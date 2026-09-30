@@ -102,3 +102,99 @@ describe('assertReadableQueryFields', () => {
     expect(() => assertReadableQueryFields({ where: { salary: 1 } }, {}, 'employee')).not.toThrow();
   });
 });
+
+/**
+ * A cross-field comparand names a field exactly as a condition key does: the
+ * comparison reads that field's value, so it is collected by the same walk and
+ * judged by the same rule. The positions below are every one the filter
+ * grammar admits for a comparand (`FieldReferenceSchema`, `data/filter.zod.ts`):
+ * the whole comparand of the six scalar comparisons, the whole-day offset
+ * wrapper (its base and its offset column), under any logical nesting, in each
+ * clause that carries a condition.
+ */
+describe('a cross-field comparand is collected and judged like a condition key', () => {
+  const SEALED = { sealed_n: { readable: false, editable: false } };
+  const ref = (field: string, extra: Record<string, unknown> = {}) => ({ $field: field, ...extra });
+
+  it.each(['$eq', '$ne', '$gt', '$gte', '$lt', '$lte'])(
+    'collects the field a %s comparand names',
+    (op) => {
+      expect([...collectConditionFields({ seen_a: { [op]: ref('seen_b') } })].sort()).toEqual(['seen_a', 'seen_b']);
+    },
+  );
+
+  it('collects a comparand under every logical nesting', () => {
+    const fields = collectConditionFields({
+      $and: [
+        { $or: [{ seen_a: 1 }, { seen_b: { $gt: ref('seen_c') } }] },
+        { $not: { seen_d: { $lte: ref('seen_e') } } },
+      ],
+    });
+    expect([...fields].sort()).toEqual(['seen_a', 'seen_b', 'seen_c', 'seen_d', 'seen_e']);
+  });
+
+  it('collects both fields a whole-day offset comparand names: its base and its offset column', () => {
+    expect([...collectConditionFields({ seen_day: { $lte: ref('base_day', { addDays: 3 }) } })].sort())
+      .toEqual(['base_day', 'seen_day']);
+    expect([...collectConditionFields({ seen_day: { $lte: ref('base_day', { addDays: ref('offset_n') }) } })].sort())
+      .toEqual(['base_day', 'offset_n', 'seen_day']);
+  });
+
+  it('gates a dotted comparand on its first segment, as it gates a dotted key', () => {
+    expect([...collectConditionFields({ seen_a: { $gt: ref('link.seen_b') } })].sort()).toEqual(['link', 'seen_a']);
+  });
+
+  it('collects comparands in where, having and a per-aggregation filter', () => {
+    const fields = collectQueryFields({
+      where: { seen_a: { $gt: ref('in_where') } },
+      having: { total: { $lt: ref('in_having') } },
+      aggregations: [{ function: 'count', alias: 'n', filter: { seen_b: { $ne: ref('in_agg_filter') } } }],
+    });
+    expect(['in_where', 'in_having', 'in_agg_filter'].filter((f) => !fields.has(f))).toEqual([]);
+  });
+
+  /** The refusal a query gets, or `undefined` when it is admitted. */
+  function refusalOf(ast: Record<string, unknown>): { code?: unknown; statusCode?: unknown; message?: unknown; details?: unknown } | undefined {
+    try {
+      assertReadableQueryFields(ast, SEALED, 'probe_object');
+    } catch (e) {
+      return e as { code?: unknown; statusCode?: unknown; message?: unknown; details?: unknown };
+    }
+    return undefined;
+  }
+
+  /** The hidden field named as a KEY — the reference answer every comparand position is held to. */
+  const KEY_FORM = refusalOf({ where: { sealed_n: { $gt: 1 } } });
+
+  it('the key form is refused 403 PERMISSION_DENIED (the reference)', () => {
+    expect(isPermissionDeniedError(KEY_FORM)).toBe(true);
+    expect({ code: KEY_FORM?.code, status: KEY_FORM?.statusCode }).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+  });
+
+  const POSITIONS: Array<[string, Record<string, unknown>]> = [
+    ...['$eq', '$ne', '$gt', '$gte', '$lt', '$lte'].map(
+      (op): [string, Record<string, unknown>] => [`the whole comparand of ${op}`, { where: { seen_a: { [op]: ref('sealed_n') } } }],
+    ),
+    ['a comparand under $and', { where: { $and: [{ seen_b: 'x' }, { seen_a: { $gt: ref('sealed_n') } }] } }],
+    ['a comparand under $or', { where: { $or: [{ seen_b: 'x' }, { seen_a: { $gt: ref('sealed_n') } }] } }],
+    ['a comparand under $not', { where: { $not: { seen_a: { $gt: ref('sealed_n') } } } }],
+    ['the base of a whole-day offset comparand', { where: { seen_day: { $lte: ref('sealed_n', { addDays: 1 }) } } }],
+    ['the offset column of a whole-day offset comparand', { where: { seen_day: { $lte: ref('base_day', { addDays: ref('sealed_n') }) } } }],
+    ['a comparand in having', { having: { total: { $gt: ref('sealed_n') } } }],
+    ['a comparand in a per-aggregation filter', { aggregations: [{ function: 'count', alias: 'n', filter: { seen_a: { $gt: ref('sealed_n') } } }] }],
+  ];
+
+  it.each(POSITIONS)('a hidden field as %s answers the key form\'s refusal', (_position, ast) => {
+    const refusal = refusalOf(ast);
+    expect(isPermissionDeniedError(refusal)).toBe(true);
+    expect({ code: refusal?.code, status: refusal?.statusCode, message: refusal?.message, details: refusal?.details })
+      .toEqual({ code: KEY_FORM?.code, status: KEY_FORM?.statusCode, message: KEY_FORM?.message, details: KEY_FORM?.details });
+  });
+
+  it('CONTROL a readable comparand in the same positions is admitted', () => {
+    for (const [, ast] of POSITIONS) {
+      const readable = JSON.parse(JSON.stringify(ast).replaceAll('sealed_n', 'seen_c')) as Record<string, unknown>;
+      expect(refusalOf(readable)).toBeUndefined();
+    }
+  });
+});
