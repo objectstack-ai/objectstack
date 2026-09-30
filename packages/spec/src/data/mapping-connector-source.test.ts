@@ -96,12 +96,25 @@ describe('mapping.connectorSource — the shape', () => {
   });
 
   it('compiles as the author shape: `Mapping` takes the binding with nothing defaulted', () => {
-    const mapping: Mapping = { ...BASE, connectorSource: INCREMENTAL_PULL };
+    // Written out rather than spread from the `as const` fixtures: a readonly
+    // tuple is not the author's array type, and this case is about the binding.
+    const mapping: Mapping = {
+      name: 'orders_pull',
+      targetObject: 'order',
+      fieldMapping: [{ source: 'id', target: 'external_id' }],
+      connectorSource: {
+        connector: 'orders_api',
+        action: 'request',
+        watermark: { field: 'updated_at', param: 'updated_since' },
+      },
+    };
     expect(MappingSchema.safeParse(mapping).success).toBe(true);
     const wrong: Mapping = {
-      ...BASE,
+      name: 'orders_pull',
+      targetObject: 'order',
+      fieldMapping: [{ source: 'id', target: 'external_id' }],
       // @ts-expect-error — `schedule` is not a key of the binding: a `job` owns the cadence.
-      connectorSource: { ...FULL_PULL, schedule: '0 6 * * *' },
+      connectorSource: { connector: 'orders_api', action: 'request', schedule: '0 6 * * *' },
     };
     expect(MappingSchema.safeParse(wrong).success).toBe(false);
   });
