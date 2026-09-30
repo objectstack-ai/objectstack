@@ -190,7 +190,9 @@ export const MAX_MEASURED_OVER_PREDICTED = 1.5;
 // suite below package granularity.
 //
 // THIS IS THAT SPLIT, and it is the shape the Dogfood job has run since #4859:
-// vitest's own `--shard=k/n` passthrough applied to ONE named package. The
+// vitest's own `--shard=k/n` applied to ONE named package (carried to it in
+// `OS_TEST_SHARD` rather than as a passthrough since #19278 -- see SLICE_ENV
+// below; the argument that follows is about vitest's shard, not the carrier). The
 // objection this file records against passthrough is specific and it does not
 // reach here -- `--shard` on a package with fewer test files than the shard
 // count hard-fails on vitest 4, and `--passWithNoTests` converts that into
@@ -1639,7 +1641,8 @@ function checkDrift(argv) {
   const merged = new Map();
   // What the summaries say each package was RUN as. A shard that carries a
   // file-level slice writes two summaries -- one per turbo invocation -- and
-  // only the slice leg's tasks carry `--shard=k/n`, so this is per package and
+  // only the slice leg's tasks carry the slice (an `OS_TEST_SHARD` digest, or
+  // `--shard=k/n` on a passthrough run), so this is per package and
   // comes from the run rather than from FILE_SHARDED_PACKAGES. A package absent
   // here ran whole; that is a reading, not a default.
   const observedSlices = new Map();

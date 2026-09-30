@@ -556,14 +556,19 @@ jobs:
           echo 'Items on this shard (a package name, or a package plus a k/n file-level slice):'
           cat "$RUNNER_TEMP/shard-packages.txt"
 
-      # ⛔ A FILE-LEVEL SLICE BUILDS ITS DEPENDENCY CLOSURE HERE, IN A RUN THAT
-      # CARRIES NO PASSTHROUGH, so that the sharded run in the next step can be
-      # `--only` (#16395).
+      # ⛔ A FILE-LEVEL SLICE BUILDS ITS DEPENDENCY CLOSURE HERE, IN ITS OWN
+      # GUARDED STEP, so the slice leg in the next step REPLAYS it. Since #19278
+      # that leg carries its slice in `OS_TEST_SHARD`, which only the `test`
+      # task declares, so its build tasks hash exactly as they do here (61 of 61
+      # identical, measured) and it schedules its own closure: this step is no
+      # longer what makes the leg correct, only what keeps the closure build off
+      # the test step's stall-guard site (see the last paragraph below).
       #
-      # Turbo folds a run-level passthrough into the hash of EVERY task in the
-      # run, not only the task that receives it -- and `-- "--shard=k/n"` is the
-      # whole reason a slice gets its own invocation at all (the next step's
-      # comment says why it cannot ride the shared run). Measured on turbo
+      # Why the step first existed (#16395, when the slice was still a
+      # passthrough and the leg was `--only`): turbo folds a run-level
+      # passthrough into the hash of EVERY task in the run, not only the task
+      # that receives it -- and `-- "--shard=k/n"` was then the whole reason a
+      # slice got its own invocation at all. Measured on turbo
       # 2.10.10, `--filter=@objectstack/cli`, `turbo run test ... --dry=json`
       # (60 tasks: 59 `build` + 1 `test`):
       #
@@ -748,11 +753,12 @@ jobs:
               #   package's own files plus the hand-declared `$TURBO_ROOT$`
               #   inputs. A slice in the affected set (on a PR, queue or push run
               #   this shard's set IS the affected set) could then match a
-              #   main-seeded entry across the very change that put it there. Run 34746808828 did: it replayed
-              #   `@objectstack/cli:test` on this leg -- `Cached: 1 cached, 1
-              #   total`, `73ms >>> FULL TURBO` -- out of a log a main push run
-              #   had produced ~15 minutes earlier, on a commit that did not
-              #   contain the PR under test. All six shards reported success,
+              #   main-seeded entry across the very change that put it there.
+              #   Run 34746808828 did: it replayed `@objectstack/cli:test` on
+              #   this leg -- `Cached: 1 cached, 1 total`, `73ms >>> FULL
+              #   TURBO` -- out of a log a main push run had produced ~15
+              #   minutes earlier, on a commit that did not contain the PR under
+              #   test. All six shards reported success,
               #   `check-test-completeness` graded the replay OK, the shard
               #   attestation said "ran to completion", and the red reached
               #   `main`. Neither of those two can tell a run from a replay.
@@ -790,7 +796,11 @@ jobs:
               # never execute), where the passthrough without `--only` was 62 MISS.
               # The step above is no longer load-bearing for correctness -- this
               # run schedules its own closure -- but it keeps that build on its
-              # own stall-guard site, and here it replays.
+              # own stall-guard site, and here it replays. `--summarize` records
+              # the slice only as the sha256 of `OS_TEST_SHARD` (`cliArguments`
+              # is empty); measure-test-shard-timings.mjs resolves that digest
+              # against the k/n the partitioner can emit and refuses one it
+              # cannot, so a slice is never timed as the whole package.
               set -- env "OS_TEST_SHARD=$SLICE" pnpm turbo run test "--filter=$PKG" --concurrency=4 --summarize --log-order=stream
             fi
             LOGS="$LOGS $LOG"
