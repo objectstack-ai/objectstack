@@ -37,47 +37,6 @@ allowlist that omits them and refuse — `Unsupported filter operator`,
 `INVALID_FILTER` / 400 — rather than approximating. A pattern ending in a lone
 unpaired backslash is refused by every face.
 
-## Logical Operators
-
-### AND (implicit)
-
-All top-level conditions are AND-combined by default:
-
-```typescript
-// ✅ Implicit AND — all conditions must match
-where: {
-  status: 'active',
-  role: 'admin',
-  age: { $gte: 18 }
-}
-
-// ✅ Explicit $and — same result
-where: {
-  $and: [
-    { status: 'active' },
-    { role: 'admin' },
-    { age: { $gte: 18 } }
-  ]
-}
-```
-
-### OR
-
-```typescript
-// ✅ Find admins OR managers
-where: {
-  $or: [
-    { role: 'admin' },
-    { role: 'manager' }
-  ]
-}
-
-// ✅ Equivalent using $in
-where: {
-  role: { $in: ['admin', 'manager'] }
-}
-```
-
 ## Field References
 
 > ✅ **Enforced.** `{ $field: '...' }` compares two columns of the same row.
@@ -97,14 +56,26 @@ reference there.
 
 ## Relation Filters
 
-A plain object with no `$` operator beneath a relation field (`lookup`,
-`master_detail`, `user`, `tree`) is refused, `INVALID_FILTER` / 400 on every
-driver: the column stores the related record's id, and no driver follows it into
-the related object. Filter the related object first, then `$in` its ids:
+A condition on a related record's fields beneath a relation field (`lookup`,
+`master_detail`, `user`, `tree`) is served in `where`: the engine reads the
+related object with it **as the caller**, then matches the field against the
+ids it returns (`$in`; any member when `multiple: true`).
 
 ```typescript
-// ❌ Refused: where: { customer: { country: 'US' } }
 // ✅ Orders whose customer is in the US
+where: { customer: { country: 'US' } }
+```
+
+Limits — one level: every key a field the related object declares, no relation
+or dotted key inside; forward only: never a parent by its children; `where`
+only: an aggregation's `filter` and `having` refuse it, `INVALID_FILTER` / 400;
+at most 1000 related ids, refused past that, `INVALID_FILTER` / 400, never
+truncated; as the caller: the related object's row scope and field permissions
+apply, so a field the caller cannot read is refused, `PERMISSION_DENIED` / 403,
+never an empty result. Past the cap, run the two steps yourself — filter the
+related object, then `$in` its ids:
+
+```typescript
 const us = await engine.find('customer', { where: { country: 'US' }, fields: ['id'] });
 where: { customer: { $in: us.map((c) => c.id) } }
 ```
@@ -119,7 +90,7 @@ fields is the same two steps reversed: query the child with the condition and
 ### ❌ Wrong: expecting sibling keys to be an OR
 
 `where: { role: 'admin', status: 'active' }` is an AND — sibling keys always
-are. For OR, wrap them in a `$or` array (see **Logical Operators** above).
+are. For OR, wrap them in a `$or` array (SKILL.md, **Logical Operators**).
 
 ### ❌ Wrong: Using string operators on non-string fields
 
