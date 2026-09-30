@@ -4285,7 +4285,17 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * element schemas).
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
-   * `db11afd49`; re-measured there 2026-09-29 — `ObjectKanban.tsx` changed in one
+   * `e420df310`; re-measured there 2026-09-30 — `ObjectKanban.tsx` changed on
+   * this hop, +40/-13: objectui#9853's renamed fetch-batch default, and
+   * objectui#11234's internal `KanbanBoardCore` with the comments that record
+   * the Quick Add cut, all of it re-mapped through the diff. Every anchor MOVED
+   * with its cited text byte-identical and none of the edits touches the
+   * `navigation` read or where it lands: the read `1261` -> `1282`, the
+   * hand-off `1269-1270` -> `1290-1291`, the overlay render `1519` -> `1540`
+   * and its `NavigationOverlay` `1535-1548` -> `1556-1569` by 21, and the card
+   * click `1638` -> `1665` by 27, the six extra lines being the
+   * `KanbanBoardCore` comment above the board it now clicks through. At
+   * `db11afd49` (2026-09-29) `ObjectKanban.tsx` changed in one
    * comment line only (`:1367`, a line-neutral comment re-spelling that no anchor
    * below cites), so every anchor below held unmoved and was re-read in place. At
    * `dd3f7e1be` (2026-09-28) `ObjectKanban.tsx` changed on
@@ -4301,11 +4311,11 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * re-READ at `87af769e9` 2026-09-22 — every anchor re-derived from that
    * tree rather than carried, none of them at its `53ded82bf` number and one
    * of them no longer spelled the way this record quoted it):
-   * `ObjectKanban.tsx:1261`
+   * `ObjectKanban.tsx:1282`
    * reads `schema.navigation ?? { mode: 'drawer' }` and hands it to
-   * `useNavigationOverlay` (`:1269-1270`), whose result drives the card click
-   * (`:1638`) and the detail overlay (`:1519`, whose `NavigationOverlay` is
-   * `:1535-1548`) — on a STANDALONE board, with no enclosing view to resolve
+   * `useNavigationOverlay` (`:1290-1291`), whose result drives the card click
+   * (`:1665`) and the detail overlay (`:1540`, whose `NavigationOverlay` is
+   * `:1556-1569`) — on a STANDALONE board, with no enclosing view to resolve
    * a mode from. ⚠️ The `(schema as any)` cast this record used to quote is
    * GONE at this pin: the read is spelled `schema.navigation` and compiles
    * through `BaseSchema`'s index signature, which the comment above it
@@ -4427,7 +4437,16 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
    * `object-kanban`'s above.
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
-   * `db11afd49`; re-measured there 2026-09-29 — `ObjectCalendar.tsx` changed
+   * `e420df310`; re-measured there 2026-09-30 — `ObjectCalendar.tsx` changed
+   * across the hop from `db11afd49` in comments only (+6/-3, objectui#11073),
+   * two of them inside the ledger comment, which now says `@objectstack/spec`
+   * 17.5.0 ships the `navigation` declaration that card waited on and that
+   * mirroring it is that card's next step, so the ledger grew `1008-1022` ->
+   * `1008-1025` and every anchor after it MOVED by 3 with its cited text
+   * byte-identical — the read `1023` -> `1026`, still spelled with the cast,
+   * the hand-off `1025-1026` -> `1028-1029`, the event click `1418` -> `1421`,
+   * the overlay render `1338` -> `1341`, its `NavigationOverlay` `1351-1364` ->
+   * `1354-1367`. At `db11afd49` (2026-09-29) `ObjectCalendar.tsx` changed
    * again across the hop from `dd3f7e1be` (+18/-11: objectui#11005's DST
    * wall-clock moves in `toStoredDateValue` and the month-grid handlers, and
    * comment re-citations, two of them inside the ledger comment, which now says
@@ -4457,10 +4476,10 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
    * `1218` -> `1237`, its `NavigationOverlay` `1228-1241` -> `1250-1263`. At
    * `87af769e9` (2026-09-22) none was at its `53ded82bf` number. Unlike its
    * `object-kanban` twin the cast is still spelled here, ledgered at
-   * `:1008-1022` as the one objectui#8651 left standing): `ObjectCalendar.tsx:1023`
-   * reads `(schema as any).navigation ?? { mode: 'drawer' }`, `:1025-1026` hands
-   * it to `useNavigationOverlay`, `:1418` fires it on an event click and
-   * `:1338` renders the overlay (its `NavigationOverlay` is `:1351-1364`) —
+   * `:1008-1025` as the one objectui#8651 left standing): `ObjectCalendar.tsx:1026`
+   * reads `(schema as any).navigation ?? { mode: 'drawer' }`, `:1028-1029` hands
+   * it to `useNavigationOverlay`, `:1421` fires it on an event click and
+   * `:1341` renders the overlay (its `NavigationOverlay` is `:1354-1367`) —
    * standalone, with no enclosing view.
    */
   navigation: NavigationConfigSchema.optional()
@@ -4722,9 +4741,26 @@ const OBJECT_MAP_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * `object-map` (objectui `plugin-map/src/ObjectMap.tsx` plus the registry shell
  * `plugin-map/src/index.tsx`, read at the pin this repo builds against —
- * `.objectui-sha` = `db11afd49`, re-measured there 2026-09-29: `ObjectMap.tsx`,
- * `index.tsx` and `core/src/utils/record-source.ts` are all byte-identical to
- * `dd3f7e1be`, so every anchor below holds unmoved and was re-checked in place.
+ * `.objectui-sha` = `e420df310`, re-measured there 2026-09-30: all three files
+ * changed across the hop from `db11afd49`, so every anchor was re-mapped
+ * through the diff and re-READ. `ObjectMap.tsx` (+16/-17, objectui#8348)
+ * changed only in the record-source docblock above `getDataConfig`, one line
+ * shorter, so every anchor from `:186` on MOVED up one line with its cited
+ * text byte-identical and `:155-162` did not move; `index.tsx` (+10/-0,
+ * objectui#8220) gained a comment above the registration and `filter` /
+ * `sort` inputs after `map`, whose own input MOVED `:89` -> `:97`
+ * byte-identical; `record-source.ts` (+38/-27,
+ * objectui#8348 moving the tree tags to `view-data`) MOVED the three rungs
+ * by 8, byte-identical. ⚠️ One CONTENT change, and it corrects this record:
+ * the carrier paragraph `:173-181` is rewritten (`:174-180` now), and says
+ * what objectui#9571 had already made true before `db11afd49` — the
+ * `SchemaRenderer` spread that carried an authored `data` array to this
+ * renderer as a React prop was stopped for object-arm blocks, so an authored
+ * array no longer draws through `SchemaRenderer` at all; only a HOST's own
+ * `data` prop does. The `data` entry below says so. At `db11afd49`
+ * (2026-09-29) `ObjectMap.tsx`,
+ * `index.tsx` and `core/src/utils/record-source.ts` were all byte-identical to
+ * `dd3f7e1be`, so every anchor held unmoved and was re-checked in place.
  * At `dd3f7e1be` (2026-09-28) all three of
  * `ObjectMap.tsx` (+193/-72), `index.tsx` (+62/-10) and
  * `core/src/utils/record-source.ts` (+27/-20) changed across the hop from
@@ -4748,39 +4784,44 @@ const OBJECT_MAP_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * At `87af769e9` (2026-09-22) none was carried from `53ded82bf` either, and
  * one of them is a read that no longer exists rather than a number that
  * moved.)
- * Read points per key: `data` (`:187-188` — `getDataConfig` is now that one
+ * Read points per key: `data` (`:186-187` — `getDataConfig` is now that one
  * `resolveRecordSourceConfig(schema, 'view-data')` call, rung 1 of the ruled
- * record-source ladder, `core/src/utils/record-source.ts:299`. ⚠️ The
+ * record-source ladder, `core/src/utils/record-source.ts:307`. ⚠️ The
  * array-shorthand head this record used to cite beside it is GONE, deleted on
- * objectui#8348 — `:155-162` records the deletion and `:173-181` records what
- * survives it: an authored array still reaches this renderer, but through the
- * React props channel, never through the ladder), `staticData` (rung 2,
- * `record-source.ts:303`), `objectName` (rung 3, `record-source.ts:310`; also
- * here at `:1184`, the `useNavigationOverlay` binding, and as a cache key at
- * `:241`, `:244`, `:319` and `:365`. ⚠️ The dependency-key read this record
+ * objectui#8348 — `:155-162` records the deletion and `:174-180` records the
+ * carrier that used to survive it and no longer does: objectui#9571 stopped
+ * `SchemaRenderer` spreading an authored `data` array onto object-arm blocks
+ * as a React prop, so an authored array reaches this renderer neither through
+ * the ladder nor through the props channel; only a host's own `data` prop
+ * does. Until `db11afd49` this record said the props channel still carried
+ * it, reading an objectui docblock that was itself stale),
+ * `staticData` (rung 2,
+ * `record-source.ts:311`), `objectName` (rung 3, `record-source.ts:318`; also
+ * here at `:1183`, the `useNavigationOverlay` binding, and as a cache key at
+ * `:240`, `:243`, `:318` and `:364`. ⚠️ The dependency-key read this record
  * cited at `:965` is GONE at this pin: objectui#10664 replaced the metadata
- * effect whose dependency list it was with `useSettledSchema` (`:796-799`),
- * keyed on the ladder's `recordSourceObjectName` (`:770`), so the object is
+ * effect whose dependency list it was with `useSettledSchema` (`:795-798`),
+ * keyed on the ladder's `recordSourceObjectName` (`:769`), so the object is
  * still read there, only no longer through that list),
- * `filter` (`:858`, read once through `useResolvedFilter`, which resolves its
- * context tokens — objectui#10666 — and holds the result, which `:952` and
- * `:1031` hand to `$filter` on the inline and the object fetch respectively;
+ * `filter` (`:857`, read once through `useResolvedFilter`, which resolves its
+ * context tokens — objectui#10666 — and holds the result, which `:951` and
+ * `:1030` hand to `$filter` on the inline and the object fetch respectively;
  * at `f8a9d0fb0` both handed `schema.filter` verbatim),
- * `sort` (`:953` and `:1032`, through the shared `convertSortToQueryParams` sink
- * to `$orderby`), `map` (`:406` — `getMapConfig` branch 1, the author face and
+ * `sort` (`:952` and `:1031`, through the shared `convertSortToQueryParams` sink
+ * to `$orderby`), `map` (`:405` — `getMapConfig` branch 1, the author face and
  * the registration's declared `{ name: 'map', type: 'object' }` input,
- * `plugin-map/src/index.tsx:89`; the second copy this record cited at `:78`
+ * `plugin-map/src/index.tsx:97`; the second copy this record cited at `:78`
  * belonged to the bare `map` registration, retired on objectui#10393, so
  * `object-map` is now the one registration declaring it), `mapStyle`
- * (`:401`, `schema.mapStyle || schema.map?.style`), `navigation` (`:1183`) and
- * `enableClustering` (`:1199`).
+ * (`:400`, `schema.mapStyle || schema.map?.style`), `navigation` (`:1182`) and
+ * `enableClustering` (`:1198`).
  *
  * Measured and deliberately NOT declared:
  *
  *  - the flat `map`-config spellings — the ObjectView/ListView flatten product,
  *    ruled an internal transport form (objectui#5018). They get
  *    {@link OBJECT_MAP_FLAT_CONFIG_GUIDANCE}'s wrong-layer prescription.
- *  - `style`. `ObjectMap.tsx:316`, inside `warnOnTopLevelStyleUrl` (`:310`),
+ *  - `style`. `ObjectMap.tsx:315`, inside `warnOnTopLevelStyleUrl` (`:309`),
  *    reads it only to say it is NOT consumed as a map style (objectui#5017):
  *    it is `BaseSchema.style`, the node's inline CSS
  *    record, and `COMPONENT_NODE_KEYS` above already sends it back to the node.
@@ -4790,11 +4831,11 @@ const OBJECT_MAP_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  *
  * VALUE posture for `map`: {@link ListMapConfigSchema}, this repo's own block —
  * the later value ratchet the previous posture here deferred, taken now that the
- * one-key gap is closed. `:409` validates the authored block against objectui's
+ * one-key gap is closed. `:408` validates the authored block against objectui's
  * `ObjectMapConfigSchema` and this block declares the same eight keys, `style`
  * included; until that declaration landed the door had to stay `z.unknown()`,
  * because pointing it at a schema missing `style` would have refused a value
- * `getMapConfig` honours at `:401` (`schema.mapStyle || schema.map?.style`).
+ * `getMapConfig` honours at `:400` (`schema.mapStyle || schema.map?.style`).
  * `mapStyle` above is unaffected: it stays the component-level spelling read
  * FIRST, and is not a member of the config block.
  */
@@ -4832,7 +4873,13 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    * Base query filter — the `ViewFilterRule` ARRAY form, the one filter
    * orthography every `filter` door in this map shares (ui#6206-B reaching the
    * `object-*` family: #15449, decision batch #55, option A). Measured at the
-   * pin this repo builds against (`.objectui-sha` = `db11afd49`, re-READ there
+   * pin this repo builds against (`.objectui-sha` = `e420df310`, re-READ there
+   * 2026-09-30: `ObjectMap.tsx` changed only in the record-source docblock
+   * above both anchors, one line shorter (objectui#8348), so each MOVED up one
+   * line with its text byte-identical, `:858` -> `:857`, `:952` -> `:951` and
+   * `:1031` -> `:1030`; and objectui#8220 now publishes a `filter` input on the
+   * `object-map` registration in this same rule-array form, `type: 'array'`
+   * (`plugin-map/src/index.tsx:100`). At `db11afd49`, re-READ there
    * 2026-09-29: `ObjectMap.tsx` is byte-identical to `dd3f7e1be`, so both anchors
    * held unmoved; at `dd3f7e1be`, re-READ there
    * 2026-09-28 — `ObjectMap.tsx` changed on this hop, and so did the CONTENT
@@ -4843,8 +4890,8 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    * `schema.filter` verbatim. At `f8a9d0fb0`, byte-identical to `62597c588`
    * and re-READ there 2026-09-23, both anchors had MOVED 19 lines from
    * `:814` / `:895` with their text byte-identical, that hop changing only a
-   * docblock and a dev warning above them): `ObjectMap.tsx:858` reads
-   * `schema.filter`, and `:952` and `:1031` hand it, tokens resolved, to
+   * docblock and a dev warning above them): `ObjectMap.tsx:857` reads
+   * `schema.filter`, and `:951` and `:1030` hand it, tokens resolved, to
    * `$filter` on the inline and the object fetch, where the adapter lowers a
    * rule array exactly as it does for the kanban and the calendar. The record
    * form is refused at `filter`.
@@ -4860,7 +4907,14 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    * Marker order — the `SortItem` ARRAY form, the one sort orthography every
    * DECLARED `sort` door on this platform carries (objectui#8221, decision batch
    * #77, option B). Measured at the pin this repo builds against
-   * (`.objectui-sha` = `db11afd49`, re-READ there 2026-09-29 — `ObjectMap.tsx`
+   * (`.objectui-sha` = `e420df310`, re-READ there 2026-09-30 — `ObjectMap.tsx`
+   * changed only in the record-source docblock above both anchors, one line
+   * shorter (objectui#8348), so both MOVED up one line with their text
+   * byte-identical, `:953` -> `:952` and `:1032` -> `:1031`; and
+   * `plugin-map/src/index.tsx` CHANGED what this record says about it:
+   * objectui#8220 declared a `sort` input on the `object-map` registration,
+   * `type: 'array'` in this same `[{ field, order }]` form (`:101`). At
+   * `db11afd49`, re-READ there 2026-09-29 — `ObjectMap.tsx`
    * and `plugin-map/src/index.tsx` are byte-identical to `dd3f7e1be`, so both
    * anchors held unmoved; at `dd3f7e1be`, 2026-09-28, `ObjectMap.tsx`
    * and `plugin-map/src/index.tsx` both changed on this hop; both anchors
@@ -4870,12 +4924,13 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    * retired (objectui#10393), still declares no `sort`. At `f8a9d0fb0` both files were byte-identical
    * to `62597c588`, re-READ there 2026-09-23 — both anchors had MOVED 19
    * lines from `:815` / `:896` with their text byte-identical):
-   * `ObjectMap.tsx:953` and `:1032`
+   * `ObjectMap.tsx:952` and `:1031`
    * hand `schema.sort` to the shared `convertSortToQueryParams` sink as the
    * fetch's `$orderby` — the same sink `object-grid` and `object-calendar`
    * declare against, so the legacy string clause is refused here for the same
-   * ruling. `plugin-map/src/index.tsx` declares no `sort` input at all, so
-   * nothing on the registry side moves.
+   * ruling. Through `db11afd49` `plugin-map/src/index.tsx` declared no `sort`
+   * input at all; since objectui#8220 it declares one in this array form
+   * (`:101`), so the registry and this door agree.
    */
   sort: z.array(SortItemSchema).optional()
     .describe('Marker order for the fetched records — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array`'),
