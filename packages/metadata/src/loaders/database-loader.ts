@@ -21,6 +21,7 @@ import type {
 } from '@objectstack/spec/system';
 import { SysMetadataObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
+import { lowerFilterCondition, type FilterLoweringOptions } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import type { IDataDriver, IDataEngine, DriverQuery } from '@objectstack/spec/contracts';
 import type { MetadataLoader, MetadataKeyedItem } from './loader-interface.js';
@@ -164,6 +165,22 @@ function canonicalIsoInstant(value: unknown): string | undefined {
 function recordedAtFallback(): string {
   return new Date(0).toISOString();
 }
+
+/**
+ * [ADR-0053 D-D1 items 5 and 7, as amended — #20822] The declared-type reader
+ * `queryHistory` lowers its driver-mode filter with: a column is `datetime`
+ * exactly when the history object this loader syncs
+ * ({@link DatabaseLoader.ensureHistorySchema}, `SysMetadataHistoryObject`)
+ * declares it `type: 'datetime'` — the test the engine seam and `SqlDriver`
+ * apply, so `recorded_at` takes the whole-day bound and every other column
+ * lowers byte-identical.
+ */
+const HISTORY_FILTER_LOWERING: FilterLoweringOptions = {
+  isDatetimeColumn: (column) => {
+    const fields = SysMetadataHistoryObject.fields as Record<string, { type?: unknown } | undefined>;
+    return Object.prototype.hasOwnProperty.call(fields, column) && fields[column]?.type === 'datetime';
+  },
+};
 
 /**
  * Cache configuration for `DatabaseLoader`.
@@ -1259,12 +1276,23 @@ export class DatabaseLoader implements MetadataLoader {
         historyFilter.recorded_at = { $lte: options.until };
       }
     }
+    // [ADR-0053 D-D1 items 5 and 7, as amended — #20822] In driver mode this
+    // filter goes straight to `IDataDriver.find` / `count`, and a driver is not
+    // a seam: it compiles the comparison it is handed, so a bare-day `until`
+    // would run as the `<=` midnight it was written as and drop every version
+    // recorded later that day. So in driver mode this call IS the seam and runs
+    // the shared lowering itself, typed by the history object it syncs
+    // ({@link HISTORY_FILTER_LOWERING}): `until: 'YYYY-MM-DD'` becomes
+    // `recorded_at < next day`, and an instant `until` is kept as written. In
+    // engine mode the engine's own `where` seam lowers it, typed by the
+    // registered history object, so this call does not lower a second time.
+    const where = this.engine ? historyFilter : lowerFilterCondition(historyFilter, HISTORY_FILTER_LOWERING);
 
     const limit = options?.limit ?? 50;
     const offset = options?.offset ?? 0;
 
     const historyRecords = await this._find(this.historyTableName, {
-      where: historyFilter,
+      where,
       orderBy: [
         { field: 'recorded_at', order: 'desc' as const },
         { field: 'version', order: 'desc' as const },
@@ -1275,7 +1303,7 @@ export class DatabaseLoader implements MetadataLoader {
 
     const hasMore = historyRecords.length > limit;
     const records = historyRecords.slice(0, limit);
-    const total = await this._count(this.historyTableName, { where: historyFilter });
+    const total = await this._count(this.historyTableName, { where });
 
     const includeMetadata = options?.includeMetadata !== false;
     const result = records.map((row: Record<string, unknown>) => {
