@@ -123,8 +123,8 @@ export function resolveAuthzCachePosture(
       `another replica is honoured by this one for up to ${ttlMs}ms. That is a ` +
       'supported configuration, not an error: the TTL is the correctness bound ' +
       'and it still holds. It is stated because a silently-absent invalidation ' +
-      'bridge is how a security control gets disabled without anyone noticing ' +
-      `(#4785). To narrow the typical window, configure a remote cluster driver; ` +
+      'bridge is how a security control gets disabled without anyone noticing. ' +
+      `To narrow the typical window, configure a remote cluster driver; ` +
       `to remove it entirely, set ${AUTHZ_GRANTS_CACHE_TTL_ENV}=0.`,
   };
 }

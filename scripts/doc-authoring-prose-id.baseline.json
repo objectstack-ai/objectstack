@@ -65,55 +65,8 @@
  "packages/connectors/connector-mcp/src/mcp-provider.ts": {
   "#3055": 2
  },
- "packages/core/src/health-monitor.ts": {
-  "#12032": 3
- },
- "packages/core/src/metadata-service-contract.ts": {
-  "#7378": 2
- },
- "packages/core/src/plugin-order.ts": {
-  "#4131": 3
- },
- "packages/core/src/plugin-registration.ts": {
-  "#9864": 1
- },
- "packages/core/src/security/admin-standing-surface.ts": {
-  "#11663": 1,
-  "#11970": 1,
-  "#8613": 1
- },
- "packages/core/src/security/authz-cache-posture.ts": {
-  "#4785": 1
- },
- "packages/drivers/driver-memory/src/filter-refusal.ts": {
-  "#10413": 1,
-  "#3948": 2,
-  "#4286": 1,
-  "#5158": 1,
-  "#5240": 1,
-  "#5324": 2,
-  "#5328": 1,
-  "#5345": 2,
-  "#5347": 1
- },
- "packages/drivers/driver-mongodb/src/mongodb-aggregation.ts": {
-  "#10413": 1,
-  "#12818": 1,
-  "#5907": 3,
-  "#6188": 1,
-  "#6212": 1
- },
- "packages/drivers/driver-mongodb/src/mongodb-filter.ts": {
-  "#5158": 1,
-  "#5240": 1,
-  "#5346": 2,
-  "#5347": 1
- },
  "packages/drivers/driver-mongodb/src/test-mongod.ts": {
   "#5517": 3
- },
- "packages/formula/src/matches-filter.ts": {
-  "#5240": 1
  },
  "packages/lint/src/authoring-rules.ts": {
   "#4463": 3,
@@ -240,68 +193,21 @@
  "packages/metadata-core/src/engine-delete-dispatch.ts": {
   "#11009": 4
  },
- "packages/metadata-core/src/engine-dispatch-unhonoured-predicate.ts": {
-  "#11009": 1
- },
  "packages/metadata-core/src/engine-findone-predicate.ts": {
   "#11767": 1,
   "#3896": 1,
-  "#4346": 1,
-  "#4419": 1
+  "#4346": 1
  },
  "packages/metadata-core/src/engine-update-dispatch.ts": {
   "#11009": 6,
-  "#11142": 5,
-  "#11230": 5,
+  "#11142": 4,
+  "#11230": 4,
   "#5748": 4
  },
  "packages/metadata-core/src/object-schema-fls-contract.ts": {
   "#3545": 1,
   "#6603": 1,
   "#7020": 1
- },
- "packages/metadata/src/endpoint-matcher.ts": {
-  "#5040": 1
- },
- "packages/metadata/src/loaders/database-loader.ts": {
-  "#4825": 1
- },
- "packages/metadata/src/metadata-manager.ts": {
-  "#5184": 1
- },
- "packages/metadata/src/metadata-route-ledger.ts": {
-  "#12140": 2
- },
- "packages/metadata/src/plugin.ts": {
-  "#4246": 1
- },
- "packages/objectql/src/engine.ts": {
-  "#4419": 1
- },
- "packages/platform-objects/src/apps/translations/en.objects.generated.ts": {
-  "#7987": 3,
-  "#8149": 1
- },
- "packages/platform-objects/src/apps/translations/es-ES.objects.generated.ts": {
-  "#7987": 3
- },
- "packages/platform-objects/src/apps/translations/ja-JP.objects.generated.ts": {
-  "#7987": 3
- },
- "packages/platform-objects/src/apps/translations/zh-CN.objects.generated.ts": {
-  "#7987": 3
- },
- "packages/platform-objects/src/audit/sys-email.object.ts": {
-  "#8149": 1
- },
- "packages/platform-objects/src/identity/sys-account.object.ts": {
-  "#7987": 3
- },
- "packages/platform-objects/src/identity/sys-scim-connection-credential.object.ts": {
-  "#3653": 1
- },
- "packages/platform-objects/src/plugin.ts": {
-  "#4795": 2
  },
  "packages/plugins/plugin-approvals/src/approval-service.ts": {
   "#10153": 1,

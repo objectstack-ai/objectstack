@@ -580,6 +580,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "小数位",
         helpText: "小数部分位数"
       },
+      useGrouping: {
+        label: "千位分隔符",
+        helpText: "显示值时的数字分组（千位分隔符）。未设置：由渲染端决定；未改动过的开关不写入任何值，所以即使渲染端会分组，它也显示为关闭。关闭：从不分组，例如年份或 ID。开启：始终分组。"
+      },
       currencyConfig: {
         label: "货币配置",
         helpText: "此字段使用哪种货币。未设置时为 dynamic 模式。两种模式下存储的值都是一个纯数字。"

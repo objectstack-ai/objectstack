@@ -244,21 +244,21 @@ export const SysAccount = ObjectSchema.create({
       label: 'Access Token',
       required: false,
       internal: true,
-      description: "Live OAuth access token issued by the provider — never returned on the data API (#7987); better-auth reads it back through the engine's privileged internal-field accessor",
+      description: "Live OAuth access token issued by the provider — never returned on the data API; better-auth reads it back through the engine's privileged internal-field accessor",
     }),
 
     refresh_token: Field.textarea({
       label: 'Refresh Token',
       required: false,
       internal: true,
-      description: 'Live OAuth refresh token — long-lived and not revoked by revoking an ObjectStack session; never returned on the data API (#7987)',
+      description: 'Live OAuth refresh token — long-lived and not revoked by revoking an ObjectStack session; never returned on the data API',
     }),
 
     id_token: Field.textarea({
       label: 'ID Token',
       required: false,
       internal: true,
-      description: 'OIDC ID token issued by the provider — never returned on the data API (#7987)',
+      description: 'OIDC ID token issued by the provider — never returned on the data API',
     }),
     
     access_token_expires_at: Field.datetime({

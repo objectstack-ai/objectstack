@@ -114,9 +114,6 @@ import { resolveTenancyPosture } from '@objectstack/types';
 /** Stable, matchable error code for the boot refusal. */
 export const MULTI_TENANT_UNSUPPORTED_CODE = 'MEMORY_MULTI_TENANT_UNSUPPORTED';
 
-const ISSUE_URL = 'https://github.com/objectstack-ai/objectstack/issues/6915';
-const CALL_SEAM_ISSUE_URL = 'https://github.com/objectstack-ai/objectstack/issues/16589';
-
 /**
  * Thrown when the in-memory driver is asked to run in a multi-tenant deployment,
  * or to serve one call under a tenant scope it cannot honour.
@@ -141,10 +138,6 @@ export class MemoryMultiTenantUnsupportedError extends Error {
           `  the driver fails at startup.\n`
         : `  answering this call would read, update or delete records belonging to OTHER\n` +
           `  organizations. Rather than answer it unisolated, the driver refuses it.\n`;
-    const tracking =
-      seam === 'boot'
-        ? ISSUE_URL
-        : `${CALL_SEAM_ISSUE_URL} (per-call refusal), ${ISSUE_URL} (no isolation here)`;
     super(
       `[driver-memory] ${headline}: this driver has NO row-level tenant isolation.\n` +
         `\n` +
@@ -159,9 +152,7 @@ export class MemoryMultiTenantUnsupportedError extends Error {
         `      deployments — it enforces tenant scoping at the driver level. For an\n` +
         `      in-process store, \`SqlDriver\` with \`connection: { filename: ':memory:' }\`\n` +
         `      is the closest drop-in replacement.\n` +
-        `    ${remedy}\n` +
-        `\n` +
-        `  Tracking: ${tracking}`,
+        `    ${remedy}`,
     );
     this.name = 'MemoryMultiTenantUnsupportedError';
   }

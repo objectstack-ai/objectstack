@@ -208,7 +208,7 @@ export function buildEndpointIndex(items: readonly unknown[], logger: Logger): E
     if (gateFailure) {
       logger.error(
         `[EndpointMatcher] stored api item '${endpoint.name}' was stored WITHOUT passing the ` +
-          `endpoint publish gates (#5040 E7 / ADR-0121) — it is EXCLUDED from endpoint matching and ` +
+          `endpoint publish gates (ADR-0121) — it is EXCLUDED from endpoint matching and ` +
           `its declared route will answer 404. Republish it through a gated path (a stack artifact, ` +
           `or \`publishPackage\` with the package's \`manifest.namespace\`); a direct metadata write ` +
           `is not a publish. Gate failure: ${gateFailure.message}`,
