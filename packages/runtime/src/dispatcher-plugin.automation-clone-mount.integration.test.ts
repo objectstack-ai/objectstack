@@ -90,9 +90,14 @@ function transportRefused(r: { status: number; body: any }): boolean {
 }
 
 describe('#20676 — the discriminator, measured in both directions', () => {
-    it('POSITIVE CONTROL: the sibling `/:name/toggle` mount answers from the domain', async () => {
-        const r = await post(`${PREFIX}/automation/${FLOW}/toggle`);
-        expect(dispatcherAnswered(r), `toggle -> ${r.status} ${JSON.stringify(r.body)}`).toBe(true);
+    // The control is the EXECUTION door, not `/:name/toggle`, on purpose: it has
+    // the same two-segment POST shape and the same domain-wide anonymous floor,
+    // and it sits outside every authoring gate, so its answer here does not
+    // depend on what the toggle door does to a given flow. The control proves
+    // one thing only — a mounted `/automation/:name/VERB` reaches `dispatch()`.
+    it('POSITIVE CONTROL: the sibling `/:name/trigger` mount answers from the domain', async () => {
+        const r = await post(`${PREFIX}/automation/${FLOW}/trigger`);
+        expect(dispatcherAnswered(r), `trigger -> ${r.status} ${JSON.stringify(r.body)}`).toBe(true);
     }, 60_000);
 
     it('NEGATIVE CONTROL: an unmounted sibling segment answers the transport, not the domain', async () => {
