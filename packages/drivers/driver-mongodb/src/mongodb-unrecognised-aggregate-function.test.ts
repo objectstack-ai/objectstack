@@ -318,7 +318,7 @@ describe('[#12818 → #13075] `array_agg` / `string_agg` are REFUSED here — th
       // and when. These two positive readings are also the control for the
       // negative one below — an empty message could not satisfy them.
       expect(err.message).toContain('was REMOVED');
-      expect(err.message).toContain('#6188');
+      expect(err.message).toContain('(ADR-0049 enforce-or-remove: no SQL backend compiled it)');
       expect(err.message.startsWith(UNDECLARED_SENTENCE(fn))).toBe(false);
     });
   }

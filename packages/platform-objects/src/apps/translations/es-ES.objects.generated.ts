@@ -431,15 +431,15 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       access_token: {
         label: "Token de acceso",
-        help: "Token de acceso OAuth vigente emitido por el proveedor; nunca se devuelve en la API de datos (#7987). better-auth lo vuelve a leer mediante el accesor privilegiado de campos internos del motor."
+        help: "Token de acceso OAuth vigente emitido por el proveedor; nunca se devuelve en la API de datos. better-auth lo vuelve a leer mediante el accesor privilegiado de campos internos del motor."
       },
       refresh_token: {
         label: "Token de actualización",
-        help: "Token de actualización OAuth vigente: de larga duración y no se revoca al revocar una sesión de ObjectStack; nunca se devuelve en la API de datos (#7987)."
+        help: "Token de actualización OAuth vigente: de larga duración y no se revoca al revocar una sesión de ObjectStack; nunca se devuelve en la API de datos."
       },
       id_token: {
         label: "Token de ID",
-        help: "Token de ID de OIDC emitido por el proveedor; nunca se devuelve en la API de datos (#7987)."
+        help: "Token de ID de OIDC emitido por el proveedor; nunca se devuelve en la API de datos."
       },
       access_token_expires_at: {
         label: "El token de acceso caduca el"

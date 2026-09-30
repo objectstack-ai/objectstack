@@ -69,7 +69,7 @@ export function engineByIdUnhonouredPredicateMessage(
     `${verb} names one row by primary key, but options.where also carries ` +
     `${keys.length > 1 ? 'predicate keys' : 'the predicate key'} ${list}. The by-id path binds ONLY ` +
     `the id — the driver never evaluates the remaining predicate — so the call would succeed with ` +
-    `the declared condition silently ignored (#11009). For a conditional (compare-and-set) write, ` +
+    `the declared condition silently ignored. For a conditional (compare-and-set) write, ` +
     `declare the predicate path, which honours EVERY where key: { where: { id, ${keys.join(', ')} }, ` +
     `multi: true } writes at most the one row matching ALL predicates and reports the matched count. ` +
     `For an unconditional single-row write, drop the extra where keys.`

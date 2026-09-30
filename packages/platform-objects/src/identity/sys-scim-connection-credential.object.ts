@@ -47,7 +47,7 @@ export const SysScimConnectionCredential = ObjectSchema.create({
   // ADR-0010 §3.7 — platform-managed identity table; tenants may not edit schema.
   protection: {
     lock: 'full',
-    reason: 'ObjectStack-owned SCIM credential store (#3653) — see ADR-0134.',
+    reason: 'ObjectStack-owned SCIM credential store — see ADR-0134.',
     docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'Bearer credentials (one-way digests) that authenticate SCIM provisioning connections',
