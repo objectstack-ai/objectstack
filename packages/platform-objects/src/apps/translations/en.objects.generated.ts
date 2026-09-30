@@ -431,15 +431,15 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       access_token: {
         label: "Access Token",
-        help: "Live OAuth access token issued by the provider — never returned on the data API (#7987); better-auth reads it back through the engine's privileged internal-field accessor"
+        help: "Live OAuth access token issued by the provider — never returned on the data API; better-auth reads it back through the engine's privileged internal-field accessor"
       },
       refresh_token: {
         label: "Refresh Token",
-        help: "Live OAuth refresh token — long-lived and not revoked by revoking an ObjectStack session; never returned on the data API (#7987)"
+        help: "Live OAuth refresh token — long-lived and not revoked by revoking an ObjectStack session; never returned on the data API"
       },
       id_token: {
         label: "ID Token",
-        help: "OIDC ID token issued by the provider — never returned on the data API (#7987)"
+        help: "OIDC ID token issued by the provider — never returned on the data API"
       },
       access_token_expires_at: {
         label: "Access Token Expires At"
@@ -2514,7 +2514,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       headers_json: {
         label: "Headers (JSON)",
-        help: "Custom headers supplied to IEmailService.send, as a JSON object of name → value. Written in both delivery modes (it is audit evidence as much as delivery input). Absent on rows written before this column existed, which read back as \"no custom headers\". Never returned on the generic data path (#8149) — headers are the ordinary place a credential goes; the delivery paths recover it through the engine's privileged accessor."
+        help: "Custom headers supplied to IEmailService.send, as a JSON object of name → value. Written in both delivery modes (it is audit evidence as much as delivery input). Absent on rows written before this column existed, which read back as \"no custom headers\". Never returned on the generic data path — headers are the ordinary place a credential goes; the delivery paths recover it through the engine's privileged accessor."
       },
       attachments_json: {
         label: "Attachments (JSON)",

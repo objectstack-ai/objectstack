@@ -2118,6 +2118,15 @@ export const ValidateDataRequestSchema = lazySchema(() => z.object({
  * Validate Data Response
  *
  * One entry per submitted row, in submission order.
+ *
+ * A row's `droppedFields` is DECLARED AHEAD of its producer: the engine's
+ * `validate` already runs the write's strips and reports them through the
+ * write's own listener, but `validateData` does not yet forward that listener
+ * or attribute its events to rows, so no server sets the key until it does.
+ * The element IS {@link DroppedFieldsEventSchema} — the same shape and `reason`
+ * vocabulary the write reports, ⛔ never a second enum — so a preview and the
+ * write it predicts answer in one vocabulary, exactly as `errors` / `warnings`
+ * share {@link ValidateDataIssueSchema} with a rejected write.
  */
 export const ValidateDataResponseSchema = lazySchema(() => z.object({
   object: z.string().describe('The object name.'),
@@ -2129,6 +2138,13 @@ export const ValidateDataResponseSchema = lazySchema(() => z.object({
     warnings: z.array(ValidateDataIssueSchema).describe(
       'Findings the target deployment ADMITS rather than rejects — today, ADR-0104 value shapes under a ' +
       'warn-first posture. The row is valid; the write would store it and log the same complaint.',
+    ),
+    droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
+      'Write-observability for the preview: caller-supplied fields the write would LEGALLY strip from THIS ' +
+      'row, one event per reason, in the shape and reason vocabulary the write itself reports. A strip is ' +
+      'not a finding: `valid` is unaffected, and the fields appear in neither `errors` nor `warnings`. ' +
+      'Present only when at least one field would be dropped. A server that does not produce this report ' +
+      'omits the key too, so an absent key alone does not prove nothing would be dropped.',
     ),
   })).describe('Per-row verdicts, in submission order.'),
   posture: z.object({

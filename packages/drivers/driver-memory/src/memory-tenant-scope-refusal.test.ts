@@ -190,11 +190,11 @@ describe('per-call tenant-scope refusal (#16589)', () => {
         expect(message).toContain(SCOPED_OBJECT);
         expect(message).toContain(ORG_A);
         // The remedy must name the isolating driver and the ADR-0066 opt-out,
-        // and must reach the tracking card — a refusal that does not say what to
-        // do next is the "loud" half without the "locatable" half.
+        // and the message must state the decision in words — a refusal that
+        // does not say what to do next is the "loud" half without the rest.
         expect(message).toContain('@objectstack/driver-sql');
         expect(message).toContain('tenancy: { enabled: false }');
-        expect(message).toContain('16589');
+        expect(message).toContain('Rather than answer it unisolated, the driver refuses it.');
       }
     });
 

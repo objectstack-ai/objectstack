@@ -44,8 +44,6 @@ import { resolveTenancyPosture } from '@objectstack/types';
 /** Stable, matchable error code for the boot refusal. */
 export const MULTI_TENANT_UNSUPPORTED_CODE = 'MONGODB_MULTI_TENANT_UNSUPPORTED';
 
-const ISSUE_URL = 'https://github.com/objectstack-ai/objectstack/issues/3724';
-
 /**
  * Thrown when the MongoDB driver is asked to run in a multi-tenant deployment.
  *
@@ -70,9 +68,7 @@ export class MongoDBMultiTenantUnsupportedError extends Error {
         `  Fix one of:\n` +
         `    • Use @objectstack/driver-sql (PostgreSQL / MySQL / SQLite) for multi-tenant\n` +
         `      deployments — it enforces tenant scoping at the driver level.\n` +
-        `    ${remedy}\n` +
-        `\n` +
-        `  Tracking: ${ISSUE_URL}`,
+        `    ${remedy}`,
     );
     this.name = 'MongoDBMultiTenantUnsupportedError';
   }

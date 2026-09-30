@@ -543,7 +543,7 @@ describe('PluginHealthMonitor', () => {
 
         const message = caught?.message ?? '';
         expect(message).toContain(`'${key}' was removed`);
-        expect(message).toContain('#12032');
+        expect(message).toContain('in @objectstack/spec 17.3.0 (ADR-0049 enforce-or-remove)');
         expect(message).toContain('ADR-0049');
         expect(message).toContain('Delete the key');
         // The affordance that exists, named in place of the one that did not.

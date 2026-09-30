@@ -614,7 +614,13 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // 81 → 82, `field :: inlineColumns :: data.type == 'master_detail'` added
     // and NONE removed. The other three rows and all their sub-rows carry no
     // predicate.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(82);
+    // It is 83 today, an ADDITION of ONE: the field form's `useGrouping` row,
+    // offered once the key was enforced, carries `scale`'s gate — the key is a
+    // display hint for `number` fields only. Measured, not inferred: the
+    // shipped `*.form.ts` corpus differenced against the merge base
+    // `d78a0bda07` adds exactly `field :: useGrouping :: data.type == 'number'`
+    // and removes none.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(83);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);
@@ -713,7 +719,9 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // It is 57 today: #19332 G2b's one new predicate, `field :: inlineColumns`
     // on `data.type == 'master_detail'`, compares against a single-quoted
     // literal.
-    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(57);
+    // It is 58 today: the field form's `useGrouping` row is gated on
+    // `data.type == 'number'`, a single-quoted literal comparison.
+    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(58);
 
     const rhsFindings = validatePredicatePathRefs(corrupted)
       .filter((f) => f.rule === PREDICATE_RHS_PATH_SHAPED);

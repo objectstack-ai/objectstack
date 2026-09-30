@@ -20,6 +20,7 @@ import {
   ValidateDataIssueSchema,
 } from './protocol.zod';
 import { BatchOptionsSchema } from './batch.zod';
+import { DroppedFieldsEventSchema } from '../data/data-engine.zod';
 
 describe('ValidateDataRequest (#6037)', () => {
   it('accepts a single candidate row', () => {
@@ -105,6 +106,60 @@ describe('ValidateDataResponse (#6037)', () => {
     expect(ValidateDataIssueSchema.safeParse(issue).success).toBe(true);
     // A caller diffing a preview against a rejected write reads one vocabulary.
     expect(ValidateDataIssueSchema.safeParse({ field: 'x', code: 'y' }).success).toBe(false);
+  });
+});
+
+/**
+ * A preview's per-row strip report. The row object is non-strict, so an
+ * undeclared key is STRIPPED by `parse`, not refused: every pin asserts the
+ * key SURVIVES a parse rather than reading bare `success`.
+ */
+describe('ValidateDataResponse — per-row droppedFields', () => {
+  const base = {
+    object: 'project',
+    mode: 'insert' as const,
+    valid: true,
+    posture: { valueShapeStrict: true, mediaValueShapeStrict: false },
+  };
+  const row = { valid: true, errors: [], warnings: [] };
+  const drops = [{ object: 'project', fields: ['doubled'], reason: 'computed' as const }];
+
+  it('parses a row without droppedFields — the key is optional', () => {
+    const parsed = ValidateDataResponseSchema.parse({ ...base, results: [row] });
+    expect(parsed.results[0]).toEqual(row);
+    expect('droppedFields' in parsed.results[0]!).toBe(false);
+  });
+
+  it('parses a row with droppedFields, keeps it, and leaves the verdict alone', () => {
+    const parsed = ValidateDataResponseSchema.parse({ ...base, results: [{ ...row, droppedFields: drops }] });
+    expect(parsed.results[0]?.droppedFields).toEqual(drops);
+    // A strip is not a finding: the row stays valid with empty buckets.
+    expect(parsed.results[0]?.valid).toBe(true);
+    expect(parsed.results[0]?.errors).toEqual([]);
+    expect(parsed.results[0]?.warnings).toEqual([]);
+  });
+
+  it('the element is the engine\'s DroppedFieldsEventSchema itself — no second vocabulary', () => {
+    const rowSchema = ValidateDataResponseSchema.shape.results.element;
+    expect(rowSchema.shape.droppedFields.unwrap().element).toBe(DroppedFieldsEventSchema);
+  });
+
+  it('accepts exactly the engine\'s reason set, `computed` included', () => {
+    const engineReasons = DroppedFieldsEventSchema.shape.reason.options;
+    expect(engineReasons).toContain('computed');
+    for (const reason of engineReasons) {
+      const parsed = ValidateDataResponseSchema.parse({
+        ...base, results: [{ ...row, droppedFields: [{ object: 'project', fields: ['f'], reason }] }],
+      });
+      expect(parsed.results[0]?.droppedFields?.[0]?.reason, `reason ${reason}`).toBe(reason);
+    }
+    const outside = ValidateDataResponseSchema.safeParse({
+      ...base, results: [{ ...row, droppedFields: [{ object: 'project', fields: ['f'], reason: 'not_a_reason' }] }],
+    });
+    expect(outside.success).toBe(false);
+    const issue = outside.success ? undefined : outside.error.issues[0];
+    expect(issue?.code).toBe('invalid_value');
+    expect(issue?.path).toEqual(['results', 0, 'droppedFields', 0, 'reason']);
   });
 });
 

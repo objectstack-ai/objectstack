@@ -158,7 +158,7 @@ function emptyFieldConstraintError(field: string, path: string): Error {
       `comparand (e.g. { "${field}": "value" }). It is refused rather than evaluated because the ` +
       `backends disagreed on what it means — driver-sql dropped it inside $and/$or/$not (matching ` +
       `EVERY row) while refusing it at the top level, and driver-memory / this evaluator ` +
-      `answered "matches nothing". #5240.`,
+      `answered "matches nothing".`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.INVALID_FILTER;
   err.status = 400;
