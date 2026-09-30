@@ -693,6 +693,8 @@ Sort field and direction pair
 | **objectName** | `string` | optional | Object this grid binds to. Optional because the component-level `dataSource` binding can supply the object instead |
 | **label** | `string \| Record<string, string>` | optional | Grid label — used as the table caption and export file title |
 | **title** | `string \| Record<string, string>` | optional | Fallback for `label` (the renderer reads `label \|\| title`) |
+| **description** | `string \| Record<string, string>` | optional | One line of help text drawn above the grid's rows — a string, or an inline locale map resolved against the display locale |
+| **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string }` | optional | What the grid draws instead of an empty table: `{ title, message, icon }` — the list view's own empty-state shape |
 | **columns** | `any[]` | optional | Columns: field names or column definition objects |
 | **fields** | `any[]` | optional | Field list fallback used when `columns` is absent |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. THE key, singular — not the plural misspelling. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
@@ -718,6 +720,7 @@ Sort field and direction pair
 | **navigation** | `any` | optional | Row-click navigation config (`{ mode: page \| drawer \| modal \| split \| popover \| new_window \| none }`) — all seven `NavigationModeSchema` values, since the shared `useNavigationOverlay` hook types its own mode union as that schema |
 | **editable** | `boolean` | optional | Enable inline cell editing |
 | **singleClickEdit** | `boolean` | optional | Enter cell edit on single click (default true when editable) |
+| **keyboardNavigation** | `boolean` | optional | [EXPERIMENTAL — not enforced] Arrow-key cell navigation on the WAI-ARIA grid pattern. Defaults to on when `editable` is set; a read-only grid keeps its Tab behaviour unless this is `true`. No renderer reads it yet: it is declared ahead of the grid's keyboard-navigation build, so authoring it changes nothing today |
 | **resizable** | `boolean` | optional | Allow column resize (read before `resizableColumns`) |
 | **resizableColumns** | `boolean` | optional | Alternate spelling of `resizable` (the renderer reads `resizable ?? resizableColumns`) |
 | **reorderableColumns** | `boolean` | optional | Allow column drag-reorder |
@@ -727,6 +730,14 @@ Sort field and direction pair
 | **operations** | `any` | optional | Operation toggles (`{ export: false, … }`) |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source binding (ViewDataSchema — discriminated on `provider`: object \| api \| value \| schema). Static inline rows live at `{ provider: 'value', items: [...] }`; the bare-array shortcut is refused — see migration `object-grid-data-view-data-converged` |
 | **staticData** | `any[]` | optional | Deprecated bare-array static-rows shortcut the renderer still reads. Prefer `data: { provider: 'value', items: [...] }` |
+
+### Nested Shape: `ObjectGridProps.emptyState`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **title** | `string \| Record<string, string>` | optional | Heading of the empty state |
+| **message** | `string \| Record<string, string>` | optional | Line of text below the heading |
+| **icon** | `string` | optional | Icon name drawn above the heading; a name that resolves to no icon draws the default empty-state glyph |
 
 ### Nested Shape: `ObjectGridProps.filter[number]`
 
