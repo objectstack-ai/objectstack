@@ -541,6 +541,51 @@ const ${toCamelCase(name)}Skill = defineSkill({
 export default ${toCamelCase(name)}Skill;
 `,
   },
+
+  picklist: {
+    description: 'Shared option list that select fields reference by name',
+    defaultDir: 'src/picklists',
+    /**
+     * A shared option list (`data/picklist.zod.ts`): one `options` array that
+     * select fields on any object take their options from by NAMING the list —
+     * `Field.select({ picklist: 'NAME' })` — instead of each carrying a copy.
+     *
+     * Written as `NAME.picklist.ts`, the registry's own pattern for the kind,
+     * through {@link metadataFileName} like every other type here — no
+     * override. Declared through `definePicklist`, so the list is parsed the
+     * moment this module loads: an unknown key or an empty `options` is a
+     * startup error naming it, not a list that goes missing later.
+     *
+     * The emitted header states the one rule an author meets next: a field
+     * that names the list declares no `options` of its own, because
+     * `FieldSchema` refuses the two together. And a field whose `picklist`
+     * names no list the stack declares is refused by `os validate` and
+     * `os build` (`utils/picklist-references.ts`), so a misspelt name surfaces
+     * at author time rather than as an empty control.
+     */
+    namesObject: false,
+    itemName: (name: string) => toSnakeCase(name),
+    generate: (name: string) => `import { definePicklist } from '@objectstack/spec/data';
+
+/**
+ * ${toTitleCase(name)} Picklist
+ *
+ * A shared option list. A select field offers these options by naming the
+ * list — Field.select({ picklist: '${toSnakeCase(name)}' }) — and declares no
+ * \`options\` of its own: a field declaring both is refused.
+ */
+const ${toCamelCase(name)}Picklist = definePicklist({
+  name: '${toSnakeCase(name)}',
+  label: '${toTitleCase(name)}',
+  options: [
+    { label: 'Option A', value: 'option_a' },
+    { label: 'Option B', value: 'option_b' },
+  ],
+});
+
+export default ${toCamelCase(name)}Picklist;
+`,
+  },
 };
 
 /**

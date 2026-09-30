@@ -138,6 +138,15 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // it — deleted there rather than reworded, for the reason the
   // `runPerPackageAuthoringRules` row above gives.
   'findViewContainerNameRefusals',
+  // A field `picklist` that names no picklist the stack declares is refused
+  // (an `info` notice when the declaring package depends on packages outside
+  // the stack, whose picklists no command can read). Not a registry rule: the
+  // verdict depends on WHICH package declares the field — that package's
+  // declared dependencies decide refusal against notice — and the union run a
+  // registry rule is handed is the flattened top level, which carries no
+  // package provenance. The WALK is the load path's package reading, the same
+  // class as the row above; both doors make the call, right after the parse.
+  'judgePicklistReferences',
   // [#20367 ruling B] One authoring shape: a default export no stack producer
   // built (`defineStack` / `composeStacks`) is refused right after load, before
   // any other judgement — the `STACK_*` cross-field refusals run inside the
@@ -278,6 +287,10 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
       // gate above) already produced; the same record rides `--json` whether
       // this runs or not.
       'printJsxGateNotices',
+      // Renders the `info` notices `judgePicklistReferences` (a gate above)
+      // already produced; the same records ride `--json` whether this runs or
+      // not.
+      'printPicklistReferenceNotices',
       // [#18780] `compile.ts`' local once-guard around the line above it. It
       // decides WHEN that printer is called — after the per-package pass has
       // appended its survivors, so the closing `N author-time warning(s) — see
