@@ -4,8 +4,8 @@
  * #11727 — `os build --json` dropped the #3366 capability-provider hints and
  * the ADR-0046 package-docs advisories that `os validate --json` carries.
  *
- * The fourth measured instance of one class in these two files (#10953,
- * #11174, #11643, this): an advisory computed and then formatted *inside* an
+ * The fourth measured instance of one class in these two files (commit be7262e72,
+ * commit ab23c67ab, #11643, this): an advisory computed and then formatted *inside* an
  * `if (... && !flags.json)` print block, which puts it structurally out of
  * reach of the payload — computed, then discarded, for the one audience
  * `--json` exists to serve. Measured at `origin/main` 589758d22 over the

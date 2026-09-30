@@ -317,7 +317,8 @@ function refuseRemoteAutonumber(object: string, fields: string[], path: string):
     `which is why it answers NOT_IMPLEMENTED/501 rather than a 400. Use the local or ` +
     `embedded-replica transport for objects that carry record numbers, or supply the value ` +
     `explicitly (a seed replay or \`preserveAudit\` import keeps its own numbers and is written ` +
-    `unchanged). Until this change the same call RESOLVED and wrote NULL into the slot (#6944).`,
+    `unchanged). It is refused rather than resolved, because resolving would write NULL into the ` +
+    `slot and persist the row without its record number.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
@@ -2357,8 +2358,8 @@ export class TursoDriver extends SqlDriver {
       `not generate record numbers, so an upsert that matches no existing row inserts one without ` +
       `it — the row is persisted, its record number is not, and nothing else reports this. Supply ` +
       `the value explicitly on this path (a seed replay or import keeps its own numbers and is ` +
-      `written unchanged), or use the local / embedded-replica transport, which do issue them ` +
-      `(#7099).`,
+      `written unchanged), or use the local / embedded-replica transport, which do issue ` +
+      `them.`,
       { object, fields: unfilled, id: row.id, path },
     );
   }

@@ -1,13 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #12297 — `os lint` never surfaced an ADR-0087 D2 conversion notice, in
+ * The defect commit 9fd45a952 fixed — `os lint` never surfaced an ADR-0087 D2 conversion notice, in
  * EITHER face.
  *
  * ## The class this belongs to, and the one it does not
  *
  * ⛔ NOT the "computed, then dropped on a failure exit" family (#11643 /
- * #11391 / #11772 / #12047 / #12125). Nothing was computed and discarded here.
+ * #11391 / #11772 / #12047 / commit 79cf692b0). Nothing was computed and discarded here.
  * `lint.ts` called `normalizeStackInput(config)` with no options object at all,
  * so no `onConversionNotice` sink existed and the notices were never PRODUCED.
  * The filer's anchored count over the whole file said so in one number:
@@ -32,9 +32,9 @@
  * ## ⛔ WHAT THESE PINS DO NOT DECIDE
  *
  * Whether an auto-converted key should instead become a `LintIssue` folded into
- * `issues` — the `os lint` shape of the same question raised on #12125, where
+ * `issues` — the `os lint` shape of the same question commit 79cf692b0 left open, where
  * it is whether `warnings` and `conversions` should be one field — is OPEN. The
- * 2026-08-25 ruling did not address it and #12125's implementer explicitly
+ * 2026-08-25 ruling did not address it and commit 79cf692b0 explicitly
  * withheld an answer. This change had no authority to settle it, so it mirrors
  * the shipped sibling shape. `counts are unchanged` below is a REGRESSION GUARD
  * recording the as-shipped shape — green before and after — ⛔ never an argument
@@ -268,7 +268,7 @@ describe('#12297 — `os lint` surfaces ADR-0087 conversion notices in both face
     // the as-shipped shape, ⛔ never red-before evidence. `issues` keeps meaning
     // "something to fix"; a converted key is not one, and folding it in would
     // move `total`/`warnings` for every author with a deprecated spelling. The
-    // fold question is OPEN (#12125) and this pin takes no side on it.
+    // fold question is OPEN (commit 79cf692b0 left it so) and this pin takes no side on it.
     const converted = payloadOf(await runCli(['lint', '--json'], dirs.converts), 'converts');
     const canonical = payloadOf(await runCli(['lint', '--json'], dirs.canonical), 'canonical');
 

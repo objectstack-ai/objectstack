@@ -263,6 +263,21 @@ const TYPE_TO_FORM: Readonly<Record<string, FormView>> = METADATA_FORM_REGISTRY;
  * spelling-tolerant lookup this comment has rejected since #4432, and it would
  * still persist the row under the plural `type`.
  */
+/**
+ * [#20802] The nested-relation spelling of a dotted relation path, as the
+ * dotted filter refusal names it: `'owner.region'` → `{ "owner": { "region":
+ * VALUE } }` — the form the engine serves at `where`. A path deeper than one
+ * relation is given the generic one-level shape. The engine door
+ * (`@objectstack/objectql`'s `nestedRelationRoute`) words it the same:
+ * `query-expression-conformance.test.ts` holds the two doors' routes equal.
+ */
+function nestedRelationRoute(dotted: string): string {
+    const [head, ...rest] = dotted.split('.');
+    return rest.length === 1
+        ? `{ "${head}": { "${rest[0]}": VALUE } }`
+        : `{ "${head}": { "FIELD": VALUE } }, one level deep`;
+}
+
 function canonicalMetaType(type: string): string {
     return canonicalMetaUrlType(type);
 }
@@ -10104,10 +10119,15 @@ export class ObjectStackProtocolImplementation implements
             const headDef = gate.fields[head];
             const headClass = classifyDottedFilterHead(headDef);
             const headType = String(headDef?.type ?? '');
+            // [#20802] The relation head names the route the engine now
+            // SERVES — the condition nested beneath the relation field — in the
+            // engine door's words (`@objectstack/objectql`'s
+            // `assertFilterIsMaterializable`). One vocabulary across the doors.
             const body = headClass === 'relation'
                 ? `filters on '${first}', which follows the relationship '${head}' into another `
-                  + `object — a filter reaches only columns of '${object}' itself, and '${head}' `
-                  + 'stores the related record\'s id, not an embedded document'
+                  + `object as a dotted path, and '${head}' stores the related record's id, not an `
+                  + 'embedded document — to filter on the related record\'s fields, nest the condition '
+                  + `beneath the relation field: ${nestedRelationRoute(first)}`
                 : headClass === 'virtual'
                     ? `filters on '${first}', a dotted path whose head '${head}' is a virtual `
                       + `'${headType}' field on object '${object}' — its value is computed on read, `

@@ -1922,8 +1922,9 @@ function checkFilterConditionComparands(
     const hasOperatorKeys = Object.keys(value).some((k) => k.startsWith('$'));
     if (!hasOperatorKeys) {
       // Nested relation / deep equality — the schema does not re-parse these,
-      // so the walk descends itself. (The query engine refuses both at query
-      // time, `INVALID_FILTER`; see form 4 on {@link FilterCondition}.)
+      // so the walk descends itself. (At query time the engine serves the
+      // nested relation in `where` and refuses a whole-value match,
+      // `INVALID_FILTER`; see form 4 on {@link FilterCondition}.)
       checkFilterConditionComparands(value, ctx, [...path, key], depth + 1);
       continue;
     }
@@ -1980,21 +1981,28 @@ function checkFilterConditionComparands(
  * 1. Implicit equality: { field: value }
  * 2. Explicit operators: { field: { $op: value } }
  * 3. Logical combinations: { $and: [...], $or: [...], $not: {...} }
- * 4. Nested relations: { relation: { field: value } } — the type and the schema
- *    accept this form, and the query engine REFUSES it: a plain object with no
- *    `$` operator beneath a relation field answers `INVALID_FILTER` / 400 on
- *    every driver, because no data-path driver follows a relation into the
- *    related object (the field stores the related record's id). Filter the
- *    related object first, then match the relation field against the ids it
- *    returns: `{ relation: { $in: [id, …] } }`, or `{ relation: { $contains: id } }`
- *    per id on a multi-valued relation. The same object beneath a JSON-valued
- *    field (a whole-value match) and beneath a scalar field is refused too.
+ * 4. Nested relations: { relation: { field: value } } — a condition on the
+ *    related record's own fields, beneath a relation field (`lookup`,
+ *    `master_detail`, `user`, `tree`; single or multiple). The query engine
+ *    SERVES it in `where`, the same on every driver: it reads the related
+ *    object with the condition AS THE CALLER — that object's row scope and
+ *    field permissions apply, so a condition on a field the caller cannot read
+ *    is refused, never answered empty — and matches the relation field against
+ *    the ids it returns (`$in` on a single-valued relation; any member, an
+ *    `$or` of `$contains` per id, on a multi-valued one). One level: every key
+ *    must be a field the related object declares, and a relation condition
+ *    beneath it, or a dotted key, is refused. A condition matching more related
+ *    records than the engine's cap is refused rather than truncated; filter the
+ *    related object yourself then, and match its ids the same way. An
+ *    aggregation's own `filter` and `having` do not serve the form. The same
+ *    object beneath a JSON-valued field (a whole-value match) and beneath a
+ *    scalar field is refused.
  */
 export type FilterCondition = {
   [key: string]: 
     | any  // Implicit equality: key: value
     | z.infer<typeof FieldOperatorsSchema>  // Explicit operators: key: { $op: value }
-    | FilterCondition;  // Nested relation: key: { nested: ... } — accepted here, refused by the engine (form 4 above)
+    | FilterCondition;  // Nested relation: key: { nested: ... } — served by the engine in `where`, one level (form 4 above)
 } & {
   /** Logical AND - combines all conditions that must be true */
   $and?: FilterCondition[];
@@ -2130,7 +2138,10 @@ export const FilterConditionSchema: z.ZodType<FilterCondition, FilterCondition> 
  *     $or: [                               // Logical combination
  *       { role: "admin" },
  *       { email: { $contains: "@company.com" } }
- *     ]
+ *     ],
+ *     account: {                           // Nested relation (form 4): a field
+ *       industry: "tech"                   // of the related record, one level
+ *     }
  *   }
  * }
  * ```
@@ -2220,7 +2231,7 @@ export type Filter<T = any> = {
         $null?: boolean;
         $exists?: boolean;
       }
-    | (T[K] extends object ? Filter<T[K]> : never);  // Nested relation — typed here, refused by the engine (see FilterCondition)
+    | (T[K] extends object ? Filter<T[K]> : never);  // Nested relation — typed at any depth here; the engine serves one level, in `where` (see FilterCondition)
 } & {
   $and?: Filter<T>[];
   $or?: Filter<T>[];

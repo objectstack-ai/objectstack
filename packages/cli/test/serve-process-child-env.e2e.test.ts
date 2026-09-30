@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #11267 — a spawned `os serve` child must not inherit the vitest worker's
+ * Commit 1ddda1d00 — a spawned `os serve` child must not inherit the vitest worker's
  * `TEST=true`, because better-auth switches its own origin/CSRF validation OFF
  * when it sees it.
  *
@@ -29,7 +29,7 @@
  *
  * | child env | answer |
  * |---|---|
- * | `{ ...process.env, … }` — this directory's shape before #11267 | `401 INVALID_EMAIL_OR_PASSWORD` — origin ACCEPTED, validation never ran |
+ * | `{ ...process.env, … }` — this directory's shape before commit 1ddda1d00 | `401 INVALID_EMAIL_OR_PASSWORD` — origin ACCEPTED, validation never ran |
  * | `childEnv({ … })` | `403 INVALID_ORIGIN` — validation ran and rejected |
  *
  * Isolated when this was measured: stripping ONLY `TEST` (leaving `VITEST`,
@@ -60,7 +60,7 @@
  * ## ⚠️ The first boot deliberately builds the env the WRONG way
  *
  * `leakedEnv()` below is a bare `...process.env` spread on purpose — it is the
- * pre-#11267 recipe, kept executable so the repair stays distinguishable from a
+ * recipe from before commit 1ddda1d00, kept executable so the repair stays distinguishable from a
  * no-op. ⛔ Do not "clean it up" to `childEnv()`: that would delete the only
  * evidence in the repo that the leak does anything, and leave a green suite
  * behind. It is also the canary on the dependency — if better-auth stops
@@ -167,7 +167,7 @@ const OVERRIDES = {
 };
 
 /**
- * ⚠️ The PRE-#11267 recipe, on purpose. See this file's header before touching
+ * ⚠️ The recipe from BEFORE commit 1ddda1d00, on purpose. See this file's header before touching
  * it — it is the leg that proves the leak does something.
  */
 function leakedEnv(): Record<string, string | undefined> {

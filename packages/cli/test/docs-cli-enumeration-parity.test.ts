@@ -13,8 +13,8 @@
  *
  *   #8965        an earlier under-inclusive drift on this page.
  *   #16892 ①     the scaffolded-scripts sentence said "these" of THREE commands
- *                and named TWO npm scripts. Under-inclusive from #16330, and
- *                for all four scaffolders from #16350 / PR #16888.
+ *                and named TWO npm scripts. Under-inclusive from commit 4998efa71, and
+ *                for all four scaffolders from commit 68aee4c99 (PR #16888).
  *   #16892 ②     `os lint` declares ELEVEN flags; the page documented FOUR.
  *                One of the seven missing was `--include-platform`, which the
  *                command NAMES IN ITS OWN HINT — so a reader following that

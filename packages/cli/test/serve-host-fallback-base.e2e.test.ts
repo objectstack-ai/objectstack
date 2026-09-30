@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #11157 — `serve`'s host importer resolves the UNDECLARED leg from
+ * Commit a4cb7817f — `serve`'s host importer resolves the UNDECLARED leg from
  * `packages/cli`, because it hands `createHostImporter` its own base.
  *
  * ── The defect ───────────────────────────────────────────────────────────
@@ -11,7 +11,7 @@
  * leg falls back to "the importing package's own resolution" — and which package
  * that is depends entirely on where the `import()` is physically WRITTEN,
  * because Node ESM resolves a bare specifier against the module containing the
- * call. #10943 made that an explicit parameter, `options.fallbackImport`, so a
+ * call. Commit 46d34ab7c made that an explicit parameter, `options.fallbackImport`, so a
  * caller can hand in its own `import()`. `@objectstack/verify` (`bootStack`) and
  * the `packages/qa/dogfood` enterprise probe both pass theirs; `serve`'s
  * `importFromHost` did not, so the CLI advertised its own resolution and
@@ -208,7 +208,7 @@ describe('os serve → the undeclared fallback resolves from packages/cli (#1115
     // Named, not just failed: the no-base leg really does resolve from
     // `packages/types`, which is the sentence this whole card is about.
     expect(probe.controlNoBase).toMatch(/imported from .*[/\\]packages[/\\]types[/\\]/);
-    // …and it says exactly why, which is the branch #11157 moves `serve` off.
+    // …and it says exactly why, which is the branch commit a4cb7817f moves `serve` off.
     expect(probe.controlNoBase).toContain('the caller did not pass `fallbackImport`');
   });
 
@@ -249,7 +249,7 @@ describe('os serve → the undeclared diagnostic reports the base actually used'
     // #11185: the app being served, never the process CWD.
     expect(probe.nowhere).toContain(`host app: ${appRoot}`);
     expect(probe.nowhere).not.toContain(`host app: ${neutralCwd}`);
-    // #11157: the fallback that failed is now THIS package's, so the path Node
+    // Commit a4cb7817f: the fallback that failed is now THIS package's, so the path Node
     // reports is inside packages/cli and not inside packages/types.
     expect(probe.nowhere).toMatch(/fallback resolution also failed: .*imported from /);
     expect(probe.nowhere).toMatch(/imported from .*[/\\]packages[/\\]cli[/\\]/);

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * PIN (#10359) — `os g agent` is gone, and its refusal names the replacement.
+ * PIN (commit 15b63e85a) — `os g agent` is gone, and its refusal names the replacement.
  *
  * The generator scaffolded into `src/agents`, a surface ADR-0063 §2 withdrew:
  * the kernel ships exactly two agents (`ask`, `build`) and the runtime catalog
@@ -27,7 +27,7 @@
  *
  * The refusal's pointer at skills is asserted here only as TEXT. That the
  * command it now names actually exists and writes a loadable file is pinned
- * next door, in `generate-skill.e2e.test.ts` (#11025) — when this message was
+ * next door, in `generate-skill.e2e.test.ts` (commit 1c3a46f87) — when this message was
  * first written there was no `os g skill` to point at, and it said so.
  */
 

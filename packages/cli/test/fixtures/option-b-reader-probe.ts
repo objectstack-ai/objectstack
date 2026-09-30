@@ -201,7 +201,7 @@ function makeRecorder(rec: Recording) {
     name: 'com.objectstack.probe.option-b-recorder',
     // No `type`: `PluginSchema` defaults an absent `type` to `standard`, and
     // `'service'` is not a member of the declared closed set — `ObjectKernel`
-    // refused this object already, and since #16721 `LiteKernel.use()` (the
+    // refused this object already, and since commit 51ae73123 `LiteKernel.use()` (the
     // kernel `bootAndRecord` boots) runs the same contract. Nothing here reads
     // `.type`; the recorder IS the subsystems, not a typed plugin.
     version: '1.0.0',

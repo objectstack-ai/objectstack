@@ -1,33 +1,34 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#20745] A plain object with no `$`-operator key beneath a relation field
- * (the nested-relation form), a structured-JSON field (a whole-value match) or
- * the platform-provisioned `id` column is refused at the public door —
- * `POST /api/v1/data/:object/query` answers `400 INVALID_FILTER` in the
- * engine's words, naming the field and the path, before any read — over a
- * real `SqlDriver`; and the route the refusal names answers the rows the
- * nested form meant.
+ * [#20802] The nested-relation form `{ relation: { field: value } }` is SERVED
+ * at the public door — `POST /api/v1/data/:object/query` answers the rows the
+ * form means, over a real `SqlDriver` — and what the first cut keeps refusing
+ * is still refused, `400 INVALID_FILTER` in the engine's words, before any read.
  *
- * Measured on the base (`origin/main` `a51920f5fb`) through this door, three
- * rows (owner `u1`, region NA, on `d1` and `d3`):
+ * #20745's table, re-read on this branch through this door (owner `u1`, region
+ * NA, on `d1` and `d3`; `d4` has no owner):
  *
- * | `where` | InMemoryDriver | SQLite | PostgreSQL 16 |
- * |:--|:--|:--|:--|
- * | `{ owner: { region: 'NA' } }` (lookup; master-detail, multiple lookup, user, tree alike) | 200, no rows | 400 `INVALID_FILTER`, the driver's words | same as SQLite |
- * | `{ meta: { a: 1 } }` (json; address, composite alike) | 200, the deep-equal rows | 400, the driver's words | same |
- * | `{ id: { a: 1 } }` | 200, no rows | 400, the driver's words | same |
- * | route `{ owner: { $in: ['u1'] } }` | `d1`, `d3` | `d1`, `d3` | `d1`, `d3` |
- * | route `{ owners: { $contains: 'u1' } }` (multiple lookup) | `d1`, `d3` | `d1`, `d3` | `d1`, `d3` |
- * | `{ owners: { $in: ['u1'] } }` (multiple lookup) | `d1`, `d3` | 400, the driver's JSON-column words | same |
+ * | `where` | before (PR #20781) | now: SQLite · PostgreSQL 16 |
+ * |:--|:--|:--|
+ * | `{ owner: { region: 'NA' } }` (lookup; master-detail and multiple lookup alike) | 400 `INVALID_FILTER` | `d1`, `d3` |
+ * | `{ parent: { title: 'a' } }` (tree) | 400 | `d2`, `d3` |
+ * | `{ $not: { owner: { region: 'NA' } } }` | 400 | `d2`, `d4` — the row with no owner satisfies the negation |
+ * | `{ $or: [{ owner: { region: 'EU' } }, { title: 'a' }] }` | 400 | `d1`, `d2` |
+ * | `{ owner: { region: 'APAC' } }` (no related record matches) | 400 | no rows |
+ * | `{ meta: { a: 1 } }` (json; address alike), `{ id: { a: 1 } }` | 400 | 400, unchanged |
+ * | a second level, an undeclared key, `{}`, an unregistered related object | 400 | 400, in words of their own |
+ * | `aggregations[1].filter` / `having` `{ owner: { region: 'NA' } }` | 400 | 400, the words say `where` serves it |
  *
- * The arm sits in the engine, in front of every driver, so one verdict holds
- * on each cell. InMemoryDriver's refusal row is `@objectstack/objectql`'s
- * `engine-nested-object-door.test.ts` by construction (the arm answers before
- * a driver is resolved). Its route readings above were measured, not pinned
+ * The InMemoryDriver cells were measured on this branch and are not pinned
  * here: this package does not depend on the in-memory driver, and that
  * driver's test consumers are a ruled, closed census
- * (`check:driver-memory-census`).
+ * (`check:driver-memory-census`). They answered every row above alike, except
+ * the multi-valued arm where one stored id contains another as a substring
+ * (`u1` / `u10`): the in-memory driver matches `$contains` per element by
+ * substring — the gap `FILTER_OPERATORS`' `$contains` docblock records for it.
+ * `@objectstack/objectql`'s `engine-nested-relation-lowering.test.ts` pins the
+ * driver input the engine sends, which is the same on every driver.
  *
  * ## The dialect axis of THIS file
  *
@@ -43,7 +44,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { EngineAggregateOptions, FilterCondition } from '@objectstack/spec/data';
-import { ObjectQL } from '@objectstack/objectql';
+import { ObjectQL, RELATION_FILTER_ID_CAP } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server';
@@ -79,6 +80,8 @@ const ROWS = [
   { id: 'd1', title: 'a', owner: 'u1', boss: 'u1', owners: ['u1'], assignee: 'u1', meta: { a: 1 }, ship_to: { city: 'Paris' } },
   { id: 'd2', title: 'b', owner: 'u2', boss: 'u2', owners: ['u2'], assignee: 'u2', parent: 'd1', meta: { a: 2 }, ship_to: { city: 'Rome' } },
   { id: 'd3', title: 'c', owner: 'u1', boss: 'u1', owners: ['u1', 'u2'], assignee: 'u1', parent: 'd1', meta: { b: 1 }, ship_to: { city: 'Paris' } },
+  // No relation at all: the row the negation's NULL polarity is about.
+  { id: 'd4', title: 'd' },
 ];
 
 interface Cell {
@@ -104,25 +107,37 @@ const CELLS: readonly Cell[] = [
   },
 ];
 
-/**
- * name · the `where` · the field · the path · words only this kind's refusal
- * prints · the route it names. Both are asserted on the REST body, so the
- * route is pinned to land inside the door's 500-character message bound.
- */
-const REFUSED: ReadonlyArray<readonly [string, FilterCondition, string, string, string, string]> = [
-  ['a lookup (the card)', { owner: { region: 'NA' } }, 'owner', 'where.owner', 'nested-relation form', `Filter the related object '${OWNER}' first, then match 'owner' against the ids it returns: { "owner": { "$in": [ID, …] } }.`],
-  ['a master-detail', { boss: { region: 'NA' } }, 'boss', 'where.boss', 'nested-relation form', '{ "boss": { "$in": [ID, …] } }'],
-  ['a multiple lookup', { owners: { region: 'NA' } }, 'owners', 'where.owners', 'nested-relation form', '{ "owners": { "$contains": ID } } for one id, an $or of those for several'],
-  ['a user field', { assignee: { region: 'NA' } }, 'assignee', 'where.assignee', 'nested-relation form', `Filter the related object 'sys_user' first`],
-  ['a tree field', { parent: { title: 'a' } }, 'parent', 'where.parent', 'nested-relation form', `Filter the related object '${OBJECT}' first`],
-  ['a json field (the card)', { meta: { a: 1 } }, 'meta', 'where.meta', 'whole-value match', '{ "meta": { "$null": false } }, or store the part you filter on in a field of its own'],
-  ['an address field', { ship_to: { city: 'Paris' } }, 'ship_to', 'where.ship_to', 'whole-value match', '{ "ship_to": { "$null": false } }'],
-  ['the id column (the card)', { id: { a: 1 } }, 'id', 'where.id', "the platform-provisioned text column 'id'", `Compare 'id' with a value ({ "id": VALUE })`],
-  ['inside $not', { $not: { owner: { region: 'NA' } } }, 'owner', 'where.$not.owner', 'nested-relation form', '{ "owner": { "$in": [ID, …] } }'],
+/** name · the `where` · the rows it means. */
+const SERVED: ReadonlyArray<readonly [string, FilterCondition, readonly string[]]> = [
+  ['a lookup (the card)', { owner: { region: 'NA' } }, ['d1', 'd3']],
+  ['a master-detail', { boss: { region: 'NA' } }, ['d1', 'd3']],
+  ['a multiple lookup — any member', { owners: { region: 'NA' } }, ['d1', 'd3']],
+  ['a multiple lookup, the other member', { owners: { region: 'EU' } }, ['d2', 'd3']],
+  ['a tree field', { parent: { title: 'a' } }, ['d2', 'd3']],
+  ['beside a column of the object', { title: 'c', owner: { region: 'NA' } }, ['d3']],
+  ['inside $or', { $or: [{ owner: { region: 'EU' } }, { title: 'a' }] }, ['d1', 'd2']],
+  ['under $not — no owner satisfies it', { $not: { owner: { region: 'NA' } } }, ['d2', 'd4']],
+  ['under $not, a multiple lookup', { $not: { owners: { region: 'NA' } } }, ['d2', 'd4']],
+  ['no related record matches', { owner: { region: 'APAC' } }, []],
+  ['no related record matches, a multiple lookup', { owners: { region: 'APAC' } }, []],
+  ['under $not, no related record matches', { $not: { owner: { region: 'APAC' } } }, ['d1', 'd2', 'd3', 'd4']],
+  ['an operator in the condition', { owner: { region: { $in: ['EU'] } } }, ['d2']],
 ];
 
-/** The arm's own words, in every refusal it raises — a control must never be answered in them. */
-const ARM_WORDS = 'is filter structure, not a value';
+/**
+ * name · the `where` · the path · words only this refusal prints · the route
+ * it names. Both are asserted on the REST body, so the route is pinned to land
+ * inside the door's 500-character message bound.
+ */
+const REFUSED: ReadonlyArray<readonly [string, FilterCondition, string, string, string]> = [
+  ['a json field (the card)', { meta: { a: 1 } }, 'where.meta', 'whole-value match', '{ "meta": { "$null": false } }, or store the part you filter on in a field of its own'],
+  ['an address field', { ship_to: { city: 'Paris' } }, 'where.ship_to', 'whole-value match', '{ "ship_to": { "$null": false } }'],
+  ['the id column (the card)', { id: { a: 1 } }, 'where.id', "the platform-provisioned text column 'id'", `Compare 'id' with a value ({ "id": VALUE })`],
+  ['a second level', { parent: { owner: { region: 'NA' } } }, 'where.parent', `'owner' is itself a lookup field of the related object '${OBJECT}'`, '{ "parent": { "$in": [ID, …] } }'],
+  ['a key the related object does not declare', { owner: { regio: 'NA' } }, 'where.owner', `'regio' is not a field of the related object '${OWNER}'`, '{ "owner": { "FIELD": VALUE } }'],
+  ['an empty condition', { owner: {} }, 'where.owner', 'names no field of the related object', '{ "owner": { "$null": false } }'],
+  ['a related object not registered here', { assignee: { region: 'NA' } }, 'where.assignee', "no object 'sys_user' is registered here", '{ "assignee": { "$in": [ID, …] } }'],
+];
 
 function createMockServer() {
   const noop = () => {};
@@ -144,7 +159,7 @@ const idsOf = (body: any): string[] => (body?.records ?? []).map((r: any) => r.i
 for (const cell of CELLS) {
   const config = cell.config();
   describe.skipIf(!config)(
-    `[#20745] a no-operator object beneath a relation, JSON or id column at the public door — ${cell.label}${config ? '' : ` (skipped: set ${cell.env} to run this cell)`}`,
+    `[#20802] the nested-relation form at the public door — ${cell.label}${config ? '' : ` (skipped: set ${cell.env} to run this cell)`}`,
     () => {
       let engine: ObjectQL;
       let driver: any;
@@ -169,10 +184,10 @@ for (const cell of CELLS) {
         for (const row of OWNERS) await engine.insert(OWNER, { ...row } as any);
         for (const row of ROWS) await engine.insert(OBJECT, { ...row } as any);
 
-        // Reads of THIS object — the protocol's own metadata traffic is not the question.
+        // Reads of the two objects — the protocol's own metadata traffic is not the question.
         for (const verb of ['find', 'findOne', 'count', 'aggregate'] as const) {
           const real = driver[verb].bind(driver);
-          driver[verb] = (o: string, ...rest: unknown[]) => { if (o === OBJECT) reads.n += 1; return real(o, ...rest); };
+          driver[verb] = (o: string, ...rest: unknown[]) => { if (o === OBJECT || o === OWNER) reads.n += 1; return real(o, ...rest); };
         }
 
         const protocol = new ObjectStackProtocolImplementation(engine as any);
@@ -194,25 +209,51 @@ for (const cell of CELLS) {
         try { await engine?.destroy(); } catch { /* noop */ }
       });
 
-      it('where: every row of the card answers 400 INVALID_FILTER in the engine\'s words, naming the field and the path — no read', async () => {
+      it('where: #20745\'s table answers the rows the form means — on every relation type, composed as written', async () => {
+        for (const [name, where, rows] of SERVED) {
+          const res = await query({ where });
+          expect(res.status, `${name}: ${JSON.stringify(res.body)}`).toBe(200);
+          expect(idsOf(res.body), name).toEqual([...rows].sort());
+          const direct = await engine.find(OBJECT, { where });
+          expect(direct.map((r: any) => r.id).sort(), `engine.find, ${name}`).toEqual([...rows].sort());
+        }
+      });
+
+      it('the nested form answers exactly what the two-step route answers', async () => {
+        const na = await query({ where: { region: 'NA' } }, OWNER);
+        const ids = idsOf(na.body);
+        expect(ids).toEqual(['u1']);
+        for (const [nested, twoStep] of [
+          [{ owner: { region: 'NA' } }, { owner: { $in: ids } }],
+          [{ owners: { region: 'NA' } }, { $or: ids.map((id) => ({ owners: { $contains: id } })) }],
+          [{ $not: { owner: { region: 'NA' } } }, { $not: { owner: { $in: ids } } }],
+        ] as Array<[FilterCondition, FilterCondition]>) {
+          expect(idsOf((await query({ where: nested })).body), JSON.stringify(nested))
+            .toEqual(idsOf((await query({ where: twoStep })).body));
+        }
+      });
+
+      it('where: what the first cut keeps refusing answers 400 INVALID_FILTER in the engine\'s words — no read', async () => {
         const before = reads.n;
-        for (const [name, where, field, path, words, route] of REFUSED) {
+        for (const [name, where, path, words, route] of REFUSED) {
           const res = await query({ where });
           expect(res.status, `${name}: ${JSON.stringify(res.body)}`).toBe(400);
           expect(res.body.code, name).toBe('INVALID_FILTER');
-          expect(res.body.error, name).toContain(`filter on '${field}'`);
           expect(res.body.error, name).toContain(`at ${path},`);
           expect(res.body.error, name).toContain('The filter was NOT applied.');
           expect(res.body.error, name).toContain(words);
           expect(res.body.error, name).toContain(route);
           const err = await engine.find(OBJECT, { where }).then(() => null, (e: any) => e);
           expect({ code: err?.code, status: err?.status }, `engine.find, ${name}`).toEqual({ code: 'INVALID_FILTER', status: 400 });
-          expect(err?.message, `engine.find, ${name}`).toContain(ARM_WORDS);
         }
-        expect(reads.n - before, 'no read of the object — every refusal precedes the driver').toBe(0);
+        const dotted = await query({ where: { 'owner.region': 'NA' } });
+        expect(dotted.status, JSON.stringify(dotted.body)).toBe(400);
+        expect(dotted.body.code).toBe('INVALID_FIELD');
+        expect(JSON.stringify(dotted.body)).toContain('nest the condition beneath the relation field');
+        expect(reads.n - before, 'no read of either object — every refusal precedes the driver').toBe(0);
       });
 
-      it('the per-aggregation filter and having: 400 INVALID_FILTER at their own positions — no read', async () => {
+      it('the per-aggregation filter and having: 400 INVALID_FILTER at their own positions, naming where — no read', async () => {
         const before = reads.n;
         const filter = await query({
           aggregations: [{ function: 'count', alias: 'n' }, { function: 'count', alias: 'm', filter: { owner: { region: 'NA' } } }],
@@ -220,6 +261,7 @@ for (const cell of CELLS) {
         expect(filter.status, JSON.stringify(filter.body)).toBe(400);
         expect(filter.body.code).toBe('INVALID_FILTER');
         expect(filter.body.error).toContain('at aggregations[1].filter.owner,');
+        expect(filter.body.error).toContain("which the engine serves in 'where'");
         const having = await query({
           groupBy: ['owner'],
           aggregations: [{ function: 'count', alias: 'n' }],
@@ -228,35 +270,57 @@ for (const cell of CELLS) {
         expect(having.status, JSON.stringify(having.body)).toBe(400);
         expect(having.body.code).toBe('INVALID_FILTER');
         expect(having.body.error).toContain('at having.owner,');
-        expect(reads.n - before, 'no read of the object — every refusal precedes the driver').toBe(0);
+        expect(reads.n - before, 'no read — every refusal precedes the driver').toBe(0);
+        // …and in `where`, the same condition narrows the aggregate.
+        const counted = await query({
+          where: { owner: { region: 'NA' } },
+          aggregations: [{ function: 'count', alias: 'n' }],
+        } satisfies EngineAggregateOptions as Record<string, unknown>);
+        expect(counted.status, JSON.stringify(counted.body)).toBe(200);
+        expect(JSON.stringify(counted.body)).toContain('"n":2');
       });
 
-      it('the named route answers the rows the nested form meant: the related object\'s ids, then $in (single) or $contains (multiple)', async () => {
+      it('the cap: a condition matching more related records than the cap is REFUSED, never truncated; at the cap it is served whole', async () => {
+        const many = Array.from({ length: RELATION_FILTER_ID_CAP }, (_, i) => ({ id: `cap_${i}`, region: 'CAP' }));
+        // In batches: one multi-row INSERT of a thousand rows passes SQLite's
+        // compound-SELECT limit.
+        for (let i = 0; i < many.length; i += 100) await engine.insert(OWNER, many.slice(i, i + 100) as any);
+        await engine.insert(OWNER, { id: 'cap_extra', region: 'CAP_EXTRA' } as any);
+        await engine.insert(OBJECT, { id: 'd_cap', title: 'cap', owner: 'cap_extra' } as any);
+        try {
+          const over = await query({ where: { owner: { region: { $in: ['CAP', 'CAP_EXTRA'] } } } });
+          expect(over.status, JSON.stringify(over.body)).toBe(400);
+          expect(over.body.code).toBe('INVALID_FILTER');
+          expect(over.body.error).toContain(`matched more than ${RELATION_FILTER_ID_CAP} records of the related object '${OWNER}'`);
+          expect(over.body.error).toContain('the filter was NOT applied');
+          expect(over.body.error).toContain('{ "owner": { "$in": [ID, …] } }');
+          // Exactly the cap: served, every id in play (no ledger row points at one).
+          const at = await query({ where: { owner: { region: 'CAP' } } });
+          expect(at.status, JSON.stringify(at.body)).toBe(200);
+          expect(idsOf(at.body)).toEqual([]);
+          const extra = await query({ where: { owner: { region: 'CAP_EXTRA' } } });
+          expect(idsOf(extra.body)).toEqual(['d_cap']);
+        } finally {
+          await engine.delete(OBJECT, { where: { id: 'd_cap' } } as any);
+          await engine.delete(OWNER, { where: { region: { $in: ['CAP', 'CAP_EXTRA'] } }, multi: true } as any);
+        }
+      });
+
+      it('CONTROL the routes still answer the rows, and a file field\'s object reaches the driver unjudged', async () => {
         const na = await query({ where: { region: 'NA' } }, OWNER);
-        expect(na.status, JSON.stringify(na.body)).toBe(200);
         const ids = idsOf(na.body);
-        expect(ids).toEqual(['u1']);
         for (const field of ['owner', 'boss', 'assignee']) {
           const res = await query({ where: { [field]: { $in: ids } } });
-          expect(res.status, `${field}: ${JSON.stringify(res.body)}`).toBe(200);
           expect(idsOf(res.body), field).toEqual(['d1', 'd3']);
         }
         const multiple = await query({ where: { owners: { $contains: ids[0] } } });
-        expect(multiple.status, JSON.stringify(multiple.body)).toBe(200);
         expect(idsOf(multiple.body)).toEqual(['d1', 'd3']);
-        const anyOf = await query({ where: { $or: [{ owners: { $contains: 'u1' } }, { owners: { $contains: 'u9' } }] } });
-        expect(idsOf(anyOf.body)).toEqual(['d1', 'd3']);
-        const tree = await query({ where: { parent: { $in: ['d1'] } } });
-        expect(idsOf(tree.body)).toEqual(['d2', 'd3']);
         const present = await query({ where: { meta: { $null: false } } });
         expect(idsOf(present.body)).toEqual(['d1', 'd2', 'd3']);
-      });
-
-      it('CONTROL a file field\'s object reaches the driver, never the arm\'s refusal', async () => {
         const before = reads.n;
         const res = await query({ where: { photo: { url: 'x' } } });
         expect(reads.n - before, 'the driver was asked').toBe(1);
-        expect(JSON.stringify(res.body)).not.toContain(ARM_WORDS);
+        expect(JSON.stringify(res.body)).not.toContain('is filter structure, not a value');
       });
     },
   );

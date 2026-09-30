@@ -55,7 +55,7 @@ function walkedKeys(config: any): string[] {
 
 /**
  * A page whose ONLY localisation is inline locale maps — the shape #14412 /
- * #5728 / #10926 ruled is a legitimate, delivered localisation route. No
+ * #5728 ruled, and the ruling commit d173125fb landed, is a legitimate, delivered localisation route. No
  * bundle, no `translations` block: nothing but the maps the author wrote.
  */
 const pageLocalisedInlineOnly = (): any => ({

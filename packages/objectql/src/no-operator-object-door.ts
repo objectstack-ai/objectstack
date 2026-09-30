@@ -124,6 +124,17 @@
  * undeclared key that is not platform-provisioned (the engine's registry-less
  * tolerance: no second opinion about a name).
  *
+ * ## [#20802] The relation kind at `where`: served, not refused
+ *
+ * The maintainer ruled the nested-relation form served (#20802, letter A),
+ * lowered at the engine's filter seam with the drivers untouched. At `where`
+ * the walk therefore hands a no-operator object beneath a relation column to
+ * `relation-filter-lowering.ts` instead of refusing it: admitted against the
+ * related object's declarations, then lowered by reading the related object as
+ * the caller. The relation words below are raised only at the two positions
+ * the engine evaluates itself — an aggregation's `filter` and `having` — and
+ * say so. The `scalar` and `json` kinds are unchanged.
+ *
  * @see https://github.com/objectstack-ai/objectstack/issues/20546
  * @see https://github.com/objectstack-ai/objectstack/issues/20745
  */
@@ -276,11 +287,16 @@ function scalarWords(refusal: NoOperatorObjectRefusal): string {
 }
 
 /**
- * [#20745] The relation kind's words. The route is the one every data-path
- * driver serves today (measured): the related object's own query, then its
- * ids — `$in` on a single-valued column, `$contains` per id on a multi-valued
- * one. An aggregated column names no declaration to read either from, so it
- * is given the single-valued spelling.
+ * [#20745] The relation kind's words. [#20802] The nested-relation form is
+ * SERVED at `where` (`relation-filter-lowering.ts`), so this arm raises these
+ * words only where it is not: an aggregation's own `filter` and `having`,
+ * which the engine evaluates itself over rows it already holds. The words send
+ * the condition to `where`, and name the ids route that works at THIS
+ * position: `$in` on a single-valued column. A multi-valued column has no
+ * member test here — the engine's evaluator compares the stored list as one
+ * value, so neither `$in` nor `$contains` matches a member of it — so `where`
+ * is its only route. An aggregated column (`having`) names no declaration to
+ * read either from, so it is given the single-valued spelling.
  */
 function relationWords(refusal: NoOperatorObjectRefusal): string {
   const { field, column } = refusal;
@@ -288,15 +304,17 @@ function relationWords(refusal: NoOperatorObjectRefusal): string {
   const target = def === undefined ? undefined : referenceTargetOf(def);
   const related = target === undefined ? 'the related object' : `the related object '${target}'`;
   const multiple = def !== undefined && isMultiValueField(def);
-  const match = multiple
-    ? `{ "${field}": { "$contains": ID } } for one id, an $or of those for several`
-    : `{ "${field}": { "$in": [ID, …] } }`;
+  const position = refusal.aggregated ? "'having'" : "an aggregation's 'filter'";
+  const route = multiple
+    ? `Put the condition in 'where' instead: here the stored list of ids is compared as one value, so no `
+      + 'operator matches one member of it.'
+    : `Put the condition in 'where' instead, or filter ${related} first and match '${field}' against `
+      + `the ids it returns: { "${field}": { "$in": [ID, …] } }.`;
   return (
-    `beneath ${describeColumn(refusal)} — the nested-relation form, which the engine does not serve. `
-    + `The filter was NOT applied. Filter ${related} first, then match '${field}' against the ids it `
-    + `returns: ${match}. An object with no "$" operator is filter structure, not a value: '${field}' `
-    + 'stores the related record\'s id, no driver follows it into the related object, and an empty '
-    + 'answer would read exactly like a real one.'
+    `beneath ${describeColumn(refusal)} — the nested-relation form, which the engine serves in 'where' `
+    + `and not in ${position}. The filter was NOT applied. ${route} An object with no "$" operator is `
+    + `filter structure, not a value, here: '${field}' holds the related record's id, and an empty answer `
+    + 'would read exactly like a real one.'
   );
 }
 
