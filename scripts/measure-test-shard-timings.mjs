@@ -1149,10 +1149,14 @@ function selfTest() {
   // -- ENV-CARRIED SLICES (#19278) --------------------------------------------
   //
   // Test Core's slice leg carries k/n in OS_TEST_SHARD, which a summary records
-  // only as a sha256 digest in `environmentVariables.configured`. Each case
-  // below fails in the #16173 direction if the digest path is dropped: a slice
-  // read as a whole package. `sliced` stands in for FILE_SHARDED_PACKAGES so the
-  // fixtures keep the short names above, and one case reads the REAL map.
+  // only as a sha256 digest in `environmentVariables.configured`. With the
+  // digest path dropped, the digest cases below fail: a slice read as a whole
+  // package (the #16173 direction), or an unmatched or conflicting digest let
+  // through. Three are controls that hold either way -- the passthrough
+  // carrier, an empty value, an unrelated variable -- and pin what the digest
+  // path must NOT read. Each case was ablated against the code it pins.
+  // `sliced` stands in for FILE_SHARDED_PACKAGES so the fixtures keep the short
+  // names above, and one case reads the REAL map.
   battery('env-carried slices (#19278)');
   const digestOf = (value) => createHash('sha256').update(value).digest('hex');
   const envTask = (pkg, start, end, value, extra = {}) => ({
