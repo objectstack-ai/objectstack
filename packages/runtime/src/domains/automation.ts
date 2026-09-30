@@ -2719,8 +2719,9 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // asks admits it — and would refuse it, loudly, if the base's
                 // provenance ever rode across. Asked before the engine is
                 // called, like every other definition write here. The
-                // metadata protocol is resolved HERE, before anything is
-                // registered, so a slot that fails to resolve cannot leave a
+                // metadata protocol is resolved before anything is registered
+                // (by the rule here, and again by `registerAndSaveFlow` below),
+                // so a slot that fails to resolve cannot leave a
                 // registered-but-unsaved clone behind.
                 const authored = await refuseUnauthoredFlowWrite(deps, context, targetName, clone);
                 if (authored) return authored;
