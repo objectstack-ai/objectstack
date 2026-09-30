@@ -159,7 +159,7 @@ describe('[#20701] a writable column imports — the control', () => {
     const commit = await b.importRows([{ id: 'w1', title: 'written', n: 4 }], { dryRun: false });
     expect(commit.body).toMatchObject({ ok: 1, errors: 0, created: 1 });
     expect(commit.body.results[0]).toMatchObject({ row: 1, ok: true, action: 'created', id: 'w1' });
-    const stored = await b.engine.findOne(OBJECT, { where: { id: 'w1' } } as any);
+    const stored = await b.engine.findOne(OBJECT, { where: { id: 'w1' } });
     expect(stored).toMatchObject({ title: 'written', n: 4, doubled: 8 });
   });
 });
@@ -176,7 +176,7 @@ describe('[#20701] a formula or readonly column: the dry run and the commit both
       expect(r.body.results[0], `dryRun=${dryRun}`).toMatchObject({ row: 1, ok: true, action: 'created' });
     }
     // The supplied value was not stored: the formula answers from `n`, and the readonly column stays empty.
-    const stored = await b.engine.findOne(OBJECT, { where: { id: 'f1' } } as any);
+    const stored = await b.engine.findOne(OBJECT, { where: { id: 'f1' } });
     expect(stored).toMatchObject({ n: 2, doubled: 4 });
     expect(stored?.ro ?? null).toBeNull();
   });
