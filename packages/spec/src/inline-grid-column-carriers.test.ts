@@ -103,12 +103,15 @@ const stackWithInlineColumns = (inlineColumns: unknown[]) => ({
   objects: [PARENT, childObject(inlineColumns)],
 });
 
+/** `defineStack` over a fixture typed loosely on purpose — several are refused by design. */
+const build = (stack: unknown) => defineStack(stack as Parameters<typeof defineStack>[0]);
+
 type Refusal = { code?: string; status?: number; issues?: unknown[]; message: string };
 
 /** Run `defineStack` and return the refusal it threw — fails the test when it accepted. */
 function refusalOf(stack: unknown): Refusal {
   try {
-    defineStack(stack as Parameters<typeof defineStack>[0]);
+    build(stack);
   } catch (error) {
     return error as Refusal;
   }
@@ -129,7 +132,7 @@ function expectHydratedCurrencyRefusal(stack: unknown, location: string): void {
 
 describe('#20901 — the form-view carrier references the column contract', () => {
   it('its column element IS InlineGridColumnSchema — one contract, not a copy', () => {
-    const subforms = (FormViewSchema.shape as Record<string, { unwrap(): { element: { shape: Record<string, { unwrap(): { element: unknown } }> } } }>).subforms;
+    const subforms = (FormViewSchema.shape as unknown as Record<string, { unwrap(): { element: { shape: Record<string, { unwrap(): { element: unknown } }> } } }>).subforms;
     const columnElement = subforms.unwrap().element.shape.columns.unwrap().element;
     expect(columnElement).toBe(InlineGridColumnSchema);
   });
@@ -219,21 +222,21 @@ describe('#20901 — defineStack judges an identity-only column by the type it r
       { name: 'amount', type: 'number', scale: 2 },
       { name: 'not_a_child_field', scale: 2 },
     ];
-    expect(() => defineStack(stackWithSubformColumns(columns) as Parameters<typeof defineStack>[0])).not.toThrow();
-    expect(() => defineStack(stackWithSubformColumns(columns, 'formViews') as Parameters<typeof defineStack>[0])).not.toThrow();
-    expect(() => defineStack(stackWithInlineColumns(columns) as Parameters<typeof defineStack>[0])).not.toThrow();
+    expect(() => build(stackWithSubformColumns(columns))).not.toThrow();
+    expect(() => build(stackWithSubformColumns(columns, 'formViews'))).not.toThrow();
+    expect(() => build(stackWithInlineColumns(columns))).not.toThrow();
   });
 
   it('CONTROL — a child object this stack does not declare is not judged: an unresolved column is not a wrong one', () => {
     const stack = stackWithSubformColumns([IDENTITY_ONLY_WITH_SCALE], 'form', 'ext_line');
-    expect(() => defineStack(stack as Parameters<typeof defineStack>[0])).not.toThrow();
+    expect(() => build(stack)).not.toThrow();
   });
 
   it('following the remedy builds: the refused column with `scale` deleted and nothing added', () => {
     const remedied: Record<string, unknown> = { ...IDENTITY_ONLY_WITH_SCALE };
     delete remedied.scale;
     expect(Object.keys(remedied)).toEqual(['name']);
-    expect(() => defineStack(stackWithSubformColumns([remedied]) as Parameters<typeof defineStack>[0])).not.toThrow();
-    expect(() => defineStack(stackWithInlineColumns([remedied]) as Parameters<typeof defineStack>[0])).not.toThrow();
+    expect(() => build(stackWithSubformColumns([remedied]))).not.toThrow();
+    expect(() => build(stackWithInlineColumns([remedied]))).not.toThrow();
   });
 });
