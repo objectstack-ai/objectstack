@@ -24,9 +24,11 @@
  * the two controls over a real driver live in `@objectstack/rest`'s
  * `data-no-operator-object-door.test.ts`.
  *
- * The two controls triage named stay accepted: a relation field's nested
- * relation filter and a JSON-typed field's object comparand reach the driver
- * exactly as written.
+ * The two controls triage named here — a relation field's nested relation
+ * filter and a JSON-typed field's object comparand — were judged by the same
+ * arm in #20745, in words of their own (`engine-nested-object-door.test.ts`
+ * pins them). What stays accepted is a file or media field (the #8371
+ * carve-out), which reaches the driver exactly as written.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -64,7 +66,8 @@ const PROBE = {
     placed_on: { name: 'placed_on', type: 'date' },
     seen_at: { name: 'seen_at', type: 'datetime' },
     code: { name: 'code', type: 'autonumber' },
-    // The accepted side.
+    // Judged by #20745 in their own words (`engine-nested-object-door.test.ts`);
+    // only the file field is still the accepted side.
     owner: { name: 'owner', type: 'lookup', reference: OWNER },
     owners: { name: 'owners', type: 'lookup', reference: OWNER, multiple: true },
     boss: { name: 'boss', type: 'master_detail', reference: OWNER },
@@ -92,11 +95,6 @@ const JUDGED: ReadonlyArray<readonly [string, string]> = [
 
 /** name · a field on the accepted side · the no-operator object it may carry. */
 const ACCEPTED: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
-  ['owner', { region: 'NA' }],
-  ['owners', { region: 'NA' }],
-  ['boss', { region: 'NA' }],
-  ['meta', { a: 1 }],
-  ['ship_to', { city: 'Paris' }],
   ['photo', { url: 'x' }],
 ];
 
@@ -236,7 +234,7 @@ describe('[#20546] a no-operator object where a scalar column\'s value belongs, 
     expect(reads).toHaveLength(0);
   });
 
-  it('CONTROL the accepted side reaches the driver exactly as written: relation, JSON-bearing and file fields', async () => {
+  it('CONTROL the accepted side reaches the driver exactly as written: a file field', async () => {
     for (const [field, spec] of ACCEPTED) {
       reads.length = 0;
       const where = { [field]: spec } as FilterCondition;
@@ -244,8 +242,7 @@ describe('[#20546] a no-operator object where a scalar column\'s value belongs, 
       expect(reads, field).toHaveLength(1);
       expect(reads[0]?.ast?.where, field).toEqual(where);
     }
-    expect(engine.judgeFilter(OBJECT, { owner: { region: 'NA' } })).toEqual({ ok: true });
-    expect(engine.judgeFilter(OBJECT, { meta: { a: 1 } })).toEqual({ ok: true });
+    expect(engine.judgeFilter(OBJECT, { photo: { url: 'x' } })).toEqual({ ok: true });
   });
 
   it('CONTROL an operator bag, a { $field } reference and a scalar comparand are not this arm\'s', async () => {
@@ -314,20 +311,14 @@ describe('[#20546] a no-operator object where a scalar column\'s value belongs, 
     await expect(engine.aggregate(OBJECT, {
       aggregations: [
         { function: 'count', alias: 'all' },
-        { function: 'count', alias: 'na', filter: { owner: { region: 'NA' } } },
-        { function: 'count', alias: 'm', filter: { meta: { a: 1 } } },
+        { function: 'count', alias: 'p', filter: { photo: { url: 'x' } } },
       ],
     } as EngineAggregateOptions)).resolves.toBeDefined();
-    for (const [groupBy, having] of [
-      ['meta', { meta: { a: 1 } }],
-      ['owner', { owner: { region: 'NA' } }],
-    ] as const) {
-      await expect(engine.aggregate(OBJECT, {
-        groupBy: [groupBy],
-        aggregations: [{ function: 'count', alias: 'n' }],
-        having,
-      } as EngineAggregateOptions), groupBy).resolves.toBeDefined();
-    }
+    await expect(engine.aggregate(OBJECT, {
+      groupBy: ['photo'],
+      aggregations: [{ function: 'count', alias: 'n' }],
+      having: { photo: { url: 'x' } },
+    } as EngineAggregateOptions)).resolves.toBeDefined();
   });
 
   // ── the REST doors that reach findData ──────────────────────────────────

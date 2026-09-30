@@ -135,7 +135,11 @@
  * such column, not only a numeric one — is refused with `INVALID_FILTER` /
  * 400, naming the field and the path. It is asked first at every field key;
  * the number arm reads what it lets through. That module holds the arm's
- * classification and words; ⛔ nothing there walks a filter.
+ * classification and words; ⛔ nothing there walks a filter. [#20745] The
+ * same arm now judges a relation column (the nested-relation form no driver
+ * serves) and a structured-JSON column (a whole-value match the drivers share
+ * no meaning for), and a platform-provisioned column the declared map omits
+ * (`id`, …): the same walk and the same three positions, words per kind.
  *
  * @see numberComparandDoorVerdict — the pure verdict (lane 1, `@objectstack/spec`).
  * @see https://github.com/objectstack-ai/objectstack/issues/20336 (the contract)
@@ -155,9 +159,12 @@ import {
 import { invalidFilterError } from './filter-comparand-shape.js';
 import type { AggregatedColumnClass } from './having-filter.js';
 import {
-  holdsScalarValues,
+  declaredNoOperatorObjectColumn,
   isNoOperatorObject,
+  noOperatorObjectColumnKind,
   noOperatorObjectRefusalMessage,
+  provisionedNoOperatorObjectColumn,
+  type NoOperatorObjectColumn,
   type NoOperatorObjectRefusal,
 } from './no-operator-object-door.js';
 
@@ -178,10 +185,11 @@ interface KeyFacts {
   /** The number arm's field meta — `null` when that arm has nothing to judge here. */
   readonly number: NumberComparandDoorFieldMeta | null;
   /**
-   * [#20546] The column's declared type when it holds scalar values
-   * (`holdsScalarValues`), so the no-operator-object arm judges it — else `null`.
+   * [#20546] The column the no-operator-object arm judges — else `null`.
+   * [#20745] Any of its three kinds (a scalar-valued, a relation or a
+   * structured-JSON column), each refused in words of its own.
    */
-  readonly scalarType: string | null;
+  readonly column: NoOperatorObjectColumn | null;
 }
 
 /** What one filter position supplies to the walk: the facts a KEY names, or `null`. */
@@ -369,13 +377,16 @@ function walkCondition(factsOf: FactsOf, node: unknown, path: string, depth: num
       if (!facts) continue;
       // [#20546] The no-operator-object arm, first: filter structure where a
       // scalar column's value belongs can match no record on any backend, so
-      // it is refused whichever arm would otherwise read the value.
-      if (facts.scalarType !== null && isNoOperatorObject(value)) {
+      // it is refused whichever arm would otherwise read the value. [#20745]
+      // Beneath a relation or a structured-JSON column too: no driver serves
+      // the nested-relation form, and none shares a meaning for a whole-value
+      // match.
+      if (facts.column !== null && isNoOperatorObject(value)) {
         return {
           ok: false,
           refusal: {
             arm: 'no-operator-object',
-            site: { field: key, declaredType: facts.scalarType, path: here, keys: Object.keys(value), aggregated: ctx.aggregated },
+            site: { field: key, column: facts.column, path: here, keys: Object.keys(value), aggregated: ctx.aggregated },
           },
         };
       }
@@ -399,10 +410,16 @@ function declaredFactsOf(schema: unknown): FactsOf | null {
   const fields = (schema as { fields?: Record<string, unknown> } | undefined)?.fields;
   if (!fields || typeof fields !== 'object') return null;
   return (key) => {
-    if (!Object.prototype.hasOwnProperty.call(fields, key)) return null;
+    if (!Object.prototype.hasOwnProperty.call(fields, key)) {
+      // [#20745] A platform-provisioned column the map omits (`id`, …) is a
+      // column all the same, and the arm judges it by the type it stores;
+      // every other undeclared key keeps the registry-less tolerance.
+      const provisioned = provisionedNoOperatorObjectColumn(key);
+      return provisioned === null ? null : { number: null, column: provisioned };
+    }
     const meta = fieldMetaOf(fields[key]);
     if (!meta) return null;
-    return { number: meta, scalarType: holdsScalarValues(meta.type) ? meta.type : null };
+    return { number: meta, column: declaredNoOperatorObjectColumn(fields[key]) };
   };
 }
 
@@ -486,7 +503,11 @@ export function narrowNumberComparands<W>(
  * [#20546] `types` (`aggregatedRowColumnTypes`, from the same reading of the
  * query as `classes`) is what the walk's no-operator-object arm reads here:
  * the column's type, since the class lumps a `json` or `lookup` groupBy in
- * with a text column. Its refusal names the aggregated column too.
+ * with a text column. Its refusal names the aggregated column too. [#20745]
+ * A `json` or `lookup` groupBy (or a `min` / `max` of one) is judged now, by
+ * that same type: the engine evaluates `having` itself, and a relation column
+ * there carries the related record's id, never the record — measured, a
+ * nested-relation `having` kept no group on every driver.
  */
 export function narrowHavingNumberComparands<H>(
   object: string,
@@ -497,9 +518,10 @@ export function narrowHavingNumberComparands<H>(
   const walked = walkCondition(
     (key) => {
       const type = types.get(key);
+      const kind = type === undefined ? null : noOperatorObjectColumnKind(type);
       return {
         number: classes.get(key) === 'numeric' ? { type: 'number' } : null,
-        scalarType: type !== undefined && holdsScalarValues(type) ? type : null,
+        column: kind === null ? null : { kind, type: type as string },
       };
     },
     having,
