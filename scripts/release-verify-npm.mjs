@@ -1475,7 +1475,8 @@ export async function selfTest() {
   console.log(
     `OK release-verify-npm self-test: ${cases.length} cases pass across `
       + `${Object.keys(SELF_TEST_BATTERIES).length} batteries (the #15321 false red reproduced and absorbed, `
-      + 'the masked partial publish caught, and absence still fatal).',
+      + 'the masked partial publish caught, absence still fatal, and the release audit backfilling '
+      + 'only a version whose whole group is on npm).',
   );
   selfTestReachedVerdict = true;
   return 0;
