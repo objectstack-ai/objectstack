@@ -1583,6 +1583,9 @@ export type Iso_ui_responsive__StyleMapSchema = Assert<Eq< z.input< typeof M165.
 export type Iso_ui_view__CalendarConfigSchema = Assert<Eq< z.input< typeof M167.CalendarConfigSchema >, z.infer< typeof M167.CalendarConfigSchema > >>;
 export type Iso_ui_view__ColumnSummaryConfigSchema = Assert<Eq< z.input< typeof M167.ColumnSummaryConfigSchema >, z.infer< typeof M167.ColumnSummaryConfigSchema > >>;
 export type Iso_ui_view__ColumnSummarySchema = Assert<Eq< z.input< typeof M167.ColumnSummarySchema >, z.infer< typeof M167.ColumnSummarySchema > >>;
+// `EmptyStateSchema` joined on #20694, extracted from the list view's inline
+// `emptyState` so the `object-grid` row can take it by reference.
+export type Iso_ui_view__EmptyStateSchema = Assert<Eq< z.input< typeof M167.EmptyStateSchema >, z.infer< typeof M167.EmptyStateSchema > >>;
 export type Iso_ui_view__FormButtonConfigSchema = Assert<Eq< z.input< typeof M167.FormButtonConfigSchema >, z.infer< typeof M167.FormButtonConfigSchema > >>;
 export type Iso_ui_view__GanttConfigSchema = Assert<Eq< z.input< typeof M167.GanttConfigSchema >, z.infer< typeof M167.GanttConfigSchema > >>;
 export type Iso_ui_view__GanttQuickFilterSchema = Assert<Eq< z.input< typeof M167.GanttQuickFilterSchema >, z.infer< typeof M167.GanttQuickFilterSchema > >>;

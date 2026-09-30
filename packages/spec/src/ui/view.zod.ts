@@ -7183,6 +7183,12 @@ export type RowHeight = z.input<typeof RowHeightSchema>;
 export type GroupingConfig = z.input<typeof GroupingConfigSchema>;
 /** Post-parse shape of {@link GroupingConfig} — defaults applied, transforms run (ADR-0122). */
 export type GroupingConfigParsed = z.infer<typeof GroupingConfigSchema>;
+/**
+ * Authoring shape of {@link EmptyStateSchema} — no default or transform in its
+ * tree, so it has no `EmptyStateParsed` (ADR-0122; pinned isomorphic in
+ * `type-alias-convention.pin.test.ts`).
+ */
+export type EmptyState = z.input<typeof EmptyStateSchema>;
 export type GalleryConfig = z.input<typeof GalleryConfigSchema>;
 /** Post-parse shape of {@link GalleryConfig} — defaults applied, transforms run (ADR-0122). */
 export type GalleryConfigParsed = z.infer<typeof GalleryConfigSchema>;
