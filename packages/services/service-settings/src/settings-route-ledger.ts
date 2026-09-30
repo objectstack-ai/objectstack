@@ -14,7 +14,7 @@
  * asking which rows nobody claims (PENDING-GAPS §E; the gate is
  * `packages/qa/dogfood/test/route-ledger-live-mount-parity.dogfood.test.ts`).
  *
- * WHAT GUARDS IT. Two layers, since #17062. The dogfood parity gate above
+ * WHAT GUARDS IT. Two layers, since commit 50b6f17d4. The dogfood parity gate above
  * checks both directions too — a row here whose route the plugin stops
  * mounting fails it, and any live mount without a row in the union of the
  * ledgers it reads fails it — but only as part of a full boot, in a

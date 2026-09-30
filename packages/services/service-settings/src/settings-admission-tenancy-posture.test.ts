@@ -614,7 +614,7 @@ describe('#15351 — decision 1 option A: a BROKEN tenancy service is an outage,
     // and not endorsed: the settings route layer had no
     // `isAuthzStoreUnavailableError` arm, so the branded 503 the seam raises
     // was flattened into `500 INTERNAL_ERROR` by the same untyped `else` branch
-    // #13279's permission-store re-raise already reached. All four route
+    // commit 6a180e42d's permission-store re-raise already reached. All four route
     // catches now RELAY the declared envelope instead.
     //
     // What THIS card owns is unchanged and still asserted: the outage is not a
