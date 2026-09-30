@@ -76,6 +76,9 @@ const REFUSED: ReadonlyArray<readonly [field: Field, cell: string]> = [
   ['d', '2026/2/30'],
 ];
 
+/** [#20722] The write door's field code for a refused cell: `invalid_time` for a `time`. */
+const codeOf = (field: Field) => (field === 't' ? 'invalid_time' : 'invalid_date');
+
 /** Admitted cells and what they store — the padding, the ISO control and the export shape. */
 const ADMITTED: ReadonlyArray<readonly [field: Field, cell: string, stored: string]> = [
   ['d', '0500-01-01', '0500-01-01'],
@@ -180,7 +183,7 @@ describe.each(HOST_ZONES)('[#20534] /import date cells, host TZ=$tz', ({ tz, jul
     else process.env.TZ = originalTz;
   });
 
-  it.each(REFUSED)('refuses the %s cell %j as that row\'s invalid_date and writes its sibling row', async (field, cell) => {
+  it.each(REFUSED)('refuses the %s cell %j as that row\'s invalid_date (a time cell: invalid_time) and writes its sibling row', async (field, cell) => {
     const res = await ctx.importRows({
       format: 'json', writeMode: 'insert',
       rows: [{ id: 'bad', [field]: cell }, { id: 'good', d: '2026-07-15' }],
@@ -189,7 +192,7 @@ describe.each(HOST_ZONES)('[#20534] /import date cells, host TZ=$tz', ({ tz, jul
     expect(res._status ?? 200).toBe(200);
     expect(res._json).toMatchObject({ total: 2, ok: 1, errors: 1, created: 1 });
     expect(res._json.results[0]).toMatchObject({
-      row: 1, ok: false, action: 'failed', field, code: 'invalid_date',
+      row: 1, ok: false, action: 'failed', field, code: codeOf(field),
     });
     // Refused, not stored as some other day or instant.
     expect(await ctx.engine.findOne(OBJECT, { where: { id: 'bad' } })).toBeNull();
@@ -267,7 +270,7 @@ describe.each(HOST_ZONES)('[#20534] /import date cells, host TZ=$tz', ({ tz, jul
 
     expect(res._json).toMatchObject({ total: REFUSED.length, ok: 0, errors: REFUSED.length });
     const failedFields = res._json.results.map((r: any) => [r.field, r.code]);
-    expect(failedFields).toEqual(REFUSED.map(([field]) => [field, 'invalid_date']));
+    expect(failedFields).toEqual(REFUSED.map(([field]) => [field, codeOf(field)]));
   });
 
   it('dry run predicts the same refusals and persists nothing', async () => {
@@ -278,7 +281,7 @@ describe.each(HOST_ZONES)('[#20534] /import date cells, host TZ=$tz', ({ tz, jul
 
     expect(res._json).toMatchObject({ dryRun: true, total: REFUSED.length, ok: 0, errors: REFUSED.length });
     for (const [i, r] of res._json.results.entries()) {
-      expect(r).toMatchObject({ ok: false, field: REFUSED[i][0], code: 'invalid_date' });
+      expect(r).toMatchObject({ ok: false, field: REFUSED[i][0], code: codeOf(REFUSED[i][0]) });
     }
     for (const [i] of REFUSED.entries()) {
       expect(await ctx.engine.findOne(OBJECT, { where: { id: `d${i}` } })).toBeNull();
