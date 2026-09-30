@@ -174,6 +174,33 @@ Resolved labels are served straight from the REST metadata endpoints (the
 locale is part of the ETag), so the Console and any SDUI client get translated
 metadata without doing lookups themselves.
 
+### An edit beats the packaged catalog
+
+A package's bundle translates the strings that package shipped, so it applies
+only to a string the served metadata still carries unchanged. Dashboards and
+views are the translated types an organization can edit in place: once an
+org's edit to a packaged dashboard or view is published, the metadata reads
+serve each edited string as written, in every locale. Each string is compared
+with the same string in the item as the package shipped it:
+
+| Packaged type | Strings compared, and how each is matched |
+|:---|:---|
+| Dashboard | its `label` and `description`; each widget's `title`, `description` and sub-caption (`subCaption`), matched by widget `id`; each global filter's `label` and static option labels, matched by the filter key and the option `value` |
+| View | its `label` and `description`; each bulk action's `label`, `confirmText` and `confirmLabel`, and each of its params' `label`, `help` and `placeholder`, matched by `name` |
+
+- **Only the edited strings move.** A widget the org left alone on an edited
+  dashboard, or a view nobody edited, is still translated.
+- **A widget, global filter or bulk action the package never shipped counts as
+  edited**: the org authored it, so its text is served as written.
+- **An edited string is served in the language it was written in, to every
+  reader.** The bundle entry for that string no longer applies to it.
+- **Resetting the overlay restores the shipped string and its translation.**
+
+Objects follow the same rule for their `label`, `pluralLabel` and
+`description`: a value that differs from the owning package's declaration (a
+label an [object extension](/docs/data-modeling/object-extensions) contributes,
+for one) is served as written.
+
 ## Organizing the files
 
 How you lay out translation source files is an authoring convention — your
