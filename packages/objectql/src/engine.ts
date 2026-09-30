@@ -11562,7 +11562,7 @@ export class ObjectQL implements IObjectQLEngine {
       `findOne('${object}') selects no particular record: 'where' is absent or empty ` +
       `and the query carries no 'orderBy'. findOne applies limit: 1, so this would return an ` +
       `ARBITRARY row — a real, plausible-looking record unrelated to what was asked for, which ` +
-      `no caller's null-check can catch (#4419). Pass 'where' (or a 'search' that resolves to ` +
+      `no caller's null-check can catch. Pass 'where' (or a 'search' that resolves to ` +
       `one) to select the record; pass 'orderBy' if you mean "the first record in THIS order"; ` +
       `or call find('${object}', { limit: 1 }) if any row will genuinely do.`,
     );

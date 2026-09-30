@@ -314,7 +314,7 @@ function refuseDateBucketedGroupBy(granularity: string): never {
     + `a capability gap in the backend, not a mistake in the query, which is why it answers `
     + `NOT_IMPLEMENTED/501 rather than a 400. A driver publishes the granularities it buckets `
     + `natively as \`supports.queryDateGranularity\`; the engine reads that record and buckets `
-    + `in memory for every granularity absent from it, which is always correct (#6212).`,
+    + `in memory for every granularity absent from it, which is always correct.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
@@ -338,7 +338,7 @@ function refusePerAggregationFilter(alias: string): never {
     `Per-aggregation \`filter\` on "${alias}" is not supported by this backend (driver-mongodb). ` +
     `The query is spelled correctly and @objectstack/spec AggregationNodeSchema declares the key — ` +
     `this backend compiles no conditional-aggregate (SQL FILTER (WHERE …) / CASE WHEN) expression ` +
-    `for it, so it is refused rather than silently aggregating the UNFILTERED rows (#10413), which ` +
+    `for it, so it is refused rather than silently aggregating the UNFILTERED rows, which ` +
     `is why it answers NOT_IMPLEMENTED/501 rather than a 400. \`engine.aggregate\` lowers filtered ` +
     `aggregations in memory for every driver without native support — route the query through the ` +
     `engine, or drop the \`filter\` key.`,
@@ -452,7 +452,7 @@ function undeclaredAggregateFunctionError(func: string): Error {
     + `Declared functions: ${DECLARED_AGGREGATE_FUNCTIONS.join(', ')} `
     + `(@objectstack/spec AggregationFunction). Fix the "function" key of the aggregations[] `
     + `entry — the Query Protocol has no such function, so this is a query no backend can run, `
-    + `not a gap in this one (#5907). It is refused rather than accumulated: until #12818 this `
+    + `not a gap in this one. It is refused rather than accumulated: before this refusal, this `
     + `builder answered any unrecognised name with a $sum of that column under the alias the `
     + `caller asked for, which is a plausible number nothing downstream can tell from an answer.`,
   ) as Error & { code?: string; status?: number };
@@ -493,7 +493,7 @@ function uncompilableAggregateFunctionError(func: string): Error {
     + `correctly and @objectstack/spec AggregationFunction declares it — this is a capability gap `
     + `in the backend, not a mistake in the query, which is why it answers NOT_IMPLEMENTED/501 `
     + `rather than a 400. Aggregate with a function this backend lowers; whether the declaration `
-    + `itself should stand is ADR-0049's enforce-or-remove question (#5907).`,
+    + `itself should stand is ADR-0049's enforce-or-remove question.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
@@ -748,11 +748,11 @@ function numericAggregandExpr(path: string): Document {
 function refuseRetiredAggregateFunction(func: string): never {
   const err = new Error(
     `Aggregate function "${func}" was REMOVED from @objectstack/spec `
-    + `AggregationFunction at #6188 (ADR-0049 enforce-or-remove) and is not lowered by this `
+    + `AggregationFunction (ADR-0049 enforce-or-remove: no SQL backend compiled it) and is not lowered by this `
     + `backend (driver-mongodb). Declared now: ${AggregationFunction.options.join(', ')}. `
     + `This answers INVALID_QUERY/400 rather than NOT_IMPLEMENTED/501 because the protocol no `
     + `longer has this name at all, which is a different fact from a capability gap in the `
-    + `backend (#5907) — the same answer \`driver-sql\` and \`driver-turso\` give it. There is no `
+    + `backend — the same answer \`driver-sql\` and \`driver-turso\` give it. There is no `
     + `replacement in the query vocabulary: read the rows with an ordinary \`fields\` query and `
     + `shape them in the caller, or model the roll-up as a stored field. Parsing the query `
     + `through AggregationNodeSchema reports this with the full retirement prescription.`,

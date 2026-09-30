@@ -392,7 +392,7 @@ function filterArrayReachedDriverError(filters: unknown[]): Error {
     `A filter ARRAY reached the driver: ${JSON.stringify(filters)}. ` +
     `'where' is a FilterCondition object; the array form ('FilterArray') is input-only ` +
     `authoring sugar and is lowered by @objectstack/spec parseFilterAST() at the engine ` +
-    `and protocol doors before any driver sees it (#5158). This driver no longer carries a ` +
+    `and protocol doors before any driver sees it. This driver no longer carries a ` +
     `second compiler for it — call through ObjectQL, or lower the value yourself with ` +
     `parseFilterAST(). Note the INFIX join form ([condA, "or", condB]) has no lowering at ` +
     `all: write the prefix form ["or", condA, condB].`,
@@ -534,7 +534,7 @@ function nonBooleanNullComparandError(field: string, value: unknown, path: strin
       `compiled IS NULL (anything but false), this driver and driver-memory's query path ` +
       `compiled IS NOT NULL (anything but true), and driver-memory's matcher dropped the ` +
       `constraint entirely. Note "false" the STRING is truthy, so it landed on the side opposite ` +
-      `the false it was written to mean (#5347).`,
+      `the false it was written to mean.`,
   );
 }
 
@@ -674,7 +674,7 @@ function emptyFieldConstraintError(field: string, path: string): Error {
       `EVERY row), driver-memory / @objectstack/formula answered "matches nothing", and this ` +
       `driver translated it to { "${field}": {} }, which MongoDB evaluates as "${field} equals the ` +
       `empty document" — a DIFFERENT filter that only looks like "matches nothing" until a ` +
-      `document actually stores an empty object there. #5240.`,
+      `document actually stores an empty object there.`,
   );
 }
 
@@ -716,7 +716,7 @@ function unknownLogicalOperatorError(key: string, path: string): Error {
       `other key is a field name. It is refused rather than written into the query document as a ` +
       `FIELD of that name, which is what this driver used to do — sending it to MongoDB to be ` +
       `evaluated, so $where ran server-side JavaScript and $nor applied a combinator the Filter ` +
-      `Protocol never declared (#5346).`,
+      `Protocol never declared.`,
   );
 }
 
@@ -740,7 +740,7 @@ function malformedBetweenError(field: string, value: unknown, path: string): Err
       `It is refused rather than skipped: a range that compiles to no predicate answers with a ` +
       `row count the author never asked for. This driver dropped both bounds and normalised the ` +
       `field to {}, which MongoDB then evaluates as "equals the empty document" — so the query ` +
-      `ran, reported nothing, and returned rows chosen by a filter nobody wrote (#5346).`,
+      `ran, reported nothing, and returned rows chosen by a filter nobody wrote.`,
   );
 }
 

@@ -737,7 +737,7 @@ export class DatabaseLoader implements MetadataLoader {
             `entry for ${type}/${name} was NOT written, and further entries are being skipped while this persists. ` +
             `The metadata write itself SUCCEEDED, so the server keeps looking healthy while its change history ` +
             `silently develops holes: version timelines and rollback targets will be incomplete. The entry is skipped ` +
-            `deliberately — numbering it from 1 (what this code did before #4825) would collide with existing rows and ` +
+            `deliberately — numbering it from 1 (what this code once did) would collide with existing rows and ` +
             `make \`event_seq\` ordering wrong rather than merely incomplete, which nothing detects and no restart ` +
             `repairs. Fix the datasource/driver error below (connection, timeout, privileges); the next metadata write ` +
             `retries and reports recovery.`,

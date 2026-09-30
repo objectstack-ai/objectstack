@@ -1148,7 +1148,9 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // three locales.
       // 658 with the `picklist` metadata type's display pair, authored in all
       // three locales.
-      expect(translated.length, `${locale} positive control`).toBe(658);
+      // 659 since the field form offers `useGrouping` on `number` fields: one
+      // new row label, authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(659);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

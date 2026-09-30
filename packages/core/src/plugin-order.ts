@@ -151,7 +151,7 @@ export function validateInitServiceContract<P extends OrderablePlugin>(
 
     if (violations.length > 0) {
         throw new Error(
-            `[Kernel] Plugin ordering contract violated (#4131):\n  - ${violations.join('\n  - ')}`
+            `[Kernel] Plugin ordering contract violated:\n  - ${violations.join('\n  - ')}`
         );
     }
 }
@@ -178,7 +178,7 @@ export function describeInitOrderFault(
         }
     }
     return ` (while plugin '${currentlyInitializing}' was initializing — a composition/` +
-        `ordering fault, #4131.${providerHint})`;
+        `ordering fault; registration order is not a contract.${providerHint})`;
 }
 
 /**
@@ -200,7 +200,7 @@ export function assertInitServiceRequirements(
             `service is registered at this point of the boot. No composed plugin that initializes ` +
             `earlier provides it — compose a provider (and, if it initializes later without declaring ` +
             `'${service}' in providesServices, order it ahead via this plugin's dependencies/` +
-            `optionalDependencies) (#4131).`
+            `optionalDependencies).`
         );
     }
 }

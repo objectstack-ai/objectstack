@@ -330,7 +330,7 @@ export function engineUpdateIdConflictMessage(
     `Update binds the payload id ${spellScalarId(payloadId)} as the row address, but options.where.id ` +
     `names a DIFFERENT row: ${spellScalarId(whereId)}. The by-id path binds ONLY one primary key — the ` +
     `losing spelling is never evaluated — so the write would land on ${spellScalarId(payloadId)} with the ` +
-    `where.id condition silently ignored (#11142). Two ids are the same row only when they are identical, ` +
+    `where.id condition silently ignored. Two ids are the same row only when they are identical, ` +
     `type included. If both spellings mean one row, make them equal; otherwise drop one: ` +
     `update(object, { id, ...fields }) addresses the row by the payload id, and ` +
     `update(object, fields, { where: { id } }) — with no id in the payload — addresses it by where.id.`
@@ -389,7 +389,7 @@ export function engineUpdateIdPredicateConflictMessage(
     `declares ${spellDeclaredWhereId(whereId)} — a predicate over a SET of rows, not one primary key. ` +
     `The by-id path binds ONLY that one id and never evaluates a predicate, so the write would land on ` +
     `${spellScalarId(payloadId)} with the where.id predicate — and any declared multi:true — silently ` +
-    `ignored (#11230). To write EVERY row the predicate selects, drop id from the payload and declare ` +
+    `ignored. To write EVERY row the predicate selects, drop id from the payload and declare ` +
     `the predicate path: update(object, fields, { where: { id: <predicate> }, multi: true }). To write ` +
     `the single row ${spellScalarId(payloadId)}, drop where.id: update(object, { id, ...fields }).`
   );

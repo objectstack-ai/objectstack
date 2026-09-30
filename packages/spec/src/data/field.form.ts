@@ -82,6 +82,16 @@ export const fieldForm = defineForm({
         // unit and are declared nowhere.
         { field: 'precision', visibleWhen: "data.type == 'currency' || data.type == 'number'", helpText: 'Total digits' },
         { field: 'scale', visibleWhen: "data.type == 'number'", helpText: 'Number of decimal digits' },
+        // `useGrouping` is shown once it is enforced (ruling 5916202706: offer
+        // it) — objectui's `shouldGroupDisplayNumber` answers an authored value
+        // first, so the order is the `valueDomain` row's: declared = enforced =
+        // shown. A plain boolean row, the face of the `allowCreate` row below
+        // (the same `z.boolean().optional()` node, no default): the switch
+        // writes nothing until toggled, so an untouched field stays unset and
+        // the renderer decides. It reads off meanwhile, even where the renderer
+        // groups, and the help text says so in the words of the `object.form.ts`
+        // `userActions` row. Gated like `scale`, a `number`-only hint.
+        { field: 'useGrouping', visibleWhen: "data.type == 'number'", helpText: 'Digit grouping (thousands separators) in displayed values. Unset: the renderer decides; an untouched switch writes nothing, so it reads off even where the renderer groups. Off: never grouped, e.g. a year or an ID. On: always grouped.' },
         // #19332 G1b (ruling 5861442317, G1) — `currencyConfig` is a strict object
         // with two keys, and both members of its one enum are spellable option
         // values, so it takes the `object.form.ts` `access` / `lifecycle` face: a
