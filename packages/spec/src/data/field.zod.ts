@@ -2131,11 +2131,9 @@ export const FieldSchema = lazySchema(() => {
 
   // A field's options come from exactly ONE source: inline `options`, or the
   // shared list `picklist` names (`data/picklist.zod.ts`). Both is refused —
-  // two sources, one of them silently ignored — and so is neither on the
-  // single-choice types, where a control with no options offers nothing to
-  // choose and the record validator skips its value check
-  // (`FIELD_CHOICE_WITHOUT_OPTIONS`, `kernel/functional-completeness.ts`).
-  // The multi-value option types keep their optionless free-form mode.
+  // two sources, one of them silently ignored. (Neither, on a single-choice
+  // type, stays the error-severity `FIELD_CHOICE_WITHOUT_OPTIONS` finding of
+  // `kernel/functional-completeness.ts`, whose prescription names both.)
   if (field.picklist !== undefined) {
     if (!SINGLE_OPTION_TYPES.has(field.type) && !MULTI_OPTION_TYPES.has(field.type)) {
       ctx.addIssue({
@@ -2158,15 +2156,6 @@ export const FieldSchema = lazySchema(() => {
           'package owns it). Or delete `picklist` to keep an inline list of this field\'s own.',
       });
     }
-  } else if (SINGLE_OPTION_TYPES.has(field.type) && !(field.options && field.options.length > 0)) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['options'],
-      message:
-        `A \`${field.type}\` field needs options to choose from: declare \`options: [{ label, value }]\` ` +
-        "inline, or `picklist: '<name>'` to use a shared picklist. With neither the control offers " +
-        'nothing, and the server cannot check a written value against a list, so any value is stored.',
-    });
   }
 
   // ADR-0113: `storage.notNull` × `requiredWhen` is a contradiction, rejected

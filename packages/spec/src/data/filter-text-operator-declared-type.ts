@@ -409,8 +409,6 @@ export interface TextOperatorDoorFixtureField {
   readonly returnType?: 'number' | 'text' | 'boolean' | 'date';
   /** `summary` — a roll-up declaration, present so the field is a legal declaration. */
   readonly summaryOperations?: { readonly object: string; readonly field: string; readonly function: 'count' };
-  /** `select` / `radio` — one option, present so the field is a legal declaration. */
-  readonly options?: readonly { readonly label: string; readonly value: string }[];
 }
 
 /** The fixture object's name. */
@@ -422,7 +420,6 @@ const fixtureFieldFor = (type: string): TextOperatorDoorFixtureField => {
   if (type === 'summary') {
     return { name, type, summaryOperations: { object: TEXT_OPERATOR_DOOR_FIXTURE_OBJECT, field: 'id', function: 'count' } };
   }
-  if (type === 'select' || type === 'radio') return { name, type, options: [{ label: 'A', value: 'a' }] };
   return { name, type };
 };
 

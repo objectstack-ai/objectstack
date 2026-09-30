@@ -47,7 +47,6 @@ function minimalField(type: string): Record<string, unknown> {
   if (type === 'lookup' || type === 'master_detail' || type === 'tree') input.reference = 'account';
   if (type === 'summary') input.summaryOperations = { object: 'line', field: 'amount', function: 'sum' };
   if (type === 'formula') input.expression = '1 + 1';
-  if (type === 'select' || type === 'radio') input.options = [{ label: 'A', value: 'a' }];
   return input;
 }
 

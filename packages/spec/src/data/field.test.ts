@@ -2152,7 +2152,7 @@ describe('FieldSchema — authored `radio` + `multiple: true` is REFUSED (#11437
   });
 
   it('radio + authored `multiple: false` stays accepted — the refusal reads only the authored `true`', () => {
-    const f = FieldSchema.parse({ name: 'severity', type: 'radio', multiple: false, options: [{ label: 'Low', value: 'low' }] });
+    const f = FieldSchema.parse({ name: 'severity', type: 'radio', multiple: false });
     expect(f.multiple).toBe(false);
   });
 

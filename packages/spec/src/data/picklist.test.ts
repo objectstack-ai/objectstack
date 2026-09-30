@@ -126,20 +126,15 @@ describe('Field `picklist` — mutually exclusive with `options` at the schema d
     expect(FieldSchema.safeParse(def).success).toBe(false);
   });
 
-  it.each(['select', 'radio'] as const)('neither on a %s is refused at `options`', (type) => {
-    for (const fixture of [
-      { name: 'f', label: 'F', type },
-      { name: 'f', label: 'F', type, options: [] },
-    ]) {
-      const issues = issuesByPath(FieldSchema.safeParse(fixture));
-      const neither = issues.get('options');
-      expect(neither?.code).toBe('custom');
-      expect(neither?.message).toContain('`picklist');
-    }
-  });
-
-  it.each(['multiselect', 'checkboxes', 'tags'] as const)('a %s keeps its optionless free-form mode', (type) => {
+  it.each(['select', 'radio'] as const)('neither on a %s is the completeness gate\'s error, not a parse refusal', (type) => {
+    // The schema door refuses only the pair. An optionless single-choice field
+    // keeps the verdict it had before the kind existed: parse-legal, and an
+    // error-severity `field/choice-without-options` finding at the author-time
+    // and registry gates — which a `picklist` reference now satisfies.
     expect(FieldSchema.safeParse({ name: 'f', label: 'F', type }).success).toBe(true);
+    expect(checkFieldCompleteness({ type }).map((f) => [f.rule, f.severity]))
+      .toEqual([['field/choice-without-options', 'error']]);
+    expect(checkFieldCompleteness({ type, picklist: 'industry' })).toEqual([]);
   });
 
   it.each(['select', 'radio', 'multiselect', 'checkboxes', 'tags'] as const)('`picklist` is accepted on the option type %s', (type) => {
@@ -154,10 +149,6 @@ describe('Field `picklist` — mutually exclusive with `options` at the schema d
     expect(issues.get('picklist')?.code).toBe('custom');
   });
 
-  it('a picklist-bound select is not a choice-without-options for the completeness predicate', () => {
-    expect(checkFieldCompleteness({ type: 'select', picklist: 'industry' })).toEqual([]);
-    expect(checkFieldCompleteness({ type: 'select' }).map((f) => f.rule)).toEqual(['field/choice-without-options']);
-  });
 });
 
 describe('the served shape — `options` resolved, `picklist` kept', () => {
