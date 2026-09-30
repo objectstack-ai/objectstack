@@ -17,6 +17,11 @@ import {
   // view's `columns` onto this block verbatim, so a second spelling of the
   // member schema would be a second thing to drift.
   ListColumnSchema,
+  // [#20831] `object-grid.grouping` and `object-kanban.grouping` are the SAME
+  // grouping config a list view carries, taken by reference: both renderers
+  // read `grouping.fields[i].field` (the kanban only `fields[0]`, as its
+  // swimlane fallback), so one declaration judges every door that carries it.
+  GroupingConfigSchema,
 } from './view.zod';
 import { InlineActionSchema, ActionLocationSchema } from './action.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
@@ -3593,7 +3598,17 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
     .describe('Fields the toolbar search queries; a non-empty list enables search'),
   showSearch: z.boolean().optional().describe('Show the search box (read only when `searchableFields` is absent)'),
   rowHeight: z.unknown().optional().describe('Row density mode (e.g. compact / comfortable)'),
-  grouping: z.unknown().optional().describe('Row grouping config'),
+  /**
+   * [#20831] The list view's own `GroupingConfigSchema`, by reference — ⛔ not
+   * a copy of its shape. objectui types this key as the spec's
+   * `GroupingConfig` and reads exactly its members: `grouping.fields[i].field`
+   * (the group header query's `groupBy` column and the row projection),
+   * `.order` and `.collapsed` (`useGroupedData`). Until #20831 it was
+   * `z.unknown()`, so a padded field name — refused on `list-view` since
+   * #17360 — or a value of the wrong shape validated green here and grouped
+   * every row into one empty group. Judged the same way on every door now.
+   */
+  grouping: GroupingConfigSchema.optional().describe('Row grouping config'),
   aggregations: z.unknown().optional().describe('Group aggregation config (sum/avg/… per column)'),
   conditionalFormatting: z.unknown().optional().describe('Conditional row/cell formatting rules'),
   rowColor: z.unknown().optional().describe('Row color rules'),
@@ -3990,7 +4005,18 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
   titleField: z.string().optional().describe('Legacy fallback for `cardTitle` (the board reads `cardTitle || titleField`). Prefer `cardTitle`'),
   cardFields: z.array(z.string()).optional().describe('Fields rendered on each card'),
   swimlaneField: z.string().optional().describe('Field for horizontal swimlanes (in addition to columns)'),
-  grouping: z.unknown().optional().describe('View grouping config; its first field is the swimlane fallback'),
+  /**
+   * [#20831] The list view's own `GroupingConfigSchema`, by reference — ⛔ not
+   * a copy of its shape. The board reads ONE position of it:
+   * `effectiveSwimlaneField = swimlaneField || grouping.fields[0].field`
+   * (`ObjectKanban.tsx`), and looks that raw name up on every card. Until
+   * #20831 it was `z.unknown()`, so a padded name (`'  business_unit  '`,
+   * refused on `list-view` since #17360) or a wrong-shaped value validated
+   * green here and collapsed every card into one lane with no error. Kept,
+   * not retired: it is a live reader of the view's grouping config, and an
+   * explicit `swimlaneField` still wins.
+   */
+  grouping: GroupingConfigSchema.optional().describe('View grouping config; its first field is the swimlane fallback'),
   /**
    * RETIRED (#17260, ADR-0049 enforce-or-remove — the spec half of the
    * objectui#8285 director-seat ruling, decision batch #91, 2026-09-08:
