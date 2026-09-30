@@ -28,6 +28,7 @@ import type { FlowTrigger, FlowTriggerBinding, FlowActivationStore } from './eng
 import { InMemoryFlowActivationStore } from './flow-activation-store.js';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import { withScheduledWorkOn } from './deployment-switch.test-support.js';
+import { withLoaderSetFromPull } from './loader-set.test-support.js';
 
 function createTestLogger(): any {
     const l: any = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
@@ -96,7 +97,7 @@ describe('a trigger type registered AFTER hydrateFlowActivations() does not arm 
             const store = new InMemoryFlowActivationStore();
             await store.setActive({ name: 'off', packageId: 'crm', active: false });
 
-            const engine = new AutomationEngine(createTestLogger());
+            const engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger()));
             engine.setFlowActivationStore(store);
             engine.registerFlow('off', packagedFlow('off', startConfig));
             engine.registerFlow('on', packagedFlow('on', startConfig));
@@ -115,7 +116,7 @@ describe('a trigger type registered AFTER hydrateFlowActivations() does not arm 
     }
 
     it('a STATUS-disabled flow is not armed by a later trigger registration either — the gate is `isFlowEnabled`, both dimensions', async () => {
-        const engine = new AutomationEngine(createTestLogger());
+        const engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger()));
         engine.registerFlow('retired', packagedFlow('retired', RECORD_CHANGE, { status: 'obsolete' }));
         engine.registerFlow('live', packagedFlow('live', RECORD_CHANGE, { status: 'active' }));
 
@@ -132,7 +133,7 @@ describe('the enable path still arms', () => {
     it('re-enabling a flow hydrated as disabled arms it on the trigger that registered after hydration', async () => {
         const store = new InMemoryFlowActivationStore();
         await store.setActive({ name: 'f', packageId: 'crm', active: false });
-        const engine = new AutomationEngine(createTestLogger());
+        const engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger()));
         engine.setFlowActivationStore(store);
         engine.registerFlow('f', packagedFlow('f', RECORD_CHANGE));
         await engine.hydrateFlowActivations();
@@ -149,7 +150,7 @@ describe('the enable path still arms', () => {
     });
 
     it('re-enabling the LEDGER bit of a flow whose STATUS is obsolete does not arm it — it still cannot run', async () => {
-        const engine = new AutomationEngine(createTestLogger());
+        const engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger()));
         engine.setFlowActivationStore(new InMemoryFlowActivationStore());
         const trigger = recordingTrigger('record_change');
         engine.registerTrigger(trigger.trigger);
@@ -176,7 +177,7 @@ describe('a cold restart over the same store keeps a switched-off flow enabled:f
      * outlive the process.
      */
     async function boot(store: FlowActivationStore) {
-        const engine = new AutomationEngine(createTestLogger());
+        const engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger()));
         engine.setFlowActivationStore(store);
         const defs = [packagedFlow('urgent_alert', RECORD_CHANGE), packagedFlow('welcome', RECORD_CHANGE)];
         for (const def of defs) engine.registerFlow(def.name, def); // the boot pull
@@ -217,7 +218,7 @@ describe('the trigger-fired failure line claims a run-history row only when one 
 
     it('a FLOW_DISABLED refusal reaching the callback (an event in flight when the flow was switched off) is not logged as a failure', async () => {
         const logger = createTestLogger();
-        const engine = new AutomationEngine(logger);
+        const engine = withLoaderSetFromPull(new AutomationEngine(logger));
         engine.setFlowActivationStore(new InMemoryFlowActivationStore());
         const trigger = recordingTrigger('record_change');
         engine.registerTrigger(trigger.trigger);
@@ -241,7 +242,7 @@ describe('the trigger-fired failure line claims a run-history row only when one 
 
     it('a run that dispatched and failed still logs at ERROR and still says its failure is in the run history — which holds it', async () => {
         const logger = createTestLogger();
-        const engine = new AutomationEngine(logger);
+        const engine = withLoaderSetFromPull(new AutomationEngine(logger));
         const trigger = recordingTrigger('record_change');
         engine.registerTrigger(trigger.trigger);
         engine.registerNodeExecutor({ type: 'exploder', async execute() { throw new Error('boom'); } } as never);
@@ -270,7 +271,7 @@ describe('the trigger-fired failure line claims a run-history row only when one 
 
     it('a failure refused before it dispatched makes no run-history claim — no row was written', async () => {
         const logger = createTestLogger();
-        const engine = new AutomationEngine(logger);
+        const engine = withLoaderSetFromPull(new AutomationEngine(logger));
         const trigger = recordingTrigger('record_change');
         engine.registerTrigger(trigger.trigger);
         engine.registerFlow('gone', packagedFlow('gone', RECORD_CHANGE));

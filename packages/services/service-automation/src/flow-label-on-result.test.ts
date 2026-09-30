@@ -38,6 +38,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { AutomationEngine } from './engine.js';
 import type { NodeExecutor } from './engine.js';
 import { installBuiltinNodes } from './builtin/index.js';
+import { withLoaderSetFromPull } from './loader-set.test-support.js';
 
 function silentLogger() {
     return { info() {}, warn() {}, error() {}, debug() {}, child() { return silentLogger(); } } as any;
@@ -79,7 +80,7 @@ describe('AutomationResult.flowLabel — the authored flow label rides the resul
     let flakyCalls: number;
 
     beforeEach(() => {
-        engine = new AutomationEngine(silentLogger());
+        engine = withLoaderSetFromPull(new AutomationEngine(silentLogger()));
         installBuiltinNodes(engine, pluginCtx());
         flakyCalls = 0;
         engine.registerNodeExecutor({

@@ -52,7 +52,7 @@ describe('AutomationEngine', () => {
     let engine: AutomationEngine;
 
     beforeEach(() => {
-        engine = new AutomationEngine(createTestLogger());
+        engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger()));
     });
 
     describe('Execution-log ring buffer (P1-2)', () => {
@@ -1317,7 +1317,7 @@ describe('AutomationEngine - Execution History', () => {
     };
 
     beforeEach(() => {
-        engine = new AutomationEngine(createTestLogger());
+        engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger()));
     });
 
     describe('getFlow', () => {
@@ -2806,6 +2806,7 @@ describe('Action Descriptor Registry (ADR-0018)', () => {
 
 import type { FlowTrigger, FlowTriggerBinding } from './engine.js';
 import type { AutomationContext } from '@objectstack/spec/contracts';
+import { withLoaderSetFromPull } from './loader-set.test-support.js';
 
 /**
  * A recording fake trigger: captures bindings/callbacks handed to it by the
@@ -2863,7 +2864,7 @@ describe('AutomationEngine - Flow Trigger Wiring', () => {
     let engine: AutomationEngine;
 
     beforeEach(() => {
-        engine = new AutomationEngine(createTestLogger());
+        engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger()));
     });
 
     it('binds a record-change flow to a matching trigger with a parsed binding', () => {
@@ -3169,7 +3170,7 @@ describe('#9378 — execute() classifies terminal exits for the trigger transpor
     let engine: AutomationEngine;
 
     beforeEach(() => {
-        engine = new AutomationEngine(createTestLogger());
+        engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger()));
     });
 
     /** start → `bad` (no executor registered for its type) → end. */

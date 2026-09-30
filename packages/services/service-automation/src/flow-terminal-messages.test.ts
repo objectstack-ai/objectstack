@@ -52,6 +52,7 @@ import { AutomationEngine } from './engine.js';
 import { InMemorySuspendedRunStore } from './suspended-run-store.js';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
+import { withLoaderSetFromPull } from './loader-set.test-support.js';
 
 function createTestLogger(): any {
     return { info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, child: () => createTestLogger() };
@@ -101,7 +102,7 @@ function messageFlow(
  * leaves through `executeWithoutRetry`'s success exit rather than `execute()`'s.
  */
 function engineWith(outcome: 'pass' | 'fail' | 'fail_then_pass') {
-    const engine = new AutomationEngine(createTestLogger());
+    const engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger()));
     const runs = { count: 0 };
     engine.registerNodeExecutor({
         type: 'script',
@@ -247,7 +248,7 @@ describe('#9414 — the symmetry anchor: resume() already did this', () => {
     // this path instead of widening that one — from passing silently.
 
     it('a resumed run still carries successMessage on its terminal exit', async () => {
-        const engine = new AutomationEngine(createTestLogger(), new InMemorySuspendedRunStore());
+        const engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger(), new InMemorySuspendedRunStore()));
         engine.registerNodeExecutor({
             type: 'approval_pause',
             descriptor: defineActionDescriptor({

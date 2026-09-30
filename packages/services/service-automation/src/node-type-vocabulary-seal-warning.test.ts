@@ -30,6 +30,7 @@ import { LiteKernel } from '@objectstack/core';
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { AutomationEngine } from './engine.js';
 import { AutomationServicePlugin } from './plugin.js';
+import { withLoaderSetFromPull } from './loader-set.test-support.js';
 
 /** Substring that identifies the #4792 line, wherever logs are captured. */
 const OMISSION_MARKER = 'node-type vocabulary was never sealed';
@@ -143,7 +144,7 @@ describe('#4792 — a never-sealed node-type vocabulary announces itself at the 
 
     it('does not fire for an unknown or disabled flow name — the trigger is a real run', async () => {
         const lines: string[] = [];
-        const engine = new AutomationEngine(loggerCapturing(lines));
+        const engine = withLoaderSetFromPull(new AutomationEngine(loggerCapturing(lines)));
         // [#20726] Disabled through the toggle, which switches packaged flows only.
         engine.registerFlow('off', { ...trivialFlow('off'), _packageId: 'crm' });
         await engine.toggleFlow('off', false);

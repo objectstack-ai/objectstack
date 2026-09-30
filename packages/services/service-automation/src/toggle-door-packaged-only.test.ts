@@ -30,6 +30,7 @@ import { AutomationEngine } from './engine.js';
 import type { FlowTrigger, FlowTriggerBinding } from './engine.js';
 import { InMemoryFlowActivationStore } from './flow-activation-store.js';
 import type { AutomationContext } from '@objectstack/spec/contracts';
+import { withLoaderSetFromPull } from './loader-set.test-support.js';
 
 function createTestLogger(): any {
     const l: any = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
@@ -72,8 +73,9 @@ const packaged = (name: string, extra: Record<string, unknown> = {}) => flowBody
 
 /**
  * The three shapes a flow authored in this deployment reaches the engine in —
- * none of them package provenance by the canonical test (`isCodeArtifactBody`,
- * which the §7.3 guards already ask through `describeFlowContender`):
+ * none of them in the loader's set, which this suite's stand-in reads off the
+ * canonical test (`isCodeArtifactBody`; see `loader-set.test-support.ts` — the
+ * engine itself reads the set, never a definition's stamps, #20761):
  *  - no package envelope at all (the automation create door, the clone door);
  *  - the `sys_metadata` sentinel a runtime-authored row is registered under;
  *  - a tenant-authored row bound to an app package (`_provenance: 'org'`).
@@ -95,7 +97,7 @@ function stateOf(engine: AutomationEngine, name: string) {
 /** An engine with the in-memory ledger and a record trigger attached. */
 function engineWithLedger() {
     const logger = createTestLogger();
-    const engine = new AutomationEngine(logger);
+    const engine = withLoaderSetFromPull(new AutomationEngine(logger));
     const store = new InMemoryFlowActivationStore();
     engine.setFlowActivationStore(store);
     const records = recordingTrigger();
@@ -146,7 +148,7 @@ describe('[#20726] pin 1 — the toggle door refuses a customer-authored flow, a
 
     it('with NO ledger attached (the degraded mode) the refusal is the same, and nothing flips in process', async () => {
         const logger = createTestLogger();
-        const engine = new AutomationEngine(logger);
+        const engine = withLoaderSetFromPull(new AutomationEngine(logger));
         const records = recordingTrigger();
         engine.registerTrigger(records.trigger);
         engine.registerFlow('customer_flow', flowBody('customer_flow'));

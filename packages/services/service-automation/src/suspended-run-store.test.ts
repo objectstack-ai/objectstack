@@ -16,6 +16,7 @@ import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
 import { InMemoryFlowActivationStore } from './flow-activation-store.js';
 import { registerSubflowNode } from './builtin/subflow-node.js';
+import { withLoaderSetFromPull } from './loader-set.test-support.js';
 
 /**
  * The `resumeAuthority: 'any'` declaration every pausing fixture below needs
@@ -1504,7 +1505,7 @@ describe('#20725 the parked-run read behind the §7.3 disable guard asks for the
 
         /** One process lifetime over the shared table: a packaged caller that parks, then calls its subflow. */
         function build() {
-            const e = new AutomationEngine(logger, new ObjectStoreSuspendedRunStore(engine, logger));
+            const e = withLoaderSetFromPull(new AutomationEngine(logger, new ObjectStoreSuspendedRunStore(engine, logger)));
             e.setFlowActivationStore(new InMemoryFlowActivationStore());
             registerSubflowNode(e, nodeCtx);
             e.registerNodeExecutor({

@@ -34,6 +34,7 @@ import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { withScheduledWorkOn } from './deployment-switch.test-support.js';
+import { withLoaderSetFromPull } from './loader-set.test-support.js';
 
 function createTestLogger(): any {
     const l: any = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
@@ -81,7 +82,7 @@ function recordingTrigger(type: string) {
 
 /** An engine with the in-memory ledger attached and the four triggers registered. */
 function engineWithLedger() {
-    const engine = new AutomationEngine(createTestLogger());
+    const engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger()));
     const store = new InMemoryFlowActivationStore();
     engine.setFlowActivationStore(store);
     const triggers = {
@@ -117,7 +118,7 @@ describe('ADR-0126 §4 — absence of a row = active (an empty ledger changes no
     });
 
     it('an engine with NO store attached behaves exactly as a stock boot', async () => {
-        const engine = new AutomationEngine(createTestLogger());
+        const engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger()));
         engine.registerFlow('welcome', packagedFlow('welcome'));
 
         // Nothing to hydrate, and nothing refused.
@@ -271,7 +272,7 @@ describe('ADR-0126 §7.2 — the install-level row unbinds the trigger', () => {
         // A brand-new engine: the retired map's "cold boot reads enabled: true
         // again" was recorded (commit 266436a7f) as mitigating-but-not-exculpating. It must no
         // longer be true.
-        const engine = new AutomationEngine(createTestLogger());
+        const engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger()));
         const trigger = recordingTrigger('record_change');
         engine.registerTrigger(trigger.trigger);
         engine.setFlowActivationStore(store);
@@ -435,7 +436,7 @@ describe('ADR-0126 §7.3 (disable direction) — a switched-off packaged caller 
 
     /** An engine that can run and PARK, over the given durable run store (none: the hot cache alone). */
     function parkingEngine(runStore?: SuspendedRunStore) {
-        const engine = new AutomationEngine(createTestLogger(), runStore);
+        const engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger(), runStore));
         const ledger = new InMemoryFlowActivationStore();
         engine.setFlowActivationStore(ledger);
         registerSubflowNode(engine, nodeCtx);
@@ -988,7 +989,7 @@ describe('ADR-0126 §4/§5 — the row this line writes', () => {
     });
 
     it('a failing durable write ABORTS the flip — the engine never reports state the ledger lacks', async () => {
-        const engine = new AutomationEngine(createTestLogger());
+        const engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger()));
         const trigger = recordingTrigger('record_change');
         engine.registerTrigger(trigger.trigger);
         engine.setFlowActivationStore({
@@ -1006,7 +1007,7 @@ describe('ADR-0126 §4/§5 — the row this line writes', () => {
 
     it('with no store attached the flip still applies, and WARNS that it is not durable', async () => {
         const logger = createTestLogger();
-        const engine = new AutomationEngine(logger);
+        const engine = withLoaderSetFromPull(new AutomationEngine(logger));
         engine.registerFlow('f', packagedFlow('f'));
 
         await engine.toggleFlow('f', false);
@@ -1059,7 +1060,7 @@ describe('#10243 — the process-local `flowEnabled` map is retired', () => {
     });
 
     it('the engine exposes no way to set activation state without the ledger', () => {
-        const engine = new AutomationEngine(createTestLogger());
+        const engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger()));
         // The retired mechanism's public shape, in every spelling a caller
         // might reach for. `toggleFlow` is the sanctioned door and it writes
         // the ledger; nothing else may exist beside it.

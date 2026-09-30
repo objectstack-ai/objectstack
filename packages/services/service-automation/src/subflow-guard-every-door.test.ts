@@ -39,6 +39,7 @@ import { registerMapNode } from './builtin/map-node.js';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import { withScheduledWorkOn } from './deployment-switch.test-support.js';
+import { withLoaderSetFromPull } from './loader-set.test-support.js';
 
 function createTestLogger(): any {
     const l: any = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
@@ -129,7 +130,7 @@ function flow(
 /** An engine over an in-memory activation ledger, with a `record_change` trigger registered. */
 function engineWithLedger() {
     const logger = createTestLogger();
-    const engine = new AutomationEngine(logger);
+    const engine = withLoaderSetFromPull(new AutomationEngine(logger));
     const ledger = new InMemoryFlowActivationStore();
     engine.setFlowActivationStore(ledger);
     registerSubflowNode(engine, nodeCtx);
@@ -236,7 +237,7 @@ describe('ADR-0126 §7.3 at REGISTRATION — the arming gate declines a packaged
         const ledger = new InMemoryFlowActivationStore();
         await ledger.setActive({ name: 'shared_step', packageId: 'crm', active: false });
         const logger = createTestLogger();
-        const engine = new AutomationEngine(logger);
+        const engine = withLoaderSetFromPull(new AutomationEngine(logger));
         engine.setFlowActivationStore(ledger);
         registerSubflowNode(engine, nodeCtx);
 
@@ -260,7 +261,7 @@ describe('ADR-0126 §7.3 at REGISTRATION — the arming gate declines a packaged
         const ledger = new InMemoryFlowActivationStore();
         await ledger.setActive({ name: 'shared_step', packageId: 'crm', active: false });
         const logger = createTestLogger();
-        const engine = new AutomationEngine(logger);
+        const engine = withLoaderSetFromPull(new AutomationEngine(logger));
         engine.setFlowActivationStore(ledger);
         registerSubflowNode(engine, nodeCtx);
         // A host whose trigger is registered before its flows are pulled.
@@ -457,6 +458,14 @@ describe('ADR-0126 §7.3 through the artifact reload (metadata:reloaded)', () =>
             service: {
                 async getMetaItemsForExecution(q: { type: string }) {
                     return { items: q.type === 'flow' ? flows : [] };
+                },
+                // [#20761] The loader's set, as the real protocol answers it:
+                // the package that ships the name, read from what this fake
+                // artifact carries — the reader the plugin hands the engine.
+                packagedArtifactOwner(q: { type: string; name: string }) {
+                    if (q.type !== 'flow') return undefined;
+                    const hit = (flows as Array<{ name?: string; _packageId?: string }>).find((f) => f.name === q.name);
+                    return hit?._packageId || undefined;
                 },
             },
             setFlows: (next: unknown[]) => { flows = next; },
