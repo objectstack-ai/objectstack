@@ -345,104 +345,149 @@ function expectOk(res, what) {
   return res.body;
 }
 
-// The unfiltered read's reach. GitHub fails a job after 30 days at an environment,
-// so no older run still waits (bar a re-run, which only the filter reaches); the
-// 17.4.0 prompt waited 20 days, so a shorter "publish window" would have missed it.
+// GitHub fails a job after 30 days at an environment, so a run created earlier no
+// longer waits (bar a re-run, which only the filter reaches); the 17.4.0 prompt waited 20.
 export const WAITING_READ_BACK_DAYS = 30;
-/** The page cap: release.yml made 2,800 runs (28 pages) in the 30 days to 2026-09-30. */
-export const WAITING_READ_MAX_PAGES = 50;
-const PER_PAGE = 100;
+// At most 5 landings per push across the 2,509 main pushes of the 29 days to
+// 2026-09-30, so the push that carried a version commit ends well inside 20.
+export const PUSH_WALK = 20;
+/** A runaway cap only: 3 version commits landed in the 30 days to 2026-09-30. */
+export const MAX_VERSION_COMMITS = 20;
+
+/**
+ * The version commits on `head`'s first-parent chain, newest first and lazily,
+ * each with the first-parent commits from it toward `head` (at most `walk`).
+ * Under ADR-0125 D1 as amended, only the push that carries a version commit
+ * queues a push-lane publish, and that push's tip is one of those commits.
+ */
+export function* versionCommitsOf({ cwd, head = 'HEAD', walk = PUSH_WALK }) {
+  if (gitOk(cwd, ['rev-parse', '--is-shallow-repository']).trim() !== 'false') {
+    throw new Error('refusing to list version commits in a shallow clone: the graft boundary reads as a version change. Check out with fetch-depth: 0.');
+  }
+  const chain = gitOk(cwd, ['rev-list', '--first-parent', head]).split('\n').filter(Boolean);
+  const at = new Map(chain.map((c, i) => [c, i]));
+  for (const commit of gitOk(cwd, ['log', '--first-parent', '--format=%H', head, '--', CLI_MANIFEST]).split('\n').filter(Boolean)) {
+    const version = versionAt(cwd, commit);
+    const parent = git(cwd, ['rev-parse', '--verify', '--quiet', `${commit}^1`]);
+    if (version === null || version === (parent.status === 0 ? versionAt(cwd, parent.stdout.trim()) : null)) continue;
+    const i = at.get(commit);
+    yield { versionCommit: commit, version, tips: chain.slice(Math.max(0, i - walk + 1), i + 1).reverse() };
+  }
+}
 
 /**
  * Every waiting run of one workflow, in `judgeWaitingRuns`' shape; `http` and
  * `now` are injectable. The `?status=waiting` filter answered the job token an
  * empty list on 2026-09-29 (runs 36579512725, 36579680181) while it listed a
- * waiting run to another reader, for a reason still unmeasured -- so the
- * unfiltered list is read back too, each run the filter names or the list shows
- * unfinished is read directly, and only that read's status is judged. A
- * disagreement or a short list read lands in `anomalies`, printed as warnings.
+ * waiting run to another reader, for a reason still unmeasured, so it is never
+ * the only reading: each version commit's push run is also found by `head_sha`,
+ * newest first until one was created before the bound, and must carry that
+ * version's publish job. Every run either reading names is read directly, and
+ * only that read's status is judged. The cost follows releases, not runs; what
+ * cannot be found or does not add up lands in `anomalies`, printed as warnings.
  */
 export async function collectWaitingRuns({
   http,
   repo,
   workflow,
+  versionCommits,
+  currentRunId = '',
   now = Date.now(),
   readBackDays = WAITING_READ_BACK_DAYS,
-  maxPages = WAITING_READ_MAX_PAGES,
+  maxVersionCommits = MAX_VERSION_COMMITS,
 }) {
   const listPath = `/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs`;
-  const list = expectOk(await http('GET', `${listPath}?status=waiting&per_page=${PER_PAGE}`), `listing ${workflow}'s waiting runs`);
+  const list = expectOk(await http('GET', `${listPath}?status=waiting&per_page=100`), `listing ${workflow}'s waiting runs`);
   const filtered = { total: list.total_count, ids: list.workflow_runs.map((r) => String(r.id)) };
-
-  const cutoff = now - readBackDays * 86_400_000;
-  const unfiltered = { days: readBackDays, runs: 0, pages: 0, oldest: null, stop: 'cap', open: [] };
-  const seen = new Set();
-  while (unfiltered.pages < maxPages) {
-    unfiltered.pages += 1;
-    const page = expectOk(
-      await http('GET', `${listPath}?per_page=${PER_PAGE}&page=${unfiltered.pages}&exclude_pull_requests=true`),
-      `listing ${workflow}'s runs, page ${unfiltered.pages}`,
-    ).workflow_runs;
-    for (const r of page) {
-      // A run created mid-read shifts every page down by one: skip the repeat.
-      if (seen.has(String(r.id))) continue;
-      seen.add(String(r.id));
-      unfiltered.runs += 1;
-      unfiltered.oldest = r.created_at;
-      if (r.status !== 'completed') unfiltered.open.push({ id: String(r.id), status: r.status });
-    }
-    if (page.length < PER_PAGE) {
-      unfiltered.stop = 'end';
-      break;
-    }
-    if (Date.parse(page[page.length - 1].created_at) < cutoff) {
-      unfiltered.stop = 'bound';
-      break;
-    }
-  }
-
   const anomalies = [];
   if (filtered.total > filtered.ids.length) {
     anomalies.push(`the status=waiting filter counts ${filtered.total} waiting runs but listed ${filtered.ids.length}.`);
   }
-  if (unfiltered.stop === 'cap') {
+
+  const cutoff = now - readBackDays * 86_400_000;
+  const targeted = { days: readBackDays, probes: 0, stop: 'history', pushes: [] };
+  const expected = new Map();
+  for (const { versionCommit, version, tips } of versionCommits) {
+    if (targeted.pushes.length === maxVersionCommits) {
+      targeted.stop = 'cap';
+      break;
+    }
+    let found = [];
+    for (const sha of tips) {
+      targeted.probes += 1;
+      const page = expectOk(
+        await http('GET', `${listPath}?head_sha=${sha}&per_page=100&exclude_pull_requests=true`),
+        `listing ${workflow}'s runs at ${sha}`,
+      );
+      found = page.workflow_runs.filter((r) => r.event === 'push');
+      if (found.length > 0) break;
+    }
+    if (found.length > 0 && found.every((r) => Date.parse(r.created_at) < cutoff)) {
+      targeted.stop = 'bound';
+      break;
+    }
+    targeted.pushes.push({ version, versionCommit, runs: found.map((r) => String(r.id)) });
+    if (found.length === 0) {
+      anomalies.push(
+        `no push run of ${workflow} at version commit ${versionCommit} (${version}) or the ${tips.length - 1} first-parent ` +
+          'commit(s) after it: a publish prompt of that push is invisible to this read.',
+      );
+    }
+    for (const r of found) expected.set(String(r.id), { version, versionCommit });
+  }
+  if (targeted.stop === 'cap') {
     anomalies.push(
-      `the unfiltered read stopped at its ${maxPages}-page cap, back to ${unfiltered.oldest}, short of ${readBackDays} days: ` +
-        'an older waiting run is seen only if the status=waiting filter lists it.',
+      `the version-commit walk stopped at its cap of ${maxVersionCommits} before reaching a push run older than ` +
+        `${readBackDays} days: an older push-lane prompt is seen only if the status=waiting filter lists it.`,
     );
   }
 
   const runs = [];
-  for (const id of new Set([...filtered.ids, ...unfiltered.open.map((o) => o.id)])) {
+  for (const id of new Set([...filtered.ids, ...expected.keys()])) {
     const r = expectOk(await http('GET', `/repos/${repo}/actions/runs/${id}`), `reading run ${id}`);
     const run = { id: r.id, event: r.event, status: r.status, headSha: r.head_sha, jobs: [], environments: [] };
     runs.push(run);
-    if (r.status !== 'waiting') continue;
-    if (!filtered.ids.includes(id)) {
-      anomalies.push(`the status=waiting filter omitted run ${id}, which a direct read answers waiting.`);
-    }
+    // A run still in flight may not have named its publish job yet, and the
+    // calling run is judged untouched whatever it holds: neither is checked.
+    const carried = expected.get(id);
+    const verify = carried && id !== String(currentRunId) && (r.status === 'waiting' || r.status === 'completed');
+    if (r.status !== 'waiting' && !verify) continue;
     const jobs = expectOk(
       await http('GET', `/repos/${repo}/actions/runs/${id}/jobs?filter=latest&per_page=100`),
       `listing run ${id}'s jobs`,
     );
+    run.jobs = jobs.jobs.map((j) => ({ name: j.name, status: j.status }));
+    if (verify && !run.jobs.some((j) => j.name === `Publish ${carried.version} to npm (awaiting approval)`)) {
+      anomalies.push(
+        `run ${id}, found as the push that carried version commit ${carried.versionCommit}, has no "Publish ${carried.version} ` +
+          'to npm" job: it is not that push, or that push queued no publish.',
+      );
+    }
+    if (r.status !== 'waiting') continue;
+    if (!filtered.ids.includes(id)) {
+      anomalies.push(`the status=waiting filter omitted run ${id}, which a direct read answers waiting.`);
+    }
     const pending = expectOk(
       await http('GET', `/repos/${repo}/actions/runs/${id}/pending_deployments`),
       `reading run ${id}'s pending deployments`,
     );
-    run.jobs = jobs.jobs.map((j) => ({ name: j.name, status: j.status }));
     run.environments = pending.map((p) => p.environment && p.environment.name).filter(Boolean);
   }
-  return { runs, filtered, unfiltered, anomalies };
+  return { runs, filtered, targeted, anomalies };
 }
 
 /** The readings behind a sweep verdict, as one summary line printed on every run. */
-export function describeReadings({ runs, filtered, unfiltered }) {
-  const stop = { end: 'the whole list', bound: `the ${unfiltered.days}-day bound`, cap: 'CUT SHORT at the page cap' }[unfiltered.stop];
-  const direct = runs.map((r) => `${r.id} ${r.status}`).join(', ') || 'none (no list named an unfinished run)';
+export function describeReadings({ runs, filtered, targeted }) {
+  const stop = {
+    bound: `a push run older than ${targeted.days} days`,
+    history: 'the start of history',
+    cap: 'CUT SHORT at the version-commit cap',
+  }[targeted.stop];
+  const pushes = targeted.pushes.map((p) => `${p.version} ${p.versionCommit.slice(0, 10)} -> ${p.runs.join('+') || 'NOT FOUND'}`);
+  const direct = runs.map((r) => `${r.id} ${r.status}`).join(', ') || 'none';
   return (
     `- readings: \`?status=waiting\` total_count ${filtered.total}, listed [${filtered.ids.join(', ')}]; ` +
-    `unfiltered ${unfiltered.runs} run(s) over ${unfiltered.pages} page(s) back to ${unfiltered.oldest ?? 'no run'} ` +
-    `(${stop}), unfinished [${unfiltered.open.map((o) => `${o.id} ${o.status}`).join(', ')}]; direct: ${direct}`
+    `version-commit pushes back to ${stop} [${pushes.join(', ')}] in ${targeted.probes} head_sha probe(s); direct: ${direct}`
   );
 }
 
@@ -459,7 +504,8 @@ async function sweep({ workflow, dryRun }) {
   const currentRunId = process.env.GITHUB_RUN_ID || '';
   const http = makeHttp({ apiUrl, token, dryRun });
 
-  const read = await collectWaitingRuns({ http, repo, workflow });
+  const versionCommits = versionCommitsOf({ cwd: process.cwd() });
+  const read = await collectWaitingRuns({ http, repo, workflow, versionCommits, currentRunId });
   for (const a of read.anomalies) console.log(`::warning::${a}`);
   const { runs } = read;
   const verdict = judgeWaitingRuns({ runs, currentRunId, npmStateOf: (v) => npmState(v) });
@@ -529,10 +575,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'a shallow clone -> refused, never a graft-boundary answer': 1,
   'npm view -> present / absent / unknown': 5,
   'a waiting prompt -> cancelled only on the push lane, only when its version is on npm': 9,
-  'the waiting-runs read -> a run the status filter omits is still judged, and a short or contradictory read is flagged': 11,
+  'the version-commit list -> newest first, each with the commits its push can end on': 4,
+  'the waiting-runs read -> a run the status filter omits is still judged, and a short or contradictory read is flagged': 13,
   'an event with no release predicate -> refused': 1,
 });
-const SELF_TEST_BATTERY_FLOOR = 12;
+const SELF_TEST_BATTERY_FLOOR = 13;
 
 async function selfTest() {
   let failed = 0;
@@ -676,6 +723,22 @@ async function selfTest() {
       throws(() => findVersionCommit({ cwd: shallowDir, head: 'HEAD' }), /shallow clone/),
       'a depth-1 clone -- whose only commit has no parent -- is refused, not answered',
     );
+
+    battery('the version-commit list -> newest first, each with the commits its push can end on');
+    const listed = [...versionCommitsOf({ cwd: r.dir, head: 'main' })];
+    check(
+      listed.map((c) => c.versionCommit).join() === [v, base].join(),
+      'newest first: the bump, then the commit that created the manifest; the dependency-only edit is not one',
+    );
+    check(
+      listed[0].version === '1.1.0' && listed[0].tips.join() === [v, l1, l2, dep].join(),
+      'each carries the first-parent commits from it toward the head, oldest first',
+    );
+    check(
+      versionCommitsOf({ cwd: r.dir, head: 'main', walk: 2 }).next().value.tips.join() === [v, l1].join(),
+      'the commits after it stop at the walk cap',
+    );
+    check(throws(() => versionCommitsOf({ cwd: shallowDir }).next(), /shallow clone/), 'a shallow clone is refused here too');
   } finally {
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
   }
@@ -737,14 +800,14 @@ async function selfTest() {
   battery('the waiting-runs read -> a run the status filter omits is still judged, and a short or contradictory read is flagged');
   const NOW = Date.parse('2026-09-30T00:00:00Z');
   const ago = (days) => new Date(NOW - days * 86_400_000).toISOString();
-  const listed = (id, status, days) => ({ id, status, event: 'push', created_at: ago(days), head_sha: 'a'.repeat(40) });
-  const filler = (from, count, days) => Array.from({ length: count }, (_, i) => listed(from + i, 'completed', days));
-  const publishing = (id, version, days = 1) => ({
-    ...listed(id, 'waiting', days),
-    jobs: [prompt(version)],
-    pending: [{ environment: { name: 'release' } }],
+  const pushRun = (id, status, days) => ({ id, status, event: 'push', created_at: ago(days), head_sha: 'a'.repeat(40) });
+  const carrying = (id, status, days, jobs, environments = []) => ({
+    ...pushRun(id, status, days),
+    jobs,
+    pending: environments.map((name) => ({ environment: { name } })),
   });
-  const readWith = async ({ filter = [], filterTotal, pages = [[]], direct = {} }, opts = {}) => {
+  const vc = (versionCommit, version, tips = [versionCommit]) => ({ versionCommit, version, tips });
+  const readWith = async ({ filter = [], filterTotal, tips = {}, direct = {}, commits = [], maxVersionCommits }) => {
     const calls = [];
     const http = async (method, path) => {
       calls.push(path);
@@ -754,108 +817,128 @@ async function selfTest() {
         if (u.searchParams.get('status') === 'waiting') {
           return { status: 200, body: { total_count: filterTotal ?? filter.length, workflow_runs: filter } };
         }
-        const page = pages[Number(u.searchParams.get('page')) - 1] ?? [];
-        return page === 'fail' ? { status: 502, body: 'bad gateway' } : { status: 200, body: { workflow_runs: page } };
+        const at = tips[u.searchParams.get('head_sha')] ?? [];
+        return at === 'fail' ? { status: 502, body: 'bad gateway' } : { status: 200, body: { workflow_runs: at } };
       }
       if ((m = /\/actions\/runs\/(\d+)$/.exec(u.pathname))) return { status: 200, body: direct[m[1]] };
-      if ((m = /\/actions\/runs\/(\d+)\/jobs$/.exec(u.pathname))) return { status: 200, body: { jobs: direct[m[1]].jobs } };
-      if ((m = /\/actions\/runs\/(\d+)\/pending_deployments$/.exec(u.pathname))) return { status: 200, body: direct[m[1]].pending };
+      if ((m = /\/actions\/runs\/(\d+)\/jobs$/.exec(u.pathname))) return { status: 200, body: { jobs: direct[m[1]].jobs ?? [] } };
+      if ((m = /\/actions\/runs\/(\d+)\/pending_deployments$/.exec(u.pathname))) return { status: 200, body: direct[m[1]].pending ?? [] };
       return { status: 404, body: null };
     };
-    const read = await collectWaitingRuns({ http, repo: 'o/r', workflow: 'release.yml', now: NOW, ...opts });
+    const read = await collectWaitingRuns({
+      http,
+      repo: 'o/r',
+      workflow: 'release.yml',
+      versionCommits: commits,
+      currentRunId: 900,
+      now: NOW,
+      ...(maxVersionCommits ? { maxVersionCommits } : {}),
+    });
     return { read, calls };
   };
+  const directReads = (calls) => calls.filter((c) => /\/actions\/runs\/\d+$/.test(c)).map((c) => c.split('/').pop());
 
   const pin = await readWith({
-    filter: [],
-    pages: [[listed(201, 'waiting', 1), listed(202, 'completed', 2)]],
-    direct: { 201: publishing(201, '1.1.0') },
+    commits: [vc('v5', '1.1.0', ['v5', 'm5', 't5'])],
+    tips: { t5: [pushRun(201, 'waiting', 1)] },
+    direct: { 201: carrying(201, 'waiting', 1, [prompt('1.1.0')], ['release']) },
   });
   const pinVerdict = judgeWaitingRuns({ runs: pin.read.runs, currentRunId: 900, npmStateOf: npmOf(['1.1.0']) });
   check(
     pinVerdict.cancel.map((c) => c.id).join() === '201',
-    'the filtered read is empty, the unfiltered read holds a waiting push-lane run whose version is on npm -> cancel',
+    'the filtered read is empty, and the push that carried the version commit waits on a version already on npm -> cancel',
   );
   check(
     pin.read.anomalies.length === 1 && /omitted run 201/.test(pin.read.anomalies[0]),
     "and the filter's omission is a warning naming that run",
   );
+  check(
+    pin.read.targeted.probes === 3 && pin.read.targeted.pushes[0].runs.join() === '201',
+    'a version commit landed mid-batch is found at the push tip two commits later',
+  );
 
-  const quiet = await readWith({ pages: [[listed(301, 'completed', 1), listed(302, 'completed', 3)]] });
+  const quiet = await readWith({
+    commits: [vc('v6', '1.2.0'), vc('v5', '1.1.0'), vc('v4', '1.0.0'), vc('v3', '0.9.0')],
+    tips: { v6: [pushRun(301, 'completed', 2)], v5: [pushRun(302, 'completed', 10)], v4: [pushRun(303, 'completed', 40)] },
+    direct: {
+      301: carrying(301, 'completed', 2, [prompt('1.2.0', 'completed')]),
+      302: carrying(302, 'completed', 10, [prompt('1.1.0', 'completed')]),
+    },
+  });
   const quietLine = describeReadings(quiet.read);
   check(
-    quiet.read.anomalies.length === 0 && quiet.read.runs.length === 0 &&
-      /total_count 0/.test(quietLine) && quietLine.includes(ago(3)) && /the whole list/.test(quietLine),
-    "nothing waiting -> no warning, and the summary still names the filter's total_count, how far back the list was read, and why it stopped",
+    quiet.read.anomalies.length === 0 && /total_count 0/.test(quietLine) && /1\.2\.0 v6 -> 301/.test(quietLine) &&
+      /older than 30 days/.test(quietLine) && /301 completed, 302 completed/.test(quietLine),
+    "nothing waiting -> no warning, and the summary names the filter's total_count, each version-commit push run, and why the walk stopped",
+  );
+  check(
+    quiet.read.targeted.stop === 'bound' && !quiet.calls.some((c) => /head_sha=v3/.test(c)) && directReads(quiet.calls).join() === '301,302',
+    'the walk stops at the first push run older than the bound: no older version commit is probed, and that run is not read',
   );
 
-  const deep = await readWith({
-    pages: [filler(1000, 100, 1), [...filler(1100, 99, 20), listed(1199, 'completed', 31)], [listed(1200, 'waiting', 32)]],
+  const lost = await readWith({ commits: [vc('v7', '1.3.0', ['v7', 'x1'])] });
+  check(
+    lost.read.anomalies.some((a) => /no push run of release\.yml at version commit v7 \(1\.3\.0\)/.test(a)) &&
+      /1\.3\.0 v7 -> NOT FOUND/.test(describeReadings(lost.read)),
+    'no push run at the version commit or the commits after it -> a warning, and the summary says NOT FOUND',
+  );
+
+  const wrong = await readWith({
+    commits: [vc('v8', '1.4.0')],
+    tips: { v8: [pushRun(501, 'completed', 3)] },
+    direct: { 501: carrying(501, 'completed', 3, [{ name: 'Publish ${{ needs.release-integrity.outputs.cli-version }} to npm (awaiting approval)', status: 'completed' }]) },
   });
   check(
-    deep.read.unfiltered.stop === 'bound' && deep.read.unfiltered.pages === 2 && !deep.calls.some((c) => /page=3/.test(c)) &&
-      !deep.calls.some((c) => /\/actions\/runs\/\d+$/.test(c)) && deep.read.anomalies.length === 0,
-    'the read stops at the page whose last run is older than the bound, asks for no page past it, and reads no completed run directly',
+    wrong.read.anomalies.some((a) => /run 501, found as the push that carried version commit v8, has no "Publish 1\.4\.0/.test(a)),
+    'a push run with no publish job for that version -> a warning: it is not the push that carried it, or nothing was queued',
   );
 
-  const mislisted = await readWith({
-    pages: [[listed(211, 'in_progress', 1)]],
-    direct: { 211: publishing(211, '1.1.0') },
+  const self = await readWith({ commits: [vc('v9', '1.5.0')], tips: { v9: [pushRun(900, 'in_progress', 0)] }, direct: { 900: pushRun(900, 'in_progress', 0) } });
+  check(
+    self.read.anomalies.length === 0 && !self.calls.some((c) => /900\/jobs/.test(c)) &&
+      judgeWaitingRuns({ runs: self.read.runs, currentRunId: 900, npmStateOf: npmOf([]) }).untouched.some((u) => u.id === '900'),
+    'the calling run carrying the version commit -> not checked for its publish job, judged untouched',
+  );
+
+  const short = await readWith({
+    commits: [vc('v6', '1.2.0'), vc('v5', '1.1.0')],
+    maxVersionCommits: 1,
+    tips: { v6: [pushRun(301, 'completed', 2)] },
+    direct: { 301: carrying(301, 'completed', 2, [prompt('1.2.0', 'completed')]) },
   });
   check(
-    judgeWaitingRuns({ runs: mislisted.read.runs, currentRunId: 900, npmStateOf: npmOf(['1.1.0']) }).cancel.map((c) => c.id).join() === '211' &&
-      mislisted.read.anomalies.some((a) => /omitted run 211/.test(a)),
-    'a run the unfiltered list calls in_progress but a direct read answers waiting -> judged on the direct read (cancel), and flagged',
+    short.read.anomalies.some((a) => /version-commit walk stopped at its cap of 1/.test(a)) && /CUT SHORT/.test(describeReadings(short.read)),
+    'the version-commit cap reached before the bound -> a warning, and the summary says the walk was cut short',
   );
 
-  const old = await readWith({
-    filter: [listed(1300, 'waiting', 40)],
-    pages: [[listed(1301, 'completed', 1)]],
-    direct: { 1300: publishing(1300, '1.1.0', 40) },
-  });
-  check(
-    old.read.runs.map((r) => String(r.id)).join() === '1300' && old.read.runs[0].jobs.length === 1 && old.read.anomalies.length === 0,
-    'a waiting run only the filter reaches (created before the window) is still read directly and judged',
-  );
-
-  const capped = await readWith({ pages: [filler(2000, 100, 1), filler(2100, 100, 2), filler(2200, 100, 3)] }, { maxPages: 2 });
-  check(
-    capped.read.unfiltered.stop === 'cap' && capped.read.anomalies.some((a) => /2-page cap/.test(a)) &&
-      /CUT SHORT/.test(describeReadings(capped.read)),
-    'the page cap reached before the bound -> a warning naming the cap, and the summary says the read was cut short',
-  );
-
-  const over = await readWith({ filter: [], filterTotal: 150 });
+  const over = await readWith({ filterTotal: 150 });
   check(over.read.anomalies.some((a) => /counts 150 waiting runs but listed 0/.test(a)), 'a filter total_count above what it listed -> a warning');
 
-  const raced = await readWith({
-    filter: [listed(401, 'waiting', 1)],
-    pages: [[listed(401, 'waiting', 1)]],
-    direct: { 401: listed(401, 'completed', 1) },
-  });
-  const racedVerdict = judgeWaitingRuns({ runs: raced.read.runs, currentRunId: 900, npmStateOf: npmOf(['1.1.0']) });
+  const raced = await readWith({ filter: [pushRun(401, 'waiting', 1)], direct: { 401: pushRun(401, 'completed', 1) } });
   check(
-    racedVerdict.untouched.some((u) => u.id === '401') && !raced.calls.some((c) => /401\/(jobs|pending)/.test(c)),
-    'a run both lists call waiting but a direct read answers completed -> judged on the direct read (untouched), its jobs never read',
+    judgeWaitingRuns({ runs: raced.read.runs, currentRunId: 900, npmStateOf: npmOf(['1.1.0']) }).untouched.some((u) => u.id === '401') &&
+      !raced.calls.some((c) => /401\/(jobs|pending)/.test(c)),
+    'a run the filter calls waiting but a direct read answers completed -> judged on the direct read (untouched), its jobs never read',
   );
 
-  const shifted = await readWith({
-    filter: [listed(501, 'waiting', 1)],
-    pages: [[...filler(5000, 99, 1), listed(501, 'waiting', 1)], [listed(501, 'waiting', 1), listed(502, 'completed', 2)]],
-    direct: { 501: publishing(501, '1.2.0') },
+  const both = await readWith({
+    filter: [pushRun(201, 'waiting', 1)],
+    commits: [vc('v5', '1.1.0')],
+    tips: { v5: [pushRun(201, 'waiting', 1)] },
+    direct: { 201: carrying(201, 'waiting', 1, [prompt('1.1.0')], ['release']) },
   });
   check(
-    shifted.read.unfiltered.runs === 101 && shifted.read.runs.length === 1 && shifted.calls.filter((c) => /runs\/501$/.test(c)).length === 1,
-    'a run repeated across two pages (the list shifted mid-read) -> counted once and read once',
+    directReads(both.calls).join() === '201' && both.read.anomalies.length === 0,
+    'a run both readings name -> read once, and no warning when they agree',
   );
 
   let refused = false;
   try {
-    await readWith({ pages: [filler(6000, 100, 1), 'fail'] });
+    await readWith({ commits: [vc('v5', '1.1.0')], tips: { v5: 'fail' } });
   } catch (err) {
-    refused = /page 2 answered HTTP 502/.test(String(err && err.message));
+    refused = /runs at v5 answered HTTP 502/.test(String(err && err.message));
   }
-  check(refused, 'a list page answering non-200 -> the read throws (a red job), never a partial answer');
+  check(refused, 'a probe answering non-200 -> the read throws (a red job), never a partial answer');
 
   battery('an event with no release predicate -> refused');
   check(
