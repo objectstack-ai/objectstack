@@ -1095,7 +1095,7 @@
     "ui/PageContainerProps:children",
     "ui/PageHeaderProps:actions",
     "ui/PageHeaderProps:aria",
-    "ui/PageHeaderProps:breadcrumb",
+    "ui/PageHeaderProps:breadcrumb [RETIRED]",
     "ui/PageHeaderProps:icon [RETIRED]",
     "ui/PageHeaderProps:maxVisible",
     "ui/PageHeaderProps:mobileMaxVisible",
