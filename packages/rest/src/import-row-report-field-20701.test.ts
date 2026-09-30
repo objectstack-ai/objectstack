@@ -16,10 +16,12 @@
  * | declared `late`, no column (drift) | — | — | `400 INVALID_FIELD` "Unknown field 'late'" |
  * | formula `doubled` / readonly `ro` | ok, created | ok, created | `201` + `droppedFields` |
  * | writable `title` | ok, created | ok, created | `201` |
+ * | a `unique` value already held | — | failed `UNIQUE_VIOLATION`, **no `field`** | `409 UNIQUE_VIOLATION`, `field` |
  *
- * The first row is `toFailedResult` reading `field` only off a `ValidationError`
- * finding, while the engine's declared-field door carries it on the envelope
- * (`field`, with the bare names in `fields`). The second is `mapDataError`'s
+ * The first and last rows are `toFailedResult` reading `field` only off a
+ * `ValidationError` finding, while the engine's declared-field door and its
+ * `DuplicateRecordError` carry it on the envelope (`field`; the declared-field
+ * door puts the bare names in `fields`). The second is `mapDataError`'s
  * driver-string branch calling a DECLARED field unknown.
  *
  * ⚠️ Not pinned here: the drop signal on the formula / readonly rows. The dry
@@ -83,11 +85,11 @@ async function boot() {
   const rest = new RestServer(createMockServer() as any, protocol as any, { api: { requireAuth: false } } as any);
   (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
   rest.registerRoutes();
-  const call = async (method: string, path: string, body: unknown): Promise<{ status: number; body: any }> => {
+  const call = async (method: string, path: string, body: unknown, object: string = OBJECT): Promise<{ status: number; body: any }> => {
     const route = rest.getRoutes().find((r: any) => r.method === method && r.path === path);
     expect(route, `${method} ${path}`).toBeDefined();
     const res = makeRes();
-    await route!.handler({ params: { object: OBJECT }, body, query: {}, headers: {} } as any, res);
+    await route!.handler({ params: { object }, body, query: {}, headers: {} } as any, res);
     return { status: res._status ?? 200, body: res._json };
   };
   const importRows = (rows: Array<Record<string, unknown>>, opts: { dryRun: boolean; writeMode?: 'insert' | 'upsert' }) =>
@@ -126,6 +128,25 @@ describe('[#20701] an unknown column fails the row on the dry run and on the com
     expect(door.body).toMatchObject({ code: 'INVALID_FIELD', field: 'nope' });
     const commit = await b.importRows([{ title: 't', nope: 5 }], { dryRun: false });
     expect(commit.body.results[0]).toMatchObject({ code: door.body.code, field: door.body.field });
+  });
+});
+
+describe('[#20701] a unique conflict row names the column the 409 names — the same envelope member', () => {
+  it('the engine\'s DuplicateRecordError carries `field`; the commit row reads it', async () => {
+    const b = await boot();
+    const UQ = 'uq_20701';
+    b.engine.registry.registerObject({
+      name: UQ, systemFields: false,
+      fields: { id: { name: 'id', type: 'text', primaryKey: true }, code: { name: 'code', type: 'text', unique: true } },
+    } as any);
+    await b.engine.syncSchemas();
+    await b.engine.insert(UQ, { id: 'a', code: 'X' } as any);
+    const door = await b.call('POST', '/api/v1/data/:object', { code: 'X' }, UQ);
+    expect(door.status).toBe(409);
+    expect(door.body).toMatchObject({ code: 'UNIQUE_VIOLATION', field: 'code' });
+    const commit = await b.call('POST', '/api/v1/data/:object/import', { format: 'json', rows: [{ code: 'X' }, { code: 'Y' }], dryRun: false }, UQ);
+    expect(commit.body.results[0]).toMatchObject({ row: 1, ok: false, action: 'failed', code: door.body.code, field: door.body.field });
+    expect(commit.body.results[1]).toMatchObject({ row: 2, ok: true, action: 'created' });
   });
 });
 
