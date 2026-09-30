@@ -282,9 +282,10 @@ localStorage / auth gotchas.
     governed-surface PR, under any account** — an authorized account is agent-operated too; "CI is green" carries no
     information about a governance change.
 
-    **Already armed or queued when you read this?** Convert it back to **draft** AND disable auto-merge — draft is
-    what removes queue membership, disabling alone drops only the arming — then confirm from the remote that it is in
-    neither the queue nor `origin/main`. **Draft is no barrier by itself — the barrier is this directive**, and a
+    **Already armed or queued when you read this?** Disable auto-merge AND convert it back to **draft**, which disarms
+    an unqueued PR; no seat act, those two included, is measured to dequeue one (`platform-readings.md`, queue
+    membership), so ask the maintainer at once to remove a queued PR by hand — then confirm from the remote that it is
+    in neither the queue nor `origin/main`. **Draft is no barrier by itself — the barrier is this directive**, and a
     spent approval or a standing record IS the review record, ⛔ not a relaxation. Behind it: the queue guard refuses a
     governed diff without its tier's record; CODEOWNERS routes review requests for `docs/adr/` only, so nothing summons
     the maintainer on the other Tier H surfaces; the post-merge audit (`scripts/pm/check-governed-merges.mjs`) lists
