@@ -5,7 +5,7 @@
     "rootDir": "./src",
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "types": ["node"],
-    // [#12181] `@objectstack/metadata-core` and `@objectstack/metadata-protocol`
+    // [commit cf71d73f8] `@objectstack/metadata-core` and `@objectstack/metadata-protocol`
     // are imported by `src/meta-delete-item-carriers.test.ts` (the real-door
     // reproduction), i.e. by the TEST program `tsconfig.test.json`, which
     // extends this file. Without these rules tsc resolves those specifiers

@@ -3,7 +3,7 @@
 /**
  * ⛔ A preflight nobody invoked is a phantom check — it evaluates never, and
  * deleting it leaves every assertion in `filter-preflight.test.ts` just as green
- * (#17853, #17978).
+ * (commit 08f5f0e5a, #17978).
  *
  * ## Why this is a DERIVED sweep and not a list of eight packages
  *

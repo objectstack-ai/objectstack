@@ -30,7 +30,7 @@ export default defineConfig({
     environment: 'node',
   },
   resolve: {
-    // [#12181] Both entries exist for `meta-delete-item-carriers.test.ts`, the
+    // [commit cf71d73f8] Both entries exist for `meta-delete-item-carriers.test.ts`, the
     // suite here that drives the REAL reset door: it boots
     // `ObjectStackProtocolImplementation` and registers the real
     // `sys_metadata*` object definitions, so it imports two sibling packages as

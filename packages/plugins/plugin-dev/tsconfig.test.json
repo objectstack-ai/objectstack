@@ -1,6 +1,6 @@
 // The TEST-layer type-check program (#14062 — the `packages/plugins/**` family
 // adopting the mechanism #5286 set for `packages/spec`, #5449 generalised,
-// #12542 carried to `packages/rest` and #13176 to `packages/plugins/
+// #12542 carried to `packages/rest` and commit a68c61267 to `packages/plugins/
 // plugin-security`). `tsconfig.json` beside this one stays exactly as it is: it
 // is the BUILD config. This sibling puts the test layer in front of tsc under
 // the module semantics vitest really executes it with, and `package.json`'s
@@ -53,7 +53,7 @@
 // zero: `check:test-typecheck` reads a missing ledger as `{ entries: {} }`, under which
 // ANY error in ANY file here is red immediately, with no entry to be added to. That is
 // strictly stronger than a ledger holding nothing, and it is the same call
-// `plugin-security` recorded for itself in #13176. If this package ever acquires
+// `plugin-security` recorded for itself in commit a68c61267. If this package ever acquires
 // residue that cannot be fixed in the PR that causes it, THAT is when a ledger and a
 // `gen:test-typecheck-debt` script are owed — and adding one is maintainer-only
 // (#5286), exactly as the gate says when it refuses.
