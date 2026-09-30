@@ -297,7 +297,12 @@ overrides:
   # declaration is now in the selector's scope and the lockfile records ^2.0.10 as its
   # specifier — the resolved version is unchanged at 2.0.12, because the ^2.0.10 target
   # floats to the newest 2.x (measured, #6095).
-  'brace-expansion@>=5.0.0 <6.0.0': '^5.0.9'
+  # brace-expansion, 2026-09-30 (#20769): three MORE advisories, GHSA-6j4f-fj2g-mc7p,
+  # GHSA-qhr7-859c-m2p7 and GHSA-q2hr-2g5m-vwhr, fixed in 5.0.12 — target lifted from
+  # ^5.0.9, selector stays at the <6.0.0 major boundary. This floor keeps THIS
+  # workspace's resolution from re-locking 5.0.9; overrides do not reach downstream
+  # installs, so a consumer's own brace-expansion copy is theirs to lift.
+  'brace-expansion@>=5.0.0 <6.0.0': '^5.0.12'
   'sharp@>=0.34.0 <0.36.0': '^0.35.4'
   'react-router@<8.3.0': '^8.3.0'
   '@sveltejs/kit@<2.69.1': '^2.69.1'
@@ -313,6 +318,11 @@ overrides:
   #     high each), fixed in 3.1.6 — target lifted from ^3.1.5, selector stays
   #     at the 4.0.0 boundary. ajv@8.20.0's ^3.0.1 already admits 3.1.6, so
   #     this is a dedupe onto the patched line, not a forced upgrade.
+  #     2026-09-30 (#20769): GHSA-hrr3-gc8f-f4qj, fixed in 3.1.8 — target lifted
+  #     from ^3.1.6, selector stays at the 4.0.0 boundary. ajv@8.20.0's ^3.0.1
+  #     admits 3.1.8, so this is again a dedupe onto the patched line. The floor
+  #     binds this workspace's resolution only; overrides do not reach downstream
+  #     installs.
   #   hono GHSA-8j4g-w8fx-2239 (5.3) — the one entry here that is NOT
   #     transitive-only: two versions resolved, 4.12.32 from our own packages
   #     and 4.12.33 pulled by @modelcontextprotocol/sdk. The override moves the
@@ -340,7 +350,7 @@ overrides:
   #     The declared ranges go to ^4.13.5 in lockstep for the downstream-install
   #     reason above; the @objectstack/hono PEER range stays ^4.12.8, unchanged,
   #     for the reason above it.
-  'fast-uri@<4.0.0': '^3.1.6'
+  'fast-uri@<4.0.0': '^3.1.8'
   'hono@<5.0.0': '^4.13.5'
   # OSV 2026-08-07 (#6407) — transitive-only, and the same "it has a fix, so
   # take the fix" disposition as the batch above:

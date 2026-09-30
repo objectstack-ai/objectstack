@@ -21,8 +21,11 @@
         },
         {
           "name": "label",
-          "type": "string",
-          "description": "Grid label, used as the table caption and as the export file title. The canonical spelling — the deprecated `title` is only read when this is absent."
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Grid label, used as the table caption, as the export file title and in the record-detail overlay heading. The canonical spelling — the deprecated `title` is only read when this is absent. Accepts either a plain string or an inline per-locale map (`{ en: \"Accounts\", \"zh-CN\": \"客户\" }`) — the `I18nLabel` union the contract admits on this key — and the grid resolves the map against the display locale (the workspace's regional default when one is configured, otherwise the active UI language), falling back through base language, a region-qualified sibling, `default`, then `en`, and finally to any remaining entry."
         },
         {
           "name": "sort",
@@ -271,11 +274,19 @@
         },
         {
           "name": "title",
-          "type": "string"
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Heading of the drawer and modal presentations (`formType: \"drawer\"` / `\"modal\"`). Accepts either a plain string or an inline per-locale map (`{ en: \"New order\", \"zh-CN\": \"新建订单\" }`) — the `I18nLabel` union the contract admits on this key — and the form resolves the map against the active UI language, falling back through base language, a region-qualified sibling, `default`, then `en`, and finally to any remaining entry."
         },
         {
           "name": "description",
-          "type": "string"
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Subtitle under the drawer and modal heading. Accepts either a plain string or an inline per-locale map (`{ en: \"Enter the order details\", \"zh-CN\": \"填写订单信息\" }`), resolved against the active UI language with the same fallback chain as `title`."
         },
         {
           "name": "layout",
@@ -357,7 +368,7 @@
         {
           "name": "modalCloseButton",
           "type": "boolean",
-          "description": "Show the modal presentation’s close button. Read at ObjectForm.tsx:361 and honoured by ModalForm."
+          "description": "Show the modal presentation’s close (X) button. Default `true`; `false` hides it. Forwarded by `ObjectForm`’s modal route and honoured by `ModalForm` on both of its dialog arms. With the button hidden the modal still closes on Escape, and on the Cancel action when that is shown."
         },
         {
           "name": "contentLayout",
@@ -366,7 +377,7 @@
             "simple",
             "tabbed"
           ],
-          "description": "How the modal presentation lays out sections. `tabbed` needs more than one section to differ from `simple` (ModalForm.tsx:638)."
+          "description": "How the modal presentation lays out sections. `tabbed` differs from `simple` only when more than one section has a field to show (`ModalForm` tests `schema.contentLayout === \"tabbed\" && groups.length > 1`)."
         },
         {
           "name": "confirmOnDiscard",
@@ -400,21 +411,35 @@
         },
         {
           "name": "submitText",
-          "type": "string"
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Label of the Save button. A map no locale limb resolves shows the default label. Accepts either a plain string or an inline per-locale map (`{ en: \"Save order\", \"zh-CN\": \"保存订单\" }`), resolved against the active UI language with the same fallback chain as `title`."
         },
         {
           "name": "cancelText",
-          "type": "string"
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Label of the Cancel button. Accepts either a plain string or an inline per-locale map (`{ en: \"Back\", \"zh-CN\": \"返回\" }`), resolved against the active UI language with the same fallback chain as `title`."
         },
         {
           "name": "nextText",
-          "type": "string",
-          "description": "Label of the next-step button (wizard)."
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Label of the next-step button (wizard). Accepts either a plain string or an inline per-locale map (`{ en: \"Continue\", \"zh-CN\": \"继续\" }`), resolved against the active UI language with the same fallback chain as `title`."
         },
         {
           "name": "prevText",
-          "type": "string",
-          "description": "Label of the previous-step button (wizard)."
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Label of the previous-step button (wizard). Accepts either a plain string or an inline per-locale map (`{ en: \"Previous\", \"zh-CN\": \"上一步\" }`), resolved against the active UI language with the same fallback chain as `title`."
         },
         {
           "name": "showSubmit",
@@ -435,8 +460,11 @@
         },
         {
           "name": "successMessage",
-          "type": "string",
-          "description": "Toast shown after a successful submit. Ignored when `submitBehavior` or `navigateOnSuccess` is set."
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Toast shown after a successful submit. Ignored when `submitBehavior` or `navigateOnSuccess` is set. Accepts either a plain string or an inline per-locale map (`{ en: \"Order saved\", \"zh-CN\": \"订单已保存\" }`), resolved against the active UI language with the same fallback chain as `title`."
         },
         {
           "name": "navigateOnSuccess",
@@ -547,16 +575,27 @@
         },
         {
           "name": "title",
-          "type": "string"
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Names the record in the built-in \"… saved\" toast after an edit save, which shows only when the host supplies no `onSuccess`. Accepts either a plain string or an inline per-locale map (`{ en: \"Purchase order\", \"zh-CN\": \"采购单\" }`) — the `I18nLabel` union the contract admits on this key — and the renderer resolves the map against the active UI language, falling back through base language, a region-qualified sibling, `default`, then `en`, and finally to any remaining entry."
         },
         {
           "name": "submitText",
-          "type": "string",
-          "description": "Label of the button that saves the parent and every detail row in one batch."
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Label of the button that saves the parent and every detail row in one batch. Defaults to \"Save\" when editing a record (`mode: \"edit\"` with a `recordId`) and to \"Create\" otherwise, in the active UI language; an empty string, or a map no locale limb resolves, shows the default too. Accepts either a plain string or an inline per-locale map (`{ en: \"Save order\", \"zh-CN\": \"保存订单\" }`), resolved against the active UI language with the same fallback chain as `title`."
         },
         {
           "name": "cancelText",
-          "type": "string"
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Label of the Cancel button, which renders only when the host supplies an `onCancel` callback (a runtime slot, not authorable in a JSON document). Defaults to \"Cancel\", in the active UI language; an empty string, or a map no locale limb resolves, shows the default too. Accepts either a plain string or an inline per-locale map (`{ en: \"Back\", \"zh-CN\": \"返回\" }`), resolved against the active UI language with the same fallback chain as `title`."
         },
         {
           "name": "showSubmit",
@@ -840,7 +879,11 @@
         },
         {
           "name": "label",
-          "type": "string"
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Heading of the tile, and of the drill-down panel when `title` is not set. Accepts either a plain string or an inline per-locale map (`{ en: \"Pipeline\", \"zh-CN\": \"销售管道\" }`) — the `I18nLabel` union the contract admits on this key — and the tile resolves the map against the active UI language, falling back through base language, a region-qualified sibling, `default`, then `en`, and finally to any remaining entry."
         },
         {
           "name": "aggregate",
@@ -853,13 +896,19 @@
         },
         {
           "name": "description",
-          "type": "string",
-          "description": "Helper text rendered under the value."
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Helper text rendered under the value. Accepts either a plain string or an inline per-locale map (`{ en: \"This quarter\", \"zh-CN\": \"本季度\" }`), resolved against the active UI language with the same fallback chain as `label`."
         },
         {
           "name": "title",
-          "type": "string",
-          "description": "Heading of the drill-down panel. Defaults to `label` — set it only when the records list wants a different name from the tile."
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Heading of the drill-down panel. Defaults to `label` — set it only when the records list wants a different name from the tile. Accepts either a plain string or an inline per-locale map (`{ en: \"Open deals\", \"zh-CN\": \"进行中的商机\" }`), resolved against the active UI language with the same fallback chain as `label`."
         },
         {
           "name": "filter",
@@ -1227,7 +1276,11 @@
         },
         {
           "name": "title",
-          "type": "string"
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Heading of the list. Defaults to the related object's label (its translation when one is loaded, otherwise the humanized object name). Accepts either a plain string or an inline per-locale map (`{ en: \"Open tasks\", \"zh-CN\": \"未完成任务\" }`) — the `I18nLabel` union the contract admits on this key — and the list resolves the map against the active UI language, falling back through base language, a region-qualified sibling, `default`, then `en`, and finally to any remaining entry."
         },
         {
           "name": "showViewAll",
@@ -1721,8 +1774,7 @@
         {
           "name": "object",
           "type": "string",
-          "required": true,
-          "description": "Object the aggregate runs over"
+          "description": "Object the aggregate runs over. Required unless a node-level `dataSource` binding names one; when both are set, `dataSource.object` wins."
         },
         {
           "name": "aggregate",
@@ -1743,7 +1795,8 @@
         },
         {
           "name": "filter",
-          "type": "array"
+          "type": "array",
+          "description": "Criteria the aggregate is scoped by. When a node-level `dataSource` binding also supplies a filter (its own, or the saved view its `view` names), the two are AND-combined: neither is dropped."
         },
         {
           "name": "format",
@@ -1761,6 +1814,12 @@
         {
           "name": "suffix",
           "type": "string"
+        },
+        {
+          "name": "dataSource",
+          "type": "object",
+          "binding": "object",
+          "description": "Per-element data binding: { object, view, filter, sort, limit }. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it."
         }
       ]
     },

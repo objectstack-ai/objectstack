@@ -66,7 +66,7 @@ function binding(overrides: Partial<FlowTriggerBinding> = {}): FlowTriggerBindin
     return {
         flowName: 'nightly_health_sweep',
         schedule: { type: 'cron', expression: '0 1 * * *', timezone: 'UTC' },
-        // [#16659] A time-triggered binding carries its acting organization; a
+        // [commit ecdfc9411] A time-triggered binding carries its acting organization; a
         // binding without one is refused — see
         // `ScheduleTrigger — the acting-organization refusal (#16659)` below.
         organization: 'org_2mtx1w9d0k4bqf7v',
@@ -324,7 +324,7 @@ describe('ScheduleTriggerPlugin', () => {
     });
 });
 
-// ─── The acting-organization refusal (#16659) ───────────────────────
+// ─── The acting-organization refusal (commit ecdfc9411) ─────────────
 //
 // The unit half of the card's consequence (3): a time-triggered flow that
 // declares no acting organization is REFUSED at bind, and the refusal reaches
@@ -509,7 +509,7 @@ describe('resolveBindingOrganization (#16659)', () => {
 //
 // Three states, three suites, and each one asserts what BINDS rather than only
 // what is logged: a refusal that logs correctly and arms the job anyway is the
-// exact defect #16659's own refusal was shaped to avoid.
+// exact defect commit ecdfc9411's own refusal was shaped to avoid.
 describe('ScheduleTrigger — the deployment switch is OFF (#17396)', () => {
     withScheduledWorkOff();
 
@@ -585,7 +585,7 @@ describe('ScheduleTrigger — switched ON under `single` (#17396)', () => {
         const trigger = new ScheduleTrigger(() => job.service, silentLogger());
 
         // ⭐ The widening the whole card turns on: this exact binding is
-        // REFUSED under a wall (the #16659 suite above) and armed here.
+        // REFUSED under a wall (commit ecdfc9411's refusal suite above) and armed here.
         trigger.start(orgLess(), async () => {});
         expect(job.jobs.size).toBe(1);
     });

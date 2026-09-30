@@ -69,12 +69,12 @@ export const entry: SemanticMigration = {
     + 'dark control of 0; inside packages/spec the '
     + 'only occurrences are tracing.zod.ts, its test, and the generated rows in '
     + 'content/docs/references/system/tracing.mdx, which this rename regenerates. And the '
-    + 'pinned objectui checkout — `.objectui-sha` = `dd3f7e1be3561d63267d7162f3fc0ac52e72834d` — names none of it: all 37 exports of '
-    + 'tracing.zod.ts and each of the four key names occur 0 times across the 9283 files '
-    + 'tracked at that sha (the 485 Span and 53 SpanSchema hits are objectui\'s own HTML '
+    + 'pinned objectui checkout — `.objectui-sha` = `db11afd4967cd9d39381c5e21dc2deec9d706204` — names none of it: all 37 exports of '
+    + 'tracing.zod.ts and each of the four key names occur 0 times across the 9546 files '
+    + 'tracked at that sha (the 486 Span and 53 SpanSchema hits are objectui\'s own HTML '
     + 'text-span component, TextSpanSchema, an unrelated name, plus colSpan and prose), against '
-    + 'two lit controls on that same corpus and sha: 13745 hits for the bare token objectstack, '
-    + 'and 5466 for the package specifier @objectstack/spec (at f8a9d0fb0: 0 across 8512, '
+    + 'two lit controls on that same corpus and sha: 14704 hits for the bare token objectstack, '
+    + 'and 5545 for the package specifier @objectstack/spec (at dd3f7e1be: 0 across 9283, Span 485, 13745 and 5466; at f8a9d0fb0: 0 across 8512, '
     + 'Span 488, 13347 and 5123; at 62597c588: 0 across 8303, Span 486, 13125 and 5043).',
   acceptanceCriteria:
     'Every author and reader of an OpenTelemetryCompatibility spells exporter.timeoutMs, '
