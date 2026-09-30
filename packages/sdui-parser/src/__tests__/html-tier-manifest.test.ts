@@ -124,7 +124,7 @@ describe('generateDts publishes the html tier into JSX.IntrinsicElements', () =>
     const dts = generateDts(published);
     expect(dts).toContain('"p": PProps;');
     expect(dts).toContain('"a": AProps;');
-    expect(dts).toContain('export interface AProps extends SduiBaseProps {\n  className?: string;\n  href?: string;\n}');
+    expect(dts).toContain('export interface AProps extends Omit<SduiBaseProps, "className"> {\n  className?: string;\n  href?: string;\n}');
     expect(dts).toContain('"flex": FlexProps;');
   });
 });

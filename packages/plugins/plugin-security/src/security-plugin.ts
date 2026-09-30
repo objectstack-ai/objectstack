@@ -1004,6 +1004,14 @@ export class SecurityPlugin implements Plugin {
    */
   private readonly fieldNamesCache = new Map<string, Set<string> | null>();
   /**
+   * [ADR-0053 D-D1 item 7 — #5930] Each object's declared `datetime` columns,
+   * read in the SAME pass as {@link fieldNamesCache} (`loadObjectFieldNames`)
+   * and invalidated with it. Handed to the RLS compile seam as
+   * `RlsFieldGuard.datetime`, so the shared lowering's whole-day rule rewrites
+   * a policy's `datetime` columns only — the scope every driver holds.
+   */
+  private readonly datetimeFieldNamesCache = new Map<string, ReadonlySet<string>>();
+  /**
    * Per-object cache of tenancy opt-out. `true` means the schema
    * explicitly disabled multi-tenancy (`tenancy.enabled === false` or
    * `systemFields.tenant === false`). Wildcard policies that target
@@ -1382,6 +1390,7 @@ export class SecurityPlugin implements Plugin {
     if (typeof md?.watch === 'function') {
       this.metadataWatch = md.watch('*', () => {
         this.fieldNamesCache.clear();
+        this.datetimeFieldNamesCache.clear();
         this.tenancyDisabledCache.clear();
         this.cbpRelCache.clear();
         this.objectSecurityMetaCache.clear();
@@ -7203,7 +7212,7 @@ export class SecurityPlugin implements Plugin {
           compilable,
           context,
           'using',
-          objectFields ? { declared: objectFields } : undefined,
+          objectFields ? { declared: objectFields, datetime: this.datetimeFieldNamesCache.get(object) } : undefined,
         );
         // Every applicable policy dropped for a missing field → deny sentinel.
         if (layer1 == null && dropped > 0) {
@@ -7469,7 +7478,7 @@ export class SecurityPlugin implements Plugin {
       withCheck,
       context,
       'check',
-      objectFields ? { declared: objectFields } : undefined,
+      objectFields ? { declared: objectFields, datetime: this.datetimeFieldNamesCache.get(object) } : undefined,
     );
   }
 
@@ -8890,19 +8899,25 @@ export class SecurityPlugin implements Plugin {
         (obj as any)?.systemFields?.tenant === false;
       this.tenancyDisabledCache.set(objectName, !!tenancyDisabled);
       const set = new Set<string>(['id']);
+      // [ADR-0053 D-D1 item 7 — #5930] The `datetime` columns, from the same
+      // declaration (see `datetimeFieldNamesCache`).
+      const datetime = new Set<string>();
       if (Array.isArray(obj.fields)) {
         for (const f of obj.fields) {
           if (f?.name) set.add(String(f.name));
+          if (f?.name && f.type === 'datetime') datetime.add(String(f.name));
         }
       } else if (typeof obj.fields === 'object') {
         for (const key of Object.keys(obj.fields)) {
           set.add(key);
           const v = (obj.fields as Record<string, any>)[key];
           if (v && typeof v === 'object' && v.name) set.add(String(v.name));
+          if (v && typeof v === 'object' && v.type === 'datetime') datetime.add(key);
         }
       } else {
         return null;
       }
+      this.datetimeFieldNamesCache.set(objectName, datetime);
       return set;
     } catch {
       return null;

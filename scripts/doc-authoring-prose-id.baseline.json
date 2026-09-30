@@ -112,55 +112,10 @@
  "packages/drivers/driver-mongodb/src/test-mongod.ts": {
   "#5517": 3
  },
- "packages/drivers/driver-sql/src/cross-field-conformance-cases.ts": {
-  "#1051": 1,
-  "#5041": 1,
-  "#5146": 2,
-  "#7398": 1,
-  "#7597": 1
- },
- "packages/drivers/driver-sql/src/live-dialect-matrix.testkit.ts": {
-  "#9350": 1
- },
- "packages/drivers/driver-sql/src/schema-drift.ts": {
-  "#11535": 1,
-  "#12121": 1,
-  "#3696": 1,
-  "#4560": 1
- },
  "packages/drivers/driver-sql/src/sql-driver.ts": {
   "#10413": 1,
-  "#11067": 1,
-  "#11374": 2,
-  "#11541": 1,
-  "#11565": 1,
-  "#11567": 1,
-  "#11627": 7,
-  "#12380": 1,
-  "#12999": 1,
-  "#13015": 3,
-  "#13056": 3,
-  "#3896": 1,
-  "#3912": 1,
-  "#3942": 1,
-  "#3994": 2,
-  "#4363": 1,
-  "#5030": 5,
-  "#5158": 1,
-  "#5240": 2,
-  "#5347": 2,
-  "#5348": 1,
-  "#5369": 1,
-  "#5907": 2,
-  "#6050": 1,
-  "#6212": 1,
-  "#6409": 1,
-  "#7398": 2,
-  "#7929": 7,
-  "#8197": 5,
-  "#8220": 1,
-  "#8790": 1,
-  "#8931": 1
+  "#5907": 1,
+  "#6409": 1
  },
  "packages/drivers/driver-turso/src/remote-canonical-backfill.ts": {
   "#1005": 1,

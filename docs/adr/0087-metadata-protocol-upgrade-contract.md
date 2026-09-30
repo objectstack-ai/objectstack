@@ -1,6 +1,6 @@
 # ADR-0087: Metadata protocol upgrades for AI consumers — conversion over notification, executable migrations, machine-verifiable upgrades
 
-**Status**: Accepted (2026-07-04, #2582) · trued up to as-built 2026-07-15 (see Addendum)
+**Status**: Accepted (2026-07-04, #2582) · trued up to as-built 2026-07-15 (see Addendum) · **Amended** (2026-09-30, #20390 ruling A — the artifact-ingestion window decides per entry by each retired conversion's `retiredAfter`; see the amendment note under the 2026-09-13 addendum's window bullet)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0059](./0059-third-party-backward-compatibility-gates.md) (layered backward-compat gates — this ADR is its consumer-facing sequel), [ADR-0078](./0078-no-silently-inert-metadata.md) (no declarable-but-unenforced metadata — the un-checked `engines.protocol` is exactly this class), [ADR-0025](./0025-plugin-package-distribution.md) (§3.2 `engines.protocol` / `engines.platform` compatibility ranges, §3.10 #3 protocol-first check order), [ADR-0033](./0033-ai-assisted-metadata-authoring.md) (the authoring population this ADR designs for), [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove), [ADR-0054](./0054-runtime-proof-for-authorable-surface.md) (prove-it-runs), AGENTS.md Prime Directive #12 (contract-first, no consumer-side dialect fallbacks — §"Why the conversion layer does not violate PD #12" draws the line)
 **Consumers**: `@objectstack/spec` (protocol version constant, conversion layer, deprecation/change registries), `@objectstack/cli` (`validate`, `doctor`, `migrate meta`), the runtime metadata loader (handshake + conversion), `@objectstack/mcp` (the AI-native change/migration surface), `@objectstack/create-objectstack`, the Release workflow, and every third-party consumer — whose maintainer is assumed to be an **AI agent**
@@ -903,14 +903,31 @@ unconditional strip would start deleting legal metadata the day the keys return.
   manifest declares (`engines.protocol`, ADR-0025) and the `@objectstack/spec`
   version the process actually runs. `floor < runtime` replays the FULL chain,
   retired entries included, before the strict parse — the artifact is the
-  "consumer arriving late" D3 keeps every conversion forever for. `floor >=
+  "consumer arriving late" D3 keeps every conversion forever for. ~~`floor >=
   runtime` replays nothing: the artifact claims the current or a newer surface,
-  and the strict parse, tombstones included, stays the authority. That branch is
+  and the strict parse, tombstones included, stays the authority.~~ — **amended
+  2026-09-30** — `floor >= runtime` replays only the retired entries whose
+  `retiredAfter` the floor does not exceed (verdict `'converted-retired-after'`),
+  and nothing when no entry is that recent; every other entry meets the strict
+  parse, tombstones included, as its authority. That branch is
   what makes the window *versioned rather than a blanket amnesty*, and it is the
   branch the M2 return needs. No declared range replays (an artifact of unknown
   age is old data at rest, and conversions only rewrite shapes they positively
   recognize); an unresolvable runtime version replays nothing, because amnesty
   rests on positive version evidence.
+
+  > **Amended (2026-09-30) — the window decides per entry.** Provenance: the
+  > #20390 ruling, comment `5865890672` (director batch #235 item 1, letter A;
+  > maintainer 「同意 A」), landed as `e956924e` (PR #20435). Every retired
+  > conversion carries a required `retiredAfter`, the last published
+  > `@objectstack/spec` whose authoring surface still accepted the old shape,
+  > and the door replays an entry E when `floor < runtime` OR
+  > `floor <= E.retiredAfter`. Why: `main` refuses keys the next release retires
+  > while it still carries the last release's label, so the label-only
+  > comparison read an artifact built by that last release as current and
+  > refused it outright. The module docblock of
+  > `packages/metadata-core/src/artifact-forward-conversion.ts` states the rule
+  > and is its authority.
 - **⚠️ The shipped key is the DECLARED FLOOR, not the authored version.** The
   ruling says "authored `specVersion`"; what an artifact manifest actually
   carries is a protocol *range*, so the implementation keys off that range's

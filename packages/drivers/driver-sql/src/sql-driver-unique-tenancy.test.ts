@@ -691,7 +691,7 @@ describe('SqlDriver unique × tenancy (#3696)', () => {
       expect(entry!.message).toMatch(/BLOCKED/);
       expect(entry!.message).toMatch(/__global__/);
       expect(entry!.message).toMatch(/"DUP"/);
-      expect(entry!.message).toMatch(/#5030/);
+      expect(entry!.message).toMatch(/NULL-distinct/);
 
       // Even `--allow-destructive` cannot force it: apply re-probes and
       // refuses — at no point is a constraint dropped without its replacement

@@ -88,6 +88,7 @@ import {
   uniqueViolationColumn,
   resolveTenancyPosture,
   declareTargetedTable,
+  isMissingTableError,
 } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import {
@@ -147,9 +148,33 @@ import {
 import { recoverUnencodedJsonText } from './unencoded-json-text.js';
 import knex, { Knex } from 'knex';
 import { nanoid } from 'nanoid';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { currentPerfTiming, perfNow, type PerfTiming } from '@objectstack/observability';
+
+/**
+ * [#20768] The async scope of a driver's own PRE-DDL question: the ADR-0104
+ * media-arm resolver that {@link SqlDriver.resolveFileColumnsMoved} asks at the
+ * start of the first `initObjects`, before this driver has created any table.
+ *
+ * The resolver the engine supplies answers by reading `sys_migration`. On the
+ * first boot of a new database that table does not exist yet, because this
+ * very schema pass is what creates it. The backend refuses the read, and the
+ * resolver answers "not moved", which is the correct answer for a store with
+ * no columns. So the refusal is the ordinary state of a new database, and not
+ * a `DATABASE_ERROR` to put in front of an operator.
+ *
+ * Only one question reads through this scope, and only
+ * {@link SqlDriver.backendStatementFault} consults it. ⛔ It demotes one class,
+ * a missing table, recognised by the shared `isMissingTableError`. Any other
+ * refusal inside the scope still warns, and so does a missing table outside it.
+ *
+ * Module-level rather than per instance: the read the question issues goes to
+ * whichever driver serves the ledger. On a multi-datasource composition that
+ * can be another instance of this class, and it is in the same async chain.
+ */
+const PRE_DDL_QUESTION_SCOPE = new AsyncLocalStorage<true>();
 
 /**
  * Default ID length for auto-generated IDs.
@@ -1746,7 +1771,7 @@ function uncompilableAggregateFunctionError(func: string): Error {
     `correctly and @objectstack/spec AggregationFunction declares it — this is a capability gap ` +
     `in the backend, not a mistake in the query, which is why it answers NOT_IMPLEMENTED/501 ` +
     `rather than a 400. Aggregate with a function this backend compiles; whether the declaration ` +
-    `itself should stand is ADR-0049's enforce-or-remove question (#5907).`,
+    `itself should stand is ADR-0049's enforce-or-remove question.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
@@ -1864,7 +1889,7 @@ function refuseDateBucketedGroupBy(granularity: string, bucketedHere: string[], 
     `a capability gap in the backend, not a mistake in the query, which is why it answers ` +
     `NOT_IMPLEMENTED/501 rather than a 400. A driver publishes the granularities it buckets ` +
     `natively as \`supports.queryDateGranularity\`; the engine reads that record and buckets ` +
-    `in memory for every granularity absent from it, which is always correct (#6212).`,
+    `in memory for every granularity absent from it, which is always correct.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
@@ -1936,10 +1961,10 @@ function refuseRejectedReferenceAlias(column: string): never {
     `Did you mean \`reference_to\` → \`reference\`? \`reference\` is the only relationship spelling ` +
     `@objectstack/spec declares, and \`FieldSchema\` refuses this key with that same verdict ` +
     `(\`unrecognized_keys\`) — so a field still carrying it at DDL time went around the schema ` +
-    `(raw \`registerObject\` skips Zod, #3896). Rename the key. The column is built from ` +
+    `(raw \`registerObject\` skips Zod). Rename the key. The column is built from ` +
     `\`reference\`, and referential integrity is enforced by the ENGINE via \`deleteBehavior\` ` +
-    `(the 409 DELETE_RESTRICTED), not by a database FOREIGN KEY: #11567 retired the FK DDL this ` +
-    `key used to gate, which could never fire for a spec-conformant lookup in the first place.`,
+    `(the 409 DELETE_RESTRICTED), not by a database FOREIGN KEY: the FK DDL this ` +
+    `key used to gate is retired, because it could never fire for a spec-conformant lookup in the first place.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.VALIDATION_ERROR;
   err.status = 400;
@@ -2406,7 +2431,7 @@ function filterArrayReachedDriverError(filters: unknown[]): Error {
     `A filter ARRAY reached the driver: ${JSON.stringify(filters)}. ` +
       `'where' is a FilterCondition object; the array form ('FilterArray') is input-only ` +
       `authoring sugar and is lowered by @objectstack/spec parseFilterAST() at the engine ` +
-      `and protocol doors before any driver sees it (#5158). This driver no longer carries a ` +
+      `and protocol doors before any driver sees it. This driver no longer carries a ` +
       `second compiler for it — call through ObjectQL, or lower the value yourself with ` +
       `parseFilterAST(). Note the INFIX join form ([condA, "or", condB]) has no lowering at ` +
       `all: write the prefix form ["or", condA, condB].`,
@@ -2756,7 +2781,7 @@ function crossFieldComparisonError(
       `of a scalar comparison operator ($eq/$ne/$gt/$gte/$lt/$lte) between two same-table ` +
       `declared columns. Compare against a literal value here, or evaluate the rule in memory ` +
       `(matchesFilter). The columns and the operator this filter used are withheld from the ` +
-      `message (#7929); the full diagnostic is in the server log.`,
+      `message; the full diagnostic is in the server log.`,
     diagnostic,
     subtree,
     `${diagnostic} Cross-field comparison compiles only as the whole comparand of a scalar ` +
@@ -2809,7 +2834,7 @@ function bareFieldReferenceError(field: string, ref: string, subtree?: unknown):
       `"OTHER_FIELD" } } } — which compiles to a column-to-column comparison. The bare form is ` +
       `refused because the in-memory evaluator does not read it as an equality (it matches no ` +
       `record), so compiling it here would make the two execution paths answer this filter ` +
-      `differently. The columns this filter named are withheld from the message (#7929); the ` +
+      `differently. The columns this filter named are withheld from the message; the ` +
       `full diagnostic is in the server log.`,
     diagnostic,
     subtree,
@@ -2941,7 +2966,7 @@ function uncompilableFieldReferenceError(
       `Cross-field comparison on SQL push-down supports same-table columns the object ` +
       `declares, compared as the same type class, excluding the tenant-isolation column. ` +
       `The columns, the operator this filter used and the specific reason are withheld from ` +
-      `the message (#7929); the full diagnostic is in the server log.`,
+      `the message; the full diagnostic is in the server log.`,
     diagnostic,
     subtree,
   );
@@ -3200,7 +3225,7 @@ function unbindableComparandError(
     `A comparison in this filter requires a single comparable value, but received a value that ` +
       `cannot be bound as a SQL parameter. Use ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE} (or a ` +
       `binary value); for a list use $in/$nin, and for a range use $between. The field, the ` +
-      `operator and the value this filter used are withheld from the message (#8197); the full ` +
+      `operator and the value this filter used are withheld from the message; the full ` +
       `diagnostic is in the server log.`,
     `Operator "${op}" on field "${field}" requires a single comparable value, but received ` +
       `${Array.isArray(value) ? 'an array' : `an object (${safeShapePreview(value)})`}, which cannot be ` +
@@ -3228,7 +3253,7 @@ function unbindableComparandError(
 function betweenArityError(field: string, subtree?: unknown): Error {
   return withheldFilterError(
     `Operator "$between" in this filter requires a [min, max] value array. The field it was ` +
-      `aimed at is withheld from the message (#8197); the full diagnostic is in the server log.`,
+      `aimed at is withheld from the message; the full diagnostic is in the server log.`,
     `Operator "$between" on field "${field}" requires a [min, max] value array.`,
     subtree,
   );
@@ -3413,8 +3438,8 @@ function jsonColumnOperatorError(field: string, op: string, bare: boolean, subtr
       `"$contains" for any-of ({ "$or": [{ "FIELD": { "$contains": "a" } }, ` +
       `{ "FIELD": { "$contains": "b" } }] }). Refused rather than compiled because the answer ` +
       `was silently wrong in BOTH directions: $in/$eq matched nothing, while $nin/$ne returned ` +
-      `the very rows they were asked to exclude (#7398). The field and the operator this filter ` +
-      `used are withheld from the message (#8197); the full diagnostic is in the server log.`,
+      `the very rows they were asked to exclude. The field and the operator this filter ` +
+      `used are withheld from the message; the full diagnostic is in the server log.`,
     `${spelling}${on} WAS NOT APPLIED: "${field}" is a multi-value (or otherwise JSON-valued) ` +
       `field, stored by this driver as a JSON TEXT column (e.g. ["a","b"]), and "${op}" compares ` +
       `that whole serialized text against a single value — it can never equal one member. ` +
@@ -3422,7 +3447,7 @@ function jsonColumnOperatorError(field: string, op: string, bare: boolean, subtr
       `"$contains" for any-of ({ "$or": [{ "${field}": { "$contains": "a" } }, ` +
       `{ "${field}": { "$contains": "b" } }] }). Refused rather than compiled because the answer ` +
       `was silently wrong in BOTH directions: $in/$eq matched nothing, while $nin/$ne returned ` +
-      `the very rows they were asked to exclude (#7398).`,
+      `the very rows they were asked to exclude.`,
     subtree,
   );
 }
@@ -4251,15 +4276,15 @@ function emptyFieldConstraintError(field: string, path: string, subtree?: unknow
       `direct comparand (e.g. { "FIELD": "value" }). It is refused rather than ignored because ` +
       `the backends disagreed on what it means — this driver dropped it inside $and/$or/$not ` +
       `(matching EVERY row) while refusing it at the top level, and driver-memory / ` +
-      `@objectstack/formula answered "matches nothing". #5240. The field this filter named and ` +
-      `its position are withheld from the message (#8197); the full diagnostic is in the server ` +
+      `@objectstack/formula answered "matches nothing". The field this filter named and ` +
+      `its position are withheld from the message; the full diagnostic is in the server ` +
       `log.`,
     `Field constraint at ${path} carries zero operators ({ "${field}": {} }). A field constraint ` +
       `must name at least one operator (e.g. { "${field}": { "$eq": "value" } }) or be a direct ` +
       `comparand (e.g. { "${field}": "value" }). It is refused rather than ignored because the ` +
       `backends disagreed on what it means — this driver dropped it inside $and/$or/$not (matching ` +
       `EVERY row) while refusing it at the top level, and driver-memory / @objectstack/formula ` +
-      `answered "matches nothing". #5240.`,
+      `answered "matches nothing".`,
     subtree,
   );
 }
@@ -4319,7 +4344,7 @@ function unknownLogicalOperatorError(key: string, path: string, subtree?: unknow
       `other key is a field name. It is refused rather than compiled as a COLUMN of that name, ` +
       `which is what this driver used to do — producing a predicate that matched no row and ` +
       `reported nothing, so a caller could not tell "no rows matched" from "the filter never ` +
-      `compiled" (#5348).`,
+      `compiled".`,
     subtree,
   );
 }
@@ -4394,11 +4419,11 @@ function nonBooleanExistsComparandError(
     `Operator "$exists" on field "${field}" requires a boolean comparand (true or false). ` +
       `Received ${describeFilterOperand(value)} (${safeShapePreview(value)}) at ${path}. ` +
       `@objectstack/spec FieldOperatorsSchema declares $exists as a boolean. It is refused rather ` +
-      `than coerced for the same reason $null is (#5347): a non-boolean lands on whichever side ` +
+      `than coerced for the same reason $null is: a non-boolean lands on whichever side ` +
       `the backend's two-branch conditional happens to default to, and those defaults point in ` +
       `OPPOSITE directions — this driver's \`=== false\` test compiles IS NOT NULL for anything ` +
       `but false, a \`=== true\` test compiles IS NULL for anything but true. Note "false" the ` +
-      `STRING is truthy, so it lands on the side opposite the false it was written to mean (#5369).`,
+      `STRING is truthy, so it lands on the side opposite the false it was written to mean.`,
     subtree,
   );
 }
@@ -4418,7 +4443,7 @@ function nonBooleanNullComparandError(
       `compiled IS NULL (anything but false), driver-memory's query path and driver-mongodb ` +
       `compiled IS NOT NULL (anything but true), and driver-memory's matcher dropped the ` +
       `constraint entirely. Note "false" the STRING is truthy, so it landed on the side opposite ` +
-      `the false it was written to mean (#5347).`,
+      `the false it was written to mean.`,
     subtree,
   );
 }
@@ -4645,7 +4670,7 @@ function undefinedComparandError(field: string, path: string, subtree?: unknown)
       `refused rather than compiled because the backends disagreed: driver-sql handed it to knex ` +
       `and got a bare "Undefined binding(s)" Error carrying no code, while Turso's remote transport ` +
       `compiled it to IS NULL — so \`{ owner_id: ctx.user?.id }\` with a missing id silently ` +
-      `matched every env-wide row instead of failing (#6050).`,
+      `matched every env-wide row instead of failing.`,
     subtree,
   );
 }
@@ -6113,6 +6138,13 @@ export class SqlDriver implements IDataDriver {
   protected logger: {
     warn: (msg: string, meta?: any) => void;
     info?: (msg: string, meta?: any) => void;
+    /**
+     * [#20768] Below-warn channel for a refusal that is the ordinary state of
+     * the store, not a fault (see {@link SqlDriver.backendStatementFault}).
+     * The default sink has none, so such a line is dropped unless a host
+     * injects a logger that keeps `debug`.
+     */
+    debug?: (msg: string, meta?: any) => void;
     /**
      * Durability-degradation channel (see AGENTS.md §Degradation log levels):
      * used when a constraint the metadata claims is enforced is NOT — e.g. a
@@ -8739,7 +8771,7 @@ export class SqlDriver implements IDataDriver {
       this.updatedAtColumnState.set(object, 'absent');
       this.logger.warn(
         `[sql-driver] '${object}' has no physical 'updated_at' column, so this driver will not ` +
-          'stamp one on update (#11067). The object is registered as managed, whose schema this ' +
+          'stamp one on update. The object is registered as managed, whose schema this ' +
           "driver's own DDL would give `created_at`/`updated_at` — a table migrated out-of-band " +
           'without them will keep a stale "last modified" for every consumer that reads it ' +
           '(list-view sorts, delta sync, cache invalidation, audit). Add the column, or accept ' +
@@ -9946,7 +9978,7 @@ export class SqlDriver implements IDataDriver {
       `[sql-driver] INVALID_FILTER — a WHERE column could not be resolved on '${object}'` +
         (column === null ? '' : ` ('${column}')`) +
         '. The dialect message below is kept server-side because it inlines the statement ' +
-        `bound literals (#7929, #8790): ${typeof detail === 'string' ? detail : String(error)}`,
+        `bound literals: ${typeof detail === 'string' ? detail : String(error)}`,
     );
     const disclosed =
       column !== null &&
@@ -10010,20 +10042,45 @@ export class SqlDriver implements IDataDriver {
 
     const detail = (error as { message?: unknown } | null | undefined)?.message;
     const code = (error as { code?: unknown } | null | undefined)?.code;
-    this.logger.warn(
-      `[sql-driver] DATABASE_ERROR — the backend refused a read on '${object}'` +
-        (typeof code === 'string' && code.length > 0 ? ` (${code})` : '') +
-        '. The dialect message below is kept server-side: it carries the compiled statement, ' +
-        'and on the dialects that inline them the bound literals too (#7929, #8931): ' +
-        `${typeof detail === 'string' ? detail : String(error)}`,
-    );
+    const dialectText = typeof detail === 'string' ? detail : String(error);
     // [#13438] The table the statement was compiled against, resolved the way
     // {@link SqlDriver.getBuilder} resolves it — a federated object's
     // `external.remoteName`, otherwise the object's own name — because every
     // read exit that reaches here built its statement through `getBuilder`.
     // Declared on the envelope for `isMissingTableError`; never in the message.
     const targetedTable = this.physicalTableByObject[object] ?? object;
-    return backendStatementFaultError(object, error, targetedTable);
+    const envelope = backendStatementFaultError(object, error, targetedTable);
+
+    // [#20768] One class leaves the warn channel, and only inside one scope: a
+    // table that does not exist yet, read while a driver asks its pre-DDL
+    // question (the ADR-0104 media-arm resolver, asked before the schema pass
+    // creates any table). On the first boot of a new database that read is
+    // `sys_migration`, and its refusal is the ordinary state of the store. The
+    // resolver hears the refusal and answers "not moved", as it always did.
+    //
+    // ⛔ Demoted, not deleted: the same dialect text goes to `debug`, which the
+    // default sink does not have. ⛔ Asked through the one shared predicate,
+    // over the envelope's DECLARED target, so a missing table named by some
+    // other relation (a view over a dropped table) is not this class. Every
+    // other refusal in the scope, and a missing table outside it, warns below.
+    if (PRE_DDL_QUESTION_SCOPE.getStore() === true && isMissingTableError(envelope, object)) {
+      this.logger.debug?.(
+        `[sql-driver] '${object}' does not exist yet: it was read while this driver asked its ` +
+          'pre-DDL question (the ADR-0104 media-arm resolver), before its schema pass created ' +
+          'any table. The refusal goes back to the resolver, which answers from it: ' +
+          dialectText,
+      );
+      return envelope;
+    }
+
+    this.logger.warn(
+      `[sql-driver] DATABASE_ERROR — the backend refused a read on '${object}'` +
+        (typeof code === 'string' && code.length > 0 ? ` (${code})` : '') +
+        '. The dialect message below is kept server-side: it carries the compiled statement, ' +
+        'and on the dialects that inline them the bound literals too: ' +
+        dialectText,
+    );
+    return envelope;
   }
 
   async count(object: string, query?: DriverQuery, options?: DriverOptions): Promise<number> {
@@ -10782,7 +10839,7 @@ export class SqlDriver implements IDataDriver {
     this.logger.warn(
       `[sql-driver] INVALID_FIELD — a groupBy/aggregation column could not be resolved on ` +
         `'${object}' ('${column}'). The dialect message below is kept server-side because it ` +
-        `inlines the statement bound literals (#7929, #11541): ` +
+        `inlines the statement bound literals: ` +
         `${typeof detail === 'string' ? detail : String(error)}`,
     );
     const clause =
@@ -12422,7 +12479,8 @@ export class SqlDriver implements IDataDriver {
         const converted = (res as any)?.changes ?? 0;
         if (converted) {
           this.logger.info?.(
-            `[sql-driver] canonicalised datetime storage (#3912) for ${table}.${field}`,
+            `[sql-driver] canonicalised datetime storage for ${table}.${field}: every value is now one ` +
+              `UTC ISO-8601 text form, so filters and sorts compare instants rather than mixed encodings`,
             { rowsConverted: converted },
           );
         }
@@ -12609,7 +12667,8 @@ export class SqlDriver implements IDataDriver {
       }
       if (tally.converted) {
         this.logger.info?.(
-          `[sql-driver] canonicalised json storage (#12380) for ${table}.${field}`,
+          `[sql-driver] canonicalised json storage for ${table}.${field}: plain-text cells are now ` +
+            `JSON-encoded strings, the one encoding a json column holds on every dialect`,
           { rowsConverted: tally.converted },
         );
       }
@@ -12734,7 +12793,8 @@ export class SqlDriver implements IDataDriver {
         const converted = (res as any)?.changes ?? 0;
         if (converted) {
           this.logger.info?.(
-            `[sql-driver] canonicalised time-of-day storage (#3994) for ${table}.${field}`,
+            `[sql-driver] canonicalised time-of-day storage for ${table}.${field}: every value is now one ` +
+              `HH:MM:SS[.sss] text form, so filters and sorts compare times rather than mixed encodings`,
             { rowsConverted: converted },
           );
         }
@@ -12950,7 +13010,8 @@ export class SqlDriver implements IDataDriver {
       });
       await this.runWideningAlters(table, statements);
       this.logger.info?.(
-        `[sql-driver] widened MySQL TIMESTAMP → DATETIME(3) (#3942) on ${table}`,
+        `[sql-driver] widened MySQL TIMESTAMP → DATETIME(3) on ${table}: TIMESTAMP ends at 2038-01-19, ` +
+          `keeps no milliseconds and converts through the session timezone`,
         { columns: legacy.map((c) => c.name) },
       );
     } catch (err) {
@@ -13055,7 +13116,8 @@ export class SqlDriver implements IDataDriver {
       });
       await this.runWideningAlters(table, statements);
       this.logger.info?.(
-        `[sql-driver] widened MySQL TIME → TIME(3) (#3994) on ${table}`,
+        `[sql-driver] widened MySQL TIME → TIME(3) on ${table}: a zero-precision TIME rounds the ` +
+          `canonical milliseconds to the nearest second, changing the stored wall clock`,
         { columns: legacy.map((c) => c.name) },
       );
     } catch (err) {
@@ -13529,7 +13591,8 @@ export class SqlDriver implements IDataDriver {
       d.severity = 'error';
       d.message = nullSafeKey
         ? `${op.table}: cannot ${tighten ? 'tighten' : 'create'} '${op.indexName}' as ${signature} — existing rows ` +
-          `already violate the NULL-safe unique constraint (duplicates the old index wrongly admitted, #5030): ` +
+          `already violate the NULL-safe unique constraint (duplicates the old index wrongly admitted: SQL ` +
+          `UNIQUE is NULL-distinct, so it never constrained rows without an organization): ` +
           `${report}. The op is BLOCKED: apply re-probes and refuses, and the existing index stays in place ` +
           `(ADR-0120 D4). Deduplicate the listed rows, then re-run "os migrate plan".`
         : // #14902: the plain unique has no #5030 history behind it — nothing
@@ -14017,7 +14080,7 @@ export class SqlDriver implements IDataDriver {
       `[schema-drift] could not create the NULL-safe unique '${op.indexName}' on '${op.table}' after dropping ` +
         `the old index${restored ? ' — restored the previous bare composite' : ' — AND the restore failed, so the ' +
         'constraint is currently NOT enforced'}. Rows without an organization are ${restored ? 'still ' : ''}not ` +
-        `constrained (#5030); re-run "os migrate plan" and apply the reported op (ADR-0120 D4).`,
+        `constrained, because SQL UNIQUE is NULL-distinct; re-run "os migrate plan" and apply the reported op (ADR-0120 D4).`,
       (cause as any)?.message ?? cause,
     );
   }
@@ -14775,7 +14838,7 @@ export class SqlDriver implements IDataDriver {
                 this.logDurabilityFailure(
                   `[sql-driver] cannot create hash-shadow unique index '${name}' on "${tableName}" — ` +
                     `existing rows violate the NULL-safe key (duplicates the previous void constraint ` +
-                    `admitted, #5030).${report} The constraint '${columns
+                    `admitted: SQL UNIQUE is NULL-distinct, so it never constrained rows without an organization).${report} The constraint '${columns
                       .map((c) => (nullSafe.has(c) ? `COALESCE(${c}, '${GLOBAL_TENANT}')` : c))
                       .join(', ')}' is NOT enforced until the data is deduplicated: run "os migrate plan" ` +
                     `for the conflicting rows (ADR-0120 D4).`,
@@ -14838,8 +14901,8 @@ export class SqlDriver implements IDataDriver {
               // did not land, so this does not read as never having been
               // attempted.
               this.logDurabilityFailure(
-                `[sql-driver] hash-shadow UNIQUE index '${name}' on "${tableName}" could not be created ` +
-                  `(#11627); falling back to the refusal below.`,
+                `[sql-driver] hash-shadow UNIQUE index '${name}' on "${tableName}" could not be created; ` +
+                  `falling back to the refusal below.`,
                 shadowMsg,
               );
             }
@@ -14857,7 +14920,8 @@ export class SqlDriver implements IDataDriver {
           // normal), and let the D4 drift pre-flight report the exact rows.
           this.logDurabilityFailure(
             `[sql-driver] cannot create NULL-safe unique index '${name}' on "${tableName}" — existing rows ` +
-              `violate it (duplicates the previous NULL-distinct index admitted, #5030). The constraint ` +
+              `violate it (duplicates the previous NULL-distinct index admitted: it never constrained rows ` +
+              `without an organization). The constraint ` +
               `'${columns.join(', ')}' is NOT enforced until the data is deduplicated: run "os migrate plan" ` +
               `for the conflicting rows (ADR-0120 D4).`,
             msg,
@@ -14948,7 +15012,7 @@ export class SqlDriver implements IDataDriver {
       this.logDurabilityFailure(
         `[sql-driver] this MySQL/MariaDB server rejects functional key parts — created '${name}' on ` +
           `"${tableName}" over the BARE columns instead. Rows without an organization are NOT constrained ` +
-          `by it (#5030): upgrade to MySQL >= 8.0.13 and re-run "os migrate plan" to tighten it (ADR-0120 D3).`,
+          `by it (SQL UNIQUE is NULL-distinct): upgrade to MySQL >= 8.0.13 and re-run "os migrate plan" to tighten it (ADR-0120 D3).`,
         msg,
       );
       await this.knex.schema.alterTable(tableName, (table) => {
@@ -16426,7 +16490,7 @@ export class SqlDriver implements IDataDriver {
     // so the naming half went here rather than to the caller.
     this.logger.warn(
       `[sql-driver] INVALID_FILTER — refusal detail withheld from the response because the ` +
-        `predicate was not positively marked as author-written (#7929, #8220, #8197). ` +
+        `predicate was not positively marked as author-written. ` +
         `Full diagnostic: ${diagnostic}`,
     );
   }
@@ -17671,8 +17735,8 @@ export class SqlDriver implements IDataDriver {
         this.logger.warn(
           `Paged read of '${object}' is NOT deterministic: this driver did not create the table, `
             + 'so it cannot name a unique column to order by, and the query asked for no sort of '
-            + 'its own. Walking the pages may serve one row twice and never serve another '
-            + '(objectstack#4363). Give the query an `orderBy` on a unique column, or declare the '
+            + 'its own. Walking the pages may serve one row twice and never serve another. '
+            + 'Give the query an `orderBy` on a unique column, or declare the '
             + 'object so this driver manages its table.',
         );
       }
@@ -18121,14 +18185,14 @@ export class SqlDriver implements IDataDriver {
               .filter((c) => !staleBounds.has(c))
               .map((c) => `"${c}"`)
               .join(', ')} in the same key declare no usable bound and DO need \`maxLength\` ` +
-            `declared on the field (#11374).`
+            `declared on the field.`
           : '';
       return (
         `[sql-driver] cannot create index '${indexName}' on "${tableName}" — MySQL refuses a TEXT/BLOB ` +
         `column in a key without a key length. Column(s) ${staleNamed} are stored as TEXT even though the ` +
         `field ALREADY declares a usable \`maxLength\` — the column was created before that bound was ` +
         `declared, and the additive sync never rewrites a column's type, so re-declaring \`maxLength\` ` +
-        `changes nothing here (#12999). REMEDY: convert the column(s) to varchar(n) by hand, with a backup ` +
+        `changes nothing here. REMEDY: convert the column(s) to varchar(n) by hand, with a backup ` +
         `taken first, restating the FULL column definition on MySQL (MODIFY drops a NOT NULL or DEFAULT you ` +
         `do not repeat) — e.g. ALTER TABLE \`${tableName}\` MODIFY \`${firstColumn}\` ` +
         `varchar(${firstBound}) plus that column's existing NOT NULL / DEFAULT clauses, restated verbatim; ` +
@@ -18145,8 +18209,8 @@ export class SqlDriver implements IDataDriver {
       `[sql-driver] cannot create index '${indexName}' on "${tableName}" — MySQL refuses a TEXT/BLOB ` +
       `column in a key without a key length. ${named} because the field declares no \`maxLength\` (or one ` +
       `wider than ${SqlDriver.MAX_KEYABLE_VARCHAR_CHARS} characters, the most a utf8mb4 key part can hold). ` +
-      `Declare \`maxLength\` on the field(s) so the column is emitted as varchar(n) and can be keyed ` +
-      `(#11374). The table exists but this index does NOT, so any uniqueness it declared is currently ` +
+      `Declare \`maxLength\` on the field(s) so the column is emitted as varchar(n) and can be keyed. ` +
+      `The table exists but this index does NOT, so any uniqueness it declared is currently ` +
       `unenforced. A prefix index is deliberately not substituted: on a UNIQUE index it constrains the ` +
       `prefix rather than the value, and rejects two different values that share one.`
     );
@@ -18308,7 +18372,7 @@ export class SqlDriver implements IDataDriver {
       this.logDurabilityFailure(
         `[sql-driver] cannot carry UNIQUE index '${indexName}' on "${tableName}" on a hash shadow — the ` +
           `column "${shadow}" already exists and is NOT a generated column, so it is not the driver's to ` +
-          `replace (#11627/#13015). The declared constraint is NOT enforced; rename or drop that column.`,
+          `replace: it may hold data. The declared constraint is NOT enforced; rename or drop that column.`,
       );
       return false;
     }
@@ -18338,12 +18402,12 @@ export class SqlDriver implements IDataDriver {
     this.logger.warn(
       `[sql-driver] UNIQUE index '${indexName}' on "${tableName}" is carried by the hash-shadow column ` +
         `"${shadow}" (SHA-256 of ${described}), because MySQL cannot key ${columns.length > 1 ? 'this column set' : 'a column'} ` +
-        `longer than ${SqlDriver.MAX_KEYABLE_VARCHAR_CHARS} characters directly (#11627). The declared ` +
+        `longer than ${SqlDriver.MAX_KEYABLE_VARCHAR_CHARS} characters directly. The declared ` +
         `constraint is enforced over the full value; only the physical key differs.` +
         (state === 'reusable'
-          ? ` The shadow column already existed and hashes this exact key — re-keyed in place (#13015).`
+          ? ` The shadow column already existed and hashes this exact key — re-keyed in place.`
           : state === 'stale'
-            ? ` A surviving shadow column hashed a DIFFERENT key and was re-generated (#13015).`
+            ? ` A surviving shadow column hashed a DIFFERENT key and was re-generated.`
             : ''),
       { tableName, indexName, columns, shadow, shadowColumnState: state },
     );
@@ -18475,7 +18539,7 @@ export class SqlDriver implements IDataDriver {
       this.logger.warn(
         `[sql-driver] NOT dropping "${tableName}"."${shadow}" while collecting the retired index ` +
           `'${indexName}' — a column of that name exists and is NOT a generated column, so it is not ` +
-          `the driver's to drop and may hold data (#11627/#13056). Remove it by hand if it is unwanted.`,
+          `the driver's to drop and may hold data. Remove it by hand if it is unwanted.`,
         { tableName, indexName, shadow },
       );
       return false;
@@ -18501,7 +18565,7 @@ export class SqlDriver implements IDataDriver {
       this.logger.warn(
         `[sql-driver] NOT dropping "${tableName}"."${shadow}" while collecting the retired index ` +
           `'${indexName}' — ${stillKeyedBy.length} index(es) still key that column ` +
-          `(${stillKeyedBy.join(', ')}), so dropping it would remove them too (#13056).`,
+          `(${stillKeyedBy.join(', ')}), so dropping it would remove them too.`,
         { tableName, indexName, shadow, stillKeyedBy },
       );
       return false;
@@ -18511,7 +18575,7 @@ export class SqlDriver implements IDataDriver {
     this.logger.warn(
       `[sql-driver] dropped the hash-shadow column "${shadow}" from "${tableName}" — the UNIQUE index ` +
         `'${indexName}' it carried is retired, so the STORED generated column was recomputed on every ` +
-        `write for a constraint that no longer exists (#11627/#13056).`,
+        `write for a constraint that no longer exists.`,
       { tableName, indexName, shadow },
     );
     return true;
@@ -18609,13 +18673,13 @@ export class SqlDriver implements IDataDriver {
       return (
         `[sql-driver] duplicate value for the UNIQUE constraint '${indexName}' on "${tableName}" ` +
         `(${described}). The constraint is physically carried by a hash-shadow column, so the ` +
-        `server's own message quotes a binary digest instead of the value (#11627).`
+        `server's own message quotes a binary digest instead of the value.`
       );
     }
     return (
       `[sql-driver] HASH COLLISION on the shadow-carried UNIQUE index '${indexName}' on "${tableName}" ` +
       `(${described}): the write was rejected as a duplicate, but NO existing row carries these ` +
-      `values. Uniqueness on this index is enforced over a SHA-256 of them (#11627), so two different ` +
+      `values. Uniqueness on this index is enforced over a SHA-256 of them, so two different ` +
       `values produced the same digest. This is expected at a rate near 10^-59 for a billion rows — if ` +
       `you are reading this, please report it with the values above; the write itself is legitimate and ` +
       `is being refused.`
@@ -19007,7 +19071,7 @@ export class SqlDriver implements IDataDriver {
       `(${SqlDriver.varcharPackLength(SqlDriver.DEFAULT_STRING_VARCHAR_CHARS, bytesPerChar)} bytes here), and ` +
       `so do \`lookup\`, \`user\`, \`auto_number\` and the option types — an object can reach this limit ` +
       `without declaring a bound anywhere. The server's own error names no column, which is the whole reason ` +
-      `this one does (#11565).`
+      `this one does.`
     );
   }
 
@@ -19840,7 +19904,10 @@ export class SqlDriver implements IDataDriver {
     this.fileColumnsMovedAsked = true;
     this.fileColumnsMovedResolver = undefined;
     try {
-      this.fileColumnsMoved = (await resolver()) === true;
+      // [#20768] Asked inside the pre-DDL scope. On a new database the ledger
+      // the resolver reads does not exist yet, and that refusal is not a
+      // fault. The answer is unchanged — see {@link PRE_DDL_QUESTION_SCOPE}.
+      this.fileColumnsMoved = (await PRE_DDL_QUESTION_SCOPE.run(true, resolver)) === true;
     } catch {
       this.fileColumnsMoved = false;
     }

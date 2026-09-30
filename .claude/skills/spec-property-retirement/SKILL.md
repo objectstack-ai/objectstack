@@ -83,8 +83,8 @@ conversion,钉上 non-warn。十四个键里有一个是这样被证伪的 —�
 
 | Schema | 路线 | 机制 |
 |---|---|---|
-| **非 `.strict()`** | `retiredKey()` 墓碑 | `packages/spec/src/shared/retired-key.ts` 的 `retiredKey(guidance)` —— `z.never({ error: () => guidance }).optional()`。两个通道:`tsc`(输入类型 `never`)与 parse(处方本身,不是 "unrecognized key")。 |
-| **`.strict()`** | 删键 + guidance map | 从 shape 里删除;向该 schema 的 `*_RETIRED_KEY_GUIDANCE` 加条目,由 `strictObject()` 的 `guidance:` 槽消费(`shared/strict-object.ts`;整族一条走 `guidanceSets`)。样板 `ai/tool.zod.ts`,审计 `shared/alias-integrity.test.ts`。⛔ 别再手写 `$ZodErrorMap`。 |
+| **任何 shape**(strict 与否) | `retiredKey()` 墓碑 | `packages/spec/src/shared/retired-key.ts` 的 `retiredKey(guidance)` —— `z.never({ error: () => guidance }).optional()`。两个通道:`tsc`(输入类型 `never`)与 parse(处方本身)。strict 上裸删也响,但只报 "unrecognized key",两通道都丢。 |
+| **从未声明的拼写** | guidance map | 退役键的旧 alias、错层指针,墓碑无属性可换:向 `*_RETIRED_KEY_GUIDANCE` 加条目,由 `strictObject()` 的 `guidance:` 槽消费(整族走 `guidanceSets`)。样板 `data/mapping.zod.ts`,审计 `shared/alias-integrity.test.ts`。⛔ 别手写 `$ZodErrorMap`。 |
 | **没人 parse 它** | 都不用 | 没人能收到的处方是噪音。有意删掉 baseline 行并在 changeset 里写明 —— 先例 #3896 与 #4834(PR #4878),都在 kernel plugin-runtime 家族。家族删除后幸存的解释块在 `packages/spec/src/kernel/index.ts`(搜 `plugin-runtime.zod`)。 |
 
 永不从非 strict schema 上裸删一个键:zod 会静默剥掉它,你只是用一个静默 no-op 换了
@@ -99,18 +99,15 @@ liveness 门禁走的是 **schema 的 shape**,逐个属性去
 | 路线 | 键还在被走的 shape 里? | 它的台账条目 |
 |---|---|---|
 | `retiredKey()` 墓碑 | **在**(`z.never()` 是属性) | **保留** —— `status: "dead"`、一个 `verifiedAt`、一条 `note` 写明 REMOVED + 条目为何还在 |
-| strict 删除 | 不在 | **删除**,连同 CLI advisory-lint 的预期 |
+| 删键(无墓碑) | 不在 | **删除**,连同 CLI advisory-lint 的预期 |
 
 现在两个方向都会红 CI,搞反了两边都很响:
 
 - 删掉**墓碑**键的行,报 **UNCLASSIFIED**(#3896 清扫一次 14 个 —— 本节就是防它);
-- 留着 **strict 删除**键的行,报 **ORPHAN** 行。
+- 留着**无墓碑删除**的键的行,报 **ORPHAN** 行。
 
-orphan 这条腿是新的(`packages/spec/scripts/liveness/orphans.mts`)。它落地之前这个方向从不失败
-—— 门禁走 schema 再查行,键已离开 shape 的行根本不会被问到,原地腐烂。report 的
-`aria`/`performance` 行就这样比它们的键多活了一整个 release,靠有人恰好读到那个文件
-才手工删掉。你撞上 orphan 报错而属性确实还可编写时,要修的是 **walk**,不是行:
-walk 看不见的属性就是 ratchet 管不到的属性。
+orphan 这条腿住 `packages/spec/scripts/liveness/orphans.mts`,来历见其头注。你撞上 orphan 报错而属性
+确实还可编写时,要修的是 **walk**,不是行:walk 看不见的属性就是 ratchet 管不到的属性。
 
 墓碑条目的 note 模板(house style 原文,如 `liveness/action.json`):
 
@@ -204,18 +201,21 @@ conversion 是消费者跟的;D3 条目是升级方的 agent 读的。三个都�
       (`flow.nodes[].outputSchema`),那也是 upgrade guide 打印的。多键 conversion
       仍用恰好 `' / '` 连接子句(tool 清扫以来的 house style)。下游不再有任何东西
       从它解析归属 —— 那个职责移给了上面的条目。
-- [ ] **`retiredFromLoadPath: true`** —— 退役恒真,但管辖权只有 authoring 漏斗
+- [ ] **`retiredFromLoadPath: true` 与 `retiredAfter: 'x.y.z'`** —— 后者必填(缺则 `tsc` 拒),新退役填
+      `packages/spec/package.json` 的当前版本标签(`retired-after.census.test.ts` 逐值钉;artifact 门据它
+      逐条开窗)。前者退役恒真,但管辖权只有 authoring 漏斗
       `normalizeStackInput`;三处 data-at-rest seam 以 `includeRetired: true` 故意重放退役
       条目,它**一处也拦不住**:`applyConversionsToStoredItem`(钉死)、automation
       engine 的 flow rehydration、`applyArtifactForwardConversions`。对*改名*它意味着
       「没有 alias 窗口,故意的」;对**默认值翻转**,只有确知输入早于翻转的 seam 才可重
       放,其余按 id 退订 `excludeConversionIds` —— `app-hidden-to-unpublished` 在 artifact
-      门即如此。上一版样例栽在这:它教「只有 migrate meta 能应用翻转」,而 boot 时照样
-      应用,该 conversion 已撤(`packages/spec/CHANGELOG.md`)。
-- [ ] **一步 D3 链**,在 `packages/spec/src/migrations/registry.ts` —— 把 id 加进
-      `MIGRATIONS_BY_MAJOR[N].conversionIds`,扩写该步的 `rationale`。
-      `conversion.toMajor` **必须等于**该步的 major。⚠ 没有东西直接断言「每个
-      conversion 都接进了某一步」,拼错的 id 在 replay 时被**静默跳过**;
+      门即如此。
+- [ ] **一步 D3 链**,在 `packages/spec/src/migrations/registry.ts`;`conversion.toMajor` **必须等于**该步的
+      major。**18 步**:conversion 只进 `conversions/registry.ts` 的 `MAJOR_18_CONVERSIONS`,照其头注按
+      标识符排序插入,本步 `conversionIds` 由它派生;`rationale` 只加一个 `STEP18_RATIONALE` 片段,
+      按其头注插在你 D3 semantic id 的排序位;尾部追加被两处头注点名的 merge 测试拒收。
+      **更早的步**:id 加进 `MIGRATIONS_BY_MAJOR[N].conversionIds`,扩写该步 `rationale`。⚠ 没有东西
+      直接断言「每个 conversion 都接进了某一步」,拼错的 id 在 replay 时被**静默跳过**;
       chain-replay 测试抓得到它,只因为没接线的 fixture 永远到不了自己的 `after`。
       所以把那个测试的失败读作「没接线」,不是「transform 坏了」。
 - [ ] **fixture 必须不相交 —— 两重。** 每个 fixture 都被整张表 replay,必须恰好等于
@@ -239,7 +239,7 @@ conversion 是消费者跟的;D3 条目是升级方的 agent 读的。三个都�
 
 从上往下做;每一行背后都有一个门。
 
-- [ ] **Schema** —— 墓碑或 strict 删除(§2),外加 schema 内注释:删了什么、真正生
+- [ ] **Schema** —— 墓碑或无墓碑删键(§2),外加 schema 内注释:删了什么、真正生
       效的机制是什么。
 - [ ] **孤儿值 schema** —— 一个键的 `XxxConfigSchema` 没有别的消费者就随它一起走
       (`PerformanceConfigSchema`、`AIKnowledgeSchema`、`ToolCategorySchema`)。没有
@@ -254,7 +254,7 @@ conversion 是消费者跟的;D3 条目是升级方的 agent 读的。三个都�
       要手改)。
 - [ ] **生成 baseline** —— `pnpm --filter @objectstack/spec gen:schema` 会动
       `authorable-surface/<category>.json`(墓碑 → 一条新的 `… [RETIRED]` 行;
-      strict 删除 → 该行**消失**,这是门 (a) 的绊线,所以同一个 PR 里有意删掉它)与
+      无墓碑删键 → 该行**消失**,这是门 (a) 的绊线,所以同一个 PR 里有意删掉它)与
       `json-schema.manifest/<category>.json`。#5837 起两者都按 category 分片 —— 门
       禁把整个目录读成一个集合,退役流程不变;变的只是那一行住在哪个文件。然后
       `gen:spec-changes`、`gen:upgrade-guide`、`gen:api-surface`、`gen:docs`。

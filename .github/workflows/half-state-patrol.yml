@@ -116,7 +116,10 @@ name: Half-State Patrol
 #
 # plus one `tracking`-labeled anchor issue opened in that repo, whose number is
 # what `anchor-issue` carries. ⛔ A sha, never `@main`: `@main` is the drift this
-# change removes, re-entered from the other side.
+# change removes, re-entered from the other side. A board with no anchor BY
+# DECISION adds `anchor-optional: true` instead of opening one, and its findings
+# then reach run summaries only; the action's header says why that is an opt-in
+# (#20793), and this caller keeps the default.
 #
 # ⚠️ The paragraph this replaces was a LIST of files to copy, and it is worth
 # recording why a list is not the fix. It said TWO files until 2026-09-03 while
@@ -279,7 +282,8 @@ jobs:
           #
           # Resolution: the repository variable `HALF_STATE_ANCHOR_ISSUE` if
           # set, else this repo's own pinned number, else EMPTY — and empty
-          # makes the action refuse to write rather than guess. The literal is
+          # makes the action refuse to write rather than guess, because this
+          # caller leaves `anchor-optional` at its loud default. The literal is
           # guarded by the repository name even though this file no longer
           # travels: the cheapest way to adopt the patrol is still to copy this
           # caller, and an unguarded fallback is what would let such a copy
