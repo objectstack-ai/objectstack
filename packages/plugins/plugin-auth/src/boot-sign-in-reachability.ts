@@ -195,6 +195,38 @@
  * When the gate suppresses the report the shape is still recorded — at `debug`,
  * under the same grep token, naming which configuration answered for it — so
  * "why is this deployment quiet" has an answer in the log and not only here.
+ *
+ * ## [#20861] A path the HOST owns, which the login page does not show
+ *
+ * The three facts above are read off `getPublicConfig()` — what the login page
+ * is told — plus one store row behind the SSO flag. A sign-in path that is
+ * deliberately NOT on the login page is invisible to all three. Measured on the
+ * card: a hosted kernel whose owner hid the platform sign-in button wires no
+ * `oidcProviders`, yet that owner still enters through the host's own handoff
+ * route, which mints the session without writing a `sys_account` row — and
+ * every kernel rebuild logged this report at `error` while the owner signed in
+ * normally.
+ *
+ * So there is a FOURTH fact, `hostSignInHandoff`, and it is the one the gate
+ * does not derive: the host that constructs the plugin STATES it
+ * (`AuthPluginOptions.hostSignInHandoff`), because the host is the one party
+ * that knows it mounted such a route. Three things it deliberately is not:
+ *
+ *   - ⛔ **an inference** — not from an environment's name, not from a control
+ *     plane's "platform SSO enabled" flag, not from the absence of rows. Each
+ *     would silence a deployment on a guess about wiring nobody stated;
+ *   - ⛔ **a login-page provider** — declaring it registers nothing and moves
+ *     no field `getPublicConfig()` returns, so the public config keeps telling
+ *     the truth about what the login page offers. Re-registering a hidden
+ *     provider just to satisfy this gate would make it lie;
+ *   - ⛔ **a remedy** — the `error` text does not name it, and must not: the
+ *     operator of a locked-out self-hosted deployment reads that line, and a
+ *     one-word switch that makes it go quiet is the one "fix" that turns a loud
+ *     dead end into a silent one. A host with no handoff route never sets it,
+ *     and the report stays loud there.
+ *
+ * Only a literal `true` declares it; any other value reads as NOT declared,
+ * which is the loud direction.
  */
 
 import { SystemObjectName } from '@objectstack/spec/system';
@@ -363,6 +395,13 @@ export interface SignInPathWiring {
   socialSignIn: boolean;
   /** Enterprise SSO is wired AND at least one `sys_sso_provider` row exists. */
   enterpriseSso: boolean;
+  /**
+   * [#20861] The HOST declared a sign-in handoff route of its own
+   * (`AuthPluginOptions.hostSignInHandoff`): a path no login-page provider
+   * shows, which mints a session without a `sys_account` row. The one member
+   * that is STATED rather than derived — see the module doc.
+   */
+  hostSignInHandoff: boolean;
 }
 
 /**
@@ -376,31 +415,44 @@ export interface SignInPathConfigView {
 }
 
 /**
+ * [#20861] The subset of `AuthPluginOptions` this gate reads — what the HOST
+ * declared, as opposed to {@link SignInPathConfigView}, what the login page is
+ * told. Structural for the same reason: the plugin hands its own options
+ * straight over, and nothing here depends on the rest of them.
+ */
+export interface SignInPathHostView {
+  hostSignInHandoff?: boolean;
+}
+
+/**
  * [#15074] Resolve the wiring facts for a boot, paying for the provider probe
  * only when the answer can change what is reported.
  *
  * Two short-circuits, both deliberate: a boot that is not in the dead-end shape
  * cannot report whatever the wiring says, and a deployment that already has a
- * delegated path proven from config needs no store read to confirm a second
- * one. Every other boot pays exactly one bounded row read, and only when
- * enterprise SSO is switched on.
+ * delegated path — proven from config, or [#20861] declared by the host — needs
+ * no store read to confirm a second one. Every other boot pays exactly one
+ * bounded row read, and only when enterprise SSO is switched on.
  */
 export async function probeSignInPathWiring(
   facts: SignInReachabilityFacts,
   config: SignInPathConfigView | undefined,
   engine: BootProbeEngine | undefined,
+  host?: SignInPathHostView,
 ): Promise<SignInPathWiring> {
   const ssoOnlyMode = config?.features?.ssoEnforced === true;
   const socialSignIn = (config?.socialProviders?.length ?? 0) > 0;
+  const hostSignInHandoff = host?.hostSignInHandoff === true;
   const needsProviderProbe =
     config?.features?.sso === true &&
     !ssoOnlyMode &&
     !socialSignIn &&
+    !hostSignInHandoff &&
     isNoSignInAccountShape(facts);
   const enterpriseSso = needsProviderProbe
     ? (await probeSsoProvidersPresence(engine)) === 'present'
     : false;
-  return { ssoOnlyMode, socialSignIn, enterpriseSso };
+  return { ssoOnlyMode, socialSignIn, enterpriseSso, hostSignInHandoff };
 }
 
 /**
@@ -431,6 +483,13 @@ export function resolveDelegatedSignInPath(wiring?: SignInPathWiring): string | 
       'registered, so a human signs in through it without holding a credential row here'
     );
   }
+  if (wiring.hostSignInHandoff) {
+    return (
+      'the host running this deployment declared a sign-in handoff route of its own ' +
+      '(hostSignInHandoff), so its humans enter through that route, not through a login-page ' +
+      `provider, and hold no '${SystemObjectName.ACCOUNT}' row`
+    );
+  }
   return null;
 }
 
@@ -455,6 +514,8 @@ export function resolveDelegatedSignInPath(wiring?: SignInPathWiring): string | 
  *     accounts" is its healthy resting state and not a dead end. Omitting
  *     `wiring` answers as if nothing were configured, which keeps every
  *     pre-#15074 caller (and the self-hosted deployment they describe) loud.
+ *     [#20861] A host-declared handoff route is one such path, the one the
+ *     host states rather than the config shows.
  */
 export function resolveNoSignInAccountReport(
   facts: SignInReachabilityFacts,

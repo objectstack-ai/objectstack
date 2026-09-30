@@ -540,6 +540,17 @@ first thing to look for — and note that it asks only whether *an* account row
 exists, so a row you wrote yourself silences it whether or not anyone can
 actually authenticate with it.
 
+The same shape is logged at **debug** instead, under the same token and naming
+the reason, when the deployment has a sign-in path that needs no `sys_account`
+row of its own: SSO-only mode (`OS_AUTH_SSO_ONLY` or `ssoOnlyMode`), a
+configured social or OIDC provider, enterprise SSO with at least one registered
+identity provider, or a host that constructs `AuthPlugin` with
+`hostSignInHandoff: true` because it signs people in through a handoff route of
+its own. A deployment with none of these still reports at **error**.
+`hostSignInHandoff` is a statement by the code that serves such a route, not a
+way to quiet the report: set on a deployment without one, it hides exactly the
+dead end this section describes.
+
 **The recovery is out of band, and it is one row.** Write a pending invitation
 directly against the store the deployment reads, then have that person register
 through the ordinary sign-up endpoint — the invitation carve-out admits that
