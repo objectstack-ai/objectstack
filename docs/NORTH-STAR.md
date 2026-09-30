@@ -40,6 +40,7 @@
 - records · 写入规则在服务端兑现,撞车响亮、后悔得了、改过什么看得见 · records-forms · validation-rule-type-matrix, object-hook-lifecycle, delete-behavior-matrix, concurrent-edit-conflict, record-edit-undo, field-history-tracking
 - records · 记录上的动作与协作:按钮在声明的位置、参数契约在派发时兑现、讨论与 @ 提醒 · records-forms · action-location-matrix, action-param-widgets, upload-guard-blocks-confirm, record-discussion-mentions
 - records · 搜得到:跨字段、字段限定、权限一致、拼音、即时新鲜;全局搜索与命令面板同一条路 · search · cross-field-object-search, field-scoped-narrowing, rls-both-personas, pinyin-flag-both-sides, freshness-and-empty, console-global-search, command-palette-navigation
+- records · 共享选项集:多个对象复用同一份选项,客户按组织追加值而不改应用源码 · records-forms · picklist-shared-across-objects, picklist-org-append
 - access · 行级与字段级权限两边都对:受限成员只看自己的,该只读的只读、该看不见的不回给前端 · access-security · rls-both-sides, scope-depth-asymmetry, fls-mask-and-strip
 - access · 增删改查逐格兑现,改完权限立刻换脸,自查接口与服务端一致 · access-security · crud-permission-matrix, permission-matrix-edit-loop, me-permissions-aggregation-parity
 - access · 写入路径挡得住:只读剥离、伪造与转移 owner 被拒、默认可见度只能收紧 · access-security · write-path-guards, owd-save-gate
