@@ -112,16 +112,80 @@
  * `write-pace.mjs` counts the dispatch as THE write — one POST, paced and
  * leased like any other; the runner's executor paces its own writes there.
  *
+ * ## The read-back — the run's `success` is the executor's, not the write's
+ *
+ * A run concluding `success` proves the executor's requests were ANSWERED 2xx.
+ * It does not prove the board holds the bytes this seat sent: measured, a
+ * 41,699-byte `issue_patch` body went through a `success` run and was stored
+ * with two multi-byte characters replaced by U+FFFD, deterministically on a
+ * re-send — and this file said exit 0 both times. The executor cannot catch
+ * that from where it stands: whatever reached it is what it wrote and what the
+ * platform echoed, so only the SEAT, which holds the bytes it meant, can.
+ *
+ * So after a `success` run `sendFleetWrite` reads back every action that
+ * carried a `body` — `BODY_OPS`, derived from `ops.mjs`, so a new body op is
+ * read back the day it lands (`READ_BACK_LOCATORS` must name it, pinned) — and
+ * judges the stored bytes against the bytes sent with post-stamped's own
+ * `classifyReadBack` / `sentBodyLanded`: the exact-bytes classifier whose
+ * declared normalisations (the platform's footer block, a stripped trailing
+ * newline) are the ones this fleet measured, ⛔ never a second copy here. It is
+ * loaded with a dynamic import because post-stamped imports THIS file
+ * statically; a static import back would be a cycle whose evaluation order
+ * decides whether either file's constants exist yet. One cell is added, for
+ * the one surface post-stamped never writes: a `pr_create` body the platform
+ * stored as the bytes sent followed by exactly the session-URL footer block
+ * (`PR_CREATE_FOOTER_TAIL`) — `platform-readings.md`'s fourth shape, where the
+ * sent body is a strict prefix of the stored one. It forgives an append after
+ * EVERY byte sent and nothing inside them.
+ *
+ * Each action's verdict is one of three, and the locator decides which a
+ * missing match may be:
+ *
+ *   landed        every byte sent is on the platform (identical, or a declared
+ *                 normalisation).
+ *   not-stored    the object the action wrote was READ and a byte sent is not
+ *                 the byte stored at that offset — the result is `failure`
+ *                 with `notStored: true`, exit `EXIT_NOT_STORED` (4), naming the
+ *                 op, the object and the first differing byte.
+ *   unverified    the stored body could not be read, or — for a `comment`,
+ *                 which only its content can find — no comment created since
+ *                 the dispatch holds the bytes sent. Result `unverified`,
+ *                 exit `EXIT_UNCONFIRMED` (6): an object that was not found was
+ *                 not measured, so ⛔ it is never called "not stored", and ⛔ never
+ *                 success either.
+ *
+ * ⛔ No retry on a mismatch: a split that happened once happens again on an
+ * identical re-send (measured), and a body edit retried writes the damage over
+ * and over. `4` means what it means in every other fleet tool — the write
+ * HAPPENED and the board disagrees: go READ it.
+ *
+ * How the callers read the new outcomes — one exit vocabulary, no caller edited:
+ *   - `failure` + `notStored` keeps the state every caller already reads as "the
+ *     platform did not keep it whole — go READ, never fall back": post-stamped's
+ *     `relayExitFor` maps `failure` to its own `EXIT_NOT_STORED` (4); the tools
+ *     that call `exitForResult` (issue-create, label-write, issue-transfer,
+ *     close-cards) get 4 from it — issue-create's `EXIT_READ_BACK_MISMATCH`.
+ *   - `unverified` is a state no caller names, so each falls to its non-success
+ *     branch: `exitForResult` answers 6, post-stamped's `relayExitFor` answers
+ *     its default 6. Neither is ever a fall-back to direct (that is `no-run`'s
+ *     alone) and neither is 0.
+ *   - a stroke carrying no body (labels, assignees, state, a transfer, the
+ *     GraphQL ops) reads nothing back and its outcome is unchanged.
+ *
  * ## Exit codes — capture them BEFORE any pipe
  *
- *   0   the run completed with conclusion `success`.
+ *   0   the run completed with conclusion `success`, and every body it wrote
+ *       reads back as the bytes sent.
  *   2   usage, or the packed payload was refused by the validator (nothing sent).
  *   3   PREREQUISITE NOT MET — no token, no session in dispatch mode, the
  *       dispatch route dead (401/407/0), or the run list unreadable.
+ *   4   NOT STORED — the run succeeded and the read-back shows a body the board
+ *       does not hold as sent (op, object and first differing byte printed).
+ *       Go READ it; ⛔ do not retry.
  *   5   the platform REFUSED the dispatch (403/404/422), or the run FAILED.
- *   6   UNCONFIRMED — no run in the start window, or no completion within
- *       the ceiling. The run URL (when any) is printed. Go READ it; ⛔ do not
- *       retry blind.
+ *   6   UNCONFIRMED — no run in the start window, no completion within the
+ *       ceiling, or a body the read-back could not find or read. The run URL
+ *       (when any) is printed. Go READ it; ⛔ do not retry blind.
  *  10   the write throttle refused the dispatch.
  */
 
@@ -135,7 +199,7 @@ import { isEntrypoint } from '../../invoked-as.mjs';
 import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan, proxyRoute } from '../check-half-states.mjs';
 import { classifyHttp } from '../label-write.mjs';
 import { EXIT_WRITE_PACE_REFUSED, isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from '../write-pace.mjs';
-import { CONTAINER_SESSION_ENV, CONTAINER_SESSION_SHAPE, MAX_REQUEST_ID_CHARS, RELAY_EVENT_TYPE, RELAY_REPO, SESSION_ENV, SESSION_SHAPE, TRANSPORTS, TRANSPORT_ENV } from './ops.mjs';
+import { CONTAINER_SESSION_ENV, CONTAINER_SESSION_SHAPE, MAX_REQUEST_ID_CHARS, OPS, OP_NAMES, RELAY_EVENT_TYPE, RELAY_REPO, SESSION_ENV, SESSION_SHAPE, TRANSPORTS, TRANSPORT_ENV } from './ops.mjs';
 import { refusalText, validatePayload } from './validate.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
@@ -145,6 +209,12 @@ const PROXY_REARM_GUARD = 'OS_FLEET_DISPATCH_PROXY_REARMED';
 export const EXIT_OK = 0;
 export const EXIT_USAGE = 2;
 export const EXIT_PREREQUISITE = EXIT_PREREQUISITE_NOT_MET;
+/**
+ * The run succeeded and the read-back READ a body the board does not hold as
+ * sent — the value every fleet tool gives "written, and the board disagrees":
+ * post-stamped's `EXIT_NOT_STORED`, issue-create's `EXIT_READ_BACK_MISMATCH`.
+ */
+export const EXIT_NOT_STORED = 4;
 export const EXIT_PLATFORM_REFUSAL = 5;
 /** The one exit that means "dispatched, outcome not confirmed" — shared by every tool that takes the relay. */
 export const EXIT_UNCONFIRMED = 6;
@@ -396,6 +466,135 @@ export function fallbackText(result, tool = 'fleet-write') {
 }
 
 // ---------------------------------------------------------------------------
+// The read-back — pure halves (the header's read-back section is the authority)
+// ---------------------------------------------------------------------------
+
+/** The clock slack a created object's timestamp may carry before the dispatch — post-stamped's relay read-back allows the same minute. */
+export const READ_BACK_SLACK_MS = 60_000;
+
+/** Every op the table lets carry a `body` — derived from `ops.mjs`, never listed, so a new body op is read back the day it lands. */
+export const BODY_OPS = Object.freeze(OP_NAMES.filter((op) => [...OPS[op].required, ...OPS[op].optional].includes('body')));
+
+/**
+ * Where each body op's stored body is read from, and how it is FOUND — which
+ * decides what a missing match may mean. `address`: the action named the
+ * object. `key`: the run created it and a key the action sent (the title, the
+ * head) finds it. Found either way, the object is identified independently of
+ * its body, so a difference is a measurement of THAT object: `not-stored`.
+ * `content`: only the body can find it (a new comment), so a body that matches
+ * nothing is `unverified` — an object that was not found was not measured.
+ * The self-test pins that this table names exactly `BODY_OPS`.
+ */
+export const READ_BACK_LOCATORS = Object.freeze({
+  issue_patch: Object.freeze({ found: 'address', where: 'GET /repos/{repo}/issues/{issue}' }),
+  comment_edit: Object.freeze({ found: 'address', where: 'GET /repos/{repo}/issues/comments/{comment_id}' }),
+  issue_create: Object.freeze({ found: 'key', where: 'the newest issue created since the dispatch whose title is the title sent' }),
+  pr_create: Object.freeze({ found: 'key', where: 'the newest pull request on the head sent, created since the dispatch' }),
+  comment: Object.freeze({ found: 'content', where: 'the newest comment on the issue, created since the dispatch, whose stored body holds the bytes sent' }),
+});
+
+/**
+ * The tail the platform appends to a `pr_create` body that does not already
+ * end in the block — `.claude/skills/pm-dispatch/references/platform-readings.md`,
+ * the fourth shape: a rule plus ONE session-URL footer, the sent body a strict
+ * prefix of the stored one, 90/91 bytes (the session id's length). A pattern
+ * only because the session id varies; everything around it is literal.
+ */
+export const PR_CREATE_FOOTER_TAIL = /^\n+---\n_Generated by \[Claude Code\]\(https:\/\/claude\.ai\/code\/session_[A-Za-z0-9]+\)_$/u;
+
+/** The read-back's judge — post-stamped's exact-bytes classifier, loaded when a body is read back. ⛔ Never restated here (header). */
+export async function loadReadBackJudge() {
+  const judge = await import('../post-stamped.mjs');
+  return { classifyReadBack: judge.classifyReadBack, sentBodyLanded: judge.sentBodyLanded };
+}
+
+/** Every action in a judged payload that carried a body, with the keys its locator needs. Pure. */
+export function readBackTargets(payload) {
+  const out = [];
+  const actions = Array.isArray(payload?.actions) ? payload.actions : [];
+  actions.forEach((a, i) => {
+    if (!BODY_OPS.includes(a?.op) || typeof a.body !== 'string') return;
+    const target = { action: i + 1, op: a.op, sent: a.body };
+    for (const key of ['issue', 'comment_id', 'title', 'head']) if (key in a) target[key] = a[key];
+    out.push(target);
+  });
+  return out;
+}
+
+const replacementCount = (s) => (String(s ?? '').match(/�/gu) ?? []).length;
+
+/**
+ * One stored body against the bytes sent. Pure: `judge` is post-stamped's pair
+ * (`loadReadBackJudge`). Returns `{ verdict, cls, offset, sentBytes,
+ * storedBytes, sentContext, storedContext, replacements }` — `verdict` is
+ * `landed` or `not-stored` for a body that was read, `unverified` for one that
+ * was not a string. `replacements` is how many MORE U+FFFD the stored body
+ * carries than the sent one: the mark of a byte-level split upstream, printed
+ * because the context window drops a replacement glyph at its edges.
+ */
+export function judgeStoredBody({ op, sent, stored }, judge) {
+  const sentText = String(sent ?? '');
+  const sentBytes = Buffer.byteLength(sentText, 'utf8');
+  if (typeof stored !== 'string') return { verdict: 'unverified', cls: 'unreadable', offset: null, sentBytes, storedBytes: null, replacements: 0 };
+  const storedBytes = Buffer.byteLength(stored, 'utf8');
+  const rb = judge.classifyReadBack({ sent: sentText, stored });
+  if (judge.sentBodyLanded(rb)) return { verdict: 'landed', cls: rb.class, offset: null, sentBytes, storedBytes, replacements: 0 };
+  const content = sentText.replace(/\n+$/u, '');
+  if (op === 'pr_create' && stored.startsWith(content) && PR_CREATE_FOOTER_TAIL.test(stored.slice(content.length))) {
+    return { verdict: 'landed', cls: 'pr-create-footer-appended', offset: null, sentBytes, storedBytes, replacements: 0 };
+  }
+  return {
+    verdict: 'not-stored',
+    cls: rb.class,
+    offset: rb.offset,
+    sentBytes,
+    storedBytes,
+    sentContext: rb.sentContext,
+    storedContext: rb.storedContext,
+    replacements: Math.max(0, replacementCount(stored) - replacementCount(sentText)),
+  };
+}
+
+/** The stroke's verdict from its rows: any `not-stored` wins, then any `unverified`; `none` when nothing carried a body. Pure. */
+export function strokeReadBackState(rows) {
+  if (!rows.length) return 'none';
+  if (rows.some((r) => r.verdict === 'not-stored')) return 'not-stored';
+  if (rows.some((r) => r.verdict === 'unverified')) return 'unverified';
+  return 'landed';
+}
+
+/** The transcript line for one read-back row. Pure. */
+export function readBackLine(row) {
+  const head = `fleet-write: read-back action ${row.action} ${row.op}${row.where ? ` ${row.where}` : ''}`;
+  if (row.verdict === 'landed') return `${head}: ${row.sentBytes} byte(s) sent, ${row.storedBytes} stored — ${row.cls}; every byte sent is on the platform.`;
+  if (row.verdict === 'unverified') return `${head}: ⚠️ UNVERIFIED — ${row.why ?? `the stored body could not be read (${row.cls})`}.`;
+  const fffd = row.replacements > 0 ? ` The stored body carries ${row.replacements} U+FFFD replacement character(s) the sent one does not — the mark of a byte-level split upstream.` : '';
+  return `${head}: ✗ NOT STORED — sent ${row.sentBytes} byte(s), stored ${row.storedBytes}; first difference at byte ${row.offset}: sent ${row.sentContext} | stored ${row.storedContext}.${fffd}`;
+}
+
+/** What the CLI prints on a `failure` the read-back measured. */
+export function notStoredText(result, tool = 'fleet-write') {
+  const bad = (result.readBack?.rows ?? []).filter((r) => r.verdict === 'not-stored');
+  const which = bad.map((r) => `action ${r.action} (${r.op}${r.where ? ` ${r.where}` : ''}) first differs at byte ${r.offset}`).join('; ');
+  return (
+    `${tool}: NOT STORED — run ${result.run?.id ?? '?'} concluded success, and the read-back shows the board does NOT hold the bytes sent: ${which}.` +
+    `${result.run?.url ? ` Run: ${result.run.url}` : ''}\n` +
+    '  The write HAPPENED. Go READ what is stored and send a body that can land. ⛔ Do not re-run blind: an identical re-send\n' +
+    `  reproduces a deterministic split, and a body edit retried writes the damage again. Exit ${EXIT_NOT_STORED}.`
+  );
+}
+
+/** What the CLI prints when the run succeeded and a body could not be read back. */
+export function unverifiedText(result, tool = 'fleet-write') {
+  const open = (result.readBack?.rows ?? []).filter((r) => r.verdict === 'unverified');
+  return (
+    `${tool}: UNCONFIRMED — run ${result.run?.id ?? '?'} concluded success, but ${open.length} body/bodies could not be read back: ` +
+    `${open.map((r) => `action ${r.action} (${r.op}) — ${r.why ?? r.cls}`).join('; ')}.${result.run?.url ? ` Run: ${result.run.url}` : ''}\n` +
+    `  Go READ the target; ⛔ do not re-run blind — a second dispatch is a second write. Exit ${EXIT_UNCONFIRMED}.`
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Transport — the one POST, paced; the reads around it are not.
 // ---------------------------------------------------------------------------
 
@@ -439,12 +638,97 @@ async function rest(api, path, { method = 'GET', body = null } = {}, deps = {}) 
   return { status: res.status, rateRemaining: rateRemaining === null ? null : Number(rateRemaining), json, detail: typeof json?.message === 'string' ? json.message : '', call: `${method} ${path}` };
 }
 
+/** Every page of a list endpoint (at most `maxPages`), or the first failing answer. Reads only — never paced. */
+async function listAll(api, path, t, maxPages = 10) {
+  const rows = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const r = await rest(api, `${path}${path.includes('?') ? '&' : '?'}per_page=100&page=${page}`, {}, t);
+    if (r.status !== 200 || !Array.isArray(r.json)) return { ok: false, rows, failed: r };
+    rows.push(...r.json);
+    if (r.json.length < 100) break;
+  }
+  return { ok: true, rows };
+}
+
+/**
+ * Read back every body a completed stroke wrote and judge it against the bytes
+ * sent. Returns `{ state, rows }` — `state` from `strokeReadBackState`. Never
+ * throws on a status: a read that fails makes its row `unverified`, with the
+ * call and status in `why`. `taken` keeps two actions of one stroke from being
+ * judged against the same created object.
+ */
+export async function readBackStroke(payload, { dispatchedAt }, deps = {}) {
+  const targets = readBackTargets(payload);
+  if (!targets.length) return { state: 'none', rows: [] };
+  const api = deps.api ?? DEFAULT_API;
+  const t = { fetch: deps.fetch, token: deps.token };
+  const judge = deps.judge ?? (await loadReadBackJudge());
+  const since = dispatchedAt - READ_BACK_SLACK_MS;
+  const sinceIso = encodeURIComponent(new Date(since).toISOString());
+  const created = (row) => Date.parse(row?.created_at ?? '') >= since;
+  const repo = payload.repo;
+  const taken = new Set();
+  const rows = [];
+  const unread = (target, where, r) => ({ action: target.action, op: target.op, where, verdict: 'unverified', cls: 'unread', why: `${r.call} -> HTTP ${r.status}${r.detail ? ` (${r.detail})` : ''}` });
+  for (const target of targets) {
+    const judged = (where, stored) => ({ action: target.action, op: target.op, where, ...judgeStoredBody({ op: target.op, sent: target.sent, stored }, judge) });
+    if (target.op === 'issue_patch' || target.op === 'comment_edit') {
+      const path = target.op === 'issue_patch' ? `/repos/${repo}/issues/${target.issue}` : `/repos/${repo}/issues/comments/${target.comment_id}`;
+      const where = target.op === 'issue_patch' ? `${repo}#${target.issue}` : `${repo} comment ${target.comment_id}`;
+      const r = await rest(api, path, {}, t);
+      rows.push(r.status === 200 && r.json ? judged(where, r.json.body) : unread(target, where, r));
+      continue;
+    }
+    if (target.op === 'issue_create' || target.op === 'pr_create') {
+      const isPr = target.op === 'pr_create';
+      const head = isPr ? (String(target.head).includes(':') ? String(target.head) : `${repo.split('/')[0]}:${target.head}`) : null;
+      const path = isPr
+        ? `/repos/${repo}/pulls?state=all&head=${encodeURIComponent(head)}&sort=created&direction=desc`
+        : `/repos/${repo}/issues?state=all&sort=created&direction=desc&since=${sinceIso}`;
+      const listed = await listAll(api, path, t, isPr ? 1 : 3);
+      const hit = listed.rows.find((o) => created(o) && !taken.has(o.id) && (isPr ? true : !o.pull_request && String(o.title ?? '').trim() === String(target.title ?? '').trim()));
+      if (!listed.ok && !hit) {
+        rows.push(unread(target, isPr ? `${repo} head ${head}` : `${repo} (new issue)`, listed.failed));
+        continue;
+      }
+      if (!hit) {
+        rows.push({ action: target.action, op: target.op, where: isPr ? `${repo} head ${head}` : `${repo} (new issue)`, verdict: 'unverified', cls: 'unfound', why: isPr ? `no pull request on ${head} was created since the dispatch` : `no issue created on ${repo} since the dispatch carries the title sent` });
+        continue;
+      }
+      taken.add(hit.id);
+      rows.push(judged(`${repo}#${hit.number}`, hit.body));
+      continue;
+    }
+    // `comment`: only the body finds a new comment, so a body that matches nothing is unverified, never not-stored.
+    const where = `${repo}#${target.issue} (new comment)`;
+    const listed = await listAll(api, `/repos/${repo}/issues/${target.issue}/comments?since=${sinceIso}`, t);
+    const candidates = listed.rows.filter((c) => created(c) && !taken.has(c.id));
+    const hit = [...candidates].reverse().find((c) => judgeStoredBody({ op: target.op, sent: target.sent, stored: c.body }, judge).verdict === 'landed');
+    if (hit) {
+      taken.add(hit.id);
+      rows.push(judged(`${repo}#${target.issue} comment ${hit.id}`, hit.body));
+      continue;
+    }
+    if (!listed.ok) {
+      rows.push(unread(target, where, listed.failed));
+      continue;
+    }
+    // One candidate is named with its first difference as a LEAD, never as a verdict: it may be someone else's comment.
+    const lone = candidates.length === 1 ? judgeStoredBody({ op: target.op, sent: target.sent, stored: candidates[0].body }, judge) : null;
+    const lead = lone && lone.verdict === 'not-stored' ? `; the one comment created since then (${candidates[0].id}) first differs at byte ${lone.offset}${lone.replacements > 0 ? ` and carries ${lone.replacements} extra U+FFFD` : ''}` : '';
+    rows.push({ action: target.action, op: target.op, where, verdict: 'unverified', cls: 'unfound', why: `${candidates.length} comment(s) created on #${target.issue} since the dispatch, none holding the bytes sent${lead}` });
+  }
+  return { state: strokeReadBackState(rows), rows };
+}
+
 /**
  * Send one packed payload and wait for its run.
  *
- * Returns `{ state, ok, status, verdict, run, requestId, dispatchedAt, startMs, ceilingMs, detail }` where `state` is one of
- * `success` · `failure` (the run completed otherwise) · `no-run` · `timeout` · `refused` (the dispatch itself).
- * Never throws on an HTTP status.
+ * Returns `{ state, ok, status, verdict, run, requestId, dispatchedAt, startMs, ceilingMs, detail, readBack }` where `state` is one of
+ * `success` (the run succeeded and every body reads back as sent) · `failure` (the run completed otherwise, or — `notStored:
+ * true` — it succeeded and the read-back measured a body the board does not hold as sent) · `unverified` (it succeeded and a
+ * body could not be read back) · `no-run` · `timeout` · `refused` (the dispatch itself). `readBack` is `readBackStroke`'s
+ * answer, present once the run succeeded. Never throws on an HTTP status.
  */
 export async function sendFleetWrite(payload, deps = {}) {
   const api = deps.api ?? DEFAULT_API;
@@ -500,14 +784,28 @@ export async function sendFleetWrite(payload, deps = {}) {
   }
   const ok = run.conclusion === 'success';
   log(`fleet-write: run ${run.id} completed — conclusion ${run.conclusion}${run.url ? ` ${run.url}` : ''}.`);
-  return { ...base, run, state: ok ? 'success' : 'failure', ok, status: 204, verdict: 'ok', dispatchedAt, detail: `conclusion ${run.conclusion}` };
+  const done = { ...base, run, status: 204, verdict: 'ok', dispatchedAt };
+  if (!ok) return { ...done, state: 'failure', ok: false, detail: `conclusion ${run.conclusion}` };
+
+  // ── read it back — the run's success is the executor's, not the write's ─────
+  const readBack = await readBackStroke(payload, { dispatchedAt }, { api, fetch: deps.fetch, token: deps.token, judge: deps.judge });
+  for (const row of readBack.rows) log(readBackLine(row));
+  if (readBack.state === 'not-stored') {
+    const first = readBack.rows.find((r) => r.verdict === 'not-stored');
+    return { ...done, state: 'failure', ok: false, notStored: true, readBack, detail: `conclusion success, but NOT STORED — action ${first.action} (${first.op} ${first.where}) first differs from the bytes sent at byte ${first.offset}` };
+  }
+  if (readBack.state === 'unverified') {
+    const first = readBack.rows.find((r) => r.verdict === 'unverified');
+    return { ...done, state: 'unverified', ok: false, readBack, detail: `conclusion success, but UNVERIFIED — action ${first.action} (${first.op}): ${first.why ?? first.cls}` };
+  }
+  return { ...done, state: 'success', ok: true, readBack, detail: `conclusion ${run.conclusion}` };
 }
 
 /** The exit a tool takes from a result that is not `success`. */
 export function exitForResult(result) {
   if (result.state === 'refused') return result.verdict === 'prerequisite' || result.verdict === 'ratelimit' ? EXIT_PREREQUISITE : EXIT_PLATFORM_REFUSAL;
-  if (result.state === 'failure') return EXIT_PLATFORM_REFUSAL;
-  if (result.state === 'no-run' || result.state === 'timeout') return EXIT_UNCONFIRMED;
+  if (result.state === 'failure') return result.notStored ? EXIT_NOT_STORED : EXIT_PLATFORM_REFUSAL;
+  if (result.state === 'no-run' || result.state === 'timeout' || result.state === 'unverified') return EXIT_UNCONFIRMED;
   return EXIT_OK;
 }
 
@@ -811,7 +1109,16 @@ export async function selfTest() {
      * function of the elapsed ms since the dispatch, so appearance latency and
      * completion are modelled as time, not as call counts.
      */
-    const platform = ({ dispatch = { status: 204 }, runs = () => [], one = () => null }, seen, clock) => async (url, init) => {
+    /**
+     * The BOARD the read-back reads: `store` maps a read call (`GET <path>`) to
+     * `{ status, json }`, or to a function of the parsed query. The default
+     * holds the one comment the default stroke writes, created just after the
+     * dispatch and stored as sent — so a stroke that succeeds reads back clean.
+     */
+    const T0 = Date.UTC(2026, 8, 22, 9, 4, 0);
+    const at = (ms) => new Date(T0 + ms).toISOString();
+    const DEFAULT_STORE = { [`GET /repos/objectstack-ai/objectstack/issues/19701/comments`]: { status: 200, json: [{ id: 501, created_at: at(8_000), body: ACTIONS[0].body }] } };
+    const platform = ({ dispatch = { status: 204 }, runs = () => [], one = () => null, store = DEFAULT_STORE }, seen, clock) => async (url, init) => {
       const u = new URL(url);
       const call = `${init?.method ?? 'GET'} ${u.pathname}`;
       seen.push({ call, query: u.search, body: init?.body ? JSON.parse(init.body) : null, auth: init?.headers?.authorization ?? '' });
@@ -830,17 +1137,24 @@ export async function selfTest() {
         const r = one(Number(m[1]), clock.elapsed());
         return r ? { status: 200, headers, json: async () => r } : { status: 404, headers, json: async () => ({ message: 'Not Found' }) };
       }
+      if (call in store) {
+        const s = typeof store[call] === 'function' ? store[call](u.searchParams) : store[call];
+        // A list answers its rows on page 1 and nothing after, as the platform's pagination does.
+        const page = Number(u.searchParams.get('page') ?? '1');
+        const json = Array.isArray(s.json) && page > 1 ? [] : s.json;
+        return { status: s.status, headers, json: async () => json };
+      }
       return { status: 404, headers, json: async () => ({ message: 'Not Found' }) };
     };
-    const drive = async (script, { file, ceilings } = {}) => {
+    const drive = async (script, { file, ceilings, stroke = payload } = {}) => {
       const seen = [];
       const logs = [];
-      let nowMs = Date.UTC(2026, 8, 22, 9, 4, 0);
+      let nowMs = T0;
       const t0 = nowMs;
       const clock = { now: () => nowMs, elapsed: () => nowMs - t0 };
       const pace = paceFor(file ?? join(dir, `pace-${paceCase++}.jsonl`));
       try {
-        const r = await sendFleetWrite(payload, {
+        const r = await sendFleetWrite(stroke, {
           fetch: platform(script, seen, clock),
           token: TOKEN,
           pace,
@@ -1040,8 +1354,9 @@ const USAGE = [
   `  ${CONTAINER_SESSION_ENV} (cse_<id> → session_<id>); ${SESSION_ENV} overrides the container (a local checkout, a test).`,
   `  ⛔ Never as a prefix on the command line: the seats' allow rules are literal command prefixes. The dispatch always`,
   `  goes to ${RELAY_REPO}; --repo names the target.`,
-  `  Exits: ${EXIT_OK} run succeeded · ${EXIT_USAGE} usage / payload refused · ${EXIT_PREREQUISITE} prerequisite · ${EXIT_PLATFORM_REFUSAL} dispatch refused or run failed ·`,
-  `         ${EXIT_UNCONFIRMED} UNCONFIRMED (no run, or no completion within the ceiling) · ${EXIT_WRITE_PACE_REFUSED} throttle refused`,
+  `  Exits: ${EXIT_OK} run succeeded and every body reads back as sent · ${EXIT_USAGE} usage / payload refused · ${EXIT_PREREQUISITE} prerequisite ·`,
+  `         ${EXIT_NOT_STORED} NOT STORED (the run succeeded, a body reads back otherwise — go READ, never retry) · ${EXIT_PLATFORM_REFUSAL} dispatch refused or run failed ·`,
+  `         ${EXIT_UNCONFIRMED} UNCONFIRMED (no run, no completion within the ceiling, or a body not read back) · ${EXIT_WRITE_PACE_REFUSED} throttle refused`,
 ].join('\n');
 
 function rearmThroughProxy(args) {
@@ -1067,7 +1382,14 @@ function rearmThroughProxy(args) {
   return null;
 }
 
-export async function main(argv) {
+/**
+ * The CLI. `deps` is the self-test's door and nothing else's: `env` stands in
+ * for `process.env` and `send` is handed to `sendFleetWrite` (a fake platform,
+ * a throttle file, a clock), so a corrupted read-back can be driven end to end
+ * through the exit code a seat actually reads.
+ */
+export async function main(argv, deps = {}) {
+  const env = deps.env ?? process.env;
   const opts = parseArgs(argv);
   if (opts.help) {
     console.log(USAGE);
@@ -1094,10 +1416,10 @@ export async function main(argv) {
     console.error(`fleet-write/dispatch: --actions-file ${opts.actionsFile} cannot be read as JSON (${e?.message ?? 'unreadable'}). Nothing was sent.`);
     return EXIT_USAGE;
   }
-  const session = opts.session ?? sessionFrom(process.env);
+  const session = opts.session ?? sessionFrom(env);
   if (!session || !SESSION_SHAPE.test(session)) {
     console.error(
-      `fleet-write/dispatch: PREREQUISITE NOT MET — no session id: ${sessionSource(process.env).reason}. Pass --session session_…, or set ${SESSION_ENV} (a cloud seat container supplies it as ${CONTAINER_SESSION_ENV}=cse_<id>; the explicit variable overrides it). The envelope carries the dispatching seat's identity; it is never invented. Nothing was sent.`,
+      `fleet-write/dispatch: PREREQUISITE NOT MET — no session id: ${sessionSource(env).reason}. Pass --session session_…, or set ${SESSION_ENV} (a cloud seat container supplies it as ${CONTAINER_SESSION_ENV}=cse_<id>; the explicit variable overrides it). The envelope carries the dispatching seat's identity; it is never invented. Nothing was sent.`,
     );
     return EXIT_PREREQUISITE;
   }
@@ -1112,27 +1434,49 @@ export async function main(argv) {
     console.log(JSON.stringify({ event_type: RELAY_EVENT_TYPE, client_payload: packed.payload }, null, 2));
     return EXIT_OK;
   }
-  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
+  const token = env.GITHUB_TOKEN ?? env.GH_TOKEN ?? '';
   if (!token) {
     console.error('fleet-write/dispatch: PREREQUISITE NOT MET — no GITHUB_TOKEN / GH_TOKEN in the environment. Nothing was sent.');
     return EXIT_PREREQUISITE;
   }
-  const rearmed = rearmThroughProxy(argv);
-  if (rearmed !== null) return rearmed;
-  const result = await sendFleetWrite(packed.payload, { token });
-  if (!result.ok && (result.state === 'no-run' || result.state === 'timeout')) console.error(unconfirmedText(result, 'scripts/pm/fleet-write/dispatch.mjs'));
-  if (opts.json) console.log(JSON.stringify({ request_id: packed.payload.request_id, state: result.state, ok: result.ok, run: result.run, dispatched_at: new Date(result.dispatchedAt).toISOString() }));
+  if (!deps.send) {
+    const rearmed = rearmThroughProxy(argv);
+    if (rearmed !== null) return rearmed;
+  }
+  const tool = 'scripts/pm/fleet-write/dispatch.mjs';
+  const result = await sendFleetWrite(packed.payload, { token, ...(deps.send ?? {}) });
+  if (!result.ok && (result.state === 'no-run' || result.state === 'timeout')) console.error(unconfirmedText(result, tool));
+  if (result.notStored) console.error(notStoredText(result, tool));
+  if (result.state === 'unverified') console.error(unverifiedText(result, tool));
+  if (opts.json) {
+    console.log(
+      JSON.stringify({
+        request_id: packed.payload.request_id,
+        state: result.state,
+        ok: result.ok,
+        not_stored: result.notStored === true,
+        run: result.run,
+        dispatched_at: new Date(result.dispatchedAt).toISOString(),
+        read_back: (result.readBack?.rows ?? []).map((r) => ({ action: r.action, op: r.op, where: r.where, verdict: r.verdict, class: r.cls, first_difference_byte: r.offset ?? null, sent_bytes: r.sentBytes ?? null, stored_bytes: r.storedBytes ?? null })),
+      }),
+    );
+  }
   return result.ok ? EXIT_OK : exitForResult(result);
 }
 
+// ⛔ No top-level await here. The read-back imports post-stamped, which imports THIS file: were this module's evaluation
+// still pending on `await main(…)`, that import would wait on it while it waits on the import — a deadlock node reports
+// as exit 13, "unsettled top-level await" (measured, the first time the read-back ran from this entry). Settling the
+// evaluation first and running `main` after it is what makes the dynamic import in `loadReadBackJudge` safe.
 if (isEntrypoint(import.meta.url)) {
-  const code = await main(process.argv.slice(2));
-  if (process.argv.includes('--self-test') && !selfTestReachedVerdict) {
-    console.error(
-      '\n✗ fleet-write/dispatch self-test: selfTest() returned without reaching its verdict, so no success line was\n' +
-        'printed. Exiting 0 here would report a self-test that never finished as one that passed.\n',
-    );
-    process.exit(1);
-  }
-  process.exit(code);
+  main(process.argv.slice(2)).then((code) => {
+    if (process.argv.includes('--self-test') && !selfTestReachedVerdict) {
+      console.error(
+        '\n✗ fleet-write/dispatch self-test: selfTest() returned without reaching its verdict, so no success line was\n' +
+          'printed. Exiting 0 here would report a self-test that never finished as one that passed.\n',
+      );
+      process.exit(1);
+    }
+    process.exit(code);
+  });
 }
