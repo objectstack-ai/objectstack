@@ -1077,11 +1077,12 @@ Both non-handshake shapes, and how to classify and probe your own:
    spec key, an export, a config field), the changeset body must state the FROM → TO mapping and the one-line fix —
    this text ships to consumers as `CHANGELOG.md` inside the npm package and is what an upgrading agent greps after the
    tombstone error. Removing an authorable spec key also requires a tombstone so the rejection itself carries the
-   prescription — `retiredKey()` (`packages/spec/src/shared/retired-key.ts`) on a non-strict schema, or an entry in
-   the relevant `UNKNOWN_KEY_GUIDANCE` / `*_RETIRED_KEY_GUIDANCE` map (see `object.zod.ts`, `ai/tool.zod.ts`) when the
-   schema is `.strict()`. The changeset is one of fourteen surfaces a retirement touches — follow the
-   `spec-property-retirement` skill (`.claude/skills/`) rather than reconstructing the kit, and note the two routes
-   imply **opposite** liveness-ledger dispositions.
+   prescription — `retiredKey()` (`packages/spec/src/shared/retired-key.ts`) on the schema whether or not it is
+   `.strict()`, and an entry in the shape's `*_RETIRED_KEY_GUIDANCE` map (see `data/mapping.zod.ts`) only for a
+   spelling the shape never declared, such as the retired key's old alias, where a tombstone has no property to
+   replace. The changeset is one of fourteen surfaces a retirement touches — follow the
+   `spec-property-retirement` skill (`.claude/skills/`) rather than reconstructing the kit, and note that a tombstone
+   keeps its liveness-ledger row while a key deleted without one loses it.
    **A breaking changeset must also state its ADR-0087 disposition, in writing** — exactly one marker in the changeset
    body, which also carries the PR's `Clause-②` line: `pnpm check:adr-0087-registration` reads the arm there. ⛔ The
    categories are NOT copied here — the gate prints the full set when it fails.
