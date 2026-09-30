@@ -2444,8 +2444,8 @@ export class AutomationEngine implements IAutomationService {
     /**
      * [#20725, ADR-0126 §7.3] Packaged callers {@link activateFlowTrigger}
      * declined to arm because a packaged subflow they call is disabled — each
-     * with the subflows that held it back and the reason `/_status` and the
-     * binding audit read.
+     * with the reason `/_status` and the binding audit read, naming those
+     * subflows.
      *
      * A record, for {@link policyDisabledFlows}'s reason: the audit and the
      * status door run long after the bind, and must say what HAPPENED rather
@@ -2455,7 +2455,7 @@ export class AutomationEngine implements IAutomationService {
      * entry whenever one of its subflows changes state, and
      * {@link unregisterFlow} drops it with the flow.
      */
-    private readonly subflowDeclinedFlows = new Map<string, { subflows: string[]; reason: string }>();
+    private readonly subflowDeclinedFlows = new Map<string, string>();
     /** Connectors registered by integration plugins, keyed by connector name (ADR-0018 §Addendum). */
     private connectors = new Map<string, RegisteredConnector>();
     /** Connector provider factories keyed by provider name (ADR-0097 §2 — `openapi`/`mcp`/`rest`/…). */
@@ -4544,7 +4544,7 @@ export class AutomationEngine implements IAutomationService {
         // reason, and ahead of the trigger branches for the gate's: with the
         // child off, the trigger would not arm it either.
         const declined = this.subflowDeclinedFlows.get(name);
-        if (declined) return declined.reason;
+        if (declined !== undefined) return declined;
         return this.triggers.has(resolved.triggerType)
             ? `trigger '${resolved.triggerType}' is registered but binding failed — see earlier warnings`
             : `no '${resolved.triggerType}' trigger is registered — add requires: ['triggers'] (record_change/schedule/time_relative/api ship in @objectstack/trigger-*)`;
@@ -5093,8 +5093,8 @@ export class AutomationEngine implements IAutomationService {
             `not armed while the packaged subflow${many ? 's' : ''} it calls ${many ? 'are' : 'is'} disabled — ` +
             `${reasons.join(', ')}; ${remedy} and it is armed (ADR-0126 §7.3)`;
         const previous = this.subflowDeclinedFlows.get(flowName);
-        this.subflowDeclinedFlows.set(flowName, { subflows: disabled.map((d) => d.name), reason });
-        if (previous?.reason === reason) return true;
+        this.subflowDeclinedFlows.set(flowName, reason);
+        if (previous === reason) return true;
         this.logger.warn(
             `Flow '${flowName}' is registered but NOT armed on trigger '${triggerType}' — ${disabled.length} packaged ` +
                 `subflow${many ? 's' : ''} it calls ${many ? 'are' : 'is'} disabled: ${reasons.join(', ')}. Armed, it ` +
