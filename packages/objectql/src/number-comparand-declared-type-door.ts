@@ -126,6 +126,17 @@
  *   flags (`$null` / `$exists` / `$empty`), the text operators and a
  *   `{ $field }` reference are not a value of the field and are left alone.
  *
+ * ## [#20546] The walk's second arm
+ *
+ * The walk below is the one filter walk the engine runs at all three
+ * positions with each column's declaration in hand, so it also carries the
+ * no-operator-object arm (`no-operator-object-door.ts`): a plain object with
+ * no `$` key where a value of a column holding scalar values belongs — any
+ * such column, not only a numeric one — is refused with `INVALID_FILTER` /
+ * 400, naming the field and the path. It is asked first at every field key;
+ * the number arm reads what it lets through. That module holds the arm's
+ * classification and words; ⛔ nothing there walks a filter.
+ *
  * @see numberComparandDoorVerdict — the pure verdict (lane 1, `@objectstack/spec`).
  * @see https://github.com/objectstack-ai/objectstack/issues/20336 (the contract)
  * @see https://github.com/objectstack-ai/objectstack/issues/20351 (this door)
