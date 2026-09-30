@@ -515,7 +515,30 @@ export const PageHeaderProps = strictObject({
     + 'carries its own `icon`. '
     + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
-  breadcrumb: z.boolean().default(true).describe('Show breadcrumb'),
+  /**
+   * REMOVED (#20758, ADR-0049 enforce-or-remove through the ADR-0087 D2 route,
+   * the way `icon` above left this row; the spec half of objectui#11166).
+   *
+   * A trail switch with no trail behind it. `PageHeaderRenderer`
+   * (`containers.tsx`) reads the key and, when it is not `false`, draws an
+   * EMPTY `div[data-page-breadcrumb-slot]` in both layouts; nothing fills it.
+   * The console's navigation trail is drawn once, by the shell (`AppHeader`
+   * inside `/apps/:appName/*`), so a page-level renderer would duplicate it
+   * rather than supply something missing. The default `true` was never
+   * materialized into a built artifact: `PageComponentSchema.properties` is an
+   * open bag, and this row is parsed only by the advisory props lint, which
+   * writes nothing back — so no retired-default residue stage is owed.
+   *
+   * Stored and built pages that carry the key (`true` or `false`) are stripped
+   * by the D2 conversion `page-header-breadcrumb-removed`, with a notice.
+   */
+  breadcrumb: retiredKey(
+    '`page:header` property `breadcrumb` was removed in @objectstack/spec 17 (ADR-0087 D2) — '
+    + 'no renderer ever drew a trail for it: objectui drew an empty slot and nothing filled it, '
+    + 'and the navigation trail is drawn once, by the app shell\'s header. Delete the key, whether '
+    + 'it was `true` or `false`; the shell\'s trail is unchanged. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+  ),
   actions: z.array(z.string()).optional().describe('Action IDs to show in header'),
   /**
    * Which of the two page-header layouts the renderer builds (#6776).

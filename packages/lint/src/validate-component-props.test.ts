@@ -65,7 +65,7 @@ describe('validateComponentProps — undeclared keys', () => {
   it('is silent on a fully declared props bag', () => {
     const findings = validateComponentProps(
       stackWith([
-        { type: 'page:header', properties: { title: 'T', subtitle: 'S', breadcrumb: true } },
+        { type: 'page:header', properties: { title: 'T', subtitle: 'S', recordChrome: false } },
         {
           type: 'record:related_list',
           properties: { objectName: 'task', relationshipField: 'project_id', limit: 5 },
