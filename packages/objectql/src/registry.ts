@@ -1069,8 +1069,9 @@ export function warnStrippedLegacyApiMethods(
   const warn = opts?.warn ?? ((msg: string) => console.warn(msg));
   warn(
     `[Registry] Object "${name}" declares retired legacy apiMethods value(s) ` +
-      `[${legacy.join(', ')}] in enable.apiMethods — since the enum shrink ` +
-      `(#3543) these are IGNORED: the effective API surface derives from the ` +
+      `[${legacy.join(', ')}] in enable.apiMethods — the authorable values are now the six ` +
+      `primitives only, because every other operation is derived from them or retired, so these ` +
+      `are IGNORED: the effective API surface derives from the ` +
       `six primitives (get/list/create/update/delete/bulk) alone ` +
       `(['create','update'] ⇒ upsert/import; ['list'] ⇒ aggregate/search/export; ` +
       `['get'] + trackHistory ⇒ history).` +

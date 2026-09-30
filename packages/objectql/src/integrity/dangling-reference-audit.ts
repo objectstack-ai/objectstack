@@ -733,7 +733,7 @@ export async function auditDanglingReferences(
   // They ride along whenever the line fires for a real finding; the full
   // report always carries them for a caller that came looking.
   if (report.dangling.length || report.undetermined || report.unreadableObjects.length) {
-    port.warn?.('[integrity] stored references that resolve to nothing (#4551)', {
+    port.warn?.('[integrity] stored references that resolve to nothing — reported, never rewritten: a system-context write is exempt from the write-time reference check, so this audit is where such a reference surfaces', {
       scanned: report.scanned,
       dangling: report.dangling.length,
       undetermined: report.undetermined,
