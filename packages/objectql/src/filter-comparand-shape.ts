@@ -188,6 +188,19 @@ export function assertListComparandShapes(
  * agreement pin in `query-expression-conformance.test.ts` is what keeps the
  * duplication honest.
  */
+/**
+ * [#20802] The nested-relation spelling of a dotted relation path, as the
+ * dotted refusal names it: `'owner.region'` → `{ "owner": { "region": VALUE } }`.
+ * A path deeper than one relation names no field it could nest (the nested
+ * form reaches one level), so it is given the generic shape and says so.
+ */
+export function nestedRelationRoute(dotted: string): string {
+  const [head, ...rest] = dotted.split('.');
+  return rest.length === 1
+    ? `{ "${head}": { "${rest[0]}": VALUE } }`
+    : `{ "${head}": { "FIELD": VALUE } }, one level deep`;
+}
+
 export function assertFilterIsMaterializable(
   object: string,
   operation: string,
@@ -221,10 +234,16 @@ export function assertFilterIsMaterializable(
     const headDef = fields[head] as { type?: unknown } | undefined;
     const headClass = classifyDottedFilterHead(headDef as never);
     const headType = String(headDef?.type ?? '');
+    // [#20802] The relation head names the route the engine now SERVES: the
+    // same condition nested beneath the relation field (one level), which
+    // `where` lowers by reading the related object. The dotted SPELLING stays
+    // refused — no backend serves the path — and the denormalise remedy stays
+    // the shared tail, word for word with the ingress door.
     const body = headClass === 'relation'
-      ? `filters on '${first}', which follows the relationship '${head}' into another object — `
-        + `a filter reaches only columns of '${object}' itself, and '${head}' stores the related `
-        + 'record\'s id, not an embedded document'
+      ? `filters on '${first}', which follows the relationship '${head}' into another object as a `
+        + `dotted path, and '${head}' stores the related record's id, not an embedded document — to `
+        + 'filter on the related record\'s fields, nest the condition beneath the relation field: '
+        + nestedRelationRoute(first)
       : headClass === 'virtual'
         ? `filters on '${first}', a dotted path whose head '${head}' is a virtual ${headType} `
           + `field on '${object}' — its value is computed on read, so no driver materialises a `
