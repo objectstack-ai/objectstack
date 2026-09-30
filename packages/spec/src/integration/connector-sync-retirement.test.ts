@@ -417,6 +417,10 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
    * its reason. ⛔ NOT an allowlist file (`spec-property-retirement` §4).
    */
   const EXCLUDED = new Set([
+    // The ledger rows `retiredKey()` keeps in the walked shape — a JSON object
+    // keyed by the property name, which is the key-position shape this walk
+    // judges.
+    'packages/spec/liveness/connector.json',
     // The pre-release authorable baseline: written ONLY by `gen:authorable-surface-base`,
     // never hand-edited or reverted — it is the record the removal is judged against.
     'packages/spec/authorable-surface.base.json',
