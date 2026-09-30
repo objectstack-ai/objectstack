@@ -1406,12 +1406,15 @@ function soleMovedFrom(dropped: readonly string[], authored: Record<string, unkn
  *   came from something the author wrote under another key — a MOVED key
  *   (`groups` → `sections`, `visibleOn` → `visibleWhen`) — and it is stored,
  *   projected against the authored key it moved from when that key is the only
- *   one of its shape. Once stored it stays stored in later rounds, so the
- *   rounds only ever add.
+ *   one of its shape, and stored whole otherwise. Once stored it stays stored
+ *   in later rounds, so the rounds only ever add.
+ * - Anything else — a value whose shape the parse changed (`['csv']` →
+ *   `{ formats }`), an array whose length it changed, a leaf — is stored as
+ *   parsed.
  */
 function buildStorableViewNode(authored: unknown, parsed: unknown, reparsed: unknown, previous: unknown): unknown {
-    if (isPlainRecord(parsed) && (authored === undefined || isPlainRecord(authored))) {
-        const a = authored ?? {};
+    if (isPlainRecord(parsed) && isPlainRecord(authored)) {
+        const a = authored;
         const r = isPlainRecord(reparsed) ? reparsed : undefined;
         const prev = isPlainRecord(previous) ? previous : undefined;
         const out: Record<string, unknown> = {};
@@ -1428,17 +1431,19 @@ function buildStorableViewNode(authored: unknown, parsed: unknown, reparsed: unk
             if (value === undefined || key in out || a[key] !== undefined) continue;
             const storedBefore = prev !== undefined && prev[key] !== undefined;
             if (!storedBefore && (r === undefined || storableEqual(r[key], value))) continue;
+            // Projected against the key it moved from when that key is the only
+            // one of its shape; otherwise (a `visibleOn` string folded into a
+            // `visibleWhen` expression object) the parsed value is the moved
+            // key's value, and it is stored whole.
             const from = soleMovedFrom(dropped, a, value);
-            out[key] = buildStorableViewNode(from === undefined ? undefined : a[from], value, r?.[key], prev?.[key]);
+            out[key] = from === undefined ? value : buildStorableViewNode(a[from], value, r?.[key], prev?.[key]);
         }
         return out;
     }
-    if (Array.isArray(parsed) && (authored === undefined || (Array.isArray(authored) && authored.length === parsed.length))) {
+    if (Array.isArray(parsed) && Array.isArray(authored) && authored.length === parsed.length) {
         const r = Array.isArray(reparsed) && reparsed.length === parsed.length ? reparsed : undefined;
         const prev = Array.isArray(previous) && previous.length === parsed.length ? previous : undefined;
-        return parsed.map((entry, i) => buildStorableViewNode(
-            Array.isArray(authored) ? authored[i] : undefined, entry, r?.[i], prev?.[i],
-        ));
+        return parsed.map((entry, i) => buildStorableViewNode(authored[i], entry, r?.[i], prev?.[i]));
     }
     return parsed;
 }

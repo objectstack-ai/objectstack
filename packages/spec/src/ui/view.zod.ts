@@ -5286,9 +5286,11 @@ function viewItemWireFields() {
     columnState: ViewColumnStateSchema.optional()
       .describe('Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view\'s row, which has no per-user scope — not authored)'),
     // [#20051] Pinned ABSENT, refused by name — see
-    // {@link VIEW_ITEM_OPTIONS_REFUSED}. The flattened FORM overlay pins its
-    // `options` the same way ({@link FORM_OVERLAY_OPTIONS_REFUSED}).
-    options: z.undefined({ error: () => VIEW_ITEM_OPTIONS_REFUSED }).optional(),
+    // {@link VIEW_ITEM_OPTIONS_REFUSED}. `z.never()` rather than the form
+    // overlay's `z.undefined()` ({@link FORM_OVERLAY_OPTIONS_REFUSED}): this
+    // member is published on its own as `ViewItemWire.json`, and `never` has a
+    // JSON Schema form (`not: {}`) where `undefined` has none.
+    options: z.never({ error: () => VIEW_ITEM_OPTIONS_REFUSED }).optional(),
   };
 }
 
