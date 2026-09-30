@@ -28,7 +28,8 @@
  * that cannot see the column type apply it unconditionally.
  *
  * The last row is the one day with no next day to stop before. The supported
- * years are 0001..9999 (the comparand and write doors refuse the rest), so
+ * years end at 9999 — 0001..9999 for a `date`, 1000..9999 for a `datetime`
+ * (the comparand and write doors refuse the rest) — so
  * every supported value is at most the last millisecond of `9999-12-31`, and
  * the whole-day bound of that day bounds nothing: `$lte '9999-12-31'` holds for
  * every value there is, and a `$between` whose maximum is that day keeps only
