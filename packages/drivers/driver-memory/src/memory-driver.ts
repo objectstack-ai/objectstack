@@ -21,7 +21,6 @@ import {
   assertObjectsNotTenantScoped,
   assertCallNotTenantScoped,
 } from './memory-tenancy-guard.js';
-import { getValueByPath } from './memory-matcher.js';
 import {
   assertFilterConditionShape,
   filterArrayReachedDriverError,
@@ -131,9 +130,10 @@ interface LoweredWrite {
  * key). Taken key → the write becomes its own `$and` branch on the same field,
  * where both constraints survive. That is exactly the guard #13195 landed for
  * `$exists` alone, generalised to every writer rather than restated per
- * operator — the reference matcher (`memory-matcher.ts`), which loops the
- * operators and therefore CANNOT express this defect, is the oracle both
- * agree with.
+ * operator — the reference matcher (`memory-matcher.ts`, retired since #5930
+ * step 4), which looped the operators and therefore COULD NOT express this
+ * defect, was the oracle; `memory-operator-key-clobber.test.ts` keeps its
+ * answers as literals.
  *
  * ## Why rank, and not author order
  *
@@ -263,9 +263,10 @@ export interface InMemoryDriverConfig {
  *
  *  - `projectFields` skips `undefined` values, so the same stored row answered
  *    `'status' in row === false` under a projection and `true` without one;
- *  - the matcher reads it as absent — measured, `{ status: { $exists: true } }`
- *    excludes it and `{ status: { $null: true } }` includes it, exactly as for
- *    a row that never carried the key at all.
+ *  - the reference matcher (retired since #5930 step 4) read it as absent —
+ *    measured, `{ status: { $exists: true } }` excluded it and
+ *    `{ status: { $null: true } }` included it, exactly as for a row that
+ *    never carried the key at all.
  *
  * So the returned row was the only surface still claiming the key was present.
  *
@@ -298,6 +299,18 @@ function withoutUndefinedOwnKeys<T extends Record<string, any>>(record: T): T {
     delete out[key];
   }
   return (out as T) ?? record;
+}
+
+/**
+ * Read a nested property by dot-notation (`"user.name"`).
+ *
+ * [#5930 step 4] Lived in `memory-matcher.ts` and was the ONE symbol this
+ * driver imported from it; moved here, byte-for-byte, when ruling D6 retired
+ * that reference matcher (no production caller).
+ */
+function getValueByPath(obj: any, path: string): any {
+  if (!path.includes('.')) return obj[path];
+  return path.split('.').reduce((o, i) => (o ? o[i] : undefined), obj);
 }
 
 /**
@@ -1353,9 +1366,10 @@ export class InMemoryDriver implements IDataDriver {
         return { [op]: conditions };
       }
       // MongoDB/FilterCondition format: { field: value } or { field: { $op: value } }
-      // [#5324/#5328] Shape first, then translate — the SAME gate the reference
-      // matcher runs (`filter-refusal.ts`), so the two faces cannot answer one
-      // filter differently again. It must run before `normalizeFilterCondition`
+      // [#5324/#5328] Shape first, then translate — the ONE gate every face of
+      // this package runs (`filter-refusal.ts`; the since-retired reference
+      // matcher ran it too), so no two faces can answer one filter differently
+      // again. It must run before `normalizeFilterCondition`
       // and not inside it: the translator recurses per key and would therefore
       // refuse or not refuse depending on where in the tree it gave up.
       assertFilterConditionShape(filters, 'filter');
@@ -1529,7 +1543,7 @@ export class InMemoryDriver implements IDataDriver {
       }
       if (key === '$not') {
         // [#5324] The whole point of the issue. `$not` is a declared combinator
-        // (spec `LOGICAL_OPERATORS`), `driver-sql` compiles it, `memory-matcher`
+        // (spec `LOGICAL_OPERATORS`), `driver-sql` compiles it, `formula`
         // evaluates it, and `cel-to-filter` EMITS it — a CEL `!expr` in an RLS
         // read scope lowers to `{ $not: {…} }`. Passing it through unchanged
         // meant mingo received a document-level `$not`, which MongoDB does not
@@ -1540,9 +1554,9 @@ export class InMemoryDriver implements IDataDriver {
         // is what `driver-mongodb` rewrites to for the identical reason (#4405).
         // It is also NULL-safe by construction, which is the semantics #5146
         // ruled canonical: a row whose field is null or missing does not satisfy
-        // the inner condition, so `$nor` admits it — the same answer this
-        // package's matcher and `@objectstack/formula` give, and the one
-        // driver-sql was rewritten to match.
+        // the inner condition, so `$nor` admits it — the same answer
+        // `@objectstack/formula` gives (and this package's reference matcher
+        // gave, until retired), and the one driver-sql was rewritten to match.
         //
         // At most one `$not` per node (it is one object key), so this never
         // overwrites a sibling `$nor`, and an input `$nor` cannot reach here —
@@ -1555,8 +1569,8 @@ export class InMemoryDriver implements IDataDriver {
       // Field-level: value may be primitive (implicit eq) or operator object
       if (value && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date) && !(value instanceof RegExp)) {
         // A field spec with no `$` keys is a nested-object COMPARAND, not an
-        // operator map — mingo compares it structurally, `driver-mongodb` says
-        // so explicitly, and the matcher deep-equals it. Handing it to the
+        // operator map — mingo compares it structurally, and `driver-mongodb`
+        // says so explicitly. Handing it to the
         // operator translator would read its field names as operators.
         if (!Object.keys(value).some((k) => k.startsWith('$'))) {
           result[key] = value;

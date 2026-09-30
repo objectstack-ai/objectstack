@@ -254,64 +254,9 @@ interface MongoPredicateInput {
    * Unicode range and would answer `CAFÉ` for `café`.
    */
   readonly asciiSubstring: (value: unknown) => RegExp;
-  /**
-   * [#20661] One value put into the storage form of the field this entry
-   * constrains — the SAME conversion `comparands` came out of
-   * ({@link MemoryAnalyticsService.storageFormFor}), handed over for the one
-   * value that is not an authored operand: a bound the builder DERIVES.
-   * See {@link lteUpperBound}.
-   */
-  readonly storageForm: (value: unknown) => unknown;
 }
 
 type MongoPredicateBuilder = (input: MongoPredicateInput) => Record<string, unknown>;
-
-/**
- * [#20661] What an `lte` bound compiles to, decided ONCE for both exits — the
- * mingo `$match` ({@link CUBE_OPERATOR_TO_MONGO_PREDICATE}) and the SQL echo
- * ({@link CUBE_OPERATOR_TO_SQL_PREDICATE}) only render it, so the rows a chart
- * is drawn from and the statement shown beside it cannot disagree on it.
- *
- * - `before` — a bare `YYYY-MM-DD` means the WHOLE day (#4042; the SQL twin is
- *   #3777): the bound is the next day's midnight, exclusive.
- * - `unbounded` — the same on `9999-12-31`, which has no next day (#20600):
- *   every value is inside the bound, so what is left to ask is a value.
- * - `through` — anything else keeps instant semantics, inclusive, compared
- *   against the authored comparand in its storage form.
- *
- * ## ⛔ The order is the fix: widen the AUTHORED string, then convert the bound
- *
- * ADR-0053 D-E3: the calendar-day rewrite is a *calendar* operation and runs
- * on the bare-day STRING first; only the resulting bound is converted to the
- * storage form. Both rows used to ask {@link nextUtcCalendarDay} about
- * `comparands[0]`, which is ALREADY in storage form — on a declared `datetime`
- * field that is the instant `2026-07-28T00:00:00.000Z`, which the helper
- * correctly refuses to widen, so `$lte: '2026-07-28'` compiled an inclusive
- * bound at that midnight and dropped the rest of the day, while `find()` on the
- * same filter (which widens `val` and converts `nextDay`, `memory-driver.ts`)
- * kept it. On an undeclared field the storage form IS the authored string,
- * which is why only the declared case was wrong. ⛔ Never teach
- * `nextUtcCalendarDay` to widen an instant instead: it refuses one because an
- * instant already says where it stops.
- *
- * `comparand` is the authored value's storage form, passed in rather than
- * recomputed: it already exists, and the `through` arm is exactly it.
- */
-type LteUpperBound =
-  | { readonly kind: 'before'; readonly bound: unknown }
-  | { readonly kind: 'unbounded' }
-  | { readonly kind: 'through'; readonly bound: unknown };
-
-function lteUpperBound(
-  authored: unknown,
-  comparand: unknown,
-  storageForm: (value: unknown) => unknown,
-): LteUpperBound {
-  const nextDay = nextUtcCalendarDay(authored);
-  if (isUnboundedAbove(nextDay)) return { kind: 'unbounded' };
-  if (nextDay != null) return { kind: 'before', bound: storageForm(nextDay) };
-  return { kind: 'through', bound: comparand };
-}
 
 /**
  * [#5374] How each cube operator becomes a mingo field predicate — the whole
@@ -369,19 +314,14 @@ const CUBE_OPERATOR_TO_MONGO_PREDICATE: Readonly<Record<CubeOperator, MongoPredi
   gt: ({ comparands }) => ({ $gt: comparands[0] }),
   gte: ({ comparands }) => ({ $gte: comparands[0] }),
   lt: ({ comparands }) => ({ $lt: comparands[0] }),
-  // A bare-day `lte` bound means "through that whole day" (#4042; the SQL twin
-  // is #3777): compile half-open so timestamp values on the final day stay in.
-  // Order-equivalent to `$lte` for plain `YYYY-MM-DD` values.
-  // [#20600] On the last supported day there is no next day: every value is
-  // inside the bound, so what `lte` still asks is a value (the `set` row below).
-  // [#20661] Decided from the AUTHORED value by {@link lteUpperBound}, which
-  // the SQL twin shares — widening `comparands[0]` read an instant on a
-  // declared `datetime` field and never widened at all.
-  lte: ({ raw, comparands, storageForm }) => {
-    const upper = lteUpperBound(raw[0], comparands[0], storageForm);
-    if (upper.kind === 'unbounded') return { $ne: null };
-    return upper.kind === 'before' ? { $lt: upper.bound } : { $lte: upper.bound };
-  },
+  // [ADR-0053 D-D1, amended — #5930 step 4] The comparison as handed, like its
+  // three neighbours. The whole-day upper bound (#4042), its last supported day
+  // (#20600) and D-E3's order — widen the AUTHORED day, then convert the bound
+  // (#20661) — are the shared lowering's, run once at this face's door
+  // ({@link MemoryAnalyticsService.normalizeFilters}): a bare-day `$lte` reaches
+  // this table as `lt` a calendar string (converted like any comparand) or as
+  // `isNull: false`, never as `lte`.
+  lte: ({ comparands }) => ({ $lte: comparands[0] }),
   // The list operators take the WHOLE list. An empty one is a real predicate —
   // `$in: []` selects nothing, `$nin: []` selects everything — and saying so
   // here is what retires the call site's `values.length > 0` guard, under which
@@ -440,11 +380,6 @@ interface SqlPredicateInput {
    * See {@link globSubstringPattern} for why GLOB and not LIKE.
    */
   readonly globSubstring: (value: unknown) => string;
-  /**
-   * [#20661] The storage-form conversion `comparands` came out of, for a bound
-   * the builder derives — the twin of {@link MongoPredicateInput.storageForm}.
-   */
-  readonly storageForm: (value: unknown) => unknown;
 }
 
 type SqlPredicateBuilder = (input: SqlPredicateInput) => string;
@@ -578,21 +513,12 @@ const CUBE_OPERATOR_TO_SQL_PREDICATE: Readonly<Record<CubeOperator, SqlPredicate
   gt: ({ column, comparands, literal }) => `${column} > ${literal(comparands[0])}`,
   gte: ({ column, comparands, literal }) => `${column} >= ${literal(comparands[0])}`,
   lt: ({ column, comparands, literal }) => `${column} < ${literal(comparands[0])}`,
-  // Half-open on a bare-day bound, exactly as the mingo row above is (#4042; the
-  // SQL twin is #3777). `<= '2026-01-02'` drops that day's timestamped rows,
-  // which is measurable as an echo one row NARROWER than the chart it describes.
-  // [#20600] …and `IS NOT NULL` on the last supported day, as the mingo row
-  // above answers `$ne: null` there.
-  // [#20661] The same {@link lteUpperBound} decision the mingo row renders, so
-  // on a declared `datetime` field the echo reads `< '2026-07-29T00:00:00.000Z'`
-  // where it used to read `<= '2026-07-28T00:00:00.000Z'`.
-  lte: ({ column, raw, comparands, storageForm, literal }) => {
-    const upper = lteUpperBound(raw[0], comparands[0], storageForm);
-    if (upper.kind === 'unbounded') return `${column} IS NOT NULL`;
-    return upper.kind === 'before'
-      ? `${column} < ${literal(upper.bound)}`
-      : `${column} <= ${literal(upper.bound)}`;
-  },
+  // [ADR-0053 D-D1, amended — #5930 step 4] The comparison as handed, exactly
+  // as the mingo row above: the echo renders the lowered filter the rows were
+  // drawn from, so a bare-day `$lte` echoes as the `lt` / `isNull` row it was
+  // lowered to — `< '2026-07-29T00:00:00.000Z'` on a declared `datetime` field
+  // (#20661), `IS NOT NULL` on the last supported day (#20600).
+  lte: ({ column, comparands, literal }) => `${column} <= ${literal(comparands[0])}`,
   // The list operators take the WHOLE list, and an EMPTY one is a real
   // predicate on this side too — `$in: []` selects nothing, `$nin: []`
   // everything. Saying so here is what retires the WHERE builder's
@@ -1589,7 +1515,6 @@ export class MemoryAnalyticsService implements IAnalyticsService {
       const predicate = this.mongoPredicateBuilder(filter.operator)({
         comparands: filter.values.map(storageForm),
         raw: filter.values,
-        storageForm,
         substring: (value) => this.driver.filterSubstringPattern(value),
         // [#6520] `$icontains`' fold, from the spec's shared definition rather
         // than from the driver's Unicode-folding `filterSubstringPattern`.
@@ -1659,7 +1584,6 @@ export class MemoryAnalyticsService implements IAnalyticsService {
         column: fieldPath,
         comparands: entry.values.map(storageForm),
         raw: entry.values,
-        storageForm,
         literal: (value) => this.toSqlLiteral(value),
         globSubstring: (value) => this.toSqlLiteral(globSubstringPattern(value)),
       }));
@@ -1680,8 +1604,8 @@ export class MemoryAnalyticsService implements IAnalyticsService {
    * → flattened into one cube-style entry per (field, operator) pair.
    *
    * [#5345] Everything outside {@link ANALYTICS_FILTER_CAPABILITIES} is REFUSED
-   * with `INVALID_FILTER` / 400, by the same walk the query path and the
-   * reference matcher use. It used to be dropped, and the direction of that drop
+   * with `INVALID_FILTER` / 400, by the same walk the query path uses (as the
+   * reference matcher did, until retired). It used to be dropped, and the direction of that drop
    * is what made it a defect rather than a limitation: fewer predicates means
    * MORE rows, so a widget filtered on `{$or: [...]}` aggregated the whole table
    * and looked like a working widget. `$not` made it a permission bug on top —
@@ -1710,10 +1634,13 @@ export class MemoryAnalyticsService implements IAnalyticsService {
    *    tokens on this face, so it reads the comparands as authored (item 3).
    *    It applies type-blind (item 7): the declared temporal kinds live inside
    *    the driver and reach this face only as a storage-form conversion, and
-   *    type-blind is the reading this face's own bound copy
-   *    (`lteUpperBound`) and the driver's `find()` already give, so it moves no
-   *    answer. The lowering emits calendar strings; each exit converts them to
-   *    the field's storage form as it converts any comparand (item 6).
+   *    type-blind is the reading this face's own bound copy gave until #5930
+   *    step 4 deleted it, so it moved no answer. This door is now the ONLY
+   *    place this face applies the whole-day bound to a `where` — on every
+   *    column, since no `isDatetimeColumn` reader is passed — and neither
+   *    exit's `lte` row widens anything. (A `dateRange` window is not a
+   *    `where`: its explicit end keeps its own arm, the amendment's item 8.) The lowering emits calendar strings; each exit converts
+   *    them to the field's storage form as it converts any comparand (item 6).
    * 3. **This face's own vocabulary gate**, on the LOWERED condition — what the
    *    face actually compiles, as a driver behind the engine seam judges the
    *    lowered filter it receives. So a `$between` reaches the gate as the two
@@ -1851,10 +1778,10 @@ export class MemoryAnalyticsService implements IAnalyticsService {
    * [#5373] The conversion that puts a value into the storage form of the field
    * one lowered entry is compared against — the ONE place either exit converts
    * a value, so the two exits cannot drift apart. Each exit maps the entry's
-   * comparands through it, and hands the same function to its predicate builder
-   * for the one value a builder derives rather than receives: the whole-day
-   * bound of an `lte` (#20661, {@link lteUpperBound}), which has to be widened
-   * from the AUTHORED day before it is converted (ADR-0053 D-E3).
+   * comparands through it. No builder derives a value any more: the whole-day
+   * bound of an `lte` (#20661) is widened from the AUTHORED day by the shared
+   * lowering at {@link MemoryAnalyticsService.normalizeFilters}, before either
+   * exit converts it (ADR-0053 D-E3, structural since #5930 step 4).
    *
    * The only conversion left is the temporal one (#4047): a `datetime` column
    * holds canonical UTC ISO text, so a `Date` comparand has to become that text

@@ -21,6 +21,12 @@
  * case below therefore runs the same filter through the live query path, the
  * reference matcher and the analytics face and demands ONE answer.
  *
+ * [#5930 step 4, ruling D6] The reference matcher had no production caller and
+ * is retired. Its `$icontains` arm held nothing of its own — it evaluated the
+ * spec's `asciiCaseInsensitiveContains`, the fold `@objectstack/formula` shares —
+ * so its half of each case is asserted on that shared predicate directly, and
+ * its refusal on the shape gate it ran (`assertFilterConditionShape`).
+ *
  * ## Why this file drives the ROWS and spells its own cases
  *
  * `check-driver-conformance.mjs` judges coverage by whether a package names the
@@ -39,9 +45,9 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { FILTER_TEXT_ROWS } from '@objectstack/spec/data';
+import { FILTER_TEXT_ROWS, asciiCaseInsensitiveContains } from '@objectstack/spec/data';
 import { InMemoryDriver } from './memory-driver.js';
-import { match } from './memory-matcher.js';
+import { assertFilterConditionShape } from './filter-refusal.js';
 
 const TABLE = 'text_rows';
 
@@ -60,9 +66,17 @@ const queryIds = async (driver: InMemoryDriver, where: unknown): Promise<string[
     .map((r: any) => String(r.id))
     .sort((a, b) => a.localeCompare(b));
 
-/** Ids the REFERENCE MATCHER returns, ascending. */
-const matcherIds = (where: unknown): string[] =>
-  ROWS.filter((r) => match(r, where)).map((r) => r.id).sort((a, b) => a.localeCompare(b));
+/**
+ * Ids the SHARED fold answers for a `{ name: { $icontains: needle } }` case,
+ * ascending — the spec's `asciiCaseInsensitiveContains`, which is what the
+ * retired reference matcher evaluated for this operator.
+ */
+const sharedFoldIds = (where: unknown): string[] => {
+  const needle = (where as { name: { $icontains: string } }).name.$icontains;
+  return ROWS.filter((r) => typeof r.name === 'string' && asciiCaseInsensitiveContains(r.name, needle))
+    .map((r) => r.id)
+    .sort((a, b) => a.localeCompare(b));
+};
 
 describe('[#6520] $icontains — the accept table, on every face', () => {
   let driver: InMemoryDriver;
@@ -93,14 +107,14 @@ describe('[#6520] $icontains — the accept table, on every face', () => {
       expect(await queryIds(driver, where)).toEqual(expected);
     });
 
-    it(`reference matcher: ${label}`, () => {
-      expect(matcherIds(where)).toEqual(expected);
+    it(`shared fold: ${label}`, () => {
+      expect(sharedFoldIds(where)).toEqual(expected);
     });
   }
 
-  it('the two faces agree on every case — the divergence class #5374 closed', async () => {
+  it('the query path and the shared fold agree on every case — the divergence class #5374 closed', async () => {
     for (const [label, where] of CASES) {
-      expect(await queryIds(driver, where), label).toEqual(matcherIds(where));
+      expect(await queryIds(driver, where), label).toEqual(sharedFoldIds(where));
     }
   });
 
@@ -112,7 +126,7 @@ describe('[#6520] $icontains — the accept table, on every face', () => {
   it('never answers every row — a dropped predicate WIDENS', async () => {
     for (const [label, where] of CASES) {
       expect((await queryIds(driver, where)).length, label).toBeLessThan(ROWS.length);
-      expect(matcherIds(where).length, label).toBeLessThan(ROWS.length);
+      expect(sharedFoldIds(where).length, label).toBeLessThan(ROWS.length);
     }
   });
 
@@ -122,11 +136,12 @@ describe('[#6520] $icontains — the accept table, on every face', () => {
    * "fixed" the fold by making `$contains` insensitive too. When it was written
    * the matcher was the ONLY face answering `$contains` case-exactly, the query
    * path still folding Unicode (#6682); since #7723 all three agree, so the
-   * choice of face here is no longer load-bearing.
+   * choice of face here is no longer load-bearing — and with the matcher
+   * retired (#5930 step 4) it is asserted on the query path.
    */
-  it('leaves $contains case-SENSITIVE on the reference matcher', () => {
-    expect(matcherIds({ name: { $contains: 'acme' } })).toEqual(['2']);
-    expect(matcherIds({ name: { $contains: 'ACME' } })).toEqual(['1']);
+  it('leaves $contains case-SENSITIVE on the query path', async () => {
+    expect(await queryIds(driver, { name: { $contains: 'acme' } })).toEqual(['2']);
+    expect(await queryIds(driver, { name: { $contains: 'ACME' } })).toEqual(['1']);
   });
 });
 
@@ -161,8 +176,8 @@ describe('[#6520] $icontains comparand refusals, in the ADR-0112 envelope', () =
     expect(err.message).toContain('$icontains');
   });
 
-  it('refuses on the REFERENCE MATCHER too — one gate, three faces', () => {
-    const err = (() => { try { match(ROWS[0], { name: { $icontains: '' } }); return null; } catch (e) { return e as any; } })();
+  it('refuses on the shared shape gate too — the retired matcher\'s door, one gate for every face', () => {
+    const err = (() => { try { assertFilterConditionShape({ name: { $icontains: '' } }, 'filter'); return null; } catch (e) { return e as any; } })();
     expect(err).toBeInstanceOf(Error);
     expect(err.code).toBe('INVALID_FILTER');
     expect(err.status).toBe(400);

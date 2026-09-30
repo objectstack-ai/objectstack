@@ -28,9 +28,9 @@
  *
  * ## The oracle
  *
- * `memory-matcher.ts`'s `match()` loops the operators and therefore CANNOT
- * express this defect, and it is the face #5962 aligned. Every cell below is
- * scored against it.
+ * `memory-matcher.ts`'s `match()` looped the operators and therefore COULD NOT
+ * express this defect, and it was the face #5962 aligned. Every cell below was
+ * scored against it, and still is — against the literal answer it gave.
  *
  * ⚠️ That exception is now CLOSED, and this note records it rather than
  * repeating it. `$between` ALONE used to disagree with the reference matcher on
@@ -45,8 +45,13 @@
  * statement about what a CLOBBER test measures — two constraints on one field
  * select exactly the rows both select alone — and it keeps this file's verdict
  * independent of the matcher's own cells. It was never a workaround for the
- * divergence, so closing the divergence does not change it. The matcher remains
- * the oracle for the named cells, where the two agree operator by operator.
+ * divergence, so closing the divergence does not change it. The matcher remained
+ * the oracle for the named cells, where the two agreed operator by operator.
+ *
+ * [#5930 step 4, ruling D6] The reference matcher had no production caller and
+ * is RETIRED. Every named cell below asserted the SAME literal row set on the
+ * live path and on the matcher, so the matcher's half of each cell is kept as
+ * that literal — the answer the oracle gave — and the live path is held to it.
  *
  * ## Why the sweep ranges over the vocabulary and not over three operators
  *
@@ -75,7 +80,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 import { InMemoryDriver } from './memory-driver.js';
-import { match } from './memory-matcher.js';
 import { MemoryAnalyticsService } from './memory-analytics.js';
 import { SUPPORTED_FIELD_OPERATORS } from './filter-refusal.js';
 
@@ -134,10 +138,6 @@ async function sweepIds(where: unknown): Promise<string[]> {
   return sorted((out as Array<Record<string, unknown>>).map((r) => String(r.id)));
 }
 
-/** The ORACLE: the reference matcher, which loops the operators. */
-const matcherIds = (where: unknown): string[] =>
-  sorted(ROWS.filter((r) => match(r, where)).map((r) => String(r.id)));
-
 /** Both key orders of one two-operator field constraint. */
 function bothOrders(
   field: string,
@@ -158,8 +158,6 @@ describe('[#13524] the card`s measured table, reproduced and repaired', () => {
     // '2' is the row `$ne: 'b'` excludes (that constraint was dropped instead).
     expect(await liveIds(ab)).toEqual(['1']);
     expect(await liveIds(ba)).toEqual(['1']);
-    expect(matcherIds(ab)).toEqual(['1']);
-    expect(matcherIds(ba)).toEqual(['1']);
   });
 
   it('`$null` + `$eq` — the other half of the same contested key pair', async () => {
@@ -167,8 +165,6 @@ describe('[#13524] the card`s measured table, reproduced and repaired', () => {
     // Was ['1'] / ['3']. "is null AND equals 'a'" is a contradiction: no row.
     expect(await liveIds(ab)).toEqual([]);
     expect(await liveIds(ba)).toEqual([]);
-    expect(matcherIds(ab)).toEqual([]);
-    expect(matcherIds(ba)).toEqual([]);
   });
 
   it('`$between` + `$gte` — the range`s lower bound, contested', async () => {
@@ -184,8 +180,6 @@ describe('[#13524] the card`s measured table, reproduced and repaired', () => {
     // file is asserted twice.
     expect(await liveIds(ab)).toEqual([]);
     expect(await liveIds(ba)).toEqual([]);
-    expect(matcherIds(ab)).toEqual([]);
-    expect(matcherIds(ba)).toEqual([]);
   });
 
   it('`$between` + `$lte` — the range`s upper bound, contested', async () => {
@@ -195,8 +189,6 @@ describe('[#13524] the card`s measured table, reproduced and repaired', () => {
     // ⭐ note for why one direction proves nothing.
     expect(await liveIds(ab)).toEqual(['1', '2']);
     expect(await liveIds(ba)).toEqual(['1', '2']);
-    expect(matcherIds(ab)).toEqual(['1', '2']);
-    expect(matcherIds(ba)).toEqual(['1', '2']);
   });
 
   it('THE FOURTH MEMBER — `$lte` on a bare calendar day lowers onto `$lt`', async () => {
@@ -206,8 +198,6 @@ describe('[#13524] the card`s measured table, reproduced and repaired', () => {
     // had named this cell; the vocabulary sweep below is what found it.
     expect(await liveIds(ab)).toEqual(['1']);
     expect(await liveIds(ba)).toEqual(['1']);
-    expect(matcherIds(ab)).toEqual(['1']);
-    expect(matcherIds(ba)).toEqual(['1']);
   });
 
   it('`$between` with a bare-day max contests `$lt` for the same reason', async () => {
@@ -215,16 +205,12 @@ describe('[#13524] the card`s measured table, reproduced and repaired', () => {
     // Was ['1'] / ['1','2'].
     expect(await liveIds(ab)).toEqual(['1']);
     expect(await liveIds(ba)).toEqual(['1']);
-    expect(matcherIds(ab)).toEqual(['1']);
-    expect(matcherIds(ba)).toEqual(['1']);
   });
 
   it('`$exists` + `$ne` — #13195`s cell, unmoved by the generalisation', async () => {
     const [ab, ba] = bothOrders('name', ['$exists', true], ['$ne', 'b']);
     expect(await liveIds(ab)).toEqual(['1']);
     expect(await liveIds(ba)).toEqual(['1']);
-    expect(matcherIds(ab)).toEqual(['1']);
-    expect(matcherIds(ba)).toEqual(['1']);
   });
 
   it('`$notContains` is covered by construction — nothing else writes `$not`', () => {
@@ -339,8 +325,6 @@ describe('[#13524] the analytics face — a WHOLESALE clobber, one level up', ()
     // was ['1','3'] / ['1'].
     expect((await analytics(ab)).executed).toEqual(['1']);
     expect((await analytics(ba)).executed).toEqual(['1']);
-    expect(matcherIds(ab)).toEqual(['1']);
-    expect(matcherIds(ba)).toEqual(['1']);
   });
 
   it('`$and`-folded nodes on one member clobbered too — that is the common shape', async () => {

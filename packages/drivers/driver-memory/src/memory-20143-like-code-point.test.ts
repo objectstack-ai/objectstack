@@ -18,11 +18,16 @@
  *
  * Each door is asserted against the literal code-point rows, not merely
  * against the others: parity alone is satisfied by breaking all three alike.
+ *
+ * [#5930 step 4, ruling D6] The reference matcher is retired. Its door held
+ * nothing of its own for this operator — it evaluated the spec's
+ * `matchesLikePattern` — so its third of each assertion is held on that shared
+ * predicate directly, the one `@objectstack/formula` evaluates too.
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { InMemoryDriver } from './memory-driver.js';
-import { match } from './memory-matcher.js';
+import { matchesLikePattern } from '@objectstack/spec/data';
 
 const GRIN = String.fromCodePoint(0x1f600);
 const SCRIPT_A = String.fromCodePoint(0x1d49c);
@@ -71,14 +76,17 @@ describe('[#20143] driver-memory — `_` is one code point on every door', () =>
   });
 
   for (const [op, pattern, expected] of FAMILY) {
-    it(`${op} ${JSON.stringify(pattern)} answers the code-point rows on all three doors`, async () => {
+    it(`${op} ${JSON.stringify(pattern)} answers the code-point rows on every door`, async () => {
       const where = { v: { [op]: pattern } };
       const ast = { type: 'comparison', field: 'v', operator: op === '$ilike' ? 'ilike' : 'like', value: pattern };
       expect({
         dollarQuery: labels(await driver.find(TABLE, { where: where as never })),
         astQuery: labels(await driver.find(TABLE, { where: ast as never })),
-        matcher: Object.entries(ROWS).filter(([label, v]) => match({ label, v }, where)).map(([l]) => l).sort(),
-      }).toEqual({ dollarQuery: [...expected], astQuery: [...expected], matcher: [...expected] });
+        sharedPredicate: Object.entries(ROWS)
+          .filter(([, v]) => matchesLikePattern(v, pattern, op === '$ilike'))
+          .map(([l]) => l)
+          .sort(),
+      }).toEqual({ dollarQuery: [...expected], astQuery: [...expected], sharedPredicate: [...expected] });
     });
   }
 });

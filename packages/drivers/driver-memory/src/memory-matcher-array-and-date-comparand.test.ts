@@ -46,121 +46,150 @@
  * — this refusal reaching the value side by accident — is still live, and the
  * assertion that the two sides stay distinct is the same assertion whichever
  * answer the value side gives.
+ *
+ * [#5930 step 4, ruling D6] The reference matcher had no production caller and
+ * is RETIRED; this file keeps its name and holds the LIVE query path now
+ * (`InMemoryDriver.find`), cell for cell. Every expectation below is the one the
+ * matcher was asserted to give, and the live path gives each of them — measured
+ * before the move. A `Date` comparand meets a row through a declared `datetime`
+ * column, the case the equality cells were written for: that column holds
+ * canonical ISO text (ADR-0053 D-B1, `memory-temporal.ts`), and so does the
+ * comparand once it is put into the column's storage form (#4047). The ARRAY
+ * refusal is the shared shape gate's, which the live path runs.
  */
 
 import { describe, it, expect } from 'vitest';
-import { match } from './memory-matcher.js';
+import { InMemoryDriver } from './memory-driver.js';
 
 const INSTANT = '2026-01-01T00:00:00.000Z';
 
-describe('[#16810] Date comparands are compared by time value', () => {
-  it('a distinct Date object of the same instant matches', () => {
-    expect(match({ created_at: new Date(INSTANT) }, { created_at: new Date(INSTANT) })).toBe(true);
+const FIELDS = {
+  created_at: { type: 'datetime' },
+  tags: { type: 'text' },
+  qty: { type: 'number' },
+  name: { type: 'text' },
+};
+
+/** A driver holding ONE row of the declared object `t`. */
+async function oneRow(stored: Record<string, unknown>): Promise<InMemoryDriver> {
+  const driver = new InMemoryDriver({ persistence: false });
+  await driver.connect();
+  await driver.syncSchema('t', { fields: FIELDS } as never);
+  await driver.create('t', { id: 'r', ...stored });
+  return driver;
+}
+
+/** Does the live query path select that one row? — what the matcher's `match(row, where)` answered, asked of `find()`. */
+async function liveSelects(stored: Record<string, unknown>, where: unknown): Promise<boolean> {
+  const rows = await (await oneRow(stored)).find('t', { where } as never);
+  return rows.length === 1;
+}
+
+/** The live query path's refusal, or a sentinel when it answered. */
+async function refusal(stored: Record<string, unknown>, where: unknown): Promise<unknown> {
+  return (await oneRow(stored)).find('t', { where } as never).then(
+    () => new Error('the live query path answered instead of refusing'),
+    (err: unknown) => err,
+  );
+}
+
+describe('[#16810] Date comparands are compared by time value (the live path, a declared datetime)', () => {
+  it('a distinct Date object of the same instant matches', async () => {
+    expect(await liveSelects({ created_at: new Date(INSTANT) }, { created_at: new Date(INSTANT) })).toBe(true);
   });
 
-  it('a Date of a DIFFERENT instant does not match — the control for the case above', () => {
-    expect(match({ created_at: new Date(INSTANT) }, { created_at: new Date('2026-06-01T00:00:00.000Z') }))
+  it('a Date of a DIFFERENT instant does not match — the control for the case above', async () => {
+    expect(await liveSelects({ created_at: new Date(INSTANT) }, { created_at: new Date('2026-06-01T00:00:00.000Z') }))
       .toBe(false);
   });
 
-  it('a Date comparand matches a stored ISO STRING of the same instant', () => {
+  it('a Date comparand matches a stored ISO STRING of the same instant', async () => {
     // The case that actually reaches a stored row: a declared `datetime` is
     // canonicalised to ISO text on write (ADR-0053 D-B1, `memory-temporal.ts`),
     // so a `Date` comparand meets a string. `==` stringified the Date to
     // "Wed Jan 01 2026 …", which no ISO value equals.
-    expect(match({ created_at: INSTANT }, { created_at: new Date(INSTANT) })).toBe(true);
+    expect(await liveSelects({ created_at: INSTANT }, { created_at: new Date(INSTANT) })).toBe(true);
   });
 
-  it('a stored Date matches an ISO STRING comparand of the same instant — the same rule, mirrored', () => {
-    expect(match({ created_at: new Date(INSTANT) }, { created_at: INSTANT })).toBe(true);
+  it('a stored Date matches an ISO STRING comparand of the same instant — the same rule, mirrored', async () => {
+    expect(await liveSelects({ created_at: new Date(INSTANT) }, { created_at: INSTANT })).toBe(true);
   });
 
-  it('an ISO string of a different instant does not match', () => {
-    expect(match({ created_at: new Date(INSTANT) }, { created_at: '2026-06-01T00:00:00.000Z' })).toBe(false);
+  it('an ISO string of a different instant does not match', async () => {
+    expect(await liveSelects({ created_at: new Date(INSTANT) }, { created_at: '2026-06-01T00:00:00.000Z' })).toBe(false);
   });
 
-  it('a non-temporal string does not become a match by way of Date parsing', () => {
-    expect(match({ created_at: new Date(INSTANT) }, { created_at: 'active' })).toBe(false);
+  it('a non-temporal string does not become a match by way of Date parsing', async () => {
+    expect(await liveSelects({ created_at: new Date(INSTANT) }, { created_at: 'active' })).toBe(false);
   });
 
-  it('an Invalid Date equals nothing, itself included', () => {
+  it('an Invalid Date equals nothing, itself included', async () => {
     // JS `Date` convention (NaN time value), `formula`'s `looseEq` answer, and
     // ADR-0053 D-F1's reading that an Invalid Date has no canonical text.
-    expect(match({ created_at: new Date('nope') }, { created_at: new Date('nope') })).toBe(false);
+    expect(await liveSelects({ created_at: new Date('nope') }, { created_at: new Date('nope') })).toBe(false);
   });
 
-  it('$eq and $ne take the SAME equality as the implicit spelling', () => {
+  it('$eq and $ne take the SAME equality as the implicit spelling', async () => {
     // One predicate must not answer two ways depending on which spelling the
     // author used.
-    expect(match({ created_at: new Date(INSTANT) }, { created_at: { $eq: new Date(INSTANT) } })).toBe(true);
-    expect(match({ created_at: new Date(INSTANT) }, { created_at: { $ne: new Date(INSTANT) } })).toBe(false);
-    expect(match({ created_at: INSTANT }, { created_at: { $eq: new Date(INSTANT) } })).toBe(true);
+    expect(await liveSelects({ created_at: new Date(INSTANT) }, { created_at: { $eq: new Date(INSTANT) } })).toBe(true);
+    expect(await liveSelects({ created_at: new Date(INSTANT) }, { created_at: { $ne: new Date(INSTANT) } })).toBe(false);
+    expect(await liveSelects({ created_at: INSTANT }, { created_at: { $eq: new Date(INSTANT) } })).toBe(true);
   });
 
-  it('the ordering operators keep answering a Date comparand', () => {
-    expect(match({ created_at: new Date(INSTANT) }, { created_at: { $gte: new Date(INSTANT) } })).toBe(true);
-    expect(match({ created_at: new Date(INSTANT) }, { created_at: { $gt: new Date(INSTANT) } })).toBe(false);
+  it('the ordering operators keep answering a Date comparand', async () => {
+    expect(await liveSelects({ created_at: new Date(INSTANT) }, { created_at: { $gte: new Date(INSTANT) } })).toBe(true);
+    expect(await liveSelects({ created_at: new Date(INSTANT) }, { created_at: { $gt: new Date(INSTANT) } })).toBe(false);
   });
 });
 
 describe('[#16810] an ARRAY comparand is refused, in the ADR-0112 envelope', () => {
   const envelope = { code: 'INVALID_FILTER', status: 400 };
 
-  it('refuses the implicit-equality position', () => {
-    expect(() => match({ tags: ['a', 'b'] }, { tags: ['a', 'b'] })).toThrow(
-      expect.objectContaining(envelope),
-    );
+  it('refuses the implicit-equality position', async () => {
+    expect(await refusal({ tags: ['a', 'b'] }, { tags: ['a', 'b'] })).toMatchObject(envelope);
   });
 
-  it('refuses an EMPTY array too — the member of the cell whose two silent answers coincided', () => {
-    expect(() => match({ tags: [] }, { tags: [] })).toThrow(expect.objectContaining(envelope));
+  it('refuses an EMPTY array too — the member of the cell whose two silent answers coincided', async () => {
+    expect(await refusal({ tags: [] }, { tags: [] })).toMatchObject(envelope);
   });
 
-  it('refuses the $eq / $ne spelling of the same position', () => {
-    expect(() => match({ tags: ['a', 'b'] }, { tags: { $eq: ['a', 'b'] } })).toThrow(
-      expect.objectContaining(envelope),
-    );
-    expect(() => match({ tags: ['a', 'b'] }, { tags: { $ne: ['a', 'b'] } })).toThrow(
-      expect.objectContaining(envelope),
-    );
+  it('refuses the $eq / $ne spelling of the same position', async () => {
+    expect(await refusal({ tags: ['a', 'b'] }, { tags: { $eq: ['a', 'b'] } })).toMatchObject(envelope);
+    expect(await refusal({ tags: ['a', 'b'] }, { tags: { $ne: ['a', 'b'] } })).toMatchObject(envelope);
   });
 
-  it('refuses an array on the ordering operators', () => {
-    expect(() => match({ qty: 5 }, { qty: { $gt: [1, 2] } })).toThrow(expect.objectContaining(envelope));
+  it('refuses an array on the ordering operators', async () => {
+    expect(await refusal({ qty: 5 }, { qty: { $gt: [1, 2] } })).toMatchObject(envelope);
   });
 
-  it('names the position, the received shape and the accepted set', () => {
+  it('names the position, the received shape and the accepted set', async () => {
     // The message is specific rather than generic: an author who wrote
     // `{ tags: ['a','b'] }` must be told which field, what arrived, what is
     // accepted, and which operators DO take a list.
-    let message = '';
-    try {
-      match({ tags: ['a', 'b'] }, { tags: ['a', 'b'] });
-    } catch (err) {
-      message = String((err as Error).message);
-    }
+    const message = String(((await refusal({ tags: ['a', 'b'] }, { tags: ['a', 'b'] })) as Error).message);
     expect(message).toContain('tags');
     expect(message).toContain('a string, number, bigint, boolean, null or Date');
     expect(message).toContain('$in/$nin');
     expect(message).toContain('$between');
   });
 
-  it('leaves the LIST operators alone — an array is their declared comparand', () => {
-    expect(match({ tags: 'a' }, { tags: { $in: ['a', 'z'] } })).toBe(true);
-    expect(match({ tags: 'a' }, { tags: { $nin: ['a', 'z'] } })).toBe(false);
-    expect(match({ qty: 5 }, { qty: { $between: [1, 10] } })).toBe(true);
+  it('leaves the LIST operators alone — an array is their declared comparand', async () => {
+    expect(await liveSelects({ tags: 'a' }, { tags: { $in: ['a', 'z'] } })).toBe(true);
+    expect(await liveSelects({ tags: 'a' }, { tags: { $nin: ['a', 'z'] } })).toBe(false);
+    expect(await liveSelects({ qty: 5 }, { qty: { $between: [1, 10] } })).toBe(true);
   });
 
-  it('leaves the TEXT family alone — its comparand disposition is recorded elsewhere', () => {
+  it('leaves the TEXT family alone — its comparand disposition is recorded elsewhere', async () => {
     // `filter-refusal.ts` lists "a stringified comparand for the LIKE family"
     // among the shapes it deliberately does not refuse, fail-closed. This
     // refusal covers the ruled cell and does not widen past it.
-    expect(() => match({ name: 'alpha' }, { name: { $contains: ['a'] } })).not.toThrow();
+    await expect(liveSelects({ name: 'alpha' }, { name: { $contains: ['a'] } })).resolves.toBeTypeOf('boolean');
   });
 });
 
 describe('[#16810/#16838] the value side is NOT the comparand side — still two cells, both now answered', () => {
-  it('a scalar comparand against a stored array is MEMBERSHIP, and is not refused', () => {
+  it('a scalar comparand against a stored array is MEMBERSHIP, and is not refused', async () => {
     // [#16838] The three lines this block pinned as UNCHANGED under #16810,
     // with the two that #16838 moved and the one it did not:
     //
@@ -174,23 +203,23 @@ describe('[#16810/#16838] the value side is NOT the comparand side — still two
     // side would turn the first two lines into a throw. Their VALUES track the
     // value side's own ruling; the shape of the assertion — an answer, not an
     // exception — is what #16810 pinned and it is unchanged.
-    expect(match({ tags: ['a', 'b'] }, { tags: 'a' })).toBe(true);
-    expect(match({ tags: ['a', 'b'] }, { tags: 'a,b' })).toBe(false);
-    expect(match({ tags: ['a'] }, { tags: 'a' })).toBe(true);
+    expect(await liveSelects({ tags: ['a', 'b'] }, { tags: 'a' })).toBe(true);
+    expect(await liveSelects({ tags: ['a', 'b'] }, { tags: 'a,b' })).toBe(false);
+    expect(await liveSelects({ tags: ['a'] }, { tags: 'a' })).toBe(true);
   });
 
-  it('the ARRAY-comparand refusal did not follow the value side — a stored array is still evaluated', () => {
+  it('the ARRAY-comparand refusal did not follow the value side — a stored array is still evaluated', async () => {
     // The invariant this block was created to hold, stated directly rather than
     // left to be inferred from the three answers above: the door refuses an
     // array in the COMPARAND position and says nothing about a stored one, so a
     // scalar comparand against any stored array must ANSWER.
     for (const stored of [['a', 'b'], ['a'], [] as unknown[], [null, 'b'], [['a']]]) {
-      expect(() => match({ tags: stored }, { tags: 'a' }), `stored ${JSON.stringify(stored)} was refused`)
-        .not.toThrow();
+      await expect(liveSelects({ tags: stored }, { tags: 'a' }), `stored ${JSON.stringify(stored)} was refused`)
+        .resolves.toBeTypeOf('boolean');
     }
     // …while the comparand position still refuses, on the same row.
-    expect(() => match({ tags: ['a', 'b'] }, { tags: ['a', 'b'] })).toThrow(
-      /requires a single comparable value/,
-    );
+    expect(await refusal({ tags: ['a', 'b'] }, { tags: ['a', 'b'] })).toMatchObject({
+      message: expect.stringMatching(/requires a single comparable value/),
+    });
   });
 });
