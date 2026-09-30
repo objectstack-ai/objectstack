@@ -21,7 +21,7 @@ error TS2322: Type 'string' is not assignable to type '{ '[REMOVED] Key retired:
 
 A hover on the key shows the same text. `os validate` and the parse print the key's own prescription, which says what replaced the key and gives the one-line fix.
 
-**What changed.** The declared type of each tombstoned key, on both the input side (`z.input`, the bare `X` aliases) and the parsed side (`z.infer`, the `XParsed` aliases), is now `{ '[REMOVED] Key retired: run `os validate` for its migration.': never } | undefined` instead of `undefined`. No value can have that object type, because its one property is typed `never`. So `tsc` still accepts only absence, as before. Both sides carry the same type, which keeps the ADR-0122 isomorphism pins true.
+**What changed.** The declared type of each tombstoned key, on both the input side (`z.input`, the bare `X` aliases) and the parsed side (`z.infer`, the `XParsed` aliases), is now `` { '[REMOVED] Key retired: run `os validate` for its migration.': never } | undefined `` instead of `undefined`. No value can have that object type, because its one property is typed `never`. So `tsc` still accepts only absence, as before. Both sides carry the same type, which keeps the ADR-0122 isomorphism pins true.
 
 **What did not change.** Runtime behaviour is the same. Each tombstone is still `z.never().optional()`. The parse error and its prescription, the text `os validate` prints, the ADR-0087 conversions, the JSON schemas and the authorable-surface artifacts are all unchanged. No export was added or removed.
 
