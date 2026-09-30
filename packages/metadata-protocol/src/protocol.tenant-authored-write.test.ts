@@ -15,11 +15,21 @@
  *    base the write itself names;
  *  - everything else is admitted, and every type but `flow` is untouched.
  *
- * The registry double serves only `getArtifactItem` — what the real
- * `SchemaRegistry` returns for an artifact a code package registered. The
- * engine double serves only `findOne` over `sys_metadata` rows (and records
- * `insert`, which a refused save must never reach). `@objectstack/objectql`
- * cannot be imported here: it depends on this package.
+ * [#20863] …and a flow saved naming, as its base, a package no installed
+ * package holds is refused `WRITABLE_PACKAGE_REQUIRED` / 422 (ADR-0070 D1: the
+ * resolved target is missing) — whatever stamps its body carries, on both
+ * topologies — before anything is written or registered. The controls: a flow
+ * naming no package passes, a flow naming an installed package passes, and a
+ * shipped flow is still refused as a locked base first.
+ *
+ * The registry double serves `getArtifactItem` — what the real
+ * `SchemaRegistry` returns for an artifact a code package registered — and
+ * `getPackage`, what it returns for an installed package (the read the `/meta`
+ * write path resolves a base against); `registerItem` is recorded, and a
+ * refused save must never reach it. The engine double serves only `findOne`
+ * over `sys_metadata` rows (and records `insert`, which a refused save must
+ * never reach either). `@objectstack/objectql` cannot be imported here: it
+ * depends on this package.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
@@ -49,13 +59,29 @@ const ARTIFACTS = new Map<string, Map<string, unknown>>([
 /** The stamps a caller would send to claim the real package's provenance. */
 const ASSERTED = { _packageId: PACKAGE_ID, _provenance: 'package' };
 
+/** A tenant's own writable base — installed, so a save may name it. */
+const TENANT_BASE = 'com.tenant.base';
+/** A package id no installed package has. */
+const ORPHAN = 'com.nowhere.pkg';
+
+/** What the registry holds as installed: the code package and the tenant's base. */
+const INSTALLED = new Map<string, unknown>([
+    [PACKAGE_ID, { manifest: { id: PACKAGE_ID, scope: 'system' } }],
+    [TENANT_BASE, { manifest: { id: TENANT_BASE, scope: 'project' } }],
+]);
+
 interface StoredRow { type: string; name: string; package_id: string | null }
 
 function protocolWith(opts: { rows?: StoredRow[]; findOne?: () => Promise<unknown>; environmentId?: string } = {}) {
     const rows = opts.rows ?? [];
     const insert = vi.fn(async () => ({ id: 'never' }));
+    const registerItem = vi.fn();
     const engine = {
-        registry: { getArtifactItem: (type: string, name: string) => ARTIFACTS.get(type)?.get(name) },
+        registry: {
+            getArtifactItem: (type: string, name: string) => ARTIFACTS.get(type)?.get(name),
+            getPackage: (id: string) => INSTALLED.get(id),
+            registerItem,
+        },
         findOne: opts.findOne ?? (async (table: string, query: { where: Record<string, unknown> }) => {
             assertEngineFindOnePredicate(table, query);
             if (table !== 'sys_metadata') return null;
@@ -64,7 +90,7 @@ function protocolWith(opts: { rows?: StoredRow[]; findOne?: () => Promise<unknow
         insert,
     };
     const protocol = new ObjectStackProtocolImplementation(engine as never, () => new Map(), opts.environmentId);
-    return { protocol, insert };
+    return { protocol, insert, registerItem };
 }
 
 const shape = (e: any) => (e ? { code: e.code, status: e.status } : null);
@@ -197,5 +223,89 @@ describe('saveMetaItem applies the rule to a flow, before anything is written', 
         expect(await ask({ writeFace: 'meta-envelope' })).toBe(1);
         expect(await ask({ source: 'migrate-stored' })).toBe(0);
         expect(await ask({ writeFace: 'package-duplicate' })).toBe(0);
+    });
+});
+
+describe('a flow saved naming, as its base, a package no installed package holds is refused', () => {
+    const refusalFor = (protocol: ObjectStackProtocolImplementation, request: Record<string, unknown>) =>
+        protocol.tenantAuthoredWriteRefusal({ type: 'flow', name: 'orphan_flow', item: flowBody('orphan_flow'), ...request } as never);
+
+    it('WRITABLE_PACKAGE_REQUIRED / 422, whatever stamps the body carries, on both topologies', async () => {
+        for (const environmentId of [undefined, 'env_1']) {
+            const { protocol } = protocolWith({ environmentId });
+            for (const stamps of [
+                {},
+                { _packageId: ORPHAN },
+                { _packageId: ORPHAN, _provenance: 'package' },
+                { _packageId: ORPHAN, _provenance: 'org' },
+                ASSERTED,
+            ]) {
+                const refusal: any = await refusalFor(protocol, { item: flowBody('orphan_flow', stamps), packageId: ORPHAN });
+                expect(shape(refusal), JSON.stringify({ environmentId, stamps })).toEqual({ code: 'WRITABLE_PACKAGE_REQUIRED', status: 422 });
+                expect(refusal.packageId).toBe(ORPHAN);
+            }
+            // The type is folded at the producer: a plural spelling cannot address around it.
+            expect(shape(await refusalFor(protocol, { type: 'flows', packageId: ORPHAN })))
+                .toEqual({ code: 'WRITABLE_PACKAGE_REQUIRED', status: 422 });
+        }
+    });
+
+    it('saveMetaItem throws it before anything is written or registered — published or drafted, on both topologies', async () => {
+        for (const environmentId of [undefined, 'env_1']) {
+            for (const mode of [undefined, 'draft'] as const) {
+                const { protocol, insert, registerItem } = protocolWith({ environmentId });
+                const thrown: any = await protocol.saveMetaItem({
+                    type: 'flow', name: 'orphan_flow', item: flowBody('orphan_flow'), packageId: ORPHAN,
+                    ...(mode ? { mode } : {}),
+                }).then(() => undefined, (e) => e);
+
+                expect(shape(thrown), JSON.stringify({ environmentId, mode })).toEqual({ code: 'WRITABLE_PACKAGE_REQUIRED', status: 422 });
+                expect(insert).not.toHaveBeenCalled();
+                expect(registerItem).not.toHaveBeenCalled();
+            }
+        }
+    });
+
+    it('control: a flow naming no package passes this rule, and the stored-row sentinel names no package', async () => {
+        const { protocol } = protocolWith();
+        for (const packageId of [undefined, null, 'sys_metadata']) {
+            expect(await refusalFor(protocol, { packageId }), String(packageId)).toBeNull();
+        }
+    });
+
+    it('control: a flow naming an installed package passes this rule, with or without its binding echoed', async () => {
+        const { protocol } = protocolWith();
+        expect(await refusalFor(protocol, { packageId: TENANT_BASE })).toBeNull();
+        expect(await refusalFor(protocol, { item: flowBody('orphan_flow', { _packageId: TENANT_BASE }), packageId: TENANT_BASE })).toBeNull();
+        // A read-only installed package is installed: whether it is a writable
+        // base is the ADR-0070 D1 gate's question further down the save, never this rule's.
+        expect(await refusalFor(protocol, { packageId: PACKAGE_ID })).toBeNull();
+    });
+
+    it('control: a shipped flow is refused as a locked base first, whatever base the save names', async () => {
+        for (const environmentId of [undefined, 'env_1']) {
+            const { protocol } = protocolWith({ environmentId });
+            const served = ARTIFACTS.get('flow')!.get('pkg_flow');
+            for (const packageId of [ORPHAN, PACKAGE_ID]) {
+                const refusal: any = await protocol.tenantAuthoredWriteRefusal({ type: 'flow', name: 'pkg_flow', item: served, packageId });
+                expect(refusal?.status, packageId).toBe(403);
+                expect(['NOT_OVERRIDABLE', 'ITEM_LOCKED']).toContain(refusal.code);
+            }
+        }
+    });
+
+    it('with the operator hatch open a shipped flow passes the lock, and a base no installed package holds is still refused', async () => {
+        process.env.OS_METADATA_WRITABLE = 'flow';
+        ObjectStackProtocolImplementation.resetEnvWritableCache();
+        const { protocol } = protocolWith();
+        const served = ARTIFACTS.get('flow')!.get('pkg_flow');
+        expect(shape(await protocol.tenantAuthoredWriteRefusal({ type: 'flow', name: 'pkg_flow', item: served, packageId: ORPHAN })))
+            .toEqual({ code: 'WRITABLE_PACKAGE_REQUIRED', status: 422 });
+        expect(await protocol.tenantAuthoredWriteRefusal({ type: 'flow', name: 'pkg_flow', item: served, packageId: PACKAGE_ID })).toBeNull();
+    });
+
+    it('every other metadata type is untouched — a view naming the same base is not this rule\'s to judge', async () => {
+        const { protocol } = protocolWith();
+        expect(await protocol.tenantAuthoredWriteRefusal({ type: 'view', name: 'customer_view', item: { name: 'customer_view' }, packageId: ORPHAN })).toBeNull();
     });
 });

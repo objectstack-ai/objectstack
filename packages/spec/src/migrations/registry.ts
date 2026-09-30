@@ -11871,11 +11871,12 @@ const step18: MigrationStep = {
     // was `z.array(z.any())` while the other carrier, a relationship field's
     // `inlineColumns`, has been the strict `InlineGridColumnSchema` since #9227; the
     // carrier now REFERENCES that schema, so both carriers are judged by one
-    // contract. D3 only, deliberately: the one mechanical respelling the family
-    // had (`field` → `name`, conversion `field-column-lists-canonicalized`) is
-    // already retired from the load path, and every other refused shape is a
-    // judgment only the author can make. A stored view whose column fails is
-    // refused with the column schema's own prescription, never stripped.
+    // contract. The one mechanical respelling, `field` → `name`, is the D2
+    // conversion `form-view-subform-columns-canonicalized` (the respelling
+    // `field-column-lists-canonicalized` makes on `inlineColumns`); every other
+    // refused shape is a judgment only the author can make. A view saved with a
+    // failing column is refused with the column schema's own prescription, and a
+    // stored row carrying one is diagnosed at rehydration; neither is stripped.
     {
       id: 'form-view-subform-columns-closed',
       surface: 'view.form.subforms[].columns[] and view.formViews.<key>.subforms[].columns[] — the '
@@ -11892,10 +11893,12 @@ const step18: MigrationStep = {
         + '(option B, `scale` retired from the currency type) and the remedy ruled on 2026-09-24 '
         + '(option 乙 — a currency\'s ISO 4217 minor unit decides its display) — published green here. '
         + 'The carrier now references the column schema, so every rule it holds applies here too, with '
-        + 'its own prescription. NOT mechanically converted: the `field` → `name` respelling this family '
-        + 'had is already retired from the load path, and which column an unknown key or a mixed '
-        + '`field`/`name` entry meant is the author\'s call — a conversion that dropped the key would '
-        + 'accept on every load what the parse now refuses. Population measured at the change, on '
+        + 'its own prescription. Only the `field` spelling is converted mechanically — by the conversion '
+        + '`form-view-subform-columns-canonicalized`, which rewrites stored rows and assembled artifacts '
+        + 'and lists the edit under `os migrate meta`, while an author writing `field` meets the refusal. '
+        + 'Which column an unknown key or a mixed `field`/`name` entry meant is the author\'s call — a '
+        + 'conversion that dropped the key would accept on every load what the parse now refuses. '
+        + 'Population measured at the change, on '
         + 'origin/main cb4c31dd52: zero authored `subforms` in the repository (the showcase derives its '
         + 'master-detail grids from the data model instead), against one authored `inlineColumns` block '
         + 'as the control. Deployed metadata NOT MEASURED.',
@@ -12308,7 +12311,9 @@ const step18: MigrationStep = {
       id: 'inline-grid-column-currency-scale-refused',
       surface: 'object.fields.<name>.inlineColumns[].scale on an inline grid column that declares '
         + '`type: \'currency\'` — any declared value, `scale: 0` included, computed or not. `scale` on a '
-        + '`number` column, and on a column that declares no `type`, is untouched',
+        + '`number` column is untouched. A column that declares no `type` is judged as the type it '
+        + 'renders as: over a `currency` field of the child object it is entry '
+        + '`inline-grid-column-identity-only-currency-scale-refused`',
       replacement: 'no `scale` on a currency inline grid column. DELETE the key — that is the whole '
         + 'migration: a currency amount\'s decimal places are its currency\'s, not a column setting. The '
         + 'currency\'s ISO 4217 minor unit decides how the cell displays the amount and the width a '
@@ -12327,19 +12332,23 @@ const step18: MigrationStep = {
         + 'every load, which is the grace window the ruling refused; the refusal names the key and its '
         + 'one-line fix instead. The same change rewords the column\'s `prefix` description: it replaces '
         + 'the resolved currency\'s symbol and has no default (the grid no longer falls back to a fixed '
-        + 'yen sign). Reach: only a DECLARED column `type` is judged — a column that declares none takes '
-        + 'its type from the child field when the console hydrates it, which the column schema cannot '
-        + 'see. Population measured at the change, on origin/main 1c8b320a89: one authored '
-        + '`inlineColumns` block in the tree (the showcase invoice, seven identity-only columns, none '
-        + 'declaring `type` or `scale`), no platform object, skill, documentation example or JSON fixture '
-        + 'declaring an inline grid column at all, and one test fixture carrying `scale: 2` on a currency '
-        + 'column, re-judged in the same change. Deployed metadata NOT MEASURED.',
+        + 'yen sign). Reach: the column schema judges only a DECLARED column `type` — a column that '
+        + 'declares none takes its type from the child field when the console hydrates it, which the '
+        + 'schema cannot see; `defineStack` judges that column instead (entry '
+        + '`inline-grid-column-identity-only-currency-scale-refused`). Population measured at the '
+        + 'change, on origin/main 1c8b320a89: one authored `inlineColumns` block in the tree (the '
+        + 'showcase invoice, seven identity-only columns, none declaring `type` or `scale`), no platform '
+        + 'object, skill, documentation example or JSON fixture declaring an inline grid column at all, '
+        + 'and one test fixture carrying `scale: 2` on a currency column, re-judged in the same change. '
+        + 'Deployed metadata NOT MEASURED.',
       acceptanceCriteria:
         'Every field in the stack parses: an `ObjectSchema` parse and `objectstack validate` report no '
         + 'issue on an `inlineColumns[].scale` path of a column declaring `type: \'currency\'`. A '
         + 'currency column that carried `scale` no longer declares it, and a diff of the column shows '
-        + 'that one line deleted and no key added. `number` columns, and columns declaring no `type`, '
-        + 'keep their `scale`; a column\'s `prefix` is still accepted on a currency column.',
+        + 'that one line deleted and no key added. `number` columns keep their `scale`, and so does a '
+        + 'column declaring no `type` unless it names a `currency` field of the child object (entry '
+        + '`inline-grid-column-identity-only-currency-scale-refused`); a column\'s `prefix` is still '
+        + 'accepted on a currency column.',
     },
     // #20901 — the reach of `inline-grid-column-currency-scale-refused`, extended to
     // the column that declares no `type`. The column schema judges only a DECLARED

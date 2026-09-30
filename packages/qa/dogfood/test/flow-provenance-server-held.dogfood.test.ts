@@ -27,7 +27,12 @@
 //     activation row is attributed to a package from an authoring path;
 //   - a clone of a shipped flow is saved as a tenant row: it reads back on the
 //     metadata door, and it is still there after a cold boot on the same file;
-//   - `/meta` on another metadata type keeps its old handling (the control).
+//   - `/meta` on another metadata type keeps its old handling (the control);
+//   - [#20863] a `/meta` flow save naming, as its base, a package no installed
+//     package holds is refused, with or without a stamp naming that same
+//     package, and nothing is written, served or registered. Its controls are
+//     the cases above: a customer flow naming no package saves, one naming the
+//     tenant's installed base saves, and a shipped flow is a locked base.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
@@ -55,6 +60,9 @@ const CLONE = 'dogfood_clone_20761';
 const META_BOUND = 'dogfood_bound_flow_20761';
 /** A package this test creates through the package door — a tenant's own base, not a managed package. */
 const TENANT_PACKAGE = 'com.dogfood.flows20761';
+/** [#20863] A flow saved naming a package no installed package has, and that id. */
+const META_ORPHAN = 'dogfood_orphan_bound_flow_20863';
+const ORPHAN_PACKAGE = 'com.dogfood.never_installed20863';
 
 const LEDGER = 'sys_metadata_activation';
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
@@ -224,6 +232,21 @@ describe('a flow\'s package provenance is the server\'s fact at every door (show
         expect(echoed.status, JSON.stringify(echoed.json)).toBe(200);
         const bare = await call('PUT', `/meta/flow/${META_BOUND}`, served.doc);
         expect(bare.status, JSON.stringify(bare.json)).toBe(200);
+    });
+
+    it('the metadata door refuses a flow naming a package no installed package holds, and nothing is written, served or registered', async () => {
+        for (const body of [definition(META_ORPHAN), { ...definition(META_ORPHAN), _packageId: ORPHAN_PACKAGE }]) {
+            const put = await call('PUT', `/meta/flow/${META_ORPHAN}?package=${ORPHAN_PACKAGE}`, body);
+
+            expect(put.status, JSON.stringify(put.json)).toBe(422);
+            expect(restCode(put.json)).toBe('WRITABLE_PACKAGE_REQUIRED');
+        }
+        const ql = (await stack.kernel.getServiceAsync('objectql')) as unknown as {
+            find(object: string, options?: unknown): Promise<Array<Record<string, unknown>>>;
+        };
+        expect(await ql.find('sys_metadata', { where: { type: 'flow', name: META_ORPHAN }, context: SYSTEM_CTX })).toEqual([]);
+        expect((await metaRead(META_ORPHAN)).status).toBe(404);
+        expect((await call('GET', `/automation/${META_ORPHAN}`)).status).toBe(404);
     });
 
     it('a round trip of a shipped flow through the metadata door is refused as a locked base', async () => {

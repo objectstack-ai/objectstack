@@ -14625,7 +14625,8 @@ export class ObjectStackProtocolImplementation implements
      *     flow: its served body echoes stamps that AGREE with the set, and the
      *     write is still an in-place edit of a locked base. With the
      *     `OS_METADATA_WRITABLE` hatch open the lock admits the write, and it
-     *     is still tenant-authored: the body's stamps decide nothing.
+     *     is still tenant-authored: the body's stamps decide nothing (the base
+     *     the write names still does — see the named-base rule below).
      *  2. **Any other name, with a body whose stamps would classify it as
      *     code-shipped** (`isCodeArtifactBody`, ADR-0029 D9.6), is refused
      *     LOUDLY. The body asserts a provenance the platform never
@@ -14654,6 +14655,46 @@ export class ObjectStackProtocolImplementation implements
      * into asserting a provenance. Not a 409: nothing about the target's
      * current state is contested — the name is free.
      *
+     * [#20863, ADR-0070 D1] **The named-base rule — after rule 1's lock,
+     * before rule 2: a base the write NAMES must be a package this deployment
+     * has installed.** A `/meta` save may name the package it is saved into.
+     * One naming an id no installed package has would store a flow bound to a
+     * package that does not exist and serve that binding back — a binding the
+     * platform can never honour, accepted silently. It is refused LOUDLY,
+     * whatever stamps the body carries: none (which rule 3 admits) or a stamp
+     * naming that same id (which the named-base agreement of rule 3 admits) —
+     * the two branches that used to let it through. The hatch does not lift
+     * it either: `OS_METADATA_WRITABLE` unlocks a TYPE, never a binding.
+     *
+     *  - "Installed" is read where the `/meta` write path already resolves a
+     *    base: {@link resolveWritePackageScope}, the registry's `getPackage`.
+     *    ⛔ Never a second list of packages, and ⛔ never the loader's set
+     *    alone — a tenant's own writable base (created through the package
+     *    door, rehydrated from the package store at boot) is installed and
+     *    ships no flow, and a save into it is the ordinary authoring path.
+     *  - The `sys_metadata` sentinel names no package — a row stored under it
+     *    reads back package-less — so a save naming it is a package-less save,
+     *    admitted as before.
+     *  - Fail direction: `resolveWritePackageScope` answers `undefined` for a
+     *    registry it cannot read as well as for an id it does not hold, so on
+     *    a registry with no `getPackage` (a metadata-only double — every real
+     *    composition's `SchemaRegistry` has one) a named base is refused. A
+     *    binding the platform cannot establish is not honoured: the same
+     *    closed direction the automation engine takes with no loader's-set
+     *    reader attached.
+     *
+     * `WRITABLE_PACKAGE_REQUIRED` / 422 — registered to this package in the
+     * ADR-0112 ledger, ⛔ no code is minted — because ADR-0070 D1 decided it
+     * for exactly this condition: a runtime create whose resolved target is
+     * MISSING, or read-only, is refused with it, and the prescription is the
+     * one this caller needs (choose or create a writable base, or name none).
+     * Not `INVALID_METADATA`: the definition may be perfectly valid — what is
+     * wrong is the base the request names, not a key in the body. The
+     * sentence is this refusal's own, because the D1 emitter's
+     * (`readOnlyBaseCreateError`) says the package is read-only, which is
+     * false of a package that does not exist; the `packageId` and `docs`
+     * members mirror that emitter's.
+     *
      * Scoped to `flow` (the 2026-09-30 ruling recorded on the card, point 5):
      * `/meta`'s handling of every OTHER type is unchanged, so for those this
      * returns `null` and the caller proceeds exactly as before.
@@ -14665,14 +14706,33 @@ export class ObjectStackProtocolImplementation implements
         const folded = canonicalizeMetaRequestType(request);
         const singular = PLURAL_TO_SINGULAR[folded.type] ?? folded.type;
         if (singular !== 'flow') return null;
-        if (this.packagedArtifactOwner(folded) !== undefined) {
-            return this.packagedBaseRefusal({
+        const shipped = this.packagedArtifactOwner(folded) !== undefined;
+        if (shipped) {
+            const locked = this.packagedBaseRefusal({
                 type: folded.type,
                 name: folded.name,
                 operation: 'save',
                 ...(folded.packageId ? { packageId: folded.packageId } : {}),
             });
+            if (locked) return locked;
         }
+        // [#20863] The named-base rule (see the docblock): a base the write
+        // names must be a package the registry holds as installed.
+        const namedBase = folded.packageId;
+        if (namedBase && namedBase !== 'sys_metadata' && this.resolveWritePackageScope(namedBase) === undefined) {
+            const err = new Error(
+                `Cannot save flow '${folded.name}' into package '${namedBase}': no package with that id is `
+                + `installed in this deployment, so the flow would be stored bound to a package that does not `
+                + `exist. Name an installed writable package as the flow's base (or create one first), or save `
+                + `the flow without naming a package. Nothing was written.`,
+            );
+            (err as any).code = 'WRITABLE_PACKAGE_REQUIRED';
+            (err as any).status = 422;
+            (err as any).packageId = namedBase;
+            (err as any).docs = 'docs/adr/0070-package-first-authoring.md';
+            return err;
+        }
+        if (shipped) return null;
         if (!isCodeArtifactBody(folded.item)) return null;
         const stamped = String((folded.item as { _packageId?: unknown })._packageId);
         if (folded.packageId === stamped) return null;
@@ -16726,9 +16786,12 @@ export class ObjectStackProtocolImplementation implements
         // caller sent: a flow no managed package loaded, sent with stamps that
         // would classify it as code-shipped, is refused loudly rather than
         // stripped silently, and a flow the loader's set holds is a locked
-        // base. A tenant row's own stamps echoed on a round trip pass and are
-        // stripped below as for every type. Every other type is untouched —
-        // {@link tenantAuthoredWriteRefusal} answers `null` for it.
+        // base. [#20863] The base this save names rides along, because the
+        // rule refuses one no installed package holds — a binding the
+        // platform could never honour. A tenant row's own stamps echoed on a
+        // round trip pass and are stripped below as for every type. Every
+        // other type is untouched — {@link tenantAuthoredWriteRefusal}
+        // answers `null` for it.
         //
         // Asked of AUTHORING writes only. The two server-stated rewrites of
         // rows this store already holds — {@link migrateStoredMetadata}

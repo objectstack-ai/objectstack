@@ -35,8 +35,11 @@
  *   "no answer — use your own fallback", NOT "no fields are readable". An empty
  *   array is a real answer and means the opposite: nothing is readable. Its
  *   metadata-plane sibling {@link ISecurityService.getMetadataReadableFields}
- *   (ADR-0106 D7) and its write-side twin {@link ISecurityService.getWritableFields}
- *   read the same two empty answers the same way.
+ *   (ADR-0106 D7), its write-side twin {@link ISecurityService.getWritableFields}
+ *   and its query-side twin {@link ISecurityService.getQueryableFields} read the
+ *   same two empty answers the same way. The query-side twin is the one whose
+ *   ABSENCE is not soft: its consumer gates a query rather than a presentation,
+ *   so its fallback fails closed (see that method).
  * - **Verdicts fail to ABSTENTION.** {@link ISecurityService.checkAuthoredRowWrite}
  *   answers a question a composing caller may use to WIDEN, so its failure mode
  *   is the one that changes nothing: `abstain`. It never reports `admit` for a
@@ -341,6 +344,48 @@ export interface ISecurityService {
    * this method only answers the projection question when a mask applies.
    */
   getMetadataReadableFields?(object: string, context?: SecurityContext): Promise<string[] | undefined>;
+
+  /**
+   * [#20935] The field names `context` may QUERY ON in `object` — filter, sort,
+   * group or aggregate by — as far as field-level security decides. The
+   * query-side twin of {@link getReadableFields}, for the doors that compile
+   * their own statement and so never reach the engine middleware's field
+   * guards (the analytics raw-SQL path is the one in the tree).
+   *
+   * **Why a second answer, and why the read projection is not it.** A field
+   * whose `maskingRule` applies to this caller is SERVED — the key stays in the
+   * row and its value is replaced by the mask — so it IS in
+   * {@link getReadableFields}. It is not queryable: a filter on it reconstructs
+   * the masked span one probe at a time (row presence is the oracle), and a
+   * group key or an aggregate over it returns the unmasked value outright. The
+   * engine refuses both, so a door that narrows by the read projection alone
+   * answers exactly the queries the engine refuses.
+   *
+   * Computed by the SAME derivation the engine middleware's predicate guard and
+   * aggregate-input guard refuse with: the returned set is the exact complement
+   * of the fields those guards refuse when a query names them. It is therefore a
+   * subset of {@link getReadableFields} — every field that is not readable is
+   * not queryable either — and the difference between the two is exactly the
+   * fields this caller sees masked.
+   *
+   * **Fails SOFT, with the same two distinct empty answers as
+   * {@link getReadableFields}:** `undefined` is "no answer" (e.g. the object
+   * schema could not be resolved); `[]` is the real answer that this caller may
+   * query on NO field. A system context bypasses and yields the full field set.
+   *
+   * **OPTIONAL, and absence is a defined state — but the fallback is NOT
+   * {@link getReadableFields} alone.** A security service that predates this
+   * method omits it, and consumers feature-detect
+   * (`typeof svc.getQueryableFields === 'function'`). ⛔ A consumer that cannot
+   * get this answer — the method is absent, or it answered `undefined` — must
+   * treat every field that declares a `maskingRule` as NOT queryable, whoever
+   * the caller is: the older reader cannot say for whom a rule is lifted, and
+   * the read projection reports a masked field as readable. Falling back to the read projection alone fails OPEN on
+   * precisely the fields this method exists for. Declaring it optional keeps
+   * that degradation a property of the type: the unguarded call does not
+   * compile, so a consumer cannot skip its fallback by accident.
+   */
+  getQueryableFields?(object: string, context?: SecurityContext): Promise<string[] | undefined>;
 
   /**
    * The field names `context` may WRITE on `object` as far as field-level
