@@ -8,7 +8,7 @@ fix(objectql,platform-objects,metadata-protocol)!: the platform's `sys_migration
 
 Clause-②: no (narrowing)
 
-<!-- adr-0087: not-required (runtime-interface-only packages/platform-objects/src/system/migration-flag.ts#MigrationFlagEngine, packages/metadata-protocol/src/migrations/seed-tenancy-backfill.ts#SeedTenancyLedger) two duck-typed engine interfaces, each the parameter type of a published helper, whose one read method moves from `find` to `findOne`. Neither is a Zod schema, a `packages/spec` declaration or an object definition, and no metadata surface references either, so `objectstack migrate meta` has nothing to rewrite: the affected party is the TypeScript author of a hand-written stand-in, and the channel that reaches them is the compiler at their own call site. The other categories are closed on facts: both packages publish (not `unpublished`); no ADR-0087 id covers an engine interface's method set, and this diff adds none (not `registered` / `already-registered`); the body does prescribe a rewrite, for TypeScript source rather than stored metadata, which is the shape this category was built for (not `no-migration-prescription`); and both interfaces were concretely typed at the merge base, not erased (not `type-surface-only`). The prescription detector does not flag the FROM/TO table below, and this claim does not rest on that miss: it rests on the four symbol predicates this gate verifies. -->
+<!-- adr-0087: not-required (runtime-interface-only packages/platform-objects/src/system/migration-flag.ts#MigrationFlagEngine, packages/metadata-protocol/src/migrations/seed-tenancy-backfill.ts#SeedTenancyLedger) two duck-typed engine interfaces, each the parameter type of a published helper, whose one read method moves from `find` to `findOne`. Neither is a Zod schema, a `packages/spec` declaration or an object definition, neither is a projection of a schema, and no metadata surface references either, so `objectstack migrate meta` has nothing to rewrite. The body carries no migration prescription. The only party affected is the TypeScript author of a hand-written stand-in, and that author's fix is carried by the compiler at their own call site, which names the missing `findOne`. The other categories are closed on facts: both packages publish (not `unpublished`); no ADR-0087 id covers an engine interface's method set, and this diff adds none (not `registered` / `already-registered`); and both interfaces were concretely typed at the merge base, not erased (not `type-surface-only`). This category, not the broader `no-migration-prescription`, because the positive reading it verifies is available here: the named symbols have no metadata surface. -->
 
 The deployment ledger is read one row at a time, by primary key. Five readers
 spelled that read as `find(sys_migration, { where: { id }, limit: 1 })`: the
@@ -27,26 +27,25 @@ warning once, for a lookup that cannot return two rows. All five readers now use
 unchanged: an unsorted `limit` read on a table the driver did not create still
 warns.
 
-**BREAKING**: this narrows what two published engine interfaces accept. A
-hand-written stand-in passed as a `MigrationFlagEngine` must now provide
-`findOne(object, options)`, which answers the row whose `where.id` matches, or
-`null`. That interface is the parameter type of `readDataMigrationFlag`,
-`isDataMigrationVerified`, `mayActIrreversibly`, `recordDataMigrationRun`,
-`recordFileColumnMove` and `attestFreshDatastore`, and part of
-`FilesToReferencesEngine` in `@objectstack/service-storage`. The same holds for a
-stand-in passed as the `ledger` of a `SeedTenancySeam`. A stand-in that provides
-only `find` no longer satisfies either type. It ships as `minor` under the
-launch-window convention for accept-set narrowings. The ObjectQL engine has both
-methods, so a host that passes the engine needs no change.
+**BREAKING**: this narrows what two published engine interfaces accept. The
+first is `MigrationFlagEngine` in `@objectstack/platform-objects/system`. It is
+the parameter type of `readDataMigrationFlag`, `isDataMigrationVerified`,
+`mayActIrreversibly`, `recordDataMigrationRun`, `recordFileColumnMove` and
+`attestFreshDatastore`, and part of `FilesToReferencesEngine` in
+`@objectstack/service-storage`. The second is `SeedTenancyLedger` in
+`@objectstack/metadata-protocol`, the type of a `SeedTenancySeam`'s `ledger`.
+Each now requires `findOne` where it required `find`, so a hand-written stand-in
+that provides only `find` no longer satisfies either type. It ships as `minor`
+under the launch-window convention for accept-set narrowings. The ObjectQL engine
+has both methods, so a host that passes the engine needs no change.
 
-| Surface | FROM | TO |
-| --- | --- | --- |
-| `MigrationFlagEngine` (`@objectstack/platform-objects/system`; also part of `FilesToReferencesEngine` in `@objectstack/service-storage`) | `find(object, options): Promise<Record<string, unknown>[]>` | `findOne(object, options): Promise<Record<string, unknown> \| null>` |
-| `SeedTenancyLedger` (`@objectstack/metadata-protocol`, the `ledger` of `SeedTenancySeam`) | `find(object, options): Promise<Record<string, unknown>[]>` | `findOne(object, options): Promise<Record<string, unknown> \| null>` |
+**Your fix:** a stand-in that implemented `find` for these helpers implements
+`findOne(object, options)` instead, answering the row whose `where.id` matches,
+or `null`.
 
 At run time, a stand-in that still provides only `find` fails the read.
 `readDataMigrationFlag` then answers `null`, the same answer as a missing row, so
-the gates it feeds stay closed. `resolveSeedTenancyLedger` now resolves a ledger
-only on a host that has `getObject`, `findOne`, `insert` and `update`. A find-only
-host gets no ledger, and the seed-tenancy repair says at `warn` that it could not
-record its receipt.
+the gates it feeds stay closed. `resolveSeedTenancySeam` now attaches a `ledger`
+only for a host that has `getObject`, `findOne`, `insert` and `update`. For a
+find-only host the seam's `ledger` is `undefined`, and when the seed-tenancy
+repair applies, it says at `warn` that it could not record its receipt.
