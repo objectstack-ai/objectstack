@@ -2977,7 +2977,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **object** | `string` | ✅ | The object name. |
 | **mode** | `Enum<'insert' \| 'update'>` | ✅ | The write mode the verdict was reached for. |
 | **valid** | `boolean` | ✅ | True when EVERY row is valid — the whole-set answer. |
-| **results** | `{ valid: boolean; errors: object[]; warnings: object[] }[]` | ✅ | Per-row verdicts, in submission order. |
+| **results** | `{ valid: boolean; errors: object[]; warnings: object[]; droppedFields?: object[] }[]` | ✅ | Per-row verdicts, in submission order. |
 | **posture** | `{ valueShapeStrict: boolean; mediaValueShapeStrict: boolean }` | ✅ | The ADR-0104 posture the verdict was reached under — reported because it is the difference between "this row is fine" and "this row is fine HERE". The same row can be an error on a self-certified deployment and an admitted warning on an un-migrated one, and a caller explaining a verdict needs to know which it got. An unconditionally-strict preview was considered and rejected (option B): it would fail rows on every un-migrated deployment that the write would have accepted. |
 
 ### Nested Shape: `ValidateDataResponse.results[number]`
@@ -2987,6 +2987,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **valid** | `boolean` | ✅ | True when this row would be accepted by the write path. |
 | **errors** | `{ field: string; code: string; message: string }[]` | ✅ | Findings that would REJECT this row. Empty when valid. |
 | **warnings** | `{ field: string; code: string; message: string }[]` | ✅ | Findings the target deployment ADMITS rather than rejects — today, ADR-0104 value shapes under a warn-first posture. The row is valid; the write would store it and log the same complaint. |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed'> }[]` | optional | Write-observability for the preview: caller-supplied fields the write would LEGALLY strip from THIS row, one event per reason, in the shape and reason vocabulary the write itself reports. A strip is not a finding: `valid` is unaffected, and the fields appear in neither `errors` nor `warnings`. Present only when at least one field would be dropped. A server that does not produce this report omits the key too, so an absent key alone does not prove nothing would be dropped. |
 
 ### Nested Shape: `ValidateDataResponse.posture`
 
