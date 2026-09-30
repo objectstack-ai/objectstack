@@ -1,6 +1,8 @@
 ---
 '@objectstack/spec': minor
 '@objectstack/platform-objects': patch
+'@objectstack/cli': patch
+'@objectstack/driver-sql': patch
 ---
 
 feat(spec): the `picklist` metadata kind — a shared option list that select fields reference by name (#19518)
@@ -13,3 +15,5 @@ Clause-②: yes (widening)
 - **Extensions.** `defineStack({ picklistExtensions: [{ extend, options }] })` adds options to a picklist that another package owns. It can only add; removing or renaming a value stays with the owning package.
 - **Translation.** `TranslationData` gains `picklists.<name>.{ label?, options: { value: label } }`. `translatePicklist` translates a served picklist item. `translateObject` gives a picklist-bound field the list's option labels, and a field-level `options` entry still wins over them.
 - **Studio type label.** `@objectstack/platform-objects` carries the `picklist` type's label and description in its metadata-forms translation bundles (en, zh-CN, ja-JP, es-ES).
+- **Extraction.** `os i18n extract` walks `picklists.NAME.{label, options.VALUE}`, including an extension's options under the list it extends, and `os lint` reports an untranslated option under its own rule, `i18n/missing-picklist`.
+- **SQL driver.** The SQL driver classifies the `picklist` field key as presentation, so it adds no column.
