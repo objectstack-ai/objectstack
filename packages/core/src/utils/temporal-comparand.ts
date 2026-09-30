@@ -134,7 +134,7 @@
  *   test), so it is left alone too.
  */
 
-import { classifyFilterToken } from '@objectstack/spec/data';
+import { ClockTimeValueSchema, classifyFilterToken } from '@objectstack/spec/data';
 import { isOutsideTemporalYearRange, temporalStorageForm } from './temporal-storage-form.js';
 
 /** Which temporal storage rule a declared field takes. */
@@ -246,11 +246,16 @@ function readsAsCalendarDay(s: string): boolean {
  * `temporalStorageForm`'s `time` reading: a bare wall clock whose components are in
  * range. Out-of-range (`25:00`) is uninterpretable — the rule it mirrors
  * returns such a value untouched rather than wrapping it.
+ *
+ * [#20771] The set is the spec's: `ClockTimeValueSchema`, the `time` stored
+ * form — `HH:MM[:SS[.fraction]]`, hours 00..23, minutes and seconds 00..59, no
+ * time zone (ADR-0053 D-C1). This function asks that schema rather than
+ * spelling a second regex, so the comparand door, the record validator's
+ * `time` arm and the spec's `time` default gate answer from one rule and
+ * cannot drift apart on an edit to either side.
  */
 function readsAsWallClock(s: string): boolean {
-  const m = /^(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?$/.exec(s);
-  if (!m) return false;
-  return Number(m[1]) <= 23 && Number(m[2]) <= 59 && Number(m[3] ?? '0') <= 59;
+  return ClockTimeValueSchema.safeParse(s).success;
 }
 
 /**

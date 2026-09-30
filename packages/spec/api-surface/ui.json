@@ -175,6 +175,8 @@
     "ElementRepeaterPropsSchema (const)",
     "ElementTextInputPropsSchema (const)",
     "ElementTextPropsSchema (const)",
+    "EmptyState (type)",
+    "EmptyStateSchema (const)",
     "ExpandViewResult (interface)",
     "ExpandedViewItem (interface)",
     "ExpressionBindableTextKey (type)",

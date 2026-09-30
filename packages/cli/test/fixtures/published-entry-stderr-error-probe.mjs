@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The #14858 crash class, manufactured INSIDE the published entry point's own
+ * The crash class commit 0c5e97368 fixed, manufactured INSIDE the published entry point's own
  * process — driven by `published-entry-stderr-error-listener.test.ts`.
  *
  * Loaded with `node --import <this> bin/run.js …` against a read end the parent

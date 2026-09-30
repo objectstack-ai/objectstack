@@ -63,7 +63,7 @@
  * Those four were a separate card by triage's own fence — a census of the
  * other artifacts was explicitly NOT folded into #14087 — so this file first
  * RECORDED them, in the shrink-only shape this repo uses elsewhere
- * (`KNOWN_UNALIASED_TEST_IMPORTS`, the type-check debt ledger). #14336 then
+ * (`KNOWN_UNALIASED_TEST_IMPORTS`, the type-check debt ledger). Commit 79c71d29d then
  * repaired all four templates and deleted all four entries, which is the whole
  * lifecycle the ledger was built to have. Two properties held throughout, and
  * both are still asserted below:
@@ -105,7 +105,7 @@ import { BUNDLE_REQUIRE_EXTERNALS } from '../src/utils/config.js';
  * — see the header. Adding an entry to silence a failure is the one edit this
  * table must never receive; the assertions below make a stale entry fail too.
  *
- * EMPTY since #14336 repaired the last four (`object` / `view` / `action` /
+ * EMPTY since commit 79c71d29d repaired the last four (`object` / `view` / `action` /
  * `app`), which means every generator on the roster is held to the clean pin.
  * Keep it that way: a red here is a template to fix, never a line to add.
  */

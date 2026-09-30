@@ -17,7 +17,7 @@
  * (#17873), which pinned the document the command wrote — the very file the
  * ruling withdrew.
  *
- * The shape follows `generate-agent-retired.e2e.test.ts` (#10359): the
+ * The shape follows `generate-agent-retired.e2e.test.ts` (commit 15b63e85a): the
  * assertions are about the CONTENT of the refusal, not only about a non-zero
  * exit, because a bare "unknown type" or "missing argument" also exits 1 and
  * leaves the author hunting for a spelling of something that no longer

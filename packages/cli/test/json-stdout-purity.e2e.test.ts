@@ -2,7 +2,7 @@
 
 /**
  * `--json` ⇒ stdout is EXACTLY ONE JSON DOCUMENT, for the whole
- * `bootSchemaStack` family (#6217).
+ * `bootSchemaStack` family (commit 2b641ddd4).
  *
  * `--json` has one audience — a program — and the commands that boot a kernel
  * were handing that program a stream it could not parse. `ObjectLogger` routes

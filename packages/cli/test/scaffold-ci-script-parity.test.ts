@@ -3,11 +3,11 @@
 /**
  * PIN — every scaffolder emits a project that can run the on-ramp's CI workflow.
  *
- * ## The defect this exists for (#16350)
+ * ## The defect this exists for (closed by commit 68aee4c99)
  *
  * Two scaffolders write a new project's `package.json`: `npx create-objectstack`
  * copies `packages/create-objectstack/src/templates/blank/`, and `os create` /
- * `os init` render one of the `TEMPLATES` maps in `src/commands/init.ts`. #16330
+ * `os init` render one of the `TEMPLATES` maps in `src/commands/init.ts`. Commit 4998efa71
  * added a `lint` script to the template and a `pnpm lint` step to the workflow it
  * ships — and did not touch `init.ts`, whose THREE script maps each declared
  * `validate` and no `lint`. The two script sets diverged inside a single PR, and

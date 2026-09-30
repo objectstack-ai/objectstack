@@ -596,7 +596,7 @@ export function portDriftError(
 
 /**
  * The variables vitest sets on its own WORKER process, which must never reach a
- * spawned `os serve` child (#11267).
+ * spawned `os serve` child (commit 1ddda1d00).
  *
  * ## Why this exists — measured, not defensive
  *
@@ -628,7 +628,7 @@ export function portDriftError(
  *
  * | child env | answer |
  * |---|---|
- * | `{ ...process.env }` (this helper, before #11267) | `401 INVALID_EMAIL_OR_PASSWORD` — origin ACCEPTED, validation never ran |
+ * | `{ ...process.env }` (this helper, before commit 1ddda1d00) | `401 INVALID_EMAIL_OR_PASSWORD` — origin ACCEPTED, validation never ran |
  * | family below stripped | `403 INVALID_ORIGIN` — validation ran and rejected |
  * | only `TEST` stripped | `403 INVALID_ORIGIN` |
  *
@@ -853,7 +853,7 @@ export function runServe(
     const child = spawn(TSX, [CLI, 'serve', opts.config ?? 'objectstack.config.ts', ...args], {
       cwd,
       // `childEnv`, never a bare `...process.env` — see its header for the
-      // measured reason (#11267).
+      // measured reason (commit 1ddda1d00).
       env: childEnv({
         NO_COLOR: '1',
         // Keep the fixture self-contained: no file written, no port conflict

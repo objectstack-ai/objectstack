@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * PIN (#11025) — `os g skill` writes a file the loader actually FINDS, and
+ * PIN (commit 1c3a46f87) — `os g skill` writes a file the loader actually FINDS, and
  * that file parses.
  *
  * ## Why "it writes a file" is the wrong assertion
@@ -17,7 +17,7 @@
  * `NAME.ts`, so a naive skill scaffold lands as `lead_qualification.ts`,
  * matches neither pattern, and then type-checks, validates and publishes with
  * nothing anywhere saying it was skipped. That is the silent-strip shape
- * ADR-0063's retirement of `os g agent` closed (#10359), re-entering through
+ * ADR-0063's retirement of `os g agent` closed (commit 15b63e85a), re-entering through
  * the scaffolder that replaced it.
  *
  * So the two pins below are:
@@ -32,20 +32,20 @@
  *    process: the template calls `defineSkill(…)` at module scope, so the
  *    import IS `SkillSchema.parse`. This is the pin that fails if anyone
  *    ever copies the template from `SkillSchema`'s or `defineSkill`'s
- *    `@example` blocks — both pass `triggerPhrases`, a `retiredKey()`
- *    tombstone that rejects on parse (#11026).
+ *    `@example` blocks — both passed `triggerPhrases`, a `retiredKey()`
+ *    tombstone that rejects on parse, until commit 3c418c498 rewrote them.
  *
  * `matchesGlob` comes from `node:path` on purpose. Hand-rolling a glob
  * matcher here would re-introduce the restatement the first pin exists to
  * avoid, one layer down: the whole point is that nothing in this file decides
  * what `**` + `*.skill.ts` mean.
  *
- * ## The control this file also holds (#11071)
+ * ## The control this file also holds (commit 50fb191dc)
  *
  * `os g object` is exercised here as a CONTROL, and what it controls for
- * changed. #11025 scoped the filename fix to `skill` and fenced the repo-wide
+ * changed. Commit 1c3a46f87 scoped the filename fix to `skill` and fenced the repo-wide
  * route, so the control pinned `customer.ts` and a `'./customer'` barrel line.
- * #11071 measured the loader rather than assuming — the mechanism, and the
+ * Commit 50fb191dc measured the loader rather than assuming — the mechanism, and the
  * precondition that keeps it from firing in this repo today, are stated once
  * in `metadata-file-name.ts` (#12075), not restated here — and the
  * per-generator override was replaced by a default derived from the
@@ -102,7 +102,7 @@ const RUN_TIMEOUT_MS = 180_000;
 /** The contract under test, read from the registry — never restated. */
 const SKILL_ENTRY = DEFAULT_METADATA_TYPE_REGISTRY.find(entry => entry.type === 'skill');
 
-/** Same, for the generator this file exercises end-to-end as a control (#11071). */
+/** Same, for the generator this file exercises end-to-end as a control (commit 50fb191dc). */
 const OBJECT_ENTRY = DEFAULT_METADATA_TYPE_REGISTRY.find(entry => entry.type === 'object');
 
 interface Run {
@@ -268,7 +268,7 @@ describe('[#11025] the generated skill parses', () => {
 
   it('carries no `triggerPhrases` — the retired key both spec `@example` blocks still pass', () => {
     // Textual, deliberately: the parse above already refuses the tombstone, so
-    // this assertion exists to name the specific copy-source hazard (#11026)
+    // this assertion exists to name the specific copy-source hazard (commit 3c418c498 removed it at its source)
     // for whoever edits the template next.
     expect(writtenSource).not.toContain('triggerPhrases');
   });

@@ -11,7 +11,7 @@
  * Only the one thing no author looks at, and the only thing a CI step, a
  * `set -e` script, a Makefile or a container entrypoint looks at.
  *
- * Two of those observations have since changed, and deliberately: #6217 gave
+ * Two of those observations have since changed, and deliberately: commit 2b641ddd4 gave
  * `--json` its stdout back, so the boot log and the shutdown receipt now arrive
  * on **stderr** and stdout is one JSON document. That is what let this file
  * drop the payload-hunting extractor it had to carry — see {@link jsonPayload}.
@@ -104,7 +104,7 @@ function runCli(args: string[], cwd: string, env: Record<string, string> = {}): 
  * column 0, then back to its matching lone `{` — written under duress because
  * the kernel's INFO logger wrote to stdout, so the payload arrived with ~60 log
  * lines above it and two below and the whole stream was not valid JSON. That
- * was its own defect for the same audience (#6217); it is fixed, `--json` now
+ * was its own defect for the same audience; commit 2b641ddd4 fixed it, `--json` now
  * reserves stdout for the payload and the kernel's output goes to stderr, and
  * the extractor is gone.
  *
@@ -163,7 +163,7 @@ describe('os migrate recorded-by --json — a successful run exits 0 (#4873)', (
         pending: 0,
         applied: false,
       });
-      // The receipt moved streams with #6217 and is still a receipt: the
+      // The receipt moved streams with commit 2b641ddd4 and is still a receipt: the
       // kernel really came up and really came down, it just says so on stderr
       // now so stdout can be the payload and nothing else.
       expect(run.stderr).toContain('Graceful shutdown complete');

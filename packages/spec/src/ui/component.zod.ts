@@ -22,6 +22,10 @@ import {
   // read `grouping.fields[i].field` (the kanban only `fields[0]`, as its
   // swimlane fallback), so one declaration judges every door that carries it.
   GroupingConfigSchema,
+  // [#20694] `object-grid.emptyState` is the list view's own empty state, taken
+  // by reference: the grid draws the same key through the same shared
+  // component `ListView` does, so one declaration judges both doors.
+  EmptyStateSchema,
 } from './view.zod';
 import { InlineActionSchema, ActionLocationSchema } from './action.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
@@ -3421,6 +3425,18 @@ const GridPageSizeSchema = z.number().int().positive();
  * (:2599), `frozenColumns` (:2135), `showColumnTypeIcons` (:1296 …),
  * `exportOptions`/`operations` (:1697-1721), `label`/`title` (:1732, :2557),
  * `data`/`staticData` (:372, :386).
+ *
+ * [#20694] Three keys measured later, at the `.objectui-sha` pin
+ * `db11afd4967c` (objectui#11130's merge commit), in the same file:
+ * `description` (:5677, `resolveInlineI18nLabel(schema.description,
+ * displayLocale)`, drawn above the rows at :5784 / :6303 / :6342) and
+ * `emptyState` (:6225, drawn through `DataEmptyState` at :6233). The third,
+ * `keyboardNavigation`, has NO read point at that pin — zero hits under
+ * objectui `packages/` and `apps/` outside tests, CHANGELOGs, READMEs and
+ * `packages/types` (its type declaration and zod twin), against 3 hits for the
+ * control `schema.editable` in `ObjectGrid.tsx`. It is declared ahead of its
+ * reader on purpose (the BUILD objectui#11068 chose), and its describe carries
+ * the `[EXPERIMENTAL — not enforced]` marker that says so; see the member.
  */
 export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   surface: 'this `object-grid`',
@@ -3432,6 +3448,38 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
     .describe('Object this grid binds to. Optional because the component-level `dataSource` binding can supply the object instead'),
   label: I18nLabelSchema.optional().describe('Grid label — used as the table caption and export file title'),
   title: I18nLabelSchema.optional().describe('Fallback for `label` (the renderer reads `label || title`)'),
+  /**
+   * [#20694] One line of help text above the grid's rows, in the treatment
+   * `ListView` gives a view's description. Read at the pin `db11afd4967c`
+   * (`ObjectGrid.tsx:5677`) through `resolveInlineI18nLabel` against the
+   * display locale, exactly as `label` is, so both `I18nLabel` forms draw; a
+   * locale map with no usable entry draws no strip. Drawn by every branch that
+   * draws rows — the card view, the split pane and the table.
+   */
+  description: I18nLabelSchema.optional()
+    .describe('One line of help text drawn above the grid\'s rows — a string, or an inline locale map resolved against the display locale'),
+  /**
+   * [#20694] What the grid draws INSTEAD of an empty table — the list view's
+   * own {@link EmptyStateSchema}, by reference (triage's direction: ⛔ not a
+   * second shape). Read at the pin `db11afd4967c` (`ObjectGrid.tsx:6225`),
+   * drawn through the shared `DataEmptyState` and `resolveIcon` that `ListView`
+   * draws a list's empty state with, and only when the grid holds no row to
+   * draw (no group, when grouped), nothing is loading, and the grid's own
+   * search box is not what emptied it. A member left out keeps the grid's
+   * default: the shared glyph, the table's "No results found" heading, no
+   * message line.
+   *
+   * ⚠️ Measured at that pin: `title` and `message` reach `DataEmptyState` as
+   * they are (`:6241-6242`), with no locale-map resolution, unlike
+   * `description` above. So of the two `I18nLabel` forms this shared shape
+   * declares, the grid draws the plain string only — an inline locale map is
+   * handed to React as a child, which throws (measured on react 19.2.8:
+   * "Objects are not valid as a React child"). That is a renderer gap on the
+   * objectui side, not a second shape here: the list view door declares the
+   * same members, and objectui's grid follows this declaration.
+   */
+  emptyState: EmptyStateSchema.optional()
+    .describe('What the grid draws instead of an empty table: `{ title, message, icon }` — the list view\'s own empty-state shape'),
   columns: z.array(z.unknown()).optional()
     .describe('Columns: field names or column definition objects'),
   fields: z.array(z.unknown()).optional()
@@ -3644,6 +3692,20 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   navigation: z.unknown().optional().describe('Row-click navigation config ({ mode: page | drawer | modal | split | popover | new_window | none }) — all seven `NavigationModeSchema` values, since the shared `useNavigationOverlay` hook types its own mode union as that schema'),
   editable: z.boolean().optional().describe('Enable inline cell editing'),
   singleClickEdit: z.boolean().optional().describe('Enter cell edit on single click (default true when editable)'),
+  /**
+   * [#20694] Declared AHEAD of its reader, deliberately: objectui#11068 chose
+   * to BUILD arrow-key cell navigation for the grid, and this row is the spec
+   * half triage folded in. At the pin `db11afd4967c` nothing reads it (see the
+   * block docblock above for the measurement), so an authored value changes
+   * nothing yet. The `[EXPERIMENTAL — not enforced]` marker in the describe is
+   * the liveness ledger's own spelling for a declared-but-not-enforced key;
+   * the `page/regions` container that holds page components is undrilled in
+   * the ledger (`undrilled-containers.baseline.json`), so no ledger row exists
+   * for any `ComponentPropsMap` key and the marker is the record. When the
+   * BUILD lands and the grid reads it, drop the marker in the same change.
+   */
+  keyboardNavigation: z.boolean().optional()
+    .describe('[EXPERIMENTAL — not enforced] Arrow-key cell navigation on the WAI-ARIA grid pattern. Defaults to on when `editable` is set; a read-only grid keeps its Tab behaviour unless this is `true`. No renderer reads it yet: it is declared ahead of the grid\'s keyboard-navigation build, so authoring it changes nothing today'),
   resizable: z.boolean().optional().describe('Allow column resize (read before `resizableColumns`)'),
   resizableColumns: z.boolean().optional().describe('Alternate spelling of `resizable` (the renderer reads `resizable ?? resizableColumns`)'),
   reorderableColumns: z.boolean().optional().describe('Allow column drag-reorder'),

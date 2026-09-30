@@ -132,7 +132,7 @@ describe('os explain — schema catalog accuracy', () => {
   // The catalog's element shape, stated locally: `SchemaInfo` is not exported,
   // and these tests must stay honest even where `SCHEMAS` widens to `any`.
   // ⚠️ The reason recorded here has CHANGED and the discipline has not. This
-  // file no longer sits outside every tsc program: #14710 landed
+  // file no longer sits outside every tsc program: commit 95fdf627b landed
   // `packages/cli/tsconfig.test.json`, whose `include: ["test/**/*"]` puts this
   // file in the program (`tsc --noEmit --listFiles -p tsconfig.test.json`
   // resolves it), and it carries NO row in `test-typecheck-debt.json` — so any
@@ -178,7 +178,7 @@ describe('os explain — schema catalog accuracy', () => {
   });
 });
 
-// ── `os explain` — the WHOLE catalog, swept against the spec (#14811) ──────
+// ── `os explain` — the WHOLE catalog, swept against the spec (commit 8ad872ba3) ──
 //
 // #14782 pinned one entry (`flow`) by parsing its `example` against the real
 // schema. This generalises that technique to every entry, and derives the entry

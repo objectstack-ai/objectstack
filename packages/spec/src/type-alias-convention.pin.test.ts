@@ -275,7 +275,7 @@ import type * as M187 from './shared/duration.zod.js';
 import type * as M188 from './ai/build-progress.zod.js';
 
 // ---------------------------------------------------------------------------
-// 779 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 780 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1583,6 +1583,9 @@ export type Iso_ui_responsive__StyleMapSchema = Assert<Eq< z.input< typeof M165.
 export type Iso_ui_view__CalendarConfigSchema = Assert<Eq< z.input< typeof M167.CalendarConfigSchema >, z.infer< typeof M167.CalendarConfigSchema > >>;
 export type Iso_ui_view__ColumnSummaryConfigSchema = Assert<Eq< z.input< typeof M167.ColumnSummaryConfigSchema >, z.infer< typeof M167.ColumnSummaryConfigSchema > >>;
 export type Iso_ui_view__ColumnSummarySchema = Assert<Eq< z.input< typeof M167.ColumnSummarySchema >, z.infer< typeof M167.ColumnSummarySchema > >>;
+// `EmptyStateSchema` joined on #20694, extracted from the list view's inline
+// `emptyState` so the `object-grid` row can take it by reference.
+export type Iso_ui_view__EmptyStateSchema = Assert<Eq< z.input< typeof M167.EmptyStateSchema >, z.infer< typeof M167.EmptyStateSchema > >>;
 export type Iso_ui_view__FormButtonConfigSchema = Assert<Eq< z.input< typeof M167.FormButtonConfigSchema >, z.infer< typeof M167.FormButtonConfigSchema > >>;
 export type Iso_ui_view__GanttConfigSchema = Assert<Eq< z.input< typeof M167.GanttConfigSchema >, z.infer< typeof M167.GanttConfigSchema > >>;
 export type Iso_ui_view__GanttQuickFilterSchema = Assert<Eq< z.input< typeof M167.GanttQuickFilterSchema >, z.infer< typeof M167.GanttQuickFilterSchema > >>;
@@ -1666,7 +1669,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 779 isomorphic pins', () => {
+  it('still declares all 780 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2373,7 +2376,14 @@ describe('ADR-0122 type-alias convention', () => {
     // `interval` rename's `retiredKey()`, kept input and output equal — so the
     // pin was the whole of its footprint here. The M78 slot stays occupied by
     // the module's surviving pins. -1 removed.
-    expect(pins).toHaveLength(779);
+    //
+    // 779 -> 780 is #20694: the list view's inline `emptyState` shape was
+    // extracted into the exported `EmptyStateSchema` so the `object-grid` row
+    // can take it by reference, and the docs gate requires its `EmptyState`
+    // author alias. It has no default or transform in its tree, so it is
+    // pinned here (Iso_ui_view__EmptyStateSchema) rather than given an
+    // `EmptyStateParsed` synonym. +1 added.
+    expect(pins).toHaveLength(780);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

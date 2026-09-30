@@ -25,7 +25,7 @@
  * consumer — ratify the subpath as public surface rather than read `dist/`
  * paths — applied to the second consumer. ⛔ NOT a local reimplementation: a
  * hand-rolled extractor passes its own tests while diverging from the rule the
- * build actually applies, which is the failure mode #13651 was filed about.
+ * build actually applies, which is the failure mode commit ada3834ad's card was filed about.
  *
  * ## Why the packed tarball and not the source tree
  *

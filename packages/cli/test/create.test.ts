@@ -1,11 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `os create`'s emitted contract — the pin for #14824.
+ * `os create`'s emitted contract — the pin for commit cf6b67164.
  *
  * ## The defect this file used to certify
  *
- * Until #14824 the only assertion here was
+ * Until commit cf6b67164 the only assertion here was
  * `expect(packageJson.dependencies['@objectstack/cli']).toBe('workspace:*')` —
  * a test that PASSED on the defect, and would have gone red on the fix. Every
  * project `os create` emitted declared its `@objectstack/*` dependencies with
@@ -89,7 +89,7 @@ describe('os create: the sweep covers every shipped template', () => {
   it('derives its population from the template map', () => {
     expect(TEMPLATE_KEYS.length).toBeGreaterThan(0);
     // Named so a rename is loud rather than silent. `plugin` is the survivor of
-    // the two #14824 reported; `example` was retired in #16483.
+    // the two templates commit cf6b67164 repaired; `example` was retired in #16483.
     expect(TEMPLATE_KEYS).toEqual(expect.arrayContaining(['plugin']));
   });
 
@@ -214,7 +214,7 @@ describe.each(TEMPLATE_KEYS)('os create %s --in-repo — the platform-work emiss
  *
  * ## The defect
  *
- * #14824 pointed the default emission at a developer outside this monorepo and
+ * Commit cf6b67164 pointed the default emission at a developer outside this monorepo and
  * the name did not move with the audience: `os create plugin my-thing` kept
  * writing `"name": "@objectstack/plugin-my-thing"` — a scope its new owner
  * cannot publish to — and no `private` flag. ⚠️ Nothing here could see it. The

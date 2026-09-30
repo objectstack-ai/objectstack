@@ -2,7 +2,7 @@
 
 /**
  * `objectstack init`'s closing "Created files" summary — over the REAL
- * command, not a copy of its printing logic (#10557).
+ * command, not a copy of its printing logic (commit 818e02700).
  *
  * ## The defect
  *
@@ -25,7 +25,7 @@
  * open question was what prints when the install FAILS.
  *
  * `create-objectstack`'s sibling scaffolder (`packages/create-objectstack/
- * src/index.ts`, the #10323 fix) had already measured and answered exactly
+ * src/index.ts`, the commit 5a616d558 fix) had already measured and answered exactly
  * this for the other scaffold path: print UNCONDITIONALLY once the install
  * attempt — succeeded or failed — has run its course, from a WALK of the
  * finished directory (`created-summary.ts`'s `summarizeTree`), never from a
@@ -33,7 +33,7 @@
  * (imported as `create-objectstack/created-summary`, a published subpath —
  * see that package's `exports`) instead of carrying a second copy of the
  * same renderer, which is how the two scaffold paths drifted once already
- * (#10499).
+ * (closed by commit 6d441e41f).
  *
  * ## Why a fake `pnpm` on PATH rather than a real install
  *
