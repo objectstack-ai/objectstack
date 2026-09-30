@@ -5,8 +5,8 @@
  * locked-base verdict, as a value, for a second door onto the same artifact.
  *
  * It is not a new rule. It hands out the SAME verdict `saveMetaItem` and
- * `deleteMetaItem` reach — the package door both now call through
- * `packagedBaseOverrideRefusal` / `packagedBaseRemovalRefusal` — so this file
+ * `deleteMetaItem` reach — the package doors both now call, lifted out of them
+ * unchanged, `refusePackagedBaseOverride` / `refusePackagedBaseRemoval` — so this file
  * pins two things and only two:
  *
  *  1. it answers exactly what those two methods throw for the same item (the
@@ -97,6 +97,18 @@ describe('packagedBaseRefusal — the /meta door\'s locked-base verdict, handed 
         expect(shape(p.packagedBaseRefusal({ type: 'page', name: 'pkg_page', operation: 'save' })))
             .toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
         expect(p.packagedBaseRefusal({ type: 'page', name: 'pkg_page', operation: 'delete' })).toBeNull();
+    });
+
+    it('a lookup that FAILS is re-raised, never handed out as a verdict', () => {
+        // The lifted helpers throw, as the inline code did; only the refusal is
+        // turned into a value. A registry that cannot answer must not become a
+        // well-formed "refused" (or "allowed") — it stays the fault it is.
+        const registry = { getArtifactItem: () => { throw new Error('registry unreadable'); } };
+        const p = new ObjectStackProtocolImplementation({ registry } as never, () => new Map(), undefined);
+        expect(() => p.packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation: 'save' }))
+            .toThrow('registry unreadable');
+        expect(() => p.packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation: 'delete' }))
+            .toThrow('registry unreadable');
     });
 
     it('reads the operator hatch through the same predicate the metadata door reads', () => {
