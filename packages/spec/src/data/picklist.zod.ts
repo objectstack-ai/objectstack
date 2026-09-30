@@ -144,10 +144,7 @@ export type PicklistExtensionParsed = z.infer<typeof PicklistExtensionSchema>;
  * A field authors `picklist: '<name>'` instead of `options`. What a client
  * receives for that field carries both: `options`, RESOLVED — the picklist's
  * options together with the options its `picklistExtensions` add — and
- * `picklist`, still naming the list they came from. Every consumer that reads
- * `field.options` today (renderers, the record validator, filter pickers,
- * import coercion) therefore reads the key it always has, and nothing a
- * client does changes for a picklist-bound field.
+ * `picklist`, still naming the list they came from.
  *
  * This is a SERVED shape, never an authoring one: `FieldSchema` refuses
  * `picklist` together with `options`, so a served field sent back through an

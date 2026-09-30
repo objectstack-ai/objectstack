@@ -1351,17 +1351,13 @@ export const FieldSchema = lazySchema(() => {
    * the option types (`select`, `radio`, `multiselect`, `checkboxes`,
    * `tags`), the types whose value is an option code.
    *
-   * The reference is resolved on the SERVER: the field a client reads from
-   * the object read exits carries the resolved `options` next to this key
-   * (`PicklistServedFieldSchema`), so renderers, the record validator
-   * and filter pickers read `options` exactly as they do for an inline list.
+   * `PicklistServedFieldSchema` declares the served form.
    * Option labels translate under `picklists.<name>.options.<value>`, which
    * every referencing field inherits.
    */
   picklist: SnakeCaseIdentifierSchema.optional().describe(
     'Name of a shared `picklist` whose options this field offers — instead of `options`, never with it. '
-    + 'Option types only (select, radio, multiselect, checkboxes, tags). The server resolves the '
-    + 'reference: the field clients read carries the resolved `options`.',
+    + 'Option types only (select, radio, multiselect, checkboxes, tags).',
   ),
 
   /**
@@ -2151,7 +2147,7 @@ export const FieldSchema = lazySchema(() => {
         path: ['options'],
         message:
           '`picklist` and `options` cannot both be declared — a field takes its options from exactly ' +
-          "one source. Keep `picklist: '<name>'` and delete `options`: the shared list supplies them " +
+          "one source. Keep `picklist: '<name>'` and delete `options`: the picklist holds them " +
           '(to offer a new value, add it to the picklist, or through `picklistExtensions` when another ' +
           'package owns it). Or delete `picklist` to keep an inline list of this field\'s own.',
       });
