@@ -237,6 +237,16 @@
         "default": "./dist/meta-spelling/index.js"
       }
     },
+    "./migrations": {
+      "import": {
+        "types": "./dist/migrations/index.d.mts",
+        "default": "./dist/migrations/index.mjs"
+      },
+      "require": {
+        "types": "./dist/migrations/index.d.ts",
+        "default": "./dist/migrations/index.js"
+      }
+    },
     "./openapi.json": "./json-schema/openapi.json",
     "./package.json": "./package.json"
   },

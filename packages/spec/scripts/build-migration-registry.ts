@@ -44,10 +44,11 @@
  *
  * `scripts/adr-anchors.mjs` assembles its shards with `readdirSync` at read
  * time, so no aggregate is checked in at all. That option does not exist for
- * this registry: `MIGRATIONS_BY_MAJOR` / `RETIRED_*_BY_MAJOR` are re-exported
- * from `@objectstack/spec`'s ROOT barrel and reach browser bundles through it.
- * A `node:fs` read anywhere in that graph breaks every consumer that bundles
- * the package — spec's `src/` is deliberately free of node builtins today. A
+ * this registry: `MIGRATIONS_BY_MAJOR` / `RETIRED_*_BY_MAJOR` are exported by
+ * the published `@objectstack/spec/migrations` entry (the ROOT barrel re-exported
+ * them until the #20646 entry split), so a consumer that bundles that entry
+ * bundles this module graph. A `node:fs` read anywhere in it breaks every such
+ * consumer — spec's `src/` is deliberately free of node builtins today. A
  * bundled library needs a STATIC module graph, and a static graph over N
  * entries needs one file that names all N.
  *

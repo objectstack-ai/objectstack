@@ -35,15 +35,13 @@
 
 import { stripVTControlCharacters } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ObjectStackDefinitionSchema, formatZodIssue, normalizeStackInput } from '@objectstack/spec';
 import {
-  ObjectStackDefinitionSchema,
   applyMetaMigrations,
-  formatZodIssue,
-  normalizeStackInput,
   MIGRATION_MAJORS,
   MIGRATION_SUPPORT_FLOOR,
   type MigrationChainResult,
-} from '@objectstack/spec';
+} from '@objectstack/spec/migrations';
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import { printMigrationReport, type MigrationReport } from './meta.js';
 
