@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // A stand-in for `objectstack build`, for fixtures that need "the stack as a
-// deployment receives it" (#6293).
+// deployment receives it" (commit c39a911ae).
 //
 // ## The trap this exists to close
 //
@@ -76,7 +76,7 @@ import { normalizeStackInput, ObjectStackDefinitionSchema } from '@objectstack/s
 // #12879 closed that hole, and this import is the one in-repo case it had to
 // decide explicitly. Declaring the subpath in the CLI's `exports` was the other
 // option and is the wrong one twice over: it would make an internal compiler
-// util part of the published contract — which is #6293's ruling inverted (reach
+// util part of the published contract — which is commit c39a911ae's ruling inverted (reach
 // the goal WITHOUT growing `@objectstack/cli`'s public entry) — and it would
 // ratify an accidental reachability nobody ever offered, pricing every later
 // internal refactor of that package at a minor bump.
@@ -199,7 +199,7 @@ export function buildShapedArtifact(stack: Record<string, unknown>): BuildShaped
   // else — no error, no warning, no key. Measured on this exact stack then:
   // hand the lowering the `{ effect: 'writes' }` husk `JSON.stringify` leaves
   // behind and the artifact came out `functions: {}`, parsing green, which is
-  // the #6293 failure wearing a different hat; the parse below could not see it,
+  // the failure commit c39a911ae fixed, wearing a different hat; the parse below could not see it,
   // because by the time it ran the evidence had been deleted.
   //
   // The producer was fixed at the source — an entry `lowerCallables` does not

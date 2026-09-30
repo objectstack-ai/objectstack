@@ -1,12 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #10243 — the toggle card, now RULED: `POST /automation/:name/toggle` is
+ * The toggle card, now RULED (commit 266436a7f): `POST /automation/:name/toggle` is
  * gated on `manage_metadata`, and this file pins the closed door over HTTP.
  *
  * ## ⭐ This file was re-pointed, and the re-pointing is the record
  *
- * It first landed (PR #10996) as a pure MEASUREMENT of the open half of the
+ * It first landed (commit 02b41232d) as a pure MEASUREMENT of the open half of the
  * card: whether one tenant's ungated toggle reached every organization. It
  * did — and it said, in this docblock, that a ruling *"flips these expectations
  * to a 403, and the flip is the point — an unrecorded verdict cannot be

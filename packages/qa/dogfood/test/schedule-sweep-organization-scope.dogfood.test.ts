@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#16659 F2] A `time_relative` sweep SELECTS inside its declared organization
+// [commit ecdfc9411, F2] A `time_relative` sweep SELECTS inside its declared organization
 // — proven on the real ObjectQL + driver stack, with matching rows in TWO
 // organizations.
 //
@@ -105,7 +105,7 @@ const SYS = { context: { isSystem: true } };
  *  - **sqlite-wasm** enforces tenant isolation, so it can be asked the real
  *    differential question: with rows in A and B, which come back?
  *  - **memory** implements none and REFUSES any call handed a tenant scope
- *    (`MEMORY_MULTI_TENANT_UNSUPPORTED`, #16589). The question it answers is the
+ *    (`MEMORY_MULTI_TENANT_UNSUPPORTED`, commit 555a89cbd). The question it answers is the
  *    one the card is really about: when a sweep required to stay inside one
  *    organization cannot be served, does it SAY SO or go quiet?
  */
@@ -319,7 +319,7 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
        * The store cannot honour the scope, so the sweep must be LOUD.
        *
        * PREDICTION, written before the run: `driver-memory` refuses the scoped
-       * `find` (#16589), the sweep's own error isolation catches it, and the
+       * `find` (commit 555a89cbd), the sweep's own error isolation catches it, and the
        * failure is logged at `error` naming the flow. ⛔ What must NOT happen is
        * the sweep quietly answering with every organization's rows — that is the
        * silent non-isolation the driver's refusal exists to remove, and this

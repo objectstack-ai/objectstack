@@ -193,7 +193,7 @@ describe('#8049: /auth/change-password clears the force-change flag and enforces
         SYS,
       )
     )[0];
-    // [#8676] `previous_password_hashes` is `internal: true`, so it is omitted
+    // [commit d6e80b28b] `previous_password_hashes` is `internal: true`, so it is omitted
     // from the row above — there is no `isSystem` carve-out on the strip. Read
     // it through the engine's privileged accessor, which is the same channel
     // the production reuse ring now uses. ⛔ Do NOT "fix" a `[]` here by

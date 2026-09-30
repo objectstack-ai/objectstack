@@ -3,7 +3,7 @@
 // ADR-0056 D10 — the authorization conformance matrix is a CHECKED artifact,
 // within the scope the mechanism can see: routes are ratcheted, primitives are
 // hand-maintained (see the matrix's own header for the narrowed claim and the
-// measured numbers — #8711). Refactored onto the reusable ADR-0060
+// measured numbers — commit 2ce1eb41b). Refactored onto the reusable ADR-0060
 // `checkLedger` helper: one call asserts every shared invariant (valid state,
 // enforced-has-site, experimental/removed-has-note, proof-file-exists,
 // high-risk-has-proof). A row that regresses one of THOSE invariants, or a

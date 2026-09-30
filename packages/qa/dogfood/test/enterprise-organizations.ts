@@ -142,7 +142,7 @@ export async function probeOrganizations(
   pkg: string = ORGANIZATIONS_PKG,
 ): Promise<OrganizationsProbe> {
   const root = hostRoot ?? process.cwd();
-  // #10943: hand the helper THIS module's resolver. Its undeclared fallback is
+  // Commit 46d34ab7c: hand the helper THIS module's resolver. Its undeclared fallback is
   // documented as "the importing package's own resolution", and a bare
   // `import()` written inside `@objectstack/types` is that package's
   // resolution, not this one's — it can see only `@objectstack/spec`. It makes

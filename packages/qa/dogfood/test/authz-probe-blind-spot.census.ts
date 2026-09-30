@@ -431,9 +431,9 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // `this.routeManager.register(` reads 73 because the helper's forwarder is
     // one of them, and it is sliced out before counting.
     //
-    // [#13214] `enforceAuth` 61 -> 64. ⛔ RE-ANCHORED, not relaxed: the control
+    // [commit cc837dbfe] `enforceAuth` 61 -> 64. ⛔ RE-ANCHORED, not relaxed: the control
     // exists to prove this census is still reading the file it thinks it is, and
-    // a rising `enforceAuth` is precisely what the 2026-08-30 ruling on #13214
+    // a rising `enforceAuth` is precisely what the 2026-08-30 ruling (commit cc837dbfe)
     // was supposed to cause — `registerUiEndpoints` was the ONE route in this
     // file that resolved no identity, and it is now guarded. The move is +3 over
     // the whole file (`occurrences` counts the bare term, comments included):
@@ -445,9 +445,9 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // ⚠️ The three sibling numbers were re-derived and did NOT move, which is
     // what says this is a guard change and not a surface change: `population`
     // 80, `reachable` 19, `private register*Endpoints(` 17 and
-    // `this.routeManager.register(` 80 are all unchanged — #13214 added no route
+    // `this.routeManager.register(` 80 are all unchanged — commit cc837dbfe added no route
     // and no registrar. `blindSpot` therefore stays 61 as well.
-    // ⚠️ That last figure is the reading AS OF #13214 and is left as written:
+    // ⚠️ That last figure is the reading AS OF commit cc837dbfe and is left as written:
     // the control is 73 today for the spelling reason recorded above, and the
     // population it feeds is still 80. Do not "correct" the paragraph — it is a
     // dated measurement, not a live claim.

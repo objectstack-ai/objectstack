@@ -21,7 +21,7 @@
 //
 // ⚠️ WHY THIS FILE IS ORG-BOUND, AND WHY THAT IS THE POINT ⚠️
 //
-// [#8408 / #8839] This file used to boot ORG-LESS, and the moderation half of
+// [#8408 / commit c25b2d52a] This file used to boot ORG-LESS, and the moderation half of
 // case (d) — "a user who can EDIT the record may moderate anyone's comment on
 // it" — was GREEN ONLY BECAUSE OF THAT. It was #8023's disarm, measured rather
 // than suspected:
@@ -42,7 +42,7 @@
 // fixture was not evidence that moderation works; it was evidence that
 // moderation works WHEN NOBODY IS AN ORG MEMBER.
 //
-// Maintainer ruling (2026-08-15, #8839 — reading 1): moderation is a declared,
+// Maintainer ruling (2026-08-15, commit c25b2d52a — reading 1): moderation is a declared,
 // implemented capability and the platform delete floor must not pre-empt it.
 // `member_default` now carries a per-object `sys_comment_moderation` delete
 // policy (`id != null`, domained to `org_member`) contributing the alternate
@@ -74,7 +74,7 @@ import { assertArmed, principalArmed } from './armed.js';
 const SYS = { isSystem: true } as const;
 
 /**
- * [#8074 / #8839] The control this file measures, and the default that silences
+ * [#8074 / commit c25b2d52a] The control this file measures, and the default that silences
  * it. Named here so the failure message says what was disarmed rather than
  * which assertion happened to notice.
  */
@@ -119,7 +119,7 @@ describe('sys_comment permission matrix (#4630)', () => {
       // AuditPlugin owns sys_comment: the #2707 enable.feeds gate AND the
       // #4630 record-level gates both ride on it.
       extraPlugins: [new AuditPlugin()],
-      // [#8839] Org-bound on purpose — see the header. A `sys_member` row is
+      // [commit c25b2d52a] Org-bound on purpose — see the header. A `sys_member` row is
       // what makes a sign-up hold `org_member`, which is what brings BOTH the
       // wildcard delete floor and the `sys_comment_moderation` policy into
       // scope. Org-less, case (d)'s moderation limb measures neither.
@@ -141,7 +141,7 @@ describe('sys_comment permission matrix (#4630)', () => {
       await ql.insert('sys_user_permission_set', { user_id: userId, permission_set_id: managerSet.id }, { context: { ...SYS } });
     }
 
-    // [#8074 / #8839] The precondition the header records in prose, now read off
+    // [#8074 / commit c25b2d52a] The precondition the header records in prose, now read off
     // the live stack and enforced BEFORE anything is measured. Asserted here
     // rather than in an `it()` on purpose: a disarmed fixture must produce ZERO
     // green cells, and #8023's harm was exactly one green cell in a matrix that
@@ -271,7 +271,7 @@ describe('sys_comment permission matrix (#4630)', () => {
     // memberB holds the delete bit and can READ the record, but is neither the
     // author nor able to EDIT the (admin-owned, public_read) parent → 403.
     //
-    // [#8839] The CODE is asserted exactly, and that is the negative control for
+    // [commit c25b2d52a] The CODE is asserted exactly, and that is the negative control for
     // this whole card. Before the fix this refusal came from the platform's
     // wildcard delete floor (`PERMISSION_DENIED`, "(row-level security)") — the
     // parent-blind gate that was ALSO refusing legitimate moderators one case
@@ -280,7 +280,7 @@ describe('sys_comment permission matrix (#4630)', () => {
     // plugin-audit's parent-derived gate instead: `RECORD_NOT_ACCESSIBLE`.
     //
     // So this is not a cosmetic tightening. Accepting `PERMISSION_DENIED` here
-    // would let the exact regression #8839 fixed pass unnoticed: the floor
+    // would let the exact regression commit c25b2d52a fixed pass unnoticed: the floor
     // re-asserting itself over `sys_comment` looks identical to a correct
     // refusal at the status-code level, and it kills moderation while this case
     // stays green. If this ever reddens with `PERMISSION_DENIED`, moderation is

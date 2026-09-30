@@ -64,7 +64,7 @@ const SHARED_SHOWCASE = [
   'test/two-doors-permission.dogfood.test.ts',
 ];
 
-// #17853 / #17978 — say so when a path named on the command line will run no
+// Commit 08f5f0e5a / #17978 — say so when a path named on the command line will run no
 // tests. Invoked HERE, at config load, and ⛔ deliberately NOT as a
 // `test.reporters` entry: naming that option replaces vitest's own reporter
 // defaulting instead of extending it, which measurably changes a healthy run's
@@ -204,7 +204,7 @@ export default defineConfig({
               find: /^@objectstack\/trigger-record-change$/,
               replacement: path.resolve(__dirname, '../../triggers/trigger-record-change/src/index.ts'),
             },
-            // [#16659] `schedule-acting-organization.dogfood.test.ts` and
+            // [commit ecdfc9411] `schedule-acting-organization.dogfood.test.ts` and
             // `schedule-sweep-organization-scope.dogfood.test.ts` drive
             // `ScheduleTrigger` / `TimeRelativeTrigger` themselves: the pins'
             // whole subject is which

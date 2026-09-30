@@ -61,7 +61,7 @@ describe('dogfood: an object extension reaches every /meta read (#7556)', () => 
     const artifactPath = join(tempDir, 'objectstack.json');
     // The real `objectstack build` lowering, not `JSON.stringify(stack)` — that
     // drops callables silently and the artifact parses green carrying none of
-    // what it advertises (#6293).
+    // what it advertises (commit c39a911ae).
     writeBuildShapedArtifact(showcaseStack as unknown as Record<string, unknown>, artifactPath);
 
     stack = await bootStack(showcaseStack, {
