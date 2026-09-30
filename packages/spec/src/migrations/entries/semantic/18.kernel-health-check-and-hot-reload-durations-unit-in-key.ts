@@ -52,13 +52,13 @@ export const entry: SemanticMigration = {
     + 'the audience that does not parse. Measured on 884e8347d: the only in-repo readers are '
     + 'packages/core/src/health-monitor.ts and packages/core/src/hot-reload.ts, both moved in '
     + 'this same change; and the pinned objectui checkout — the pin this repo builds '
-    + 'against, `.objectui-sha` = `dd3f7e1be3561d63267d7162f3fc0ac52e72834d` — names '
+    + 'against, `.objectui-sha` = `db11afd4967cd9d39381c5e21dc2deec9d706204` — names '
     + 'neither def and neither key: all thirteen exports of plugin-lifecycle-advanced.zod.ts and '
-    + 'the string debounceDelay each occur 0 times across its 9283 tracked files (0 across the '
+    + 'the string debounceDelay each occur 0 times across its 9546 tracked files (0 across the 9283 at dd3f7e1be, the '
     + '8512 at f8a9d0fb0 and the 8303 at 62597c588 too), against lit '
     + 'controls objectstack 12966 and @objectstack/spec 4997 on the same corpus at 87af769e9, '
     + 'which re-count to 13125 and 5043 respectively at 62597c588, to 13347 and 5123 at '
-    + 'f8a9d0fb0 and to 13745 and 5466 at this pin (git grep -o -F, the method that reproduces '
+    + 'f8a9d0fb0, to 13745 and 5466 at dd3f7e1be and to 14704 and 5545 at this pin (git grep -o -F, the method that reproduces '
     + 'every earlier count).',
   acceptanceCriteria:
     'Every producer and reader of a PluginHealthCheck spells intervalMs and timeoutMs, and every '

@@ -61,14 +61,24 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // `revoked` on ONE key. The multi-select surface this rule protects does not
   // exist for API keys, and the shape a future one would take does not need
   // `bulk` either — both read off the console build this release pins
-  // (`.objectui-sha` = `dd3f7e1be`, `packages/plugin-grid`; re-measured at
-  // that pin, 2026-09-28 — previously measured at `f8a9d0fb0`, `62597c588`,
+  // (`.objectui-sha` = `db11afd49`, `packages/plugin-grid`; re-measured at
+  // that pin, 2026-09-29. On the hop off `dd3f7e1be`, `ObjectGrid.tsx` changed
+  // again (105 insertions, 16 deletions: objectui#11068's grid keys,
+  // objectui#11105's server-grouped column-name fix, objectui#10993's title
+  // locale map among them), none of it inside the selection block, which only
+  // MOVED by +32: `ObjectGrid.tsx:4637-4664` here (`4605-4632` at
+  // `dd3f7e1be`), still hashing to
+  // `c88443302d40c2db739ddb235470bafa29056e2e` (hash-object of the block),
+  // re-READ with the same reading below; `hooks/useBulkExecutor.ts` is
+  // byte-identical to `dd3f7e1be` and its `:298-303` still hashes to
+  // `01083348330f10a201cdf1078b4c21c236402b6a`. Previously measured at
+  // `dd3f7e1be`, `f8a9d0fb0`, `62597c588`,
   // `87af769e9`, `53ded82bf`, `a472b0716`, `00d3f09c5`, `67dadd602`, before
   // that at `d8ec8d6d4`, `9602dc820`, `190fbd01d`, `9a3daf8d3`, originally at
   // `6314e87f2`. On the hop off `f8a9d0fb0`, `ObjectGrid.tsx` changed hard
   // (745 insertions, 161 deletions: objectui#7189's server-side grid grouping
   // and objectui#10881's grouped-grid refusal among them), none of it inside
-  // the selection block, which only MOVED: `ObjectGrid.tsx:4605-4632` here
+  // the selection block, which only MOVED: `ObjectGrid.tsx:4605-4632` then
   // (`4032-4059` at `f8a9d0fb0`), still hashing to
   // `c88443302d40c2db739ddb235470bafa29056e2e`, re-READ with the same reading
   // below — the one edit in the surrounding selection-mode region (from its

@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { FILE_REFERENCES_MIGRATION_ID, hasMovedFileColumns } from '@objectstack/spec/system';
 
 import {
@@ -46,12 +46,12 @@ function engineOver(rows: Array<Record<string, unknown>>, opts: { registered?: b
   const inserts: Array<Record<string, unknown>> = [];
   const engine: MigrationFlagEngine = {
     getObject: (name: string) => (opts.registered === false ? undefined : { name }),
-    async find(_object, options) {
-      const o = options as { where?: Record<string, unknown>; limit?: number };
-      const matched = rows.filter((r) => matches(r, o.where ?? {}));
-      // The caller's bound, applied AFTER the filter and BY PRESENCE — a
-      // limit-blind double hides a caller that forgot to page.
-      return typeof o.limit === 'number' ? matched.slice(0, o.limit) : matched;
+    // The single-row route the flag reader takes (#20648), held to the real
+    // engine's refusal of a query that selects no particular record.
+    async findOne(object, options) {
+      assertEngineFindOnePredicate(object, options);
+      const o = options as { where: Record<string, unknown> };
+      return rows.find((r) => matches(r, o.where)) ?? null;
     },
     async insert(_object, data) {
       inserts.push(data);
@@ -199,7 +199,7 @@ describe('#15989 — a backfill re-run must not disturb the stamp', () => {
     const { engine } = engineOver(rows);
     const failing: MigrationFlagEngine = {
       ...engine,
-      async find() {
+      async findOne() {
         throw new Error('ledger unreadable');
       },
     };

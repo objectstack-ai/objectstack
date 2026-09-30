@@ -214,8 +214,14 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * and this docblock and the `describe` beneath it both said so.
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
-   * `dd3f7e1be`; re-derived at that pin 2026-09-28 — both files changed again on
-   * this hop (objectui `544aca24f`, objectui#10301, the date-time half of
+   * `db11afd49`; re-derived at that pin 2026-09-29 — `date-display.ts` is
+   * byte-identical to `dd3f7e1be` and `dataset-format.ts` changed only in three
+   * comment lines (`:529`, `:589`, `:660`, objectui `63ab76112`), all below every
+   * anchor here, so `formatDate` `378-413`, the ±7-day fallback `332`,
+   * `formatMeasureDate` `:229-263`, its call at `:369` and its datetime arm
+   * `:259`-`:261` were re-READ and did not move. At `dd3f7e1be` (2026-09-28)
+   * both files changed again on
+   * that hop (objectui `544aca24f`, objectui#10301, the date-time half of
    * objectui#10026: `toDisplayDate` now refuses a date-TIME written on a day
    * that does not exist as well, and `dataset-format.ts` rewrote the
    * `ISO_DATETIME_RE` docblock that said such a value still rolls over, four
