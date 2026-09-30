@@ -2622,7 +2622,7 @@ export type CurrencyValue = z.input<typeof CurrencyValueSchema>;
 export type FieldInput = Omit<Partial<Field>, 'type'>;
 
 /** `Field.select` with inline options — the array or `{ options }` forms. */
-function selectWithOptions(optionsOrConfig: SelectOption[] | string[] | FieldInput & { options: SelectOption[] | string[] }, config?: FieldInput) {
+function selectWithOptions(optionsOrConfig: Array<SelectOption | string> | Omit<FieldInput, 'options'> & { options: Array<SelectOption | string> }, config?: FieldInput) {
   // Helper function to convert string to lowercase snake_case
   const toSnakeCase = (str: string): string => {
     return str
@@ -2744,9 +2744,9 @@ export const Field = {
     !Array.isArray(optionsOrConfig)
       && typeof (optionsOrConfig as { picklist?: unknown }).picklist === 'string'
       && (optionsOrConfig as { options?: unknown }).options === undefined
-      ? selectFromPicklist(optionsOrConfig as FieldInput & { picklist: string })
+      ? selectFromPicklist(optionsOrConfig as FieldInput & { picklist: string; options?: undefined })
       : selectWithOptions(optionsOrConfig as Parameters<typeof selectWithOptions>[0], config)
-  ) as typeof selectFromPicklist & typeof selectWithOptions,
+  ) as typeof selectWithOptions & typeof selectFromPicklist,
 
   
   /**
