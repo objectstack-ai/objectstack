@@ -324,14 +324,21 @@ export default class PackagePublish extends Command {
     category: Flags.string({
       description: 'Marketplace category slug (e.g. crm, hr, devtools)',
     }),
+    // ⛔ No `default:` here. The package upsert is also the RE-publish path, and
+    // the control plane patches an existing package's visibility whenever the
+    // body carries one — it cannot tell a CLI default from a choice. A default
+    // on this flag therefore rewrote every package on every publish: a
+    // `marketplace` package re-published without repeating the flag silently
+    // became `org` and left the marketplace. Omitted flag ⇒ omitted key.
     visibility: Flags.string({
       description:
         "Who can see / install this package. " +
-        "'org' (default): auto-visible/installable across your organization's environments. " +
+        "'org': auto-visible/installable across your organization's environments. " +
         "'private': only explicitly-granted orgs/envs. " +
-        "'marketplace': public after review.",
+        "'marketplace': public after review. " +
+        'Omit it to leave an existing package\'s visibility unchanged; a new package then gets ' +
+        "the control plane's default ('org' on ObjectStack Cloud).",
       options: ['private', 'org', 'marketplace'],
-      default: 'org',
     }),
     org: Flags.string({
       description: 'owner_org_id (required when using a bearer key in service mode; ignored in user mode)',
@@ -358,7 +365,8 @@ export default class PackagePublish extends Command {
     submit: Flags.boolean({
       description:
         'After publishing, submit the new version for marketplace review ' +
-        '(requires --visibility=marketplace and a complete listing).',
+        "(requires the package's visibility to be marketplace — already stored, or set with " +
+        '--visibility marketplace — and a complete listing).',
       default: false,
     }),
     'auto-approve': Flags.boolean({
@@ -521,8 +529,11 @@ export default class PackagePublish extends Command {
       const pkgBody: Record<string, any> = {
         manifest_id: manifestId,
         display_name: displayName,
-        visibility: flags.visibility,
       };
+      // Absent flag ⇒ absent key, so the control plane keeps an existing
+      // package's visibility and applies its own default to a new one.
+      // `CreatePackageRequestSchema.visibility` is optional; see the flag.
+      if (flags.visibility) pkgBody.visibility = flags.visibility;
       // Absent namespace ⇒ absent key. `CreatePackageRequestSchema.namespace`
       // is optional and §A.2 allows an unnamespaced publish; sending `null` or
       // `''` would turn "declares no namespace" into a value the gate has to
@@ -614,6 +625,12 @@ export default class PackagePublish extends Command {
       }
       const pkg = pkgRes.body?.data ?? pkgRes.body;
       printSuccess(`${pkg?.created ? 'Created' : 'Updated'} sys_package ${pkg?.id} (${manifestId})`);
+      // The visibility the package now has: the control plane's answer, else
+      // the value this publish explicitly asked for (the upsert stores it).
+      // With the flag omitted only the control plane knows — there is no
+      // local default to fall back on, and the summary says so.
+      const visibility: string | undefined =
+        typeof pkg?.visibility === 'string' ? pkg.visibility : flags.visibility;
 
       // ---- Step 1b: optional icon upload ---------------------------------
       // When --icon-file is set we upload raw bytes BEFORE version publish.
@@ -735,7 +752,7 @@ export default class PackagePublish extends Command {
       printKV('  Version',        String(ver?.version ?? version));
       printKV('  Version ID',     String(ver?.id ?? '—'));
       if (ver?.checksum) printKV('  Checksum', String(ver.checksum).slice(0, 16));
-      printKV('  Visibility',     String(pkg?.visibility ?? flags.visibility));
+      printKV('  Visibility',     visibility ?? 'not reported by the control plane');
       if (pkg?.owner_org_id) printKV('  Owner Org', String(pkg.owner_org_id));
       if (ver?.installation) {
         console.log('');
@@ -751,7 +768,7 @@ export default class PackagePublish extends Command {
       if (ver?.listing_status) {
         console.log('');
         printKV('  Listing', String(ver.listing_status));
-        if (ver.listing_status === 'draft' && flags.visibility === 'marketplace') {
+        if (ver.listing_status === 'draft' && visibility === 'marketplace') {
           console.log('');
           console.log(
             '  Hint: visibility is marketplace but the version is still draft. Pass --submit on the\n' +
