@@ -1484,6 +1484,18 @@ describe('#20725 the parked-run read behind the §7.3 disable guard asks for the
         expect(runs.every((r) => r.flowName === 'vendor_process')).toBe(true);
     });
 
+    it('listByFlow REFUSES rather than answers short when the read cannot advance past a full page', async () => {
+        const engine = createFakeEngine();
+        // Rows that carry no `id` column: the seek walk has nothing to advance
+        // past, so after one full page it cannot say whether more rows remain.
+        for (let i = 0; i < 600; i++) {
+            engine.rows.set(`keyless_${i}`, { flow_name: 'vendor_process', node_id: 'pause', status: 'paused' });
+        }
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+
+        await expect(store.listByFlow(['vendor_process'])).rejects.toThrow(/could not be read to their end/);
+    });
+
     it('the disable guard, on a restarted engine over the DB-backed store, refuses naming the caller\'s run parked behind 1000 other runs', async () => {
         const engine = createFakeEngine();
         seedOtherPausedRows(engine, 1000);

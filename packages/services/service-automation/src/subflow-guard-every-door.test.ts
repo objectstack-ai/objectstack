@@ -187,6 +187,12 @@ describe('ADR-0126 §7.3 at REGISTRATION — the arming gate declines a packaged
         const declined = declineWarnings(logger, 'vendor_process');
         expect(declined).toHaveLength(1);
         expect(declined[0]).toContain("'shared_step' (switched off in the activation ledger)");
+
+        // Said once per decline: re-registering the same definition (a hot
+        // reload, the kernel:ready re-bind) records it again and says nothing new.
+        engine.registerFlow('vendor_process', flow('vendor_process', { calls: ['shared_step'] }));
+        expect(trigger.isBound('vendor_process')).toBe(false);
+        expect(declineWarnings(logger, 'vendor_process')).toHaveLength(1);
     });
 
     it('REPUBLISH: an armed packaged caller republished to call a switched-off subflow is disarmed, and the warning names that subflow only', async () => {
