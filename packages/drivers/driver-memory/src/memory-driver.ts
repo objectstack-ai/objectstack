@@ -13,6 +13,10 @@ import { hasDanglingLikeEscape, hasNulInLikePattern, likePatternToRegExp } from 
 // [#20444] The `$empty` operator's ONE expansion — the field's declared row of
 // the ruled 「is empty」 table, asked of the spec by the live query path.
 import { expandEmptyOperator, type ValueShapeFieldDef } from '@objectstack/spec/data';
+// [#20874] The JSON-stored population — the declared fields on which
+// `$contains` asks MEMBERSHIP — from the spec's value-shape classes, the same
+// two `driver-sql`'s JSON-column registry is built from.
+import { STRUCTURED_JSON_TYPES, isMultiValueField } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { Logger, createLogger, compensatedSum } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
@@ -127,6 +131,9 @@ interface LoweredWrite {
  * `$not` is written by `$notContains` and by NOTHING else — it is covered here
  * by construction rather than curatively, which is the point of ranging over
  * the vocabulary instead of over the three operators that had been noticed.
+ * [#20874] `$elemMatch` joins it on the same terms: written by `$contains` on a
+ * JSON-stored field and by nothing else (an author cannot write `$elemMatch` —
+ * the shape gate refuses it), so it is never contested either.
  *
  * ## The rule, and why it is this one
  *
@@ -323,6 +330,52 @@ function getValueByPath(obj: any, path: string): any {
 interface MemoryTransaction {
   id: string;
   snapshot: Record<string, any[]>;
+}
+
+/**
+ * [#20874] The JSON NUMBER grammar, spelled out — the pattern `driver-sql`'s
+ * `jsonMembershipCandidates` tests a comparand against, for its reason:
+ * `Number()` also accepts `'0x10'`, `' 1 '`, `'Infinity'` and `''`, none of
+ * which is a JSON number, and admitting them would make the member set depend
+ * on JS coercion rules no SQL dialect shares.
+ */
+const JSON_NUMBER_TEXT = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/;
+
+/**
+ * [#20874] The stored MEMBERS a `$contains` / `$notContains` comparand names on
+ * a JSON-stored field — the in-memory twin of `driver-sql`'s
+ * `jsonMembershipCandidates`, which reads one comparand the same way for all
+ * three SQL dialects.
+ *
+ * The contract declares the comparand a STRING (`FILTER_OPERATORS`' `$contains`
+ * docblock in `@objectstack/spec`), so a member stored as a JSON number or
+ * boolean is named by its TEXT: `'1'` names the string `'1'` OR the number `1`,
+ * `'true'` the string OR `true`, `'null'` the string OR `null`. The number is
+ * read through `Number()`, so `'1.50'` names a stored `1.5`, as it does on
+ * every SQL dialect. ⛔ Not a lenient alias: one declared comparand type read
+ * against one stored shape, decided in the driver so every backend gets the
+ * same reading.
+ *
+ * `String(value)` is the rendering the substring reading gives the comparand
+ * ({@link InMemoryDriver.filterSubstringPattern}) and the one `driver-sql`
+ * gives it, so the two readings never disagree about WHICH text was asked for.
+ * Each candidate's `JSON.stringify` is exactly the JSON text `driver-sql`
+ * compares a stored element against, which is what lets the analytics face's
+ * SQLite echo name the same set (`memory-analytics.ts`).
+ *
+ * @see InMemoryDriver.filterContainsMembers — where the population decides
+ *      whether a comparand is read this way at all.
+ */
+export function containsMemberCandidates(value: unknown): Array<string | number | boolean | null> {
+  const text = String(value);
+  if (text === 'true') return [text, true];
+  if (text === 'false') return [text, false];
+  if (text === 'null') return [text, null];
+  if (JSON_NUMBER_TEXT.test(text)) {
+    const parsed = Number(text);
+    if (Number.isFinite(parsed)) return [text, parsed];
+  }
+  return [text];
 }
 
 /**
@@ -1428,8 +1481,12 @@ export class InMemoryDriver implements IDataDriver {
       // returned rows it excludes, which on an RLS read scope is over-reach
       // rather than a loose filter (#3948). `escapeRegex` stays: the comparand
       // was always literal, and that half was never the defect.
+      //
+      // [#20874] `contains` / `not_contains` take the ONE test the `$`-spelling
+      // takes ({@link containsTest}): membership on a declared JSON-stored
+      // field, the case-exact substring everywhere else.
       case 'contains':
-        return { [field]: { $regex: new RegExp(this.escapeRegex(value)) } };
+        return { [field]: this.containsTest(object, field, value) };
       // [#7536] `like` / `ilike` are NOT `contains`, and sharing this arm with
       // it was the memory-face twin of the wire defect #7536 closed: the
       // comparand was regex-ESCAPED (so a caller's `%` matched a literal percent
@@ -1451,7 +1508,7 @@ export class InMemoryDriver implements IDataDriver {
         };
       }
       case 'notcontains': case 'not_contains':
-        return { [field]: { $not: { $regex: new RegExp(this.escapeRegex(value)) } } };
+        return { [field]: { $not: this.containsTest(object, field, value) } };
       case 'startswith': case 'starts_with':
         return { [field]: { $regex: new RegExp(`^${this.escapeRegex(value)}`) } };
       case 'endswith': case 'ends_with':
@@ -1580,7 +1637,7 @@ export class InMemoryDriver implements IDataDriver {
           if (Object.keys(rest).length === 0) continue;
           fieldOps = rest;
         }
-        const normalized = this.normalizeFieldOperators(fieldOps, this.temporalKind(object, key), key, here);
+        const normalized = this.normalizeFieldOperators(fieldOps, this.temporalKind(object, key), key, here, object);
         // [#13524] Lowered writes whose mingo key was already taken by a
         // sibling operator on the same field. They cannot be merged without one
         // of the two constraints silently overwriting the other, so each
@@ -1634,8 +1691,17 @@ export class InMemoryDriver implements IDataDriver {
    *
    * `field` and `path` are carried only so a refusal can name the position it
    * refused — the vocabulary itself is enforced one level up (#5324).
+   * [#20874] `object` is carried for `$contains` / `$notContains` alone: which
+   * question they ask is the FIELD's declared storage shape
+   * ({@link containsTest}), and `field` names it only together with `object`.
    */
-  private normalizeFieldOperators(ops: Record<string, any>, kind?: TemporalFieldKind, field = '<field>', path = 'filter'): Record<string, any> {
+  private normalizeFieldOperators(
+    ops: Record<string, any>,
+    kind?: TemporalFieldKind,
+    field = '<field>',
+    path = 'filter',
+    object?: string,
+  ): Record<string, any> {
     const store = (v: any) => coerceTemporalValue(v, kind);
     const regexConditions: Record<string, any>[] = [];
     /**
@@ -1660,11 +1726,21 @@ export class InMemoryDriver implements IDataDriver {
         // method up (`convertConditionToMongo`) and for the same reason — see
         // the note there. The comparand stays `escapeRegex`-literal; only the
         // Unicode-folding `i` flag is gone.
-        case '$contains':
-          regexConditions.push({ $regex: new RegExp(this.escapeRegex(val)) });
+        //
+        // [#20874] `$contains` / `$notContains` ask the ONE test
+        // {@link containsTest} builds: MEMBERSHIP on a declared JSON-stored
+        // field, the substring pattern everywhere else. The substring test
+        // still joins `regexConditions`, so it composes with `$startsWith` /
+        // `$endsWith` exactly as before; the membership test lowers to
+        // `$elemMatch`, a key no other operator writes.
+        case '$contains': {
+          const test = this.containsTest(object, field, val);
+          if ('$elemMatch' in test) put('$elemMatch', test.$elemMatch);
+          else regexConditions.push(test);
           break;
+        }
         case '$notContains':
-          put('$not', { $regex: new RegExp(this.escapeRegex(val)) });
+          put('$not', this.containsTest(object, field, val));
           break;
         case '$startsWith':
           regexConditions.push({ $regex: new RegExp(`^${this.escapeRegex(val)}`) });
@@ -2225,6 +2301,10 @@ export class InMemoryDriver implements IDataDriver {
    * [#5374] The pattern a `$contains` / `$notContains` comparand becomes — the
    * substring rule itself, for the analytics (cube) face.
    *
+   * [#20874] On a scalar column. A declared JSON-stored field asks MEMBERSHIP
+   * instead, so the analytics face now takes the whole predicate
+   * ({@link filterContainsPredicate}), which uses this for the substring half.
+   *
    * Same reasoning as {@link filterComparandStorageForm} one method up, on the
    * other half of what a `contains` predicate needs. This driver's rule is
    * `escapeRegex` and NO flags ({@link normalizeFieldOperators}): the comparand
@@ -2258,6 +2338,109 @@ export class InMemoryDriver implements IDataDriver {
    */
   filterSubstringPattern(value: unknown): RegExp {
     return new RegExp(this.escapeRegex(value as string));
+  }
+
+  /**
+   * [#20874] Is `field` of `object` DECLARED JSON-stored — the population on
+   * which `$contains` / `$notContains` ask MEMBERSHIP rather than SUBSTRING?
+   *
+   * The contract (`FILTER_OPERATORS`' `$contains` docblock, `@objectstack/spec`)
+   * selects the question by the COLUMN: on a `multiple: true` field or a
+   * JSON-stored type, `$contains: v` asks whether `v` is a member of the stored
+   * array; on a scalar string column it stays the substring test. The storage
+   * shape is DECLARED metadata, so this reads the declaration {@link syncSchema}
+   * recorded ({@link valueShapes}) and never the row: `driver-sql` forks on its
+   * JSON-column registry the same way (`SqlDriver.isJsonColumn`), and a fork read
+   * off each row's value would answer a declared JSON field holding a scalar
+   * string by substring where every SQL dialect answers no member.
+   *
+   * The population is the spec's JSON-stored classes — `STRUCTURED_JSON_TYPES`
+   * and every multi-valued field (`isMultiValueField`, which covers
+   * `MULTI_OPTION_TYPES`) — the two halves `driver-sql`'s registry is built
+   * from. Two members of that registry are deliberately not here: its
+   * driver-internal `object` / `array` aliases (introspected external columns,
+   * not an authorable `type`), and a SINGLE-VALUE media field, a JSON column
+   * only on a deployment that has not moved its media columns (ADR-0104
+   * addendum); this driver stores the bare id, the moved end-state.
+   *
+   * **A field with no recorded declaration answers `false`**, exactly as
+   * `SqlDriver.isJsonColumn` answers for a table it was never told about: an
+   * object never synced, or a field its schema does not name, keeps the
+   * substring reading it has always had.
+   */
+  private isJsonStoredField(object: string | undefined, field: string): boolean {
+    const shape = object ? this.valueShapes.get(object)?.get(field) : undefined;
+    if (!shape) return false;
+    return STRUCTURED_JSON_TYPES.has(shape.type) || isMultiValueField(shape);
+  }
+
+  /**
+   * [#20874] The stored members a `$contains` / `$notContains` comparand names
+   * on `field` of `object` ({@link containsMemberCandidates}), or `null` when
+   * the field asks the SUBSTRING question instead
+   * ({@link isJsonStoredField}).
+   *
+   * Public for the analytics face's SQL echo, which has to RENDER the same
+   * question in SQLite's language — the same reason
+   * {@link filterComparandStorageForm} and {@link filterSubstringPattern} are
+   * public: a face that re-derived the population or the member reading would
+   * be a second place for the two faces to drift apart (#5374).
+   */
+  filterContainsMembers(object: string | undefined, field: string, value: unknown): Array<string | number | boolean | null> | null {
+    return this.isJsonStoredField(object, field) ? containsMemberCandidates(value) : null;
+  }
+
+  /**
+   * [#20874] The mingo predicate `$contains` becomes on `field` of `object`, or
+   * — `negate`d — `$notContains`: the whole field predicate, for the analytics
+   * (cube) face, built by the one rule the live query path uses
+   * ({@link containsTest}).
+   *
+   * Returned whole, not as a pattern, because the two readings do not share a
+   * shape: the substring reading is a `$regex`, the membership reading an
+   * `$elemMatch`. The analytics face used to take {@link filterSubstringPattern}
+   * and wrap it in `$regex` itself, which is how it inherited the per-element
+   * substring answer on a stored array along with the query path.
+   */
+  filterContainsPredicate(object: string | undefined, field: string, value: unknown, negate: boolean): Record<string, unknown> {
+    const test = this.containsTest(object, field, value);
+    return negate ? { $not: test } : test;
+  }
+
+  /**
+   * [#20874] The one un-negated test behind every spelling of `$contains` on
+   * this package — the `$`-spelling and the AST spelling of the query path, and
+   * the analytics face through {@link filterContainsPredicate}.
+   *
+   * - **A declared JSON-stored field → MEMBERSHIP**: some element of the stored
+   *   array IS one of the comparand's candidates. `$elemMatch` is array-only by
+   *   construction, so a stored scalar, an object or `null` has no member — the
+   *   answer `driver-sql` gives on every dialect (its constructs are array-only
+   *   too). The `$not: { $type: 'array' }` clause keeps a NESTED array out: mingo
+   *   applies `$in` through an element that is itself an array, so `[['u1']]`
+   *   would otherwise answer `'u1'`, where SQLite compares the element's JSON
+   *   text `["u1"]` and does not. Measured on mingo 7.2 over one fixture: with
+   *   the clause, this and SQLite answer the same rows on every shape, `[null]`
+   *   and `[[null]]` included.
+   * - **Anything else → the case-exact literal SUBSTRING** (#6682), unchanged.
+   *
+   * The negation composes with the NULL rule rather than replacing it: `$not`
+   * over either test admits a row whose field is null or missing (#5298), which
+   * is `driver-sql`'s `col IS NULL OR NOT (…)`.
+   *
+   * ⚠️ On a field this driver holds no declaration for, the substring pattern
+   * still reaches mingo, which applies a `$regex` to each element of an array
+   * value. That residue is the population's deliberate `false` above, the same
+   * one `driver-sql` keeps for a table it was never told about.
+   */
+  private containsTest(
+    object: string | undefined,
+    field: string,
+    value: unknown,
+  ): { $elemMatch: Record<string, unknown> } | { $regex: RegExp } {
+    const members = this.filterContainsMembers(object, field, value);
+    if (members) return { $elemMatch: { $in: members, $not: { $type: 'array' } } };
+    return { $regex: this.filterSubstringPattern(value) };
   }
 
   /**
