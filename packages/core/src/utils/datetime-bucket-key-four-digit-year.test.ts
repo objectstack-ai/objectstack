@@ -91,9 +91,9 @@ describe('[#20760] bucketKeyToCalendarRange reads exactly what bucketDateKey wri
 });
 
 describe('[#20760] a year outside 0000..9999 has no four-digit form, and is not padded into one', () => {
-  // Not reached: a `date` or `datetime` value names a year from 0001 to 9999 at
-  // both engine doors. Stated so a negative year is never spelled as a padded
-  // fragment (`00-1`) that reads as a key.
+  // Not reached: at both engine doors a `date` value names a year from 0001 to
+  // 9999 and a `datetime` one a year from 1000 to 9999. Stated so a negative
+  // year is never spelled as a padded fragment (`00-1`) that reads as a key.
   const inYear = (year: number) => {
     const d = new Date(0);
     d.setUTCFullYear(year, 5, 15);

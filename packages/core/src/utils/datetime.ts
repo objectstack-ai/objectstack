@@ -306,8 +306,9 @@ export function isBucketGranularity(value: unknown): value is BucketGranularity 
  * [#20760] The year of every key is spelled with four digits
  * ({@link bucketKeyYear}): `0050`, `0050-Q2`, `0050-06`, `0050-06-15`,
  * `0049-W52` — what the drivers' bucket expressions answer for the same
- * instant. A `date` value keeps the years 0001..9999, so 0001..0999 reach this
- * function.
+ * instant. A `date` value keeps the years 0001..9999, and a `datetime` row
+ * stored before the engine doors refused a year below 1000 can still hold one,
+ * so 0001..0999 reach this function.
  */
 export function bucketDateKey(
   value: unknown,
@@ -357,9 +358,9 @@ export function bucketDateKey(
  *
  * A year below 0 has no four-digit form and keeps its plain spelling (`-1`),
  * never a padded fragment such as `00-1`; a year past 9999 is longer than four
- * digits already. Neither is reached: a `date` or `datetime` value names a
- * year from 0001 to 9999 at both engine doors, and
- * {@link bucketKeyToCalendarRange} reads neither spelling.
+ * digits already. Neither is reached: at both engine doors a `date` value
+ * names a year from 0001 to 9999 and a `datetime` one a year from 1000 to
+ * 9999, and {@link bucketKeyToCalendarRange} reads neither spelling.
  */
 function bucketKeyYear(year: number): string {
   return year >= 0 ? String(year).padStart(4, '0') : String(year);
