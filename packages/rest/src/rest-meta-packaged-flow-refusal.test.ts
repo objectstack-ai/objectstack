@@ -72,7 +72,8 @@ function boot(environmentId: string | undefined) {
     const call = async (method: 'PUT' | 'DELETE', type: string, name: string, body?: unknown) => {
         const res = makeRes();
         await route(method).handler({ method, params: { type, name }, query: {}, headers: {}, body } as any, res);
-        return { status: res._status, error: res._json?.error ?? {} };
+        // The door's 4xx envelope: `code` beside the client-facing `error` text.
+        return { status: res._status, code: res._json?.code, message: res._json?.error };
     };
     return { call };
 }
@@ -93,8 +94,8 @@ describe('PUT / DELETE /api/v1/meta/flow/:name on a packaged flow — the refusa
             const { call } = boot(environmentId);
             const r = await call('PUT', 'flow', PACKAGED_FLOW, { name: PACKAGED_FLOW, label: 'Changed in place' });
             expect(r.status).toBe(403);
-            expect(r.error.code).toBe('NOT_OVERRIDABLE');
-            expectRegimeC(r.error.message);
+            expect(r.code).toBe('NOT_OVERRIDABLE');
+            expectRegimeC(r.message);
         });
     }
 
@@ -102,16 +103,16 @@ describe('PUT / DELETE /api/v1/meta/flow/:name on a packaged flow — the refusa
         const { call } = boot('env_1');
         const r = await call('DELETE', 'flow', PACKAGED_FLOW);
         expect(r.status).toBe(403);
-        expect(r.error.code).toBe('NOT_OVERRIDABLE');
-        expectRegimeC(r.error.message);
+        expect(r.code).toBe('NOT_OVERRIDABLE');
+        expectRegimeC(r.message);
     });
 
     it('control: a packaged `page` (no declared regime) reads the sentence it always read', async () => {
         const { call } = boot('env_1');
         const r = await call('PUT', 'page', PACKAGED_PAGE, { name: PACKAGED_PAGE, label: 'Changed in place' });
         expect(r.status).toBe(403);
-        expect(r.error.code).toBe('NOT_OVERRIDABLE');
-        expect(r.error.message).toBe(
+        expect(r.code).toBe('NOT_OVERRIDABLE');
+        expect(r.message).toBe(
             `Metadata item 'page/${PACKAGED_PAGE}' is provided by a code package `
             + 'and the type has not opted into per-org overlay writes (allowOrgOverride=false). '
             + 'Edit the source artifact and redeploy, or set OS_METADATA_WRITABLE to grant a runtime escape hatch. '
