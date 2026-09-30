@@ -12,7 +12,7 @@ Clause-②: no (narrowing)
 
 The judged fields are the spec's scalar-valued classes: every type in `SCALAR_FILTER_HEAD_TYPES` (text-like, numeric, boolean, date, datetime, time, single-option, `autonumber`, `summary`), with or without `multiple: true`, and the multi-option types (`multiselect`, `checkboxes`, `tags`). A `having` column is judged by the type it carries: a `count` / `sum` / `avg` is a number, a groupBy or `min` / `max` column the type of its field, a date bucket a date or text label.
 
-FROM a plain object with no `$` key beneath such a field → TO `INVALID_FILTER` / 400, naming the field, its declared type, the object's keys and the position (`where.amount`, `aggregations[1].filter.amount`, `having.total`). The fix is one line: compare the field with a value (`{ "amount": 12 }`) or an operator (`{ "amount": { "$gt": 12 } }`); to filter by a related record, name a relation field.
+The refusal names the field, its declared type, the object's keys and the position (`where.amount`, `aggregations[1].filter.amount`, `having.total`). No mechanical rewrite exists, because which value or operator the caller meant is not in the object; the fix is one line by hand: compare the field with a value (`{ "amount": 12 }`) or an operator (`{ "amount": { "$gt": 12 } }`), and to filter by a related record, name a relation field.
 
 Measured through `engine.find` / `engine.aggregate` and `POST /data/:object/query`, three rows:
 
