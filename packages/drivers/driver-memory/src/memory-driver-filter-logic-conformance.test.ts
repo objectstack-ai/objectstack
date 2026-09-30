@@ -13,12 +13,12 @@
  * that SQL on sql.js, `driver-mongodb` translates and executes it, and
  * `service-analytics` lowers it into its read-scope SQL.
  *
- * `driver-memory` ran it through `memory-matcher` ONLY
- * (`memory-matcher-or-semantics.test.ts`). That file is not a driver test: the
- * driver does not call `match()` — it imports exactly one symbol from that
- * module, `getValueByPath`, and filters with mingo instead. So this backend's
- * half of the conformance table was measured against a REFERENCE implementation
- * while the half users actually run was never executed against the standard once.
+ * `driver-memory` ran it through its reference matcher ONLY (`match()` in
+ * `memory-matcher.ts`, since retired). That was not a driver test: the driver
+ * never called `match()` — it imported exactly one symbol from that module,
+ * `getValueByPath`, and filters with mingo instead. So this backend's half of
+ * the conformance table was measured against a REFERENCE implementation while
+ * the half users actually run was never executed against the standard once.
  *
  * The cost was not hypothetical. The table's `$not ANDs with its sibling keys
  * inside a branch` case was green here for as long as it has existed, while the
@@ -29,10 +29,15 @@
  * is the "declared ≠ enforced" shape Prime Directive #10 names.
  *
  * So the gap is closed the way the other three backends close it — by running
- * the table through the thing that serves queries. `memory-matcher-or-semantics`
- * stays: the matcher is still the reference evaluator, and holding BOTH faces to
- * the same table is what makes "this package has two filter surfaces" a
- * statement someone can check.
+ * the table through the thing that serves queries.
+ *
+ * [#5930 step 4, ruling D6] The reference matcher had no production caller and
+ * is RETIRED. Its copy of this table (`memory-matcher-or-semantics.test.ts`)
+ * asserted the same case names against the same `expected` column this file
+ * asserts on the live path, so its assertions live here now, one `it` per case;
+ * the table's `expected` column is the oracle both were held to, and
+ * `@objectstack/formula`, `driver-sql`, `driver-mongodb` and the analytics read
+ * scope run it too.
  *
  * # The third face (#5345)
  *
@@ -97,7 +102,6 @@ import type { Cube, FilterCondition } from '@objectstack/spec/data';
 
 import { InMemoryDriver } from './memory-driver.js';
 import { MemoryAnalyticsService, ANALYTICS_FILTER_CAPABILITIES } from './memory-analytics.js';
-import { match } from './memory-matcher.js';
 
 const TABLE = 'conformance';
 
@@ -165,21 +169,21 @@ describe('[#5324] InMemoryDriver.find — filter logic conformance (the LIVE que
   });
 
   /**
-   * The two faces, on the same table, in one assertion.
+   * The whole table, in one assertion.
    *
-   * `memory-matcher-or-semantics.test.ts` already holds the matcher to these
-   * cases and this file holds the driver to them, so both being green already
-   * implies agreement. Asserting it directly is still worth one test: it is the
-   * invariant #5240 established for this package ("a backend whose two halves
-   * disagree about what a filter MEANS is exactly the divergence the ruling
-   * closes"), and stated here it survives either suite being edited.
+   * This was "both filter faces answer the whole table identically" — the live
+   * path against the reference matcher, the invariant #5240 established for this
+   * package ("a backend whose two halves disagree about what a filter MEANS is
+   * exactly the divergence the ruling closes"). [#5930 step 4, ruling D6] The
+   * matcher is retired, so one face is left and the oracle it was compared to is
+   * the one both were already held to: the table's own `expected` column. Kept
+   * as ONE assertion over every case, for the reason it was written — stated
+   * here it survives the per-case loop above being edited.
    */
-  it('both filter faces answer the whole table identically', async () => {
-    for (const c of FILTER_LOGIC_CASES) {
-      const live = await ids(c.filter);
-      const reference = FILTER_LOGIC_ROWS.filter((r) => match(r, c.filter)).map((r) => r.id);
-      expect(live, `${c.name}: the live query path and the reference matcher disagree`).toEqual(reference);
-    }
+  it('the live query path answers the whole table as the spec states it', async () => {
+    const live: Record<string, string[]> = {};
+    for (const c of FILTER_LOGIC_CASES) live[c.name] = await ids(c.filter);
+    expect(live).toEqual(Object.fromEntries(FILTER_LOGIC_CASES.map((c) => [c.name, [...c.expected]])));
   });
 });
 
