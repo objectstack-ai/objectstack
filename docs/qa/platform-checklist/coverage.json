@@ -52,7 +52,8 @@
     "book": {
       "items": [
         "platform-core.docs-audience-gate",
-        "platform-core.docs-portal-render"
+        "platform-core.docs-portal-render",
+        "studio-authoring.doc-on-app-menu"
       ]
     },
     "connector": {
@@ -101,7 +102,8 @@
     "doc": {
       "items": [
         "platform-core.docs-audience-gate",
-        "platform-core.docs-portal-render"
+        "platform-core.docs-portal-render",
+        "studio-authoring.doc-on-app-menu"
       ]
     },
     "email_template": {

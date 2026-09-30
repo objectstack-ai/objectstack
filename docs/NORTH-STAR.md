@@ -21,7 +21,7 @@
 - studio · 自定义页面:块组合、页面变量与页面级动作、三档源码 · studio-authoring · custom-page-render-and-blocks, page-variables-and-actions, custom-page-source-tiers
 - studio · 先草稿后发布:发布是原子的,冲突与非法草稿当场被拒 · studio-authoring · draft-publish-lifecycle, authoring-validation-not-persisted
 - studio · Studio 的判定与边界:表达式与引擎一致、权限矩阵编得动、注册表决定什么能在运行中改 · studio-authoring · expression-editors, permission-matrix-editor-ux, org-override-registry-gate
-- studio · 管理员在界面里写 Markdown 文档并加到菜单(含 book),按受众发布成门户 · studio-authoring + platform-core · 清单项待写, platform-core.docs-audience-gate, platform-core.docs-portal-render
+- studio · 管理员在界面里写 Markdown 文档并加到菜单(含 book),按受众发布成门户 · studio-authoring + platform-core · doc-on-app-menu, platform-core.docs-audience-gate, platform-core.docs-portal-render
 
 **② 本地跑起来、看到 —— 终端用户在应用里用到的能力,都在这一步第一次被需要**
 
