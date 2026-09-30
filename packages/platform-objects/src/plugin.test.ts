@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 // package — that import would close a dependency cycle turbo rejects, and is
 // why this file's `update` entry sat in the gate's DEBT ledger until #5619 sank
 // the predicate into a package that depends on neither side.
-import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { PlatformObjectsPlugin } from './plugin.js';
 import { SysMetadataActivation, SysMigration, SysMigrationJournal, SysSecret } from './system/index.js';
 
@@ -149,8 +149,11 @@ describe('PlatformObjectsPlugin: fresh-datastore attestation (#3438, ADR-0104)',
     const rows: Array<Record<string, unknown>> = [];
     const engine: any = {
       getObject: (name: string) => (name === 'sys_migration' ? { name } : undefined),
-      find: async (_object: string, options: any) =>
-        rows.filter((r) => options?.where?.id === undefined || r.id === options.where.id),
+      // The single-row route the flag reader takes (#20648).
+      findOne: async (object: string, options: any) => {
+        assertEngineFindOnePredicate(object, options);
+        return rows.find((r) => r.id === options.where.id) ?? null;
+      },
       insert: async (_object: string, data: any) => {
         rows.push({ ...data });
         return data;
