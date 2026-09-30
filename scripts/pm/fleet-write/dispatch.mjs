@@ -200,7 +200,7 @@ import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan, proxyRoute } fro
 import { classifyHttp } from '../label-write.mjs';
 import { EXIT_WRITE_PACE_REFUSED, isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from '../write-pace.mjs';
 import { CONTAINER_SESSION_ENV, CONTAINER_SESSION_SHAPE, MAX_REQUEST_ID_CHARS, OPS, OP_NAMES, RELAY_EVENT_TYPE, RELAY_REPO, SESSION_ENV, SESSION_SHAPE, TRANSPORTS, TRANSPORT_ENV } from './ops.mjs';
-import { refusalText, validatePayload } from './validate.mjs';
+import { PAYLOAD_ENV, refusalText, validatePayload } from './validate.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
 const DEFAULT_API = 'https://api.github.com';
@@ -866,10 +866,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the dispatch: one paced POST to the board repo with event_type and client_payload; 204 is acceptance, anything else a refusal': 7,
   'the run-poller: the run named after the request id, its completion, its conclusion': 6,
   'the ceilings: no run in the start window, no completion in the ceiling — UNCONFIRMED, never retried': 7,
-  'the wiring: the POST is paced and on the roster, the reads are not, the token never reaches the log': 4,
+  'the read-back targets: every op the table lets carry a body — derived, each with a locator — and no other op is read back': 6,
+  "the verdict: post-stamped's own classifier, imported — declared normalisations land, a split, lost or truncated byte is NOT STORED at its first differing byte, an unreadable body is unverified, the PR-create footer forgiven on pr_create alone": 13,
+  "the round trip: the card's 41,699 bytes with a multi-byte character across every 16 KiB boundary of every stream, byte for byte through pack, the wire, the runner's env text, the validator and the executor; a per-chunk decode is NOT STORED": 8,
+  'the read-back end to end: after a success run each body at its locator — a corrupted read-back exits 4 through the CLI, an unreadable or unfound one 6, a body-less stroke reads nothing, never a retry': 17,
+  'the wiring: the POST is paced and on the roster, the reads are not, the token never reaches the log': 5,
   'the CLI: a dry run sends nothing, usage, the exit ladder, the session derived from the container, a route read behind a dead proxy refuses': 11,
 });
-const SELF_TEST_BATTERY_FLOOR = 11;
+const SELF_TEST_BATTERY_FLOOR = 15;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -894,6 +898,10 @@ export async function selfTest() {
   const TOKEN = 'ghs_FixtureTokenNotRealAtAll0000000000000';
   const SESSION = 'session_01ABCDEFGHJKMNPQRSTVWXYZ';
   const ACTIONS = [{ op: 'comment', issue: 19701, body: 'Hello from the relay.' }];
+  // The read-back's judge, loaded the way the live path loads it — so this self-test, run from this file's own entry,
+  // is also the proof that the entry settles before the import back into it (the header's no-top-level-await note).
+  const JUDGE = await loadReadBackJudge();
+  const { PLATFORM_COMMENT_FOOTER, classifyReadBack: POST_STAMPED_CLASSIFIER } = await import('../post-stamped.mjs');
 
   // ── the selector ────────────────────────────────────────────────────────
   battery('the selector: OS_FLEET_TRANSPORT wins; auto is dispatch only under all three conditions and direct otherwise');
@@ -1222,6 +1230,203 @@ export async function selfTest() {
       t('the ceilings read the environment with malformed overrides ignored and said', [ceilingsFrom({ OS_FLEET_DISPATCH_START_MS: '10', OS_FLEET_DISPATCH_TIMEOUT_MS: 'soon' }).startMs, ceilingsFrom({ OS_FLEET_DISPATCH_TIMEOUT_MS: 'soon' }).ceilingMs, ceilingsFrom({ OS_FLEET_DISPATCH_TIMEOUT_MS: 'soon' }).notes.length], [10, DEFAULT_CEILING_MS, 1]);
     }
 
+    // ── the read-back: which actions are read, and where ─────────────────────
+    battery('the read-back targets: every op the table lets carry a body — derived, each with a locator — and no other op is read back');
+    {
+      t('BODY_OPS is derived from the op table: exactly the five ops that can carry a body', [...BODY_OPS].sort(), ['comment', 'comment_edit', 'issue_create', 'issue_patch', 'pr_create']);
+      t('⛔ READ_BACK_LOCATORS names exactly BODY_OPS — a body op without a locator reds here the day it lands in ops.mjs', Object.keys(READ_BACK_LOCATORS).sort(), [...BODY_OPS].sort());
+      t('an addressed object and one found by a key are MEASURED; a new comment only its content can find', Object.fromEntries(Object.entries(READ_BACK_LOCATORS).map(([op, l]) => [op, l.found])), { issue_patch: 'address', comment_edit: 'address', issue_create: 'key', pr_create: 'key', comment: 'content' });
+      const mixed = { repo: 'objectstack-ai/objectstack', actions: [{ op: 'labels_add', issue: 1, labels: ['a'] }, { op: 'issue_patch', issue: 2, state: 'closed' }, { op: 'issue_patch', issue: 3, body: 'B' }, { op: 'pr_create', title: 'T', head: 'h', base: 'main' }, { op: 'pr_create', title: 'T', head: 'h2', base: 'main', body: 'P' }] };
+      t('only an action that SENT a body is a target, numbered as the stroke numbers it', readBackTargets(mixed).map((x) => [x.action, x.op]), [[3, 'issue_patch'], [5, 'pr_create']]);
+      t('…carrying the keys its locator needs', [readBackTargets(mixed)[0].issue, readBackTargets(mixed)[1].head, readBackTargets(mixed)[1].sent], [3, 'h2', 'P']);
+      let fetched = 0;
+      const none = await readBackStroke({ repo: 'objectstack-ai/objectstack', actions: [{ op: 'labels_add', issue: 1, labels: ['a'] }] }, { dispatchedAt: T0 }, {
+        judge: JUDGE,
+        fetch: async () => {
+          fetched += 1;
+          throw new Error('no read expected');
+        },
+      });
+      t('a stroke with no body reads NOTHING back — state none, zero requests', [none.state, none.rows.length, fetched], ['none', 0, 0]);
+    }
+
+    // ── the verdict ─────────────────────────────────────────────────────────
+    battery("the verdict: post-stamped's own classifier, imported — declared normalisations land, a split, lost or truncated byte is NOT STORED at its first differing byte, an unreadable body is unverified, the PR-create footer forgiven on pr_create alone");
+    {
+      const J = (op, sent, stored) => judgeStoredBody({ op, sent, stored }, JUDGE);
+      const SENT = 'A census table:\n| card | title |\n|---|---|\n| #1 | no… 全部 |\n';
+      const TRIMMED = SENT.replace(/\n+$/u, '');
+      t('identical bytes land', [J('issue_patch', SENT, SENT).verdict, J('issue_patch', SENT, SENT).cls], ['landed', 'identical']);
+      t("the platform's footer block appended lands (post-stamped's footer-appended)", [J('issue_patch', SENT, `${TRIMMED}${PLATFORM_COMMENT_FOOTER}`).verdict, J('issue_patch', SENT, `${TRIMMED}${PLATFORM_COMMENT_FOOTER}`).cls], ['landed', 'footer-appended']);
+      t('a stripped trailing newline lands', J('comment', SENT, TRIMMED).verdict, 'landed');
+      const ell = Buffer.byteLength(SENT.slice(0, SENT.indexOf('…')), 'utf8');
+      const SPLIT_ELL = SENT.replace('…', '���');
+      const e1 = J('issue_patch', SENT, SPLIT_ELL);
+      t("⭐ the card's first shape — '…' stored as three U+FFFD — is NOT STORED at the byte where '…' began, three extra replacement characters", [e1.verdict, e1.offset, e1.replacements], ['not-stored', ell, 3]);
+      const quan = Buffer.byteLength(SENT.slice(0, SENT.indexOf('全')), 'utf8');
+      const e2 = J('issue_patch', SENT, SENT.replace('全', '��'));
+      t("⭐ …and its second — '全' stored as two U+FFFD — at the byte where '全' began", [e2.verdict, e2.offset, e2.replacements], ['not-stored', quan, 2]);
+      t('a truncation is NOT STORED at the first byte the stored body lacks', [J('comment_edit', SENT, SENT.slice(0, 10)).verdict, J('comment_edit', SENT, SENT.slice(0, 10)).offset], ['not-stored', 10]);
+      t('a stored body that is not a string is unverified — never landed, never not-stored', [J('issue_patch', SENT, null).verdict, J('issue_patch', SENT, undefined).verdict], ['unverified', 'unverified']);
+      const PR_TAIL = '\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01KTZmMfzVzjNvyaLyQ8mHvg)_';
+      t("pr_create: the platform's rule + ONE session-URL footer after every byte sent lands as pr-create-footer-appended", [J('pr_create', SENT, `${TRIMMED}${PR_TAIL}`).verdict, J('pr_create', SENT, `${TRIMMED}${PR_TAIL}`).cls], ['landed', 'pr-create-footer-appended']);
+      t("⛔ …that cell is pr_create's alone: the same tail on an issue body is NOT STORED", J('issue_patch', SENT, `${TRIMMED}${PR_TAIL}`).verdict, 'not-stored');
+      t('⛔ …it forgives nothing INSIDE the bytes sent: a split character before that footer is still NOT STORED', J('pr_create', SENT, `${SPLIT_ELL.replace(/\n+$/u, '')}${PR_TAIL}`).verdict, 'not-stored');
+      t('⛔ …nor an append that is not exactly that block', J('pr_create', SENT, `${SENT}\nextra`).verdict, 'not-stored');
+      const line = readBackLine({ action: 1, op: 'issue_patch', where: 'objectstack-ai/objectui#11041', ...e1 });
+      t('the NOT STORED line names the op, the object, the first differing byte and the replacement characters', line.includes('NOT STORED') && line.includes('issue_patch') && line.includes('#11041') && line.includes(`first difference at byte ${ell}`) && line.includes('3 U+FFFD'));
+      const own = readReal(SELF_PATH, 'utf8');
+      t("⛔ the judge is post-stamped's, imported — this file declares no classifier of its own", [JUDGE.classifyReadBack === POST_STAMPED_CLASSIFIER, /import\('\.\.\/post-stamped\.mjs'\)/u.test(own), new RegExp('function\\s+(classifyReadBack|footerReAnchoring|firstDifferingByte|sentBodyLanded)\\b').test(own)], [true, true, false]);
+    }
+
+    // ── the round trip ──────────────────────────────────────────────────────
+    // The platform legs are MODELLED here, not measured: GitHub parses the wire, and the runner's `toJSON` is taken as
+    // the 2-space JSON the workflow's expression engine renders. Everything this repository executes is the real code.
+    battery("the round trip: the card's 41,699 bytes with a multi-byte character across every 16 KiB boundary of every stream, byte for byte through pack, the wire, the runner's env text, the validator and the executor; a per-chunk decode is NOT STORED");
+    {
+      const { executeFleetWrite } = await import('./execute.mjs');
+      const KIB16 = 16 * 1024;
+      const CARD_BYTES = 41_699;
+      const UNIT = '𠮷😀全😀…😀é\n"'; // 4-, 3- and 2-byte characters, and the newline and quote the JSON streams escape
+      const UNIT_BYTES = Buffer.byteLength(UNIT, 'utf8');
+      const build = (pad) => {
+        let s = 'x'.repeat(pad);
+        while (Buffer.byteLength(s, 'utf8') + UNIT_BYTES <= CARD_BYTES) s += UNIT;
+        return s + 'x'.repeat(CARD_BYTES - Buffer.byteLength(s, 'utf8'));
+      };
+      const streamsOf = (body) => {
+        const p = packRequest({ repo: 'objectstack-ai/objectui', session: SESSION, actions: [{ op: 'issue_patch', issue: 11041, body }], requestId: 'fw-20260929T061500Z-abc123' }).payload;
+        const wire = JSON.stringify({ event_type: RELAY_EVENT_TYPE, client_payload: p });
+        return { payload: p, wire, envText: JSON.stringify(JSON.parse(wire).client_payload, null, 2), exec: JSON.stringify({ body }) };
+      };
+      /** Every 16 KiB boundary of the stream falls on a UTF-8 continuation byte — inside a character, never between two. */
+      const straddles = (text) => {
+        const buf = Buffer.from(text, 'utf8');
+        for (let k = KIB16; k < buf.length; k += KIB16) if ((buf[k] & 0xc0) !== 0x80) return false;
+        return true;
+      };
+      let pad = -1;
+      for (let p = 0; p < 2000 && pad < 0; p++) {
+        const body = build(p);
+        const s = streamsOf(body);
+        if ([body, s.wire, s.envText, s.exec].every(straddles)) pad = p;
+      }
+      const BODY = build(Math.max(pad, 0));
+      const SENT_BYTES = Buffer.from(BODY, 'utf8');
+      const S = streamsOf(BODY);
+      t("a body of exactly the card's 41,699 bytes exists whose EVERY 16 KiB boundary — in the body, the dispatch wire, the runner's env text and the executor's request — falls inside a multi-byte character", [pad >= 0, SENT_BYTES.length, [BODY, S.wire, S.envText, S.exec].every(straddles)], [true, CARD_BYTES, true]);
+      t('…and every one of those streams crosses at least two such boundaries', [BODY, S.wire, S.envText, S.exec].map((x) => Buffer.byteLength(x, 'utf8') > 2 * KIB16), [true, true, true, true]);
+      t('① pack → the dispatch wire → the platform\'s parse: byte for byte', Buffer.compare(Buffer.from(JSON.parse(S.wire).client_payload.actions[0].body, 'utf8'), SENT_BYTES), 0);
+      const child = spawnSync(process.execPath, [fileURLToPath(new URL('./validate.mjs', import.meta.url)), '--from-env', '--json'], { encoding: 'utf8', env: { ...process.env, [PAYLOAD_ENV]: S.envText, GITHUB_STEP_SUMMARY: '' }, maxBuffer: 1 << 24 });
+      const judged = child.status === 0 ? JSON.parse(child.stdout.trim().split('\n')[1]) : null;
+      t("② the runner's env text through FLEET_WRITE_PAYLOAD into validate.mjs --from-env, in its own process: byte for byte", [child.status, judged ? Buffer.compare(Buffer.from(judged.actions[0].body, 'utf8'), SENT_BYTES) : null], [0, 0], child.stderr.slice(-300));
+      let captured = null;
+      const execRun = await executeFleetWrite({ payload: JSON.parse(S.envText), sender: 'os-support-ai', token: TOKEN }, {
+        fetch: async (url, init) => {
+          if (init?.method === 'PATCH') captured = init.body;
+          const json = new URL(url).pathname.endsWith('/permission') ? { permission: 'write', role_name: 'write' } : { number: 11041 };
+          return { status: 200, headers: new Headers({ 'x-ratelimit-remaining': '4999' }), json: async () => json };
+        },
+        pace: paceFor(join(dir, 'pace-roundtrip.jsonl')),
+        log: () => {},
+      });
+      t("③ the executor's own PATCH is exactly the request the stream check straddled, carrying the bytes sent", [execRun.exit, captured === S.exec, captured ? Buffer.compare(Buffer.from(JSON.parse(captured).body, 'utf8'), SENT_BYTES) : null], [0, true, 0]);
+      const answer = (body) => async () => ({ status: 200, headers: new Headers(), json: async () => ({ number: 11041, body }) });
+      const back = await readBackStroke(S.payload, { dispatchedAt: T0 }, { judge: JUDGE, token: TOKEN, fetch: answer(`${BODY}${PLATFORM_COMMENT_FOOTER}`) });
+      t("④ what that request stored, read back with the platform's footer, lands", [back.state, back.rows[0]?.cls], ['landed', 'footer-appended']);
+      // The defect the card suspects: a reader that decodes each 16 KiB chunk of the wire on its own.
+      const wireBuf = Buffer.from(S.wire, 'utf8');
+      const chunked = Array.from({ length: Math.ceil(wireBuf.length / KIB16) }, (_, i) => wireBuf.subarray(i * KIB16, (i + 1) * KIB16).toString('utf8')).join('');
+      const damaged = JSON.parse(chunked).client_payload.actions[0].body;
+      // Where the first wire boundary falls in BODY coordinates: walk the body a character at a time, each one as wide
+      // on the wire as its JSON escape, until the character that spans wire byte 16384.
+      let predicted = null;
+      {
+        let wirePos = Buffer.byteLength(S.wire.slice(0, S.wire.indexOf('"body":"') + '"body":"'.length), 'utf8');
+        let bodyPos = 0;
+        for (const ch of BODY) {
+          const w = Buffer.byteLength(JSON.stringify(ch).slice(1, -1), 'utf8');
+          if (wirePos < KIB16 && KIB16 < wirePos + w) {
+            predicted = bodyPos;
+            break;
+          }
+          wirePos += w;
+          bodyPos += Buffer.byteLength(ch, 'utf8');
+        }
+      }
+      const broken = await readBackStroke(S.payload, { dispatchedAt: T0 }, { judge: JUDGE, token: TOKEN, fetch: answer(damaged) });
+      t('⑤ that body decoded chunk by chunk — every boundary splitting a character — is NOT STORED, with the replacement characters counted', [broken.state, damaged === BODY, broken.rows[0]?.replacements > 0], ['not-stored', false, true]);
+      t('…at exactly the body byte where the first 16 KiB wire boundary split a character', [predicted !== null, broken.rows[0]?.offset], [true, predicted]);
+    }
+
+    // ── the read-back, end to end ───────────────────────────────────────────
+    battery('the read-back end to end: after a success run each body at its locator — a corrupted read-back exits 4 through the CLI, an unreadable or unfound one 6, a body-less stroke reads nothing, never a retry');
+    {
+      const UI = 'objectstack-ai/objectui';
+      const strokeOf = (actions, repo = 'objectstack-ai/objectstack') => packRequest({ repo, session: SESSION, actions, requestId: 'fw-test-1' }).payload;
+      const OK_RUN = { runs: () => [RUN('completed', 'success')] };
+      const B = 'Body with a multi-byte tail: no… 全部\n';
+      const SPLIT = B.replace('全', '��');
+      const AT = Buffer.byteLength(B.slice(0, B.indexOf('全')), 'utf8');
+      const patch = strokeOf([{ op: 'issue_patch', issue: 11041, body: B }], UI);
+      const ISSUE = `GET /repos/${UI}/issues/11041`;
+      const good = await drive({ ...OK_RUN, store: { [ISSUE]: { status: 200, json: { number: 11041, body: `${B.replace(/\n+$/u, '')}${PLATFORM_COMMENT_FOOTER}` } } } }, { stroke: patch });
+      t('a success run whose body reads back as sent (plus the footer) is success, its row landed, exit 0', [good.state, good.ok, good.readBack?.state, exitForResult(good)], ['success', true, 'landed', EXIT_OK]);
+      t('…read at the address the action named, once, AFTER the run completed', [good.seen.filter((s) => s.call === ISSUE).length, good.seen.findIndex((s) => s.call === ISSUE) > good.seen.findIndex((s) => s.call === RUNS)], [1, true]);
+      const bad = await drive({ ...OK_RUN, store: { [ISSUE]: { status: 200, json: { number: 11041, body: SPLIT } } } }, { stroke: patch });
+      t('⭐ a deliberately corrupted read-back: failure + notStored, exit 4, naming the op, the object and the first differing byte', [bad.state, bad.ok, bad.notStored, exitForResult(bad), bad.detail.includes('issue_patch') && bad.detail.includes('#11041') && bad.detail.includes(`byte ${AT}`)], ['failure', false, true, EXIT_NOT_STORED, true], bad.detail);
+      t('…the transcript says NOT STORED and counts the U+FFFD, and ⛔ there was exactly ONE dispatch — never a retry', [bad.logs.some((l) => l.includes('NOT STORED') && l.includes('U+FFFD')), bad.seen.filter((s) => s.call === DISPATCH).length], [true, 1]);
+      t('…and the CLI text says the write HAPPENED, go READ, never re-run blind, exit 4', notStoredText(bad).includes('HAPPENED') && notStoredText(bad).includes('Do not re-run') && notStoredText(bad).includes(`Exit ${EXIT_NOT_STORED}`));
+      const unread = await drive({ ...OK_RUN, store: { [ISSUE]: { status: 503, json: { message: 'down' } } } }, { stroke: patch });
+      t('an object the read-back cannot read is unverified, exit 6 — ⛔ never success, ⛔ never not-stored — and says which call failed', [unread.state, unread.ok, unread.notStored ?? false, exitForResult(unread), unverifiedText(unread).includes('HTTP 503')], ['unverified', false, false, EXIT_UNCONFIRMED, true]);
+      const EDIT = 'GET /repos/objectstack-ai/objectstack/issues/comments/77';
+      const edit = await drive({ ...OK_RUN, store: { [EDIT]: { status: 200, json: { id: 77, body: SPLIT } } } }, { stroke: strokeOf([{ op: 'comment_edit', comment_id: 77, body: B }]) });
+      t('comment_edit: read at its address; a split character is NOT STORED, exit 4', [edit.state, edit.notStored, exitForResult(edit)], ['failure', true, EXIT_NOT_STORED]);
+      const CMTS = 'GET /repos/objectstack-ai/objectstack/issues/19701/comments';
+      const two = await drive({ ...OK_RUN, store: { [CMTS]: { status: 200, json: [{ id: 601, created_at: at(5_000), body: B }, { id: 602, created_at: at(6_000), body: B }] } } }, { stroke: strokeOf([{ op: 'comment', issue: 19701, body: B }, { op: 'comment', issue: 19701, body: B }]) });
+      t('comment: found by its content among those created since the dispatch; two identical comments match two DIFFERENT stored ones', [two.state, two.readBack.rows.map((r) => r.where)], ['success', ['objectstack-ai/objectstack#19701 comment 602', 'objectstack-ai/objectstack#19701 comment 601']]);
+      const lost = await drive({ ...OK_RUN, store: { [CMTS]: { status: 200, json: [{ id: 603, created_at: at(5_000), body: SPLIT }] } } }, { stroke: strokeOf([{ op: 'comment', issue: 19701, body: B }]) });
+      t("⛔ a comment only its content can find is UNVERIFIED when nothing matches — exit 6, never not-stored — the one candidate's first difference named as a LEAD", [lost.state, exitForResult(lost), lost.readBack.rows[0].why.includes(`first differs at byte ${AT}`), lost.readBack.rows[0].why.includes('U+FFFD')], ['unverified', EXIT_UNCONFIRMED, true, true]);
+      const stale = await drive({ ...OK_RUN, store: { [CMTS]: { status: 200, json: [{ id: 604, created_at: at(-120_000), body: B }] } } }, { stroke: strokeOf([{ op: 'comment', issue: 19701, body: B }]) });
+      t('…and a comment created BEFORE the dispatch (outside the slack) is never taken for this write', [stale.state, exitForResult(stale)], ['unverified', EXIT_UNCONFIRMED]);
+      const ISSUES = 'GET /repos/objectstack-ai/objectstack/issues';
+      const created = await drive({ ...OK_RUN, store: { [ISSUES]: { status: 200, json: [{ id: 9, number: 20999, title: 'Other', created_at: at(4_000), body: B }, { id: 8, number: 20998, title: 'Card', created_at: at(3_000), body: SPLIT }] } } }, { stroke: strokeOf([{ op: 'issue_create', title: 'Card', body: B }]) });
+      t('issue_create: the new issue found by the title sent and its body judged — a split character is NOT STORED on THAT issue, exit 4', [created.state, created.notStored, created.readBack.rows[0].where, exitForResult(created)], ['failure', true, 'objectstack-ai/objectstack#20998', EXIT_NOT_STORED]);
+      const PULLS = 'GET /repos/objectstack-ai/objectstack/pulls';
+      const PR_TAIL = '\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01KTZmMfzVzjNvyaLyQ8mHvg)_';
+      const prStroke = strokeOf([{ op: 'pr_create', title: 'T', head: 'claude/issue-1-x', base: 'main', body: B }]);
+      const pr = await drive({ ...OK_RUN, store: { [PULLS]: (q) => ({ status: 200, json: q.get('head') === 'objectstack-ai:claude/issue-1-x' ? [{ id: 31, number: 20600, created_at: at(4_000), body: `${B.replace(/\n+$/u, '')}${PR_TAIL}` }] : [] }) } }, { stroke: prStroke });
+      t("pr_create: found by owner:head; the platform's session-URL footer after every byte sent is success", [pr.state, pr.readBack.rows[0].cls, pr.readBack.rows[0].where], ['success', 'pr-create-footer-appended', 'objectstack-ai/objectstack#20600']);
+      const noPr = await drive({ ...OK_RUN, store: { [PULLS]: { status: 200, json: [] } } }, { stroke: prStroke });
+      t('…and a pull the head does not find is unverified, exit 6', [noPr.state, exitForResult(noPr)], ['unverified', EXIT_UNCONFIRMED]);
+      const labels = await drive(OK_RUN, { stroke: strokeOf([{ op: 'labels_add', issue: 1, labels: ['a'] }]) });
+      t('a stroke carrying no body reads nothing back: success, read-back none, no request beyond the dispatch and the run', [labels.state, labels.readBack?.state, labels.seen.filter((s) => !s.call.includes('/actions/runs') && s.call !== DISPATCH).length], ['success', 'none', 0]);
+      t("the callers' one vocabulary: failure + notStored → 4, failure → 5, unverified → 6", [exitForResult({ state: 'failure', notStored: true }), exitForResult({ state: 'failure' }), exitForResult({ state: 'unverified' })], [EXIT_NOT_STORED, EXIT_PLATFORM_REFUSAL, EXIT_UNCONFIRMED]);
+      // The CLI, end to end: the exit code a seat actually reads, from the actions file the card's seat sent.
+      writeFileSync(join(dir, 'patch.json'), JSON.stringify([{ op: 'issue_patch', issue: 11041, body: B }]), 'utf8');
+      const cli = async (stored) => {
+        let nowMs = T0;
+        const clock = { now: () => nowMs, elapsed: () => nowMs - T0 };
+        const out = [];
+        const [log, err] = [console.log, console.error];
+        console.log = (l) => out.push(String(l));
+        console.error = () => {};
+        try {
+          const code = await main(['--repo', UI, '--actions-file', join(dir, 'patch.json'), '--request-id', 'fw-test-1', '--json'], {
+            env: { GITHUB_TOKEN: TOKEN, [SESSION_ENV]: SESSION },
+            send: { fetch: platform({ ...OK_RUN, store: { [ISSUE]: { status: 200, json: { number: 11041, body: stored } } } }, [], clock), pace: paceFor(join(dir, `pace-cli-${paceCase++}.jsonl`)), now: clock.now, sleep: async (ms) => { nowMs += ms; }, log: () => {}, ceilings: { startMs: 90_000, ceilingMs: 300_000, pollMs: 5_000, notes: [] } },
+          });
+          return { code, json: out.length ? JSON.parse(out[out.length - 1]) : null };
+        } finally {
+          [console.log, console.error] = [log, err];
+        }
+      };
+      const cliBad = await cli(SPLIT);
+      t("⭐ the CLI: the card's stroke with a deliberately corrupted read-back EXITS 4, and --json says not_stored with the first differing byte", [cliBad.code, cliBad.json?.not_stored, cliBad.json?.read_back?.[0]?.first_difference_byte], [EXIT_NOT_STORED, true, AT]);
+      const cliGood = await cli(`${B.replace(/\n+$/u, '')}${PLATFORM_COMMENT_FOOTER}`);
+      t('…and the same stroke read back intact exits 0, its row landed', [cliGood.code, cliGood.json?.read_back?.[0]?.verdict], [EXIT_OK, 'landed']);
+    }
+
     // ── the wiring ──────────────────────────────────────────────────────────
     battery('the wiring: the POST is paced and on the roster, the reads are not, the token never reaches the log');
     {
@@ -1230,8 +1435,10 @@ export async function selfTest() {
       t('write-pace lists this file among the wired write tools', WIRED_WRITE_TOOLS.includes('scripts/pm/fleet-write/dispatch.mjs'));
       t('this file calls both halves, guarded by the write-verb predicate', own.includes('paceWrite(') && own.includes('noteResponse(') && own.includes('isWriteMethod('));
       const records = readReal(paceFile, 'utf8');
-      t('the dispatches above were paced; the run-list and run reads were not', [records.includes('fleet-write dispatch POST'), records.includes('fleet-write dispatch GET')], [true, false]);
+      t('the dispatches above were paced; the run-list, run and read-back reads were not', [records.includes('fleet-write dispatch POST'), records.includes('fleet-write dispatch GET')], [true, false]);
       t('⛔ and the token never reached the throttle\'s log', records.includes(TOKEN), false);
+      const entry = own.slice(own.lastIndexOf('if (isEntrypoint(import.meta.url))'));
+      t('⛔ the entry settles before main runs — no top-level await on main — so the read-back\'s import of post-stamped (which imports this file) cannot wait on it', [/\bawait\s+main\(/u.test(entry), /main\(process\.argv\.slice\(2\)\)\.then\(/u.test(entry)], [false, true]);
     }
 
     // ── the CLI ─────────────────────────────────────────────────────────────
@@ -1299,7 +1506,8 @@ export async function selfTest() {
   }
   console.log(
     `✓ fleet-write/dispatch self-test: ${cases.length} cases pass across ${declared.length} batteries — the transport selector that never guesses, ` +
-      'the session on the envelope, one paced dispatch per stroke, a run found by its request id and waited to its conclusion, both ceilings answered UNCONFIRMED and never retried.',
+      'the session on the envelope, one paced dispatch per stroke, a run found by its request id and waited to its conclusion, both ceilings answered UNCONFIRMED and never retried, ' +
+      'and every body read back after a success run — the card\'s 41,699 bytes byte-exact across every 16 KiB boundary, a corrupted read-back NOT STORED (exit 4), an unfound one UNCONFIRMED (6).',
   );
   selfTestReachedVerdict = true;
   return 0;
