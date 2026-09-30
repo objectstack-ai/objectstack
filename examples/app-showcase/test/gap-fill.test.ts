@@ -4,9 +4,12 @@ import { existsSync } from 'node:fs';
 
 import { describe, it, expect } from 'vitest';
 import { SchemaRegistry } from '@objectstack/objectql';
+import { CubeSchema } from '@objectstack/spec/data';
+import { DatasetSchema } from '@objectstack/spec/ui';
 
 import stack from '../objectstack.config.js';
 import { DeliveryCube } from '../src/data/analytics/showcase.cube.js';
+import { ShowcaseTaskDataset } from '../src/ui/datasets/chart-gallery.dataset.js';
 import { AccountExtension } from '../src/data/extensions/account.extension.js';
 import { Account } from '../src/data/objects/account.object.js';
 
@@ -26,7 +29,7 @@ describe('showcase gap fill — analytics cube', () => {
   it('declares measures and dimensions over the delivery backbone', () => {
     expect(DeliveryCube.sql).toBe('showcase_task');
     expect(Object.keys(DeliveryCube.measures ?? {})).toEqual(
-      expect.arrayContaining(['count', 'total_estimate_hours', 'avg_estimate_hours', 'done_rate']),
+      expect.arrayContaining(['count', 'total_estimate_hours', 'avg_estimate_hours']),
     );
     expect(Object.keys(DeliveryCube.dimensions ?? {})).toEqual(
       expect.arrayContaining(['status', 'priority', 'due_date']),
@@ -60,6 +63,36 @@ describe('showcase gap fill — analytics cube', () => {
     for (const key of joinKeys) {
       expect(fields.has(key), `join key '${key}' is not a field of '${DeliveryCube.sql}'`).toBe(true);
     }
+  });
+});
+
+describe('showcase gap fill — the done rate is a dataset measure, not a cube expression (#20943)', () => {
+  it('the cube declares no expression member: the shipped literal passes the narrowed member `sql` contract', () => {
+    // A cube member's `sql` names a column (ADR-0021 "zero raw expressions",
+    // carried to the cube layer). `defineCube` already parsed this file at
+    // import; re-parsing here pins that the shipped literal still passes the
+    // narrowed contract, member by member.
+    expect(CubeSchema.safeParse(DeliveryCube).success).toBe(true);
+    expect(Object.keys(DeliveryCube.measures ?? {})).not.toContain('done_rate');
+  });
+
+  it('the task dataset carries it as a filtered count over the unfiltered count, and parses', () => {
+    const measures = new Map(ShowcaseTaskDataset.measures.map((m) => [m.name, m]));
+    // The numerator: a count scoped by its OWN structured filter — the half of
+    // the old CASE expression the platform can now judge (it names `status`).
+    expect(measures.get('done_count')).toMatchObject({ aggregate: 'count', filter: { status: 'done' } });
+    expect(measures.get('done_count')?.field).toBeUndefined();
+    // The denominator is the dataset's existing unfiltered count.
+    expect(measures.get('task_count')).toMatchObject({ aggregate: 'count' });
+    expect(measures.get('task_count')?.filter).toBeUndefined();
+    // The rate: a ratio of the two, a 0–1 fraction shown through the `%` pattern.
+    expect(measures.get('done_rate')).toMatchObject({
+      derived: { op: 'ratio', of: ['done_count', 'task_count'] },
+      format: '0.0%',
+    });
+    // `defineDataset` is an identity helper, so the parse is asserted here: the
+    // strict shape and its cross-measure refinement (every `of` name declared).
+    expect(DatasetSchema.safeParse(ShowcaseTaskDataset).success).toBe(true);
   });
 });
 
