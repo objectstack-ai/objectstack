@@ -224,10 +224,6 @@
  "packages/metadata/src/metadata-manager.ts": {
   "#5184": 1
  },
- "packages/platform-objects/src/apps/translations/en.objects.generated.ts": {
-  "#7987": 3,
-  "#8149": 1
- },
  "packages/platform-objects/src/plugin.ts": {
   "#4795": 2
  },
