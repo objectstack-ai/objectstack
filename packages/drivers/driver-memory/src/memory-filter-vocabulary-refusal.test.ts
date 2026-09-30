@@ -31,17 +31,22 @@
  *
  * # Both faces
  *
- * Each case is asserted through `InMemoryDriver.find` (mingo) AND through
- * `match` (the reference matcher). They are one gate now, and this is the test
- * that says so — a regression that re-forks them fails here rather than being
- * discovered by a conformance table that only runs one of them (#5240).
+ * Each case was asserted through `InMemoryDriver.find` (mingo) AND through
+ * `match` (the reference matcher). They were one gate, and this was the test
+ * that said so — a regression that re-forked them failed here rather than being
+ * discovered by a conformance table that only ran one of them (#5240).
+ *
+ * [#5930 step 4, ruling D6] The reference matcher is retired. Its half of every
+ * case was the gate's refusal (`assertFilterConditionShape`), so each case now
+ * asserts the live path's refusal and the SAME message from that gate called
+ * directly — the one-gate invariant, kept.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { FilterCondition } from '@objectstack/spec/data';
 
 import { InMemoryDriver } from './memory-driver.js';
-import { match } from './memory-matcher.js';
+import { assertFilterConditionShape } from './filter-refusal.js';
 
 interface WireBearingError extends Error {
   code?: string;
@@ -97,14 +102,17 @@ describe('[#5324/#5328] a filter this driver cannot evaluate is refused, not ans
     throw new Error('expected the live query path to refuse this filter, but it answered');
   };
 
-  /** The refusal raised by the REFERENCE matcher, for the same filter. */
-  const matcherRefusal = (where: unknown): WireBearingError => {
+  /**
+   * The refusal raised by the shared shape gate, for the same filter — the gate
+   * the retired reference matcher ran, called directly.
+   */
+  const gateRefusal = (where: unknown): WireBearingError => {
     try {
-      ROWS.filter((r) => match(r, where));
+      assertFilterConditionShape(where, 'filter');
     } catch (e) {
       return e as WireBearingError;
     }
-    throw new Error('expected the reference matcher to refuse this filter, but it answered');
+    throw new Error('expected the shape gate to refuse this filter, but it passed');
   };
 
   /** Every refusal in this package carries the same wire identity (#4436). */
@@ -147,7 +155,7 @@ describe('[#5324/#5328] a filter this driver cannot evaluate is refused, not ans
       expectEnvelope(live);
       expect(live.message).toContain(DRIVER_SQL_WORDING.unknownOperator(op, 'stage'));
 
-      const reference = matcherRefusal(where);
+      const reference = gateRefusal(where);
       expectEnvelope(reference);
       expect(reference.message).toBe(live.message);
     });
@@ -186,7 +194,7 @@ describe('[#5324/#5328] a filter this driver cannot evaluate is refused, not ans
       // Both faces, one sentence — the #5324 invariant, which is exactly what a
       // retirement must not be allowed to fork: this driver's matcher is the one
       // surface in the repo that really evaluated `$regex`.
-      const reference = matcherRefusal(where);
+      const reference = gateRefusal(where);
       expectEnvelope(reference);
       expect(reference.message).toBe(live.message);
     });
@@ -207,7 +215,7 @@ describe('[#5324/#5328] a filter this driver cannot evaluate is refused, not ans
       const live = await liveRefusal(where);
       expectEnvelope(live);
       expect(live.message).toContain(`Unsupported filter combinator "${key}"`);
-      expect(matcherRefusal(where).message).toBe(live.message);
+      expect(gateRefusal(where).message).toBe(live.message);
     }
   });
 
@@ -236,7 +244,7 @@ describe('[#5324/#5328] a filter this driver cannot evaluate is refused, not ans
       expectEnvelope(live);
       expect(live.message).toContain(DRIVER_SQL_WORDING.malformedBetween('score'));
 
-      const reference = matcherRefusal(where);
+      const reference = gateRefusal(where);
       expectEnvelope(reference);
       expect(reference.message).toBe(live.message);
     });
@@ -247,12 +255,11 @@ describe('[#5324/#5328] a filter this driver cannot evaluate is refused, not ans
     // NO rows from `find` and EVERY row from `match`. One package, one filter,
     // two contradictory silent answers, neither of them a range.
     const where = { score: { $between: 5 } };
-    expect((await liveRefusal(where)).message).toBe(matcherRefusal(where).message);
+    expect((await liveRefusal(where)).message).toBe(gateRefusal(where).message);
   });
 
   it('a well-formed $between is untouched, including the calendar-day rewrite it feeds', async () => {
     expect(await ids({ score: { $between: [10, 20] } })).toEqual(['1', '2']);
-    expect(ROWS.filter((r) => match(r, { score: { $between: [10, 20] } })).map((r) => r.id)).toEqual(['1', '2']);
   });
 
   // ── malformed combinator operands, the same shape one position over ────────
@@ -271,7 +278,7 @@ describe('[#5324/#5328] a filter this driver cannot evaluate is refused, not ans
       const live = await liveRefusal(where);
       expectEnvelope(live);
       expect(live.message).toMatch(pattern);
-      expect(matcherRefusal(where).message).toBe(live.message);
+      expect(gateRefusal(where).message).toBe(live.message);
     }
   });
 
@@ -314,13 +321,21 @@ describe('[#5324/#5328] a filter this driver cannot evaluate is refused, not ans
     }
   });
 
-  it('the refusal does not depend on the RECORD being tested', () => {
-    // Same argument as #5240's: both faces short-circuit, so a gate inside
+  it('the refusal does not depend on the RECORD being tested', async () => {
+    // Same argument as #5240's: an evaluator short-circuits, so a gate inside
     // evaluation would refuse for some rows and answer for others — a filter
-    // that is valid or invalid by luck of the data. The walk runs first.
-    for (const row of ROWS) {
-      expect(() => match(row, { stage: 'nothing-matches-this', score: { $between: 5 } })).toThrow(/\[min, max\]/);
-      expect(() => match(row, { $or: [{ stage: 'won' }, { owner: { $sounds_like: 'u1' } }] })).toThrow(/Unsupported filter operator/);
+    // that is valid or invalid by luck of the data. The walk runs first, so a
+    // table holding any one row — or none — refuses alike.
+    for (const rows of [...ROWS.map((row) => [row]), []]) {
+      const one = new InMemoryDriver({ persistence: false });
+      for (const row of rows) await one.create('deal', { ...row });
+      const label = JSON.stringify(rows);
+      await expect(one.find('deal', { where: { stage: 'nothing-matches-this', score: { $between: 5 } } as never }), label)
+        .rejects.toThrow(/\[min, max\]/);
+      await expect(
+        one.find('deal', { where: { $or: [{ stage: 'won' }, { owner: { $sounds_like: 'u1' } }] } as never }),
+        label,
+      ).rejects.toThrow(/Unsupported filter operator/);
     }
   });
 });
