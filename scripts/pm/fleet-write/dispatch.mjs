@@ -521,7 +521,7 @@ export function readBackTargets(payload) {
   return out;
 }
 
-const replacementCount = (s) => (String(s ?? '').match(/�/gu) ?? []).length;
+const replacementCount = (s) => (String(s ?? '').match(/\uFFFD/gu) ?? []).length;
 
 /**
  * One stored body against the bytes sent. Pure: `judge` is post-stamped's pair
@@ -1260,11 +1260,11 @@ export async function selfTest() {
       t("the platform's footer block appended lands (post-stamped's footer-appended)", [J('issue_patch', SENT, `${TRIMMED}${PLATFORM_COMMENT_FOOTER}`).verdict, J('issue_patch', SENT, `${TRIMMED}${PLATFORM_COMMENT_FOOTER}`).cls], ['landed', 'footer-appended']);
       t('a stripped trailing newline lands', J('comment', SENT, TRIMMED).verdict, 'landed');
       const ell = Buffer.byteLength(SENT.slice(0, SENT.indexOf('…')), 'utf8');
-      const SPLIT_ELL = SENT.replace('…', '���');
+      const SPLIT_ELL = SENT.replace('…', '\uFFFD\uFFFD\uFFFD');
       const e1 = J('issue_patch', SENT, SPLIT_ELL);
       t("⭐ the card's first shape — '…' stored as three U+FFFD — is NOT STORED at the byte where '…' began, three extra replacement characters", [e1.verdict, e1.offset, e1.replacements], ['not-stored', ell, 3]);
       const quan = Buffer.byteLength(SENT.slice(0, SENT.indexOf('全')), 'utf8');
-      const e2 = J('issue_patch', SENT, SENT.replace('全', '��'));
+      const e2 = J('issue_patch', SENT, SENT.replace('全', '\uFFFD\uFFFD'));
       t("⭐ …and its second — '全' stored as two U+FFFD — at the byte where '全' began", [e2.verdict, e2.offset, e2.replacements], ['not-stored', quan, 2]);
       t('a truncation is NOT STORED at the first byte the stored body lacks', [J('comment_edit', SENT, SENT.slice(0, 10)).verdict, J('comment_edit', SENT, SENT.slice(0, 10)).offset], ['not-stored', 10]);
       t('a stored body that is not a string is unverified — never landed, never not-stored', [J('issue_patch', SENT, null).verdict, J('issue_patch', SENT, undefined).verdict], ['unverified', 'unverified']);
@@ -1366,7 +1366,7 @@ export async function selfTest() {
       const strokeOf = (actions, repo = 'objectstack-ai/objectstack') => packRequest({ repo, session: SESSION, actions, requestId: 'fw-test-1' }).payload;
       const OK_RUN = { runs: () => [RUN('completed', 'success')] };
       const B = 'Body with a multi-byte tail: no… 全部\n';
-      const SPLIT = B.replace('全', '��');
+      const SPLIT = B.replace('全', '\uFFFD\uFFFD');
       const AT = Buffer.byteLength(B.slice(0, B.indexOf('全')), 'utf8');
       const patch = strokeOf([{ op: 'issue_patch', issue: 11041, body: B }], UI);
       const ISSUE = `GET /repos/${UI}/issues/11041`;
