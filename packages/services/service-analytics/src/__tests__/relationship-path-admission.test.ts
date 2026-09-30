@@ -145,9 +145,9 @@ function makeService(
 }
 
 /** The refusal's envelope and the object it names, or the answer. */
-const outcomeOf = (run: () => Promise<{ rows?: unknown }>) =>
+const outcomeOf = (run: () => Promise<object>) =>
   run().then(
-    (r) => ({ answered: r.rows }),
+    (r) => ({ answered: (r as { rows?: unknown }).rows }),
     (e: { code?: string; status?: number; object?: string }) => ({ refused: { code: e?.code, status: e?.status, object: e?.object } }),
   );
 
