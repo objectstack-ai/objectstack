@@ -19,7 +19,7 @@
  *   - "record-detail views only" turns on the real shapes `find` and `findOne`
  *     leave on `ctx.result` and `ctx.input.ast.where`.
  *
- * ⚠️ [#16829] A THIRD pin used to be claimed here — "the row keeps the VIEW
+ * ⚠️ [commit 8d4690b8f] A THIRD pin used to be claimed here — "the row keeps the VIEW
  * instant, which depends on the real engine's `created_at` strip and its
  * system-context exemption (#4447)". This file CANNOT make that one, and the
  * claim was false in both of its halves.
@@ -40,7 +40,7 @@
  * — a real kernel, the real `ObjectQLPlugin`, a real driver. ⛔ Do not restate
  * an engine-behaviour guarantee here: a green reading from an instrument that
  * cannot fail is indistinguishable from a pass, and that is precisely how
- * #16829 shipped.
+ * the defect fixed by commit 8d4690b8f shipped.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -542,7 +542,7 @@ describe('#8992 what the row must NOT contain, and when it says it happened', ()
    * row itself rather than leaving the column to the engine — and that, the
    * writer's own behaviour, is the whole of what this case pins.
    *
-   * ⛔ [#16829] It does NOT pin that the engine keeps the value. This harness's
+   * ⛔ [commit 8d4690b8f] It does NOT pin that the engine keeps the value. This harness's
    * engine registers no audit stamp hook at all (see this file's header), so
    * this case reads green whether the ledger write declares `preserveAudit` or
    * not. The engine half is pinned by

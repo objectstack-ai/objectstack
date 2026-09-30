@@ -1208,7 +1208,7 @@ describe('audit writers — a lost audit row is reported at error (#5226)', () =
  *     keep losing rows for hours to a second fault with one `error` line at the
  *     top of the log describing the first;
  *  2. that one line named the telemetry-datasource remedy unconditionally. The
- *     cause measured on #14927 was `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` and
+ *     cause commit ab489388b records was `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` and
  *     the text said "datasource" — the operator was sent to check something
  *     that was not broken.
  *
@@ -1367,7 +1367,7 @@ describe('audit writers — reported once per CAUSE, not once per process (#1516
     expect(forMissingTable).toMatch(/telemetry/);
     expect(forMissingTable).toMatch(/OS_TELEMETRY_DB=0/);
 
-    // The measured #14927 misdirection: the cause was an organization refusal
+    // The misdirection commit ab489388b records: the cause was an organization refusal
     // and the text said "datasource".
     const refused = makeCauseEngine(() => ORG_REQUIRED());
     await refused.fire('crm_lead', 'l-1');
@@ -1407,7 +1407,7 @@ describe('audit writers — reported once per CAUSE, not once per process (#1516
 });
 
 /**
- * [#8707] Which organization an audit row is stamped with — the RECORD'S own,
+ * [commit 1408fe385] Which organization an audit row is stamped with — the RECORD'S own,
  * honouring the maintainer's ruling on #8287.
  *
  * The precedence these cases pin is `recordOrgId ?? sess.organizationId`. Read the
@@ -1645,12 +1645,12 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
     expect(stampOf(created).audit?.organization_id).not.toBe('org-parent');
   });
 
-  // ── the platform stamp column — `sys_api_key` (#8778, #19054) ──────────
+  // ── the platform stamp column — `sys_api_key` (commit 7901b2dd2, #19054) ──
   //
   // The former ⛔ KNOWN GAP case lived here: it pinned that
   // `sys_api_key.active_organization_id` was UNREACHABLE and stamped the
   // ACTOR's org, and was written to go red the day the divergence became
-  // expressible. That day is #8778 (maintainer-ruled option A); the cases
+  // expressible. That day came with commit 7901b2dd2 (maintainer-ruled option A); the cases
   // below are its rewrite, expecting `org-key`. #19054 moved the divergence
   // off the authorable `tenancy.organizationField` key and into
   // `PLATFORM_STAMP_ORGANIZATION_COLUMNS`, keyed by object name — so these
@@ -1879,7 +1879,7 @@ describe('audit writers — the writer reads the session key the engine emits (#
 
     // This case is GREEN before and after the #9516 fix on purpose: it pins
     // that fixing WHICH KEY the fallback arm reads did not disturb the ORDER
-    // the #8707 ruling set (honouring the maintainer's ruling on #8287).
+    // commit 1408fe385 set (honouring the maintainer's ruling on #8287).
     await fire('afterInsert', {
       object: 'crm_lead',
       input: { id: 'lead-1' },
@@ -1919,7 +1919,7 @@ describe('audit writers — the writer reads the session key the engine emits (#
   // Lower stakes than the audit stamp — it feeds `resolveWriteLocale` and the
   // emitted envelope's `organizationId` rather than a row behind an RLS wall —
   // but the same removed key, dead the same way. Note the ORDER here is
-  // session-first and stays that way: #8707's ruling reasons about an AUDIT
+  // session-first and stays that way: commit 1408fe385 reasons about an AUDIT
   // ROW read through the record's own tenant wall, which is not what a mention
   // notification is. Only the key changes at this site.
   const setupMentions = (schemas: Record<string, string[] | Record<string, any>> = SINGLE_TENANT) => {
