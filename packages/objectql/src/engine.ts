@@ -200,6 +200,7 @@ import {
   EmptyCredentialWriteError,
   SECRET_MASK,
 } from './secret-fields.js';
+import { assertGroupByNamesNoStructuredJsonField } from './group-by-structured-json-door.js';
 import { pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
 import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter } from './search-filter.js';
@@ -16674,6 +16675,14 @@ export class ObjectQL implements IObjectQLEngine {
       // the `where` doors above, before the AST is built and tokens resolve).
       query = this.expandSearchOnAggregateOptions(object, query);
       this.rejectCredentialAggregation(object, query);
+      // [#20783] …and a `groupBy` entry naming a structured-JSON field (`json`,
+      // `composite`, `address`, …) is refused `INVALID_FIELD` / 400 here, before
+      // any driver is asked: the drivers share no meaning for a JSON document as
+      // a group key (memory merged every row into one group, SQLite grouped each
+      // serialized document apart, PostgreSQL answered 500). After the
+      // credential refusal, which reads the same entries, so a protected field
+      // keeps that refusal's words.
+      assertGroupByNamesNoStructuredJsonField(object, this._registry.getObject(object), query.groupBy);
       // [#10576] The per-aggregation `filter` (`AggregationNodeSchema.filter`,
       // the contract half of #10413) is a second filter position on this verb,
       // so it walks through the same refusal doors `where` does at this seam:
