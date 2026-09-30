@@ -59,8 +59,9 @@ const SCHEMAS: Record<string, unknown> = {
     },
   },
 };
-const FIELDS = ['title', 'account', 'secret', 'margin'];
-const PAYLOAD_VALUE: Record<string, unknown> = { title: 'x', account: 'acc_1', secret: 's', margin: 1 };
+/** The field universe the plugin resolves: the schema's fields plus `id`. */
+const FIELDS = ['id', 'title', 'account', 'secret', 'margin'];
+const PAYLOAD_VALUE: Record<string, unknown> = { id: 'inv_1', title: 'x', account: 'acc_1', secret: 's', margin: 1 };
 
 const WRITER_CTX = { userId: 'u_writer', tenantId: 'org-1', positions: [], permissions: [], posture: 'MEMBER' };
 const LIVE_DELEGATOR = 'u_boss';
@@ -121,11 +122,11 @@ async function middlewareAdmits(
 
 describe('getWritableFields agrees with the middleware\'s write gate, field for field', () => {
   const CASES: Array<{ label: string; sets: PermissionSet[]; context: Record<string, unknown>; writable: string[] }> = [
-    { label: 'a field read but not editable, and one neither', sets: [LOCKED_SET], context: WRITER_CTX, writable: ['title'] },
-    { label: 'no field rules', sets: [OPEN_SET], context: WRITER_CTX, writable: ['title', 'account', 'secret'] },
+    { label: 'a field read but not editable, and one neither', sets: [LOCKED_SET], context: WRITER_CTX, writable: ['id', 'title'] },
+    { label: 'no field rules', sets: [OPEN_SET], context: WRITER_CTX, writable: ['id', 'title', 'account', 'secret'] },
     { label: 'the field capability held', sets: [CAPABLE_SET], context: WRITER_CTX, writable: FIELDS },
-    { label: 'a delegated agent whose delegator may not edit the field', sets: [AGENT_SET, LOCKED_SET], context: DELEGATED_AGENT_CTX, writable: ['title'] },
-    { label: 'the same agent acting for nobody', sets: [AGENT_SET, LOCKED_SET], context: AGENT_CTX, writable: ['title', 'account'] },
+    { label: 'a delegated agent whose delegator may not edit the field', sets: [AGENT_SET, LOCKED_SET], context: DELEGATED_AGENT_CTX, writable: ['id', 'title'] },
+    { label: 'the same agent acting for nobody', sets: [AGENT_SET, LOCKED_SET], context: AGENT_CTX, writable: ['id', 'title', 'account'] },
   ];
 
   for (const c of CASES) {
@@ -176,6 +177,6 @@ describe('getWritableFields — the answers the contract names', () => {
     const { registerService } = await boot([LOCKED_SET]);
     const svc = registerService.mock.calls.find((c: any[]) => c[0] === 'security')?.[1];
     expect(typeof svc?.getWritableFields).toBe('function');
-    expect(await svc.getWritableFields('invoice', WRITER_CTX)).toEqual(['title']);
+    expect(await svc.getWritableFields('invoice', WRITER_CTX)).toEqual(['id', 'title']);
   });
 });
