@@ -340,17 +340,31 @@ export function sanitizeRowError(raw: unknown): string {
  * `DUPLICATE_RECORD` without being the engine's class keeps its own code, as it
  * does at the door. The engine's thrown identity is unchanged; only the row's
  * wire spelling moves.
+ *
+ * ## The column comes from the envelope's own `field` when no finding names one
+ *
+ * Not every refusal is a `ValidationError`. The engine's declared-field door
+ * throws the ADR-0112 envelope `INVALID_FIELD` / 400 with the column in its
+ * `field` member and the bare names in `fields` — strings, not findings — and
+ * `DuplicateRecordError` carries `field` when the dialect named the column.
+ * Reading `field` only off a finding left those rows naming no column, while
+ * `POST /data/:object` answered the same key with `field` set. Since
+ * `engine.validate` runs that door too, an unknown column now fails the dry
+ * run and the commit alike, and both rows name it. A finding still wins, as
+ * it does for `code`; an entry of `fields` that is not an object is not a
+ * finding.
  */
 function toFailedResult(rowNo: number, err: unknown): ImportRowResult {
-  const e = err as { code?: unknown; message?: unknown; fields?: unknown } | null | undefined;
-  const fields = Array.isArray(e?.fields) ? (e.fields as Array<{ field?: unknown; code?: unknown }>) : [];
-  const first = fields[0];
+  const e = err as { code?: unknown; message?: unknown; fields?: unknown; field?: unknown } | null | undefined;
+  const head: unknown = Array.isArray(e?.fields) ? e.fields[0] : undefined;
+  const first = head !== null && typeof head === 'object' ? (head as { field?: unknown; code?: unknown }) : undefined;
   const thrownCode = isEngineDuplicateRecordEnvelope(e) ? 'UNIQUE_VIOLATION' : e?.code;
   const code = first?.code ?? thrownCode ?? 'IMPORT_ROW_FAILED';
+  const field = first?.field != null && first.field !== '' ? first.field : e?.field;
   const message = sanitizeRowError(e?.message);
   return {
     row: rowNo, ok: false, action: 'failed', error: message, code: String(code),
-    ...(first?.field != null && first.field !== '' ? { field: String(first.field) } : {}),
+    ...(field != null && field !== '' ? { field: String(field) } : {}),
   };
 }
 
