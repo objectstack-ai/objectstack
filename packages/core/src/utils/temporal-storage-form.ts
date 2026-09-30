@@ -56,13 +56,14 @@
  * `isUninterpretableTemporalComparand` (`temporal-comparand.ts`) answers for
  * the doors that refuse them.
  *
- * ## [#20264] The supported years: 0001 to 9999, for `date` and `datetime`
+ * ## [#20264] The supported years: a `date` 0001 to 9999, a `datetime` 1000 to 9999
  *
- * A `date` or `datetime` value names a year from 0001 to 9999, or it is
- * refused: `INVALID_FILTER` / 400 as a comparand, at the engine's
- * temporal-comparand door (`where`, a per-aggregation `filter`, `having`), and
- * `VALIDATION_FAILED` / 400 as a written value, at the record validator. Both
- * doors ask {@link isOutsideTemporalYearRange}, so there is one range.
+ * A `date` value names a year from 0001 to 9999, and [#20280] a `datetime`
+ * value a year from 1000 to 9999, or it is refused: `INVALID_FILTER` / 400 as
+ * a comparand, at the engine's temporal-comparand door (`where`, a
+ * per-aggregation `filter`, `having`), and `VALIDATION_FAILED` / 400 as a
+ * written value, at the record validator. Both doors ask
+ * {@link isOutsideTemporalYearRange}, so there is one range per kind.
  *
  * - Above 9999 the forms stop being fixed-width text: `toISOString()` spells
  *   `+010000-01-01T00:00:00.000Z`, which sorts below every four-digit year, and
@@ -71,11 +72,13 @@
  *   `timestamptz` have no year 0 (`0000-06-15` is `date/time field value out of
  *   range`), and a negative year's spelling (`-000001-…`) orders as no instant
  *   does.
- * - Every shipped backend holds 0001..9999 for a `date`. MySQL documents its
+ * - Every shipped backend holds 0001..9999 for a `date`. [#20280] A `datetime`
+ *   starts at 1000, MySQL's documented `DATETIME` floor: MySQL documents its
  *   `DATETIME` from year 1000 only, and reads a stored `DATETIME` in years
- *   0001..0099 back a century late through its client's instant parser (ADR-0053
- *   D-F2 keeps that parser): a known misread inside the range, not something
- *   this rule decides.
+ *   0001..0099 back a century late through its client's instant parser, which
+ *   ADR-0053 D-F2 keeps. The range is the contract on every backend, never a
+ *   dialect's: a `datetime` before 1000 is refused on SQLite, PostgreSQL and
+ *   the in-memory driver too, which would have held it.
  *
  * The rule itself stays total: a year outside the range keeps the spelling
  * `toISOString()` or the unpadded year gives it on the write and read paths
@@ -155,12 +158,19 @@ function instantMs(value: unknown): number | undefined {
   return Number.isFinite(ms) ? ms : undefined;
 }
 
-/** [#20264] The first and the last year a `date` or `datetime` value may name. */
-const FIRST_SUPPORTED_YEAR = 1;
+/**
+ * [#20264] The first year a value of each kind may name — [#20280] per kind:
+ * a `date` from 0001, a `datetime` from 1000, MySQL's documented `DATETIME`
+ * floor (see the module note). The `date` entry is also the year the `date`
+ * rule pads to four digits from ({@link canonicalCalendarDay}).
+ */
+const FIRST_SUPPORTED_YEAR: Readonly<Record<'date' | 'datetime', number>> = { date: 1, datetime: 1000 };
+/** [#20264] The last year a `date` or `datetime` value may name. */
 const LAST_SUPPORTED_YEAR = 9999;
 
 /**
- * [#20264] Does `value` name a year outside 0001..9999 for a column of `kind`?
+ * [#20264] Does `value` name a year outside the supported years for a column
+ * of `kind` — 0001..9999 for a `date`, [#20280] 1000..9999 for a `datetime`?
  * The one range both doors ask — the temporal-comparand door on a comparand,
  * the record validator on a written value; see the module note.
  *
@@ -168,7 +178,7 @@ const LAST_SUPPORTED_YEAR = 9999;
  *
  * - `datetime`: the UTC year of the instant {@link canonicalUtcDatetime}
  *   reads, so `9999-12-31T23:59:59-01:00` (year 10000 in UTC) is outside and
- *   `0001-01-01T00:00:00+08:00` (year 0 in UTC) is outside too.
+ *   [#20280] `1000-01-01T00:00:00+08:00` (year 999 in UTC) is outside too.
  * - `date`: a string's leading `YYYY-MM-DD` year; otherwise — a number, a
  *   `Date`, or a string with no leading day that still names an instant, such
  *   as `+010000-01-01T00:00:00.000Z` — the UTC year of that instant, whose UTC
@@ -193,7 +203,7 @@ export function isOutsideTemporalYearRange(value: unknown, kind: TemporalCompara
     if (ms === undefined) return false;
     year = new Date(ms).getUTCFullYear();
   }
-  return year < FIRST_SUPPORTED_YEAR || year > LAST_SUPPORTED_YEAR;
+  return year < FIRST_SUPPORTED_YEAR[kind] || year > LAST_SUPPORTED_YEAR;
 }
 
 function canonicalCalendarDay(value: unknown): unknown {
@@ -210,13 +220,14 @@ function canonicalCalendarDay(value: unknown): unknown {
     // declares and the ISO-string and bare-day arms below already produce:
     // `0999-06-15`, never `999-06-15`, which sorted above every padded day as
     // text (`'9' > '0'`). [#20264] The padding covers 0001..0999, the padded
-    // part of the supported years: a year outside 0001..9999 — year 0
+    // part of a `date`'s supported years: a year outside 0001..9999 — year 0
     // included, which PostgreSQL's `DATE` does not have — has no `YYYY-MM-DD`
     // form here; it keeps its unpadded spelling, and the doors refuse it
     // before it reaches a comparison or a write
-    // ({@link isOutsideTemporalYearRange}).
+    // ({@link isOutsideTemporalYearRange}). [#20280] The `date` floor, never
+    // the `datetime` one: a calendar day in 0001..0999 is a supported `date`.
     const y = instant.getUTCFullYear();
-    const yyyy = y >= FIRST_SUPPORTED_YEAR ? String(y).padStart(4, '0') : String(y);
+    const yyyy = y >= FIRST_SUPPORTED_YEAR.date ? String(y).padStart(4, '0') : String(y);
     const m = String(instant.getUTCMonth() + 1).padStart(2, '0');
     const d = String(instant.getUTCDate()).padStart(2, '0');
     return `${yyyy}-${m}-${d}`;
