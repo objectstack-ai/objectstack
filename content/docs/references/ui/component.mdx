@@ -705,7 +705,7 @@ Sort field and direction pair
 | **searchableFields** | `string[]` | optional | Fields the toolbar search queries; a non-empty list enables search |
 | **showSearch** | `boolean` | optional | Show the search box (read only when `searchableFields` is absent) |
 | **rowHeight** | `any` | optional | Row density mode (e.g. compact / comfortable) |
-| **grouping** | `any` | optional | Row grouping config |
+| **grouping** | `{ fields: object[] }` | optional | Row grouping config |
 | **aggregations** | `any` | optional | Group aggregation config (sum/avg/… per column) |
 | **conditionalFormatting** | `any` | optional | Conditional row/cell formatting rules |
 | **rowColor** | `any` | optional | Row color rules |
@@ -757,6 +757,12 @@ Sort field and direction pair
 | **field** | `string` | ✅ | Field name to sort by |
 | **order** | `Enum<'asc' \| 'desc'>` | ✅ | Sort direction |
 
+### Nested Shape: `ObjectGridProps.grouping`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **fields** | `{ field: string; order: Enum<'asc' \| 'desc'>; collapsed: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
+
 ### Nested Shape: `ObjectGridProps.data[provider='object']`
 
 | Property | Type | Required | Description |
@@ -806,7 +812,7 @@ Sort field and direction pair
 | **titleField** | `string` | optional | Legacy fallback for `cardTitle` (the board reads `cardTitle \|\| titleField`). Prefer `cardTitle` |
 | **cardFields** | `string[]` | optional | Fields rendered on each card |
 | **swimlaneField** | `string` | optional | Field for horizontal swimlanes (in addition to columns) |
-| **grouping** | `any` | optional | View grouping config; its first field is the swimlane fallback |
+| **grouping** | `{ fields: object[] }` | optional | View grouping config; its first field is the swimlane fallback |
 | **quickAdd** | `never` | optional | [REMOVED] `object-kanban` property `quickAdd` was removed in @objectstack/spec 17 (ADR-0049) — the board forwarded it, but the per-column affordance is gated on both `quickAdd` and `onQuickAdd`, and `onQuickAdd` is a host-supplied function JSON cannot carry and no producer ever put on an `object-kanban` node, so authoring it was a parse-clean no-op. Delete the key. The quick-add control is unchanged on the `kanban-ui` block, where a React host supplies the `onQuickAdd` slot the control needs. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **coverImageField** | `string` | optional | Image field rendered as the card cover |
 | **conditionalFormatting** | `any` | optional | Card conditional formatting rules |
@@ -821,6 +827,12 @@ View filter rule
 | **field** | `string` | ✅ | Field name to filter on |
 | **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
 | **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
+
+### Nested Shape: `ObjectKanbanProps.grouping`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **fields** | `{ field: string; order: Enum<'asc' \| 'desc'>; collapsed: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
 
 ### Nested Shape: `ObjectKanbanProps.navigation`
 
