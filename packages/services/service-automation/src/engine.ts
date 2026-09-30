@@ -5176,18 +5176,38 @@ export class AutomationEngine implements IAutomationService {
      * minted. Not a 400: nothing about the request is malformed. Not a 403:
      * no caller could be authorized into it. Not `DELETE_RESTRICTED`: that
      * member means dependencies.
+     *
+     * ## A customer flow a ledger row ALREADY holds off
+     *
+     * The ledger is keyed by name, and a row can already stand under a
+     * customer flow's name: this door used to accept a customer flow whose
+     * package id was non-empty (the sentinel and app-bound shapes above) and
+     * wrote one, and a customer overlay can shadow a packaged flow the ledger
+     * switched off. A status does not clear such a row ({@link isFlowEnabled}
+     * composes the two, neither overrides the other), so for that flow the
+     * refusal must not stop at "publish it `active`" — a step that completes
+     * nothing. It names the one that does, and the one the `FLOW_DISABLED`
+     * refusal already names for a ledger-held flow: a clone under a new name
+     * (ADR-0126 §7.1), which no row holds. Still nothing is written: which
+     * rows this door should clear is not this refusal's to decide.
      */
     private refuseCustomerAuthoredToggle(name: string, flow: FlowParsed, enabled: boolean): void {
         if (describeFlowContender(flow).source === 'package') return;
+        const updateDoor = `its update door, PUT /automation/${name}, which takes the complete definition`;
+        const ownSwitch = this.flowLedgerDisabled.has(name)
+            ? `This flow's own switch is its definition's status, published through ${updateDoor} — but it is ` +
+              `ALSO held off by an activation-ledger row recorded under the name '${name}' (for a packaged flow of ` +
+              `that name, or by this switch before it refused customer-authored flows), and no status clears that ` +
+              `row. To run this flow, clone it under a new name through POST /automation/${name}/clone, which ` +
+              `arms the copy, and remove this one.`
+            : `This flow's switch is its own definition's status: publish it through ${updateDoor}, with status ` +
+              `'obsolete' to switch it off or 'active' to arm it.`;
         throw Object.assign(
             new Error(
                 `Flow '${name}' cannot be ${enabled ? 'enabled' : 'disabled'} through this switch: the switch turns ` +
                     `packaged flows on and off, and '${name}' was authored in this deployment, not shipped by a ` +
-                    `package. It records an installation's choice about a packaged flow in the activation ledger ` +
-                    `(sys_metadata_activation, ADR-0126 §7.2), which holds no customer-authored flow. This flow's ` +
-                    `switch is its own definition's status: publish it through its update door, ` +
-                    `PUT /automation/${name}, which takes the complete definition, with status 'obsolete' to ` +
-                    `switch it off or 'active' to arm it. Nothing was changed.`,
+                    `package. The switch records an installation's choice about a packaged flow in the activation ` +
+                    `ledger (sys_metadata_activation, ADR-0126 §7.2). ${ownSwitch} Nothing was changed.`,
             ),
             { code: 'RESOURCE_CONFLICT', status: 409 },
         );
