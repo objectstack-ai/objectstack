@@ -2087,6 +2087,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/objectql/src/protocol-packaged-view-base.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/objectql/src/protocol-publish-package-drafts.test.ts",
       "verb": "update",
       "pinned": 1
