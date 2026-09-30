@@ -2511,10 +2511,11 @@ export class AnalyticsService implements IAnalyticsService {
    * (`structured-json-dimension-door.ts`); this method supplies the two
    * answers only the service has.
    *
-   * - The column a member groups by is {@link resolveMemberSource}'s, the
-   *   resolver the dimension source-field gate above reads, with the same
-   *   `'dimension'` kind the strategies' `resolveDimensionSql` /
-   *   `resolveFieldName(…, 'dimension')` resolve by.
+   * - The dimension `sql` a member resolves to is {@link declaredMemberEntry}'s
+   *   (`cube.dimensions` only, the `'dimension'` kind the strategies'
+   *   `resolveDimensionSql` / `resolveFieldName(…, 'dimension')` resolve by),
+   *   and the member itself when the cube declares none — the column the
+   *   strategies group by in that case.
    * - Its declared type is {@link AnalyticsServiceConfig.sourceFieldMeta}'s.
    *
    * Runs after the dimension source-field gate on every `ensureCube` path, so a
@@ -2531,7 +2532,11 @@ export class AnalyticsService implements IAnalyticsService {
       query,
       cube,
       object,
-      (member) => resolveMemberSource(cube, member, 'dimension').source,
+      (member) => {
+        const entry = declaredMemberEntry(cube, member, 'dimension');
+        if (!entry) return member;
+        return typeof entry.sql === 'string' ? entry.sql : '';
+      },
       (o, field) => fieldMeta(o, field)?.type,
     );
   }

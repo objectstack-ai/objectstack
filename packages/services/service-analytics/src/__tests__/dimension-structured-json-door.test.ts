@@ -42,10 +42,18 @@ const silentLogger = {
 
 const OBJECT = 'ledger';
 
-/** One field per `FieldType`, named `f_<type>`, plus the text control `title`. */
+/** One field per `FieldType`, named `f_<type>`, plus the text control `title` and a lookup to `account`. */
 const FIELDS: Record<string, { type: string }> = {
   title: { type: 'text' },
+  account: { type: 'lookup' },
   ...Object.fromEntries(FieldType.options.map((type) => [`f_${type}`, { type }])),
+};
+
+/** The joined object: a text column and a json one. */
+const JOINED = 'account';
+const JOINED_FIELDS: Record<string, { type: string }> = {
+  name: { type: 'text' },
+  hq: { type: 'json' },
 };
 
 /** An authored cube: a text dimension, a json one filed under a key that is not its column, and a time one. */
@@ -69,9 +77,12 @@ const LEDGER_DATASET = {
   name: 'ledger_ds',
   label: 'Ledger dataset',
   object: OBJECT,
+  include: ['account'],
   dimensions: [
     { name: 'title_dim', field: 'title', type: 'string' },
     { name: 'meta_doc', field: 'f_json', type: 'string' },
+    { name: 'acct_name', field: 'account.name', type: 'string' },
+    { name: 'acct_hq', field: 'account.hq', type: 'string' },
   ],
   measures: [{ name: 'row_count', aggregate: 'count' }],
 } as unknown as Dataset;
@@ -106,7 +117,7 @@ function makeService(face: Face, opts: { sourceFieldMeta?: boolean } = {}) {
     getObjectFieldNames: (n: string) => (n === OBJECT ? Object.keys(FIELDS) : undefined),
     ...(opts.sourceFieldMeta === false
       ? {}
-      : { sourceFieldMeta: (o: string, f: string) => (o === OBJECT ? FIELDS[f] : undefined) }),
+      : { sourceFieldMeta: (o: string, f: string) => (o === OBJECT ? FIELDS[f] : o === JOINED ? JOINED_FIELDS[f] : undefined) }),
   });
   return { service, calls };
 }
@@ -182,6 +193,17 @@ describe('a dimension on a structured-JSON field is refused at the analytics doo
     expect(calls.raw).toEqual([]);
   });
 
+  it('a dataset dimension over an included relationship is judged on the JOINED object — naming the dataset dimension', async () => {
+    const { service, calls } = makeService('native');
+    const err = await rejection(service.queryDataset(LEDGER_DATASET, { measures: ['row_count'], dimensions: ['acct_hq'] }));
+    expect(envelopeOf(err)).toEqual({ code: 'INVALID_FIELD', status: 400, member: 'acct_hq', param: 'dimensions', field: 'account.hq', object: JOINED });
+    expect(err.message).toContain(`Dimension 'acct_hq' on cube 'ledger_ds' groups by field 'account.hq', whose column 'hq' the joined object '${JOINED}' declares as json`);
+    expect(calls.raw).toEqual([]);
+    // CONTROL the joined text column is served.
+    await service.queryDataset(LEDGER_DATASET, { measures: ['row_count'], dimensions: ['acct_name'] });
+    expect(calls.raw).toHaveLength(1);
+  });
+
   it('an ad-hoc query (no cube registered under the object name) is refused the same way', async () => {
     const { service, calls } = makeService('native');
     const err = await rejection(service.query({ cube: OBJECT, measures: ['count'], dimensions: ['f_json'] }));
@@ -209,6 +231,13 @@ describe('what the door does not judge', () => {
     const err = await rejection(service.query({ cube: OBJECT, measures: ['count'], dimensions: ['nope'] }));
     expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_FIELD', status: 400 });
     expect(err.message).toContain("which object 'ledger' does not have");
+  });
+
+  it('a dotted path the cube declares no join for is a synthetic traversal: its object is not a declaration, so it is not judged', async () => {
+    const { service, calls } = makeService('native');
+    await service.generateSql({ cube: 'ledger_cube', measures: ['count'], dimensions: ['account.hq'] });
+    await service.query({ cube: 'ledger_cube', measures: ['count'], dimensions: ['account.hq'] });
+    expect(calls.raw).toHaveLength(1);
   });
 
   it('a host that wires no sourceFieldMeta cannot name the type, so the door stands down', async () => {

@@ -45,12 +45,21 @@
  * - The class is `@objectstack/spec/data`'s {@link STRUCTURED_JSON_TYPES},
  *   the predicate the engine's door reads — never a list minted here.
  *
+ * - The column is read the way `NativeSQLStrategy` compiles it: the member's
+ *   dimension `sql` (the member itself when the cube declares none). A bare
+ *   identifier is a column of the cube's object. A dotted identifier path
+ *   (`account.hq`, a dataset dimension over an `include`d relationship) is the
+ *   last segment, on the object the cube's own `joins` entry for that path
+ *   names — the alias the dataset compiler registers and the strategy joins.
+ *   Measured on the base the same way as the table above: a dataset dimension
+ *   over `account.hq` (a `json` field of the joined object) answered one group
+ *   per document on SQLite and 500 on PostgreSQL, like a base-object one.
+ *
  * **Not judged** (the same "cannot answer, do not block" tiering as every
  * sibling gate in `ensureCube`): a host that wires no `sourceFieldMeta`, a cube
- * whose `sql` is not a bare object name, a member the resolver cannot pin to a
- * bare base column (an expression `sql`, a dotted relation traversal: its
- * column lives on a joined object that `sourceFieldMeta` does not answer for),
- * and every other field type.
+ * whose `sql` is not a bare object name, an expression `sql`, a dotted path
+ * the cube declares no join for (a synthetic traversal: which object it lands
+ * on is the strategy's guess, not a declaration), and every other field type.
  *
  * ## The envelope
  *
@@ -58,8 +67,9 @@
  * verdict is about ONE MEMBER the request named, the family the three
  * source-field gates and the engine's door already answer with
  * `INVALID_FIELD`. `member` is the entry as the request spelled it; `field` is
- * the column it groups by — it exists, and its declared type is the verdict —
- * and `object` is the object that declares it.
+ * the column it groups by, spelled as the dimension's `sql` spells it
+ * (`account.hq` for a joined one) — it exists, and its declared type is the
+ * verdict — and `object` is the object that declares it.
  *
  * @see https://github.com/objectstack-ai/objectstack/issues/20807
  */
@@ -75,6 +85,21 @@ interface GroupedMember {
   readonly param: 'dimensions' | 'timeDimensions';
 }
 
+/** The column a grouped member reads: where it is declared, and how the dimension spells it. */
+interface DimensionColumn {
+  /** The object that declares the column. */
+  readonly object: string;
+  /** The column's name on that object. */
+  readonly column: string;
+  /** The dimension's `sql` as written: the column, or the dotted path to it. */
+  readonly path: string;
+}
+
+/** A bare identifier: one column. */
+const BARE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** A dotted identifier path: relationship hops, then one column (`NativeSQLStrategy`'s own test). */
+const IDENTIFIER_PATH = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$/;
+
 /**
  * The members of `query` that group the result, in request-key order:
  * `dimensions` first, then each bucketed `timeDimensions` entry.
@@ -89,15 +114,31 @@ function groupedMembers(query: AnalyticsQuery): GroupedMember[] {
 }
 
 /**
+ * The column a dimension `sql` reads, or `null` when this door cannot pin one.
+ * A dotted path's object is the cube's DECLARED join at that path — the alias
+ * is the path with its dots as `__`, as the dataset compiler registers it and
+ * the strategy joins it — and a path with no declared join is not judged.
+ */
+function columnOf(cube: Cube, baseObject: string, sql: string): DimensionColumn | null {
+  const path = sql.trim();
+  if (BARE_IDENTIFIER.test(path)) return { object: baseObject, column: path, path };
+  if (!IDENTIFIER_PATH.test(path)) return null;
+  const segments = path.split('.');
+  const column = segments.pop() as string;
+  const joined = (cube.joins as Record<string, { name?: unknown } | undefined> | undefined)?.[segments.join('__')]?.name;
+  return typeof joined === 'string' && joined !== '' ? { object: joined, column, path } : null;
+}
+
+/**
  * Refuse the first grouped member of `query` whose column is a declared
  * structured-JSON field — `INVALID_FIELD` / 400. See the module header.
  *
- * @param object - The object `cube.sql` names (the caller has checked it is a
- *   bare object name).
- * @param sourceOf - The bare base column a dimension member groups by, or
- *   `null` when this door cannot pin one (the dimension gate's resolver).
- * @param declaredFieldType - The declared `FieldType` of a column on
- *   `object`, or `undefined` when nothing authoritative answers.
+ * @param baseObject - The object `cube.sql` names (the caller has checked it
+ *   is a bare object name).
+ * @param sqlOf - The dimension `sql` a member resolves to, or the member itself
+ *   when the cube declares none — the strategies' own lookup.
+ * @param declaredFieldType - The declared `FieldType` of a column on an
+ *   object, or `undefined` when nothing authoritative answers.
  *
  * The words put the verdict first, then that the query did not run, then the
  * route, then the reason: a door that bounds a 4xx message keeps the front of
@@ -106,29 +147,32 @@ function groupedMembers(query: AnalyticsQuery): GroupedMember[] {
 export function assertNoStructuredJsonDimension(
   query: AnalyticsQuery,
   cube: Cube,
-  object: string,
-  sourceOf: (member: string) => string | null,
+  baseObject: string,
+  sqlOf: (member: string) => string,
   declaredFieldType: (object: string, field: string) => string | undefined,
 ): void {
   for (const { member, param } of groupedMembers(query)) {
-    const field = sourceOf(member);
-    if (!field) continue;
-    const type = declaredFieldType(object, field);
+    const target = columnOf(cube, baseObject, sqlOf(member));
+    if (!target) continue;
+    const type = declaredFieldType(target.object, target.column);
     if (typeof type !== 'string' || !STRUCTURED_JSON_TYPES.has(type)) continue;
 
     const kind = param === 'timeDimensions' ? 'Time dimension' : 'Dimension';
     const verb = param === 'timeDimensions' ? 'buckets' : 'groups by';
+    const declarer = target.path === target.column
+      ? `which object '${target.object}' declares`
+      : `whose column '${target.column}' the joined object '${target.object}' declares`;
     const err = invalidMemberError(
-      `${kind} '${member}' on cube '${cube.name}' ${verb} field '${field}', which object '${object}' `
-      + `declares as ${type} — a structured-JSON value, which analytics does not group by. `
+      `${kind} '${member}' on cube '${cube.name}' ${verb} field '${target.path}', ${declarer} `
+      + `as ${type} — a structured-JSON value, which analytics does not group by. `
       + 'The query was NOT run. Group by a field that stores one scalar value: store the part you '
       + 'group on in a field of its own and group by that field. A JSON document is no group key '
       + 'the SQL dialects share: one grouped each serialized document apart, another refused the '
       + 'statement.',
       { member, param, cube: cube.name },
     ) as Error & { field?: string; object?: string };
-    err.field = field;
-    err.object = object;
+    err.field = target.path;
+    err.object = target.object;
     throw err;
   }
 }
