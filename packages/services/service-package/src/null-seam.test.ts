@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #10965 — `get()` / `list()` answered over a driver they never queried.
+ * The card behind commit ab47f6974 — `get()` / `list()` answered over a driver they never queried.
  *
  * ## What was measured before the fix
  *
