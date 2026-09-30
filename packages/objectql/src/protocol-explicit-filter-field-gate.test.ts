@@ -401,7 +401,7 @@ describe('#7534 — unknown field on the EXPLICIT filter axes (real ObjectQL eng
         // descends: the answer is not its INVALID_FIELD about `region`.
         const err: any = await find({ where: { owner_id: { region: 'NA' } } }).then(() => null, (e: any) => e);
         expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
-        expect(err.message).toContain("a nested-relation condition beneath the declared lookup field 'owner_id'");
+        expect(err.message).toContain("puts a nested-relation condition (keys \"region\") at where.owner_id, beneath the declared lookup field 'owner_id'");
         expect(err.field).toBeUndefined();
     });
 
