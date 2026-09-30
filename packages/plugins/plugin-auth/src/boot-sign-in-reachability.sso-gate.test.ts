@@ -53,6 +53,7 @@ import type {
   SignInReachabilityFacts,
 } from './boot-sign-in-reachability';
 import { WALLED_OWNER_NO_VERIFICATION_PATH } from './walled-owner-verification-path';
+import type { AuthManager } from './auth-manager';
 import type { PluginContext } from '@objectstack/core';
 
 /** The store shape this report speaks about: humans SEEN, accounts SEEN ABSENT. */
@@ -61,6 +62,7 @@ const NOTHING_WIRED: SignInPathWiring = {
   ssoOnlyMode: false,
   socialSignIn: false,
   enterpriseSso: false,
+  hostSignInHandoff: false,
 };
 
 const ENV_KEYS = [
@@ -174,9 +176,14 @@ const bootWith = async (
   await plugin.start(ctx);
   await runKernelReady(hooks);
   const said = (fn: { mock: { calls: unknown[][] } }) => fn.mock.calls.map((c) => String(c[0]));
+  // The live manager `init()` registered — what the login page is told comes
+  // from ITS `getPublicConfig()`, so that is what the #20861 pin compares.
+  const registered = (ctx.registerService as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+  const authManager = registered.find((c) => c[0] === 'auth')?.[1] as AuthManager | undefined;
   return {
     logger,
     reads,
+    publicConfig: authManager?.getPublicConfig(),
     errors: said(logger.error).filter((m) => m.includes(NO_SIGN_IN_ACCOUNT_AT_BOOT)),
     warnings: said(logger.warn).filter((m) => m.includes(NO_SIGN_IN_ACCOUNT_AT_BOOT)),
     debugs: said(logger.debug).filter((m) => m.includes(NO_SIGN_IN_ACCOUNT_AT_BOOT)),
@@ -452,5 +459,98 @@ describe('#15074 — the `sys_sso_provider` probe is bounded, silent and cheap',
   it('an absent public config reads as NOTHING configured — the loud default', async () => {
     const { engine } = engineOver({ ssoProviders: [{ id: 'ssop_1' }] });
     await expect(probeSignInPathWiring(DEAD_END, undefined, engine)).resolves.toEqual(NOTHING_WIRED);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#20861] A sign-in path the HOST owns, which no login-page provider shows.
+//
+// A hosted kernel whose owner hid the platform sign-in button wires no
+// `oidcProviders`, yet its owner still enters through the host's own handoff
+// route — which writes no `sys_account` row. None of the three facts above can
+// see that path, because each is read off what the LOGIN PAGE is told. So the
+// host states it: `new AuthPlugin({ hostSignInHandoff: true })`. The pins below
+// hold both directions and the one thing the declaration must never touch.
+// ---------------------------------------------------------------------------
+
+describe('#20861 — a host-declared sign-in handoff is a delegated path', () => {
+  it('declared, humans and ZERO `sys_account` rows — NO error, NO warning', async () => {
+    const { errors, warnings } = await bootWith(
+      { users: HUMANS, accounts: [] },
+      {},
+      { hostSignInHandoff: true },
+    );
+    expect(errors).toHaveLength(0);
+    expect(warnings).toHaveLength(0);
+  });
+
+  it('CONTROL — the same boot WITHOUT the declaration still reports the error', async () => {
+    const { errors } = await bootWith({ users: HUMANS, accounts: [] });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('NOBODY CAN SIGN IN');
+  });
+
+  it('the suppressed shape is still recorded at `debug`, naming the declaration', async () => {
+    const { debugs } = await bootWith(
+      { users: HUMANS, accounts: [] },
+      {},
+      { hostSignInHandoff: true },
+    );
+    expect(debugs).toHaveLength(1);
+    expect(debugs[0]).toMatch(/hostSignInHandoff/);
+  });
+
+  it('declaring it changes NOTHING `getPublicConfig()` returns — the login page is not lied to', async () => {
+    const without = await bootWith({ users: HUMANS, accounts: [] });
+    const declared = await bootWith(
+      { users: HUMANS, accounts: [] },
+      {},
+      { hostSignInHandoff: true },
+    );
+    expect(without.publicConfig).toBeDefined();
+    expect(declared.publicConfig).toEqual(without.publicConfig);
+    // Spelled out, because these are the fields the other three facts read:
+    // no provider is registered and no SSO mode is claimed on the host's behalf.
+    expect(declared.publicConfig?.socialProviders).toEqual([]);
+    expect(declared.publicConfig?.features.sso).toBe(false);
+    expect(declared.publicConfig?.features.ssoEnforced).toBe(false);
+  });
+});
+
+describe('#20861 — the fact comes from the host declaration, and from nothing else', () => {
+  it('declared alone ⇒ no report, and the reason NAMES the declaration', () => {
+    const wiring: SignInPathWiring = { ...NOTHING_WIRED, hostSignInHandoff: true };
+    expect(resolveNoSignInAccountReport(DEAD_END, wiring)).toBeNull();
+    expect(resolveDelegatedSignInPath(wiring)).toMatch(/hostSignInHandoff/);
+  });
+
+  it('the resolver carries the declaration through, and defaults to NOT declared', async () => {
+    const { engine } = engineOver({});
+    const declared = await probeSignInPathWiring(DEAD_END, undefined, engine, {
+      hostSignInHandoff: true,
+    });
+    expect(declared).toEqual({ ...NOTHING_WIRED, hostSignInHandoff: true });
+    await expect(probeSignInPathWiring(DEAD_END, undefined, engine, {})).resolves.toEqual(
+      NOTHING_WIRED,
+    );
+  });
+
+  it('only a literal `true` declares it — anything else keeps the report LOUD', async () => {
+    const { engine } = engineOver({});
+    for (const value of ['true', 1, 'yes', null]) {
+      const wiring = await probeSignInPathWiring(DEAD_END, undefined, engine, {
+        hostSignInHandoff: value as unknown as boolean,
+      });
+      expect(wiring.hostSignInHandoff).toBe(false);
+      expect(resolveNoSignInAccountReport(DEAD_END, wiring)).toContain(NO_SIGN_IN_ACCOUNT_AT_BOOT);
+    }
+  });
+
+  it('a declared handoff spares the `sys_sso_provider` read, like any path proven without the store', async () => {
+    const { engine, reads } = engineOver({ ssoProviders: [{ id: 'ssop_1' }] });
+    await probeSignInPathWiring(DEAD_END, { features: { sso: true } }, engine, {
+      hostSignInHandoff: true,
+    });
+    expect(reads).toEqual([]);
   });
 });

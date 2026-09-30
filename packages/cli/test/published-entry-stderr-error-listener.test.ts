@@ -1,13 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * A failed stderr write must not kill the PUBLISHED CLI. #14858 for the class,
+ * A failed stderr write must not kill the PUBLISHED CLI. Commit 0c5e97368 for the class,
  * #15564 for the measurement that reached it on this entry point.
  *
  * ## What #15564 asked, and what the answer turned out to be
  *
  * `bin/run-dev.js` has carried a no-op `error` listener on `process.stderr`
- * since #14858; `bin/run.js` — the file `bin.objectstack` / `bin.os` point at,
+ * since commit 0c5e97368; `bin/run.js` — the file `bin.objectstack` / `bin.os` point at,
  * and the only thing under `bin/` npm packs (#14874) — did not. The card was
  * filed **NOT REPRODUCED** on purpose and fenced the cheap conclusion: two
  * probes against the published entry with the read end destroyed had answered
@@ -30,7 +30,7 @@
  *           at afterWriteDispatched (node:internal/stream_base_commons:159:15)
  *     exit  code=1
  *
- * — the same frame and status #14858 traced on the dev shim, at 3049-3433 ms,
+ * — the same frame and status commit 0c5e97368's card traced on the dev shim, at 3049-3433 ms,
  * on `examples/app-todo`. The same child read by a DRAINING parent boots and
  * serves, exit 0 at a 20 s SIGTERM after 7926 bytes over 16.6 s. So the crash
  * costs the run at its first diagnostic line and 20 of its 21 stderr writes.

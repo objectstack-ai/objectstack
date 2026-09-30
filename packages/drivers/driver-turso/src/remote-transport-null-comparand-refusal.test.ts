@@ -174,11 +174,12 @@ describe('RemoteTransport $null comparand refusal (#1116)', () => {
       expect(err.message).toContain('the side opposite the false it was written to mean');
     });
 
-    it('cites the ruling and the framework landing so both repos are findable', async () => {
+    it('states the ruling and its landing in words: refused, not coerced, by every driver', async () => {
       const err = await refusalOf({ stage: { $null: 'yes' } });
-      expect(err.message).toContain('objectstack#5347');
-      expect(err.message).toContain('objectstack#5368');
-      expect(err.message).toContain('#1116');
+      expect(err.message).toContain('It is refused rather than coerced');
+      expect(err.message).toContain(
+        'Every driver now refuses it, so one filter no longer gets a different answer per backend.',
+      );
     });
 
     it('names the spec declaration rather than only complaining', async () => {

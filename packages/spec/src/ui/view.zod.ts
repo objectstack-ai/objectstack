@@ -1723,6 +1723,56 @@ export const AddRecordConfigSchema = lazySchema(() => strictObject({
 }).describe('Add record entry point configuration'));
 
 /**
+ * The one answer an empty state gives to an author reaching for a call to
+ * action inside it. Written for EVERY door that carries
+ * {@link EmptyStateSchema}, the `VIEW_ROW_BOUND_GUIDANCE` way: the add-record
+ * entry point is a list view's own `addRecord` block, and the `object-grid`
+ * page block declares no authorable one at all, so a sentence pointing at
+ * "this list view" would be a wrong answer on the grid.
+ */
+const EMPTY_STATE_ACTION_GUIDANCE =
+  'The empty state renders text only — a `title`, a `message` and an `icon`. An "add record" '
+  + 'entry point is not part of it: on a list view, configure it in that view\'s own `addRecord` block.';
+
+/**
+ * Empty State — what a record list draws in place of rows when it has none to
+ * show: a heading, a line of text and an icon.
+ *
+ * [#20694] ONE declaration for every door that carries it, taken BY REFERENCE —
+ * the list view's `emptyState` below and the `object-grid` page block's
+ * (`ComponentPropsMap['object-grid'].emptyState`, `component.zod.ts`), the
+ * `GroupingConfigSchema` precedent (#20831). It was an inline shape on the list
+ * view until the grid's renderer started reading the same key; a second copy of
+ * the shape for the grid would be a second thing to drift, and objectui's own
+ * mirror of the grid's key follows this one, not the other way round.
+ *
+ * The extraction left the list view's accept set unchanged: a 28-value parse
+ * corpus over its four doors (`ListViewSchema`, `ObjectListViewSchema`,
+ * `ViewSchema.list`, the flattened overlay arm of `ViewMetadataSchema`) reads
+ * the same success, parsed data, issue codes and paths before and after. The
+ * one deliberate text change is {@link EMPTY_STATE_ACTION_GUIDANCE}, which now
+ * reads true on both doors.
+ */
+export const EmptyStateSchema = lazySchema(() => strictObject({
+  surface: 'this empty state',
+  history: VIEW_HISTORY,
+  // `description`/`text`/`subtitle` are the words the neighbouring empty-state
+  // vocabularies use for the secondary line; here it is `message`.
+  aliases: { description: 'message', text: 'message', subtitle: 'message', heading: 'title', label: 'title', image: 'icon' },
+  // An author wiring a CTA into the empty state is reaching for the add-record
+  // entry point, which is a separate block where one exists at all.
+  guidance: {
+    action: EMPTY_STATE_ACTION_GUIDANCE,
+    button: EMPTY_STATE_ACTION_GUIDANCE,
+  },
+}, {
+  title: I18nLabelSchema.optional().describe('Heading of the empty state'),
+  message: I18nLabelSchema.optional().describe('Line of text below the heading'),
+  icon: z.string().optional()
+    .describe('Icon name drawn above the heading; a name that resolves to no icon draws the default empty-state glyph'),
+}));
+
+/**
  * Kanban Settings
  */
 export const KanbanConfigSchema = lazySchema(() => strictObject({
@@ -2875,24 +2925,11 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   /** Advanced: Allow Printing (Airtable Interface parity) */
   allowPrinting: z.boolean().optional().describe('Allow users to print the view'),
 
-  /** Empty State */
-  emptyState: strictObject({
-    surface: 'this empty state',
-    history: VIEW_HISTORY,
-    // `description`/`text`/`subtitle` are the words the neighbouring empty-state
-    // vocabularies use for the secondary line; here it is `message`.
-    aliases: { description: 'message', text: 'message', subtitle: 'message', heading: 'title', label: 'title', image: 'icon' },
-    // The add-record entry point is a real, separate block on this same view —
-    // an author wiring a CTA into the empty state is reaching for it.
-    guidance: {
-      action: 'The empty state renders text only. Configure the "add record" entry point in the `addRecord` block on this list view.',
-      button: 'The empty state renders text only. Configure the "add record" entry point in the `addRecord` block on this list view.',
-    },
-  }, {
-    title: I18nLabelSchema.optional(),
-    message: I18nLabelSchema.optional(),
-    icon: z.string().optional(),
-  }).optional().describe('Empty state configuration when no records found'),
+  /**
+   * Empty State — {@link EmptyStateSchema} by reference (#20694), the same
+   * declaration the `object-grid` page block carries.
+   */
+  emptyState: EmptyStateSchema.optional().describe('Empty state configuration when no records found'),
 
   /** ARIA accessibility attributes */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes for the list view'),
@@ -7180,6 +7217,12 @@ export type RowHeight = z.input<typeof RowHeightSchema>;
 export type GroupingConfig = z.input<typeof GroupingConfigSchema>;
 /** Post-parse shape of {@link GroupingConfig} — defaults applied, transforms run (ADR-0122). */
 export type GroupingConfigParsed = z.infer<typeof GroupingConfigSchema>;
+/**
+ * Authoring shape of {@link EmptyStateSchema} — no default or transform in its
+ * tree, so it has no `EmptyStateParsed` (ADR-0122; pinned isomorphic in
+ * `type-alias-convention.pin.test.ts`).
+ */
+export type EmptyState = z.input<typeof EmptyStateSchema>;
 export type GalleryConfig = z.input<typeof GalleryConfigSchema>;
 /** Post-parse shape of {@link GalleryConfig} — defaults applied, transforms run (ADR-0122). */
 export type GalleryConfigParsed = z.infer<typeof GalleryConfigSchema>;

@@ -39,14 +39,14 @@
 // apart and neither said which was current, so the population is now stated
 // ONCE — with the commit it was measured on — in the suite-cost section below.
 //
-// ## Why the create-objectstack entry (#10557)
+// ## Why the create-objectstack entry (commit 818e02700)
 //
 // `init.ts` prints its "Created files" summary from a walk of the finished
 // project directory rather than a list accumulated while writing the
 // template (see the command's own header) — reusing `create-objectstack`'s
 // `created-summary.ts`, published as the `create-objectstack/created-summary`
 // subpath so both scaffold paths share one renderer instead of drifting
-// (#10499). Without an alias that bare specifier resolves through
+// (commit 6d441e41f closed the earlier drift). Without an alias that bare specifier resolves through
 // `create-objectstack`'s `exports` to its **dist**, for the same reason and
 // the same danger as the entry above: a stale `dist/created-summary.js`
 // would make every test that reaches `init.ts` a verdict about build state.
@@ -60,7 +60,7 @@
 // already in this package's ledger entry — so the required set is unchanged in
 // both directions.
 //
-// ## WHY THERE IS STILL NO `test` BLOCK — the suite cost, measured (#10152)
+// ## WHY THERE IS STILL NO `test` BLOCK — the suite cost, measured (commit ad492e7fd)
 //
 // This package's suite was the largest single item on the Test Core critical
 // path (548.6s / 474.4s in two `merge_group` runs), and the standing theory for
@@ -79,7 +79,7 @@
 // re-checked. Whoever re-measures next: print your commit here, and keep these
 // counts in exactly one place in this file — a second copy is what rotted last
 // time, because the two drifted and neither said which was current.
-// ⇒ Re-measured on f532630d02 (#13504): the `cli` POPULATION below is
+// ⇒ Re-measured on f532630d02 (commit 55519d503): the `cli` POPULATION below is
 //   superseded by the section further down, which also attributes the `import`
 //   term per file. The peer rows and every ratio in this section are from the
 //   2f665a1af run and were NOT re-taken.
@@ -258,9 +258,9 @@
 // So the work is real, the price is fair, and nothing contained in this package
 // removes it without changing what the e2e tests assert.
 //
-// ## THE `import` TERM, ATTRIBUTED PER FILE (#13504) — f532630d02, 2026-08-31
+// ## THE `import` TERM, ATTRIBUTED PER FILE (commit 55519d503) — f532630d02, 2026-08-31
 //
-// #13504 asked the one question the section above does not answer. The run it
+// Commit 55519d503's card asked the one question the section above does not answer. The run it
 // filed spent `import 401.08s`, a quarter of its wall, before any assertion
 // executed, and nothing said WHERE. This section says where, and the answer
 // settles three candidate routes without any of them having to be tried.
@@ -356,7 +356,7 @@
 // `bin/run.js` each state that prerequisite in their own words). So this names
 // the lever and stops; taking it is one argument per file.
 //
-// THE TRADE, PRICED. This is the choice #13504 says is being made by the
+// THE TRADE, PRICED. This is the choice commit 55519d503's card says is being made by the
 // suite's runtime rather than by a person. Estimated wall uses this run's own
 // measured effective parallelism (2043.29s of per-file work over a 1041s wall
 // = 1.96):
@@ -482,7 +482,7 @@
 // population: it did not see the swap.
 //
 // What keeps those four honest is a declaration, not this gate. `turbo.json`
-// declares `@objectstack/cli#test` `dependsOn: ["build"]` (#11268), so CI
+// declares `@objectstack/cli#test` `dependsOn: ["build"]` (commit 918988ad3), so CI
 // builds `dist/` before the suite runs, and each of the four refuses an unbuilt
 // tree in a sentence of its own. The residual — a `dist/` merely BEHIND its
 // source — is real, and those files state it. An in-process import has no such
@@ -493,7 +493,7 @@
 // Before adding a `test` block for speed, re-measure: if `tests` is still the
 // dominant term, the block is not the lever.
 //
-// ## THE TWO TIERS (#13504, #14554) — `unit` and `integration`, DERIVED population
+// ## THE TWO TIERS (commit 44813ba57, #14554) — `unit` and `integration`, DERIVED population
 //
 // Maintainer ruling (2026-09-01): split this suite into two NAMED tiers — a
 // unit-fast tier that is fast to run locally and does not monopolise the shared
@@ -505,7 +505,7 @@
 //   pnpm --filter @objectstack/cli exec vitest run --project integration   # the real thing, on demand
 //
 // ⛔ `--project` NARROWS THE RUN, AND A PATH YOU NAME OUTSIDE THE SELECTED TIER
-// IS DISCARDED RATHER THAN RUN (#17853). The split itself skips, weakens,
+// IS DISCARDED RATHER THAN RUN (commit 08f5f0e5a). The split itself skips, weakens,
 // deletes and doubles nothing — `vitest run` with no `--project` runs every
 // project, so the POPULATION is intact. ⛔ That sentence is about the
 // population and says nothing whatever about one narrowed invocation, and this
@@ -538,7 +538,7 @@
 // statement about this package rather than about a subset you chose.
 //
 // ⛔ THE PREDICATE IS WHAT A FILE DOES, NOT WHAT IT IS CALLED. The ACCEPT on
-// #13504 fixed that the `*.e2e.test.ts` name disagrees with behaviour, so a
+// commit 44813ba57's card fixed that the `*.e2e.test.ts` name disagrees with behaviour, so a
 // tier keyed on the name routes coverage to the wrong place. The predicate is
 // stated ONCE, in `vitest-tiers.ts` — SPAWN (the real CLI, or this package's
 // source in a cold tsx child) or KERNEL (a real kernel or driver booted in
@@ -659,7 +659,7 @@ import { integrationTestFiles, unitTestFiles } from './vitest-tiers.js';
 export const INTEGRATION_FILES = integrationTestFiles(__dirname);
 export const UNIT_FILES = unitTestFiles(__dirname, INTEGRATION_FILES);
 
-// #17853 / #17978 — say so when a path named on the command line will run no
+// Commit 08f5f0e5a / #17978 — say so when a path named on the command line will run no
 // tests. It is invoked HERE, at config load, and ⛔ deliberately NOT as a
 // `test.reporters` entry: naming that option replaces vitest's own reporter
 // defaulting instead of extending it, which measurably changes a healthy run's
@@ -674,7 +674,7 @@ export const UNIT_FILES = unitTestFiles(__dirname, INTEGRATION_FILES);
 //
 // ⭐ This package is the ONE of the eight that needs no walked population: both
 // of its projects take an exact-path `include`, as a by-product of the tier walk
-// it already performs for unrelated reasons (#13504 / #14554). So it hands the
+// it already performs for unrelated reasons (commit 44813ba57 / #14554). So it hands the
 // two arrays over directly and never calls `exactAndGlobPopulations`. That
 // asymmetry is exactly why a port of this package's former local copy could not
 // serve the other seven — #17978 carries the measurement.
@@ -828,7 +828,7 @@ export default defineConfig({
         external: [/packages[\/]types[\/]dist/],
       },
     },
-    // The two tiers (#13504) — see the header section of the same name, and
+    // The two tiers (commit 44813ba57) — see the header section of the same name, and
     // "THE NIGHTLY TIERS" for the population both read. Both `extends: true`
     // so each project inherits the `resolve.alias` table and the
     // `server.deps.external` entry above; each repeats the console-intercept

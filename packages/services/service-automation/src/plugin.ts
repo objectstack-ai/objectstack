@@ -1017,7 +1017,13 @@ export class AutomationServicePlugin implements Plugin {
             // resolveFlowPrecedence applies the ADR-0005 direction — runtime
             // overlay wins over the packaged artifact — and warns per colliding
             // name, which is the artifact-vs-DB warning ADR-0048 §3.4 routes to.
-            const resolved = resolveFlowPrecedence(flows, ctx.logger);
+            // [#20864, ADR-0126 §7.3] Which contender IS the packaged artifact
+            // is the loader's set, asked through the engine's own
+            // `packagedFlowOwner` (the `packagedFlowReader` attached in
+            // `init()`), so precedence and every other classification the
+            // engine makes read one source — never the stamps on the bodies.
+            const engine = this.engine;
+            const resolved = resolveFlowPrecedence(flows, ctx.logger, (name) => engine.packagedFlowOwner(name));
             const shadowedNames = resolved.filter((entry) => entry.shadowing).length;
             let registered = 0;
             for (const entry of resolved) {

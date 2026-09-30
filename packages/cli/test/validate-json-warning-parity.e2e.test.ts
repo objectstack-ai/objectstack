@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #10953 — `os validate` and `os validate --json` carry the SAME warning set
+ * Commit be7262e72 — `os validate` and `os validate --json` carry the SAME warning set
  * for the same config.
  *
  * ## The defect this pins shut

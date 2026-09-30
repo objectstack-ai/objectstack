@@ -112,43 +112,6 @@
  "packages/drivers/driver-mongodb/src/test-mongod.ts": {
   "#5517": 3
  },
- "packages/drivers/driver-sql/src/sql-driver.ts": {
-  "#10413": 1,
-  "#5907": 1,
-  "#6409": 1
- },
- "packages/drivers/driver-turso/src/remote-canonical-backfill.ts": {
-  "#1005": 1,
-  "#5770": 1
- },
- "packages/drivers/driver-turso/src/remote-transport.ts": {
-  "#1003": 1,
-  "#1004": 6,
-  "#10413": 1,
-  "#1051": 1,
-  "#1058": 6,
-  "#1066": 3,
-  "#1073": 2,
-  "#1075": 1,
-  "#1076": 1,
-  "#1116": 1,
-  "#5347": 2,
-  "#5348": 2,
-  "#5368": 1,
-  "#5369": 1,
-  "#5769": 3,
-  "#5903": 1,
-  "#5907": 2,
-  "#6050": 1,
-  "#6212": 1,
-  "#6409": 1,
-  "#7929": 1,
-  "#8197": 1
- },
- "packages/drivers/driver-turso/src/turso-driver.ts": {
-  "#6944": 1,
-  "#7099": 1
- },
  "packages/formula/src/matches-filter.ts": {
   "#5240": 1
  },

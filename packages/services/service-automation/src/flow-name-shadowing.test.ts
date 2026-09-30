@@ -47,6 +47,23 @@ function flowBody(name: string, marker: string) {
 const packagedBody = () => ({ ...flowBody(FLOW, 'PACKAGED'), _packageId: 'crm' });
 const runtimeBody = () => ({ ...flowBody(FLOW, 'RUNTIME') });
 
+/**
+ * [#20864] The loader's set, read the way the metadata protocol's
+ * `packagedArtifactOwner` reads it: the owner of the registry's ARTIFACT view
+ * of `name` (`SchemaRegistry.getArtifactItem`), never a listed body's stamps.
+ * Precedence classifies by this set (see `flow-precedence-loader-set.test.ts`),
+ * so a suite about the ORDER it imposes hands it one, as the boot pull does.
+ */
+function loaderSetOf(registry: any) {
+    return (name: string): string | undefined => {
+        const owner = (registry.getArtifactItem('flow', name) as { _packageId?: unknown } | undefined)?._packageId;
+        return typeof owner === 'string' && owner !== '' ? owner : undefined;
+    };
+}
+
+/** An explicit loader's set, for the list-only cases below. */
+const setOf = (set: Record<string, string>) => (name: string): string | undefined => set[name];
+
 /** A registry holding both contenders, registered in the given order. */
 function registryWithBoth(order: 'package-first' | 'runtime-first') {
     const registry: any = new SchemaRegistry();
@@ -62,12 +79,15 @@ function registryWithBoth(order: 'package-first' | 'runtime-first') {
 
 /**
  * The boot pull, reduced to the two steps under test: resolve precedence, then
- * register the winners. Mirrors `plugin.ts`'s flow pull — see the comment there.
+ * register the winners. Mirrors `plugin.ts`'s flow pull — see the comment there
+ * — including the loader's set, attached to the engine and read back through
+ * its `packagedFlowOwner`.
  */
 function bootPull(registry: any, logger: { warn(m: string, meta?: unknown): void } = silentLogger) {
     const engine = new AutomationEngine(silentLogger);
+    engine.setPackagedFlowSource(loaderSetOf(registry));
     const listed = registry.listItems('flow') as unknown[];
-    const resolved = resolveFlowPrecedence(listed, logger);
+    const resolved = resolveFlowPrecedence(listed, logger, (name) => engine.packagedFlowOwner(name));
     for (const entry of resolved) {
         engine.registerFlow(entry.name, entry.definition as never);
         if (entry.shadowing) engine.recordFlowShadowing(entry.shadowing);
@@ -182,8 +202,11 @@ describe('#11997 — precedence is a total order, not an iteration order', () =>
         const a = { ...flowBody(FLOW, 'FROM_ALPHA'), _packageId: 'alpha' };
         const b = { ...flowBody(FLOW, 'FROM_BETA'), _packageId: 'beta' };
 
-        const forward = resolveFlowPrecedence([a, b], silentLogger);
-        const backward = resolveFlowPrecedence([b, a], silentLogger);
+        // The loader's set names ONE owner per name; the second package's
+        // entry is told apart by the registry's per-entry artifact test.
+        const loaderSet = setOf({ [FLOW]: 'alpha' });
+        const forward = resolveFlowPrecedence([a, b], silentLogger, loaderSet);
+        const backward = resolveFlowPrecedence([b, a], silentLogger, loaderSet);
 
         expect((forward[0].definition as any).label).toBe('FROM_ALPHA');
         expect((backward[0].definition as any).label).toBe('FROM_ALPHA');
@@ -201,19 +224,22 @@ describe('#11997 — precedence is a total order, not an iteration order', () =>
     });
 
     it('classifies the sys_metadata rehydration sentinel as runtime, not as a package', () => {
+        // Judged with the loader's set HOLDING the name, so what is pinned is
+        // the per-entry test inside a held name, not the set's own answer.
+        const loaderSet = setOf({ [FLOW]: 'crm' });
         // `loadMetaFromDb` rehydrates overlay rows with a synthetic
         // `_packageId = 'sys_metadata'` (ADR-0005 §Provenance edge case). A
         // bare `_packageId` truthiness test would misread it as packaged.
-        expect(describeFlowContender({ name: FLOW, _packageId: 'sys_metadata' })).toEqual({
+        expect(describeFlowContender({ name: FLOW, _packageId: 'sys_metadata' }, loaderSet)).toEqual({
             source: 'runtime',
             packageId: 'sys_metadata',
         });
         // And a tenant-authored overlay bound to a REAL package id is runtime
         // too — provenance is the axis, not the id (cloud#970).
         expect(
-            describeFlowContender({ name: FLOW, _packageId: 'app.built_by_studio', _provenance: 'org' }),
+            describeFlowContender({ name: FLOW, _packageId: 'app.built_by_studio', _provenance: 'org' }, loaderSet),
         ).toEqual({ source: 'runtime', packageId: 'app.built_by_studio' });
-        expect(describeFlowContender({ name: FLOW, _packageId: 'crm' })).toEqual({
+        expect(describeFlowContender({ name: FLOW, _packageId: 'crm' }, loaderSet)).toEqual({
             source: 'package',
             packageId: 'crm',
         });
@@ -222,7 +248,7 @@ describe('#11997 — precedence is a total order, not an iteration order', () =>
     it('a tenant overlay beats the package even when both carry a real package id', () => {
         const packaged = { ...flowBody(FLOW, 'PACKAGED'), _packageId: 'crm' };
         const tenant = { ...flowBody(FLOW, 'TENANT'), _packageId: 'crm', _provenance: 'org' };
-        const resolved = resolveFlowPrecedence([packaged, tenant], silentLogger);
+        const resolved = resolveFlowPrecedence([packaged, tenant], silentLogger, setOf({ [FLOW]: 'crm' }));
         expect((resolved[0].definition as any).label).toBe('TENANT');
     });
 });

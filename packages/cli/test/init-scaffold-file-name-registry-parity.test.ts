@@ -14,7 +14,7 @@
  *
  * ## What is and is NOT claimed here — the measured load path
  *
- * This is deliberately NOT the silent-strip shape (#10359, and #11071's case
+ * This is deliberately NOT the silent-strip shape (commit 15b63e85a, and commit 50fb191dc's case
  * for `os generate`). A scaffolded project declares its objects in CODE:
  *
  *     import * as objects from './src/objects';
@@ -31,7 +31,7 @@
  *
  * So the scaffold WORKED under the old name and nothing was invisible. What
  * it was, is one CLI teaching two spellings for one metadata type: `os init`
- * wrote `<ns>_item.ts`, `os g object customer` (after #11071) writes
+ * wrote `<ns>_item.ts`, `os g object customer` (after commit 50fb191dc) writes
  * `customer.object.ts`, `create-objectstack`'s own blank starter already
  * shipped `note.object.ts`, and the examples (`app-crm/src/objects/
  * account.object.ts`) plus the registry's own glob keys speak the same shape.
@@ -134,7 +134,7 @@ describe('[#11598] the init scaffold writes object files the registry declares',
   it.each(TEMPLATES_WITH_OBJECTS)(
     'template "%s" writes the same filename `os g object` would, for the same stem',
     (templateKey) => {
-      // The convergence half (#11071 direction, inherited): one CLI, one
+      // The convergence half (commit 50fb191dc's direction, inherited): one CLI, one
       // spelling. `metadataFileName` is the derivation `os generate` uses —
       // reading the infix out of the pattern rather than interpolating the
       // type key — so this compares the two commands' OUTPUTS, not two

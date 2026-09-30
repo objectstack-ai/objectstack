@@ -188,7 +188,7 @@ function boot(port: number | string, timeoutMs = 180_000): Promise<Booted> {
   return new Promise((resolveBoot) => {
     const child = spawn(TSX, [CLI, 'serve', 'objectstack.config.ts', '--port', String(port)], {
       cwd: dir,
-      // The shared child environment, never a bare `...process.env` (#11267).
+      // The shared child environment, never a bare `...process.env` (commit 1ddda1d00).
       //
       // `NODE_ENV` is declared here rather than left to the entrypoint even
       // though `bin/run-dev.js` pins the same value before argv is parsed: the

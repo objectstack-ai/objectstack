@@ -1696,7 +1696,7 @@ function undeclaredAggregateFunctionError(func: string): Error {
     `Declared functions: ${DECLARED_AGGREGATE_FUNCTIONS.join(', ')} ` +
     `(@objectstack/spec AggregationFunction). Fix the "function" key of the aggregations[] ` +
     `entry — the Query Protocol has no such function, so this is a query no backend can run, ` +
-    `not a gap in this one (#5907).`,
+    `not a gap in this one.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.INVALID_QUERY;
   err.status = 400;
@@ -1800,7 +1800,7 @@ function unsupportedAggregationFilterError(alias: string, backend: string): Erro
     `Per-aggregation \`filter\` on "${alias}" is not supported by this backend (${backend}). ` +
     `The query is spelled correctly and @objectstack/spec AggregationNodeSchema declares the key — ` +
     `this backend compiles no conditional-aggregate (SQL FILTER (WHERE …) / CASE WHEN) expression ` +
-    `for it, so it is refused rather than silently aggregating the UNFILTERED rows (#10413), which ` +
+    `for it, so it is refused rather than silently aggregating the UNFILTERED rows, which ` +
     `is why it answers NOT_IMPLEMENTED/501 rather than a 400. \`engine.aggregate\` lowers filtered ` +
     `aggregations in memory for every driver without native support — route the query through the ` +
     `engine, or drop the \`filter\` key.`,
@@ -1834,7 +1834,7 @@ function refuseDistinctAggregateWithoutField(func: string): never {
   const err = new Error(
     `Aggregate function "${func}" needs a "field" — there is nothing to deduplicate. ` +
     `COUNT(*) counts rows and is the spelling that takes no field; a distinct count has to name ` +
-    `the column whose values are deduplicated. Add "field" to the aggregations[] entry (#6409).`,
+    `the column whose values are deduplicated. Add "field" to the aggregations[] entry.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.INVALID_QUERY;
   err.status = 400;
