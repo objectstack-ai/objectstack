@@ -298,7 +298,7 @@ export function resolveFlowPrecedence(
         const sealedOverStored =
             armed.contender.source === 'package' && shadowed.some((contender) => contender.source === 'runtime');
         const why = sealedOverStored
-            ? `: a managed package's flow is sealed, so a stored row of its name is shadowed (ADR-0126 §2)`
+            ? ` because a managed package's flow is sealed (ADR-0126 §2)`
             : armed.contender.source === 'package'
                 ? ' by package id'
                 : ' by arrival order';
