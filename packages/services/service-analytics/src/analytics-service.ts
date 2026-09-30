@@ -83,6 +83,9 @@ import { evaluateAnalyticsQueryOverRows } from './preview-evaluator.js';
 // member as the request spelled it (see `dataset-refusal.ts`'s header for why
 // that code and not `DATASET_INVALID`).
 import { invalidMemberError } from './dataset-refusal.js';
+// [#20807] A grouped dimension on a structured-JSON field is refused in
+// `ensureCube`, ahead of both strategies, naming the member the caller wrote.
+import { assertNoStructuredJsonDimension } from './structured-json-dimension-door.js';
 // [#16206] The `sqlDialect` hook's DECLARED accept set, and the predicate that
 // says whether a host answered outside it. Both live next to the membership set
 // the compilers read, so the contract has one definition and this file states
@@ -2373,6 +2376,12 @@ export class AnalyticsService implements IAnalyticsService {
    * where), so a query that gets several wrong is answered about one at a time,
    * naming a real mistake either way.
    *
+   * [#20807] One more door runs between the dimension gate and the `where`
+   * gate, on the same paths: {@link assertDimensionsGroupScalarColumns}, which
+   * refuses a grouped dimension whose column EXISTS but is declared
+   * structured JSON — a question about the column's type, not its existence,
+   * and so asked after it.
+   *
    * [#20356] "Registered" means registered in `scope`: the cube is read from it
    * and what this method mints is recorded in it — the call's own request
    * scope, on every door, so nothing minted here reaches the shared registry
@@ -2401,6 +2410,8 @@ export class AnalyticsService implements IAnalyticsService {
       // spelling is in there — which is why the suggestion list is computed by
       // subtraction inside the gate rather than echoed verbatim.
       this.assertDimensionFields(query, cube, Object.keys(cube.dimensions));
+      // [#20807] …and a grouped dimension's column must not be structured JSON.
+      this.assertDimensionsGroupScalarColumns(query, cube);
       // [#5669] …and the `where`'s, third and last of the three request keys that
       // carry a field name. Its members are read from the filter TREE, not from
       // `cube.dimensions` — which on this path was minted from this very query,
@@ -2472,6 +2483,7 @@ export class AnalyticsService implements IAnalyticsService {
       // authored/compiled list IS the vocabulary a caller may name — and the one
       // the rejection suggests.
       this.assertDimensionFields(query, augmented, Object.keys(cube.dimensions));
+      this.assertDimensionsGroupScalarColumns(query, augmented);
       // [#5669] The `where` gate resolves a filter member through dimensions AND
       // measures (that is what the strategies do for a filter member), so it is
       // handed the AUGMENTED cube — a caller filtering on a suffix-inferred
@@ -2486,8 +2498,47 @@ export class AnalyticsService implements IAnalyticsService {
       // authored cube can declare a measure over a field the object dropped.
       this.assertMeasureFields(query, cube, Object.keys(cube.measures));
       this.assertDimensionFields(query, cube, Object.keys(cube.dimensions));
+      this.assertDimensionsGroupScalarColumns(query, cube);
       this.assertWhereFields(query, cube, Object.keys(cube.dimensions));
     }
+  }
+
+  /**
+   * [#20807] Refuse a GROUPED dimension whose column is a declared
+   * structured-JSON field — `INVALID_FIELD` / 400, naming the member the caller
+   * wrote — before either strategy builds anything. The rule, the
+   * measurements and the envelope are {@link assertNoStructuredJsonDimension}'s
+   * (`structured-json-dimension-door.ts`); this method supplies the two
+   * answers only the service has.
+   *
+   * - The dimension `sql` a member resolves to is {@link declaredMemberEntry}'s
+   *   (`cube.dimensions` only, the `'dimension'` kind the strategies'
+   *   `resolveDimensionSql` / `resolveFieldName(…, 'dimension')` resolve by),
+   *   and the member itself when the cube declares none — the column the
+   *   strategies group by in that case.
+   * - Its declared type is {@link AnalyticsServiceConfig.sourceFieldMeta}'s.
+   *
+   * Runs after the dimension source-field gate on every `ensureCube` path, so a
+   * member naming a column the object does not have is answered as that first.
+   * Same stand-downs as that gate: no `sourceFieldMeta`, or a cube whose `sql`
+   * is not a bare object name.
+   */
+  private assertDimensionsGroupScalarColumns(query: AnalyticsQuery, cube: Cube): void {
+    const fieldMeta = this.sourceFieldMeta;
+    if (!fieldMeta) return;
+    const object = typeof cube.sql === 'string' ? cube.sql.trim() : '';
+    if (!object || !BARE_IDENTIFIER.test(object)) return;
+    assertNoStructuredJsonDimension(
+      query,
+      cube,
+      object,
+      (member) => {
+        const entry = declaredMemberEntry(cube, member, 'dimension');
+        if (!entry) return member;
+        return typeof entry.sql === 'string' ? entry.sql : '';
+      },
+      (o, field) => fieldMeta(o, field)?.type,
+    );
   }
 
   /**

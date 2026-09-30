@@ -372,3 +372,21 @@ describe('[#20480] isUninterpretableTemporalComparand — a time column\'s insta
     }
   });
 });
+
+// [#20771] The bare-wall-clock half of the `time` rule is the spec's
+// `ClockTimeValueSchema` (`@objectstack/spec/data`), not a second regex in
+// core: the private `readsAsWallClock` asks that schema. These are the
+// boundary cases on each side, asserted through the one public door that
+// reaches `readsAsWallClock`. None of them is an ISO instant, so the
+// instant half of the rule cannot rescue one: the verdict is the wall-clock
+// half's alone.
+describe('[#20771] isUninterpretableTemporalComparand — the wall-clock half is the spec\'s time-of-day rule', () => {
+  it('reads the last wall clock of the day, to the fraction', () => {
+    expect(isUninterpretableTemporalComparand('time', '23:59:59.999')).toBe(false);
+  });
+
+  it('refuses the hour past the last one, and a time of day with a zone', () => {
+    expect(isUninterpretableTemporalComparand('time', '24:00')).toBe(true);
+    expect(isUninterpretableTemporalComparand('time', '10:00Z')).toBe(true);
+  });
+});

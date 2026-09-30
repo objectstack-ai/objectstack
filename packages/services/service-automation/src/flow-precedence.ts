@@ -44,6 +44,17 @@
 // ⛔ NOT DONE HERE: making the engine's flow map package-aware. That is a much
 // larger change, and ADR-0048 does not ask for it — the ADR's answer for this
 // case is a precedence plus a warning, both of which are here.
+//
+// [#20864, ADR-0126 §2 / §7.3] WHICH CONTENDER IS PACKAGED IS THE LOADER'S SET.
+//
+// For a flow, "packaged" means exactly "loaded by the loader from a managed
+// package", and the engine's classification — the §7.3 guards, the toggle
+// door, and this precedence — reads that one server-held fact, never the
+// stamps a flow body carries. The caller hands the reader in (the boot pull
+// passes the engine's own `packagedFlowOwner`, so precedence and every other
+// reader ask one source); with none, NO contender is packaged, which is the
+// engine's fail-closed answer too. The body's stamps stay on the contender
+// for display only.
 
 // [commit fa5d137ab] From `@objectstack/metadata-core`, which this package DECLARES —
 // not from `@objectstack/objectql`, which it does not. The predicate is the
@@ -53,7 +64,7 @@
 // answered it by inlining objectql's implementation into this package's dist.
 // `pnpm check:undeclared-dep-imports` is the gate over that class.
 import { isCodeArtifactBody } from '@objectstack/metadata-core';
-import type { FlowContender, FlowShadowingRecord } from './engine.js';
+import type { FlowContender, FlowShadowingRecord, PackagedFlowSource } from './engine.js';
 
 /** One flow name's resolved winner, plus the receipt when it displaced others. */
 export interface FlowPrecedenceWinner {
@@ -62,6 +73,55 @@ export interface FlowPrecedenceWinner {
     definition: unknown;
     /** Present only when this name had more than one contender. */
     shadowing?: FlowShadowingRecord;
+}
+
+/**
+ * [#20864] The package the loader's set names for `name`, or `undefined` —
+ * including for every name when no reader was handed in. The same
+ * normalization `AutomationEngine.packagedFlowOwner` applies to the reader's
+ * answer: only a non-empty string names an owner.
+ */
+function loaderSetOwner(packagedFlowOwner: PackagedFlowSource | undefined, name: unknown): string | undefined {
+    if (!packagedFlowOwner || typeof name !== 'string' || name === '') return undefined;
+    const owner = packagedFlowOwner(name);
+    return typeof owner === 'string' && owner !== '' ? owner : undefined;
+}
+
+/**
+ * Classify one contender, given what the loader's set answered for its name.
+ *
+ * Two questions, in this order, and only the first is the set's:
+ *
+ *  1. **Does the loader's set hold this name at all?** No ⇒ `runtime`
+ *     (tenant-authored), whatever the body carries. A package id or a
+ *     package provenance on the body is the caller's bytes, and a flow reaches
+ *     a registry through authoring doors too — so a stamp can never put a
+ *     contender into the packaged rank for a name no managed package loaded.
+ *  2. **Which of a held name's entries is the loader's?** The reader answers
+ *     per NAME, and a held name can legitimately have several entries: a
+ *     second package shipping the same bare name (ADR-0048 §3.4), and a
+ *     tenant row of that name. Telling them apart is the registry's own
+ *     per-entry test, `isCodeArtifactBody` — the exact test the set's lookup
+ *     (`SchemaRegistry.getArtifactItem`) applies to each entry it considers.
+ *     So on this side a stamp can only keep a held name's entry OUT of the
+ *     packaged rank (the tenant marker the boot hydration forces onto every
+ *     stored row), never admit one.
+ *
+ * A packaged contender keeps its own registered id: for one package that is
+ * the id the set names, and for two packages shipping one bare name it is what
+ * keeps the lexicographic order in {@link resolveFlowPrecedence} total. A
+ * `runtime` contender keeps a body's id for display only —
+ * {@link renderFlowContender} never prints it.
+ */
+function classifyContender(item: unknown, owner: string | undefined): FlowContender {
+    const packageId = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+    if (owner !== undefined && isCodeArtifactBody(item)) {
+        return { source: 'package', packageId: String(packageId) };
+    }
+    return {
+        source: 'runtime',
+        ...(typeof packageId === 'string' && packageId ? { packageId } : {}),
+    };
 }
 
 /**
@@ -75,22 +135,20 @@ export interface FlowPrecedenceWinner {
  * reusable had nothing in it to reuse. For the operator-facing phrase, use
  * {@link renderFlowContender} below.
  *
- * Delegates to `isCodeArtifactBody` — the canonical ADR-0029 D9.6 test, which
- * exists precisely so callers cannot drift into a second answer to "does a code
- * package ship this name?". ⛔ Do not re-derive this from `_packageId`: that
- * sentinel test cannot tell a tenant-authored overlay from a code artifact,
- * because a tenant overlay bound to a package carries a real package id too
- * (see `isTenantAuthored` in objectql's registry.ts, and cloud#970).
+ * [#20864, ADR-0126 §2 / §7.3] `packaged` is decided by THE LOADER'S SET —
+ * `packagedFlowOwner`, the reader `AutomationEngine.setPackagedFlowSource`
+ * takes (a host passes `engine.packagedFlowOwner`, so this and the engine's
+ * own classification ask one source). With no reader, nothing is packaged:
+ * the engine's fail-closed answer, never the body's own claim. Within a name
+ * the set holds, the loader's entries are told from a same-named tenant row
+ * by `isCodeArtifactBody`, the canonical ADR-0029 D9.6 test the set's lookup
+ * itself applies; ⛔ do not re-derive that from `_packageId` alone, which
+ * cannot tell a tenant overlay bound to a package from a code artifact (see
+ * `isTenantAuthored` in `@objectstack/metadata-core`, and cloud#970).
  */
-export function describeFlowContender(item: unknown): FlowContender {
-    const packageId = (item as { _packageId?: unknown } | null | undefined)?._packageId;
-    if (isCodeArtifactBody(item)) {
-        return { source: 'package', packageId: String(packageId) };
-    }
-    return {
-        source: 'runtime',
-        ...(typeof packageId === 'string' && packageId ? { packageId } : {}),
-    };
+export function describeFlowContender(item: unknown, packagedFlowOwner?: PackagedFlowSource): FlowContender {
+    const name = (item as { name?: unknown } | null | undefined)?.name;
+    return classifyContender(item, loaderSetOwner(packagedFlowOwner, name));
 }
 
 /**
@@ -158,15 +216,30 @@ function precedenceRank(contender: FlowContender): number {
  * boot order does. That case is warned about too — it is exactly as invisible as
  * the artifact-vs-DB one.
  *
- * @param items   whatever `registry.listItems('flow')` returned
- * @param logger  warned once per colliding name, naming both contenders
+ * Two `runtime` contenders tie on both rules and keep arrival order. The boot
+ * hydration registers every stored row under the one bare-name slot, so the
+ * stored rows bring at most one tenant row per name into this list. Without a
+ * reader nothing is packaged, so two packages shipping one bare name tie the
+ * same way — the fail-closed composition gives up rule 2 rather than rank by
+ * a body's own claim.
+ *
+ * [#20864] Which contender is `package` is the loader's set's answer, asked
+ * ONCE per contested name so every contender of that name is judged against
+ * one answer — see {@link describeFlowContender}. A name with one contender
+ * asks nothing: precedence decides nothing there.
+ *
+ * @param items              whatever `registry.listItems('flow')` returned
+ * @param logger             warned once per colliding name, naming both contenders
+ * @param packagedFlowOwner  the loader's set — the boot pull passes the engine's
+ *                           `packagedFlowOwner`; absent, no contender is packaged
  */
 export function resolveFlowPrecedence(
     items: readonly unknown[],
     logger?: { warn(message: string, meta?: unknown): void },
+    packagedFlowOwner?: PackagedFlowSource,
 ): FlowPrecedenceWinner[] {
     // Group by bare name, remembering arrival order for a stable tie-break.
-    const groups = new Map<string, Array<{ definition: unknown; contender: FlowContender; index: number }>>();
+    const groups = new Map<string, Array<{ definition: unknown; index: number }>>();
     const order: string[] = [];
     items.forEach((item, index) => {
         const name = (item as { name?: unknown } | null | undefined)?.name;
@@ -177,22 +250,33 @@ export function resolveFlowPrecedence(
             groups.set(name, group);
             order.push(name);
         }
-        group.push({ definition: item, contender: describeFlowContender(item), index });
+        group.push({ definition: item, index });
     });
 
     const winners: FlowPrecedenceWinner[] = [];
     for (const name of order) {
-        const group = groups.get(name)!;
-        if (group.length === 1) {
-            winners.push({ name, definition: group[0].definition });
+        const members = groups.get(name)!;
+        if (members.length === 1) {
+            winners.push({ name, definition: members[0].definition });
             continue;
         }
 
+        const owner = loaderSetOwner(packagedFlowOwner, name);
+        const group = members.map((member) => ({
+            ...member,
+            contender: classifyContender(member.definition, owner),
+        }));
         const ranked = [...group].sort((a, b) => {
             const byRank = precedenceRank(a.contender) - precedenceRank(b.contender);
             if (byRank !== 0) return byRank;
-            const byPackage = (a.contender.packageId ?? '').localeCompare(b.contender.packageId ?? '');
-            if (byPackage !== 0) return byPackage;
+            // [#20864] Rule 2 is WITHIN `package` only, as stated above. A
+            // `runtime` contender's id is the body's own bytes, kept for
+            // display — letting it order tenant rows would hand the armed
+            // slot back to the stamps the loader's set just stopped trusting.
+            if (a.contender.source === 'package') {
+                const byPackage = (a.contender.packageId ?? '').localeCompare(b.contender.packageId ?? '');
+                if (byPackage !== 0) return byPackage;
+            }
             // Fully-tied bodies: keep arrival order so the result is still total.
             return a.index - b.index;
         });

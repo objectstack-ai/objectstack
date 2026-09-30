@@ -63,6 +63,7 @@
     "ui/ElementRepeaterProps",
     "ui/ElementTextInputProps",
     "ui/ElementTextProps",
+    "ui/EmptyState",
     "ui/ExpressionBindableTextKey",
     "ui/FormButtonConfig",
     "ui/FormField",
