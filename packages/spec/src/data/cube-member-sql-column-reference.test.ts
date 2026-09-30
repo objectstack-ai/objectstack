@@ -6,14 +6,16 @@
  * expressions" carried to the cube layer; ADR-0049 enforce-or-remove).
  *
  * What is pinned here, door by door:
- *   1. The accept set: a bare identifier, a dotted identifier path, and `'*'`
- *      on a `count` measure parse byte-identically to before.
+ *   1. The accept set the ruling's execution parameters name — a bare
+ *      identifier, a dotted identifier path, and `'*'` — parses
+ *      byte-identically to before, on a measure and a dimension alike.
  *   2. The refusal: every other value — an expression, a quoted or
  *      `$`-prefixed spelling, an empty string, a broken path — is refused at
  *      `…sql` with the prescription, whose first sentence states the contract
  *      and whose body names the ADR-0021 dataset form.
- *   3. `'*'` belongs to a count: on any other measure type, and on a
- *      dimension, it is refused with its own sentence.
+ *   3. The rule is a `pattern` in the published JSON Schema too, so a
+ *      document validated against `json-schema/**` is judged as the parse
+ *      judges it.
  *   4. Every door that carries a cube refuses it: `CubeSchema`, the
  *      `analytics_cube` write-door binding, `defineCube()` and `defineStack()`
  *      (the last with its STACK_SCHEMA_INVALID / 422 envelope).
@@ -32,6 +34,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 import { MIGRATIONS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../migrations/registry';
@@ -53,7 +56,7 @@ const DONE_RATE_EXPRESSION = "SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) *
 
 const METRIC_FIRST_SENTENCE =
   "`measures.<metric>.sql` is a column reference: a field of the cube's object (`amount`), a "
-  + "relationship path ending in one (`account.amount`), or `'*'` on a `count` measure.";
+  + "relationship path ending in one (`account.amount`), or `'*'` for a count.";
 const DIMENSION_FIRST_SENTENCE =
   "`dimensions.<dimension>.sql` is a column reference: a field of the cube's object (`status`) "
   + 'or a relationship path ending in one (`account.industry`).';
@@ -96,7 +99,7 @@ const refusalOf = (schema: { safeParse: (v: unknown) => { success: boolean; erro
 };
 
 describe('cube member sql — the accept set is unchanged for every column reference', () => {
-  it('a measure admits a bare column, a relationship path, and `*` on a count — parsed byte-identically', () => {
+  it('a measure admits a bare column, a relationship path, and `*` — parsed byte-identically', () => {
     const admitted = [
       { label: 'Total', type: 'sum', sql: 'amount' },
       { label: 'Account total', type: 'sum', sql: 'account.amount' },
@@ -113,7 +116,8 @@ describe('cube member sql — the accept set is unchanged for every column refer
   });
 
   it('a dimension admits a bare column and a relationship path — parsed byte-identically', () => {
-    for (const sql of ['status', 'account.industry', 'account.owner.region', '_private']) {
+    // `'*'` is in the accept set the execution parameters name for both members.
+    for (const sql of ['status', 'account.industry', 'account.owner.region', '_private', '*']) {
       const dim = { label: 'D', type: 'string', sql };
       const r = DimensionSchema.safeParse(dim);
       expect(r.success, sql).toBe(true);
@@ -127,7 +131,7 @@ describe('cube member sql — an expression is refused at parse, with the prescr
     for (const sql of EXPRESSIONS) {
       const issues = refusalOf(MetricSchema, { label: 'M', type: 'number', sql });
       expect(issues, sql).toHaveLength(1);
-      expect(issues[0]!.code).toBe('custom');
+      expect(issues[0]!.code).toBe('invalid_format');
       expect(issues[0]!.path).toEqual(['sql']);
       expect(issues[0]!.message.startsWith(METRIC_FIRST_SENTENCE), sql).toBe(true);
       expect(issues[0]!.message).toMatch(EXPRESSION_PRESCRIPTION);
@@ -147,7 +151,7 @@ describe('cube member sql — an expression is refused at parse, with the prescr
     for (const sql of EXPRESSIONS) {
       const issues = refusalOf(DimensionSchema, { label: 'D', type: 'string', sql });
       expect(issues, sql).toHaveLength(1);
-      expect(issues[0]!.code).toBe('custom');
+      expect(issues[0]!.code).toBe('invalid_format');
       expect(issues[0]!.path).toEqual(['sql']);
       expect(issues[0]!.message.startsWith(DIMENSION_FIRST_SENTENCE), sql).toBe(true);
       expect(issues[0]!.message).toMatch(EXPRESSION_PRESCRIPTION);
@@ -157,25 +161,19 @@ describe('cube member sql — an expression is refused at parse, with the prescr
   });
 });
 
-describe("cube member sql — `'*'` is a count's row wildcard", () => {
-  it('a non-count measure refuses `*` at `sql`, with its own sentence', () => {
-    for (const type of AggregationMetricType.options.filter((t) => t !== 'count')) {
-      const issues = refusalOf(MetricSchema, { label: 'M', type, sql: '*' });
-      expect(issues, type).toHaveLength(1);
-      expect(issues[0]!.code).toBe('custom');
-      expect(issues[0]!.path).toEqual(['sql']);
-      expect(issues[0]!.message).toMatch(
-        new RegExp(`^\`measures\\.<metric>\\.sql\` is \`'\\*'\` only on a \`count\` measure — .*a \`${type}\` measure has nothing to aggregate`, 's'),
-      );
-    }
-  });
-
-  it('a dimension refuses `*` — it names no column to group by', () => {
-    const issues = refusalOf(DimensionSchema, { label: 'D', type: 'string', sql: '*' });
-    expect(issues).toHaveLength(1);
-    expect(issues[0]!.path).toEqual(['sql']);
-    expect(issues[0]!.message.startsWith(DIMENSION_FIRST_SENTENCE)).toBe(true);
-    expect(issues[0]!.message).toMatch(/names no column to group by/);
+describe('cube member sql — the rule reaches the published JSON Schema as a pattern', () => {
+  it('both members carry the same `pattern` on `sql`, and it judges values as the parse does', () => {
+    const metricSql = (z.toJSONSchema(MetricSchema, { io: 'input', unrepresentable: 'any' }) as {
+      properties: Record<string, { pattern?: string }>;
+    }).properties.sql!;
+    const dimensionSql = (z.toJSONSchema(DimensionSchema, { io: 'input', unrepresentable: 'any' }) as {
+      properties: Record<string, { pattern?: string }>;
+    }).properties.sql!;
+    expect(metricSql.pattern).toBeDefined();
+    expect(dimensionSql.pattern).toBe(metricSql.pattern);
+    const pattern = new RegExp(metricSql.pattern!);
+    for (const sql of ['amount', 'account.amount', '*']) expect(pattern.test(sql), sql).toBe(true);
+    for (const sql of EXPRESSIONS) expect(pattern.test(sql), sql).toBe(false);
   });
 });
 
@@ -191,8 +189,8 @@ describe('cube member sql — every door that carries a cube refuses an expressi
       dimensions: { ...CUBE.dimensions, bucket: { label: 'Bucket', type: 'string', sql: "CASE WHEN a > 0 THEN 'x' END" } },
     });
     expect(issues.map((i) => [i.code, i.path])).toEqual([
-      ['custom', ['measures', 'done_rate', 'sql']],
-      ['custom', ['dimensions', 'bucket', 'sql']],
+      ['invalid_format', ['measures', 'done_rate', 'sql']],
+      ['invalid_format', ['dimensions', 'bucket', 'sql']],
     ]);
   });
 

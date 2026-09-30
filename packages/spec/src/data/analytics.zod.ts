@@ -198,19 +198,22 @@ const CUBE_DIMENSION_NAME_REMOVED = cubeMemberNameRemoved('dimensions.<dimension
  * "zero raw SQL / zero raw expressions" carried from the dataset layer down to
  * the cube members it compiles to; ADR-0049 enforce-or-remove).
  *
- * Admitted, and parsed byte-identically to before:
+ * Admitted, on a measure and a dimension alike, and parsed byte-identically to
+ * before — the accept set the ruling's execution parameters name:
  * - a column of the cube's object — `amount`;
  * - a relationship path of bare identifiers ending in one — `account.amount`,
  *   `account.owner.region` — the chain
  *   `NativeSQLStrategy#qualifyAndRegisterJoin` lowers into its LEFT JOINs;
- * - on a `count` measure only, the row wildcard `'*'` (checked on
- *   {@link MetricSchema}, which sees the member's `type`).
+ * - the row wildcard `'*'`, the form a `count` measure uses.
  *
- * {@link CUBE_MEMBER_COLUMN_PATH} is the pattern the readers already use to
- * tell a column path from an expression — `IDENTIFIER_PATH` in
+ * The identifier half of {@link CUBE_MEMBER_SQL} is the pattern the readers
+ * already use to tell a column path from an expression — `IDENTIFIER_PATH` in
  * `native-sql-strategy.ts`, and the field-level read gate's bare-identifier /
  * identifier-path pair in `analytics-service.ts` — so the contract now admits
- * exactly the values those readers resolve to fields.
+ * exactly the values those readers resolve to fields (and `'*'`, which reads
+ * no field value). It is a `.regex()`, not a refinement, so the published JSON
+ * Schema carries the same rule as a `pattern`: a document validated against
+ * `json-schema/**` is judged as the parse judges it.
  *
  * Refused at parse: everything else — `CASE WHEN …`, `SUM(…) / COUNT(*)`, a
  * quoted identifier, a `$`-prefixed spelling, an empty string. Such a value
@@ -231,7 +234,7 @@ const CUBE_DIMENSION_NAME_REMOVED = cubeMemberNameRemoved('dimensions.<dimension
  * cube that met this parse, and their deletion is the services lane's
  * follow-up, not this schema's.
  */
-const CUBE_MEMBER_COLUMN_PATH = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/;
+const CUBE_MEMBER_SQL = /^(?:\*|[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)$/;
 
 const CUBE_MEMBER_SQL_RETIRED =
   'A SQL expression there was retired in @objectstack/spec 17 (ADR-0021 zero raw expressions; '
@@ -241,7 +244,7 @@ const CUBE_MEMBER_SQL_RETIRED =
 
 const CUBE_METRIC_SQL_EXPRESSION_REFUSED =
   '`measures.<metric>.sql` is a column reference: a field of the cube\'s object (`amount`), a '
-  + 'relationship path ending in one (`account.amount`), or `\'*\'` on a `count` measure. '
+  + 'relationship path ending in one (`account.amount`), or `\'*\'` for a count. '
   + `${CUBE_MEMBER_SQL_RETIRED} Name the column the measure aggregates, or declare the derived `
   + 'value on an ADR-0021 dataset, where the platform judges every field it reads: a conditional '
   + 'count or sum is a dataset measure with its own structured `filter` '
@@ -251,22 +254,12 @@ const CUBE_METRIC_SQL_EXPRESSION_REFUSED =
   + '\'task_count\'] }, format: \'0.0%\' }` — a 0–1 fraction, which the `%` pattern displays as a '
   + 'percentage).';
 
-const cubeMetricSqlStarRefused = (type: string) =>
-  '`measures.<metric>.sql` is `\'*\'` only on a `count` measure — `\'*\'` counts rows and names no '
-  + `column, so a \`${type}\` measure has nothing to aggregate. Name the column it aggregates `
-  + '(`amount`, or `account.amount` across a relationship), or declare the measure `type: \'count\'`.';
-
-const cubeDimensionSqlRefused = (value: string) => (
-  value === '*'
-    ? '`dimensions.<dimension>.sql` is a column reference: a field of the cube\'s object (`status`) '
-      + 'or a relationship path ending in one (`account.industry`). `\'*\'` counts rows on a `count` '
-      + 'measure and names no column to group by — name the column.'
-    : '`dimensions.<dimension>.sql` is a column reference: a field of the cube\'s object (`status`) '
-      + `or a relationship path ending in one (\`account.industry\`). ${CUBE_MEMBER_SQL_RETIRED} `
-      + 'Group by the column itself. A bucket computed over a column\'s values (a CASE over them) '
-      + 'has no expression form in the cube layer or the dataset layer: keep the bucket as a field '
-      + 'of the object, and name that field here or in an ADR-0021 dataset dimension\'s `field`.'
-);
+const CUBE_DIMENSION_SQL_EXPRESSION_REFUSED =
+  '`dimensions.<dimension>.sql` is a column reference: a field of the cube\'s object (`status`) '
+  + `or a relationship path ending in one (\`account.industry\`). ${CUBE_MEMBER_SQL_RETIRED} `
+  + 'Group by the column itself. A bucket computed over a column\'s values (a CASE over them) '
+  + 'has no expression form in the cube layer or the dataset layer: keep the bucket as a field '
+  + 'of the object, and name that field here or in an ADR-0021 dataset dimension\'s `field`.';
 
 /**
  * Metric Schema
@@ -300,7 +293,7 @@ export const MetricSchema = lazySchema(() => strictObject(
       // ADR-0021 dataset measure's structured `filter` (#10411). A third
       // channel this text used to name — folding the condition into the
       // metric's own `sql` expression — went with #20943: a member's `sql` is
-      // a column reference (see `CUBE_MEMBER_COLUMN_PATH`). The nested
+      // a column reference (see `CUBE_MEMBER_SQL`). The nested
       // `strictObject` the key carried (closed by #4001 batch D) is gone with
       // it — strictness on a shape nothing reads was fake compliance either way.
       filters:
@@ -327,16 +320,13 @@ export const MetricSchema = lazySchema(() => strictObject(
 
     /**
      * The column the measure aggregates — a field of the cube's object, a
-     * relationship path ending in one, or `'*'` on a `count`. A SQL expression
-     * is refused at parse (#20943, ruling D; see `CUBE_MEMBER_COLUMN_PATH`):
-     * a derived value is declared on an ADR-0021 dataset instead.
+     * relationship path ending in one, or `'*'` for a count. A SQL expression
+     * is refused at parse (#20943, ruling D; see `CUBE_MEMBER_SQL`): a derived
+     * value is declared on an ADR-0021 dataset instead.
      */
-    sql: z.string().superRefine((value, ctx) => {
-      if (value === '*' || CUBE_MEMBER_COLUMN_PATH.test(value)) return;
-      ctx.addIssue({ code: 'custom', message: CUBE_METRIC_SQL_EXPRESSION_REFUSED });
-    }).describe(
+    sql: z.string().regex(CUBE_MEMBER_SQL, { error: () => CUBE_METRIC_SQL_EXPRESSION_REFUSED }).describe(
       'Column reference: a field of the cube\'s object ("amount"), a relationship path ending in one '
-      + '("account.amount"), or "*" on a count measure. Never a SQL expression: a derived value is '
+      + '("account.amount"), or "*" for a count. Never a SQL expression: a derived value is '
       + 'declared on an ADR-0021 dataset (a measure-scoped filter, or derived: { op, of }).',
     ),
 
@@ -359,14 +349,7 @@ export const MetricSchema = lazySchema(() => strictObject(
       + 'Relayed verbatim as fields[].format on POST /analytics/query results, and on the measure by GET /analytics/meta.',
     ),
   },
-).superRefine((metric, ctx) => {
-  // [#20943] `'*'` is the row wildcard of a COUNT. Every other aggregate needs
-  // a column: `SUM(*)` is no statement any dialect runs, so a non-count `'*'`
-  // is refused here, where the member's `type` is in view.
-  if (metric.sql === '*' && metric.type !== 'count') {
-    ctx.addIssue({ code: 'custom', path: ['sql'], message: cubeMetricSqlStarRefused(metric.type) });
-  }
-}));
+));
 
 /**
  * Dimension Schema
@@ -401,13 +384,11 @@ export const DimensionSchema = lazySchema(() => strictObject(
 
     /**
      * The column the dimension groups by — a field of the cube's object, or a
-     * relationship path ending in one. A SQL expression is refused at parse
-     * (#20943, ruling D; see `CUBE_MEMBER_COLUMN_PATH`).
+     * relationship path ending in one (`'*'` is admitted with the measure's
+     * accept set). A SQL expression is refused at parse (#20943, ruling D; see
+     * `CUBE_MEMBER_SQL`).
      */
-    sql: z.string().superRefine((value, ctx) => {
-      if (CUBE_MEMBER_COLUMN_PATH.test(value)) return;
-      ctx.addIssue({ code: 'custom', message: cubeDimensionSqlRefused(value) });
-    }).describe(
+    sql: z.string().regex(CUBE_MEMBER_SQL, { error: () => CUBE_DIMENSION_SQL_EXPRESSION_REFUSED }).describe(
       'Column reference: a field of the cube\'s object ("status") or a relationship path ending in one '
       + '("account.industry"). Never a SQL expression.',
     ),
