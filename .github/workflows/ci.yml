@@ -2438,8 +2438,8 @@ jobs:
       #
       # ⚠️ release.yml's restore step still keys on the pin and the build script
       # alone, so the two workflows no longer share dist entries: each builds its
-      # own on a miss. That file's comment asks for the two to stay in step; which
-      # way to reconcile them is recorded on #20765.
+      # own on a miss. The narrower release key is deliberate, and that file's
+      # comment says why (#20765).
       #
       # Split restore/save where release.yml uses the combined action, because the
       # combined form's post-step saves even when the job FAILED. build-console.sh
