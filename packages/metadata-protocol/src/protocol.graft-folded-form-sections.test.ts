@@ -267,7 +267,7 @@ describe('#7134 what the save path must NOT change', () => {
         expect(parsed.sections[0]).toMatchObject({ collapsible: false, collapsed: false, columns: 1 });
         expect(parsed.sharing.enabled).toBe(false);
         const body = await storedViewBody('contact_us', authored);
-        const { isPinned: _dropped, ...declared } = authored;
+        const { isPinned: _dropped, ...declared } = authored as Record<string, unknown>;
         expect(body).toEqual(declared);
     });
 
