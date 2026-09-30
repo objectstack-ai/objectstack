@@ -18,8 +18,6 @@
  */
 
 export const zhCNGeneratedSourceHashes: Readonly<Record<string, string>> = {
-  "metadataForms.field.fields.useGrouping.helpText": "95a35c561c81aff0",
-  "metadataForms.field.fields.useGrouping.label": "ac793405441ca0ab",
   "objects.sys_account._actions.link_social.params.provider.options.apple": "cfdc41e15ed6699b",
   "objects.sys_account._actions.link_social.params.provider.options.discord": "12f931cc062e76ae",
   "objects.sys_account._actions.link_social.params.provider.options.facebook": "7eea009178f5b807",

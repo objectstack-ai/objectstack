@@ -581,8 +581,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Número de dígitos decimales"
       },
       useGrouping: {
-        label: "Use Grouping",
-        helpText: "Digit grouping (thousands separators) in displayed values. Unset: the renderer decides; an untouched switch writes nothing, so it reads off even where the renderer groups. Off: never grouped, e.g. a year or an ID. On: always grouped."
+        label: "Separador de miles",
+        helpText: "Agrupación de dígitos (separador de miles) en los valores mostrados. Sin definir: lo decide el renderizador; un interruptor que no se ha tocado no escribe nada, así que aparece desactivado aunque el renderizador agrupe. Desactivado: nunca se agrupa, p. ej., un año o un ID. Activado: siempre se agrupa."
       },
       currencyConfig: {
         label: "Configuración de moneda",

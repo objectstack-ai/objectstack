@@ -581,8 +581,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "小数部分位数"
       },
       useGrouping: {
-        label: "Use Grouping",
-        helpText: "Digit grouping (thousands separators) in displayed values. Unset: the renderer decides; an untouched switch writes nothing, so it reads off even where the renderer groups. Off: never grouped, e.g. a year or an ID. On: always grouped."
+        label: "千位分隔符",
+        helpText: "显示值时的数字分组（千位分隔符）。未设置：由渲染端决定；未改动过的开关不写入任何值，所以即使渲染端会分组，它也显示为关闭。关闭：从不分组，例如年份或 ID。开启：始终分组。"
       },
       currencyConfig: {
         label: "货币配置",
