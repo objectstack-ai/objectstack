@@ -30,13 +30,14 @@
  * | `system`     | the injected columns are all `readonly` save `owner_id`, which |
  * |              | the security middleware refuses (403) when it names anyone     |
  * |              | but the caller and the caller holds no transfer grant          |
- * | `hidden`     | the injected hidden columns are all `readonly` too             |
  *
- * The `system` and `hidden` rows are the card's, and they reach further than
- * those behaviours do: an AUTHOR-declared `system: true` or `hidden: true`
- * field that is not `readonly` is stored by the import like any other. They
- * are kept as the card states them; the gap is reported rather than decided
- * here.
+ * `hidden` is NOT an exclusion: an author-declared `hidden: true` field that
+ * is writable is stored by the import, so it is a column ([#18386] ruling,
+ * Q2 C). The injected hidden columns are `readonly`, so the `readonly` row
+ * keeps them out.
+ *
+ * Field-level security narrows the rest to what the caller may WRITE — see
+ * {@link resolveTemplateProjection}.
  *
  * An explicit `?fields=` list is honoured exactly as asked: the caller named
  * the columns, so no rule narrows them (the export treats `?fields=` the same).
@@ -69,6 +70,7 @@ import {
   SINGLE_OPTION_TYPES,
   isMultiValueField,
 } from '@objectstack/spec/data';
+import type { ISecurityService, SecurityContext } from '@objectstack/spec/contracts';
 import { buildFieldMetaMap, type ExportFieldMeta } from './export-format.js';
 import { loadExcelJs, type Workbook, type Worksheet } from './xlsx-module.js';
 
@@ -78,7 +80,6 @@ import { loadExcelJs, type Workbook, type Worksheet } from './xlsx-module.js';
 export interface TemplateFieldDef {
   type?: unknown;
   readonly?: unknown;
-  hidden?: unknown;
   system?: unknown;
   required?: unknown;
   defaultValue?: unknown;
@@ -89,7 +90,7 @@ export interface TemplateFieldDef {
 /** One exclusion of the template's column rule. */
 export interface TemplateColumnExclusion {
   /** Stable id, one per row of the column-rule table in the module header. */
-  readonly id: 'system' | 'hidden' | 'readonly' | 'computed' | 'autonumber';
+  readonly id: 'system' | 'readonly' | 'computed' | 'autonumber';
   /** Does this rule keep the field out of the template? */
   readonly excludes: (def: TemplateFieldDef) => boolean;
 }
@@ -100,7 +101,6 @@ export interface TemplateColumnExclusion {
  */
 export const TEMPLATE_COLUMN_EXCLUSIONS: readonly TemplateColumnExclusion[] = Object.freeze([
   { id: 'system', excludes: (def) => def.system === true },
-  { id: 'hidden', excludes: (def) => def.hidden === true },
   { id: 'readonly', excludes: (def) => def.readonly === true },
   { id: 'computed', excludes: (def) => def.type === 'formula' || def.type === 'summary' },
   { id: 'autonumber', excludes: (def) => def.type === 'autonumber' },
@@ -156,6 +156,47 @@ export function templateColumns(schema: unknown, opts: TemplateColumnsOptions = 
     out.push(name);
   }
   return out;
+}
+
+// ── field-level security ────────────────────────────────────────────
+
+/**
+ * Which field-level-security projection narrowed the columns: `writable` (the
+ * security service's write projection), `readable` (its read projection — the
+ * contract's soft-fail case, which the response states), or `none` (no
+ * projection applies: no security service, or an explicit `?fields=`).
+ */
+export type TemplateProjectionSource = 'writable' | 'readable' | 'none';
+
+export type TemplateProjection =
+  | { source: 'writable' | 'readable'; permitted: ReadonlySet<string> }
+  | { source: 'none' }
+  | { source: 'unanswered' };
+
+/**
+ * Ask the security service which fields the template may offer.
+ *
+ * `getWritableFields` first: the fields a write may name without the write
+ * gate refusing the row. A service without it, or one that gives no answer,
+ * is the contract's soft-fail case — the READ projection narrows instead, and
+ * `readable` obliges the caller to say so. `unanswered`: a service is present
+ * and gave neither answer, so the caller refuses rather than widen silently.
+ */
+export async function resolveTemplateProjection(
+  security: Partial<Pick<ISecurityService, 'getWritableFields' | 'getReadableFields'>> | undefined,
+  objectName: string,
+  context: SecurityContext | undefined,
+): Promise<TemplateProjection> {
+  if (!security) return { source: 'none' };
+  if (typeof security.getWritableFields === 'function') {
+    const writable = await security.getWritableFields(objectName, context);
+    if (Array.isArray(writable)) return { source: 'writable', permitted: new Set(writable) };
+  }
+  if (typeof security.getReadableFields === 'function') {
+    const readable = await security.getReadableFields(objectName, context);
+    if (Array.isArray(readable)) return { source: 'readable', permitted: new Set(readable) };
+  }
+  return { source: 'unanswered' };
 }
 
 /**
@@ -267,6 +308,8 @@ export interface TemplateText {
   instructionsSheet: string;
   filenameSuffix: string;
   notes: readonly string[];
+  /** The note stating the soft-fail: the columns are the READ projection. */
+  readProjectionNote: string;
   headings: readonly [string, string, string, string, string];
   required: string;
   optional: string;
@@ -307,6 +350,8 @@ const EN: TemplateText = {
       + 'replace it or delete it before you import, or it is imported as a record.',
     'Columns marked * are required: a row that leaves one of them blank is refused.',
   ],
+  readProjectionNote: 'These columns are the fields you can read: this deployment cannot say which fields you can edit. '
+    + 'A row that fills a field you can read but not edit is refused.',
   headings: ['Column', 'Field', 'Type', 'Required', 'How to fill it'],
   required: 'Yes',
   optional: 'No',
@@ -353,6 +398,7 @@ const ZH: TemplateText = {
     '在「模板」工作表中每行填写一条记录,从第 2 行开始。第 2 行是每一列的示例值:导入前请替换或删除,否则它会作为一条记录被导入。',
     '带 * 的列为必填:其中任一列留空的行会被拒绝。',
   ],
+  readProjectionNote: '这些列是你可读的字段:当前部署无法判断你可编辑哪些字段。填写了可读但不可编辑字段的行会被拒绝。',
   headings: ['列', '字段', '类型', '必填', '填写方式'],
   required: '是',
   optional: '否',
@@ -580,6 +626,8 @@ const DROPDOWN_FIRST_COLUMN = 7;
 
 export interface BuildTemplateOptions {
   locale?: string;
+  /** `readable` adds the note that states the soft-fail. */
+  projection?: TemplateProjectionSource;
 }
 
 /**
@@ -611,7 +659,8 @@ export async function buildImportTemplateWorkbook(
   });
 
   // Instructions: notes, then one row per column.
-  text.notes.forEach((note, i) => { guide.getCell(i + 1, 1).value = note; });
+  const notes = opts.projection === 'readable' ? [...text.notes, text.readProjectionNote] : text.notes;
+  notes.forEach((note, i) => { guide.getCell(i + 1, 1).value = note; });
   const headingRow = guide.getRow(INSTRUCTIONS_TABLE_HEADER_ROW);
   text.headings.forEach((h, i) => { headingRow.getCell(i + 1).value = h; });
   headingRow.font = { bold: true };

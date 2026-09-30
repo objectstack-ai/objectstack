@@ -360,8 +360,10 @@ import {
     buildImportTemplateWorkbook,
     describeTemplateColumns,
     readTemplateMode,
+    resolveTemplateProjection,
     templateColumns,
     templateText,
+    type TemplateProjectionSource,
 } from './import-template.js';
 import { enrichOpenApiWithEndpoints } from './openapi-endpoints.js';
 import { buildBuiltinPaths } from './openapi-builtin-paths.js';
@@ -10047,20 +10049,11 @@ export class RestServer {
      *
      * Columns: an explicit `?fields=` is honoured as asked; otherwise
      * `templateColumns` over the object as this caller reads it, narrowed by
-     * the security service's field projection.
-     *
-     * ⚠️ That projection is the READ one (`getReadableFields`). The card asks
-     * for the fields the caller may WRITE, and the security service answers no
-     * such question: its contract (`ISecurityService`) carries a readable-field
-     * projection and nothing for writes, and the write-side field mask lives
-     * inside `@objectstack/plugin-security`. Until a write projection exists
-     * there, a field the caller may read but not edit is still a column here,
-     * and the import refuses a row that fills it (403, field write denied). The
-     * read projection is kept because it is the one this door can ask: without
-     * it the header would name a field the caller cannot even see.
-     *
-     * A security service that is present but gives no projection fails the
-     * request rather than answering an unnarrowed header.
+     * `resolveTemplateProjection` — the security service's WRITE projection,
+     * or its read projection when it has none, which `X-Export-Template-Projection`
+     * and a note on the instructions sheet then state. A security service that
+     * is present but answers neither fails the request rather than answering an
+     * unnarrowed header.
      */
     private async answerImportTemplate(
         req: any,
@@ -10098,21 +10091,21 @@ export class RestServer {
         schema = await this.translateMetaItem(req, 'object', environmentId, schema);
 
         let permitted: ReadonlySet<string> | undefined;
+        let projection: TemplateProjectionSource = 'none';
         if (!explicitFields || explicitFields.length === 0) {
             const security = await this.resolveSecurityService(environmentId, req);
-            if (security && typeof security.getReadableFields === 'function') {
-                const readable = await security.getReadableFields(objectName, context);
-                if (!Array.isArray(readable)) {
-                    // Declared 5xx: a fault, sanitised and logged — never read
-                    // as "no such object" by the message heuristics.
-                    throw Object.assign(
-                        new Error('The security service gave no field projection, so the import template '
-                            + 'cannot tell which columns this caller may see.'),
-                        { status: 500, code: 'INTERNAL_ERROR' },
-                    );
-                }
-                permitted = new Set(readable);
+            const answer = await resolveTemplateProjection(security, objectName, context);
+            if (answer.source === 'unanswered') {
+                // Declared 5xx: a fault, sanitised and logged — never read
+                // as "no such object" by the message heuristics.
+                throw Object.assign(
+                    new Error('The security service gave no field projection, so the import template '
+                        + 'cannot tell which columns this caller may write.'),
+                    { status: 500, code: 'INTERNAL_ERROR' },
+                );
             }
+            if (answer.source !== 'none') permitted = answer.permitted;
+            projection = answer.source;
         }
         const fields = templateColumns(schema, { explicitFields, permitted });
 
@@ -10139,7 +10132,7 @@ export class RestServer {
         const i18n = await this.resolveI18nService(environmentId, req).catch(() => undefined);
         const locale = this.extractLocale(req, i18n);
         const columns = describeTemplateColumns(schema, fields, { locale, referenceLabels });
-        const workbook = await buildImportTemplateWorkbook(columns, { locale });
+        const workbook = await buildImportTemplateWorkbook(columns, { locale, projection });
         const bytes = Buffer.from(await workbook.xlsx.writeBuffer());
 
         const timezone = typeof context?.timezone === 'string' && context.timezone ? String(context.timezone) : undefined;
@@ -10150,6 +10143,7 @@ export class RestServer {
         ));
         res.header('X-Export-Format', 'xlsx');
         res.header('X-Export-Template', 'true');
+        res.header('X-Export-Template-Projection', projection);
         res.header('Cache-Control', 'no-store');
         res.write(bytes);
         res.end();

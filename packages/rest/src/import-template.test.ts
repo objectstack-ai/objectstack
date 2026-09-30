@@ -24,6 +24,7 @@ import {
   describeTemplateColumns,
   isTemplateRequired,
   readTemplateMode,
+  resolveTemplateProjection,
   templateColumns,
   templateText,
 } from './import-template.js';
@@ -53,8 +54,8 @@ function objectWith(extra: Record<string, Record<string, unknown>>): { name: str
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('templateColumns — the column rule, row by row', () => {
-  it('declares the five exclusion rows, in the table\'s order', () => {
-    expect(TEMPLATE_COLUMN_EXCLUSIONS.map((r) => r.id)).toEqual(['system', 'hidden', 'readonly', 'computed', 'autonumber']);
+  it('declares the four exclusion rows, in the table\'s order', () => {
+    expect(TEMPLATE_COLUMN_EXCLUSIONS.map((r) => r.id)).toEqual(['system', 'readonly', 'computed', 'autonumber']);
   });
 
   it('starting point: every schema field is a candidate (a plain field of each kind is kept)', () => {
@@ -73,8 +74,10 @@ describe('templateColumns — the column rule, row by row', () => {
       .toEqual(['title']);
   });
 
-  it('hidden: a `hidden: true` field is excluded', () => {
-    expect(templateColumns(objectWith({ secret_note: { type: 'text', hidden: true } }))).toEqual(['title']);
+  it('hidden: a writable `hidden: true` field is KEPT — the import stores it', () => {
+    expect(templateColumns(objectWith({ secret_note: { type: 'text', hidden: true } }))).toEqual(['title', 'secret_note']);
+    // …and a hidden field that is also readonly stays out, by the readonly row.
+    expect(templateColumns(objectWith({ org: { type: 'text', hidden: true, readonly: true } }))).toEqual(['title']);
   });
 
   it('readonly: a `readonly: true` field is excluded', () => {
@@ -119,6 +122,48 @@ describe('templateColumns — the column rule, row by row', () => {
   it('reads the array `fields` shape too, by each entry\'s own name', () => {
     const schema = { fields: [{ name: 'a', type: 'text' }, { name: 'b', type: 'text', readonly: true }, { name: 'c', type: 'number' }] };
     expect(templateColumns(schema)).toEqual(['a', 'c']);
+  });
+});
+
+describe('resolveTemplateProjection — the write projection, and the stated fallback', () => {
+  const ctx = { userId: 'u1' };
+
+  it('asks getWritableFields first, and does not consult the read projection when it answers', async () => {
+    let readAsked = false;
+    const answer = await resolveTemplateProjection({
+      getWritableFields: async () => ['title'],
+      getReadableFields: async () => { readAsked = true; return ['title', 'locked']; },
+    }, 'proj', ctx);
+    expect(answer).toEqual({ source: 'writable', permitted: new Set(['title']) });
+    expect(readAsked).toBe(false);
+  });
+
+  it('a service without getWritableFields: the read projection, marked `readable` so the response states it', async () => {
+    const answer = await resolveTemplateProjection({ getReadableFields: async () => ['title', 'locked'] }, 'proj', ctx);
+    expect(answer).toEqual({ source: 'readable', permitted: new Set(['title', 'locked']) });
+  });
+
+  it('a write projection that gives no answer falls back the same way', async () => {
+    const answer = await resolveTemplateProjection({
+      getWritableFields: async () => undefined,
+      getReadableFields: async () => ['title'],
+    }, 'proj', ctx);
+    expect(answer.source).toBe('readable');
+  });
+
+  it('`[]` from getWritableFields is a real answer — nothing writable — never a fallback', async () => {
+    const answer = await resolveTemplateProjection({
+      getWritableFields: async () => [],
+      getReadableFields: async () => ['title'],
+    }, 'proj', ctx);
+    expect(answer).toEqual({ source: 'writable', permitted: new Set() });
+  });
+
+  it('no security service: no projection applies; a service that answers neither: unanswered', async () => {
+    expect(await resolveTemplateProjection(undefined, 'proj', ctx)).toEqual({ source: 'none' });
+    expect(await resolveTemplateProjection({ getReadableFields: async () => undefined }, 'proj', ctx))
+      .toEqual({ source: 'unanswered' });
+    expect(await resolveTemplateProjection({}, 'proj', ctx)).toEqual({ source: 'unanswered' });
   });
 });
 
@@ -410,6 +455,19 @@ describe('buildImportTemplateWorkbook — read back', () => {
     });
     expect(cols.find((c) => c.field === 'name')?.textFormat).toBe(true);
     expect(cols.find((c) => c.field === 'amount')?.textFormat).toBe(false);
+  });
+
+  it('the read-projection fallback is stated on the instructions sheet; the write projection adds no note', async () => {
+    const cols = describeTemplateColumns(KITCHEN_SINK, templateColumns(KITCHEN_SINK), { locale: 'en' });
+    const notesOf = async (projection: 'writable' | 'readable' | 'none', locale = 'en') => {
+      const wb = await buildImportTemplateWorkbook(cols, { locale, projection });
+      const guide = (await loadXlsxWorkbook(Buffer.from(await wb.xlsx.writeBuffer()))).worksheets[1];
+      return [1, 2, 3].map((r) => guide.getCell(r, 1).value);
+    };
+    expect((await notesOf('readable'))[2]).toBe(templateText('en').readProjectionNote);
+    expect((await notesOf('readable', 'zh-CN'))[2]).toBe(templateText('zh-CN').readProjectionNote);
+    expect((await notesOf('writable'))[2]).toBeNull();
+    expect((await notesOf('none'))[2]).toBeNull();
   });
 
   it('zh-CN: the sheets, headings and boolean dropdown are Chinese', async () => {

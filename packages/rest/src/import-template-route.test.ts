@@ -146,6 +146,8 @@ describe('?template=true — the import template, through the real stack', () =>
     expect(out.status()).toBe(200);
     expect(out.headers['Content-Type']).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     expect(out.headers['X-Export-Template']).toBe('true');
+    // No security service composed: no field-level projection applies.
+    expect(out.headers['X-Export-Template-Projection']).toBe('none');
     expect(out.headers['Content-Disposition']).toMatch(/^attachment; filename="deal-template-\d{8}-\d{6}\.xlsx"/);
     expect(findData).not.toHaveBeenCalled();
     const { wb } = await headerRow(out.body());
@@ -167,16 +169,17 @@ describe('?template=true — the import template, through the real stack', () =>
     const { get } = await boot();
     const out = await get({ template: 'true' });
     const { wb, header } = await headerRow(out.body());
-    expect(header).toEqual(['Title *', 'Stage', 'Amount', 'Hot', 'Tags', 'Close date', 'Account', 'Salary']);
+    // `secret_note` is `hidden: true` and writable, so it is a column.
+    expect(header).toEqual(['Title *', 'Stage', 'Hidden note', 'Amount', 'Hot', 'Tags', 'Close date', 'Account', 'Salary']);
     const fields = (wb.worksheets[1].getColumn(2).values as unknown[]).slice(5, 5 + header.length);
-    expect(fields).toEqual(['title', 'stage', 'amount', 'hot', 'tags', 'close_date', 'account', 'salary']);
+    expect(fields).toEqual(['title', 'stage', 'secret_note', 'amount', 'hot', 'tags', 'close_date', 'account', 'salary']);
   });
 
   it('the lookup column names its target by the target object\'s label', async () => {
     const { get } = await boot();
     const wb = await loadXlsxWorkbook((await get({ template: 'true' })).body());
-    const howToFill = String(wb.worksheets[1].getCell('E11').value);
-    expect(wb.worksheets[1].getCell('B11').value).toBe('account');
+    const howToFill = String(wb.worksheets[1].getCell('E12').value);
+    expect(wb.worksheets[1].getCell('B12').value).toBe('account');
     expect(howToFill).toContain('客户');
   });
 
@@ -210,22 +213,37 @@ describe('?template=true — the import template, through the real stack', () =>
   });
 });
 
-describe('?template=true — field-level security (the security service\'s projection)', () => {
-  it('a field the projection leaves out is absent; one it admits is present', async () => {
+describe('?template=true — field-level security: the WRITE projection', () => {
+  // `salary` is readable and NOT editable for this caller; `amount` is neither.
+  const READABLE = ['title', 'stage', 'secret_note', 'hot', 'tags', 'close_date', 'account', 'salary'];
+  const WRITABLE = ['title', 'stage', 'secret_note', 'hot', 'tags', 'close_date', 'account'];
+
+  it('a field the caller may read but not edit is absent, and the response names the write projection', async () => {
     const { get } = await boot({
-      security: {
-        canExport: async () => true,
-        getReadableFields: async () => ['title', 'stage', 'amount', 'hot', 'tags', 'close_date', 'account'],
-      },
+      security: { canExport: async () => true, getReadableFields: async () => READABLE, getWritableFields: async () => WRITABLE },
     });
-    const { header } = await headerRow((await get({ template: 'true' })).body());
+    const out = await get({ template: 'true' });
+    const { wb, header } = await headerRow(out.body());
     expect(header).not.toContain('Salary');
-    expect(header).toContain('Amount');
+    expect(header).not.toContain('Amount');
+    expect(header).toContain('Account');
+    expect(out.headers['X-Export-Template-Projection']).toBe('writable');
+    expect(wb.worksheets[1].getCell(3, 1).value).toBeNull();
   });
 
-  it('a security service that answers no projection fails the request instead of an unnarrowed header', async () => {
+  it('a security service without getWritableFields: narrowed by the read projection, and the response says so', async () => {
+    const { get } = await boot({ security: { canExport: async () => true, getReadableFields: async () => READABLE } });
+    const out = await get({ template: 'true' });
+    const { wb, header } = await headerRow(out.body());
+    expect(header).toContain('Salary');
+    expect(header).not.toContain('Amount');
+    expect(out.headers['X-Export-Template-Projection']).toBe('readable');
+    expect(String(wb.worksheets[1].getCell(3, 1).value)).toContain('cannot say which fields you can edit');
+  });
+
+  it('a security service that answers neither projection fails the request instead of an unnarrowed header', async () => {
     const { get } = await boot({
-      security: { canExport: async () => true, getReadableFields: async () => undefined },
+      security: { canExport: async () => true, getWritableFields: async () => undefined, getReadableFields: async () => undefined },
     });
     const out = await get({ template: 'true' });
     expect(out.status()).toBe(500);
@@ -316,7 +334,9 @@ describe('?template=true — the template filled in and imported back', () => {
     expect(report).toMatchObject({ total: 1, ok: 1, errors: 0, created: 1 });
 
     const [stored] = await engine.find('deal', {});
-    expect(stored).toMatchObject({ title: 'Sample', stage: 'open', amount: 1, hot: true, tags: ['vip', 'new'], salary: 1 });
+    expect(stored).toMatchObject({
+      title: 'Sample', stage: 'open', secret_note: 'Sample', amount: 1, hot: true, tags: ['vip', 'new'], salary: 1,
+    });
     expect(String(stored.close_date)).toContain('2026-01-31');
   });
 });

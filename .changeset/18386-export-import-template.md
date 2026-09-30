@@ -11,13 +11,17 @@ answers an `.xlsx` workbook with no data rows; `template=false`, or no
 `template` parameter, answers the export exactly as before, byte for byte.
 
 - **Columns.** The fields an import stores: every field of the object except
-  those marked `system`, `hidden` or `readonly`, and `formula`, `summary` and
-  `autonumber` fields, in the order the object declares them. The seven columns
-  the platform adds to every object (`organization_id`, `created_at`,
-  `created_by`, `updated_at`, `updated_by`, `owner_id`,
-  `owning_business_unit_id`) are never template columns. A field the caller's
-  field-level security does not let them read is left out. An explicit
-  `?fields=` list is used as sent.
+  those marked `system` or `readonly`, and `formula`, `summary` and
+  `autonumber` fields, in the order the object declares them. A `hidden` field
+  that can be written is a column. The seven columns the platform adds to every
+  object (`organization_id`, `created_at`, `created_by`, `updated_at`,
+  `updated_by`, `owner_id`, `owning_business_unit_id`) are never template
+  columns. A field the caller's field-level security does not let them edit is
+  left out. If the security service cannot say which fields the caller can edit,
+  the columns are narrowed by the fields the caller can read instead. The
+  instructions sheet then says so, and the `X-Export-Template-Projection`
+  response header reads `readable` instead of `writable` (`none` when no
+  field-level security applies). An explicit `?fields=` list is used as sent.
 - **First sheet.** The header row, with ` *` after each field that is required
   and has no default value, and one example row to replace or delete. Select,
   radio and boolean columns carry a dropdown.
