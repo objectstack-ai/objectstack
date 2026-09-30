@@ -21,6 +21,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { validateJsxPages } from '@objectstack/lint';
+import { SDUI_MANIFEST_SERVICE } from '@objectstack/metadata-protocol';
 import {
   CONSOLE_SDUI_MANIFEST,
   JSX_PARSE_LEVEL_ONLY_RULE,
@@ -579,8 +580,7 @@ describe('registerDeploymentSduiManifest — `os serve` hands the save door its 
     }
   });
 
-  it('`os serve` registers it under the save door\'s key, from the served config\'s directory, once', async () => {
-    const { SDUI_MANIFEST_SERVICE } = await import('@objectstack/metadata-protocol');
+  it('`os serve` registers it under the save door\'s key, from the served config\'s directory, once', () => {
     expect(SDUI_MANIFEST_SERVICE).toBe('sdui-manifest');
     const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'commands', 'serve.ts'), 'utf8');
     const calls = source.match(/registerDeploymentSduiManifest\(/g) ?? [];

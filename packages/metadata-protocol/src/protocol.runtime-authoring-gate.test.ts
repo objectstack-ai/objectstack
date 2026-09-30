@@ -38,6 +38,7 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 import { validateSemanticRoles } from '@objectstack/lint';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import type { MetadataAuthoringChannel } from './protocol.js';
+import { SDUI_MANIFEST_SERVICE } from './index.js';
 
 /** The issue's body. Zod-valid: `approvers[].value` is just a string to the schema. */
 const brokenApprovalFlow = () => ({
@@ -1119,8 +1120,7 @@ describe('html page source compiled at the save door against the SDUI manifest (
         warn.mockRestore();
     });
 
-    it('the exported key is the one the save door reads', async () => {
-        const { SDUI_MANIFEST_SERVICE } = await import('./index.js');
+    it('the exported key is the one the save door reads', () => {
         expect(SDUI_MANIFEST_SERVICE).toBe('sdui-manifest');
     });
 
