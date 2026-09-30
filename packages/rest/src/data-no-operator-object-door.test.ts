@@ -4,9 +4,11 @@
  * [#20546] A plain object with no `$`-operator key where a scalar field's
  * value belongs is refused at the public door — `POST /api/v1/data/:object/query`
  * and `engine.find` answer `400 INVALID_FILTER` in the engine's words, naming
- * the field and the path, before any read — over a real `SqlDriver`, with the
- * two controls triage named reaching the driver as written: a `lookup` field's
- * nested relation filter and a `json` field's object comparand.
+ * the field and the path, before any read — over a real `SqlDriver`, with a
+ * file field's object reaching the driver as written. The two controls triage
+ * first named here — a `lookup` field's nested relation filter and a `json`
+ * field's object comparand — are refused by the same arm since #20745, in
+ * words of their own (`data-nested-object-door.test.ts` pins them).
  *
  * Measured on the base (`origin/main` `fbec216e2d`) through this door and the
  * engine, three rows:
@@ -14,15 +16,14 @@
  * | `where` | InMemoryDriver | SQLite | PostgreSQL 16 |
  * |:--|:--|:--|:--|
  * | `{ amount: { a: 1 } }` (number), `{ title: { a: 1 } }` (text) | 200, no rows | 400 `INVALID_FILTER`, the driver's words | same as SQLite |
- * | control `{ owner: { region: 'NA' } }` (lookup) | 200, no rows | 400, the driver's words | same |
- * | control `{ meta: { a: 1 } }` (json) | 200, one row | 400, the driver's words | same |
+ * | `{ owner: { region: 'NA' } }` (lookup), `{ meta: { a: 1 } }` (json) | 200, no rows / one row | 400, the driver's words | same — refused since #20745 |
  * | `aggregations[1].filter` `{ amount: { a: 1 } }` / `having` `{ total: { a: 1 } }` | count 0 / no group | same | same |
  *
  * The arm sits in the engine, in front of every driver, so one verdict holds
  * on each cell; InMemoryDriver's row is `@objectstack/objectql`'s
  * `engine-no-operator-object-door.test.ts` by construction (the arm answers
- * before a driver is resolved). The controls are this door's to let through,
- * not to fix: what a driver answers for them afterwards is its own, and is
+ * before a driver is resolved). The control is this door's to let through,
+ * not to fix: what a driver answers for it afterwards is its own, and is
  * pinned here only as "the driver was asked, and the words are not the arm's".
  *
  * ## The dialect axis of THIS file
@@ -61,6 +62,7 @@ const LEDGER = {
     amount: { name: 'amount', type: 'number' as const },
     owner: { name: 'owner', type: 'lookup' as const, reference: OWNER },
     meta: { name: 'meta', type: 'json' as const },
+    photo: { name: 'photo', type: 'image' as const },
   },
 };
 
@@ -103,10 +105,9 @@ const REFUSED: ReadonlyArray<readonly [string, FilterCondition, string, string]>
   ['inside $not (every row on memory, before)', { $not: { amount: { a: 1 } } }, 'amount', 'where.$not.amount'],
 ];
 
-/** name · the `where` — the two controls triage named. */
+/** name · the `where` — the accepted side: a file field (the #8371 carve-out). */
 const CONTROLS: ReadonlyArray<readonly [string, FilterCondition]> = [
-  ["a lookup field's nested relation filter", { owner: { region: 'NA' } }],
-  ["a json field's object comparand", { meta: { a: 1 } }],
+  ["a file field's object", { photo: { url: 'x' } }],
 ];
 
 /** The arm's own words, in every refusal it raises — a control must never be answered in them. */
@@ -218,7 +219,7 @@ for (const cell of CELLS) {
         expect(reads.n - before, 'no read of the object — every refusal precedes the driver').toBe(0);
       });
 
-      it('CONTROL the lookup nested relation filter and the json object comparand reach the driver, never the arm\'s refusal', async () => {
+      it('CONTROL a file field\'s object reaches the driver, never the arm\'s refusal', async () => {
         for (const [name, where] of CONTROLS) {
           const before = reads.n;
           const res = await query({ where });
