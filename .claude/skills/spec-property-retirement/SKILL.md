@@ -210,10 +210,12 @@ conversion 是消费者跟的;D3 条目是升级方的 agent 读的。三个都�
       「没有 alias 窗口,故意的」;对**默认值翻转**,只有确知输入早于翻转的 seam 才可重
       放,其余按 id 退订 `excludeConversionIds` —— `app-hidden-to-unpublished` 在 artifact
       门即如此。
-- [ ] **一步 D3 链**,在 `packages/spec/src/migrations/registry.ts` —— 把 id 加进
-      `MIGRATIONS_BY_MAJOR[N].conversionIds`,扩写该步的 `rationale`。
-      `conversion.toMajor` **必须等于**该步的 major。⚠ 没有东西直接断言「每个
-      conversion 都接进了某一步」,拼错的 id 在 replay 时被**静默跳过**;
+- [ ] **一步 D3 链**,在 `packages/spec/src/migrations/registry.ts`;`conversion.toMajor` **必须等于**该步的
+      major。**18 步**:conversion 只进 `conversions/registry.ts` 的 `MAJOR_18_CONVERSIONS`,照其头注按
+      标识符排序插入,本步 `conversionIds` 由它派生;`rationale` 只加一个 `STEP18_RATIONALE` 片段,
+      按其头注插在你 D3 semantic id 的排序位;尾部追加被两处头注点名的 merge 测试拒收。
+      **更早的步**:id 加进 `MIGRATIONS_BY_MAJOR[N].conversionIds`,扩写该步 `rationale`。⚠ 没有东西
+      直接断言「每个 conversion 都接进了某一步」,拼错的 id 在 replay 时被**静默跳过**;
       chain-replay 测试抓得到它,只因为没接线的 fixture 永远到不了自己的 `after`。
       所以把那个测试的失败读作「没接线」,不是「transform 坏了」。
 - [ ] **fixture 必须不相交 —— 两重。** 每个 fixture 都被整张表 replay,必须恰好等于
