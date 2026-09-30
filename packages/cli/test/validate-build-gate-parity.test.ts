@@ -242,6 +242,15 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
   // `test/rls-policy-authoring-admission.test.ts`.
   'The engine judge handed to the authoring-rule registry as an input — the rule that reads it is the gate':
     ['stackFilterJudge'],
+  // [#20583] The catch-all's fold: it reads the ADR-0087 conversion record a
+  // stack PRODUCER stamped on the refusal it threw at load — the refusing half
+  // of step 1b's `loaded.stackConversions`, which is a property read and so
+  // never reached this scan. It raises no finding and refuses nothing: the
+  // refusal was already thrown, the conversions were already applied by the
+  // producer, and the exit is 1 whether it answers the record or `[]`. Both
+  // commands call it (and `lint.ts`), so no parity gap sits behind it either.
+  'Carries the conversion record a stack producer stamped on the refusal it threw — the producer judged; this reads, and refuses nothing':
+    ['stackConversionsOf'],
   // [#18431] Artifact ASSEMBLY, and deliberately not a `BUILD_ONLY_GATES` row.
   // That ledger's entries are gates that cannot run read-only (they rewrite a
   // committed snapshot, or emit a sibling module); filing this one there would
