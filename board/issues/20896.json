@@ -1,0 +1,29 @@
+{
+  "number": 20896,
+  "kind": "issue",
+  "title": "The import template (`GET /data/:object/export?template=true`) sits behind the EXPORT gate (`allowExport`): a caller who may import but not export cannot download it — gate it by the import door instead? (from #18386 acceptance-6 verification)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "needs-user-decision"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T16:11:19Z",
+  "updated_at": "2026-09-30T16:12:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20896",
+  "body": "Filed by the `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`, seat post #19357), from the #18386 acceptance-6 machine verification (`5914688255`, risk 2). ⛔ Not a claim. The decision analysis is the first comment.\n\n## What the tree does (read on `main` `00a92e18da`)\n\n- `packages/rest/src/rest-server.ts:9633` and `:9636` run the export door's two gates, `enforceApiAccess(..., 'export')` and `enforceExportPermission`. They run BEFORE the `template=true` branch at `:9667`–`:9672`, so a template download needs `allowExport` on the object.\n- The import door has its own gates: `enforceApiAccess(..., 'import')` at `:9093` and `:9200`, plus the write path's create permission.\n- `allowExport` has been a deliberate segregation-of-duties axis since protocol 17 (`17.export-axis-opt-in`: \"Reading a record and taking a bulk machine-readable copy of the whole table are different privileges\"). `member_default` deliberately does not carry it, and protocol 18 removed the admin wildcard (`18.admin-export-wildcard-removed`).\n- The template carries no records: only the columns the caller may write, which `getWritableFields` narrows by field-level security, one example row of placeholder values, and the instructions sheet.\n\n## Measured (verification `5914688255`)\n\n- In `examples/app-showcase`, no permission set grants `allowExport`. An ordinary member (create and read on `showcase_task`) and the dev admin both get `403 EXPORT_NOT_PERMITTED` for `?template=true`.\n- So an importer who is not also an exporter cannot get the template. The objectui button that objectstack-ai/objectui#9600 wires to this URL would answer 403 for them.\n\n## Governing text\n\n#18386's body, 实现要点: 「权限沿用现有两道闸(`enforceApiAccess('export')` + `enforceExportPermission`)」. The template inherited the export gates by design of record, and this card asks whether that design holds.\n\nDedupe words: import template allowExport, template=true 403 EXPORT_NOT_PERMITTED, template gate import door"
+}

@@ -2,8 +2,8 @@
   "number": 20819,
   "kind": "issue",
   "title": "The packaged-base refusal for a flow (403 NOT_OVERRIDABLE) prescribes \"edit the source artifact and redeploy, or set OS_METADATA_WRITABLE\", not ADR-0126 Regime C's sanctioned path (clone, or the enable/disable switch)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:access",
     "bug",
     "domain:engine",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T08:35:46Z",
-  "updated_at": "2026-09-30T10:09:08Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-30T18:45:53Z",
+  "closed_at": "2026-09-30T18:43:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20819",
   "body": "Filing gate: **① a product defect with a measured `reach:`**, finding class **(b)** (a violated declared contract), plus the release-text exception: the sentence ships in every refusal. Filed by the `domain:cli` execution seat (#6024, session `session_01VvcEokUG1tvVxkceYfR5XB`) from the #20679 dev's report on PR #20817 (`out_of_scope_findings[0]`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\nA write to a packaged flow's locked base is refused with `403 NOT_OVERRIDABLE` and this sentence (`packages/metadata-protocol/src/protocol.ts`, `saveMetaItem`'s package door, about `:16134` at `origin/main` `d2b188fb`):\n\n> Metadata item 'flow/NAME' is provided by a code package and the type has not opted into per-org overlay writes (allowOrgOverride=false). Edit the source artifact and redeploy, or set OS_METADATA_WRITABLE to grant a runtime escape hatch. See docs/adr/0005-metadata-customization-overlay.md.\n\n- **`reach:`** `PUT /api/v1/meta/flow/:name` on the showcase's packaged flow answers exactly this. This is the checklist item `access-security.packaged-flow-write-door-parity`'s control leg, measured by the #20679 dev over a booted showcase at PR #20817's head `f5ea00604`.\n- Once PR #20817 lands, the automation doors relay the same refusal: `PUT` / `DELETE /api/v1/automation/:name`, and `POST /api/v1/automation` onto a packaged name.\n\n## The contract it violates\n\nADR-0126 §2 (`docs/adr/0126-packaged-metadata-customization-model.md:143-147`), Regime C, which is the regime of behavioral types (`flow` among them):\n\n> the packaged base is **locked** — in-place edit refused loudly at the write door, the refusal naming the sanctioned path; each packaged behavioral artifact carries an **enable/disable switch** … customization is **authoring an ordinary sibling artifact** (clone or from scratch; new machine name mandatory …\n\nand the same ADR at `:424-425`: \"a locked base that refuses loudly with the sanctioned path in the refusal message is the shape that keeps AI-written metadata from guessing\".\n\nFor a packaged flow, the sanctioned paths are the clone under a new name (§7.1; `POST /api/v1/automation/:name/clone`, served since PR #20779) and the enable/disable switch (§7.2; `POST /api/v1/automation/:name/toggle`, operator-gated per §5). The sentence names neither. It prescribes a code edit and redeploy, which an administrator of an installed package cannot do, and a runtime escape hatch that ADR-0131 D6 (managed definitions are sealed) and the maintainer's #20761 ruling (`5904938166`) both narrow. It also cites ADR-0005, not ADR-0126.\n\nSeam: `adr:ADR-0126 §2 refusal-names-the-sanctioned-path → runtime:packages/metadata-protocol/src/protocol.ts saveMetaItem / deleteMetaItem package doors (NOT_OVERRIDABLE)`, relayed by `packages/runtime/src/domains/automation.ts` once PR #20817 lands.\n\n## Not decided here\n\n- Whether the prescription becomes per-regime: a Regime C type names clone and the switch; other regimes keep their own sanctioned path.\n- Whether the `OS_METADATA_WRITABLE` sentence survives for sealed managed content at all. That is #15206's territory (ADR-0131 D6/D7/D13, open), which may rewrite this door.\n\n## Dedupe (closed included)\n\nSemantic search in `objectstack-ai/objectstack`, open and closed:\n- \"packaged flow refusal NOT_OVERRIDABLE sentence should name clone sanctioned path instead of redeploy OS_METADATA_WRITABLE\": 22 hits.\n- \"NOT_OVERRIDABLE refusal message OS_METADATA_WRITABLE escape hatch packaged flow edit source redeploy\": 24 hits.\n\nNeither query has a hit about this sentence. The nearest are #15206 (open: the sealing rework), #12156 / #12157 (closed: the clone and switch doors themselves) and #19874 (closed: a different refusal naming an unavailable remedy).\n\nDedupe words: `packaged flow refusal sanctioned path` · `NOT_OVERRIDABLE clone prescription` · `OS_METADATA_WRITABLE refusal sealed` · `Regime C refusal message`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

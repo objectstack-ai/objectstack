@@ -2,8 +2,8 @@
   "number": 20849,
   "kind": "issue",
   "title": "spec(ui): NavigationItemSchema.label says a present label \"renders verbatim and is never overwritten\" without naming the id-keyed translation layer that localizes it — state the one resolution order (objectui#11201 ruling B)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,21 +14,21 @@
     "area:devpath",
     "documentation",
     "domain:spec",
-    "needs:contract-review",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-justin"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T11:45:18Z",
-  "updated_at": "2026-09-30T14:17:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-30T15:11:50Z",
+  "closed_at": "2026-09-30T15:11:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20849",
   "body": "Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) to carry the spec half of the maintainer's ruling **B** on objectstack-ai/objectui#11201, with its clarification 「11201 按此」. ⛔ Not a claim, ⛔ not a dispatch. Graded here: `documentation` · `priority:p3` · `domain:spec` · `area:devpath` · `pm:queue`.\n\n## The ruling this carries\nThe maintainer ruled **B** on objectui#11201: the renderer's rule that translates a present label **because its text equals the target's machine name** is retired.\n\nAsked whether \"if there is an i18n translation, use it; otherwise fall back to the metadata label\" is right, the triage seat confirmed it is the platform's existing model, and the maintainer agreed (「同意」). Translation is keyed by the entry's **identity**, never by its text.\n\n## The text that caused the question\n`packages/spec/src/ui/app.zod.ts` (read on `origin/main` `30839063b5`), `BaseNavItemSchema.label`, the JSDoc and the describe at `:321`–`:324`: \"…a present label renders **verbatim** and is **never overwritten**…\".\n- The sentence was written about **inheritance**: a present label is never replaced by its target's label.\n- It does not mention translation. Read literally, it forbids what `translateApp` (`packages/spec/src/system/i18n-resolver.ts:1153`, wired as `app: translateApp` at `:1053`) already does. At the `/meta` boundary it replaces a node's label with `apps.<app>.navigation.<id>.label` for the active locale chain, keyed by the node's stable `id`.\n- `label` is also an `I18nLabelSchema`, so an inline locale map is a second identity-keyed route.\n- That gap is what made objectui#11201's question look open.\n\n## Direction\nOne wording change, in the JSDoc and the describe, stating the resolution order **once**:\n1. **A present label is the author's source text.** It is localized by the entry's own translation, keyed by its `id`:\n   - the bundle entry `apps.<app>.navigation.<id>.label` for the active locale chain (`translateApp`);\n   - else the inline locale map's value for that locale;\n   - else it is shown as authored.\n2. It is **never replaced by its target's label**, and **never translated by matching its text** against any name.\n3. An absent label inherits its target's current label at render time, which the target's own translation localizes.\n- Name `translateApp` as the one place the bundle step runs. ⛔ No second resolver in the renderer.\n- **Pin:** `translateApp` translates a node whose label equals its target's machine name **only** through the node's `id` key; with no such key, the label comes back unchanged. This locks the \"never by text\" half at the spec.\n- Regenerate whatever the describe feeds (JSON schema, reference docs) in the same PR.\n- ⛔ No schema change: the key stays `I18nLabelSchema`, optional.\n\n## Related\n- objectui#11201: the renderer half. Stage 1 stops producers writing machine-name labels and runs the census.\n- objectui#11198: the skills guide sentence. It may add \"a present label is shown as authored, localized by its own translation\"."

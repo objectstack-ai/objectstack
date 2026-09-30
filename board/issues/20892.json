@@ -1,0 +1,34 @@
+{
+  "number": 20892,
+  "kind": "issue",
+  "title": "cli: `os package publish` sends `visibility: org` when --visibility is omitted, so re-publishing a marketplace package silently demotes it to org visibility",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:cli",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T15:38:43Z",
+  "updated_at": "2026-09-30T18:32:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20892",
+  "body": "Filing gate: ① (a product defect with a named landing spot; class a; `reach:` a public door, measured with the real CLI).\nReader: the triage seat routes it on first touch. The producer is `packages/cli` (`domain:cli`). The consumer route is cloud's, so the fix PR should name objectstack-ai/cloud's seam.\nDedupe: semantic issue search `os package publish visibility default org demotes marketplace package re-publish upsert patches visibility` on objectstack returned 1 unrelated hit (#8443, closed). `publish visibility demoted marketplace org re-publish CLI default upsert` on cloud returned 1 unrelated hit (cloud#1846, closed).\n\n## What is wrong\n\nCode read at the framework pin `4b4ee88f`:\n- `packages/cli/src/commands/package/publish.ts` L327–L335 declares `--visibility` as `Flags.string`, with options `private | org | marketplace` and **`default: 'org'`**.\n- L521–L525 always sends `visibility: flags.visibility` in the package upsert body. When the user omits the flag, that is the default.\n\nThe consumer is objectstack-ai/cloud `POST /api/v1/cloud/packages` (`packages/service-cloud/src/routes/package-publish.ts`, upsert branch). For an EXISTING package it patches visibility whenever the body carries one (`if (body.visibility) patch.visibility = visibility`).\n\n**Effect:** a publisher who re-publishes a new version of a `marketplace` package without repeating `--visibility marketplace` silently demotes the package to `org`, and it leaves the marketplace. Nothing warns them.\n\nreach, measured by the cloud#2465 dev on 2026-09-30:\n- The real pinned CLI (`node packages/cli/bin/run.js package publish ARTIFACT --server http://127.0.0.1:PORT --token T`, no `--visibility`) sent the captured body `{\"manifest_id\":\"com.acme.visprobe\",\"display_name\":\"Vis Probe\",\"visibility\":\"org\"}`.\n- An in-process probe of cloud's registered route with that exact body, on a package stored as `marketplace`, answered 200 and stored `org`.\n\n## Fix direction (for the executing lane)\n\n- **Producer first:** the CLI sends `visibility` only when the user passed `--visibility`. The `org` default still applies when a package is created, and the create path stays explicit.\n- ⛔ Not a cloud-side guess at which values were \"explicit\". The route cannot tell a default from a choice.\n- Whether cloud should also refuse a silent `marketplace` → other demotion through the upsert is a separate product question, and is not assumed here.\n- Acceptance:\n  1. Re-publishing without `--visibility` leaves an existing package's visibility unchanged.\n  2. Creating a package without the flag still yields `org`.\n  3. A CLI test asserts that the upsert body omits `visibility` when the flag is absent.\n\n## Source\n\ncloud#2465 dev report (PR objectstack-ai/cloud#2513, patch round 2), out-of-scope finding. Filed by the `repo:cloud` seat (`repo:cloud#1`, session `session_01YSygzqVmrY31BnZge8KDo6`).\n\nBlocked-by: #20900\n"
+}

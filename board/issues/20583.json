@@ -2,8 +2,8 @@
   "number": 20583,
   "kind": "issue",
   "title": "[finding] the conversions defineStack applies still miss two door paths after PR #20579: os lint --json never reads the record, and a defineStack that converts then refuses drops them from --json",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,23 @@
     "area:devpath",
     "bug",
     "domain:cli",
-    "pm:blocked",
     "priority:p3"
   ],
   "assignees": [
-    "hotlong"
+    "huangyiirene"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T05:10:13Z",
-  "updated_at": "2026-09-30T10:09:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-30T20:20:58Z",
+  "closed_at": "2026-09-30T20:19:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20583",
   "body": "Filing gate: **① product defects with a measured `reach:`, one family, one card.** Finding class **(a)**, two locations.\n\nFiled by the `domain:spec` execution seat 2 (`session_014EJ1ED8X4MMrT18BhVx4tx`, seat post #18549) from the #20476 dev report `5883869680` (`out_of_scope_findings` 1 and 2). PR #20579's at-tier record `5884030605` verified both from the code and judged them correctly outside that PR. ⛔ Filed bare: routing, grading and any split belong to triage. ⛔ Not a claim.\n\n## The family\n\n`defineStack` applies the ADR-0087 D2 conversions at load, and only it knows what it converted. PR #20579 (`Fixes #20476`) records the notices on the stack it returns (`stackConversionsOf`, `@objectstack/spec`). `loadConfig` reads that record as `LoadedConfig.stackConversions`, and `os validate` / `os build` fold it into `--json` `conversions` and the `--strict` gate. Two paths still lose the record. Both depend on PR #20579 landing: until it does, the record does not exist.\n\n## Locations (read at PR #20579's head `b80dce953b`)\n\n1. **`os lint --json` never folds the record.** `packages/cli/src/commands/lint.ts:945`–`:958` fills `conversions` only from its own `normalizeStackInput` pass over `loadConfig`'s `config`. That config is already canonical, so the pass finds nothing the producer converted, and `LoadedConfig.stackConversions` is never read.\n   - `reach:` the public door `os lint --json`. The dev measured it at `ba5927f714` through `bin/run-dev.js`, on the card's case: a `defineStack` config whose `page:header` authors `description` (live conversion `page-header-subtitle-alias`). It exits 0 with `conversions: []`, and the conversion shows up only on stderr.\n   - Shape: a one-line fold, as `validate.ts` / `compile.ts` step 1b do in PR #20579.\n   - ⛔ This does not extend the one-shape rule to `os lint`. #20367's confirmation `5881817230` leaves that rule (OQ3) unopened. `stackConversionsOf` answers `[]` for an unbuilt config, so `os lint` keeps accepting exactly what it accepts today.\n   - Re-check, once PR #20579 has landed: `git grep -n stackConversions origin/main -- packages/cli/src/commands/lint.ts` should answer 0 hits. Positive control: the same grep over `packages/cli/src/commands/validate.ts` answers at least 1.\n2. **A `defineStack` that converts and then refuses loses the conversions from `--json`.** The record rides on the returned stack, and a refusing `defineStack` returns none. The doors' catch-all reports the empty list it holds, because the step 1b fold runs after `loadConfig`.\n   - `reach:` the public doors `os validate --json` / `os build --json`. Measured by the dev after the change, with the CLI from `src/`: a strict config that converts (`page:header` `description`) and then refuses (`requires: ['no-such-capability']`) exits 1 with `STACK_CAPABILITY_UNKNOWN` and `conversions: []`. The notice reaches stderr only.\n   - The run already fails loudly, so this is the smaller half. Closing it needs a second channel, such as the refusal error carrying the notices it applied. That is a shape choice for whoever takes it. The `stackConversionsOf` TSDoc in PR #20579 names this boundary.\n\n## Not in this card\n\n- The one-shape rule for serve / migrate / lint / generate: `5881817230`, OQ3, deliberately not opened.\n- `content/docs/deployment/cli.mdx`'s \"Warnings checked\" list for `os validate`, which names neither conversion notices nor the other advisory classes. It was incomplete before PR #20579 and was not made false by it: an Acceptance note on that PR, not filed.\n\n## Dedupe\n\nA REST listing of the 1,000 most recently updated issues and PRs, open and closed, grepped locally for `os lint … conversions`, `lint --json … conversion`, `stackConversionsOf`, `conversions … refus` and `refusal … conversion notice`. Its only hit is PR #20579 itself.\n\nDedupe words: `os lint --json conversions defineStack` · `stackConversionsOf lint door` · `defineStack refusal conversions empty` · `refusal error carry conversion notices`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

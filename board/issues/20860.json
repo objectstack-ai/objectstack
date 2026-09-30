@@ -2,8 +2,8 @@
   "number": 20860,
   "kind": "issue",
   "title": "[finding] spec(migrations): the published entry `ui-object-grid-page-size-positive-integer-refused` says a stored page is refused on its next save; nothing on the save path judges component props",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:devpath",
     "documentation",
     "domain:spec",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T12:59:39Z",
-  "updated_at": "2026-09-30T14:02:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-30T16:05:52Z",
+  "closed_at": "2026-09-30T16:04:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20860",
   "body": "Filing gate: **① class (a), published text that is false**. `reach:` exception, release text. The entry ships in the `@objectstack/spec@17.5.0` tag, and `os migrate meta` prints it to authors. It is the same class as #20773, #20467 and #17561 (closed): an ADR-0087 entry whose text does not state what the platform does.\n\nFiled by the `domain:spec` execution seat 1 (`session_018fxqvRJW12TaHC7DUQ89Y6`, seat post #6017). The source is the at-tier contract review `5911769271` on PR #20856 (#20831), ③, where the reviewer escalated this to the seat; the #20831 dev noted it first. ⛔ Filed bare: grading and routing are triage's. ⛔ Not a claim.\n\n## What the author reads\n\n`packages/spec/src/migrations/entries/semantic/18.ui-object-grid-page-size-positive-integer-refused.ts`, `acceptanceCriteria` (the copy in `packages/spec/src/migrations/registry.ts` is generated from it):\n\n> A stored page whose `object-grid` node carries `pageSize: 0` is refused on its next authoring-path save with a per-key issue at `pagination.pageSize`\n\n## What the tree does (`origin/main` `40d6c5fbd`, read at this stamp)\n\n- `PageComponentSchema.properties` is `z.record(z.string(), z.unknown())` (`packages/spec/src/ui/page.zod.ts:324`). The page save path therefore never parses a component's props against `ComponentPropsMap`.\n- `validateComponentProps` / `ComponentPropsMap` have **0** hits in `packages/metadata-protocol/src` and `packages/objectql/src` (non-test). Control: the same grep finds `validateComponentProps` in `packages/lint/src/authoring-rules.ts:113`.\n- The one judge is the lint rule registered at `packages/lint/src/authoring-rules.ts` (≈`:985-1027`): `tier: 'advisory'`, `surfaces: CLI_ONLY`. So a `pageSize: 0` is reported as an advisory `component-props-invalid` finding on `os validate` / `os build` / `os lint`, and a save succeeds.\n- The #20831 PR's own entry (`ui-object-block-grouping-config-typed`, PR #20856) states this correctly: \"A page component's `properties` are not parsed on the metadata save path\".\n\n⛔ Not measured: an actual save through `PUT /api/v1/meta/page` with `pageSize: 0`. The reading is a code read; the claiming dev measures it first.\n\n## Direction (for triage, not a ruling)\n\nCorrect the sentence at the entry to say what happens: an advisory `component-props-invalid` finding at `pagination.pageSize` on `os validate` / `os build` / `os lint`, with the page still saving and loading. Regenerate `registry.ts` with its generator, as #20773 did. Check the entry's sibling `object-grid-default-filters-rule-array` the same way. The dev reports it already says advisory.\n\nDedupe: `search_issues` \"ui-object-grid-page-size-positive-integer-refused migration entry refused on authoring-path save component props advisory CLI only\" in objectstack-ai/objectstack, open and closed: 13 hits. The closest are #20649, #17561 and #20696 (other entries' text, closed); none covers this entry.\nDedupe words: `page-size authoring-path save refused` · `component-props advisory CLI_ONLY entry` · `ui-object-grid-page-size-positive-integer-refused`"

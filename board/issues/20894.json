@@ -1,0 +1,35 @@
+{
+  "number": 20894,
+  "kind": "pull_request",
+  "title": "fix(pm): the queue guard's refusal remedies send a queued PR to the maintainer's manual removal, never claiming a DRAFT conversion dequeues it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T16:07:30Z",
+  "updated_at": "2026-09-30T17:05:20Z",
+  "closed_at": "2026-09-30T17:05:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-30T17:05:18Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20894",
+  "body": "Fixes #20855\n\nClause-②: no\n\n## What changed\n\n`scripts/pm/check-governed-queue-guard.mjs` prints two refusal remedies: the governed-surface leg's (`renderGuardVerdict`) and the SIZE leg's (`renderSizeVerdict`). Both refusals fire only on the `merge_group` leg (`guardVerdict` returns `warned` and `sizeGuardVerdict` returns `not-applicable` on `pull_request`), so the pull request they name IS in the queue. Both told a seat to \"take the pull request out of the queue: convert it back to DRAFT (disarming auto-merge alone does NOT dequeue it) and park it there\". No seat act is measured to dequeue a queued pull request, and that includes a draft conversion (`.claude/skills/pm-dispatch/references/platform-readings.md`, queue membership).\n\nStep one of both remedies now says what AGENTS.md Prime Directive #14 has said since `2d5fe76f`:\n\n- the pull request is in the queue, and no seat act is measured to take it out, disabling auto-merge and converting it to DRAFT included;\n- ask the maintainer AT ONCE to remove it from the queue by hand;\n- disable auto-merge AND convert it back to DRAFT, which disarms it so it does not re-enter once removed;\n- confirm from the remote that it is in neither the queue nor `origin/main`.\n\nThe rest of each remedy is unchanged: the approval route, both landings, and the bypass-rules option. The quote 「四件套留 draft 等人批,⛔ 不翻正式不入队」 is kept, now as the place a governed PR waits once it is out of the queue. No dequeue act is named: no GraphQL mutation and no relay op. Only printed text and its self-test move. No verdict, exit code or read changes.\n\n## The pins\n\n- **Ordering pin (moved).** The governed remedy's ordering pin now checks three positions in order: the pull-back (`ask the maintainer AT ONCE`), then `obtain an APPROVED review`, then `CLAIMING SEAT lands it from there`. It also refuses a missing phrase. The old pin compared raw `indexOf` results, and a missing phrase answers -1, which sorts first.\n- **New battery (floor 4).** `⛔ the queued pull-back: the remedy names no dequeue act a seat has`; `SELF_TEST_BATTERY_FLOOR` goes from 23 to 24. The battery collapses whitespace in each text before reading it, so a phrase wrapped across two array entries still counts as one. Its four cases:\n  1. every governed refusal kind (unapproved, unreadable, unattributed) carries the pull-back;\n  2. every size refusal kind (oversized, unreadable, no-pull) carries the same pull-back;\n  3. a control: the draft-dequeue detector fires on each of four fixtures, and every spelling it lists fires on at least one fixture;\n  4. the negative pin: no rendering (the six refusals and the `pull_request`-leg warning) matches any spelling of \"a DRAFT conversion dequeues it\".\n- Self-test: 292 → 296 cases, all passing.\n\n## Ablation (one-time; no permanent test file)\n\nBoth legs ran through `node scripts/ablation-replace.mjs` in WRAP mode, from the committed head `7f89016f9`. Each leg ran inside a script with an EXIT/INT/TERM restore trap on the absolute path.\n\n- **Leg A: the old sentence restored.** The size remedy's new step one was replaced by the sentence at `4edb61449`: anchor 1 → 0, blob `3f59569d5403` → `8bd07044a078`, on-disk count of `alone does NOT dequeue it` 1 → 2. The self-test printed `2 of 296 case(s) failed`: `every-size-refusal-kind-carries-the-SAME-pull-back`, and `NO-rendering-claims-a-DRAFT-conversion-dequeues-a-queued-PR` on the three size renderings. Restore: blob == HEAD `3f59569d5403`, `git diff HEAD` empty.\n- **Leg B: the negative pin alone.** The old parenthesis was appended to the governed remedy, and the new text was left intact: `1 of 296 case(s) failed`, the negative pin only, on the three governed renderings. Restore: blob == HEAD, `git diff HEAD` empty.\n- No build or `dist/` is involved, because the self-test runs this script from source.\n\n## Gates, at head `7f89016f9`\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` (no paths) derives the same 31 commands the dispatch named. All 31 exit 0, and `--ran` reconciles them: `31 derived famil(ies) accounted for — 31 run, 0 NOT-MEASURED`.\n\n- The 16 direct-node commands: `check-ci-filter-parity`, `check-closing-keyword-parity` (+ `--self-test`), `check-comment-mask-corpus` (7658 files, 0 disagree), `check-declaration-mirrors` (+ `--self-test`), `check-scripts-symbol-anchors` (+ `--self-test`), `check-self-test-wired` (+ `--self-test`), `check-self-test-workflow-commands` (+ `--self-test`), `check-whole-set-label-write` (+ `--self-test`), `pm/bare-root-worklist --self-test`, and `pm/check-governed-queue-guard --self-test` (296 cases pass).\n- `pnpm check:agent-test-spelling`, `bash32-floor`, `cli-command-ids`, `closing-target-claim`, `cross-package-test-inputs`, `driver-memory-census`, `entry-guard`, `gitlink-declared`, `nul-bytes`, `parse-guard`, `pnpm-filter-targets`, `ratchet-remedy-authority`, `refd-timer-probe` and `watch-hint-literal`.\n- `pnpm check:pm-dispatch-gates` ran detached: `dispatch-gates self-test: 1976 cases pass`, 882.7 s, exit 0.\n- NOT MEASURED locally, left to CI: the guard's own event-payload run (it is CI-measured only), 3 families that take a value from the workflow, and 1 CI job scheduled by these paths.\n- Lint, narrowed: `eslint scripts/pm/check-governed-queue-guard.mjs --no-inline-config --format json` read 1 file with 0 errors and 0 warnings. The effective config for this file has no `parserOptions.project`, and its two rules (`no-restricted-imports`, `comment-swallow/no-code-inside-block-comment`) are per-file, so this diff cannot move the verdict on any untouched file.\n- A control-byte scan of the file came back clean (`grep -naP` exit 1).\n\n## Publishing\n\n`scripts/pm/**` ships in no package's `files[]`, so this PR has no changeset.\n\n## Acceptance notes\n\n- `scripts/pm/check-governed-merges.mjs:773-774` is a header comment, not printed text, and it still says \"Disarming alone does not dequeue: converting the PR back to draft is what removes it from the merge queue.\" That file is outside this card's file surface, so it is not edited here. Carrier: none named.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01KTZmMfzVzjNvyaLyQ8mHvg)_\n"
+}

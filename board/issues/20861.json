@@ -2,8 +2,8 @@
   "number": 20861,
   "kind": "issue",
   "title": "plugin-auth: `no_sign_in_account_at_boot` still fires at ERROR on hosted kernels whose platform-SSO button is hidden (the owner signs in through the cloud handoff, which the gate cannot see)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:identity",
     "bug",
     "domain:services",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T13:00:09Z",
-  "updated_at": "2026-09-30T14:03:08Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-30T16:34:05Z",
+  "closed_at": "2026-09-30T16:30:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20861",
   "body": "Filing gate: ① (product defect with a named landing spot; `finding`, class a, `reach:` a named real producer).\nReader: the triage seat routes it on first touch (the gate is in `plugin-auth`, `domain:services`). The executing lane then decides the fix shape.\nDedupe: semantic issue search `no_sign_in_account_at_boot false error delegated sign-in path host handoff SSO` on objectstack returned 2 hits, both closed: #15074 (the parent, below) and #9653 (unrelated). The same on cloud with `platform_sso_enabled hidden sign-in button owner handoff` returned 2 hits: cloud#2437 (the source) and cloud#1683 (unrelated).\n\n## What is wrong\n\n#15074 was fixed by `2c87a48f` (PR #17941): the boot report is suppressed when `getPublicConfig()` shows a delegated sign-in path, meaning `ssoEnforced`, a non-empty `socialProviders`, or enterprise SSO with an IdP row. On a hosted cloud kernel that path is normally the platform-SSO OIDC provider (`objectstack-cloud`), and the report is correctly quiet there. objectstack-ai/cloud PR #2504 pins that case.\n\nOne population is still reported falsely: environments whose owner used the cloud console action **\"Hide ObjectStack Sign-in\"** (`disable_platform_sso`, `packages/service-tenant/src/objects/sys-environment.object.ts` in objectstack-ai/cloud, which writes `platform_sso_enabled = false`).\n- The action only hides the login-page button. Its own description says env-native login is unaffected.\n- The hosted kernel then wires no `oidcProviders`.\n- The owner still enters through the cloud handoff (`sso_as_owner` → `sso-handoff-issue` → `sso-exchange` in cloud's `auth-proxy-plugin.ts`). That path never writes a `sys_account` row.\n- So an SSO-only owner (a `sys_user` row, zero `sys_account` rows) on such an environment makes every kernel rebuild log `ERROR [auth] no_sign_in_account_at_boot: … NOBODY CAN SIGN IN, and the deployment CANNOT BE RECOVERED FROM INSIDE …`, while the owner signs in normally. That is the #15074 harm (a false ERROR that drowns real alerts), on a smaller population.\n\nreach: named producer, the console action above. Measured by the cloud#2437 dev at framework `4b4ee88f`: with `platform_sso_enabled` false in the hosted-kernel e2e harness, the rebuild logs the ERROR line above (the mutation leg of cloud PR #2504's test: 3 failed / 1 passed). The number of environments with the button hidden is NOT MEASURED (no control-plane access).\n\n## Where the fix sits\n\nThe gate's `SignInPathWiring` has no fact a host can use to declare a delegated sign-in path that is not a login-page provider. The candidate shape, for the executing lane to confirm: let the host declare that humans reach this deployment through a host-owned handoff, and treat that like the other delegated paths.\n- ⛔ Not a cloud-side workaround (log filtering or a level override).\n- ⛔ Not re-registering a hidden provider just to satisfy the gate: that would make the public config lie about what the login page offers.\n\n## Source\n\nobjectstack-ai/cloud#2437 item 2, re-check report 5911753456 on that card; objectstack-ai/cloud PR #2504. Filed by the `repo:cloud` seat (`repo:cloud#1`, session `session_01YSygzqVmrY31BnZge8KDo6`)."

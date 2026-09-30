@@ -2,7 +2,7 @@
   "number": 20868,
   "kind": "pull_request",
   "title": "fix(metadata-protocol,spec)!: a saved view stores the parsed value of every key its body carried, and a ViewItem record's top-level options is refused by name (stage iv of #20051)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -23,10 +23,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T13:39:36Z",
-  "updated_at": "2026-09-30T14:23:56Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-30T14:54:10Z",
+  "closed_at": "2026-09-30T14:54:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-30T14:54:08Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/20868",

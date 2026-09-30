@@ -1,0 +1,32 @@
+{
+  "number": 20919,
+  "kind": "issue",
+  "title": "connector sync, stage ② of #20281: an executor in service-automation pulls a `mapping` whose `connectorSource` names a rest/openapi connector and writes through the import runner's upsert-by-match-key",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "domain:services",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T18:26:16Z",
+  "updated_at": "2026-09-30T19:58:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20919",
+  "body": "Filed by the `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`, seat post #19357), as the maintainer ruling A on #20281 (`5904845660`) directs: \"files the stage cards as it claims\". Stage ① (spec) landed as PR #20903 → `0efbdc3421`. ⛔ Filed unassigned and unlabelled: routing and grading are triage's. The executor lives in `service-automation`, which the ruling names because it holds the connector registry. ⛔ Not a claim.\n\n## What stage ① put on `main`\n\n- **`mapping.connectorSource`:** `connector` (the connector name), `action` (the read action), optional `input`, optional `recordsPath` (omitted means `body`), and optional `watermark { field, param }` for a timestamp-incremental pull.\n  - It is declared ahead of its reader. The ledger rows are `planned`, with `authorWarn` on the container.\n  - It has no cadence key (a `job` drives it: stage ③) and no credential (ADR-0097 static credentials on the connector instance).\n- **The 14 `syncConfig.*` / `fieldMappings.*` keys left `connector`:** tombstones, D2 `connector-sync-keys-removed`, D3 `connector-sync-keys-retired`.\n- **`packages/spec/docs/SYNC_ARCHITECTURE.md`** says the binding is declared and not yet executed.\n\n## The ruling's execution parameters for this stage (maintainer-ruled; overturnable on #20281)\n\n- **Write path:** `runImport`'s upsert-by-match-key (`packages/rest/src/import-runner.ts`).\n  - ⚠️ **The dependency direction is measured BEFORE claiming.** `service-automation` would reach into `@objectstack/rest`. If that inverts a layer, the runner's core moves to a shared package. ⛔ Never a copy. The claiming seat states which on #20281 before it builds.\n- **Source:** v1 accepts `rest` / `openapi` connectors only, and resolving the `connector` name is this stage's job. It is a one-way pull, full or watermark-incremental.\n- **Stop valve** (triage `5859569880`, note 3): if the executor needs a credential or scheduling convention the spec does not declare, stop and report. Do not invent one.\n- **Open from stage ①** (report `5916207829`): no pagination in v1, so if the target APIs need paging, the stop valve trips. Where the watermark is stored is this stage's to decide from measurement. The acting organization is stage ③'s.\n\n## Text that becomes true, or must be corrected, when this lands\n\n- The `mapping.json` ledger rows go `planned` → `live`, citing the executor.\n- `SYNC_ARCHITECTURE.md` stops saying \"not yet executed\". Its two stale Best Practices bullets (\"Test authentication and sync flows\", \"Document field mappings\") get rewritten.\n- The D3 entry's \"validated at authoring\" becomes true for the provider restriction once this stage resolves the name.\n- `connector.mdx`'s dangling \"section below\", generated from the `connector.zod.ts` header, is fixed at the next header touch.\n- `packages/lint` comments that say the `mapping` ledger warns on nothing (`authoring-rules.ts`, `runtime-gate.inert-type-writes.test.ts` group C) are updated.\n\nBlocked-by: none. Stage ① has landed.\n\nDedupe words: connector sync executor, connectorSource executor, mapping pull runImport, service-automation sync"
+}

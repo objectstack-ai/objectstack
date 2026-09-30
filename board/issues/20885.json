@@ -1,0 +1,37 @@
+{
+  "number": 20885,
+  "kind": "pull_request",
+  "title": "fix(core): readsAsWallClock answers from the spec's ClockTimeValueSchema",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T15:08:50Z",
+  "updated_at": "2026-09-30T16:04:04Z",
+  "closed_at": "2026-09-30T16:04:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-30T16:04:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20885",
+  "body": "Fixes #20771\nClause-②: no\n\n`readsAsWallClock`, the private wall-clock half of core's `time` rule in `packages/core/src/utils/temporal-comparand.ts`, now answers `ClockTimeValueSchema.safeParse(s).success`. That schema is the spec's `time` stored form from `@objectstack/spec/data`. The private regex is gone, and no second regex was written. Core already imported `@objectstack/spec/data` in this file, so no dependency edge was added.\n\n**Shape taken: delegation, not the fallback.** `packages/spec` is untouched, and no spec export was added, so `Clause-②: no` holds. The parse path was measured before choosing (below): it costs about 30 ns more per accepted string and about 1.2 µs more per refused one. At realistic counts that is microseconds per request, so the fallback (a spec-exported regex) was not needed.\n\n## Measurements (scratch scripts, not committed)\n\n- **Same boolean for every string.** 8,655,360 generated strings: hours in 1-, 2- and 3-digit spellings plus non-ASCII digits, `:` or `.` separators, minutes in 1- and 2-digit spellings, 12 seconds/fraction variants, 14 suffixes (`Z`, `z`, `+00:00`, `+0000`, `-00:00`, `+08:00`, `-0530`, `+2359`, `+24:00`, a space, a newline, `T`, a letter, none), with and without a leading space. The old private regex (at base `6c96b37be8`) and `ClockTimeValueSchema.safeParse` agreed on all of them: 8,640 accepted by both, 8,646,720 refused by both, 0 by one side only. The schema is a bare `z.string().regex(...)`, with no transform, refinement or brand.\n- **Cost.** 2,000,000 calls per leg, three rounds. Accepted strings: old 134 to 154 ns, new 169 to 173 ns. Refused strings: old 41 to 43 ns, new 1,215 to 1,303 ns (zod builds the issue list). On a mixed sample (half accepted, half refused): old 94 to 124 ns, new 734 to 796 ns. For scale, 20 time comparands in one request cost about 15 µs in total at the mixed rate.\n- **Where it runs.** `isUninterpretableTemporalComparand('time', ...)` is asked per comparand by the engine's comparand door and the analytics check, and also per written value by the record validator's `time` arm and per cell by the import's `time` coercion. So it is not only a per-request cost. At the mixed rate, 10,000 rows with 5 `time` fields cost about 33 ms more (39 ms in total). At the accepted rate, which is what a valid import mostly hits, they cost about 1.5 ms more.\n- **Lean entry.** At `5d3ff119cf`, `check:lean-entry-closure` is green: `@objectstack/objectql/core` keeps its 15 admitted packages (import 201 modules, require 199). `check:dts-closure` is green: 71/71 declaration files. The import names a specifier core already loads.\n\n## Pins\n\nIn `packages/core/src/utils/temporal-comparand.test.ts`, block `[#20771]`:\n\n- `23:59:59.999` is read;\n- `24:00` and `10:00Z` are refused.\n\nThey are asserted through `isUninterpretableTemporalComparand('time', ...)`, because `readsAsWallClock` is private. None of the three strings is an ISO instant, so the instant half cannot rescue one, and the verdict is the wall-clock half's alone. Exporting `readsAsWallClock` would widen core's public barrel (`export *` from this module) and turn this into `Clause-②: yes`. The existing temporal-comparand pins are unchanged and green.\n\n## Ablation\n\nThe implementation was committed first (`45ba267683`). Every leg went through `scripts/ablation-replace.mjs` in wrap mode.\n\n- **Core side, source-resolved (the test imports core src relatively).**\n  - `readsAsWallClock` widened to a bare `HH:MM` prefix test: 1 red, the `24:00` / `10:00Z` pin.\n  - `readsAsWallClock` made to answer false: 4 red. They are the `23:59:59.999` pin and three existing wall-clock pins (`[#20264]`, `[#20549]`, `[#20480]`).\n  - Each was restored: the blob equals HEAD and `git diff HEAD` is empty.\n- **Spec side, dist-resolved.** This leg proves the delegation is live.\n  - `ClockTimeValueSchema` was made to accept a trailing `Z` again, and spec was rebuilt. `scripts/ablation-dist-preflight.mjs` found the marker in 28 built files.\n  - Core's `10:00Z` pin went red (1 failed, 25 passed).\n  - Control, in the same mutated-spec window: core's function was put back to the old private regex, and all 26 passed. The old shape could not see an edit to the spec; the new one can.\n  - Restore: the source was restored, spec was rebuilt, and the preflight found the marker in none of 230 files. The tree is clean, and all 26 passed.\n\n## Verification\n\nAt head `5d3ff119cf`, which includes a merge of `origin/main` `2d5fe76f43`:\n\n- `pnpm --filter @objectstack/core test`: 61 files, 1795 passed.\n- `pnpm --filter @objectstack/core typecheck`: exit 0.\n- objectql `engine-time-write-zone-less` and `engine-temporal-comparand-door`: 19 passed, against core dist rebuilt at this head.\n- `dispatch-gates --commands`: 61 families. `--ran`: 59 run with exit 0, 2 NOT MEASURED, 0 unrun.\n  - NOT MEASURED: `check:dual-build-cjs-loads` and `check:type-check-debt`, because their prerequisite is every workspace package built, which is beyond the foreground cap. CI builds that closure.\n- eslint, narrowed to the 2 changed `.ts` files with `eslint --no-inline-config --format json`: 2 files, 0 errors, 0 warnings.\n  - The population comes from `eslint.config.mjs`: its `**/*.{ts,...}` and `packages/**` blocks. `--print-config` resolves both files, so neither is ignored.\n  - The config enables no type-aware linting. `parserOptions` is only `ecmaVersion` and `sourceType`, so this diff cannot move a verdict on an untouched file.\n\n## Acceptance notes\n\n- `packages/core/src/utils/temporal-storage-form.ts` `canonicalTimeOfDay` carries its own wall-clock pattern with capture groups. It needs the groups to write `HH:MM:SS`, so `safeParse` cannot replace it. That is the storage rule `readsAsWallClock` mirrors. Today it admits the same set. It is outside this card's file surface, so it is recorded here and not touched. Carrier: none.\n- objectql's `isZonedTimeOfDay` (record validator) spells a zone-suffix pattern, but it judges the wall-clock half through `isUninterpretableTemporalComparand('time', ...)`, so it now reaches the spec rule too.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DEvba2nBuD4tWzfq8r8NFY)_\n"
+}

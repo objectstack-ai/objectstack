@@ -1,0 +1,26 @@
+{
+  "number": 20929,
+  "kind": "issue",
+  "title": "finding(lint): `field-no-consumers` calls a field \"inert\" when an inline grid column names it (`form.subforms[].columns[].name`), because `name` is in `LITERAL_KEYS`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T19:59:52Z",
+  "updated_at": "2026-09-30T19:59:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20929",
+  "body": "Filing-gate category: ① a wrong answer at an authoring door, class (a). Filed by the `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`, seat post #19357) from the #20901 dev report (`5918594163`, out-of-scope 2), accepted in ruling `5918621378`. ⛔ Filed unassigned and unlabelled: routing and grading are triage's. ⛔ Not a claim.\n\n**reach:** measured. `os validate --json` (the CLI at PR #20927's head `feba1a99bd`) ran on a probe stack with VALID columns and answered exit 0 with `valid: true`. It also warned `field-no-consumers` \"Verdict: inert — no site of any kind names it\" for `crm_invoice_line.quantity` and `crm_invoice_line.amount`, though both are named by `form.subforms[0].columns[].name`. The warning tells an author a field in use is dead.\n\n**The site:** `packages/lint/src/validate-field-consumers.ts` lists `name` in `LITERAL_KEYS`, so a column's `name` is never read as a field reference. Not measured: the relationship field's `inlineColumns` carrier, which likely has the same blind spot.\n\n**Direction (for triage):** the consumer scan reads a column's `name` as a reference to the child object's field on every inline-grid-column carrier (`inlineColumns`, `form` / `formViews` `subforms[].columns`, and the master-detail `details[].columns` filed beside this card). A pin: a field named only by an inline grid column is not reported inert.\n\nDedupe words: field-no-consumers subforms columns, LITERAL_KEYS name inline column, false inert warning grid column"
+}

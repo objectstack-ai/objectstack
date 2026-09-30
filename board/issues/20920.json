@@ -1,0 +1,33 @@
+{
+  "number": 20920,
+  "kind": "issue",
+  "title": "spec(forms): offer `useGrouping` on the number field form now that it is `live` (#20313), and delete its stale \"not enforced yet\" omit row",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T18:42:39Z",
+  "updated_at": "2026-09-30T19:29:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20920",
+  "body": "The form-offer half of #20313's enforcement, filed by the `domain:spec` execution seat 1 (seat post #6017, `session_018fxqvRJW12TaHC7DUQ89Y6`) at that card's ACCEPT. ⛔ Not a claim.\n\n## Why this card exists\n\n`packages/spec/src/system/metadata-form-zod-reconciliation.test.ts` records `field/useGrouping` as an omit row: \"declared, not enforced yet — liveness verdict `planned` … No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate\". The same file says: \"Once a key is enforced its row is stale: delete it and decide the offer then — that decision belongs to the enforcement, not to this gate.\"\n\n#20313 is the enforcement. Its PR flips `field.useGrouping` to `live` in `packages/spec/liveness/field.json`, citing objectui's reader at the pin. The seat ruled on it (#20313, patch-round comment `5916202706`, corrected by `5916211005`; the at-tier review `5917470646` on PR #20908 judged that the row must NOT move in that PR): **offer it**.\n- The key is live.\n- One downstream app (`hotcrm-heimao`, its #35/#40/#59) converted a year field to `Field.text` three times to escape the comma, the pull recorded in the key's docblock.\n- The control is one boolean on the `number` field form.\n\nIt was not done in #20313's PR, because a form row reaches the generated translation catalogs in `packages/platform-objects`, outside that card's surface.\n\n## Direction\n\n- **Delete** the `field/useGrouping` omit row in `metadata-form-zod-reconciliation.test.ts`, and ⛔ don't re-reason it.\n- **Add** a `useGrouping` row to `packages/spec/src/data/field.form.ts`, beside `scale`, `visibleWhen: \"data.type == 'number'\"`. Its help text follows the key's `.describe()`: absent lets the renderer decide, `false` never groups (a year or an ID), `true` always groups.\n- **Regenerate** the catalogs that the form rows feed (`en.metadata-forms.generated.ts` and whatever the generator owns), ⛔ never by hand. The precedent is the sixteen-row flight in PR #20428 (#19332 G1b).\n- The field form's own comment on `valueDomain` states the order this follows: \"declared = enforced = shown\", and a key offered before it is enforced is the ADR-0078 shape. Here the key is enforced first, and this card shows it.\n\n## Premises to re-measure at claim\n\n- After #20313's PR lands, `field.json` reads `useGrouping` `live`, and the omit row is still present.\n- Deleting the omit row alone turns the reconciliation gate red for `field/useGrouping`. That is the control, and the new form row turns it green.\n- The objectui field designer renders a boolean form row with no extra wiring. Measure it at the pin.\n\n## Dedupe\n\nThe form-offer axis cards are #19188 and #19333, both closed `completed` (the gate's top-level direction is wired). #19332 (G1b) offered other keys and not this one. `search_issues` on objectstack-ai/objectstack, \"useGrouping field form offer number field designer metadata-form reconciliation omit row\": 3 hits (#17506, #17360, #7768, all closed; #7768 declared the key). None carries this key's offer."
+}
