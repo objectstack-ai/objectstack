@@ -6,6 +6,15 @@ import type { Cube, AnalyticsQuery } from '@objectstack/spec/data';
 // [#7117] `likePatternToGlobPattern` — the spec's one LIKE→GLOB translation, so
 // the SQL exit's wildcard rendering is not a third hand-copy of that escape.
 import { asciiCaseInsensitiveRegexSource, likePatternToGlobPattern } from '@objectstack/spec/data';
+// [ADR-0053 D-D1, amended 2026-09-30 — #5930 step 3] This face's NEW door, run at
+// the entry of {@link MemoryAnalyticsService.normalizeFilters}: the two shared
+// comparand faces every other analytics face runs (ruling #7872; #6050 B), then
+// the shared `FilterCondition → FilterCondition` lowering.
+import {
+  assertListComparandShapes,
+  lowerFilterCondition,
+  normalizeFilterComparandTypes,
+} from '@objectstack/spec/data';
 import type { InMemoryDriver } from './memory-driver.js';
 import {
   Logger,
@@ -95,6 +104,14 @@ const MONGO_TO_CUBE_OPERATOR = Object.freeze({
   // entry point is the divergence class #5374 closed for `$contains`.
   $icontains: 'icontains',
   $exists: 'set',
+  // [ADR-0053 D-D1, amended — #5930 step 3] `$null`, one of the two operators
+  // the shared lowering emits that this face did not compile (the other is the
+  // `$or` combinator, {@link ANALYTICS_FILTER_CAPABILITIES}): the NULL escape
+  // it puts around a negative-polarity leaf, and the "has a value" it leaves of
+  // a bound on the last supported day. Design §3.4's output vocabulary, and
+  // nothing wider — `$not`, `$between` (lowered away before this table is
+  // asked), `$startsWith`, `$endsWith` and `$empty` stay outside it.
+  $null: 'isNull',
 } as const);
 
 /**
@@ -107,16 +124,21 @@ type CubeOperator = (typeof MONGO_TO_CUBE_OPERATOR)[keyof typeof MONGO_TO_CUBE_O
 /**
  * [#5345] What the analytics (cube) face compiles, for the shared filter walk.
  *
- * `$and` is the one combinator: {@link MemoryAnalyticsService.flattenFilterCondition}
- * folds its branches into the same implicit-AND list the top level already is.
- * `$or` and `$not` have no expression in a flat `{member, operator, values}`
- * pipeline at all — which is why they were being skipped, and why refusing is
- * the answer here rather than a lowering nobody can write.
+ * `$and` folds its branches into the same implicit-AND list the top level
+ * already is ({@link MemoryAnalyticsService.flattenFilterCondition}). `$not` has
+ * no expression in this face's `{member, operator, values}` pipeline, which is
+ * why refusing it is the answer here rather than a lowering nobody can write.
+ *
+ * [ADR-0053 D-D1, amended — #5930 step 3] `$or` joins: the shared lowering emits
+ * it (the NULL escape around a negative-polarity leaf), so this face has to
+ * compile it, and it does — as a {@link NormalizedCubeDisjunction} each exit
+ * renders natively (mingo's `$or`, SQL's `OR`), with the boolean identities
+ * every other face gives it (`$or: []` is FALSE, a `{}` branch is TRUE).
  */
 export const ANALYTICS_FILTER_CAPABILITIES: FilterFaceCapabilities = Object.freeze({
   face: "driver-memory's analytics (cube) face",
   fieldOperators: new Set<string>(Object.keys(MONGO_TO_CUBE_OPERATOR)),
-  combinators: new Set<string>(['$and']),
+  combinators: new Set<string>(['$and', '$or']),
 });
 
 /**
@@ -154,6 +176,7 @@ export const ANALYTICS_FILTER_CAPABILITIES: FilterFaceCapabilities = Object.free
  * caller, no spec schema and no serialized form observes this triple's shape.
  */
 interface NormalizedCubeFilter {
+  readonly anyOf?: never;
   member: string;
   operator: CubeOperator;
   /**
@@ -162,6 +185,29 @@ interface NormalizedCubeFilter {
    * never here — that rule needs the resolved field path, which only an exit has.
    */
   values: unknown[];
+}
+
+/**
+ * [ADR-0053 D-D1, amended — #5930 step 3] A disjunction of conjunctions: the
+ * `$or` this face now compiles. Each branch is an entry list read exactly as
+ * the top level is — implicitly ANDed, contested members kept apart — so a
+ * branch is whatever a `$or` element flattens to, nested `$or`s included.
+ *
+ * The boolean identities are the ones every other face gives (#5322): a branch
+ * with NO entries (a `{}` element) is TRUE and makes the whole disjunction TRUE;
+ * a disjunction with NO branches (`$or: []`) is FALSE. Both exits render those
+ * two cases as constants rather than leaving them to a backend's reading of an
+ * empty operand.
+ */
+interface NormalizedCubeDisjunction {
+  readonly anyOf: ReadonlyArray<ReadonlyArray<NormalizedCubeEntry>>;
+}
+
+/** One entry of the implicitly-ANDed list `normalizeFilters` returns. */
+type NormalizedCubeEntry = NormalizedCubeFilter | NormalizedCubeDisjunction;
+
+function isDisjunction(entry: NormalizedCubeEntry): entry is NormalizedCubeDisjunction {
+  return entry.anyOf !== undefined;
 }
 
 /**
@@ -366,6 +412,12 @@ const CUBE_OPERATOR_TO_MONGO_PREDICATE: Readonly<Record<CubeOperator, MongoPredi
   // documented. The `raw.length === 0` arm keeps the old call site's reading of
   // a valueless `set` ("does it exist" → true).
   set: ({ raw }) => ((raw.length === 0 || Boolean(raw[0])) ? { $ne: null } : { $eq: null }),
+  // [ADR-0053 D-D1, amended — #5930 step 3] `$null`, the mirror of `set`: a
+  // presence flag, not a comparand, and "no value" is null or an absent key —
+  // mingo's `$eq: null` reads both, as MongoDB does. The flag is a boolean by
+  // the time it gets here (`assertFilterConditionShape` refuses anything else,
+  // #5347), so the `=== true` below is the whole choice.
+  isNull: ({ raw }) => (raw[0] === true ? { $eq: null } : { $ne: null }),
 });
 
 /**
@@ -569,6 +621,10 @@ const CUBE_OPERATOR_TO_SQL_PREDICATE: Readonly<Record<CubeOperator, SqlPredicate
   // mingo row's reading of a valueless `set`.
   set: ({ column, raw }) =>
     `${column} IS ${raw.length === 0 || Boolean(raw[0]) ? 'NOT NULL' : 'NULL'}`,
+  // [ADR-0053 D-D1, amended — #5930 step 3] `$null`, the mirror of `set` — the
+  // mingo row's `$eq: null` / `$ne: null`, spelled the way `read-scope-sql.ts`
+  // and `driver-sql` spell a null predicate.
+  isNull: ({ column, raw }) => `${column} IS ${raw[0] === true ? 'NULL' : 'NOT NULL'}`,
 });
 
 /**
@@ -1014,61 +1070,7 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     // dropped (#5345).
     const normalizedFilters = this.normalizeFilters(query);
     if (normalizedFilters.length > 0) {
-      const matchStage: Record<string, any> = {};
-      /**
-       * [#13524] Predicates for a member that already has one — see the
-       * promotion below the loop for why they cannot be assigned.
-       */
-      const contested: Record<string, any>[] = [];
-      for (const filter of normalizedFilters) {
-        const fieldPath = this.resolveFieldPath(cube, filter.member);
-        // [#5374] The operator decides the WHOLE predicate, not just its name —
-        // so `notContains` can say `{$not: {$regex: …}}` instead of being forced
-        // into `{$not: <comparand>}`, which mingo reads as no constraint at all.
-        //
-        // [#5373] `comparands` are the values as authored, in the storage form
-        // of the field they are compared against. There is no type recovery step
-        // any more, because there is no longer a stringification to recover
-        // FROM: a boolean reaches mingo as a boolean and `null` as `null`, so a
-        // predicate over `is_active` or `closed_at` selects the same rows
-        // `find()` selects instead of none / all of them.
-        const storageForm = this.storageFormFor(cube, filter.member);
-        const predicate = this.mongoPredicateBuilder(filter.operator)({
-          comparands: filter.values.map(storageForm),
-          raw: filter.values,
-          storageForm,
-          substring: (value) => this.driver.filterSubstringPattern(value),
-          // [#6520] `$icontains`' fold, from the spec's shared definition rather
-          // than from the driver's Unicode-folding `filterSubstringPattern`.
-          asciiSubstring: (value) => new RegExp(asciiCaseInsensitiveRegexSource(String(value))),
-        });
-        // [#13524] This was `matchStage[fieldPath] = …`, and the assignment was
-        // a WHOLESALE clobber — the widest member of this card's class. The two
-        // document-shaped translators lose a constraint only when two operators
-        // happen to lower onto the SAME key; here the stage is keyed by field
-        // path alone, so the second predicate on a member replaced the first
-        // ENTIRELY, for every operator pair. And `flattenFilterCondition` folds
-        // `$and` into this same flat list, so `{$and: [{name: {$contains:'a'}},
-        // {name: {$ne:'b'}}]}` — two separate nodes, not one operator map —
-        // lost a constraint too. Measured on a three-row fixture:
-        // `{name: {$contains:'a', $ne:'b'}}` aggregated ['1','3'] and its
-        // key-swapped twin ['1'], while the reference matcher said ['1'].
-        //
-        // Same rule as the translators: free member merges inline, a taken one
-        // becomes its own `$and` branch of the SAME `$match`, where both
-        // predicates survive. No ranking is needed here — unlike a contested
-        // operator key, nothing is overwritten, so which predicate sits inline
-        // changes the document's shape but never its answer.
-        if (Object.prototype.hasOwnProperty.call(matchStage, fieldPath)) {
-          contested.push({ [fieldPath]: predicate });
-        } else {
-          matchStage[fieldPath] = predicate;
-        }
-      }
-      // A field path can never BE `$and` — `resolveFieldPath` resolves cube
-      // members, and `flattenFilterCondition` refuses `$or` / `$not` and folds
-      // `$and` away before this runs — so this cannot collide with a member.
-      if (contested.length > 0) matchStage.$and = contested;
+      const matchStage = this.mongoConjunction(cube, normalizedFilters);
       if (Object.keys(matchStage).length > 0) {
         pipeline.push({ $match: matchStage });
       }
@@ -1510,20 +1512,7 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     // construction for the same reason. There is deliberately no
     // `values.length > 0` guard any more: an empty list IS a predicate, and
     // skipping the clause described the whole table (see the `in` row).
-    const whereClauses: string[] = [];
-    const normalizedFilters = this.normalizeFilters(query);
-    for (const filter of normalizedFilters) {
-      const fieldPath = this.resolveFieldPath(cube, filter.member);
-      const storageForm = this.storageFormFor(cube, filter.member);
-      whereClauses.push(this.sqlPredicateBuilder(filter.operator)({
-        column: fieldPath,
-        comparands: filter.values.map(storageForm),
-        raw: filter.values,
-        storageForm,
-        literal: (value) => this.toSqlLiteral(value),
-        globSubstring: (value) => this.toSqlLiteral(globSubstringPattern(value)),
-      }));
-    }
+    const whereClauses = this.sqlConjunction(cube, this.normalizeFilters(query));
 
     let sql = `SELECT ${selectClauses.join(', ')} FROM ${tableName}`;
     if (whereClauses.length > 0) {
@@ -1556,6 +1545,129 @@ export class MemoryAnalyticsService implements IAnalyticsService {
   // ===================================
 
   /**
+   * The mingo `$match` document one implicitly-ANDed entry list compiles to —
+   * the top-level list `normalizeFilters` returns, and (since #5930 step 3)
+   * each branch of a {@link NormalizedCubeDisjunction}, which is rendered by
+   * the same rule so a branch means exactly what a top-level list means.
+   */
+  private mongoConjunction(cube: Cube, entries: ReadonlyArray<NormalizedCubeEntry>): Record<string, any> {
+    const matchStage: Record<string, any> = {};
+    /**
+     * [#13524] Predicates for a member that already has one — see the
+     * promotion below the loop for why they cannot be assigned.
+     */
+    const contested: Record<string, any>[] = [];
+    for (const entry of entries) {
+      // [ADR-0053 D-D1, amended — #5930 step 3] A disjunction. A branch with no
+      // entries is TRUE and absorbs it: no constraint at all. A disjunction
+      // with no branches is FALSE: the explicit constant, not an empty `$or`
+      // left to the matcher's reading. Otherwise each branch compiles by this
+      // same rule and mingo's `$or` joins them — joined through `$and` beside
+      // the member predicates, since one `$match` holds a single `$or` key.
+      if (isDisjunction(entry)) {
+        if (entry.anyOf.some((branch) => branch.length === 0)) continue;
+        contested.push(
+          entry.anyOf.length === 0
+            ? { $expr: false }
+            : { $or: entry.anyOf.map((branch) => this.mongoConjunction(cube, branch)) },
+        );
+        continue;
+      }
+      const filter = entry;
+      const fieldPath = this.resolveFieldPath(cube, filter.member);
+      // [#5374] The operator decides the WHOLE predicate, not just its name —
+      // so `notContains` can say `{$not: {$regex: …}}` instead of being forced
+      // into `{$not: <comparand>}`, which mingo reads as no constraint at all.
+      //
+      // [#5373] `comparands` are the values as authored, in the storage form
+      // of the field they are compared against. There is no type recovery step
+      // any more, because there is no longer a stringification to recover
+      // FROM: a boolean reaches mingo as a boolean and `null` as `null`, so a
+      // predicate over `is_active` or `closed_at` selects the same rows
+      // `find()` selects instead of none / all of them.
+      const storageForm = this.storageFormFor(cube, filter.member);
+      const predicate = this.mongoPredicateBuilder(filter.operator)({
+        comparands: filter.values.map(storageForm),
+        raw: filter.values,
+        storageForm,
+        substring: (value) => this.driver.filterSubstringPattern(value),
+        // [#6520] `$icontains`' fold, from the spec's shared definition rather
+        // than from the driver's Unicode-folding `filterSubstringPattern`.
+        asciiSubstring: (value) => new RegExp(asciiCaseInsensitiveRegexSource(String(value))),
+      });
+      // [#13524] This was `matchStage[fieldPath] = …`, and the assignment was
+      // a WHOLESALE clobber — the widest member of this card's class. The two
+      // document-shaped translators lose a constraint only when two operators
+      // happen to lower onto the SAME key; here the stage is keyed by field
+      // path alone, so the second predicate on a member replaced the first
+      // ENTIRELY, for every operator pair. And `flattenFilterCondition` folds
+      // `$and` into this same flat list, so `{$and: [{name: {$contains:'a'}},
+      // {name: {$ne:'b'}}]}` — two separate nodes, not one operator map —
+      // lost a constraint too. Measured on a three-row fixture:
+      // `{name: {$contains:'a', $ne:'b'}}` aggregated ['1','3'] and its
+      // key-swapped twin ['1'], while the reference matcher said ['1'].
+      //
+      // Same rule as the translators: free member merges inline, a taken one
+      // becomes its own `$and` branch of the SAME `$match`, where both
+      // predicates survive. No ranking is needed here — unlike a contested
+      // operator key, nothing is overwritten, so which predicate sits inline
+      // changes the document's shape but never its answer.
+      if (Object.prototype.hasOwnProperty.call(matchStage, fieldPath)) {
+        contested.push({ [fieldPath]: predicate });
+      } else {
+        matchStage[fieldPath] = predicate;
+      }
+    }
+    // A field path can never BE `$and` — `resolveFieldPath` resolves cube
+    // members, and `flattenFilterCondition` folds `$and` away and turns `$or`
+    // into a disjunction entry before this runs — so this cannot collide with a
+    // member.
+    if (contested.length > 0) matchStage.$and = contested;
+    return matchStage;
+  }
+
+  /**
+   * The SQL clauses one implicitly-ANDed entry list compiles to, joined with
+   * `AND` by the caller — the twin of {@link mongoConjunction}, by the same
+   * rule on the same entries, so the echo describes the `$match` that ran.
+   *
+   * [ADR-0053 D-D1, amended — #5930 step 3] A disjunction renders as
+   * `(b1 OR b2 …)`, each branch parenthesised when it holds more than one
+   * clause, so no reading of it leans on `AND` binding tighter than `OR`. A
+   * branch that compiles to no clause is TRUE and drops the whole disjunction;
+   * a disjunction with no branches is `1 = 0`, the FALSE constant this exit
+   * already spells an empty `$in` with.
+   */
+  private sqlConjunction(cube: Cube, entries: ReadonlyArray<NormalizedCubeEntry>): string[] {
+    const clauses: string[] = [];
+    for (const entry of entries) {
+      if (isDisjunction(entry)) {
+        if (entry.anyOf.length === 0) {
+          clauses.push('1 = 0');
+          continue;
+        }
+        const branches = entry.anyOf.map((branch) => this.sqlConjunction(cube, branch));
+        if (branches.some((branch) => branch.length === 0)) continue;
+        clauses.push(
+          `(${branches.map((branch) => (branch.length === 1 ? branch[0] : `(${branch.join(' AND ')})`)).join(' OR ')})`,
+        );
+        continue;
+      }
+      const fieldPath = this.resolveFieldPath(cube, entry.member);
+      const storageForm = this.storageFormFor(cube, entry.member);
+      clauses.push(this.sqlPredicateBuilder(entry.operator)({
+        column: fieldPath,
+        comparands: entry.values.map(storageForm),
+        raw: entry.values,
+        storageForm,
+        literal: (value) => this.toSqlLiteral(value),
+        globSubstring: (value) => this.toSqlLiteral(globSubstringPattern(value)),
+      }));
+    }
+    return clauses;
+  }
+
+  /**
    * Normalize a query's `where` into the cube-style array the pipeline consumes.
    *
    * Accepts a MongoDB-style `FilterCondition` (per spec/data/filter.zod.ts) —
@@ -1581,16 +1693,47 @@ export class MemoryAnalyticsService implements IAnalyticsService {
    * through a lowering fires or does not fire depending on key order and on
    * which sibling branch was walked first. Both public entry points (`query()`
    * and `generateSql()`) go through this method, so both refuse identically.
+   *
+   * ## The door in front of the gate (ADR-0053 D-D1, amended — #5930 step 3)
+   *
+   * This method is also the one seam of the amendment's item 2 that did not
+   * exist before it — the face's NEW door — and it runs, in order:
+   *
+   * 1. **The two shared comparand faces** this face ran without:
+   *    `assertListComparandShapes`, then `normalizeFilterComparandTypes`, whose
+   *    RETURN is the condition read from here on (a bigint within 2^53
+   *    narrowed to its number, copy-on-write). So an `undefined` comparand —
+   *    implicit, under an operator, or as a list member — is refused
+   *    `INVALID_FILTER` / 400 as it is on every other face (ruling #7872,
+   *    #6050 B), where this face used to read it as `null`.
+   * 2. **The shared lowering**, `lowerFilterCondition`. Nothing resolves filter
+   *    tokens on this face, so it reads the comparands as authored (item 3).
+   *    It applies type-blind (item 7): the declared temporal kinds live inside
+   *    the driver and reach this face only as a storage-form conversion, and
+   *    type-blind is the reading this face's own bound copy
+   *    (`lteUpperBound`) and the driver's `find()` already give, so it moves no
+   *    answer. The lowering emits calendar strings; each exit converts them to
+   *    the field's storage form as it converts any comparand (item 6).
+   * 3. **This face's own vocabulary gate**, on the LOWERED condition — what the
+   *    face actually compiles, as a driver behind the engine seam judges the
+   *    lowered filter it receives. So a `$between` reaches the gate as the two
+   *    bounds it lowers to, and answers `find()`'s rows here too.
+   *
+   * Not an array: `where` is declared a `FilterCondition`, and an array here is
+   * left to the reading this method has always given it.
    */
-  private normalizeFilters(query: unknown): NormalizedCubeFilter[] {
+  private normalizeFilters(query: unknown): NormalizedCubeEntry[] {
     if (!query || typeof query !== 'object') return [];
 
-    const out: NormalizedCubeFilter[] = [];
+    const out: NormalizedCubeEntry[] = [];
     const where = (query as { where?: unknown }).where;
 
     if (where && typeof where === 'object' && !Array.isArray(where)) {
-      assertFilterConditionShape(where, 'where', ANALYTICS_FILTER_CAPABILITIES);
-      this.flattenFilterCondition(where as Record<string, unknown>, out, 'where');
+      assertListComparandShapes(where);
+      const admitted = normalizeFilterComparandTypes(where);
+      const lowered = lowerFilterCondition(admitted);
+      assertFilterConditionShape(lowered, 'where', ANALYTICS_FILTER_CAPABILITIES);
+      this.flattenFilterCondition(lowered as Record<string, unknown>, out, 'where');
     }
 
     return out;
@@ -1598,7 +1741,7 @@ export class MemoryAnalyticsService implements IAnalyticsService {
 
   private flattenFilterCondition(
     cond: Record<string, unknown>,
-    out: NormalizedCubeFilter[],
+    out: NormalizedCubeEntry[],
     path: string,
   ): void {
     for (const [key, raw] of Object.entries(cond)) {
@@ -1615,11 +1758,10 @@ export class MemoryAnalyticsService implements IAnalyticsService {
       // is the #3948 direction, and on an RLS read scope it is an unauthorized
       // read rather than a wrong number.
       //
-      // `undefined` falls through with it, matching the live query path, which
-      // has never distinguished the two (`normalizeFilterCondition` sends both
-      // to `toStorageForm` and lets mingo's null-equality rule decide). Agreeing
-      // with that path is the invariant (#5240); inventing a third reading of
-      // `{field: undefined}` here would break it in the other direction.
+      // [ADR-0053 D-D1, amended — #5930 step 3] `undefined` no longer reaches
+      // this walk: the shared comparand faces at the door refuse it in every
+      // comparand position, as every other face does (ruling #7872). It used to
+      // fall through here and read as `null`.
 
       // Logical combinators. `$and` folds into the same implicit-AND list; the
       // gate above has already proven it is an array of filter nodes.
@@ -1629,12 +1771,27 @@ export class MemoryAnalyticsService implements IAnalyticsService {
         }
         continue;
       }
-      // [#5345] Unreachable via normalizeFilters — the gate refuses these for
-      // this face before the lowering starts. Kept as a throw rather than left
+      // [ADR-0053 D-D1, amended — #5930 step 3] `$or` becomes ONE entry holding
+      // each branch flattened on its own — a branch is an implicitly-ANDed list
+      // exactly like the top level — so the disjunction survives to both exits
+      // instead of being folded into the conjunction around it. The gate above
+      // has proven the operand an array of filter nodes. See
+      // {@link NormalizedCubeDisjunction} for the identities.
+      if (key === '$or') {
+        const anyOf = (raw as unknown[]).map((sub, index) => {
+          const branch: NormalizedCubeEntry[] = [];
+          this.flattenFilterCondition(sub as Record<string, unknown>, branch, `${here}[${index}]`);
+          return branch;
+        });
+        out.push({ anyOf });
+        continue;
+      }
+      // [#5345] Unreachable via normalizeFilters — the gate refuses it for this
+      // face before the lowering starts. Kept as a throw rather than left
       // implicit so that the `continue` which caused #5345 cannot come back, and
       // so a future caller that lowers a condition without gating it first fails
       // loudly instead of silently widening the result set.
-      if (key === '$or' || key === '$not') {
+      if (key === '$not') {
         throw uncompilableCombinatorError(key, here, ANALYTICS_FILTER_CAPABILITIES);
       }
 

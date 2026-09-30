@@ -476,6 +476,12 @@ import {
   textComparandRefusalReason,
   VALID_AST_OPERATORS,
 } from '@objectstack/spec/data';
+// [ADR-0053 D-D1, amended 2026-09-30 — #5930 step 3] The shared lowering, run
+// on what this door admitted, before any face reads the condition — see
+// {@link normalizeAnalyticsFilterTree} (F10) and the draft preview (F11).
+import { lowerFilterCondition, type FilterLoweringOptions } from '@objectstack/spec/data';
+import type { StrategyContext } from '@objectstack/spec/contracts';
+import type { DatasetScopedStrategyContext } from './types.js';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import {
   CROSS_FIELD_COMPARISON_OPERATORS,
@@ -2352,13 +2358,84 @@ export function conjunctFieldKeys(condition: Record<string, unknown>): string[] 
  * metadata meaning one thing: the same `where` on a plain `find()` already
  * lowers at the engine door (#5329), so refusing it here would have forked the
  * product by which face read the metadata.
+ *
+ * ## The shared lowering (ADR-0053 D-D1, amended 2026-09-30 — #5930 step 3)
+ *
+ * This is the analytics `where` door's seam for F10, the amendment's item 2:
+ * the condition {@link lowerAnalyticsWhere} admitted — after both shared
+ * comparand faces, on either spelling — is lowered by `lowerFilterCondition`
+ * before {@link buildNode} reads it, so every compiler of the tree (the native
+ * SQL, the `/analytics/sql` echo, and the ObjectQL hand-off to the engine)
+ * reads one lowered condition. Filter tokens resolve upstream of every path
+ * that reaches here, so the lowering meets a resolved date macro (item 3).
+ *
+ * `lowering` is the caller's column-type reader (item 7), and it is REQUIRED,
+ * so no compile site can reach the tree without deciding it: a strategy passes
+ * the member's declared type through its context's `declaredFieldType` hook
+ * ({@link declaredDatetimeLowering}), and a position that cannot or need not
+ * read types passes {@link NO_DATETIME_COLUMNS}. {@link lowerAnalyticsWhere}
+ * itself stays un-lowered: its other readers ask about the AUTHORED condition
+ * (the keys an ad-hoc cube is minted from, the routing detectors), not about
+ * the predicate that runs.
+ *
+ * Every member reader downstream (`collectFilterLeaves`, `assertWhereFields`)
+ * reads this same lowered tree, so "the member the gate saw" stays "the column
+ * that reached SQL" — the lowering's NULL guards name the member they guard.
  */
 export function normalizeAnalyticsFilterTree(
   query: { where?: unknown } | unknown,
+  lowering: FilterLoweringOptions,
 ): NormalizedFilterNode | null {
   const condition = lowerAnalyticsWhere(query);
   if (!condition) return null;
-  return buildNode(condition);
+  return buildNode(lowerFilterCondition(condition, lowering));
+}
+
+/**
+ * [ADR-0053 D-D1, amended — #5930 step 3] The shared lowering's reader for a
+ * position that cannot, or need not, read declared types: no member is a
+ * `datetime` column, so the whole-day rule and the `$between` split rewrite
+ * nothing and every bound reaches its face as written; the NULL-polarity guards
+ * apply all the same (they do not depend on the type).
+ *
+ * Three kinds of position use it. The draft preview, which evaluates drafted
+ * rows with no schema (its own bound copy keeps the whole-day rule until its
+ * deletion card). A strategy context the host wired no `declaredFieldType` hook
+ * into — the step-2 RLS seam's reading of a guard without types, for the same
+ * reason: the rule stays with each face's own copy and no answer moves. And a
+ * reader that collects MEMBERS rather than compiling (`assertWhereFields`, the
+ * cross-object envelope check): the two type-scoped rules never change which
+ * member a leaf names.
+ */
+export const NO_DATETIME_COLUMNS: FilterLoweringOptions = Object.freeze({
+  isDatetimeColumn: () => false,
+});
+
+/**
+ * [ADR-0053 D-D1, amended — #5930 step 3] A strategy's column-type reader for
+ * the shared lowering (item 7): a `where` member is a `datetime` column when
+ * the host's declared-type hook says the column it binds against is one —
+ * `type === 'datetime'`, the test `SqlDriver` indexes `datetimeFields` by and
+ * the engine seam reads. `target` resolves a member to its (object, column)
+ * exactly as the strategy's own compile path resolves it, so the question is
+ * asked of the column the predicate will read.
+ *
+ * The hook is the context's optional `declaredFieldType` — the one
+ * `nonTextColumnResolver` asks — and a context without one gets
+ * {@link NO_DATETIME_COLUMNS}.
+ */
+export function declaredDatetimeLowering(
+  ctx: StrategyContext,
+  target: (member: string) => { object: string; field: string },
+): FilterLoweringOptions {
+  const declared = (ctx as DatasetScopedStrategyContext).declaredFieldType;
+  if (typeof declared !== 'function') return NO_DATETIME_COLUMNS;
+  return {
+    isDatetimeColumn: (member) => {
+      const { object, field } = target(member);
+      return declared.call(ctx, object, field) === 'datetime';
+    },
+  };
 }
 
 /**

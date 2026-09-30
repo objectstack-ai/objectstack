@@ -9,7 +9,7 @@
 //
 // Scope (deliberately the dataset-query subset, not a general engine):
 //   • Mongo-style `where` filters ($eq implicit, $ne/$gt/$gte/$lt/$lte/
-//     $between/$in/$nin/$contains, $and/$or/$not)
+//     $between/$in/$nin/$contains/$null, $and/$or/$not)
 //   • timeDimensions date-range filtering + granularity bucketing
 //     (day/week/month/quarter/year)
 //   • group-by dimensions; count / count_distinct / sum / avg / min / max
@@ -48,9 +48,9 @@ import { explicitDateRangeWindow } from './date-range-array-arm.js';
 // same reason: one rule, one spelling, on both faces. [#20010] And, through
 // the same gate, every other arm of the shared comparand-shape face. [#20035]
 // And the comparand-TYPE face, through the same gate again.
-import { invalidFilterError, normalizeWhereComparands } from './strategies/filter-normalizer.js';
+import { invalidFilterError, normalizeWhereComparands, NO_DATETIME_COLUMNS } from './strategies/filter-normalizer.js';
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
-import { emptyGroupValueFor, type Cube } from '@objectstack/spec/data';
+import { emptyGroupValueFor, lowerFilterCondition, type Cube } from '@objectstack/spec/data';
 
 type Row = Record<string, unknown>;
 
@@ -176,6 +176,16 @@ const PREVIEW_FIELD_OPERATORS = new Map<string, PreviewPredicate>([
     if (min == null || max == null) return false;
     return compare(value, min) >= 0 && lteBound(value, max);
   }],
+  // [ADR-0053 D-D1, amended 2026-09-30 — #5930 step 3] `$null` — the one
+  // operator the shared lowering emits that this face did not evaluate: the
+  // NULL escape it puts around a negative-polarity leaf (`$ne` of a value,
+  // `$nin`, `$notContains`), and the guard it puts on each leaf of a `$not`
+  // operand. The flag is a boolean by the time it reaches this table (the
+  // `where` door's `assertBooleanNullFlags` refused anything else), and "no
+  // value" is `null` or an absent key — the reading `formula` and
+  // `driver-memory` give it, measured against `FILTER_LOGIC_CASES`' two `$null`
+  // rows. Nothing wider joins with it: `$exists` and `$empty` stay refused.
+  ['$null', (value, expected) => (expected === true ? value == null : value != null)],
   ['$in', (value, expected) => Array.isArray(expected) && expected.some((e) => value === e || String(value) === String(e))],
   ['$nin', (value, expected) => Array.isArray(expected) && !expected.some((e) => value === e || String(value) === String(e))],
   ['$contains', (value, expected) => String(value ?? '').toLowerCase().includes(String(expected ?? '').toLowerCase())],
@@ -672,7 +682,20 @@ export function evaluateAnalyticsQueryOverRows(
   // answered EVERY row; and a bigint within 2^53 was ordered as text
   // (`{ amt: { $gt: 2n } }` lost `amt = 10`), where publish narrows it to its
   // number and serves the right rows.
-  const where = normalizeWhereComparands(query.where);
+  // [ADR-0053 D-D1, amended 2026-09-30 — #5930 step 3] Then the shared
+  // `FilterCondition → FilterCondition` lowering, on what the door admitted
+  // and before the vocabulary gate reads it — the `where` door's seam for this
+  // face (the amendment's item 2), with filter tokens already resolved by the
+  // `DatasetExecutor` that calls this evaluator (item 3). Its column-type
+  // reader is {@link NO_DATETIME_COLUMNS} (item 7): drafted rows carry no
+  // schema, so no member is read as `datetime` and {@link lteBound} keeps
+  // answering the whole-day rule as this face's own copy. A type-blind rewrite
+  // here would move one cell away from the typed drivers — `$lte` on the last
+  // supported day over a non-temporal value sorting above it. The NULL guards
+  // apply whatever the type; measured, they move only the rows this face read
+  // through `String()` — a row with no value against the text `'null'` or
+  // `'undefined'` — onto every driver's answer.
+  const where = lowerFilterCondition(normalizeWhereComparands(query.where), NO_DATETIME_COLUMNS);
   assertPreviewCanEvaluate(where);
   let filtered = rows.filter((r) => matchesWhere(r, where));
   const timeDims = query.timeDimensions ?? [];

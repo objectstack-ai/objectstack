@@ -5,6 +5,10 @@ import type { FilterCondition } from '@objectstack/spec/data';
 // at the ObjectQL merge sites by {@link assertReadScopeComparandsRunnable}, and
 // [#20018] at the end of {@link compileScopedFilterToSql} by the same function.
 import { assertListComparandShapes, normalizeFilterComparandTypes } from '@objectstack/spec/data';
+// [ADR-0053 D-D1, amended 2026-09-30 — #5930 step 3] The shared lowering, run
+// at the entry of {@link compileScopedFilterToSql}, after the placeholders
+// resolve and before any clause is compiled.
+import { lowerFilterCondition, type FilterLoweringOptions } from '@objectstack/spec/data';
 // [#20068] The `$icontains` text-comparand door: the table's discrimination and
 // its reason half, asked at {@link compileOperator}'s `$icontains` arm and at
 // the engine-bound merges through {@link assertReadScopeComparandsRunnable}.
@@ -737,6 +741,22 @@ function isFilterNode(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
 
+/**
+ * [ADR-0053 D-D1 item 7, amended 2026-09-30 — #5930 step 3] The read scope's
+ * column-type reader for the shared lowering: a column is `datetime` when the
+ * caller's declared value shape says so — the declaration both of this
+ * compiler's consumers already hand it for `$empty` (#20445), and the test
+ * `SqlDriver` indexes `datetimeFields` by. So the whole-day rule rewrites a
+ * declared `datetime` column and nothing else, and a `date`, `time` or
+ * non-temporal column compiles byte-identical to before. A caller that hands no
+ * declarations reads NO column as `datetime` — the step-2 RLS seam's reading of
+ * a guard without types, for the same reason: it moves no answer.
+ */
+function readScopeLowering(options: ReadScopeCompileOptions): FilterLoweringOptions {
+  const shape = options.declaredValueShape;
+  return { isDatetimeColumn: (field) => shape?.(field)?.type === 'datetime' };
+}
+
 function quoteIdent(name: string, kind: string): string {
   if (typeof name !== 'string' || !IDENT.test(name)) {
     throw readScopeCompileError(`[read-scope-sql] unsafe ${kind} identifier "${String(name)}" — refusing to build read scope (fail-closed).`);
@@ -758,13 +778,32 @@ export function compileScopedFilterToSql(
   // the sentence those gates give it. Held rather than raised early, the tree
   // lowered on that path is the unresolved one, and its SQL is discarded with
   // the throw. See the module header's #20075 section.
-  let lowered = filter;
+  let resolved = filter;
   let unresolvable: Error | undefined;
   try {
-    lowered = resolveReadScopePlaceholders(filter, alias, options.context);
+    resolved = resolveReadScopePlaceholders(filter, alias, options.context);
   } catch (e) {
     unresolvable = e as Error;
   }
+  // [ADR-0053 D-D1, amended 2026-09-30 — #5930 step 3] The shared
+  // `FilterCondition → FilterCondition` lowering, at this compiler's ENTRY —
+  // the read-scope seam the amendment's item 2 names — right after the scope's
+  // placeholders resolve (item 3: a `{today}` bound is widened as the day it
+  // resolves to) and before a single clause is compiled. It is what gives this
+  // face the whole-day upper bound it never applied: a bare-day `$lte` (or a
+  // `$between` maximum) on a declared `datetime` column compiles `< next-day`,
+  // in the calendar-string domain, and answers the rows `SqlDriver.find` does
+  // on the same filter. It also lays the NULL-polarity guards on as structure,
+  // which this compiler's own copies (`nullSafeNegative`,
+  // `nullSafeNegationOperand`) already answered: idempotent in rows, and
+  // removed by this face's deletion card.
+  //
+  // The shared comparand faces below still judge the scope AS WRITTEN, after
+  // compilation (#20018's order). The lowering never refuses and never turns a
+  // scope those faces refuse into one they admit, so the order moves no
+  // verdict. An RLS `using` reaches here already lowered by the RLS compile
+  // seam; lowering it again is a no-op.
+  const lowered = lowerFilterCondition(resolved, readScopeLowering(options));
   const params: unknown[] = [];
   const sql = compileNode(lowered, quotedAlias, params, options);
   // [#20018] The shared comparand faces, on the scope ALONE: the judgement the

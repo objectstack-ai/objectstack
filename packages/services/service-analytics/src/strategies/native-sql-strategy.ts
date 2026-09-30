@@ -4,6 +4,7 @@ import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contract
 import type { Cube } from '@objectstack/spec/data';
 import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext } from './types.js';
 import {
+  declaredDatetimeLowering,
   lowerAnalyticsWhere,
   normalizeAnalyticsFilterTree,
   toSqlBindValue,
@@ -437,6 +438,15 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // dataset, which is why an inferred or manifest cube compiles unchanged.
     const datasetScope = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!);
 
+    // [ADR-0053 D-D1, amended — #5930 step 3] The column-type reader the `where`
+    // door's shared lowering applies at every filter position below — the
+    // measure filters, the `where` and the dataset's own scope (item 7): a
+    // member is `datetime` when the column it binds against is declared so,
+    // asked of the SAME target `compileFilterNode` coerces for. This face's own
+    // bare-day copy (`buildFilterClause`'s `lte` arm) stays until its deletion
+    // card, and is idempotent on the lowered bound.
+    const lowering = declaredDatetimeLowering(ctx, (member) => this.resolveStorageTarget(cube, member, tableName));
+
     // Build SELECT for measures
     if (query.measures && query.measures.length > 0) {
       for (const measure of query.measures) {
@@ -449,7 +459,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
         const measureFilter = datasetScope?.measureFilters?.[measure];
         const predicate = measureFilter
           ? this.compileFilterNode(
-              normalizeAnalyticsFilterTree({ where: measureFilter }),
+              normalizeAnalyticsFilterTree({ where: measureFilter }, lowering),
               cube,
               tableName,
               joins,
@@ -467,7 +477,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // used to be dropped instead of compiled.
     const whereClauses: string[] = [];
     const filterSql = this.compileFilterNode(
-      normalizeAnalyticsFilterTree(query),
+      normalizeAnalyticsFilterTree(query, lowering),
       cube,
       tableName,
       joins,
@@ -484,7 +494,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // predicate with itself selects the same rows.
     if (datasetScope?.filter) {
       const scopeSql = this.compileFilterNode(
-        normalizeAnalyticsFilterTree({ where: datasetScope.filter }),
+        normalizeAnalyticsFilterTree({ where: datasetScope.filter }, lowering),
         cube,
         tableName,
         joins,

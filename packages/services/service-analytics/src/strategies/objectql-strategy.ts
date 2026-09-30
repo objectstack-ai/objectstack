@@ -7,8 +7,10 @@ import type { AggregationFunction, Cube } from '@objectstack/spec/data';
 import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext } from './types.js';
 import {
+  declaredDatetimeLowering,
   invalidFilterError,
   lowerAnalyticsWhere,
+  NO_DATETIME_COLUMNS,
   normalizeAnalyticsFilterTree,
   collectFilterLeaves,
   SQL_CONST_FALSE,
@@ -181,6 +183,13 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // inferred or manifest cube compiles unchanged.
     const datasetScope = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!);
 
+    // [ADR-0053 D-D1, amended — #5930 step 3] The column-type reader the `where`
+    // door's shared lowering applies at the three filter positions this path
+    // hands the engine (item 7): a member is `datetime` when the column it binds
+    // against is declared so. The engine seam lowers the same filter again with
+    // the same scope, and the lowering is idempotent.
+    const lowering = declaredDatetimeLowering(ctx, (member) => this.resolveStorageTarget(cube, member, objectName));
+
     // Build aggregations from measures.
     //
     // [#10413 phase 2] A measure's own `filter` (`stage: 'closed_won'`) lowers
@@ -198,7 +207,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         const { field, method } = this.resolveMeasureAggregation(cube, measure);
         const measureFilter = datasetScope?.measureFilters?.[measure];
         const filterCondition = measureFilter
-          ? this.filterNodeToCondition(normalizeAnalyticsFilterTree({ where: measureFilter }), cube)
+          ? this.filterNodeToCondition(normalizeAnalyticsFilterTree({ where: measureFilter }, lowering), cube)
           : null;
         aggregations.push(
           filterCondition
@@ -217,7 +226,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // Operands that cannot merge into their field's entry without one silently
     // replacing the other; ANDed in below so the engine intersects them.
     const conjuncts: Record<string, unknown>[] = [];
-    this.applyFilterNode(normalizeAnalyticsFilterTree(query), cube, filter, conjuncts);
+    this.applyFilterNode(normalizeAnalyticsFilterTree(query, lowering), cube, filter, conjuncts);
     // #3650 — and the time-dimension WINDOWS, through the SAME merge, so a
     // `dateRange` and a caller `where` bound on one field compose instead of
     // clobbering each other.
@@ -253,7 +262,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       // `null` = constrains nothing, which is the AND identity — nothing to add,
       // and nothing invented for a filter that says nothing.
       const scopeCondition = this.filterNodeToCondition(
-        normalizeAnalyticsFilterTree({ where: datasetScope.filter }),
+        normalizeAnalyticsFilterTree({ where: datasetScope.filter }, lowering),
         cube,
       );
       if (scopeCondition) conjuncts.push(scopeCondition);
@@ -439,6 +448,13 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // the same channel `execute()` reads it from, so the echo cannot drift
     // from what actually ran.
     const datasetScope = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!);
+    // [ADR-0053 D-D1, amended — #5930 step 3] The same column-type reader
+    // `execute()` hands the `where` door's shared lowering, so the echo prints
+    // the lowered bound the engine receives — a bare-day `$lte` on a `datetime`
+    // member reads `< next-day` here because that is what runs.
+    const echoLowering = declaredDatetimeLowering(ctx, (member) =>
+      this.resolveStorageTarget(cube, member, this.extractObjectName(cube)),
+    );
     const crossByDim = new Map((plan?.crossDims ?? []).map((cd) => [cd.outputName, cd]));
     const joinClauses: string[] = [];
     const dimExpr = (dim: string): string => {
@@ -479,7 +495,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         const { field, method } = this.resolveMeasureAggregation(cube, m);
         const measureFilter = datasetScope?.measureFilters?.[m];
         const predicate = measureFilter
-          ? this.renderFilterNodeSql(normalizeAnalyticsFilterTree({ where: measureFilter }), cube, params, ctx)
+          ? this.renderFilterNodeSql(normalizeAnalyticsFilterTree({ where: measureFilter }, echoLowering), cube, params, ctx)
           : null;
         const aggSql = predicate
           ? this.conditionalAggregateSql(method, field, predicate)
@@ -518,7 +534,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // `$or` rendered as a conjunction (or dropped) is exactly the lie this
     // block's comment above warns about, in the other direction.
     const filterClause = this.renderFilterNodeSql(
-      normalizeAnalyticsFilterTree(query),
+      normalizeAnalyticsFilterTree(query, echoLowering),
       cube,
       params,
       ctx,
@@ -531,7 +547,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // same lowering `execute()` uses, so the two cannot drift.
     if (datasetScope?.filter) {
       const scopeSql = this.renderFilterNodeSql(
-        normalizeAnalyticsFilterTree({ where: datasetScope.filter }),
+        normalizeAnalyticsFilterTree({ where: datasetScope.filter }, echoLowering),
         cube,
         params,
         ctx,
@@ -815,7 +831,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       const measureFilter = datasetScope?.measureFilters?.[m];
       return measureFilter
         ? leaves(
-            normalizeAnalyticsFilterTree({ where: measureFilter }),
+            normalizeAnalyticsFilterTree({ where: measureFilter }, NO_DATETIME_COLUMNS),
             { kind: 'measure-filter', measure: m },
           )
         : [];
@@ -823,9 +839,9 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     return Object.fromEntries([
       ...measureLeaves,
       ...(datasetScope?.filter
-        ? leaves(normalizeAnalyticsFilterTree({ where: datasetScope.filter }), { kind: 'dataset-filter' })
+        ? leaves(normalizeAnalyticsFilterTree({ where: datasetScope.filter }, NO_DATETIME_COLUMNS), { kind: 'dataset-filter' })
         : []),
-      ...leaves(normalizeAnalyticsFilterTree(query), { kind: 'where' }),
+      ...leaves(normalizeAnalyticsFilterTree(query, NO_DATETIME_COLUMNS), { kind: 'where' }),
     ]);
   }
 
