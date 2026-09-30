@@ -208,17 +208,22 @@ export const GetAnalyticsMetaRequestSchema = lazySchema(() => z.object({
  * `/analytics/query` expects back in `measures[]` / `dimensions[]`; the
  * unqualified key it was defined under is not published. `title` carries the
  * definition's `label`, so it is the display name a dashboard renders.
+ * `description` carries the definition's `description`, and a measure also
+ * carries its definition's `format` (#20282, the additive return path the
+ * #6442 ruling recorded below); each is absent when the definition declares
+ * none.
  *
  * Deliberately narrower than the authoring definitions (`MetricSchema` /
- * `DimensionSchema` in `data/analytics.zod.ts`): `sql`, `description`,
- * `granularities` and `format` are dropped by the projection and are NOT
- * reachable through this endpoint (#6442). (`filters` used to head this list;
- * #10414 removed it from the authoring definition itself.)
+ * `DimensionSchema` in `data/analytics.zod.ts`): `sql` and `granularities`
+ * are dropped by the projection and are NOT reachable through this endpoint
+ * (#6442). (`filters` used to head this list; #10414 removed it from the
+ * authoring definition itself.)
  *
  * Module-local, and NOT exported as its own named schema: `CubeMeta` in
  * `contracts/analytics-service.ts` is already THE name for this shape, so a
  * second exported name would be the permanent synonym ADR-0122 D3 forbids AND a
  * new dual-source export. `analytics.test.ts` binds the two at compile time.
+ * This is the dimension member; {@link cubeMetaMeasureShape} adds `format`.
  */
 const cubeMetaMemberShape = () => z.object({
   name: z.string().describe('Cube-qualified member name, `"<cube>.<key>"` — the spelling `/analytics/query` accepts'),
@@ -229,6 +234,12 @@ const cubeMetaMemberShape = () => z.object({
     + 'shape serves both member kinds.',
   ),
   title: z.string().optional().describe('Display label, projected from the definition\'s `label`'),
+  description: z.string().optional().describe('Description, projected from the definition\'s `description`'),
+});
+
+/** A measure as `GET /analytics/meta` publishes it: the member shape plus `format`. */
+const cubeMetaMeasureShape = () => cubeMetaMemberShape().extend({
+  format: z.string().optional().describe('Display format, projected from the measure definition\'s `format`'),
 });
 
 /**
@@ -262,11 +273,12 @@ export const AnalyticsMetadataResponseSchema = lazySchema(() => BaseResponseSche
   data: z.array(z.object({
     name: z.string().describe('Cube name'),
     title: z.string().optional().describe('Human-readable cube title'),
-    measures: z.array(cubeMetaMemberShape()).describe('Measures this cube accepts in `/analytics/query`'),
+    description: z.string().optional().describe('Cube description, projected from the cube definition\'s `description`'),
+    measures: z.array(cubeMetaMeasureShape()).describe('Measures this cube accepts in `/analytics/query`'),
     dimensions: z.array(cubeMetaMemberShape()).describe('Dimensions this cube accepts in `/analytics/query`'),
   })).describe(
     'Available cubes, each as the `CubeMeta` discovery projection — the cube name, '
-    + 'its title, and the measures/dimensions a client may name in a query. A bare '
+    + 'its title and description, and the measures/dimensions a client may name in a query. A bare '
     + 'array: there is no `cubes` wrapper object, and no cube `sql` is published.',
   ),
 }));

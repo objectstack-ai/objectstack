@@ -213,17 +213,39 @@ export interface AnalyticsResult {
 }
 
 /**
- * Cube metadata for discovery
+ * Cube metadata for discovery — the projection `GET /analytics/meta` serves.
+ *
+ * `description` (on the cube and on each member) and a measure's `format` are
+ * copied from the cube definition when it declares them and absent when it
+ * does not; `packages/spec/src/api/analytics.zod.ts#AnalyticsMetadataResponseSchema`
+ * declares the same shape and `packages/spec/src/api/analytics.test.ts` binds
+ * the two at compile time.
  */
 export interface CubeMeta {
     /** Cube name */
     name: string;
     /** Human-readable title */
     title?: string;
+    /** The cube definition's `description` */
+    description?: string;
     /** Available measures */
-    measures: Array<{ name: string; type: string; title?: string }>;
+    measures: Array<{
+        name: string;
+        type: string;
+        title?: string;
+        /** The measure definition's `description` */
+        description?: string;
+        /** The measure definition's `format` */
+        format?: string;
+    }>;
     /** Available dimensions */
-    dimensions: Array<{ name: string; type: string; title?: string }>;
+    dimensions: Array<{
+        name: string;
+        type: string;
+        title?: string;
+        /** The dimension definition's `description` */
+        description?: string;
+    }>;
 }
 
 /**

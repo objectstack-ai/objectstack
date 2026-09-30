@@ -28,6 +28,10 @@ import {
   bucketDateKey,
   isBucketGranularity,
   type BucketGranularity,
+  // [#20544] The ONE compensated fold for `sum` / `avg`, the one objectql's
+  // rows path, this package's data face and SQLite add with — see
+  // {@link compensatedAddendAccumulator}.
+  compensatedSum,
 } from '@objectstack/core';
 // [#16178] The pipeline below is split at its `$group` when a time dimension
 // buckets, so the bucket key can be folded in JS between the two halves — mingo
@@ -648,6 +652,80 @@ function numericAggregandExpr(path: string): Record<string, unknown> {
 }
 
 /**
+ * [#20544] A `sum` or `avg` measure as ONE `$group` accumulator that adds with
+ * `@objectstack/core`'s {@link compensatedSum} — the fold objectql's rows path,
+ * this package's data face (`memory-driver.ts`, `computeAggregate`) and SQLite
+ * add with.
+ *
+ * ## What it replaced
+ *
+ * mingo's `$sum` and `$avg` add in a plain loop, so this face answered
+ * `0.6000000000000001` / `0.20000000000000004` over `0.1`, `0.2` and `0.3`
+ * where the rows path and SQLite answer `0.6` / `0.19999999999999998`, and
+ * `1e16, 1, -1e16` summed to `0` rather than `1`.
+ *
+ * ## Why an `$accumulator`, measured against the other two routes (mingo 7.2.4)
+ *
+ * - **A post-group recompute** is ruled out by the reason in
+ *   {@link numericAggregandExpr}'s header: it runs after the pipeline's own
+ *   `$sort` and `$limit`, so `order` over a `sum` measure would rank the value
+ *   the measure does not answer.
+ * - **A custom accumulator operator** cannot replace `$sum` / `$avg` through
+ *   the `mingo` entry point this package imports: its `Aggregator` merges the
+ *   default operators first (`Context.from`), and `addOps` keeps an operator
+ *   already present, so a caller's context can only ADD a name. A new name
+ *   would have to be registered where each `Aggregator` is built — the
+ *   driver's public `aggregate()` and {@link MemoryAnalyticsService}'s own
+ *   time-bucket half — widening the pipeline dialect the driver accepts.
+ * - **`$accumulator`** is in mingo's default operator set and needs
+ *   `scriptEnabled`, which `ComputeOptions.init` defaults to `true`; both
+ *   `Aggregator`s this face runs take the default options. It stays inside the
+ *   `$group` stage, so every later stage sees the finished number.
+ *
+ * ## What does not move
+ *
+ * Only the addition. The aggregand is {@link numericAggregandExpr}, as before,
+ * and the addends are the values mingo's own `$sum` / `$avg` add: numbers,
+ * NaN excluded (mingo's `isNumber`), so null, a missing key and a non-numeric
+ * string stay ignored. `avg` over no addend is `null`, `sum` over none is `0`,
+ * exactly as mingo answered. The values are added in the group's row order,
+ * the order mingo's `$push` collects them in, so the naive running sum inside
+ * {@link compensatedSum} is the one `$sum` computed.
+ *
+ * The functions are named, and {@link pipelineDumpReplacer} renders a function
+ * by its name, so the pipeline dump still says which fold a measure runs.
+ */
+function compensatedAddendAccumulator(path: string, fn: 'sum' | 'avg'): Record<string, unknown> {
+  return {
+    $accumulator: {
+      init: startAddends,
+      accumulateArgs: [numericAggregandExpr(path)],
+      accumulate: collectAddend,
+      finalize: fn === 'sum' ? compensatedSumOfAddends : compensatedMeanOfAddends,
+      lang: 'js',
+    },
+  };
+}
+
+function startAddends(): number[] {
+  return [];
+}
+
+/** mingo's `isNumber`: the values its `$sum` and `$avg` add. */
+function collectAddend(addends: number[], value: unknown): number[] {
+  if (typeof value === 'number' && !Number.isNaN(value)) addends.push(value);
+  return addends;
+}
+
+function compensatedSumOfAddends(addends: readonly number[]): number {
+  return compensatedSum(addends);
+}
+
+function compensatedMeanOfAddends(addends: readonly number[]): number | null {
+  return addends.length === 0 ? null : compensatedSum(addends) / addends.length;
+}
+
+/**
  * [#7853] A `JSON.stringify` replacer that renders a `RegExp` operand instead of
  * dropping it — the one value type the pipeline dump carries that
  * `JSON.stringify` erases.
@@ -700,7 +778,13 @@ function numericAggregandExpr(path: string): Record<string, unknown> {
  * EXECUTION, before this dump is ever built, so no replacer here reaches it.
  */
 function pipelineDumpReplacer(_key: string, value: unknown): unknown {
-  return value instanceof RegExp ? `/${value.source}/${value.flags}` : value;
+  if (value instanceof RegExp) return `/${value.source}/${value.flags}`;
+  // [#20544] A function is the other value `JSON.stringify` erases, and the
+  // `sum` / `avg` `$accumulator` carries three ({@link
+  // compensatedAddendAccumulator}). Dropped, the two measures dump identically;
+  // by name, the dump still says which fold each one runs.
+  if (typeof value === 'function') return `[function ${value.name}]`;
+  return value;
 }
 
 /**
@@ -1728,10 +1812,12 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     switch (measure.type) {
       case 'count':
         return { $sum: 1 };
+      // [#20544] Compensated, as every other face the platform owns adds —
+      // see {@link compensatedAddendAccumulator}.
       case 'sum':
-        return { $sum: numericAggregandExpr(`$${fieldPath}`) };
+        return compensatedAddendAccumulator(`$${fieldPath}`, 'sum');
       case 'avg':
-        return { $avg: numericAggregandExpr(`$${fieldPath}`) };
+        return compensatedAddendAccumulator(`$${fieldPath}`, 'avg');
       // [#11152] `min`/`max` take the SAME boolean coercion as `sum`/`avg` —
       // maintainer ruling 2026-08-28 (superseding #11249's `false`/`true`):
       // booleans aggregate as NUMBERS on every face, no per-aggregate
