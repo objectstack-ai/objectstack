@@ -36,7 +36,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { FILTER_LOGIC_CASES, FILTER_LOGIC_ROWS, type Cube, type FilterCondition } from '@objectstack/spec/data';
+import { FILTER_LOGIC_CASES, FILTER_LOGIC_ROWS, type Cube, type FilterCondition, type FilterLoweringOptions } from '@objectstack/spec/data';
 import type { AnalyticsQuery, StrategyContext } from '@objectstack/spec/contracts';
 
 import { collectFilterLeaves, normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
@@ -65,8 +65,8 @@ const CUBE: Cube = {
 } as unknown as Cube;
 
 /** The strategies' reader, by hand: `signed` is the one member whose column is declared `datetime`. */
-const TYPED = { isDatetimeColumn: (member: string) => member === 'signed' };
-const UNTYPED = { isDatetimeColumn: () => false };
+const TYPED: FilterLoweringOptions = { isDatetimeColumn: (member: string) => member === 'signed' };
+const UNTYPED: FilterLoweringOptions = { isDatetimeColumn: () => false };
 
 const leaf = (member: string, operator: string, values: unknown[]) => ({ kind: 'leaf', member, operator, values });
 
@@ -182,11 +182,11 @@ describe('[ADR-0053 D-D1 amended — #5930 step 3] F11: the draft preview evalua
     public: true,
   } as unknown as Cube;
 
-  const previewIds = (where: FilterCondition, rows: ReadonlyArray<Record<string, unknown>>): string[] =>
+  const previewIds = (where: FilterCondition, rows: ReadonlyArray<object>): string[] =>
     evaluateAnalyticsQueryOverRows(
       { cube: 'rows', dimensions: ['id'], measures: ['n'], where } as AnalyticsQuery,
       PREVIEW_CUBE,
-      rows.map((r) => ({ ...r })),
+      rows.map((r) => ({ ...(r as Record<string, unknown>) })),
     ).rows.map((r) => String(r.id)).sort();
 
   /** `stage` holds a value on p1, is null on p2, and is absent on p3. */

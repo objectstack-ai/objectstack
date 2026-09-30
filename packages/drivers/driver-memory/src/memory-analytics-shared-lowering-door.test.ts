@@ -78,11 +78,11 @@ const DAY_ROWS = [
   { id: 'r29', created_at: '2026-07-29T10:00:00.000Z' },
 ];
 
-async function setup(rows: ReadonlyArray<Record<string, unknown>>) {
+async function setup(rows: ReadonlyArray<object>) {
   const driver = new InMemoryDriver({});
   await driver.connect();
   await driver.syncSchema('logic_row', { name: 'logic_row', fields: { created_at: { type: 'datetime' } } });
-  for (const row of rows) await driver.create('logic_row', { ...row });
+  for (const row of rows) await driver.create('logic_row', { ...(row as Record<string, unknown>) });
   const service = new MemoryAnalyticsService({ driver, cubes: [LOGIC_CUBE] });
   return { driver, service };
 }
@@ -91,7 +91,7 @@ const cubeQuery = (where?: FilterCondition) =>
   ({ cube: 'logic', measures: ['count'], dimensions: ['id'], ...(where === undefined ? {} : { where }) }) as any;
 
 /** The live query path, the cube's rows and the echo's WHERE, for one `where`. */
-async function answer(rows: ReadonlyArray<Record<string, unknown>>, where?: FilterCondition) {
+async function answer(rows: ReadonlyArray<object>, where?: FilterCondition) {
   const { driver, service } = await setup(rows);
   return {
     find: ids(await driver.find('logic_row', where === undefined ? {} : { where })),
