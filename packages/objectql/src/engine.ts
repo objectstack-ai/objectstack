@@ -7075,9 +7075,10 @@ export class ObjectQL implements IObjectQLEngine {
     if (!recordId) {
       this.logger.warn(
         `No data.record.${action} event published for '${object}': the write names no single record, ` +
-          `and DataEvent.recordId is required — refusing to publish an off-contract event. ` +
-          `A predicate write publishes data.records.${action} instead (#4639), so reaching this ` +
-          `means a single-id write whose driver returned no usable primary key (#4626)`,
+          `and DataEvent.recordId is required — refusing to publish an off-contract event rather than ` +
+          `fabricate one with an empty recordId. A predicate (multi: true) write publishes its own ` +
+          `data.records.${action} event, carrying the affected-row count, instead — so reaching this ` +
+          `means a single-id write whose driver returned no usable primary key, which is a driver defect`,
         { object },
       );
       return;
@@ -7169,8 +7170,8 @@ export class ObjectQL implements IObjectQLEngine {
       this.logger.warn(
         `No data.records.${action} event published for '${object}': the driver's multi-row result is ` +
           `not an affected-row count (IDataDriver.updateMany/deleteMany are contracted to resolve ` +
-          `a number). The count is the only thing a bulk event states, so publishing one here would ` +
-          `assert something unverified (#4639)`,
+          `a number). The count is the only thing a bulk event states — it carries no records and no ` +
+          `predicate — so publishing one here would assert something unverified`,
         { object },
       );
       return;

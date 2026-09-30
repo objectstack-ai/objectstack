@@ -24,7 +24,7 @@
  * the context that kernel hands its plugins. Nothing here stubs the kernel, the
  * plugin, or the branch under test.
  *
- * ⭐ WHICH KERNEL, AND WHY THAT IS HALF THE FILE (#16599, then #16721). This
+ * ⭐ WHICH KERNEL, AND WHY THAT IS HALF THE FILE (#16599, then commit 51ae73123). This
  * repository publishes TWO kernels and `@objectstack/core` exports both. When
  * group F was written they did NOT agree about this block's inputs, and that
  * disagreement is the reason groups B, D and F exist in the shape they do:
@@ -34,12 +34,12 @@
  *     object (#16049, landed as #16363), and since #16334 that schema requires
  *     `staticPath` AND `slug` for `type: 'ui'`. A `ui` plugin missing either is
  *     a boot REFUSAL and never reaches `kernel.plugins` at all.
- *   - `LiteKernel.use()` — until #16721 — called `registerPluginByName`
+ *   - `LiteKernel.use()` — until commit 51ae73123 — called `registerPluginByName`
  *     directly and never touched `PluginSchema`: the same object was stored
  *     verbatim, and `ObjectKernelBase.createContext()` handed plugins a context
  *     whose `getKernel()` returned that kernel, whose `plugins` map is exactly
  *     what this block iterates. Group F measured that, per branch.
- *   - Since #16721 (maintainer ruling, option A: the kernels converge)
+ *   - Since commit 51ae73123 (maintainer ruling, option A: the kernels converge)
  *     `LiteKernel.use()` runs the SAME check — `assertPluginContract` in
  *     `packages/core/src/plugin-contract.ts`, the one statement both kernels
  *     call — and refuses the same objects with the same envelope. Group F now
@@ -177,7 +177,7 @@ interface Booted {
  * their plugins a context whose `getKernel()` returns the kernel itself, and both
  * keep the loaded plugins in a `plugins` map — the three properties the block
  * under test depends on. They used to differ on whether `use()` validates; since
- * #16721 both do (see the header). Groups A, B, D and E run on `ObjectKernel`;
+ * commit 51ae73123 both do (see the header). Groups A, B, D and E run on `ObjectKernel`;
  * group F runs on `LiteKernel`; group C runs on both.
  */
 type KernelUnderTest = ObjectKernel | LiteKernel;
@@ -208,13 +208,13 @@ async function boot(fixture: UiPluginFixture): Promise<Booted> {
 
 /**
  * The `LiteKernel` counterpart of {@link boot} — the kernel `AGENTS.md` names for
- * tests, serverless and edge. `LiteKernel.use()` is synchronous; since #16721 it
+ * tests, serverless and edge. `LiteKernel.use()` is synchronous; since commit 51ae73123 it
  * runs the same `assertPluginContract` the loader runs for {@link boot} and then
  * stores the object through `registerPluginByName`, so a fixture {@link boot}
  * REFUSES is refused here too — synchronously, which the `async` wrapper turns
  * into the rejection {@link refusal} reads.
  *
- * ⚠️ Until #16721 nothing on this path called `PluginSchema` at all, so #16334's
+ * ⚠️ Until commit 51ae73123 nothing on this path called `PluginSchema` at all, so #16334's
  * `type: 'ui'` requirements and #16363's enforcement were both absent here — the
  * state group F was written to measure. Its header records both readings.
  *
@@ -357,10 +357,10 @@ describe('UI plugin auto-discovery (#16050)', () => {
             // measured the expression LIVE on `LiteKernel`, which then never called
             // `PluginSchema` (ablating the `||` moved the mounted route from
             // `/console` to `/undefined`), and this comment said "⛔ NOT dead code"
-            // on that basis. Since #16721 `LiteKernel.use()` runs the same contract,
+            // on that basis. Since commit 51ae73123 `LiteKernel.use()` runs the same contract,
             // so the same object is refused there too — pin F1 — and the derivation
             // is reachable through NEITHER published kernel's `use()`. Whether that
-            // makes it removable is `hono-plugin.ts`'s question, noted on #16721 and
+            // makes it removable is `hono-plugin.ts`'s question, raised with commit 51ae73123 and
             // deliberately not pinned here: this file pins what each kernel's
             // `use()` lets through, not what the block should do with it.
             const err = await refusal(boot(makeFixture({ name: '@os-fixture/console' })));
@@ -492,10 +492,10 @@ describe('UI plugin auto-discovery (#16050)', () => {
             // there and deleting `&& plugin.staticPath` turned a clean boot into a
             // `TypeError` naming `paths[1]`, thrown by
             // `path.resolve(process.cwd(), mount.root)` once `undefined` was pushed
-            // as a mount root. Since #16721 `LiteKernel.use()` refuses the same
+            // as a mount root. Since commit 51ae73123 `LiteKernel.use()` refuses the same
             // object — pin F2 — so the conjunct is reachable through neither
             // published kernel's `use()`. Removable or not is `hono-plugin.ts`'s
-            // question, noted on #16721; this file pins the kernels' answers.
+            // question, raised with commit 51ae73123; this file pins the kernels' answers.
             const err = await refusal(boot(makeFixture({
                 name: '@os-fixture/console-no-assets',
                 staticPath: undefined,
@@ -591,9 +591,9 @@ describe('UI plugin auto-discovery (#16050)', () => {
     /**
      * F — the SAME two inputs on `LiteKernel`, where they are now refused too.
      *
-     * WHY THIS GROUP EXISTS, and what it used to pin (#16599, then #16721). B
+     * WHY THIS GROUP EXISTS, and what it used to pin (#16599, then commit 51ae73123). B
      * and D pin that `ObjectKernel.use()` REFUSES a `ui` plugin missing `slug`
-     * or `staticPath`. Until #16721 this group pinned the OPPOSITE half:
+     * or `staticPath`. Until commit 51ae73123 this group pinned the OPPOSITE half:
      * `LiteKernel.use()` — which then never called `PluginSchema` — stored the
      * same two objects verbatim and the block ran against them, deriving a slug
      * from the package name (old F1: routes `/console`, `/console/*`) and
@@ -601,11 +601,11 @@ describe('UI plugin auto-discovery (#16050)', () => {
      * Those two readings were what falsified #16599's "dead code" claim, and
      * they were ⛔ NOT fixture noise: they pinned the leniency itself. That is
      * why they could not be "fixed into passing" once the leniency went — the
-     * step that measured the convergence's cost (#16721 step 1) found F0
+     * step that measured the convergence's cost (before commit 51ae73123) found F0
      * passing and F1/F2 failing under the wiring, which is the signature of a
      * pin on the divergence rather than of a sloppy fixture.
      *
-     * #16721 (maintainer ruling, option A, under #9864's precedent that the two
+     * Commit 51ae73123 (maintainer ruling, option A, under #9864's precedent that the two
      * kernels converge) made `LiteKernel.use()` run the same
      * `assertPluginContract` the loader runs, so the subject of the old F1/F2
      * no longer exists on any published kernel. ⭐ REWRITTEN, not deleted, and
@@ -628,7 +628,7 @@ describe('UI plugin auto-discovery (#16050)', () => {
      * load-bearing — `plugin.slug || plugin.name.split('/').pop()` and the
      * `&& plugin.staticPath` conjunct in `hono-plugin.ts`: neither is reachable
      * through either published kernel's `use()` any more. That is an
-     * observation about `hono-plugin.ts`, recorded on #16721 and deliberately
+     * observation about `hono-plugin.ts`, recorded with commit 51ae73123 and deliberately
      * not acted on here — this file pins the kernels' inputs, and whether the
      * block keeps its defensive spelling is that file's call, not this pin's.
      */
@@ -643,7 +643,7 @@ describe('UI plugin auto-discovery (#16050)', () => {
             // readings rather than a harness that never mounts under this kernel.
             // Identical to pin B's expectation, which is the point: the block
             // behaves the same on both kernels once the object gets through —
-            // and, since #16721, the same objects get through on both.
+            // and, since commit 51ae73123, the same objects get through on both.
             expect(routes).toEqual([
                 '/console-fixture',
                 '/console-fixture',

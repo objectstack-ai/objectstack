@@ -3274,9 +3274,10 @@ export class AutomationEngine implements IAutomationService {
         this.resumeAuthorityOmissionWarned.add(descriptor.type);
         this.logger.warn(
             `[automation] node type '${descriptor.type}' declares supportsPause but never declares ` +
-            `resumeAuthority, so the #3801 resume gate REFUSES every pause it creates on the generic route ` +
-            `(POST /automation/:name/runs/:runId/resume) — an unclaimed pause is fail-closed since #5561, ` +
-            `because the opposite guess is how #3823 walked past an unrecorded approval decision. ` +
+            `resumeAuthority, so the resume-authority gate REFUSES every pause it creates on the generic route ` +
+            `(POST /automation/:name/runs/:runId/resume) — an undeclared resumeAuthority resolves to ` +
+            `'service', fail-closed, because guessing 'any' is how a raw resume once walked past an approval ` +
+            `decision no service had recorded. ` +
             `Declare it on the descriptor: 'any' if that route IS the intended door (a screen's collected ` +
             `inputs, a signal wait's external producer), or 'service' if resuming is the tail of a decision ` +
             `some service must authorize and record first. Declaring 'any' is what RESTORES the generic ` +
@@ -6266,14 +6267,16 @@ export class AutomationEngine implements IAutomationService {
         const why = declared === 'service'
             ? `which is resumable only through its owning service (resumeAuthority: 'service')`
             : `whose type never declares resumeAuthority, so it is closed to the generic route until it does ` +
-              `(#5561) — declare resumeAuthority: 'any' on its descriptor if this route IS the intended door`;
+              `(an undeclared resumeAuthority resolves to 'service', fail-closed) — declare ` +
+              `resumeAuthority: 'any' on its descriptor if this route IS the intended door`;
         this.logger.warn(`[automation] refused resume of run '${runId}': parked on ${nodeType} node ${at}, ${why}`);
 
         // The fix, identical in both the direct and the linked-run phrasing —
         // what has to change is a descriptor, not the call that just failed.
         const undeclaredFix =
             `and that node type never declares resumeAuthority, so the generic resume route is closed to the ` +
-            `pauses it creates (#5561). If that route IS the intended door — a screen's collected inputs, a ` +
+            `pauses it creates: an undeclared resumeAuthority resolves to 'service', fail-closed. If that ` +
+            `route IS the intended door — a screen's collected inputs, a ` +
             `signal wait's external producer — declare resumeAuthority: 'any' on its action descriptor; declare ` +
             `'service' if resuming is the tail of a decision some service must authorize and record first`;
         return {
@@ -6409,7 +6412,8 @@ export class AutomationEngine implements IAutomationService {
             `node type '${nodeType}' suspended the run but its action descriptor declares ` +
             `supportsPause: false, so the pause is refused — a run that paused here could not be ` +
             `continued on the generic resume route anyway: a type that declares no pause declares no ` +
-            `resumeAuthority either, and an unclaimed pause is fail-closed since #5561. Declare ` +
+            `resumeAuthority either, and an undeclared resumeAuthority resolves to 'service', which the ` +
+            `generic route refuses. Declare ` +
             `supportsPause: true on the descriptor together with the resumeAuthority the pauses need ` +
             `('any' if POST /automation/:name/runs/:runId/resume is the intended door, 'service' if ` +
             `resuming is the tail of a decision some service must authorize and record first) — or stop ` +
