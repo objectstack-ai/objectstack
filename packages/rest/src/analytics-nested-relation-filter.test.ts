@@ -347,26 +347,49 @@ describe('[#20887] a read scope carrying the nested-relation form', () => {
   /** A host read scope (the plugin option): the member reads only ledger rows whose owner is in NA. */
   const scope = (object: string): FilterCondition | null => (object === OBJECT ? { owner: { region: 'NA' } } : null);
 
-  for (const strategy of ['native', 'objectql'] as const) {
-    it(`is served by the executing face as the engine serves it, the related object read as the caller — ${strategy} composition`, async () => {
-      const h = await boot({ ...(strategy === 'objectql' ? { caps: 'objectql' as const } : {}), getReadScope: scope });
-      try {
-        const reference = await engineAnswer(h.engine, { owner: { region: 'NA' } });
-        expect(reference).toEqual({ titles: ['a', 'c'] });
-        const cube = await h.analytics.query({ cube: OBJECT, measures: ['count'], dimensions: ['title'] } as never, MEMBER_CTX as never)
-          .then((r) => ({ titles: titlesOf(r.rows, 'title') }), (e: Thrown) => ({ refused: envelopeOf(e), message: e?.message }));
-        expect(cube).toEqual(reference);
+  /**
+   * B4, measured: the read scope's SQL compile (`compileScopedFilterToSql`) is a
+   * synchronous string builder that holds the caller's context for placeholders
+   * and no data engine — it cannot read the related object as the caller. So
+   * where a scope is compiled to SQL — the native strategy's statement and both
+   * SQL echoes — it keeps its fail-closed refusal, now in words that name the
+   * route that serves the form. On the engine-aggregate path the scope reaches
+   * the engine as written, and the engine serves it as the caller, as it did
+   * before this change.
+   */
+  const bootWithScope = (strategy: 'native' | 'objectql') =>
+    boot({ ...(strategy === 'objectql' ? { caps: 'objectql' as const } : {}), getReadScope: scope });
+  const query = { cube: OBJECT, measures: ['count'], dimensions: ['title'] } as never;
 
-        // The SQL echo compiles the scope to SQL, where no read of the related
-        // object happens: it keeps the fail-closed refusal, whose words name the
-        // route that serves the form.
-        const echo = await h.analytics.generateSql({ cube: OBJECT, measures: ['count'], dimensions: ['title'] } as never, MEMBER_CTX as never)
-          .then((r) => ({ sql: r.sql }), (e: Thrown) => ({ refused: envelopeOf(e), message: String(e?.message) }));
-        expect(echo).toMatchObject({ refused: { code: 'READ_SCOPE_COMPILE_FAILED', status: 500 } });
-        expect((echo as { message: string }).message).toContain('reads the related object as the caller');
-      } finally {
-        try { await h.engine.destroy(); } catch { /* noop */ }
+  it('the native strategy compiles the scope to SQL and keeps the fail-closed refusal, naming the route — never unscoped rows', async () => {
+    const h = await bootWithScope('native');
+    try {
+      for (const run of [() => h.analytics.query(query, MEMBER_CTX as never), () => h.analytics.generateSql(query, MEMBER_CTX as never)]) {
+        const answer = await run().then((r) => ({ answered: r }), (e: Thrown) => ({ refused: envelopeOf(e), message: String(e?.message) }));
+        expect(answer).toMatchObject({ refused: { code: 'READ_SCOPE_COMPILE_FAILED', status: 500 } });
+        const message = (answer as { message: string }).message;
+        expect(message).toContain("The engine serves the form in a query's where");
+        expect(message).toContain('reads the related object as the caller');
       }
-    }, 60_000);
-  }
+    } finally {
+      try { await h.engine.destroy(); } catch { /* noop */ }
+    }
+  }, 60_000);
+
+  it('the engine-aggregate path hands the scope to the engine, which serves it as the caller — its SQL echo refuses', async () => {
+    const h = await bootWithScope('objectql');
+    try {
+      const reference = await engineAnswer(h.engine, { owner: { region: 'NA' } });
+      expect(reference).toEqual({ titles: ['a', 'c'] });
+      const cube = await h.analytics.query(query, MEMBER_CTX as never)
+        .then((r) => ({ titles: titlesOf(r.rows, 'title') }), (e: Thrown) => ({ refused: envelopeOf(e), message: e?.message }));
+      expect(cube).toEqual(reference);
+      const echo = await h.analytics.generateSql(query, MEMBER_CTX as never)
+        .then((r) => ({ sql: r.sql }), (e: Thrown) => ({ refused: envelopeOf(e), message: String(e?.message) }));
+      expect(echo).toMatchObject({ refused: { code: 'READ_SCOPE_COMPILE_FAILED', status: 500 } });
+      expect((echo as { message: string }).message).toContain('reads the related object as the caller');
+    } finally {
+      try { await h.engine.destroy(); } catch { /* noop */ }
+    }
+  }, 60_000);
 });

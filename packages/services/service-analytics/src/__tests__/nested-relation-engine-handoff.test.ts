@@ -7,23 +7,24 @@
  * so this package carries no second copy of that rule. What that takes here,
  * pinned at the seams this package owns:
  *
- * 1. `NativeSQLStrategy` DECLINES a query in which any producer it would compile
- *    carries the form — the caller's `where` (either spelling), the dataset's
- *    own `filter`, a requested measure's `filter`, the read scope of the base
- *    object or of a joined one — so the query routes to the ObjectQL/engine path.
- *    The same mechanism, for the same reason, as the #7598 cross-field decline
- *    (maintainer ruling 2026-08-12, Q1 = B): the rule lives in one place and
- *    the strategy that cannot enforce it routes to the one that does. The
- *    DOTTED member (`'owner.region'`) is a cube member, not this form, and stays
- *    on the native path.
+ * 1. `NativeSQLStrategy` DECLINES a query in which a filter the caller or the
+ *    dataset writes carries the form — the caller's `where` (either spelling),
+ *    the dataset's own `filter`, a requested measure's `filter` — so the query
+ *    routes to the ObjectQL/engine path. The same mechanism, for the same
+ *    reason, as the #7598 cross-field decline (maintainer ruling 2026-08-12,
+ *    Q1 = B): the rule lives in one place and the strategy that cannot enforce
+ *    it routes to the one that does. The DOTTED member (`'owner.region'`) is a
+ *    cube member, not this form, and stays on the native path. A READ SCOPE
+ *    carrying the form is not routed: it is a policy compiled to SQL (item 4).
  * 2. `ObjectQLStrategy` hands the engine the form AS WRITTEN — never flattened
  *    to the dotted member, which the engine cannot join — so the engine's seam
  *    lowers it.
  * 3. The native compiler refuses the form if it ever reaches it (the routing's
  *    fail-closed backstop, unreachable by construction).
  * 4. The read-scope compiler, which compiles a policy to SQL and reads no other
- *    object, keeps its fail-closed refusal of the form — in words that name the
- *    route that serves it.
+ *    object — a synchronous string builder with the caller's context for
+ *    placeholders and no data engine — keeps its fail-closed refusal of the
+ *    form, in words that name the route that serves it.
  *
  * The rows each face then answers — the engine's, with the real security layer —
  * are `@objectstack/rest`'s `analytics-nested-relation-filter.test.ts`.
@@ -105,9 +106,19 @@ describe('[#20887] NativeSQLStrategy declines the nested-relation form, from eve
     ).toBe(false);
   });
 
-  it('declines the form in the read scope of the base object and of a joined one', () => {
-    expect(native.canHandle(q(), nativeCtx({ readScopes: { [OBJECT]: NESTED } }))).toBe(false);
-    expect(native.canHandle(q(), nativeCtx({ readScopes: { [OWNER]: { account: { tier: 'gold' } } } }))).toBe(false);
+  it('does NOT decline for a read scope carrying the form: its compile to SQL keeps the fail-closed refusal', async () => {
+    // The base object's scope, and a joined object's (compiled once the statement joins it).
+    const cases: ReadonlyArray<readonly [Record<string, FilterCondition>, AnalyticsQuery]> = [
+      [{ [OBJECT]: NESTED }, q()],
+      [{ [OWNER]: { account: { tier: 'gold' } } }, q({ dimensions: ['owner.region'] })],
+    ];
+    for (const [readScopes, query] of cases) {
+      const ctx = nativeCtx({ readScopes });
+      expect(native.canHandle(query, ctx), JSON.stringify(readScopes)).toBe(true);
+      const err = await native.generateSql(query, ctx).then(() => null, (e: Error & { code?: string; status?: number }) => e);
+      expect({ code: err?.code, status: err?.status }, JSON.stringify(readScopes)).toEqual({ code: 'READ_SCOPE_COMPILE_FAILED', status: 500 });
+      expect(String(err?.message)).toContain('carries a nested-relation condition');
+    }
   });
 
   it('the native compiler refuses the form if the routing ever lets it through — a bare fault, never a statement', async () => {
@@ -180,6 +191,7 @@ describe('[#20887] the read-scope compiler keeps its refusal of the form, naming
     expect({ code: err?.code, status: err?.status }).toEqual({ code: 'READ_SCOPE_COMPILE_FAILED', status: 500 });
     const message = String(err?.message);
     expect(message).toContain('"owner"');
+    expect(message).toContain("The engine serves the form in a query's where");
     expect(message).toContain('reads the related object as the caller');
     expect(message).toContain('{ "owner": { "$in": [ID, …] } }');
   });

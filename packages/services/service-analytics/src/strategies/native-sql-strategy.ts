@@ -266,9 +266,11 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // nothing. So it declines, and the query routes to the ObjectQL strategy,
     // which hands the form to the engine as written. The mechanism of the
     // #7598 decline above, for the same reason — one rule, in one place. Every
-    // producer this strategy would compile is read (see
-    // {@link nestedRelationConditionIn}); the DOTTED member (`account.region`)
-    // is a cube member, not this form, and stays here.
+    // filter a caller or a dataset writes is read (see
+    // {@link nestedRelationConditionIn}); a READ SCOPE is not, deliberately —
+    // it is a policy this strategy compiles to SQL, and that compile keeps its
+    // fail-closed refusal of the form (`read-scope-sql.ts`). The DOTTED member
+    // (`account.region`) is a cube member, not this form, and stays here.
     if (this.nestedRelationConditionIn(query, ctx)) return false;
     const caps = ctx.queryCapabilities(query.cube);
     return caps.nativeSql && typeof ctx.executeRawSql === 'function';
@@ -364,18 +366,22 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
   }
 
   /**
-   * [#20887] The first nested-relation condition in anything this strategy
+   * [#20887] The first nested-relation condition in a filter this strategy
    * would compile for `query` — or `null`. See the decline at {@link canHandle}.
    *
-   * Every producer the statement is built from, as {@link generateSql} builds
-   * it: the caller's `where` (lowered, so the `FilterArray` spelling is read
-   * as the object it lowers to), the compiled dataset's own `filter`, the
-   * `filter` of each REQUESTED measure (one it does not ask for is never
-   * compiled), and the read scope of the base object and of every joined one
-   * (`applyReadScope` compiles each of them). A read scope is a different
-   * producer from the caller's `where`, and the engine serves the form there
-   * too, as the caller; its SQL compile (`read-scope-sql.ts`) reads no related
-   * object and refuses it.
+   * Every filter the caller or the dataset writes, as {@link generateSql}
+   * compiles them: the caller's `where` (lowered, so the `FilterArray` spelling
+   * is read as the object it lowers to), the compiled dataset's own `filter`,
+   * and the `filter` of each REQUESTED measure (one it does not ask for is never
+   * compiled).
+   *
+   * ⛔ NOT the read scope. A read scope is a policy, compiled to SQL here by
+   * `compileScopedFilterToSql` — a synchronous string builder that holds the
+   * caller's context for placeholders and no data engine, so it cannot read the
+   * related object as the caller. It keeps its fail-closed refusal of the form
+   * (`READ_SCOPE_COMPILE_FAILED` / 500, the policy withheld), in words that name
+   * the route; routing the query away would trade that declared refusal for
+   * whatever the next strategy answers, on a host that has none a generic fault.
    */
   private nestedRelationConditionIn(
     query: AnalyticsQuery,
@@ -399,18 +405,6 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     for (const measure of query.measures ?? []) {
       const inMeasure = findNestedRelationCondition(datasetScope?.measureFilters?.[measure], 'filter');
       if (inMeasure) return { source: `the \`filter\` of measure "${measure}"`, ...inMeasure };
-    }
-
-    if (typeof ctx.getReadScope !== 'function') return null;
-    const cube = query.cube ? ctx.getCube(query.cube) : undefined;
-    if (!cube) return null;
-    const objects = [this.extractObjectName(cube)];
-    for (const alias of Object.keys(cube.joins ?? {})) {
-      objects.push(cube.joins?.[alias]?.name ?? alias);
-    }
-    for (const objectName of objects) {
-      const inReadScope = findNestedRelationCondition(ctx.getReadScope(objectName), 'scope');
-      if (inReadScope) return { source: `the read scope of "${objectName}"`, ...inReadScope };
     }
     return null;
   }
