@@ -264,7 +264,7 @@ describe('[#5345] MemoryAnalyticsService — the same table, through the THIRD f
    * ends: at least one case must be genuinely answered, and the shapes the cube
    * pipeline cannot express must be the ones refused.
    */
-  it('at least one case is answered, and every combinator case is refused rather than dropped', async () => {
+  it('at least one case is answered, and every $not case is refused rather than dropped', async () => {
     const answered: string[] = [];
     const refused: string[] = [];
     for (const c of FILTER_LOGIC_CASES) {
@@ -274,10 +274,13 @@ describe('[#5345] MemoryAnalyticsService — the same table, through the THIRD f
     expect(refused.length, 'nothing was refused — the silent drop is back').toBeGreaterThan(0);
     // Every case whose filter mentions a combinator this face cannot lower must
     // be in the refused column, by name — not merely "some things were refused".
-    const uncompilable = FILTER_LOGIC_CASES.filter((c) => /"\$(or|not)"/.test(JSON.stringify(c.filter)));
+    // [ADR-0053 D-D1, amended — #5930 step 3] `$or` left this set: the face
+    // compiles it now (the shared lowering emits it), so its cases moved to the
+    // agreeing column, which the case-by-case invariant above holds them to.
+    const uncompilable = FILTER_LOGIC_CASES.filter((c) => /"\$not"/.test(JSON.stringify(c.filter)));
     expect(uncompilable.length).toBeGreaterThan(0);
     for (const c of uncompilable) {
-      expect(refused, `${c.name}: a $or/$not case must refuse, never answer`).toContain(c.name);
+      expect(refused, `${c.name}: a $not case must refuse, never answer`).toContain(c.name);
     }
   });
 });
@@ -646,6 +649,8 @@ const DECLARED_OPERATOR_PROBES: Record<string, FilterCondition> = {
   // this block's own header warns against.
   $icontains: { name: { $icontains: 'BET' } } as FilterCondition,
   $exists: { closed_at: { $exists: false } } as FilterCondition,
+  // [ADR-0053 D-D1, amended — #5930 step 3] `$null` joined the face's table.
+  $null: { closed_at: { $null: true } } as FilterCondition,
 };
 
 describe('[#5374] operator semantics — the analytics face against the live query path', () => {
@@ -815,7 +820,9 @@ describe('[#5374] operator semantics — the analytics face against the live que
     // classes rather than an `i` — this is what #6520 compiled, made visible.
     ['$icontains', { name: { $icontains: 'BET' } } as FilterCondition, '{"name":{"$regex":"/[Bb][Ee][Tt]/"}}'],
     // The negation still wraps a pattern, and now the pattern is legible.
-    ['$notContains', { name: { $notContains: 'et' } } as FilterCondition, '{"name":{"$not":{"$regex":"/et/"}}}'],
+    // [ADR-0053 D-D1, amended — #5930 step 3] …inside the shared lowering's NULL
+    // escape, which the face's door now applies before it compiles.
+    ['$notContains', { name: { $notContains: 'et' } } as FilterCondition, '{"$and":[{"$or":[{"name":{"$eq":null}},{"name":{"$not":{"$regex":"/et/"}}}]}]}'],
     // A comparand carrying a regex metacharacter shows its ESCAPE. `a.p` is a
     // literal here, not "any character between a and p" (#5567's direction), and
     // the dump is the only place an author can see which of the two ran.
