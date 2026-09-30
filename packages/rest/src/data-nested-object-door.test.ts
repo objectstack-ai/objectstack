@@ -24,9 +24,10 @@
  * The arm sits in the engine, in front of every driver, so one verdict holds
  * on each cell. InMemoryDriver's refusal row is `@objectstack/objectql`'s
  * `engine-nested-object-door.test.ts` by construction (the arm answers before
- * a driver is resolved); its routes are `@objectstack/runtime`'s
- * `data-nested-object-door-memory.test.ts`, the package that has both the
- * in-memory driver and this door.
+ * a driver is resolved). Its route readings above were measured, not pinned
+ * here: this package does not depend on the in-memory driver, and that
+ * driver's test consumers are a ruled, closed census
+ * (`check:driver-memory-census`).
  *
  * ## The dialect axis of THIS file
  *
