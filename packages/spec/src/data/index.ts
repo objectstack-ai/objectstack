@@ -131,6 +131,13 @@ export * from './date-macros.zod';
 // rule (#8690 C half). `ui/dashboard.zod.ts` re-exports the vocabulary.
 export * from './date-range-presets';
 export * from './calendar-day';
+// [ADR-0053 D-D1, amended 2026-09-30 — #5930] The shared `FilterCondition →
+// FilterCondition` lowering the seams run once, after the comparand doors and
+// after filter-token resolution: the `$between` split, the whole-day upper
+// bound in the calendar-string domain, and the NULL-polarity guards. Beside
+// `calendar-day` because what a bare day denotes as a bound is protocol, and
+// on this subpath only — never the package root entry (the ruling's D3).
+export * from './filter-lowering';
 // Session-scoped filter placeholders ({current_user_id} / {current_org_id}) —
 // the sibling vocabulary to date macros. Presentation scope only; RLS is the
 // enforcement boundary. See context-tokens.zod.ts.
