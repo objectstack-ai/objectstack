@@ -15,6 +15,11 @@ import {
   lowerFilterCondition,
   normalizeFilterComparandTypes,
 } from '@objectstack/spec/data';
+// The `FilterArray` spelling of `where`, lowered in front of that door by the
+// spec's ONE lowering of it — the pair the analytics `where` door and the engine
+// call: `isFilterAST` gates the shape, `parseFilterAST` lowers it. See
+// {@link lowerWhereFilterArray}. ⛔ No second FilterArray parser in this face.
+import { isFilterAST, parseFilterAST, VALID_AST_OPERATORS } from '@objectstack/spec/data';
 import type { InMemoryDriver } from './memory-driver.js';
 import {
   Logger,
@@ -51,6 +56,7 @@ import {
   assertFilterConditionShape,
   uncompilableCombinatorError,
   uncompilableFieldOperatorError,
+  unsupportedFilterError,
   unsupportedTimeGranularityError,
   type FilterFaceCapabilities,
 } from './filter-refusal.js';
@@ -939,8 +945,85 @@ function explicitDateRangeWindow(dateRange: readonly unknown[]): [string, string
 }
 
 /**
+ * Lower the `FilterArray` spelling of a cube `where` to the `FilterCondition`
+ * it spells, at the entry of {@link MemoryAnalyticsService.normalizeFilters} —
+ * so both spellings of one filter meet the same comparand doors, the same
+ * shared lowering and the same vocabulary gate after it.
+ *
+ * `AnalyticsQuery.where` is declared a `FilterCondition`; `FilterArray` is
+ * input-only authoring sugar (`spec/data/filter.zod.ts`). This face used to
+ * read only a non-array object `where`, so an array skipped every door and the
+ * flatten, and its predicate vanished: `[['d', '=', 'v1']]` aggregated EVERY
+ * row and the `generateSql()` echo carried no `WHERE`, while `{d: 'v1'}`
+ * answered its row. Fewer predicates means more rows — the widening class the
+ * vocabulary gate below already refuses for the object spelling.
+ *
+ * The analytics `where` door lowers the array spelling, and this face is an
+ * analytics face, so it LOWERS rather than refuses — through the same spec pair
+ * that door and the engine call, never a parser of its own. The three arrival
+ * answers are theirs:
+ *
+ * 1. `[]` is "no filter", not a failed filter — `parseFilterAST([])` is
+ *    `undefined`, and every door reads it that way.
+ * 2. An array `isFilterAST` accepts is lowered by `parseFilterAST`, which runs
+ *    the shared comparand-shape and comparand-type faces on what it returns;
+ *    `normalizeFilters` then runs its door on that condition as on any object.
+ * 3. Any other array is REFUSED `INVALID_FILTER` / 400 — `isFilterAST` gates
+ *    first so `parseFilterAST`'s lenient `$${op}` fallback cannot turn a
+ *    misspelled operator into a condition nothing compiles, and so a shape it
+ *    has no lowering for (the infix join, a list of scalars, a cube-style
+ *    `{member, operator, values}` list) is never read as no filter at all.
+ *
+ * Anything that is not an array is returned as it came.
+ */
+function lowerWhereFilterArray(where: unknown): unknown {
+  if (!Array.isArray(where)) return where;
+  // (1) `[]` is "no filter".
+  if (where.length === 0) return undefined;
+  // (3) Not a shape `parseFilterAST` can express.
+  if (!isFilterAST(where)) throw filterArrayNotLowerableError(where);
+  // (2) The declared path.
+  const condition = parseFilterAST(where);
+  if (!condition || typeof condition !== 'object' || Array.isArray(condition)) {
+    // Unreachable by construction — `isFilterAST` accepted the shape, so
+    // `parseFilterAST` has a lowering for it. Loud rather than silent: the
+    // failure mode of the two spec functions disagreeing is a dropped
+    // predicate, i.e. every row.
+    throw unsupportedFilterError(
+      `The analytics (cube) face received the filter array ${previewFilterArray(where)}, which ` +
+        `isFilterAST() accepted and parseFilterAST() lowered to ${previewFilterArray(condition)}. ` +
+        `It is refused rather than aggregating the UNFILTERED rows.`,
+    );
+  }
+  return condition;
+}
+
+/** A `where` array this face cannot lower — the analytics `where` door's refusal, in this face's words. */
+function filterArrayNotLowerableError(where: readonly unknown[]): Error {
+  return unsupportedFilterError(
+    `The analytics (cube) face received a 'where' array that is not a filter: ` +
+      `${previewFilterArray(where)}. A filter array is a comparison [field, operator, value], a ` +
+      `logical node ["and"|"or", ...conditions], or a list of those — it is INPUT-ONLY sugar (spec ` +
+      `'FilterArray'), lowered to a FilterCondition by @objectstack/spec parseFilterAST() at every ` +
+      `door, this one included. This value cannot be lowered, and an unapplied filter would have ` +
+      `aggregated the UNFILTERED rows. Recognised operators: ` +
+      `${[...VALID_AST_OPERATORS].sort().join(', ')}. Infix joins ([condA, "or", condB]) are NOT ` +
+      `one of the shapes — write the prefix form ["or", condA, condB].`,
+  );
+}
+
+/** The refused value for a message — never a second throw (a `bigint` has no JSON). */
+function previewFilterArray(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return Array.isArray(value) ? 'an array' : typeof value;
+  }
+}
+
+/**
  * Memory-Based Analytics Service
- * 
+ *
  * Implements IAnalyticsService using InMemoryDriver's aggregation capabilities.
  * Provides a semantic layer (Cubes, Metrics, Dimensions) on top of in-memory data.
  * 
@@ -1646,14 +1729,20 @@ export class MemoryAnalyticsService implements IAnalyticsService {
    *    lowered filter it receives. So a `$between` reaches the gate as the two
    *    bounds it lowers to, and answers `find()`'s rows here too.
    *
-   * Not an array: `where` is declared a `FilterCondition`, and an array here is
-   * left to the reading this method has always given it.
+   * ## In front of the door: the `FilterArray` spelling
+   *
+   * An array `where` is lowered FIRST, by {@link lowerWhereFilterArray} — the
+   * spec's `isFilterAST` / `parseFilterAST` pair the analytics `where` door
+   * calls — so it reaches steps 1–3 as the `FilterCondition` it spells and
+   * answers what that object answers; `[]` is no filter, and an array with no
+   * lowering is refused `INVALID_FILTER` / 400. It used to skip all three steps
+   * and the flatten, and so answered every row.
    */
   private normalizeFilters(query: unknown): NormalizedCubeEntry[] {
     if (!query || typeof query !== 'object') return [];
 
     const out: NormalizedCubeEntry[] = [];
-    const where = (query as { where?: unknown }).where;
+    const where = lowerWhereFilterArray((query as { where?: unknown }).where);
 
     if (where && typeof where === 'object' && !Array.isArray(where)) {
       assertListComparandShapes(where);
