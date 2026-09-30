@@ -159,10 +159,10 @@ describe('controls and the author-facing type', () => {
  * `connectors[].syncConfig.schedule` was the third, and #16320 DELETED it
  * (ADR-0049 — nothing evaluated it; deleted outright, no tombstone, by the
  * maintainer ruling of 2026-09-10). It stays in this block as the absence it
- * now is: `DataSyncConfigSchema` is not `.strict()`, so every shape that used
- * to draw a dialect verdict at that path is now dropped in silence — the roster
- * shrinks HERE rather than a stale control quietly passing a cron through a slot
- * that no longer exists.
+ * now is — and protocol 18 made that absence LOUD: the whole `syncConfig`
+ * container is a `retiredKey()` tombstone now (ADR-0049; the sync definition
+ * moved to the target `mapping`), so every shape that used to draw a dialect
+ * verdict at that path draws the container's retirement verdict one level up.
  */
 describe('through `ObjectStackDefinitionSchema` — the stack-reachable typed slots refuse at the named path', () => {
   const manifest = { id: 'com.example.typed', name: 'typed-slots', version: '1.0.0', type: 'app' as const };
@@ -199,19 +199,21 @@ describe('through `ObjectStackDefinitionSchema` — the stack-reachable typed sl
     ]);
   });
 
-  it('[#16320] `connectors[].syncConfig.schedule` is no longer a typed slot — every shape is STRIPPED at `connectors.0.syncConfig.schedule`, drawing no verdict at all', () => {
+  it('[#16320] `connectors[].syncConfig.schedule` is no longer a typed slot — every shape draws the CONTAINER\'s retirement verdict at `connectors.0.syncConfig`, never a dialect verdict', () => {
     // The foreign envelope this case used to narrow on, the cron envelope the
-    // slot used to normalize TO, and the bare string it used to accept: all
-    // three are dropped now. `DataSyncConfigSchema` is not `.strict()` and the
-    // key was deleted with no `retiredKey()` tombstone, so there is no issue to
-    // read — the ADR-0104 silent-strip shape, accepted deliberately by the
-    // ruling and pinned here so a route change is loud.
+    // slot used to normalize TO, and the bare string it used to accept. They
+    // were silently stripped from 2026-09-10 (the key deleted with no
+    // tombstone); since protocol 18 the whole `syncConfig` container is a
+    // `retiredKey()` tombstone (ADR-0049), so each is refused ONE LEVEL UP, at
+    // the container, with its prescription — and still never judged as a
+    // dialect, which is the half this block exists to pin.
     for (const authored of [{ dialect: 'template', source: '{{x}}' }, { dialect: 'cron', source: '*/15 * * * *' }, '*/15 * * * *']) {
-      expect(stackIssues({ manifest, connectors: [connector(authored)] }), JSON.stringify(authored)).toEqual([]);
-      const parsed = ObjectStackDefinitionSchema.safeParse({ manifest, connectors: [connector(authored)] });
-      expect(parsed.success).toBe(true);
-      if (!parsed.success) continue;
-      expect(parsed.data.connectors?.[0]?.syncConfig).not.toHaveProperty('schedule');
+      const issues = stackIssues({ manifest, connectors: [connector(authored)] });
+      expect(issues.map((i) => i.path), JSON.stringify(authored)).toEqual(['connectors.0.syncConfig']);
+      expect(issues[0]!.message).toMatch(/^`connector\.syncConfig` was removed/);
+      for (const dialectMessage of Object.values(TYPED_EXPRESSION_DIALECT_ONLY)) {
+        expect(issues[0]!.message).not.toBe(dialectMessage);
+      }
     }
     // Control: the same connector minus the key parses.
     const control = ObjectStackDefinitionSchema.safeParse({ manifest, connectors: [{ name: 'sap', label: 'SAP', type: 'saas' as const }] });

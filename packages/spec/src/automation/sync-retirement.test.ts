@@ -46,6 +46,15 @@ import {
 //     bare name is now published by NOBODY, and sections 3 and 5 below were
 //     rewritten to pin that instead. The #4738 rename stands: freeing a word is
 //     not a reason to rename the connector vocabulary back.
+//
+//     ⚠️ Protocol 18 SUPERSEDED the integration half too: connector-attached
+//     sync was retired from the connector (ADR-0049 — `syncConfig` parsed and
+//     was never executed; the definition moved to the target `mapping`'s
+//     `connectorSource`), and `DataSyncConfig(Schema)` and
+//     `ConnectorConflictResolution(Schema)` left `./integration` whole with it.
+//     Sections 2 and 4 below were rewritten to pin that ALL the sync names are
+//     now published by nobody; `connector-sync-retirement.test.ts` owns the
+//     retirement itself.
 //   - `@objectstack/spec/api`'s `ConflictResolutionStrategy` (route conflicts)
 //     is a FOURTH relative under a different name; it is outside the baseline
 //     and must not be touched by any of this.
@@ -109,16 +118,15 @@ describe('[#4738] sync/conflict dual-source retirement', () => {
       ).not.toContain(alsoRetired);
     }
 
-    // 2. The renamed side: `ConnectorConflictResolution(Schema)` originates in
-    //    integration/connector.zod.ts and is exported by ./integration alone
-    //    (plus nothing else — the rename must not fan out).
+    // 2. The renamed side: `ConnectorConflictResolution(Schema)` was the
+    //    connector vocabulary's name from #4738 until protocol 18 retired it
+    //    whole with `connector.syncConfig` (ADR-0049). Published by nobody now —
+    //    and in particular not re-homed onto another entry.
     for (const name of ['ConnectorConflictResolution', 'ConnectorConflictResolutionSchema']) {
-      const holders = holderOriginsOf(name);
-      expect(holders.length, `${name} must be exported (by ./integration)`).toBeGreaterThan(0);
-      for (const h of holders) {
-        expect(h.sub, `${name} must only be exported by ./integration`).toBe('./integration');
-        expect(originFile(h.origin)).toBe('src/integration/connector.zod.ts');
-      }
+      expect(
+        holderOriginsOf(name).map((h) => `${h.sub} (${h.origin})`),
+        `${name} left with connector.syncConfig — no entry may publish it`,
+      ).toEqual([]);
     }
 
     // 3. The bare `ConflictResolution(Schema)` is now published by NOBODY.
@@ -148,14 +156,18 @@ describe('[#4738] sync/conflict dual-source retirement', () => {
       ).toEqual([]);
     }
 
-    // 4. `DataSyncConfig(Schema)` likewise: ./integration alone, declared in
-    //    integration/connector.zod.ts — it kept its bare name because it is on
-    //    the live `ConnectorSchema.syncConfig` parse path.
+    // 4. `DataSyncConfig(Schema)` likewise: it kept its bare name on
+    //    ./integration while `ConnectorSchema.syncConfig` parsed it, and left
+    //    whole with that key in protocol 18. Published by nobody now.
     for (const name of ['DataSyncConfig', 'DataSyncConfigSchema']) {
-      const holders = holderOriginsOf(name);
-      expect(holders.map((h) => h.sub), `${name} must be owned by ./integration alone`).toEqual(['./integration']);
-      expect(originFile(holders[0].origin)).toBe('src/integration/connector.zod.ts');
+      expect(
+        holderOriginsOf(name).map((h) => `${h.sub} (${h.origin})`),
+        `${name} left with connector.syncConfig — no entry may publish it`,
+      ).toEqual([]);
     }
+    // Anti-vacuity for 2 and 4: ./integration still resolves, and still
+    // publishes the connector itself.
+    expect(exportNamesOf('./integration')).toContain('ConnectorSchema');
 
     // 5. The fourth relative is untouched: `ConflictResolutionStrategy` (route
     //    conflict handling) still exists on ./api under its own distinct name.
@@ -187,14 +199,12 @@ describe('[#4738] sync/conflict dual-source retirement', () => {
     // Anti-vacuity: the namespace we just probed is real and non-trivial.
     expect('FlowSchema' in automation).toBe(true);
 
-    // Renamed side — the connector vocabulary, byte-for-byte unchanged.
+    // Renamed side — retired with `connector.syncConfig` in protocol 18, so
+    // gone at runtime too, and the connector itself still resolves.
     expect('ConflictResolutionSchema' in integration).toBe(false);
-    expect('ConnectorConflictResolutionSchema' in integration).toBe(true);
-    expect(() => integration.ConnectorConflictResolutionSchema.parse('target_wins')).not.toThrow();
-    expect(() => integration.ConnectorConflictResolutionSchema.parse('latest_wins')).not.toThrow();
-    // The retired automation-side vocabulary was disjoint precisely here:
-    expect(() => integration.ConnectorConflictResolutionSchema.parse('destination_wins')).toThrow();
-    expect(() => integration.ConnectorConflictResolutionSchema.parse('merge')).toThrow();
+    expect('ConnectorConflictResolutionSchema' in integration).toBe(false);
+    expect('DataSyncConfigSchema' in integration).toBe(false);
+    expect('ConnectorSchema' in integration).toBe(true);
 
     // ui side — RETIRED at #4988 with `ui/offline.zod.ts`. The runtime half of
     // section 3: the bare name is absent from all three namespaces rather than
@@ -208,24 +218,28 @@ describe('[#4738] sync/conflict dual-source retirement', () => {
     expect('PageSchema' in ui).toBe(true);
   });
 
-  it('still parses authored connector syncConfig through the renamed enum — the live path', async () => {
+  it('refuses an authored connector `syncConfig` whatever its conflict value — the path is retired', async () => {
+    // Was "still parses authored connector syncConfig through the renamed enum
+    // — the live path", asserting `target_wins` parsed and `destination_wins`
+    // did not. Protocol 18 retired `syncConfig` (ADR-0049): the value domain no
+    // longer decides anything, because the KEY is refused with its
+    // prescription. Both former outcomes now read the same, which is the proof
+    // that the refusal is about the key and not the value.
     const { ConnectorSchema } = await import('../integration/connector.zod');
     const connectorWith = (conflictResolution: string) => ({
       name: 'sap_erp',
       label: 'SAP ERP',
       type: 'saas',
-      syncConfig: {
-        strategy: 'incremental',
-        direction: 'bidirectional',
-        conflictResolution,
-        batchSize: 500,
-      },
+      syncConfig: { strategy: 'incremental', direction: 'bidirectional', conflictResolution, batchSize: 500 },
     });
-    const parsed = ConnectorSchema.parse(connectorWith('target_wins'));
-    expect(parsed.syncConfig?.conflictResolution).toBe('target_wins');
-    // The authored VALUE domain did not move an inch with the TS rename; the
-    // SAME document differing only in this one value stays illegal (so this
-    // negative cannot pass for an unrelated reason):
-    expect(() => ConnectorSchema.parse(connectorWith('destination_wins'))).toThrow();
+    for (const value of ['target_wins', 'destination_wins']) {
+      const result = ConnectorSchema.safeParse(connectorWith(value));
+      expect(result.success, `${value} must be refused`).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'syncConfig');
+      expect(issue!.message).toMatch(/^`connector\.syncConfig` was removed/);
+    }
+    // CONTROL: the same connector without the key parses.
+    const { syncConfig: _dropped, ...rest } = connectorWith('target_wins');
+    expect(ConnectorSchema.safeParse(rest).success).toBe(true);
   });
 });

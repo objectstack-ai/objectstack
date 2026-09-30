@@ -54,13 +54,13 @@ import { RetryPolicySchema } from './shared/retry-policy.zod';
 import type { RetryPolicy, RetryPolicyParsed } from './shared/retry-policy.zod';
 import {
   ConnectorSchema,
-  DataSyncConfigSchema,
+  RetryConfigSchema,
 } from './integration/connector.zod';
 import type {
   Connector,
   ConnectorParsed,
-  DataSyncConfig,
-  DataSyncConfigParsed,
+  RetryConfig,
+  RetryConfigParsed,
 } from './integration/connector.zod';
 import { ViewFilterRuleSchema, ViewSchema } from './ui/view.zod';
 import type { View, ViewFilterRule, ViewFilterRuleParsed, ViewParsed } from './ui/view.zod';
@@ -275,7 +275,7 @@ import type * as M187 from './shared/duration.zod.js';
 import type * as M188 from './ai/build-progress.zod.js';
 
 // ---------------------------------------------------------------------------
-// 780 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 778 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -937,10 +937,8 @@ export type Iso_identity_scim__SCIMPatchOperationSchema = Assert<Eq< z.input< ty
 // `ConnectorTrigger` pin with its schema in the `triggers` retirement after it.
 export type Iso_integration_connector__ConnectorActionEffectSchema = Assert<Eq< z.input< typeof M78.ConnectorActionEffectSchema >, z.infer< typeof M78.ConnectorActionEffectSchema > >>;
 export type Iso_integration_connector__ConnectorActionSchema = Assert<Eq< z.input< typeof M78.ConnectorActionSchema >, z.infer< typeof M78.ConnectorActionSchema > >>;
-export type Iso_integration_connector__ConnectorConflictResolutionSchema = Assert<Eq< z.input< typeof M78.ConnectorConflictResolutionSchema >, z.infer< typeof M78.ConnectorConflictResolutionSchema > >>;
 export type Iso_integration_connector__ConnectorRetryStrategySchema = Assert<Eq< z.input< typeof M78.ConnectorRetryStrategySchema >, z.infer< typeof M78.ConnectorRetryStrategySchema > >>;
 export type Iso_integration_connector__ConnectorTypeSchema = Assert<Eq< z.input< typeof M78.ConnectorTypeSchema >, z.infer< typeof M78.ConnectorTypeSchema > >>;
-export type Iso_integration_connector__SyncStrategySchema = Assert<Eq< z.input< typeof M78.SyncStrategySchema >, z.infer< typeof M78.SyncStrategySchema > >>;
 
 // kernel/cli-extension.zod.ts
 // Iso385 (`CLICommandContributionSchema`) left with the #12007 retirement.
@@ -1615,8 +1613,11 @@ export type Iso_ui_view__VisualizationTypeSchema = Assert<Eq< z.input< typeof M1
 
 export type Spot1 = Assert<Eq< ConnectorParsed, z.infer< typeof ConnectorSchema > >>;
 export type Spot1Flipped = Assert<Eq< Connector, z.input< typeof ConnectorSchema > >>;
-export type Spot2 = Assert<Eq< DataSyncConfigParsed, z.infer< typeof DataSyncConfigSchema > >>;
-export type Spot2Flipped = Assert<Eq< DataSyncConfig, z.input< typeof DataSyncConfigSchema > >>;
+// Spot 2 was `DataSyncConfig` until protocol 18 retired it whole with
+// `connector.syncConfig` (ADR-0049); `RetryConfig`, the connector's executed
+// policy block, holds the same two facts in the same module.
+export type Spot2 = Assert<Eq< RetryConfigParsed, z.infer< typeof RetryConfigSchema > >>;
+export type Spot2Flipped = Assert<Eq< RetryConfig, z.input< typeof RetryConfigSchema > >>;
 export type Spot3 = Assert<Eq< ViewParsed, z.infer< typeof ViewSchema > >>;
 export type Spot3Flipped = Assert<Eq< View, z.input< typeof ViewSchema > >>;
 export type Spot4 = Assert<Eq< ViewFilterRuleParsed, z.infer< typeof ViewFilterRuleSchema > >>;
@@ -1669,7 +1670,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 780 isomorphic pins', () => {
+  it('still declares all 778 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2383,7 +2384,20 @@ describe('ADR-0122 type-alias convention', () => {
     // author alias. It has no default or transform in its tree, so it is
     // pinned here (Iso_ui_view__EmptyStateSchema) rather than given an
     // `EmptyStateParsed` synonym. +1 added.
-    expect(pins).toHaveLength(780);
+    //
+    // 780 -> 778 is the ADR-0049 retirement of connector-attached sync from the
+    // connector (`connector.syncConfig` / `connector.fieldMappings`; the sync
+    // definition moved to the target `mapping`'s `connectorSource`):
+    // `SyncStrategySchema` and `ConnectorConflictResolutionSchema` left whole
+    // with their carrier (whole-def removal, `RETIRED_DEFS_BY_MAJOR[18]`), so
+    // their two M78 pins leave with the schemas. The other two defs of that
+    // retirement (`DataSyncConfig`, `ConnectorFieldMapping`) each carried an
+    // `XParsed` alias and were never on this list; `DataSyncConfig` was Spot 2
+    // above, which now reads `RetryConfig`. The M78 slot stays occupied by the
+    // module's surviving pins. -2 removed. Authored off 779 (as 779 -> 777)
+    // and re-derived on the merge of #20694's `EmptyStateSchema` pin above, so
+    // this entry's arrow starts from 780.
+    expect(pins).toHaveLength(778);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

@@ -46,10 +46,9 @@ live declarations in `integration/connector.zod.ts` and `ui/offline.zod.ts` (the
 
 **What to use instead:**
 
-- **Connector-attached sync** — `ConnectorSchema.syncConfig`
-  (`integration/connector.zod.ts`): the live, parsed sync-strategy surface
-  (strategy, direction, `conflictResolution`, batching, delete mode; the cron
-  `schedule` slot was retired at #16320 under ADR-0049 — nothing ever evaluated it).
+- **Connector-attached sync** — ~~`ConnectorSchema.syncConfig`~~ **also retired**
+  (ADR-0049): parsed, never executed. A sync is now defined on its target — see
+  [Data sync is defined on the target](#data-sync-is-defined-on-the-target).
 - **Transformation pipelines** — ~~`ETLPipeline` (`automation/etl.zod.ts`) for
   multi-source, multi-stage data movement~~ **also retired, at #6414** (ADR-0049), on
   the same reading this section applies to L1: zero execution-side consumers, no
@@ -65,7 +64,7 @@ live declarations in `integration/connector.zod.ts` and `ui/offline.zod.ts` (the
   when it is built its vocabulary arrives on the sync engine that owns the
   queue, the conflict policy and the cache — not as a standalone `ui/` config
   shape. The bare `ConflictResolution` name is consequently published by no def
-  at all; `ConnectorConflictResolution` above is the connector-sync one.
+  at all, and the connector's `ConnectorConflictResolution` left with `syncConfig`.
 
 ---
 
@@ -95,10 +94,9 @@ ten-stage pipeline, get no error, and get no execution.
 
 **What to use instead — layer by layer, and one honest gap:**
 
-- **Scheduled, connector-attached synchronisation** — `ConnectorSchema.syncConfig`
-  (`integration/connector.zod.ts`), the live, parsed surface described under L3 below:
-  strategy, direction, `conflictResolution`, batching, delete mode — no cron slot:
-  `syncConfig.schedule` was retired at #16320 under ADR-0049, nothing ever evaluated it.
+- **Scheduled pull from an external system** — the target-side binding
+  `mapping.connectorSource` with a `job` for the cadence (declared, not yet executed;
+  see [Data sync is defined on the target](#data-sync-is-defined-on-the-target)).
 - **Per-field value conversion on import** — `mapping.fieldMapping[].transform`
   (`data/mapping.zod.ts`): a string enum (`none` / `constant` / `map` / `split` /
   `join` / `lookup`) with its settings in `params`, applied row by row by the REST
@@ -135,9 +133,7 @@ Complete, production-grade integration with external systems. Includes authentic
 
 - ✅ **Authentication**: OAuth2, JWT, SAML, API Key, Basic Auth
 - ✅ **Retry Policies**: Exponential backoff and the rest of `retryConfig` — executed; see below
-- ✅ **Field Mapping**: `dataType` target type and `syncMode` per-field direction —
-  **no value transformation**; see below
-- ✅ **Conflict Resolution**: Multiple strategies (`ConnectorConflictResolution`)
+- ❌ **Sync and field mapping on the connector**: **not provided** — `syncConfig` / `fieldMappings` were retired; see below
 - ✅ **Security**: Signature verification, encryption
 - ❌ **Health checks and circuit breaking**: **not provided** — the `health` block was retired; see below
 - ❌ **Webhooks on the connector**: **not provided** — declare webhooks in the stack's top-level `webhooks:` collection; see below
@@ -198,44 +194,36 @@ Complete, production-grade integration with external systems. Includes authentic
 > a connect-only bound in a provider or gateway on a transport that can separate
 > the phases.
 
-> **Field mapping does not transform values.** The ticked line above used to read
-> "With transformations and data type conversion". Only the second half was ever
-> true: `ConnectorFieldMappingSchema` (`integration/connector.zod.ts`) extends the
-> base mapping with exactly three keys — `dataType`, `required` and `syncMode`.
-> `FieldMapping.transform` — authored as `connector.fieldMappings[].transform` and
-> `externalLookup.fieldMappings[].transform` — was removed in `@objectstack/spec`
-> 17.0.0 (#5552, ADR-0049), and the whole `FieldMappingTransform` union went with
-> it (`constant` / `cast` / `lookup` / `javascript` / `map`) — **no runtime ever
-> executed any of the five**, and the `javascript` member advertised
-> `dialect: "js"`, a dialect retired in #3278. An L3 connector mapping moves a
-> value from `source` to `target`; it does not compute one. **Value conversion
-> belongs on a surface that runs it:** the import mapping's own `transform`
-> (`mapping.fieldMapping[].transform` in `data/mapping.zod.ts` — a string enum,
-> `none`/`constant`/`map`/`split`/`join`/`lookup`, with its settings in `params`),
-> applied row by row by the REST import path, which rejects its own `javascript`
-> value with a 400 rather than pretending to run it. That is now the ONLY such
-> surface: this note used to offer "or an ETL transformation step (L2 above)" as a
-> second option, and L2 was retired at #6414 for having no executor — the second
-> option was the same defect this note is about, one layer up. Already authored the
-> retired key? `os migrate meta --from 16` rewrites it.
+### Data sync is defined on the target
+
+> **The connector carries no sync.** `connector.syncConfig` (strategy, direction,
+> `conflictResolution`, batching, delete mode, filters) and `connector.fieldMappings`
+> were removed in `@objectstack/spec` 17 (ADR-0049): no engine ever ran a
+> connector-attached sync or moved a value through a connector field mapping, and
+> the `latest_wins` / `soft_delete` defaults resolved and deleted nothing. The
+> capability is mainstream, so it moved rather than lapsed — to the TARGET, where
+> mainstream platforms bind it: a `mapping` (`data/mapping.zod.ts`)
+> already names the object it writes, its field map (with an executed
+> `fieldMapping[].transform`), its `mode` and its `upsertKey`, and its
+> `connectorSource` adds where the rows come from — a `rest` / `openapi` connector
+> instance, the read action and an optional timestamp `watermark`. A `job` sets the
+> cadence; no schedule key returns to the connector. Version 1 is a one-way pull,
+> full or incremental. ⚠️ **Declared, not yet executed:** the pull executor ships in
+> a later stage, and authoring `connectorSource` warns until it does.
+> Already authored the retired keys? `os migrate meta --from 17` lists the mechanical edits.
 
 ### Use Cases
 
-1. **Enterprise SAP Integration** - Full bidirectional sync with complex business logic
+1. **Enterprise SAP Integration** - Calling the ERP's actions from flows
 2. **Financial System Integration** - PCI-compliant payment processor connector
-3. **Identity Provider Sync** - SAML/OIDC integration with Okta/Auth0
-4. **IoT Platform Integration** - Real-time data streaming from sensors
+3. **Identity Provider Integration** - SAML/OIDC integration with Okta/Auth0
 
 ### Example
 
 > **The bare `Connector` is the AUTHOR shape.** It is `z.input` of
 > `ConnectorSchema`, so every key carrying a `.default()` — `enabled`,
-> `requestTimeoutMs`, all of `syncConfig`'s
-> `strategy` / `direction` / `realtimeSync` / `conflictResolution` /
-> `batchSize` / `deleteMode`, and a mapping's `required` / `syncMode` — is
-> optional when you write a connector. (`syncConfig.schedule`, the cron slot the schema used
-> to wrap into an envelope, was retired at #16320 under ADR-0049: nothing ever
-> evaluated it.) Annotate the **result** of
+> `requestTimeoutMs`, `authentication` — is optional when you write a
+> connector. Annotate the **result** of
 > `ConnectorSchema.parse(…)` with **`ConnectorParsed`**, which is `z.infer`:
 > there those keys are all present. The same convention held on L2's
 > `ETLPipeline` / `ETLPipelineParsed` before that layer was retired (#6414), and
@@ -274,47 +262,9 @@ const sapConnector: Connector = {
     scopes: ['read:orders', 'write:orders']
   },
 
-  // Data Sync Configuration
-  syncConfig: {
-    strategy: 'incremental',
-    direction: 'bidirectional',
-    realtimeSync: true,
-    timestampField: 'updated_at',
-    conflictResolution: 'latest_wins',
-    batchSize: 1000,
-    deleteMode: 'soft_delete'
-  },
-
-  // Field Mappings — `dataType` target type and `syncMode` direction. There is
-  // no value transformation here; see the tombstone on the second entry.
-  // The keys are `source` / `target` — the canonical spelling of the base
-  // protocol in `shared/mapping.zod.ts`, which every mapping surface extends.
-  fieldMappings: [
-    {
-      source: 'customer_number',
-      target: 'customer_id',
-      dataType: 'string',
-      required: true,
-      syncMode: 'bidirectional'
-    },
-    {
-      source: 'order_value',
-      target: 'order_total',
-      dataType: 'number',
-      // (`transform` sat here until #5552 retired it, together with the whole
-      // five-member `FieldMappingTransform` union — `constant` / `cast` /
-      // `lookup` / `javascript` / `map`. None of the five ever had an executor:
-      // an L3 connector mapping moves a value from `source` to `target`, and
-      // nothing anywhere read the transform. The `javascript` member is what
-      // made the gap visible — it recommended the retired `js` dialect
-      // (#3278), so the only spelling that parsed was a bare string, which
-      // means CEL. Value conversion belongs on a surface that runs it: the
-      // import mapping's own `transform` (`data/mapping.zod.ts`). The "or an ETL
-      // transformation step" this used to add is gone — L2 was retired at #6414
-      // for having no executor, which is the very defect this comment is about.)
-      syncMode: 'bidirectional'
-    }
-  ],
+  // (`syncConfig` and `fieldMappings` sat here until ADR-0049 retired them —
+  // no engine ever ran a connector-attached sync. A sync is defined on its
+  // target: a `mapping` whose `connectorSource` names this connector.)
 
   // (`webhooks` sat here until ADR-0049 retired it — a webhook nested in a
   // connector was never registered, so it was never delivered. Declare
@@ -391,14 +341,14 @@ mostly answers "which surface", and — for the two questions that used to route
 
 | Question | Answer → Surface |
 |----------|------------------|
-| Do you need to convert a value per field on import? | **Yes** → the import mapping's `fieldMapping[].transform` (`data/mapping.zod.ts`), applied row by row by the REST import path. **Not** L3: a connector's `fieldMappings` declares `dataType` and `syncMode` and performs no value transformation (#5552) |
+| Do you need to convert a value per field on import? | **Yes** → the import mapping's `fieldMapping[].transform` (`data/mapping.zod.ts`), applied row by row by the REST import path. **Not** L3: the connector's `fieldMappings` never transformed anything and is retired (ADR-0049) |
 | Do you need joins, aggregations or custom-SQL stages? | **No surface provides this.** It was L2's headline claim and L2 had no executor (#6414). Do it in the destination system, or in a `flow` / job you write. Do not author a shape hoping it runs |
 | Do you need multi-source aggregation? | **Same answer**, and for the same reason — see [Retired: L2 ETL Pipeline](#retired-l2-etl-pipeline-v17) |
 | Do you need real-time webhooks? | **Outbound:** the stack's top-level `webhooks:` collection (`src/automation/webhook.zod.ts`) — **not** L3: a connector's nested `webhooks` was never delivered and is retired (ADR-0049) |
 | Do you need advanced authentication (OAuth2, SAML)? | **Yes** → L3 (Connector) |
 | Do you need retry policies and circuit breaking? | **Retry: yes, L3.** `retryConfig` is executed at the platform's one outbound call (ADR-0049 ruled `实现`) — backoff shape, attempt count, retryable statuses, network-error retry and a per-attempt `requestTimeoutMs`. **Circuit breaking: no level provides it** — `health.circuitBreaker` was retired (ADR-0049) because no breaker ever opened; implement it in the connector provider or an upstream gateway. Outbound **rate limiting** is not a reason to pick any level either: no level provides it (#4911); throttle at the provider or gateway |
-| Is it a simple point-to-point sync with an external system? | **Yes** → L3 (Connector) with `syncConfig` |
-| Are you building a data warehouse pipeline? | The extraction half is L3 (`syncConfig`); the warehouse-side transformation is the warehouse's own tooling. There is no ObjectStack pipeline protocol (#6414) |
+| Is it a simple pull from an external system into a local object? | The target-side binding: a `mapping` with `connectorSource` over a `rest` / `openapi` connector, cadence from a `job` — **declared, not yet executed** ([above](#data-sync-is-defined-on-the-target)) |
+| Are you building a data warehouse pipeline? | The extraction half is that same pull binding; the warehouse-side transformation is the warehouse's own tooling. There is no ObjectStack pipeline protocol (#6414) |
 | Are you integrating with an enterprise system? | **Yes** → L3 (Connector) |
 | Do you need client-side offline sync? | Not this layering — and note `ui/offline.zod.ts` was itself retired at #4988 for having no carrier key |
 
@@ -410,17 +360,17 @@ ObjectStack ↔ Enterprise Connector ↔ SAP
                     ↓
                Auth, Retry
 ```
-Use **L3 Enterprise Connector** for production-grade integrations — including
-straightforward point-to-point sync, via a connector instance with simple `auth`
-and a `syncConfig`.
+Use **L3 Enterprise Connector** for production-grade integrations — a connector
+instance with simple `auth` whose actions flows call.
 
 #### Pattern 2: Ingest, then transform where it runs
 ```
 External API → L3 Connector → ObjectStack → (warehouse's own ELT)
 ```
 The second arrow used to read `ObjectStack → L2 ETL → Data Warehouse`, and that hop
-never executed. Land the data with a connector, then transform it with a tool that
-actually runs — the warehouse's own ELT, a `flow`, or a scheduled job.
+never executed. Land the data through a connector (the target-side pull binding once
+its executor ships), then transform it with a tool that actually runs — the
+warehouse's own ELT, a `flow`, or a scheduled job.
 
 ---
 
@@ -448,16 +398,34 @@ const pipeline: ETLPipeline = {
 };
 ```
 
-**After** — split it by which half had a runtime. The extraction half does:
+**After** — split it by which half has a runtime. The extraction half is the
+target-side pull binding (declared; its executor ships in a later stage):
 
 ```typescript
 import type { Connector } from '@objectstack/spec/integration';
+import type { Mapping } from '@objectstack/spec/data';
 
 const orders: Connector = {
   name: 'orders',
   label: 'Orders API',
-  type: 'saas',
-  syncConfig: { strategy: 'incremental', direction: 'import' }
+  type: 'api',
+  provider: 'rest',
+  providerConfig: { baseUrl: 'https://orders.example.com' },
+};
+
+const ordersPull: Mapping = {
+  name: 'orders_pull',
+  targetObject: 'order',
+  fieldMapping: [{ source: 'id', target: 'external_id' }, { source: 'total', target: 'amount' }],
+  mode: 'upsert',
+  upsertKey: ['external_id'],
+  connectorSource: {
+    connector: 'orders',
+    action: 'request',
+    input: { method: 'GET', path: '/orders' },
+    recordsPath: 'body.items',
+    watermark: { field: 'updated_at', param: 'updated_since' },
+  },
 };
 ```
 
@@ -468,13 +436,15 @@ ELT, a `flow`, or a scheduled job you write.
 Per-field value conversion on import — a cast, a constant, a lookup — is the import
 mapping's `fieldMapping[].transform` (`data/mapping.zod.ts`), which is executed.
 
-### From L3 (`syncConfig`) to a pipeline
+### From L3 `syncConfig` / `fieldMappings`
 
-There is no pipeline layer to move up to. This section used to describe exactly that
-move — "when a connector's declarative sync needs to transform values … **After (L2)**"
-— and the destination did not run. If `syncConfig` plus `fieldMapping[].transform` does
-not cover the case, the work belongs outside the sync protocol until an engine exists
-to receive it (ADR-0049: enforce, then declare).
+Both keys are retired (ADR-0049) and nothing was ever executed under them, so this
+is a source edit, not a data migration: move each sync you still want onto its
+target as the `mapping` above, carrying `fieldMappings`' `source` → `target` pairs
+into `fieldMapping` (a `defaultValue` becomes a `constant` transform). `direction`,
+`conflictResolution` and `deleteMode` have no counterpart — version 1 is a one-way
+pull that writes through `mode` / `upsertKey`. There is still no pipeline layer to
+move up to (ADR-0049: enforce, then declare).
 
 ---
 

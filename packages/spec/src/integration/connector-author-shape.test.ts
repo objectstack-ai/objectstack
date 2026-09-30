@@ -6,10 +6,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import {
-  ConnectorFieldMappingSchema,
-  ConnectorSchema,
-} from './connector.zod';
+import { ConnectorSchema } from './connector.zod';
 
 // ─── [#5515] the L3 `Connector` example in SYNC_ARCHITECTURE.md ──────────────
 //
@@ -62,6 +59,13 @@ import {
 // in this file now measures. #16320 then retired `syncConfig.schedule` itself
 // (ADR-0049 — nothing evaluated it), the one key whose TYPE differed between
 // the two sides, so that block now measures the flip on the defaults alone.
+//
+// Protocol 18 then retired `syncConfig` and `fieldMappings` themselves
+// (ADR-0049 — no engine ever ran a connector-attached sync; the definition
+// moved to the target `mapping`'s `connectorSource`). The three `fieldMappings`
+// probes below therefore measure the strongest fact left: the KEY is refused
+// whatever it holds, and the document's second example now teaches the
+// target-side binding instead of a connector `syncConfig`.
 
 const SPEC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const SYNC_ARCHITECTURE = resolve(SPEC_DIR, 'docs/SYNC_ARCHITECTURE.md');
@@ -210,63 +214,37 @@ describe('[#5515] SYNC_ARCHITECTURE.md L3 connector examples compile', () => {
   });
 });
 
-describe('[#5515] the four spellings the example used to carry are rejected', () => {
+describe('[#5515] the spellings the example used to carry are rejected', () => {
   // Reverse verification, direction stated BEFORE running: each probe below
-  // restores one defect into an otherwise-fixed literal, and each must go RED
-  // with a named diagnostic. Not "some diagnostic" — a bare non-empty check
+  // restores one retired key into an otherwise-valid literal, and each must go
+  // RED with a named diagnostic. Not "some diagnostic" — a bare non-empty check
   // would still pass if the probe broke for an unrelated reason, which is
   // precisely the failure mode a documentation gate is prone to.
   //
-  // Each probe is a whole `Connector` rather than a bare mapping or
-  // webhook literal, because that is the shape the document actually teaches —
-  // and because the nested schemas publish no author-state name of their own,
-  // so reaching them any other way would mean measuring something the barrel
-  // does not export.
+  // #5515 pinned four VALUE-level defects here (`sourceField` for `source`, a
+  // `custom` transform, a webhook `retryPolicy`, a bare cron string). Every
+  // container they lived in has since been retired whole — `fieldMappings`
+  // and `syncConfig` in protocol 18, `webhooks` before them — so each probe now
+  // measures the stronger fact: the KEY is refused, whatever it holds, even
+  // when what it holds would once have been well-formed.
   const HEAD = "import type { Connector } from '@objectstack/spec/integration';";
   const probes = {
-    'alias-source-field': `${HEAD}
+    // The example's former field map, in its CANONICAL spelling: refused anyway.
+    'field-mappings-retired': `${HEAD}
       const c: Connector = {
         name: 'sap_erp_connector', label: 'SAP ERP Integration', type: 'saas',
-        fieldMappings: [{ sourceField: 'customer_number', targetField: 'customer_id' }],
+        fieldMappings: [{ source: 'customer_number', target: 'customer_id' }],
       };
       void c;
     `,
-    // #5515 filed this as "`custom` is not a member of the union". #5552 then
-    // retired the union outright, so the probe now measures the stronger fact:
-    // the KEY is gone, and it is gone for `custom` and for every real member
-    // alike. The probe body is unchanged on purpose — it is the same wrong
-    // snippet an author copies out of the L3 document.
-    'transform-retired': `${HEAD}
+    // The example's former sync block, trimmed to one key: refused anyway.
+    'sync-config-retired': `${HEAD}
       const c: Connector = {
         name: 'sap_erp_connector', label: 'SAP ERP Integration', type: 'saas',
-        fieldMappings: [{
-          source: 'order_value', target: 'order_total',
-          transform: { type: 'custom', function: 'value => parseFloat(value) / 100' },
-        }],
+        syncConfig: { strategy: 'incremental' },
       };
       void c;
     `,
-    // The other half, and the one that would silently rot otherwise: a
-    // previously-VALID member must now fail too. Without this, a regression that
-    // restored the union would leave `transform-retired` red for the old reason
-    // ("custom is not a member") and nothing would notice the retirement had
-    // been undone.
-    'transform-retired-valid-member': `${HEAD}
-      const c: Connector = {
-        name: 'sap_erp_connector', label: 'SAP ERP Integration', type: 'saas',
-        fieldMappings: [{
-          source: 'order_value', target: 'order_total',
-          transform: { type: 'javascript', expression: 'value / 100' },
-        }],
-      };
-      void c;
-    `,
-    // This probe used to author `webhooks[].retryPolicy` and pin TS2353 on the
-    // nested webhook shape. The whole nested array was retired since
-    // (ADR-0049 — a webhook inside a connector was never registered or
-    // delivered), so the example dropped its `webhooks` block and the probe now
-    // measures the stronger fact: the KEY is refused, whatever it holds — even
-    // a nested webhook that would have been well-formed.
     'webhooks-retired': `${HEAD}
       const c: Connector = {
         name: 'sap_erp_connector', label: 'SAP ERP Integration', type: 'saas',
@@ -277,14 +255,12 @@ describe('[#5515] the four spellings the example used to carry are rejected', ()
       };
       void c;
     `,
-    // The canonical spelling of the surviving key, as one control: if this were
-    // red the reds above would say nothing about the SPELLING.
-    'canonical-control': `${HEAD}
+    // A live sibling key in the same literal, as one control: if this were red
+    // the reds above would say nothing about the RETIRED keys.
+    'live-key-control': `${HEAD}
       const c: Connector = {
         name: 'sap_erp_connector', label: 'SAP ERP Integration', type: 'saas',
-        fieldMappings: [{
-          source: 'order_value', target: 'order_total',
-        }],
+        retryConfig: { maxAttempts: 3 },
       };
       void c;
     `,
@@ -292,53 +268,22 @@ describe('[#5515] the four spellings the example used to carry are rejected', ()
 
   const results = compileProbes(probes);
 
-  it('`sourceField` / `targetField` are not the canonical `source` / `target`', () => {
-    const message = render(results.get('alias-source-field')!);
-    expect(message).toContain('TS2353');
-    expect(message).toContain('sourceField');
-  });
-
   // ⚠ Measured, not assumed — and it is the one place the two tombstone
   // channels are NOT equally good. `retiredKey()` is `z.never().optional()`, so
   // its `z.input` type is `undefined`, and tsc reports the assignment failure
   // against that type: "Type '{ … }' is not assignable to type 'undefined'".
   // The compile channel therefore REFUSES the key but does not NAME it, while
-  // the parse channel (the `[#5515]`/`[#5552]` runtime block below) carries the
-  // full prescription. Asserting `toContain('transform')` here was the first
-  // draft and it was simply wrong about the diagnostic text; pinning the real
-  // shape is what keeps this test honest about which channel says what.
-  it('[#5552] `transform` is retired — the key no longer type-checks', () => {
-    // Was: "`custom` is not a member of the transform union", asserting all five
-    // member names appeared in the message. That assertion cannot be re-spelled
-    // — the union it enumerated is gone — so it is replaced by the fact that
-    // survived: the key itself fails to compile.
-    const message = render(results.get('transform-retired')!);
-    expect(message).toContain('TS2322');
-    expect(message).toContain("not assignable to type 'undefined'");
-  });
+  // the parse channel (the runtime block below) carries the full prescription.
+  for (const probe of ['field-mappings-retired', 'sync-config-retired', 'webhooks-retired'] as const) {
+    it(`\`${probe}\`: the key no longer type-checks, whatever it holds`, () => {
+      const message = render(results.get(probe)!);
+      expect(message).toContain('TS2322');
+      expect(message).toContain("not assignable to type 'undefined'");
+    });
+  }
 
-  it('[#5552] …and a member that used to be VALID fails identically', () => {
-    // The guard against a silent restoration: if the union came back, this probe
-    // would compile and go green, which is the only signal distinguishing "the
-    // key is retired" from "that one value was never a member". Identical
-    // diagnostic to the probe above — same key, same refusal, regardless of the
-    // value's shape.
-    const message = render(results.get('transform-retired-valid-member')!);
-    expect(message).toContain('TS2322');
-    expect(message).toContain("not assignable to type 'undefined'");
-  });
-
-  it('`webhooks` itself is retired — the key no longer type-checks, whatever it holds', () => {
-    // Same compile-channel shape as the `transform` pair above: a `retiredKey()`
-    // input type is `undefined`, so tsc refuses without naming the key; the
-    // parse channel below carries the prescription.
-    const message = render(results.get('webhooks-retired')!);
-    expect(message).toContain('TS2322');
-    expect(message).toContain("not assignable to type 'undefined'");
-  });
-
-  it('…while the canonical spelling of the surviving key compiles', () => {
-    expect(render(results.get('canonical-control')!)).toBe('');
+  it('…while a live sibling key in the same literal compiles', () => {
+    expect(render(results.get('live-key-control')!)).toBe('');
   });
 });
 
@@ -346,15 +291,9 @@ describe('[#5515] the schema rejects them at RUNTIME too, and how it says so', (
   // The compile probes above guard the TYPE surface. These guard the PARSE
   // surface, and they are not redundant with it: what an author is told when
   // they get it wrong is the difference between a fixable mistake and a
-  // mysterious one — and the three keys are told three different ways.
+  // mysterious one.
 
   it('`webhooks` on a connector is a KEY verdict carrying the retirement prescription', () => {
-    // Was: "`retryPolicy` is a curated tombstone" on the nested webhook shape
-    // (`WebhookConfigSchema`). That shape left with `connector.webhooks`
-    // (ADR-0049), so the example's webhook block is refused one level up, by
-    // the key — and the prescription must send the author to the collection
-    // that IS delivered, not merely refuse. (`retryPolicy`'s own curated
-    // tombstone lives on the delivered `WebhookSchema` and is pinned there.)
     const result = ConnectorSchema.safeParse({
       name: 'sap_erp_connector',
       label: 'SAP ERP Integration',
@@ -373,64 +312,25 @@ describe('[#5515] the schema rejects them at RUNTIME too, and how it says so', (
     expect(issue!.message).toContain('top-level `webhooks:` collection');
   });
 
-  it('`sourceField` / `targetField` are STRIPPED, and the mapping then fails on the missing canonical keys', () => {
-    // Pinned because it is the opposite of what #5515 first assumed, and the
-    // difference matters for how the doc defect could survive: the curated
-    // `sourceField` alias lives on `./data`'s `ImportFieldMappingSchema`
-    // (a `strictObject`, see `connector.test.ts`), NOT on this one.
-    // `ConnectorFieldMappingSchema` is a plain `z.object`, so the two foreign
-    // keys vanish silently and the author is told only that `source` and
-    // `target` are missing — never that the words they wrote were the problem.
-    const result = ConnectorFieldMappingSchema.safeParse({
-      sourceField: 'customer_number',
-      targetField: 'customer_id',
-      dataType: 'string',
+  it('the example\'s former `syncConfig` / `fieldMappings` are KEY verdicts pointing at the target-side binding', () => {
+    // What an author copying an older revision of the document meets: both
+    // keys refused BY NAME, and the prescription naming the surface the
+    // document now teaches — the target `mapping` and its `connectorSource`.
+    const result = ConnectorSchema.safeParse({
+      name: 'sap_erp_connector',
+      label: 'SAP ERP Integration',
+      type: 'saas',
+      syncConfig: { strategy: 'incremental', conflictResolution: 'latest_wins', deleteMode: 'soft_delete' },
+      fieldMappings: [{ source: 'customer_number', target: 'customer_id', syncMode: 'bidirectional' }],
     });
     expect(result.success).toBe(false);
-    const paths = result.error!.issues.map((i) => i.path.join('.'));
-    expect(paths).toEqual(['source', 'target']);
-    expect(JSON.stringify(result.error!.issues)).not.toContain('sourceField');
-  });
-
-  it('[#5552] `transform` is now a KEY verdict carrying the retirement prescription', () => {
-    // The verdict CHANGED CLASS here, and that is the point worth pinning.
-    // #5515 measured a VALUE verdict — the key was real, `'custom'` was not a
-    // member, and the message enumerated the five that were. #5552 retired the
-    // key, so the same input is now refused one level up, by the key, and every
-    // member is equally out. Both spellings below get the identical message,
-    // which is what "the union is gone" means as opposed to "your value was
-    // wrong".
-    for (const transform of [
-      { type: 'custom', function: 'value => parseFloat(value) / 100' },
-      { type: 'javascript', expression: 'value / 100' },
-    ]) {
-      const result = ConnectorFieldMappingSchema.safeParse({
-        source: 'order_value',
-        target: 'order_total',
-        transform,
-      });
-      expect(result.success).toBe(false);
-      const issue = result.error!.issues.find((i) => i.path.join('.') === 'transform');
-      expect(issue).toBeDefined();
-      expect(issue!.message).toMatch(/`FieldMapping\.transform`.*removed/s);
-      // It must point at the transform pipeline that DOES run, not just refuse.
-      expect(issue!.message).toMatch(/mapping\.fieldMapping\[\]\.transform/s);
+    for (const key of ['syncConfig', 'fieldMappings']) {
+      const issue = result.error!.issues.find((i) => i.path.join('.') === key);
+      expect(issue, `${key} must be refused at its own path`).toBeDefined();
+      expect(issue!.code).toBe('invalid_type');
+      expect(issue!.message).toMatch(new RegExp(`^\`connector\\.${key}\` was removed`));
+      expect(issue!.message).toContain('`connectorSource`');
     }
-  });
-
-  it('the corrected mapping parses — with the transform dropped, not re-spelled', () => {
-    // There is no replacement member to move to: the L3 connector surface never
-    // transformed anything. What the author keeps is the plain source→target
-    // mapping; what they must move elsewhere is the transformation itself.
-    const parsed = ConnectorFieldMappingSchema.parse({
-      source: 'order_value',
-      target: 'order_total',
-      dataType: 'number',
-      syncMode: 'bidirectional',
-    });
-    expect(parsed).not.toHaveProperty('transform');
-    expect(parsed.source).toBe('order_value');
-    expect(parsed.dataType).toBe('number');
   });
 });
 
@@ -443,18 +343,15 @@ describe('[#5515] the bare `Connector` is the author shape; `ConnectorParsed` is
   // and `Connector`; only which name sits on which side moved, which is the
   // whole claim of the flip as a test.
   //
-  // The literal used to carry `syncConfig: { schedule: '*/15 * * * *' }` as
-  // well — the one key whose TYPE differed between the sides (a bare cron
-  // string in, the `{ dialect, source }` envelope out), and the half of this
-  // block that asserted `dialect`. #16320 deleted that key (ADR-0049; its
-  // absence is owned by `cron-typed-positions-retirement.test.ts`), and no
-  // other key on `Connector` transforms its type at parse — so the flip is
-  // measured on the defaults alone, which were always the larger half.
+  // The literal used to carry `syncConfig: { strategy: 'incremental' }`, and
+  // the flip was measured on `syncConfig`'s defaults. Protocol 18 retired that
+  // key (ADR-0049), so it is measured on the connector's OWN defaults —
+  // `enabled`, `requestTimeoutMs` and `authentication` — which were always the
+  // other half of it.
   const literal = `{
     name: 'sap_erp_connector',
     label: 'SAP ERP Integration',
     type: 'saas',
-    syncConfig: { strategy: 'incremental' },
   }`;
   const probes = {
     'author-connector': `
@@ -477,14 +374,9 @@ describe('[#5515] the bare `Connector` is the author shape; `ConnectorParsed` is
 
   it('rejects the same literal under `ConnectorParsed`, on the defaults it left out', () => {
     const message = render(results.get('parsed-connector')!);
-    // TS2739 on the innermost mismatch first: the parse supplies `direction`,
-    // `realtimeSync`, `conflictResolution`, `batchSize`, `deleteMode` under
-    // `syncConfig` (and `enabled` one level up — `status` was one too, until
-    // ADR-0049 retired it); `z.infer` demands
-    // them all of the author.
     expect(message).toMatch(/TS2739: .* is missing the following properties/);
-    expect(message).toContain('direction');
-    expect(message).toContain('realtimeSync');
+    expect(message).toContain('enabled');
+    expect(message).toContain('requestTimeoutMs');
   });
 
   it('a parse turns the one into the other — the annotation is the only difference', () => {
@@ -492,17 +384,17 @@ describe('[#5515] the bare `Connector` is the author shape; `ConnectorParsed` is
       name: 'sap_erp_connector',
       label: 'SAP ERP Integration',
       type: 'saas',
-      syncConfig: { strategy: 'incremental' },
     });
     // The defaults the author left out, supplied by the parse. This is what
     // makes annotating the example with the parsed alias wrong rather than
     // merely inconvenient: it would demand the author write them all out.
-    expect(parsed.syncConfig!.strategy).toBe('incremental');
-    expect(parsed.syncConfig!.direction).toBe('import');
-    expect(parsed.syncConfig).not.toHaveProperty('schedule');
     expect(parsed.enabled).toBe(true);
-    // `status` used to be supplied here as `'inactive'`; the key is retired
-    // (ADR-0049) and a parse no longer emits it.
+    expect(parsed.requestTimeoutMs).toBe(30000);
+    expect(parsed.authentication).toEqual({ type: 'none' });
+    // `status` used to be supplied here as `'inactive'`, and `syncConfig`'s
+    // defaults with it; both keys are retired (ADR-0049) and a parse emits
+    // neither.
     expect(parsed).not.toHaveProperty('status');
+    expect(parsed).not.toHaveProperty('syncConfig');
   });
 });

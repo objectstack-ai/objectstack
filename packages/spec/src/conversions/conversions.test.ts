@@ -21,15 +21,43 @@ import { applyConversionsToStoredItem } from './stored.js';
 import { renameConfigKey, renameKey } from './walk.js';
 import { CONVERSION_NOTICE_CODE, type ConversionNotice } from './types.js';
 
+/**
+ * A RELEASED major's fixture whose whole surface a LATER major retired, keyed
+ * by the fixture's id and naming the retiring entry.
+ *
+ * The contract below is that every fixture, replayed through the WHOLE table,
+ * equals its own `after` — which is what keeps two entries of one major from
+ * silently composing. It cannot hold for an entry of a released major once a
+ * later major removes the container its only surface lives in: the later strip
+ * runs after it on every replay, by design, and the released entry can be
+ * neither absorbed (its id and step are published in that major's
+ * `spec-changes.json` and upgrade guide) nor given a fixture the later strip
+ * leaves alone (it has no other surface). So such a fixture is replayed with
+ * the retiring entry excluded — its own contract, byte for byte — AND replayed
+ * with it, where the result must be exactly what the retiring entry produces on
+ * top. Both legs are asserted; nothing is skipped.
+ *
+ * ⛔ Not a way out of a same-major collision: an entry here must be from an
+ * EARLIER major than the one that retires its surface (asserted below), and a
+ * same-major pair is absorbed instead (`spec-property-retirement` §0).
+ */
+const SUPERSEDED_FIXTURES: Readonly<Record<string, { by: string; stripped: readonly string[] }>> = {
+  // `connector.fieldMappings[].transform` (17) lives only inside
+  // `connector.fieldMappings`, which protocol 18 retired whole with the rest of
+  // connector-attached sync (ADR-0049).
+  'field-mapping-transform-removed': { by: 'connector-sync-keys-removed', stripped: ['fieldMappings'] },
+};
+
 describe('conversion layer (ADR-0087 D2)', () => {
   describe('fixture pairs — every entry converts old shape → canonical', () => {
     for (const conversion of ALL_CONVERSIONS) {
       it(`${conversion.id}: before → after, emits ${conversion.fixture.expectedNotices} notice(s)`, () => {
+        const superseded = SUPERSEDED_FIXTURES[conversion.id];
         // `includeRetired` so graduated (load-retired) entries stay fixture-tested
         // forever — the chain replays them even though the loader no longer does.
         const { stack, notices } = collectConversionNotices(
           structuredClone(conversion.fixture.before),
-          { includeRetired: true },
+          { includeRetired: true, ...(superseded ? { excludeConversionIds: [superseded.by] } : {}) },
         );
         // The whole table runs, but fixtures are disjoint, so the result must
         // equal exactly this entry's `after`.
@@ -43,7 +71,31 @@ describe('conversion layer (ADR-0087 D2)', () => {
           expect(n.retiresIn).toBe(conversion.toMajor + 1);
           expect(n.surface).toBe(conversion.surface);
         }
+        if (superseded) {
+          // The other leg: the full table, retiring entry included. The result
+          // is this fixture's `after` with the retired container stripped from
+          // every connector, and the extra notices are all the retiring entry's.
+          const retiring = ALL_CONVERSIONS.find((c) => c.id === superseded.by);
+          expect(retiring, `${superseded.by} must be registered`).toBeDefined();
+          expect(retiring!.toMajor, 'a superseding entry must come from a LATER major').toBeGreaterThan(conversion.toMajor);
+          const full = collectConversionNotices(structuredClone(conversion.fixture.before), { includeRetired: true });
+          const expected = structuredClone(conversion.fixture.after) as { connectors: Record<string, unknown>[] };
+          for (const c of expected.connectors) for (const key of superseded.stripped) delete c[key];
+          expect(full.stack).toEqual(expected);
+          const extra = full.notices.filter((n) => n.conversionId !== conversion.id);
+          expect(extra.length, 'the retiring entry must actually fire on this fixture').toBeGreaterThan(0);
+          for (const n of extra) expect(n.conversionId).toBe(superseded.by);
+          expect(full.notices.length - extra.length).toBe(conversion.fixture.expectedNotices);
+        }
       });
+    }
+  });
+
+  it('every superseded fixture names a registered entry and a registered retiring entry', () => {
+    const ids = new Set(ALL_CONVERSIONS.map((c) => c.id));
+    for (const [id, { by }] of Object.entries(SUPERSEDED_FIXTURES)) {
+      expect(ids.has(id), id).toBe(true);
+      expect(ids.has(by), by).toBe(true);
     }
   });
 

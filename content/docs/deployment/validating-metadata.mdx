@@ -206,9 +206,11 @@ measures: [{ name: 'avg_closed', aggregate: 'avg', field: 'closed_at' }]
 `avg` over a temporal column is where this bites hardest: one SQL family coerces
 the stored text and returns a plausible number (the average *year*), another has
 no such function and fails at query time. `min`/`max` over the same field are
-**accepted** — they return a real instant of the field's own type — and
-`count`/`count_distinct` are accepted over every type, because they read no
-arithmetic off the value. The analytics service refuses the same pair with
+**accepted** — they return a real instant of the field's own type — `count` is
+accepted over every type, because it reads no value, and `count_distinct` over
+every type but the JSON-stored ones (the structured-JSON types and
+`multiselect` / `checkboxes` / `tags`), whose values no two backends compare
+for equality alike. The analytics service refuses the same pair with
 `400 DATASET_INVALID` when a query is built; this is the identical verdict,
 from the identical table, one door earlier. The rule stays silent wherever the
 field's type cannot be resolved (an object this stack does not define, a

@@ -211,7 +211,8 @@ import {
   EmptyCredentialWriteError,
   SECRET_MASK,
 } from './secret-fields.js';
-import { assertGroupByNamesNoStructuredJsonField } from './group-by-structured-json-door.js';
+import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
+import { assertCountDistinctNamesNoJsonStoredField } from './count-distinct-json-stored-door.js';
 import { pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
 import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter } from './search-filter.js';
@@ -16863,8 +16864,17 @@ export class ObjectQL implements IObjectQLEngine {
       // a group key (memory merged every row into one group, SQLite grouped each
       // serialized document apart, PostgreSQL answered 500). After the
       // credential refusal, which reads the same entries, so a protected field
-      // keeps that refusal's words.
-      assertGroupByNamesNoStructuredJsonField(object, this._registry.getObject(object), query.groupBy);
+      // keeps that refusal's words. [#20808] The same door refuses a `groupBy`
+      // entry naming a MULTI-VALUE field (`isMultiValueField`: a list stored in
+      // a JSON column, split the same three ways), judged in one walk so the
+      // first offending position is the one named.
+      assertGroupByNamesNoJsonStoredField(object, this._registry.getObject(object), query.groupBy);
+      // [#20808] …and a `count_distinct` over a JSON-stored field: the spec
+      // table's `count_distinct` row (`isAggregateCompatibleWithFieldType`)
+      // beside `isMultiValueField`, before any driver is asked — memory counted
+      // equal documents apart, SQLite compared serialized text, PostgreSQL
+      // answered 500 (no equality operator for `json`).
+      assertCountDistinctNamesNoJsonStoredField(object, this._registry.getObject(object), query.aggregations);
       // [#10576] The per-aggregation `filter` (`AggregationNodeSchema.filter`,
       // the contract half of #10413) is a second filter position on this verb,
       // so it walks through the same refusal doors `where` does at this seam:
