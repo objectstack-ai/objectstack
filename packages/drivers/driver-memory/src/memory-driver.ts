@@ -14,7 +14,7 @@ import { hasDanglingLikeEscape, hasNulInLikePattern, likePatternToRegExp } from 
 // the ruled 「is empty」 table, asked of the spec by the live query path.
 import { expandEmptyOperator, type ValueShapeFieldDef } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
-import { Logger, createLogger, nextUtcCalendarDay, isUnboundedAbove, compensatedSum } from '@objectstack/core';
+import { Logger, createLogger, compensatedSum } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
 import {
   assertSingleTenantPosture,
@@ -111,15 +111,19 @@ interface LoweredWrite {
  * | lowered key | written by |
  * |---|---|
  * | `$eq`  | `$eq`, `$null: true`,  `$exists: false` |
- * | `$ne`  | `$ne`, `$null: false`, `$exists: true`, `$lte` (the LAST supported day, `9999-12-31` — #20600: no bound, a value) |
+ * | `$ne`  | `$ne`, `$null: false`, `$exists: true` |
  * | `$gte` | `$gte`, `$between` |
  * | `$lte` | `$lte`, `$between` |
- * | `$lt`  | `$lt`, `$lte` (BARE CALENDAR DAY — #4042's half-open rewrite), `$between` (bare-day max) |
  * | `$regex` | the whole string family — promoted by `_multiRegex`, see below |
  *
- * `$lte` → `$lt` is the member no card had named: a bare `YYYY-MM-DD` upper
- * bound compiles half-open, so `{d: {$lte: '2026-07-28', $lt: '2026-07-02'}}`
- * and its key-swapped twin answered `['1']` and `['1','2']` on this fixture.
+ * `$lte` → `$lt` WAS the member no card had named: while this face compiled a
+ * bare `YYYY-MM-DD` upper bound half-open itself, `{d: {$lte: '2026-07-28',
+ * $lt: '2026-07-02'}}` and its key-swapped twin answered `['1']` and
+ * `['1','2']` on this fixture. [#20822] That rewrite (and the last-supported-day
+ * `$lte` → `$ne`) now runs once, at the seams, in the shared lowering, which
+ * never clobbers an author's key either (a lowered key that is taken becomes
+ * its own conjunct); this face writes `$lte` as `$lte`, so `$lt` and `$ne`
+ * have one fewer writer here.
  * `$not` is written by `$notContains` and by NOTHING else — it is covered here
  * by construction rather than curatively, which is the point of ranging over
  * the vocabulary instead of over the three operators that had been noticed.
@@ -1405,19 +1409,14 @@ export class InMemoryDriver implements IDataDriver {
         return { [field]: { $gte: store(value) } };
       case '<':
         return { [field]: { $lt: store(value) } };
-      case '<=': {
-        // A bare-day upper bound means "through that whole day" (#4042, the
-        // driver-sql twin is #3777): `<= 2026-07-28` on an ISO-timestamp value
-        // compiles half-open (`< 2026-07-29`), which is also order-equivalent
-        // to `<=` for plain `YYYY-MM-DD` date values — so no field-type lookup
-        // is needed, exactly the argument the preview evaluator uses.
-        // [#20600] On the last supported day there is no next day: every value
-        // is inside the bound, so what `<=` still asks is a value (`$ne: null`,
-        // the `is_not_null` arm below).
-        const nextDay = nextUtcCalendarDay(value);
-        if (isUnboundedAbove(nextDay)) return { [field]: { $ne: null } };
-        return { [field]: nextDay != null ? { $lt: store(nextDay) } : { $lte: store(value) } };
-      }
+      case '<=':
+        // [ADR-0053 D-D1 items 5 and 9, as amended — #20822] The comparison as
+        // written. The whole-day reading of a bare-day bound (#4042) is the
+        // shared lowering's, applied at the seams, and no seam emits this AST
+        // node form (the engine and the protocol hand a driver a
+        // FilterCondition), so it arrives here only from a direct driver call,
+        // which gets the comparison it wrote (item 5).
+        return { [field]: { $lte: store(value) } };
       case 'in':
         return { [field]: { $in: store(value) } };
       case 'nin': case 'not_in': case 'notin': case 'not in':
@@ -1486,16 +1485,9 @@ export class InMemoryDriver implements IDataDriver {
         return this.emptyOperatorCondition(object, field, false, `filter.${field}.${operator}`);
       case 'between':
         if (Array.isArray(value) && value.length === 2) {
-          // Bare-day max → half-open, inheriting `<=`'s whole-day rule (#4042).
-          // [#20600] A max on the last supported day bounds nothing: the range
-          // keeps its minimum alone.
-          const nextDay = nextUtcCalendarDay(value[1]);
-          if (isUnboundedAbove(nextDay)) return { [field]: { $gte: store(value[0]) } };
-          return {
-            [field]: nextDay != null
-              ? { $gte: store(value[0]), $lt: store(nextDay) }
-              : { $gte: store(value[0]), $lte: store(value[1]) },
-          };
+          // Both ends inclusive, as written: the whole-day reading of a
+          // bare-day max is the shared lowering's (see the `<=` arm above).
+          return { [field]: { $gte: store(value[0]), $lte: store(value[1]) } };
         }
         // [#5328] One condition, one wording — the same refusal the
         // FilterCondition `$between` arm raises. They used to differ, which is
@@ -1735,31 +1727,15 @@ export class InMemoryDriver implements IDataDriver {
           // range simply vanished, and no one was told. The shape gate refuses
           // it now; this throw is the totality floor.
           if (!Array.isArray(val) || val.length !== 2) throw malformedBetweenError(field, val, `${path}.$between`);
+          // Both ends inclusive, as written. [ADR-0053 D-D1 items 5 and 9, as
+          // amended — #20822] The whole-day reading of a bare-day max (#4042)
+          // and the last-supported-day rule (#20600) are the shared
+          // lowering's (`lowerFilterCondition`, `@objectstack/spec/data`),
+          // applied at the seams: a seam-fed filter arrives here with no
+          // `$between` left, and a direct driver call gets the comparison it
+          // wrote (item 5).
           put('$gte', store(val[0]));
-          // Bare-day max → half-open, inheriting `$lte`'s whole-day rule (#4042).
-          // [#20600] A max on the last supported day bounds nothing: the
-          // range keeps its minimum alone.
-          const betweenNextDay = nextUtcCalendarDay(val[1]);
-          if (isUnboundedAbove(betweenNextDay)) break;
-          if (betweenNextDay != null) put('$lt', store(betweenNextDay));
-          else put('$lte', store(val[1]));
-          break;
-        }
-        case '$lte': {
-          // A bare-day upper bound means "through that whole day" (#4042; the
-          // driver-sql twin is #3777). Order-equivalent to `<=` for plain
-          // `YYYY-MM-DD` values, so it applies without a field-type lookup.
-          // [#13524] `$lt` here is a key an AUTHOR can also write — this arm is
-          // the member of the clobber class no card had named. See
-          // {@link assembleLoweredWrites}.
-          // [#20600] On the last supported day there is no next day: every
-          // value is inside the bound, so what `$lte` still asks is a value —
-          // `$ne: null`, the lowering `$null: false` takes below. Collected like
-          // every other write, so an author's own `$ne` survives beside it.
-          const nextDay = nextUtcCalendarDay(val);
-          if (isUnboundedAbove(nextDay)) put('$ne', null);
-          else if (nextDay != null) put('$lt', store(nextDay));
-          else put('$lte', store(val));
+          put('$lte', store(val[1]));
           break;
         }
         case '$null':
@@ -1783,7 +1759,10 @@ export class InMemoryDriver implements IDataDriver {
           break;
         // Value comparisons take the field's storage form (#4047); the null /
         // existence predicates above are value-independent and must not.
-        case '$eq': case '$ne': case '$gt': case '$gte': case '$lt':
+        // [#20822] `$lte` is one of them, as written: its whole-day reading of
+        // a bare day is the shared lowering's, applied at the seams (see the
+        // `$between` arm above).
+        case '$eq': case '$ne': case '$gt': case '$gte': case '$lt': case '$lte':
         case '$in': case '$nin':
           put(op, store(val));
           break;

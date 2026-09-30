@@ -22,7 +22,7 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { temporalStorageForm } from '@objectstack/core';
-import type { FilterCondition } from '@objectstack/spec/data';
+import { lowerFilterCondition, type FilterCondition } from '@objectstack/spec/data';
 import { coerceTemporalValue } from './memory-temporal.js';
 import { InMemoryDriver } from './memory-driver.js';
 
@@ -95,6 +95,24 @@ const CARD_WHERE_TWINS: ReadonlyArray<readonly [string, () => FilterCondition, n
   ['[#20480] the same instant as epoch milliseconds', () => ({ slot: { $gt: Date.parse('2026-02-01T11:00:00Z') } }), 3],
 ];
 
+/** The declared field map the twins run against — what a typed seam reads. */
+const LEDGER_FIELDS: Record<string, { type: string }> = {
+  placed_on: { type: 'date' },
+  opened_at: { type: 'datetime' },
+  slot: { type: 'time' },
+};
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5, 7 and 9, as amended] What a TYPED seam hands
+ * this driver: the twin through the shared lowering, reading
+ * {@link LEDGER_FIELDS}' `datetime` columns. Rows 3 and 4 (a bare day as a
+ * datetime's upper bound) are answered by the lowered filter, as on every
+ * seam-fed path — the engine's per-aggregation `filter` included — since this
+ * driver keeps no whole-day copy of its own; the counts are unchanged.
+ */
+const seamed = <T,>(where: T): T =>
+  lowerFilterCondition(where, { isDatetimeColumn: (column) => LEDGER_FIELDS[column]?.type === 'datetime' });
+
 describe('[#20176] the where twins of the card\'s rows, on this driver', () => {
   let driver: InMemoryDriver;
 
@@ -103,14 +121,14 @@ describe('[#20176] the where twins of the card\'s rows, on this driver', () => {
     await driver.connect();
     await driver.syncSchema(OBJECT, {
       name: OBJECT,
-      fields: { placed_on: { type: 'date' }, opened_at: { type: 'datetime' }, slot: { type: 'time' } },
+      fields: LEDGER_FIELDS,
     });
     for (const row of ROWS) await driver.create(OBJECT, row);
   });
 
   for (const [name, where, expected] of CARD_WHERE_TWINS) {
     it(`${name}: ${expected} of 6`, async () => {
-      const rows = await driver.find(OBJECT, { where: where() });
+      const rows = await driver.find(OBJECT, { where: seamed(where()) });
       expect(rows).toHaveLength(expected);
     });
   }

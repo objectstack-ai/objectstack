@@ -8059,6 +8059,11 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
+        // [#20913] A shipped flow name serves the loader's entries only — see
+        // {@link isShippedFlowName}. This is the registry half: a stored row
+        // the hydration registered under the bare key is not one of them.
+        items = items.filter((it) => !this.isStoredFlowEntryOfShippedName(request.type, it));
+
         // Always consult the DB so metadata persisted by the seeder /
         // bulkRegister shows up even when the registry already has unrelated
         // entries (the previous fallback-only logic meant per-env metadata
@@ -8201,7 +8206,13 @@ export class ObjectStackProtocolImplementation implements
                 // merge slot carries the bundle discriminator, so an
                 // `email_template` overlay lands on its own locale member
                 // instead of flattening every member of the bundle onto it.
-                items = mergePackageAwareOverlay(request.type, items, overlays, (data, prev) => {
+                // [#20913] …and the stored-row half: a row of a shipped flow name
+                // is not merged into the package's slot. It is still hydrated
+                // below, as the tenant row it is, so the boot pull reports it.
+                const mergeable = overlays.filter(
+                    ({ data }) => !this.isShippedFlowName(request.type, (data as { name?: unknown } | null)?.name),
+                );
+                items = mergePackageAwareOverlay(request.type, items, mergeable, (data, prev) => {
                     if (isView && data && typeof data === 'object') {
                         const patch = viewIdentityPatch(data as Record<string, unknown>, prev);
                         if (patch) Object.assign(data as Record<string, unknown>, patch);
@@ -14531,6 +14542,49 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#20913, #20761 ruling rule 1, ADR-0126 §2 / §3] Is `name` a FLOW name
+     * the loader's set holds ({@link packagedArtifactOwner})? Every other type,
+     * and a flow name no managed package ships, answers `false`.
+     *
+     * `flow` is Regime C: the packaged base is locked, "⛔ Never silent
+     * override, never an overlay read path". So the flattened view
+     * ({@link readFlattenedMetaItems}, both faces) serves a shipped flow name
+     * from the loader's own entries alone, and a stored row of that name is
+     * neither merged into the package's slot nor lets it stand in for it —
+     * {@link isStoredFlowEntryOfShippedName} for the registry's list, this
+     * predicate by NAME for a row read from the store, whose own bytes decide
+     * nothing. Merged, such a row was served under the package's provenance
+     * and the automation engine's `kernel:ready` sync armed it over the body
+     * the boot pull had armed: the stored body dispatched while every receipt
+     * named the package.
+     *
+     * The row itself is neither refused nor rewritten here: it stays at rest,
+     * {@link hydrateOverlayIntoRegistry} still registers it as the
+     * tenant-authored row it is, and the automation boot pull reports it as a
+     * shadowed contender. What becomes of such rows (keep, refuse, migrate) is
+     * not decided by this method.
+     */
+    private isShippedFlowName(type: string, name: unknown): boolean {
+        if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'flow') return false;
+        if (typeof name !== 'string' || name === '') return false;
+        return this.packagedArtifactOwner({ type: 'flow', name }) !== undefined;
+    }
+
+    /**
+     * [#20913] A registry entry of a shipped flow name ({@link isShippedFlowName})
+     * that is NOT one of the loader's own entries — the stored row the
+     * hydration registered under the bare key. The loader's entries are told
+     * apart by `isCodeArtifactBody`, the per-entry test the set's own lookup
+     * (`SchemaRegistry.getArtifactItem`) applies; a stored flow row reaches the
+     * registry tenant-marked and, since this card, without the artifact's
+     * envelope ({@link hydrateOverlayIntoRegistry}), so it never passes it.
+     */
+    private isStoredFlowEntryOfShippedName(type: string, item: unknown): boolean {
+        return this.isShippedFlowName(type, (item as { name?: unknown } | null | undefined)?.name)
+            && !isCodeArtifactBody(item);
+    }
+
+    /**
      * [#20761, ADR-0126 §2 / §7.3] THE LOADER'S SET, read: the package that
      * ships `(type, name)` as a code artifact, or `undefined` when none does.
      *
@@ -15780,7 +15834,16 @@ export class ObjectStackProtocolImplementation implements
         // here. ⚠️ BEFORE the merge, never after — where a real artifact
         // exists its envelope must still win (ADR-0010 §3.3), and it does,
         // because {@link mergeArtifactProtection} overwrites `_provenance` last.
-        registry.registerItem(type, mergeArtifactProtection(stateTenantAuthorship(data), artifact), 'name' as any);
+        //
+        // [#20913, ADR-0126 §2] ⛔ Not for a FLOW. `flow` is Regime C: no
+        // overlay read path, so a stored flow row is never the artifact's
+        // overlay and the artifact's envelope is not its to wear. Grafted, a
+        // stored row of a shipped flow name read as the package's own entry —
+        // the boot pull's precedence could not tell the two contenders apart,
+        // and its receipt rendered both as the package. Registered as the
+        // tenant row it is, it is reported as one and never armed.
+        const envelope = canonicalType === 'flow' ? undefined : artifact;
+        registry.registerItem(type, mergeArtifactProtection(stateTenantAuthorship(data), envelope), 'name' as any);
         this.hydrateExpandedViewItems(type, data, options, registry);
         return true;
     }

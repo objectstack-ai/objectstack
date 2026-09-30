@@ -1190,7 +1190,9 @@ function resolveWhereFilterTokens<W>(
  * object's declarations, so the whole-day rule rewrites a declared
  * `datetime` column only ({@link declaredDatetimeLowering}) — the scope
  * `SqlDriver` holds, so a `date`, `time` or non-temporal column reaches every
- * driver byte-identical to before (the amendment's item 7).
+ * driver byte-identical to before (the amendment's item 7). An object with no
+ * field map has no declarations to read, and there the rule applies
+ * type-blind (item 7's other half).
  *
  * Returns the input by reference when nothing resolved and nothing lowered.
  */
@@ -1207,12 +1209,21 @@ function resolveThenLowerWhere<W>(
  * positions: a column is `datetime` exactly when the object's declared field
  * map says `type: 'datetime'` — the same test `SqlDriver` indexes its
  * `datetimeFields` by, so the columns this seam widens are a subset of the
- * columns every face widens today. No field map (a registry-less host) reads
- * no column as `datetime`: the whole-day rule is then left to the faces, as it
- * was, rather than applied type-blind to columns no driver would widen.
+ * columns every face widens today.
+ *
+ * [#20822] No field map (an object the registry does not hold, a
+ * registry-less host) is a seam that cannot read the declared type, and item 7
+ * says what such a seam does: "applies the rewrite type-blind", as the
+ * type-blind emitters do (sound on `Field.date` text, where `< next-day`
+ * orders exactly as `<= day`). So the reader is omitted and the whole-day
+ * rules apply to every column. This branch used to read "no field map" as "no
+ * datetime column" and leave the rule to the faces; item 5 retires those
+ * copies, and with them gone that reading would have dropped the whole-day
+ * bound on every such read.
  */
 function declaredDatetimeLowering(schema: unknown): FilterLoweringOptions {
   const fields = (schema as { fields?: unknown } | undefined)?.fields;
+  if (fields === null || typeof fields !== 'object') return {};
   return {
     isDatetimeColumn: (column) =>
       fields !== null
