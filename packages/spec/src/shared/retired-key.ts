@@ -91,32 +91,33 @@
 import { z } from 'zod';
 
 /**
- * The declared type of every {@link retiredKey} tombstone: optional, never
- * produces a value, and its INPUT is an object type whose one required
- * property is named by the retirement sentence and typed `never`.
+ * The declared type of every {@link retiredKey} tombstone: optional, and both
+ * its INPUT and its OUTPUT are an object type whose one property is named by
+ * the retirement sentence and typed `never` — a mark no value can carry.
  *
  * The input type is what `tsc` and the editor show an author who writes the
  * key, so it is spelled to be read there. Writing any value prints the
  * sentence, whatever the value's kind:
  *
- *     TS2322: Type 'string' is not assignable to type '{ readonly '[REMOVED] This key …': never; }'.
- *     TS2741: Property ''[REMOVED] This key …'' is missing in type 'string[]' but required in type '{ … }'.
+ *     TS2322: Type 'string' is not assignable to type '{ '[REMOVED] Key retired: …': never; }'.
+ *     TS2741: Property ''[REMOVED] Key retired: …'' is missing in type 'string[]' but required in type '{ … }'.
  *     TS2353: Object literal may only specify known properties, and 'field' does not exist in type '{ … }'.
  *
- * and the hover reads `key?: { readonly '[REMOVED] This key …': never; } | undefined`.
+ * and a hover on the key reads `key?: { '[REMOVED] Key retired: …': never; } | undefined`.
  * Before this type the input was `undefined`, and the diagnostic read
  * `Type 'string[]' is not assignable to type 'undefined'` — audible, but it
  * said nothing about a retirement, so an upgrading author read it as a typing
  * bug.
  *
- * Three choices here are measured, not stylistic:
+ * Four choices here are measured, not stylistic:
  *
- *   - **The object type is written INLINE and anonymous.** A named alias or
+ *   - **The mark is written INLINE and anonymous.** A named alias or
  *     interface is printed BY NAME in the diagnostic (the sentence is lost for
  *     every value that is not an array), and the name would appear in the
  *     declared type of every tombstoned schema — a new type every consumer's
  *     declaration emit must be able to name through an entry point. Inline,
- *     each site's declared type references `zod` alone.
+ *     each site's declared type references `zod` alone. The price is bytes:
+ *     the declaration emitter spells the mark out at every site.
  *   - **The sentence is fixed, not the key's own prescription.** A type can
  *     carry a prescription only as a string LITERAL type, and TypeScript types
  *     `'…' + '…'`, a constant built that way and a helper's return all as
@@ -125,6 +126,14 @@ import { z } from 'zod';
  *     sentence names what happened and the door that prints the per-key
  *     prescription (`os validate`, or the parse itself); it never says
  *     "delete", because some retirements are renames.
+ *   - **The OUTPUT carries the same mark.** ADR-0122 declares an `XParsed`
+ *     alias exactly for the schemas whose `z.input` and `z.infer` differ, and
+ *     pins the rest isomorphic (`type-alias-convention.pin.test.ts`). A mark
+ *     on the input alone would split every tombstoned schema that is
+ *     otherwise isomorphic into two "shapes" that differ by a diagnostic
+ *     device, and demand a synonym `XParsed` for each. Parsed data never
+ *     holds the key, and no value can be the mark, so the output stays
+ *     exactly as empty as `undefined` was.
  *   - **No value satisfies it.** The property's type is `never`, so no
  *     authored value — array, object or primitive — is assignable without a
  *     cast, exactly as `undefined` refused everything but absence. The
@@ -133,9 +142,16 @@ import { z } from 'zod';
  *     prescription and every walker reading `_zod.def` (`acceptsNothing`,
  *     the JSON-schema build) see what they saw before.
  */
-type RetiredKeySchema = z.ZodOptional<z.ZodType<never, {
-  readonly '[REMOVED] This key was removed from @objectstack/spec. Run `os validate` for its migration.': never;
-}>>;
+type RetiredKeySchema = Tombstone<{
+  '[REMOVED] Key retired: run `os validate` for its migration.': never;
+}>;
+
+/**
+ * Spells the mark once in source for both sides. A generic alias over a
+ * `zod` reference is not preserved at the call sites — they print the `zod`
+ * types with the mark inline, which is the point (see above).
+ */
+type Tombstone<Mark> = z.ZodOptional<z.ZodType<Mark, Mark>>;
 
 /**
  * Declare a key that has been REMOVED from the spec.
