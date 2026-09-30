@@ -146,7 +146,7 @@ describe('[#20913] the kernel:ready sync arms what the boot pull armed, by the s
         }
     });
 
-    it('control: an unheld name keeps arrival order — the tenant\'s own flow is not second-guessed', async () => {
+    it('an unheld name listed twice: the sync resolves by arrival order, as the boot pull does', async () => {
         const c: Composition = {
             registry: [flowBody(FLOW, 'FIRST', { _provenance: 'org' })],
             view: [flowBody(FLOW, 'FIRST', { _provenance: 'org' }), flowBody(FLOW, 'SECOND', { _provenance: 'org' })],
