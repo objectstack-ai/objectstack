@@ -317,7 +317,8 @@ function refuseRemoteAutonumber(object: string, fields: string[], path: string):
     `which is why it answers NOT_IMPLEMENTED/501 rather than a 400. Use the local or ` +
     `embedded-replica transport for objects that carry record numbers, or supply the value ` +
     `explicitly (a seed replay or \`preserveAudit\` import keeps its own numbers and is written ` +
-    `unchanged). Until this change the same call RESOLVED and wrote NULL into the slot (#6944).`,
+    `unchanged). It is refused rather than resolved, because resolving would write NULL into the ` +
+    `slot and persist the row without its record number.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
