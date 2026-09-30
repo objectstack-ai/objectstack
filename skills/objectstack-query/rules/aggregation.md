@@ -46,7 +46,7 @@ const rows = await engine.aggregate('sale', {
 ```
 
 Never list the grouped fields in `fields`: drivers auto-select every grouped
-field into the result rows, and `fields` is not one of the six keys
+field into the result rows, and `fields` is not one of the keys
 `engine.aggregate()` accepts — it is rejected by name (see the calling
 convention in `SKILL.md`).
 
