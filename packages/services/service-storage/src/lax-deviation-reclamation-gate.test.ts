@@ -56,9 +56,12 @@ function ledgerEngine(rows: Array<Record<string, unknown>>) {
   const tables: Record<string, Array<Record<string, unknown>>> = { sys_migration: rows };
   const engine: MigrationFlagEngine & { tables: typeof tables } = {
     getObject: (name: string) => (name in tables ? { name } : undefined),
-    async find(object, options: any) {
-      const where = options?.where ?? {};
-      return tables[object].filter((r) => Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
+    // The flag reader's single-row route (#20648), held to the real engine's
+    // refusal of a query that selects no particular record.
+    async findOne(object, options: any) {
+      assertEngineFindOnePredicate(object, options);
+      const where = options.where;
+      return tables[object].find((r) => Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; })) ?? null;
     },
     async insert(object, data) {
       tables[object].push({ ...data });

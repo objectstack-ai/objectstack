@@ -9603,12 +9603,16 @@ export class ObjectQL implements IObjectQLEngine {
       return { verified: false, conclusive: false, columnsMoved: false };
     }
     try {
-      const rows = await this.find(DATA_MIGRATION_FLAG_OBJECT, {
+      // [#20648] The row by primary key, through the single-row route. ⛔ Not
+      // `find` with `limit: 1`: the SQL driver reads that as page one of a
+      // walk, and this read runs at boot BEFORE `sys_migration` is registered
+      // with the driver — so every boot of an existing deployment printed the
+      // driver's "Paged read ... is NOT deterministic" warning for a lookup
+      // that cannot return two rows. `findOne` is the route it exempts.
+      const row: any = await this.findOne(DATA_MIGRATION_FLAG_OBJECT, {
         where: { id: migrationId },
-        limit: 1,
         context: { isSystem: true } as ExecutionContext,
       });
-      const row: any = rows?.[0];
       if (!row || row.id !== migrationId) {
         return { verified: false, conclusive: true, columnsMoved: false };
       }
@@ -9773,12 +9777,11 @@ export class ObjectQL implements IObjectQLEngine {
     this.recordedDeviations.add(migrationId);
     this.deviationRecording = this.deviationRecording
       .then(async () => {
-        const rows = await this.find(DATA_MIGRATION_FLAG_OBJECT, {
+        // [#20648] Same single-row route as `readMigrationFlagVerified`.
+        const row: any = await this.findOne(DATA_MIGRATION_FLAG_OBJECT, {
           where: { id: migrationId },
-          limit: 1,
           context: { isSystem: true } as ExecutionContext,
         });
-        const row: any = rows?.[0];
         if (!row || row.id !== migrationId) return; // nothing certified — no authority to withdraw
         if (row.deviation_observed_at != null && String(row.deviation_observed_at) !== '') return; // already standing
         // Only a row that currently authorises something can have authority
@@ -9877,12 +9880,11 @@ export class ObjectQL implements IObjectQLEngine {
     this.retractedCreationAttestations.add(migrationId);
     this.creationAttestationRetraction = this.creationAttestationRetraction
       .then(async () => {
-        const rows = await this.find(DATA_MIGRATION_FLAG_OBJECT, {
+        // [#20648] Same single-row route as `readMigrationFlagVerified`.
+        const row: any = await this.findOne(DATA_MIGRATION_FLAG_OBJECT, {
           where: { id: migrationId },
-          limit: 1,
           context: { isSystem: true } as ExecutionContext,
         });
-        const row: any = rows?.[0];
         if (!row || row.id !== migrationId) return; // nothing certified — nothing to revoke
         if (row.verified_at == null) return; // gate already closed
         const tally = this.admittedValueShapeViolations.get(migrationId);

@@ -50,7 +50,7 @@ import { DevPlugin } from './dev-plugin';
 //     the next transform that lands in this file.
 import '@objectstack/plugin-security';
 
-// [#10036] The state under test is "SecurityPlugin LOADED but its start()
+// [commit 7552e0337] The state under test is "SecurityPlugin LOADED but its start()
 // bailed", so `@objectstack/plugin-security` is deliberately NOT mocked here —
 // the real plugin's real `init()`/`start()` phase split is what constructs the
 // state. Every OTHER optional dependency is mocked away for the same reason as
