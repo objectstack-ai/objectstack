@@ -1104,6 +1104,11 @@ function assertUnmixedFieldWrapper(field: string, wrapper: Record<string, unknow
  * `{ $gte, $lte }` depends on.
  */
 function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
+  // [#20887] A nested-relation condition the shared lowering was kept away from
+  // ({@link shieldNestedRelations}): the relation node, carrying it as written.
+  const shielded = isFilterObject(raw) ? NESTED_RELATION_SENTINELS.get(raw) : undefined;
+  if (shielded) return [{ kind: 'relation', member: key, condition: shielded }];
+
   // [#6386] `undefined` in a comparand position, refused before any leaf exists.
   // First statement of the only leaf producer, so no consumer of the tree can be
   // handed one — see {@link assertDefinedComparands} for the position list and
@@ -2459,7 +2464,67 @@ export function normalizeAnalyticsFilterTree(
 ): NormalizedFilterNode | null {
   const condition = lowerAnalyticsWhere(query);
   if (!condition) return null;
-  return buildNode(lowerFilterCondition(condition, lowering));
+  return buildNode(lowerFilterCondition(shieldNestedRelations(condition), lowering));
+}
+
+/**
+ * [#20887] The nested-relation conditions a `where` carries, held OUT of the
+ * shared lowering: each stands in the lowered condition as a sentinel spec
+ * registered here, and {@link fieldLeaves} turns the sentinel back into the
+ * `relation` node carrying the author's condition, as written.
+ *
+ * Why the lowering must not read the condition itself: it is not a door, and it
+ * reads every field key as a column of THIS object. Under a `$not` it would
+ * guard the relation column (`{ owners: { $null: false } }`) before anything
+ * knows which related ids match — a guard the engine adds itself, over the
+ * `$in` / `$contains` it lowers the condition to, and one this package's engine
+ * hand-off spells `$ne: null`, which the SQL driver refuses over a multi-valued
+ * relation's JSON column (measured: `{ $not: { owners: { region: 'NA' } } }`
+ * answered `INVALID_FILTER` where the engine answers its rows). And the
+ * condition's own comparands belong to the related object, whose declared
+ * types the engine reads when it lowers them.
+ *
+ * The sentinel is `{ $exists: true }`, a fresh object per condition: TOTAL for
+ * a row with no value, so the lowering neither guards nor rewrites it and hands
+ * it on by reference, and it names no column as required (only an exact
+ * `{ $null: false }` does). Copy-on-write, like the lowering: a condition with
+ * no nested relation comes back as the same object.
+ */
+const NESTED_RELATION_SENTINELS = new WeakMap<object, Record<string, unknown>>();
+
+function shieldNestedRelations(node: Record<string, unknown>): Record<string, unknown> {
+  let out: Record<string, unknown> | undefined;
+  const replace = (key: string, value: unknown): void => {
+    out ??= { ...node };
+    out[key] = value;
+  };
+  for (const [key, spec] of Object.entries(node)) {
+    if (key === '$and' || key === '$or') {
+      if (!Array.isArray(spec)) continue;
+      let copy: unknown[] | undefined;
+      spec.forEach((child, index) => {
+        if (!isFilterObject(child)) return;
+        const shielded = shieldNestedRelations(child);
+        if (shielded !== child) {
+          copy ??= [...spec];
+          copy[index] = shielded;
+        }
+      });
+      if (copy) replace(key, copy);
+      continue;
+    }
+    if (key === '$not') {
+      if (!isFilterObject(spec)) continue;
+      const shielded = shieldNestedRelations(spec);
+      if (shielded !== spec) replace(key, shielded);
+      continue;
+    }
+    if (key.startsWith('$') || !isNestedRelationCondition(spec)) continue;
+    const sentinel = { $exists: true };
+    NESTED_RELATION_SENTINELS.set(sentinel, spec);
+    replace(key, sentinel);
+  }
+  return out ?? node;
 }
 
 /**
