@@ -8,10 +8,15 @@ export const entry: SemanticMigration = {
     'a `where` naming a column the table does not have, on `driver-sql` (and its '
     + '`TursoDriver` / `SqliteWasmDriver` subclasses) — `find()` / `findOne()` answered '
     + '`[]` and `count()` threw the dialect\'s own error; both now refuse with '
-    + '`INVALID_FILTER` / 400',
+    + '`INVALID_FILTER` / 400. The `aggregate()` door of `TursoDriver`\'s remote face '
+    + 'answered `[]` for a missing column or a missing table, and now refuses as the local '
+    + 'face does: `INVALID_FILTER` / 400 for a `where` column the table lacks, '
+    + '`INVALID_FIELD` / 400 for a `groupBy` or aggregation column the table lacks, and '
+    + '`DATABASE_ERROR` / 500 for an object whose table is absent',
   replacement:
     'name a column the object actually has, or run schema sync so a recently declared '
-    + 'field exists as a column before filtering on it. A caller that legitimately wants '
+    + 'field exists as a column before filtering, grouping or aggregating on it, and so '
+    + 'the object\'s table exists. A caller that legitimately wants '
     + '"no rows unless this matches" gets that from a predicate over a real column; there '
     + 'is no spelling of an unresolvable column that means "match nothing", which is '
     + 'exactly what the old empty list was mistaken for',
@@ -88,9 +93,12 @@ export const entry: SemanticMigration = {
     + 'caller never asked for. ADR-0112.',
   acceptanceCriteria:
     'No saved report `query.filter`, flow condition, sharing/permission rule or hook '
-    + 'filters on a name the queried object has no column for. Reads and counts complete '
+    + 'filters on a name the queried object has no column for, and no report or dashboard '
+    + 'groups by, or aggregates over, such a name. Reads, counts and aggregates complete '
     + 'with no `INVALID_FILTER` whose message says "names a column that object" or "names a '
-    + 'column the database could not resolve". Where a filter key was a relationship '
+    + 'column the database could not resolve", no `INVALID_FIELD` whose message says "has '
+    + 'no column for, so the aggregate never ran", and no aggregate refused with '
+    + '`DATABASE_ERROR` / 500 because the object\'s table is absent. Where a filter key was a relationship '
     + 'traversal spelled as a dotted path, rewrite it against a column on the queried '
     + 'object — the driver never resolved such a path and answered `[]`, so any list that '
     + 'looked correct under one was already showing nothing.',
