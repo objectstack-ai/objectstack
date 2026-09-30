@@ -133,7 +133,7 @@ describe('os package publish — `visibility` is sent only when asked for', () =
   });
 
   it.each(['private', 'org', 'marketplace'] as const)(
-    'carries `visibility: %s` when --visibility %s is passed',
+    'carries the flag value when --visibility %s is passed',
     async (value) => {
       const path = await artifact();
       const calls = standInRoute(new Map());
