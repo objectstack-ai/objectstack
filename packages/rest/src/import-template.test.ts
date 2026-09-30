@@ -19,6 +19,8 @@ import {
   TEMPLATE_INAPPLICABLE_PARAMS,
   TEMPLATE_READER_CLAIMS,
   TEMPLATE_VALIDATED_ROWS,
+  TEMPLATE_VALIDATION_ERROR_MAX,
+  TEMPLATE_VALIDATION_ERROR_TITLE_MAX,
   buildImportTemplateWorkbook,
   columnLetter,
   describeTemplateColumns,
@@ -26,6 +28,7 @@ import {
   readTemplateMode,
   resolveTemplateProjection,
   templateColumns,
+  templateInsertDefault,
   templateText,
 } from './import-template.js';
 import {
@@ -168,15 +171,58 @@ describe('resolveTemplateProjection — the write projection, and the stated fal
 });
 
 describe('isTemplateRequired — the `*` mark', () => {
+  const STAGES = [{ label: 'Backlog', value: 'backlog', default: true }, { label: 'Done', value: 'done' }];
+
   it('marks a required field with no default', () => {
     expect(isTemplateRequired({ required: true })).toBe(true);
   });
   it('does NOT mark a required field that declares a default — the engine fills it', () => {
     expect(isTemplateRequired({ required: true, defaultValue: 'standard' })).toBe(false);
   });
+  it('does NOT mark a required field whose option is marked `default: true` — the engine fills that too', () => {
+    expect(isTemplateRequired({ required: true, type: 'select', options: STAGES })).toBe(false);
+    expect(isTemplateRequired({ required: true, type: 'multiselect', options: STAGES })).toBe(false);
+  });
+  it('marks one whose option list fills nothing: no marked option, a non-canonical flag, or a marked option with no value', () => {
+    expect(isTemplateRequired({ required: true, type: 'select', options: [{ label: 'A', value: 'a' }] })).toBe(true);
+    expect(isTemplateRequired({ required: true, type: 'select', options: [{ label: 'A', value: 'a', default: 'true' }] })).toBe(true);
+    expect(isTemplateRequired({ required: true, type: 'select', options: [{ label: 'A', default: true }] })).toBe(true);
+  });
+  it('`defaultValue: null` declares no default (the engine\'s `== null`), so the option list decides', () => {
+    expect(isTemplateRequired({ required: true, defaultValue: null })).toBe(true);
+    expect(isTemplateRequired({ required: true, type: 'select', defaultValue: null, options: STAGES })).toBe(false);
+  });
+  it('marks one whose default the required check counts as empty — `\'\'`, or `[]` on a multi-valued field', () => {
+    expect(isTemplateRequired({ required: true, type: 'text', defaultValue: '' })).toBe(true);
+    expect(isTemplateRequired({ required: true, type: 'multiselect', defaultValue: [], options: STAGES })).toBe(true);
+  });
+  it('does not mark a field the insert never runs `required` on: system, readonly, autonumber', () => {
+    expect(isTemplateRequired({ required: true, system: true })).toBe(false);
+    expect(isTemplateRequired({ required: true, readonly: true })).toBe(false);
+    expect(isTemplateRequired({ required: true, type: 'autonumber' })).toBe(false);
+  });
   it('does not mark an optional field', () => {
     expect(isTemplateRequired({ required: false })).toBe(false);
     expect(isTemplateRequired({})).toBe(false);
+  });
+});
+
+describe('templateInsertDefault — the default the engine fills on insert', () => {
+  it('`defaultValue` wins over a marked option; `\'\'` is a real default, `null` is none', () => {
+    const options = [{ value: 'a' }, { value: 'b', default: true }];
+    expect(templateInsertDefault({ defaultValue: 'x', options })).toBe('x');
+    expect(templateInsertDefault({ defaultValue: '', options })).toBe('');
+    expect(templateInsertDefault({ defaultValue: null, options })).toBe('b');
+  });
+  it('a single-valued field takes the FIRST marked option; a multi-valued one takes every marked option', () => {
+    const options = [{ value: 'a', default: true }, { value: 'b' }, { value: 'c', default: true }];
+    expect(templateInsertDefault({ type: 'select', options })).toBe('a');
+    expect(templateInsertDefault({ type: 'select', multiple: true, options })).toEqual(['a', 'c']);
+    expect(templateInsertDefault({ type: 'multiselect', options })).toEqual(['a', 'c']);
+  });
+  it('no default at all answers undefined', () => {
+    expect(templateInsertDefault(undefined)).toBeUndefined();
+    expect(templateInsertDefault({ type: 'select', options: ['a', 'b'] })).toBeUndefined();
   });
 });
 
@@ -374,6 +420,26 @@ describe('describeTemplateColumns', () => {
     }
   });
 
+  it('a required select whose option is marked `default: true` is not starred, and its instructions row says not required', async () => {
+    const schema = {
+      fields: {
+        title: { name: 'title', type: 'text', label: 'Title', required: true },
+        status: {
+          name: 'status', type: 'select', label: 'Status', required: true,
+          options: [{ label: 'Backlog', value: 'backlog', default: true }, { label: 'Done', value: 'done' }],
+        },
+      },
+    };
+    for (const [locale, no] of [['en', 'No'], ['zh-CN', '否']] as const) {
+      const cols = describeTemplateColumns(schema, ['title', 'status'], { locale });
+      expect(cols.map((c) => [c.header, c.required])).toEqual([['Title *', true], ['Status', false]]);
+      const wb = await loadXlsxWorkbook(Buffer.from(await (await buildImportTemplateWorkbook(cols, { locale })).xlsx.writeBuffer()));
+      expect(wb.worksheets[0].getCell('B1').value, locale).toBe('Status');
+      expect(wb.worksheets[1].getCell('A6').value, locale).toBe('Status');
+      expect(wb.worksheets[1].getCell('D6').value, locale).toBe(no);
+    }
+  });
+
   it('a name in ?fields= that is no field of the object is described as such', () => {
     const [unknown] = describeTemplateColumns(KITCHEN_SINK, ['nope'], { locale: 'en' });
     expect(unknown).toMatchObject({ header: 'nope', type: '', howToFill: 'Not a field of this object.' });
@@ -434,6 +500,30 @@ describe('buildImportTemplateWorkbook — read back', () => {
     // A column without a dropdown carries no validation.
     expect(sheet.getCell('A2').dataValidation).toBeUndefined();
     expect(sheet.getCell('E2').dataValidation).toBeUndefined();
+  });
+
+  it('a dropdown\'s error title is cut to Excel\'s 32 characters, and its message to 255', async () => {
+    const longLabel = 'Preferred contact channel for renewal outreach'; // 46 characters
+    const schema = {
+      fields: {
+        channel: {
+          name: 'channel', type: 'select', label: longLabel, required: true,
+          options: [{ label: 'Email', value: 'email' }, { label: 'Phone', value: 'phone' }],
+        },
+        short: { name: 'short', type: 'boolean', label: 'Hot' },
+      },
+    };
+    const cols = describeTemplateColumns(schema, ['channel', 'short'], { locale: 'en' });
+    expect(cols[0].header.length).toBeGreaterThan(TEMPLATE_VALIDATION_ERROR_TITLE_MAX);
+    const wb = await buildImportTemplateWorkbook(cols, { locale: 'en' });
+    const back = await loadXlsxWorkbook(Buffer.from(await wb.xlsx.writeBuffer()));
+    const long = back.worksheets[0].getCell('A2').dataValidation;
+    expect(TEMPLATE_VALIDATION_ERROR_TITLE_MAX).toBe(32);
+    expect(long?.errorTitle?.length).toBeLessThanOrEqual(32);
+    expect(long?.errorTitle).toBe(`${longLabel} *`.slice(0, 32));
+    expect(long?.error?.length).toBeLessThanOrEqual(TEMPLATE_VALIDATION_ERROR_MAX);
+    // A title that fits is written whole.
+    expect(back.worksheets[0].getCell('B2').dataValidation?.errorTitle).toBe('Hot');
   });
 
   it('the instructions sheet has one row per column: header, field, type, required, how to fill', async () => {
