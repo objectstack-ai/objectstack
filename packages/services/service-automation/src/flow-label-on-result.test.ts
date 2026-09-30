@@ -282,7 +282,8 @@ describe('AutomationResult.flowLabel — the authored flow label rides the resul
 
     describe('absent — a refusal carrying `code`, or no registered flow', () => {
         it('never-dispatched refusals: FLOW_DISABLED and FLOW_NO_START_NODE', async () => {
-            engine.registerFlow('approve_orders', chain('approve_orders', PARENT_LABEL, [{ id: 'w', type: 'work' }]) as never);
+            // [#20726] Disabled through the toggle, which switches packaged flows only.
+            engine.registerFlow('approve_orders', { ...chain('approve_orders', PARENT_LABEL, [{ id: 'w', type: 'work' }]), _packageId: 'crm' } as never);
             await engine.toggleFlow('approve_orders', false);
             const disabled = await engine.execute('approve_orders');
             expect(disabled.code).toBe('FLOW_DISABLED');
