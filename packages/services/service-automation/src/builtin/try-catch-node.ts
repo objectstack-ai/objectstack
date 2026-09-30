@@ -17,7 +17,7 @@ import { attachPartialSteps } from '../partial-steps.js';
  * `retry` policy re-runs the `try` region with exponential backoff. If the
  * region still fails after retries, the optional `catch` region runs with the
  * caught error bound to `errorVariable` (default `$error`) — `{ nodeId,
- * message }`, plus `code` (#14419) when the failing node's own result set a
+ * message }`, plus `code` (commit c5a7448d5) when the failing node's own result set a
  * platform-classified one (e.g. `create_record`'s `DUPLICATE_RECORD`), so the
  * catch region can branch on `{$error.code}` instead of only ever seeing a
  * string, plus `iteration` and `item` (#14456) when the container is running
@@ -137,7 +137,7 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
       // container still reports `success` when it recovers. Only the record of
       // what happened changes.
       let lastError = 'unknown error';
-      // #14419 — the classified `code` (ADR-0112 `StandardErrorCode`, e.g.
+      // Commit c5a7448d5 — the classified `code` (ADR-0112 `StandardErrorCode`, e.g.
       // `DUPLICATE_RECORD`) of whichever node inside the try region last
       // failed, when that node's executor set one. Captured from `$error`
       // (below) rather than from the caught exception itself: a node that
@@ -148,7 +148,7 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
       // either the next retry attempt or this executor's own `errorVariable`
       // write (below) can shadow it. Without this, a `try_catch`'s catch
       // region could never distinguish "the row is already there" from any
-      // other failure — the whole point of #14419.
+      // other failure — the whole point of commit c5a7448d5.
       let lastErrorCode: string | undefined;
       const failedAttemptSteps: StepLogEntry[] = [];
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -257,7 +257,7 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
         // WHICH thing, and `message` names one only when it happens to echo
         // the template.
         //
-        // `code` (#14419) is bound alongside and IS declared on
+        // `code` (commit c5a7448d5) is bound alongside and IS declared on
         // `TryCatchErrorValueSchema` — an open, optional `string` whose
         // docblock in `packages/spec/src/automation/control-flow.zod.ts`
         // states why the type stays open rather than closing over

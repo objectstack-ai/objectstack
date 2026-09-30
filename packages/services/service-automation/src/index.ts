@@ -30,7 +30,7 @@ export type {
     FlowDispatchOutcome,
     // [ADR-0126 §7.2] The packaged-flow activation ledger port and its row —
     // the durable off-switch that REPLACES the retired process-local
-    // `flowEnabled` map (#10243). Exported so a host can supply its own
+    // `flowEnabled` map (the leak commit 02b41232d measured). Exported so a host can supply its own
     // backing store, and so the shape a consumer reads is the platform's.
     FlowActivationStore,
     FlowActivationRow,
