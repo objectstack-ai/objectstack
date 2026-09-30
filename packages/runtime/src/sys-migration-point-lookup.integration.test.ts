@@ -107,14 +107,14 @@ describe('#20648 — sys_migration point lookups on a table this driver did not 
       await engine.findOne('sys_migration', {
         where: { id: 'seed-tenancy-backfill' },
         context: { isSystem: true },
-      } as any),
+      }),
     ).toBeNull();
 
     const pagingWarnings = () => warn.mock.calls.filter(([message]) => PAGING_WARNING.test(String(message)));
     expect(pagingWarnings()).toEqual([]);
 
     // ── the control: a real unsorted page on the same table still warns.
-    const page = await engine.find('sys_migration', { limit: 1 } as any);
+    const page = await engine.find('sys_migration', { limit: 1 });
     expect(page).toHaveLength(1);
     expect(pagingWarnings()).toHaveLength(1);
   });

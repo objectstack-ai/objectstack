@@ -177,7 +177,7 @@ describe('#20648 — the engine reads sys_migration rows through findOne', () =>
     // one. The engine's paging reads still reach the driver as `find`.
     const store: Store = new Map();
     const { engine, reads } = boot(store, { created: false });
-    await engine.find('sys_migration', { where: { id: FILE_REFERENCES_MIGRATION_ID }, limit: 1 } as any);
+    await engine.find('sys_migration', { where: { id: FILE_REFERENCES_MIGRATION_ID }, limit: 1 });
     expect(idsRead(reads, 'find')).toEqual([FILE_REFERENCES_MIGRATION_ID]);
     expect(reads.find((r) => r.verb === 'find')?.ast?.limit).toBe(1);
   });

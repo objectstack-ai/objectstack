@@ -87,9 +87,6 @@
     "packages/metadata-protocol/src/migrations/recorded-by-sentinel.test.ts": {
       "unjudged": 1
     },
-    "packages/metadata-protocol/src/migrations/seed-tenancy-backfill.test.ts": {
-      "unjudged": 1
-    },
     "packages/metadata-protocol/src/protocol-publish-drafts-advisories.test.ts": {
       "blind": 1
     },
@@ -468,12 +465,6 @@
     "packages/objectql/src/sys-metadata-repository.test.ts": {
       "unjudged": 1
     },
-    "packages/platform-objects/src/plugin.test.ts": {
-      "unjudged": 1
-    },
-    "packages/platform-objects/src/system/migration-flag.test.ts": {
-      "unjudged": 1
-    },
     "packages/plugins/plugin-approvals/src/approval-node.test.ts": {
       "wrong": 1
     },
@@ -820,7 +811,7 @@
       "unjudged": 1
     },
     "packages/services/service-storage/src/lax-deviation-reclamation-gate.test.ts": {
-      "blind": 2
+      "blind": 1
     },
     "packages/services/service-storage/src/tombstone-hydration-download-agreement.test.ts": {
       "unjudged": 1
