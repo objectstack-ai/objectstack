@@ -36,6 +36,8 @@ import {
   resolveAnalyticsDateRangeString,
   utcInstantMs,
   isUnboundedAbove,
+  compensatedSum,
+  wallClockToUtcMs,
 } from '@objectstack/core';
 import { explicitDateRangeWindow } from './date-range-array-arm.js';
 // [#19810] The `where` door's refusal envelope — `INVALID_FILTER` / 400,
@@ -364,7 +366,9 @@ export function bucketDate(value: unknown, granularity: string, timezone?: strin
     case 'month': return `${y}-${m}`;
     case 'week': {
       // Build a UTC date from the zone-shifted parts, then step back to Monday.
-      const monday = new Date(Date.UTC(y, month - 1, dayNum));
+      // [#20599] Through core's `wallClockToUtcMs`, never `Date.UTC`, which
+      // reads a year from 0 to 99 as 1900 + year.
+      const monday = new Date(wallClockToUtcMs({ year: y, month, day: dayNum }));
       const dow = (monday.getUTCDay() + 6) % 7; // Monday=0
       monday.setUTCDate(monday.getUTCDate() - dow);
       return monday.toISOString().slice(0, 10);
@@ -511,7 +515,13 @@ function aggregate(rows: Row[], metricType: string, field: string): unknown {
     // numeric `default` below, answering a sum of coerced values (or a row
     // count) under the author's `count_distinct` name.
     case 'count_distinct': return new Set(rows.map((r) => r[field]).filter((v) => v != null)).size;
-    case 'sum': return nums.reduce((a, b) => a + b, 0);
+    // [#20544] `sum` and `avg` add with `@objectstack/core`'s `compensatedSum`,
+    // the fold SQLite and the engine's rows path add with. A naive `reduce`
+    // here answered `0.1 + 0.2 + 0.3` as `0.6000000000000001` over a draft
+    // while the published chart on SQLite read `0.6`. Only the addition moved:
+    // which rows are operands is each arm's own rule, unchanged, and a `0`
+    // operand leaves a compensated sum as it leaves a naive one.
+    case 'sum': return compensatedSum(nums);
     // [#16219] Averaging NOTHING has no answer, and this arm used to invent
     // one. The live faces answer SQL NULL over the same rows (`AVG(col)` is
     // defined over non-null values in every dialect), so a drafted chart read
@@ -547,7 +557,7 @@ function aggregate(rows: Row[], metricType: string, field: string): unknown {
     case 'avg': {
       const present = rows.filter((r) => r[field] != null);
       const operands = present.map((r) => Number(r[field])).filter((n) => Number.isFinite(n));
-      if (operands.length) return operands.reduce((a, b) => a + b, 0) / operands.length;
+      if (operands.length) return compensatedSum(operands) / operands.length;
       // ⭐ No numeric operand is TWO different situations, and only one of them
       // is "averaging nothing":
       //
@@ -622,7 +632,7 @@ export function lowerPreviewDateRange(
     const window = resolveAnalyticsDateRangeString(dateRange as string, { timezone });
     return { start: window.start, end: window.end, endExclusive: window.endExclusive };
   }
-  // [#17124] An oddly-sized array is REFUSED, by the one
+  // [commit 86c505286] An oddly-sized array is REFUSED, by the one
   // `explicitDateRangeWindow` every face in this package calls. ⛔ What this
   // replaced left the upper bound UNWRITTEN — `String(undefined)` is
   // `"undefined"`, and every ISO date sorts below it, so a one-entry array

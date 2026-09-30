@@ -87,7 +87,7 @@ interface MountOptions {
     /**
      * Make the ENDPOINT's own `sys_user` read throw (the courtesy-never-fails-
      * the-answer case). The session resolver reads the same row first, once,
-     * through core's fail-LOUD `tryFind` (#13279) — a throw there is a
+     * through core's fail-LOUD `tryFind` (commit 6a180e42d) — a throw there is a
      * different contract (the whole answer is refused), so only the read
      * after it fails here.
      */

@@ -135,7 +135,7 @@ async function lowerViaPreview(range: string | readonly string[]): Promise<Lower
 
 /**
  * [#17973] The dataset executor's `compareTo` window — the FOURTH face in this
- * package, and the one #17015 never reached. It kept the degenerate
+ * package, and the one commit 0da638cd9 never reached. It kept the degenerate
  * `[range, range]` fallback every sibling shed, so a DECLARED preset plus
  * `compareTo` was refused outright. MEASURED on `b3b43b6ea`, before the fix:
  *
@@ -391,7 +391,7 @@ describe('#17973 — the dataset executor APPLIES the window it reports', () => 
     it('⛔ CONTROL — the CALLER\'s explicit window is still shifted bound for bound', async () => {
         // ⭐ Without this, every assertion above is satisfied by a face that
         // rewrote the array arm too. The answer is byte-identical to the one
-        // #17124 pinned before this change.
+        // commit 86c505286 pinned before this change.
         expect(await comparePasses(['2026-01-01', '2026-01-31'], 'previousPeriod')).toEqual([
             [['2026-01-01', '2026-01-31']],
             [['2025-12-01', '2025-12-31']],

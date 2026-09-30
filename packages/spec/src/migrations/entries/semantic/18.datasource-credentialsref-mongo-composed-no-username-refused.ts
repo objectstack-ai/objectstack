@@ -3,7 +3,7 @@
 import type { SemanticMigration } from '../../types.js';
 
 // The COMPOSED-branch twin of `datasource-credentialsref-mongo-url-no-user-refused`
-// (#9147 widening #9041's refinement). Same silent discard, one branch over, and a
+// (#9147 widening commit d491625c1's refinement). Same silent discard, one branch over, and a
 // DIFFERENT remedy — which is why it is its own entry rather than a widened surface
 // on that one: with no `url` the discrete `config.username` is the live field, so the
 // fix is `config.username`, not the URL's userinfo.

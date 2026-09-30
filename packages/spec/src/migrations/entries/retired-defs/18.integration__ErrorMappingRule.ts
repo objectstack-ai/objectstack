@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// #14676 — `integration/ErrorMappingRule` (`sourceCode`, `sourceMessage`,
+// Commit 13c48c2a5 — `integration/ErrorMappingRule` (`sourceCode`, `sourceMessage`,
 // `targetCode`, `targetCategory`, `severity`, `retryable`, `userMessage`) leaves
 // with `integration/ErrorMappingConfig`, whose `rules[]` was its only carrier.
 // The `userMessage` member is the reason the census filed the card: its

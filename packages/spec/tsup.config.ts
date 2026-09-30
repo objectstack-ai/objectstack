@@ -96,7 +96,11 @@ const entries = [
   // contract — per-entry self-contained bundling is unchanged (#8133 stays on
   // hold); this entry's whole graph is two pure modules, so "self-contained"
   // costs a few hundred bytes here by construction.
-  'src/meta-spelling/index.ts'
+  'src/meta-spelling/index.ts',
+  // The ADR-0087 migration chain + change manifest, off the root entry: its
+  // registry is mostly `os migrate meta` guidance text, and its import-time work
+  // kept all of it in every bundle of whichever entry carried it (#20646).
+  'src/migrations/index.ts',
 ];
 
 /**
@@ -189,11 +193,12 @@ const swapServerOnlyGrammarArm: Plugin = {
  * reachable graph again: the peak grew with entries × graph, not with the
  * graph. `patches/tsup@8.5.1.patch` (wired in `pnpm-workspace.yaml`'s
  * `patchedDependencies`) keys every entry by the tsconfig's directory, so the
- * 18 entries share one program. The patch names the exact tsup version, and
+ * entries share one program (18 when the table below was measured, 19 since the
+ * `./migrations` split). The patch names the exact tsup version, and
  * `pnpm install` refuses a patch that matches no installed package, so a tsup
  * bump cannot drop it silently. ⇒ On a tsup bump, re-derive the patch or
- * retire it, then re-measure this table. If this pass ever shows 18 programs
- * again, the entries are back to one program each.
+ * retire it, then re-measure this table. If this pass ever shows one program
+ * per entry again, the entries are back to one program each.
  *
  * `noCheck`: rollup-plugin-dts forces `noEmitOnError`, which makes the program
  * also semantically CHECK each file it emits — a type check

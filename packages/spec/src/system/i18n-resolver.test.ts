@@ -1240,6 +1240,146 @@ describe('translateDashboard — global filters (#16772)', () => {
   });
 });
 
+describe('translateDashboard — the catalog loses to an explicit override (#20680, ADR-0029 D9.2a)', () => {
+  // What the package shipped — the catalog's subject.
+  const PACKAGED = {
+    name: 'system_overview',
+    label: 'System Overview',
+    description: 'Platform health',
+    widgets: [
+      { id: 'widget_total_users', title: 'Total Users', description: 'Registered users', options: { description: 'all time' } },
+      { id: 'widget_organizations', title: 'Organizations' },
+    ],
+    globalFilters: [
+      { name: 'region', field: 'region', label: 'Region', options: [{ value: 'emea', label: 'EMEA' }, { value: 1, label: 'One' }] },
+    ],
+  };
+
+  // `en` repeats the shipped strings (what `platform-objects` ships); `zh-CN`
+  // translates them. Both, because the measured defect was in the SOURCE
+  // locale: an `en` reader got the shipped English back over the edit.
+  const BUNDLE: TranslationBundle = {
+    en: {
+      dashboards: {
+        system_overview: {
+          label: 'System Overview',
+          description: 'Platform health',
+          widgets: {
+            widget_total_users: { title: 'Total Users', description: 'Registered users', subCaption: 'all time' },
+            widget_organizations: { title: 'Organizations' },
+          },
+          globalFilters: { region: { label: 'Region', options: { emea: 'EMEA', '1': 'One' } } },
+        },
+      },
+    } as any,
+    'zh-CN': {
+      dashboards: {
+        system_overview: {
+          label: '系统概览',
+          description: '平台健康',
+          widgets: {
+            widget_total_users: { title: '用户总数', description: '注册用户', subCaption: '全部时间' },
+            widget_organizations: { title: '组织' },
+            // An id the package does not ship — addressed only to prove a
+            // tenant-added widget keeps its own title.
+            widget_added: { title: 'MUST-NOT-APPLY' },
+          },
+          globalFilters: { region: { label: '区域', options: { emea: '欧洲', '1': '一' } } },
+        },
+      },
+    } as any,
+  };
+
+  const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
+  const widget = (doc: any, id: string) => doc.widgets.find((w: any) => w.id === id);
+
+  it('an untouched document still gets the catalog — every string', () => {
+    const out: any = translateDashboard(clone(PACKAGED), BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
+    expect(out.label).toBe('系统概览');
+    expect(out.description).toBe('平台健康');
+    expect(widget(out, 'widget_total_users')).toMatchObject({ title: '用户总数', description: '注册用户', options: { description: '全部时间' } });
+    expect(widget(out, 'widget_organizations').title).toBe('组织');
+    expect(out.globalFilters[0].label).toBe('区域');
+    expect(out.globalFilters[0].options.map((o: any) => o.label)).toEqual(['欧洲', '一']);
+  });
+
+  it("an org overlay's edited widget title is served — in the SOURCE locale and in translation", () => {
+    const doc = clone(PACKAGED);
+    doc.widgets[0].title = 'Total Users (edited)';
+    for (const locale of ['en', 'zh-CN']) {
+      const out: any = translateDashboard(doc, BUNDLE, { locale, packagedBase: PACKAGED });
+      expect(widget(out, 'widget_total_users').title, locale).toBe('Total Users (edited)');
+    }
+  });
+
+  it('judges each string SEPARATELY — an edited title leaves the other strings translated', () => {
+    const doc = clone(PACKAGED);
+    doc.widgets[0].title = 'Total Users (edited)';
+    const out: any = translateDashboard(doc, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
+    expect(widget(out, 'widget_total_users').description).toBe('注册用户');
+    expect(widget(out, 'widget_total_users').options.description).toBe('全部时间');
+    expect(widget(out, 'widget_organizations').title).toBe('组织');
+    expect(out.label).toBe('系统概览');
+  });
+
+  it('every translatable string follows the same rule — label, description, widget description, sub-caption, filter label, option label', () => {
+    const doc = clone(PACKAGED);
+    doc.label = 'Ops Overview';
+    doc.description = 'Our health';
+    doc.widgets[0].description = 'People';
+    doc.widgets[0].options!.description = 'since launch';
+    doc.globalFilters[0].label = 'Territory';
+    doc.globalFilters[0].options[0].label = 'Europe';
+    const out: any = translateDashboard(doc, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
+    expect(out.label).toBe('Ops Overview');
+    expect(out.description).toBe('Our health');
+    expect(widget(out, 'widget_total_users').description).toBe('People');
+    expect(widget(out, 'widget_total_users').options.description).toBe('since launch');
+    expect(out.globalFilters[0].label).toBe('Territory');
+    // The edited option keeps its label; its unedited sibling is still
+    // translated, matched by the value's string spelling (`1` against `'1'`).
+    expect(out.globalFilters[0].options.map((o: any) => o.label)).toEqual(['Europe', '一']);
+  });
+
+  it('a widget the package does not ship was authored after the fact and keeps its title', () => {
+    const doc: any = clone(PACKAGED);
+    doc.widgets.push({ id: 'widget_added', title: 'Added by the org' });
+    const out: any = translateDashboard(doc, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
+    expect(widget(out, 'widget_added').title).toBe('Added by the org');
+  });
+
+  it('NO packaged base supplied → the pre-#20680 behaviour, catalog applies (the measured defect, as a control)', () => {
+    const doc = clone(PACKAGED);
+    doc.widgets[0].title = 'Total Users (edited)';
+    expect(widget(translateDashboard(doc, BUNDLE, { locale: 'en' }), 'widget_total_users').title).toBe('Total Users');
+    expect(widget(translateDashboard(doc, BUNDLE, { locale: 'zh-CN', packagedBase: undefined }), 'widget_total_users').title).toBe('用户总数');
+    expect(widget(translateDashboard(doc, BUNDLE, { locale: 'zh-CN', packagedBase: null }), 'widget_total_users').title).toBe('用户总数');
+  });
+
+  it('the ruled edge — an edit back to exactly the shipped string is a no-op, and the catalog still applies', () => {
+    const out: any = translateDashboard(clone(PACKAGED), BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
+    expect(widget(out, 'widget_total_users').title).toBe('用户总数');
+  });
+
+  it('does not mutate either input document', () => {
+    const doc = clone(PACKAGED);
+    doc.widgets[0].title = 'Total Users (edited)';
+    translateDashboard(doc, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
+    expect(doc.widgets[0].title).toBe('Total Users (edited)');
+    expect(PACKAGED.widgets[0].title).toBe('Total Users');
+  });
+
+  it('reaches the generic dispatcher — translateMetadataDocument carries the base for a dashboard', () => {
+    // The serving layer never calls `translateDashboard` directly; a base that
+    // stopped at the dispatcher would leave the defect exactly where it was.
+    const doc = clone(PACKAGED);
+    doc.widgets[0].title = 'Total Users (edited)';
+    const out = translateMetadataDocument('dashboard', doc, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
+    expect(widget(out, 'widget_total_users').title).toBe('Total Users (edited)');
+    expect(widget(out, 'widget_organizations').title).toBe('组织');
+  });
+});
+
 describe('translatePage', () => {
   const bundle: TranslationBundle = {
     'zh-CN': {

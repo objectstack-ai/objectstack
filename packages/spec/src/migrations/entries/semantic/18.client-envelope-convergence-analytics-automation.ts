@@ -6,8 +6,8 @@
 // resolve this repo's internal issue numbers.
 //
 //   card            objectstack-ai/objectstack#13079
-//   landing PR      objectstack-ai/objectstack#14526
-//   registration    objectstack-ai/objectstack#14996
+//   landing commit  db16b9424
+//   registration    commit db16b9424 (the ADR-0087 registration landed in that same squash)
 //   precedents      objectstack-ai/objectstack#13023 (the two entries this is
 //                   shaped on: `client-delete-result-success`,
 //                   `client-meta-reset-result-reset`)

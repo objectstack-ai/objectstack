@@ -142,6 +142,50 @@ export const AnalyticsResultResponseSchema = lazySchema(() => BaseResponseSchema
       + 'the underlying data (never re-derived from bucketed values). The '
       + 'grand-total grouping yields a single dimensionless row.',
     ),
+    object: z.string().optional().describe(
+      'The base object of the dataset the answer was computed from: the dataset\'s '
+      + '`object`, by machine name. Every dataset answer (`POST /analytics/dataset/query`) '
+      + 'must carry it, whatever dimensions are selected and whether or not rows came '
+      + 'back, so a consumer can refresh on that object\'s record changes and drill '
+      + 'into its records. Absent on a cube query answer, which has no dataset behind it.',
+    ),
+    // Drill-through sidecars (ADR-0021 D2) — mirrored member for member from
+    // `AnalyticsResult`, where each one's conditions are stated in full.
+    dimensionFields: z.record(z.string(), z.string()).optional().describe(
+      'Drill-through sidecar: each equality-drillable dimension the answer is grouped '
+      + 'by, dimension name to that dataset dimension\'s own `field` (a base-object '
+      + 'field or a `relationship.field` path). Set only on a dataset answer '
+      + '(`POST /analytics/dataset/query`) that has rows and groups by at least one '
+      + 'dimension with a `field` that is not `type: \'date\'`; a date dimension is '
+      + 'never listed (see `drillRanges`). Absent on a cube query answer.',
+    ),
+    drillRawRows: z.array(z.record(z.string(), z.unknown())).optional().describe(
+      'Drill-through sidecar, aligned to `rows` by index: each `dimensionFields` '
+      + 'dimension name to the stored value that row was grouped by (a select '
+      + 'option\'s value, a lookup\'s record id), captured before label resolution '
+      + 'rewrites the row to its display label. An exact-match drill filter is built '
+      + 'from these, not from the labels in `rows`. Set exactly when `dimensionFields` is.',
+    ),
+    drillRawTotals: z.array(z.array(z.record(z.string(), z.unknown()))).optional().describe(
+      'Drill-through sidecar for `totals`: entry `[i][j]` aligns to `totals[i].rows[j]` '
+      + 'and holds the stored value of the `dimensionFields` dimensions that grouping '
+      + 'groups by, so the grand-total grouping yields an empty map per row. Set only '
+      + 'when `dimensionFields` is and the answer carries at least one `totals` grouping.',
+    ),
+    drillRanges: z.array(z.record(z.string(), z.object({
+      field: z.string().describe('The date dimension\'s own `field`'),
+      gte: z.string().describe('Inclusive lower bound of the bucket'),
+      lt: z.string().describe('Exclusive upper bound of the bucket'),
+    }))).optional().describe(
+      'Drill-through sidecar for time buckets, aligned to `rows` by index: date '
+      + 'dimension name to the half-open range `[gte, lt)` that row\'s bucket covers. '
+      + 'Bounds are `YYYY-MM-DD` calendar days, or ISO-8601 instants at midnight in the '
+      + 'reference timezone when the source field is `datetime`; a row whose bucket '
+      + 'value is null gets no entry for that dimension. Set only on a dataset answer '
+      + 'that has rows and groups by at least one `type: \'date\'` dimension with a '
+      + '`field` and a granularity; independent of `dimensionFields`. Absent on a cube '
+      + 'query answer.',
+    ),
   }),
 }));
 
@@ -164,17 +208,22 @@ export const GetAnalyticsMetaRequestSchema = lazySchema(() => z.object({
  * `/analytics/query` expects back in `measures[]` / `dimensions[]`; the
  * unqualified key it was defined under is not published. `title` carries the
  * definition's `label`, so it is the display name a dashboard renders.
+ * `description` carries the definition's `description`, and a measure also
+ * carries its definition's `format` (#20282, the additive return path the
+ * #6442 ruling recorded below); each is absent when the definition declares
+ * none.
  *
  * Deliberately narrower than the authoring definitions (`MetricSchema` /
- * `DimensionSchema` in `data/analytics.zod.ts`): `sql`, `description`,
- * `granularities` and `format` are dropped by the projection and are NOT
- * reachable through this endpoint (#6442). (`filters` used to head this list;
- * #10414 removed it from the authoring definition itself.)
+ * `DimensionSchema` in `data/analytics.zod.ts`): `sql` and `granularities`
+ * are dropped by the projection and are NOT reachable through this endpoint
+ * (#6442). (`filters` used to head this list; #10414 removed it from the
+ * authoring definition itself.)
  *
  * Module-local, and NOT exported as its own named schema: `CubeMeta` in
  * `contracts/analytics-service.ts` is already THE name for this shape, so a
  * second exported name would be the permanent synonym ADR-0122 D3 forbids AND a
  * new dual-source export. `analytics.test.ts` binds the two at compile time.
+ * This is the dimension member; {@link cubeMetaMeasureShape} adds `format`.
  */
 const cubeMetaMemberShape = () => z.object({
   name: z.string().describe('Cube-qualified member name, `"<cube>.<key>"` — the spelling `/analytics/query` accepts'),
@@ -185,6 +234,12 @@ const cubeMetaMemberShape = () => z.object({
     + 'shape serves both member kinds.',
   ),
   title: z.string().optional().describe('Display label, projected from the definition\'s `label`'),
+  description: z.string().optional().describe('Description, projected from the definition\'s `description`'),
+});
+
+/** A measure as `GET /analytics/meta` publishes it: the member shape plus `format`. */
+const cubeMetaMeasureShape = () => cubeMetaMemberShape().extend({
+  format: z.string().optional().describe('Display format, projected from the measure definition\'s `format`'),
 });
 
 /**
@@ -218,11 +273,12 @@ export const AnalyticsMetadataResponseSchema = lazySchema(() => BaseResponseSche
   data: z.array(z.object({
     name: z.string().describe('Cube name'),
     title: z.string().optional().describe('Human-readable cube title'),
-    measures: z.array(cubeMetaMemberShape()).describe('Measures this cube accepts in `/analytics/query`'),
+    description: z.string().optional().describe('Cube description, projected from the cube definition\'s `description`'),
+    measures: z.array(cubeMetaMeasureShape()).describe('Measures this cube accepts in `/analytics/query`'),
     dimensions: z.array(cubeMetaMemberShape()).describe('Dimensions this cube accepts in `/analytics/query`'),
   })).describe(
     'Available cubes, each as the `CubeMeta` discovery projection — the cube name, '
-    + 'its title, and the measures/dimensions a client may name in a query. A bare '
+    + 'its title and description, and the measures/dimensions a client may name in a query. A bare '
     + 'array: there is no `cubes` wrapper object, and no cube `sql` is published.',
   ),
 }));

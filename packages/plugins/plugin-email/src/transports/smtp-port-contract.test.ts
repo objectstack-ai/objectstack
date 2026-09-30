@@ -31,7 +31,7 @@
  * mechanism `mail-manifest-providers.contract.test.ts` already uses for the
  * provider dropdown over that same devDependency.
  *
- * ## #13189 — the accept set narrowed, and this file is where that is visible
+ * ## Commit 33fbd3566 — the accept set narrowed, and this file is where that is visible
  *
  * `isValidSmtpPort` now tests INTEGRALITY. That is a deliberate narrowing of
  * the set #12993 pinned, and the pin below was written to make exactly this
@@ -225,7 +225,7 @@ describe('#12993 — one SMTP port range, every door states it from there', () =
   it('narrows the accept set in exactly ONE dimension — integrality — and nowhere else (#13189)', () => {
     // ⚠️ This case was `refactors the enforcement without narrowing what it
     // accepts` when #12993 moved the predicate here, and `587.5` sat in its
-    // table as MEASURED, not endorsed. #13189 is the card that SPENDS that
+    // table as MEASURED, not endorsed. Commit 33fbd3566 is the change that SPENDS that
     // pin: the accept set really does narrow now, and the pin's job was always
     // to make such a change visible rather than to prevent one. So the oracle
     // and the values stay exactly where they were; what changed is that the

@@ -7161,6 +7161,48 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#20680] The PACKAGED (code-layer) declaration of a DASHBOARD — the
+     * body a code package ships, before any tenant `sys_metadata` overlay.
+     * The dashboard twin of {@link getPackagedObjectBase}, and the fact
+     * `translateDashboard` (`@objectstack/spec/system`) compares against as
+     * its `packagedBase`: the i18n catalog is the packaged translation of
+     * exactly this body, so it may only replace a string the served
+     * dashboard still carries unchanged from it (ADR-0029 D9.2a — an explicit
+     * override beats a packaged default; ADR-0126 Regime O — a packaged
+     * dashboard is overlay-editable, and a published overlay is what every
+     * read serves).
+     *
+     * Measured before this existed: an org overlay on `system_overview`
+     * published and was returned by {@link getMetaItem} and
+     * {@link getMetaItems} — the write and every protocol read resolve ONE
+     * identity (`type: 'dashboard'`, the name, `package_id: null`, the org) —
+     * yet the served widget title stayed the shipped one, because the
+     * translation of the served document had no base to compare with.
+     *
+     * {@link lookupArtifactItem}, and nothing wider: it answers only an item
+     * whose `_packageId` marks a genuine code package and is immune to an
+     * overlay row hydrated under the plain registry key, so the body it
+     * returns can never be the overlay it is meant to be compared against.
+     * A dashboard has no extension fold, so — unlike the object case — the
+     * artifact item IS the packaged declaration.
+     *
+     * Returns `undefined` — "no packaged baseline, infer nothing", which the
+     * translator reads as the catalog applying unchanged — for a
+     * runtime/tenant-authored dashboard (no code package ships it), an
+     * unknown name, and a registry double without the lookup.
+     */
+    getPackagedDashboardBase(name: string): unknown {
+        if (typeof name !== 'string' || name === '') return undefined;
+        try {
+            return this.lookupArtifactItem('dashboard', name);
+        } catch {
+            // A read over the in-memory registry; a failure here must never
+            // turn a served dashboard into a 5xx.
+            return undefined;
+        }
+    }
+
+    /**
      * [#8268, generalising #8038] The REGISTRY-SIDE half of
      * {@link governServedItem}'s presence convergence: replay the registry's
      * object-materialization seam onto the served body.

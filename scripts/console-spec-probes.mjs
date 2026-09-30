@@ -124,6 +124,64 @@ export function pickProbe(candidates, theirs) {
   return null;
 }
 
+/** Every candidate `theirs` does not contain, by the same substring rule as pickProbe. */
+export function uniqueCandidates(candidates, theirs) {
+  return candidates.filter((candidate) => !theirs.includes(candidate));
+}
+
+/**
+ * The two probes for ONE built console bundle, chosen with the bundle in view.
+ *
+ * ## The blind spot this closes (objectstack#20646)
+ *
+ * Both blobs are every JS file the package's exports map resolves to, but a
+ * console bundles only the entries it imports. Taking the alphabetically first
+ * unique candidate therefore picked text the bundle could never carry, on both
+ * legs, and nothing noticed until the witness landed in one:
+ *
+ *   - FRESH: the new `@objectstack/spec/migrations` entry took the change-manifest
+ *     descriptions off the root. "A public export added or removed by one
+ *     release." stayed the first injected-only candidate, now carried only by an
+ *     entry the console never imports, so a working injection read as "neither
+ *     spec appears" (exit 2) — while 102 of the 142 injected-only descriptions
+ *     were in that very bundle (measured on fbec216e2d against objectui
+ *     dd3f7e1be356 and its published @objectstack/spec 17.4.0).
+ *   - STALE: the first published-only candidate was text from the published
+ *     `./cloud` entry, which the console never imports either, so the detector
+ *     was absent by construction: a console built from the PUBLISHED spec passed
+ *     this leg too.
+ *
+ * ## What is chosen instead
+ *
+ *   - The fresh witness is the first injected-only candidate the bundle DOES
+ *     carry. When it carries none, the first candidate is still returned with
+ *     `freshPresent: false` — "neither spec appears" stays exit 2 at the caller.
+ *   - The stale leg is judged over EVERY published-only candidate, not one: it is
+ *     present when ANY of them is in the bundle, and the detector returned is the
+ *     first one found. That is strictly stronger than the single pick — a bundle
+ *     the old leg flagged is still flagged — and it no longer depends on which
+ *     entry happens to sort first. With none present, the first candidate is
+ *     returned, exactly the one pickProbe chose, so the stamp this feeds keeps
+ *     its shape and its replay (check-console-injection) keeps its meaning.
+ *
+ * `freshPresent` / `stalePresent` are `null` when that side has no unique
+ * candidate at all — no skew on that side — matching the caller's old tri-state.
+ */
+export function chooseProbes({ injectedBlob, vendoredBlob, bundle }) {
+  const freshPool = uniqueCandidates(describeCandidates(injectedBlob), vendoredBlob);
+  const stalePool = uniqueCandidates(describeCandidates(vendoredBlob), injectedBlob);
+  const freshInBundle = freshPool.filter((candidate) => bundle.includes(candidate));
+  const staleInBundle = stalePool.filter((candidate) => bundle.includes(candidate));
+  return {
+    freshWitness: freshInBundle[0] ?? freshPool[0] ?? null,
+    freshPresent: freshPool.length === 0 ? null : freshInBundle.length > 0,
+    freshCounts: { pool: freshPool.length, inBundle: freshInBundle.length },
+    staleDetector: staleInBundle[0] ?? stalePool[0] ?? null,
+    stalePresent: stalePool.length === 0 ? null : staleInBundle.length > 0,
+    staleCounts: { pool: stalePool.length, inBundle: staleInBundle.length },
+  };
+}
+
 /** Concatenated JavaScript of a built console `assets/` directory. */
 export function readBundle(assetsDir) {
   if (!fs.existsSync(assetsDir)) bad(`assets dir \`${assetsDir}\` does not exist`);

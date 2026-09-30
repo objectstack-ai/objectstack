@@ -218,7 +218,7 @@ describe('smtpOptionsFromMailSettings', () => {
     expect(smtpOptionsFromMailSettings({ smtp_host: 'smtp.x' })).toEqual({ host: 'smtp.x' });
   });
 
-  // #13190 — `absent` vs `present but unreadable`, which this function used to
+  // Commit 56c5b1dbe — `absent` vs `present but unreadable`, which this function used to
   // collapse into one bucket. A port that could not be read was DELETED here,
   // and `SmtpTransport` then applied its built-in 587: a configured `abc`
   // became a working-looking connection nobody chose, and `describe()`
@@ -269,18 +269,18 @@ describe('smtpOptionsFromMailSettings', () => {
     });
 
     it('refuses a READABLE but FRACTIONAL port by name, without a second door (#13189)', () => {
-      // The bucket #13190 never had to name, because the guard below it
+      // The bucket commit 56c5b1dbe never had to name, because the guard below it
       // admitted the value: `'587.5'` is present, readable, finite and inside
       // `1-65535`, so it mapped straight through and died at SEND time under
       // `RangeError: Port should be >= 0 and < 65536` — a TCP rule, naming no
-      // part of Settings → Mail → Port. #13189 made the guard test
+      // part of Settings → Mail → Port. Commit 33fbd3566 made the guard test
       // integrality, so it is refused at construction now, in this
       // transport's own sentence, carrying what the operator actually typed.
       const opts = smtpOptionsFromMailSettings({ smtp_host: 'smtp.x', smtp_port: '587.5' });
 
-      // ⛔ The mapping still PASSES IT THROUGH. #13190's rule is that this
+      // ⛔ The mapping still PASSES IT THROUGH. Commit 56c5b1dbe's rule is that this
       // function hides nothing from the guard and adds no parallel refusal of
-      // its own; #13189 changed which numbers the guard refuses, not where
+      // its own; commit 33fbd3566 changed which numbers the guard refuses, not where
       // the refusal lives. A repair that started rejecting here instead would
       // pass the next line and quietly rebuild the second door.
       expect(opts, 'the mapping dropped the key instead of passing it down')

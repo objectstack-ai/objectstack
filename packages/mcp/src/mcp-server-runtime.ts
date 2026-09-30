@@ -269,7 +269,7 @@ interface ToolWorldHint {
  * ```
  *
  * For the two safety hints, omission lands on the cautious answer and costs
- * only information — which is why #13318 could move them to omit-when-unsourced
+ * only information — which is why commit 3ec8646f1 could move them to omit-when-unsourced
  * and call it conservative. For this one, omission lands on the LESS cautious
  * reading: a tool that sources nothing is understood by every conforming host
  * to reach an open world. That trade is accepted on purpose. For an
@@ -622,7 +622,7 @@ async function diagnosedGet(
  * this answer be trusted as complete?" is asked of the contract member that is
  * declared to answer it.
  *
- * [#6724] This TSDoc used to offer a second, factual ground — that the
+ * [commit 4f3d2322e] This TSDoc used to offer a second, factual ground — that the
  * equivalence "does not hold in general", `MetadataFacade.getObject` (objectql)
  * returning "a different shape from its own `get()`". That claim is **false**,
  * and it was asserted rather than measured. `SchemaRegistry.getItem`
@@ -633,8 +633,8 @@ async function diagnosedGet(
  * **identical object reference** on a hit, and both answer `undefined` on a
  * miss. All three shipped implementations are pinned that way by
  * `packages/objectql/src/metadata-service-getobject-equivalence.test.ts`
- * (PR #6839 for #6745), and `IMetadataService.getObject` has documented the
- * equivalence since PR #6723 (#6505) — so the "no documented equivalence" half
+ * (commit 7a5ef0008, PR #6839), and `IMetadataService.getObject` has documented the
+ * equivalence since commit 8ad609c69 (#6505) — so the "no documented equivalence" half
  * above is a fact about #6055's repo, not today's.
  *
  * Correcting the record does not decide the design question, and this note
@@ -649,7 +649,7 @@ async function diagnosedGet(
  *   object that is genuinely absent. That is the conservative direction — it
  *   withholds, it never admits — and no such host exists today
  *   (`MetadataManager` is the only `getDiagnosed` implementation on `main`).
- *   Since PR #6723 the contract also rules such a host out by declaration, so
+ *   Since commit 8ad609c69 the contract also rules such a host out by declaration, so
  *   this reads as residual risk against a contract violation, not as a live
  *   divergence anyone can point at.
  */

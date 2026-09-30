@@ -394,7 +394,7 @@ function said(r: Ran): string {
  * spells it — would hang until the harness timeout. Measured while writing this
  * file: every case sat at its 240s ceiling.
  *
- * ## Why this waits on the child's own word instead of on a clock (#19424)
+ * ## Why this waits on the child's own word instead of on a clock (commit c27e16059)
  *
  * The wait this replaces was 80 `curl` probes 0.25s apart — exactly 20s — run
  * through `execFileSync('bash', …, { stdio: 'ignore' })` against a child
@@ -676,7 +676,7 @@ describe.skipIf(!RUNNABLE)('[#9779] scaffold-e2e.yml boot-and-probe blocks asser
       it('refuses a neighbour already answering the URL its loop accepts as proof', async () => {
         // The neighbour goes up FIRST and reports the port the kernel gave it,
         // so the script is rewritten around a port that is already held rather
-        // than around one that merely tested free a moment ago (#19424).
+        // than around one that merely tested free a moment ago (commit c27e16059).
         const n = await neighbour();
         const port = n.port;
         const script = stepScript(step).replaceAll('8080', String(port));
@@ -813,7 +813,7 @@ async function failedNeighbour(
 }
 
 /**
- * The controls for the instrument above (#19424).
+ * The controls for the instrument above (commit c27e16059).
  *
  * ⛔ A green suite is not evidence that a diagnostic works — only a
  * deliberately broken child is. Each case here breaks the neighbour a

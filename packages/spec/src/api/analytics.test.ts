@@ -254,6 +254,87 @@ describe('AnalyticsResultResponseSchema', () => {
     expect(resp.data.totals?.[1].rows[0].revenue).toBe(250);
   });
 
+  // `data.object` — the dataset's base object, which a consumer keys its
+  // record-change refresh on. The answer that most needs it is the one with no
+  // dimensions and no rows (a KPI tile before its first record), so that is the
+  // payload pinned. Preservation, not just acceptance: this schema strips an
+  // undeclared key, so an undeclared `object` would parse green and vanish.
+  it('should preserve data.object — the dataset base object — on a dimension-less, zero-row answer', () => {
+    const resp = AnalyticsResultResponseSchema.parse({
+      success: true,
+      data: { rows: [], fields: [{ name: 'count', type: 'number' }], object: 'showcase_project' },
+    });
+    expect(resp.data.object).toBe('showcase_project');
+
+    // Optional: a cube query answer carries none, and still parses.
+    const cube = AnalyticsResultResponseSchema.parse({ success: true, data: { rows: [], fields: [] } });
+    expect('object' in cube.data).toBe(false);
+
+    const bad = AnalyticsResultResponseSchema.safeParse({
+      success: true,
+      data: { rows: [], fields: [], object: 42 },
+    });
+    expect(bad.success).toBe(false);
+    expect(bad.success ? [] : bad.error.issues.map((i) => i.path.join('.'))).toContain('data.object');
+  });
+
+  // The four drill-through sidecars (ADR-0021 D2), on the answer that carries all
+  // four at once: a dataset grouped by a lookup (equality drill) and by a
+  // quarter-bucketed date (range drill), with a grand total and a per-account
+  // subtotal. Preservation, not just acceptance: this schema strips an undeclared
+  // key, so an undeclared sidecar would parse green and vanish.
+  const drillable = {
+    rows: [
+      { account: 'Acme', close_date: '2026-Q2', revenue: 100 },
+      { account: 'Globex', close_date: '2026-Q3', revenue: 40 },
+    ],
+    fields: [
+      { name: 'account', type: 'string' },
+      { name: 'close_date', type: 'time' },
+      { name: 'revenue', type: 'number' },
+    ],
+    totals: [
+      { dimensions: [], rows: [{ revenue: 140 }] },
+      { dimensions: ['account'], rows: [{ account: 'Acme', revenue: 100 }, { account: 'Globex', revenue: 40 }] },
+    ],
+    object: 'opportunity',
+    dimensionFields: { account: 'account' },
+    drillRawRows: [{ account: 'acc_1' }, { account: 'acc_2' }],
+    drillRawTotals: [[{}], [{ account: 'acc_1' }, { account: 'acc_2' }]],
+    drillRanges: [
+      { close_date: { field: 'close_date', gte: '2026-04-01', lt: '2026-07-01' } },
+      { close_date: { field: 'close_date', gte: '2026-07-01', lt: '2026-10-01' } },
+    ],
+  };
+
+  it('should preserve all four drill-through sidecars on a drillable dataset answer', () => {
+    const resp = AnalyticsResultResponseSchema.parse({ success: true, data: drillable });
+    expect(resp.data.dimensionFields).toEqual({ account: 'account' });
+    expect(resp.data.drillRawRows).toEqual([{ account: 'acc_1' }, { account: 'acc_2' }]);
+    expect(resp.data.drillRawTotals).toEqual([[{}], [{ account: 'acc_1' }, { account: 'acc_2' }]]);
+    expect(resp.data.drillRanges).toEqual(drillable.drillRanges);
+
+    // Optional: a cube query answer, and a non-drillable dataset answer, carry none.
+    const bare = AnalyticsResultResponseSchema.parse({ success: true, data: { rows: [], fields: [] } });
+    for (const key of ['dimensionFields', 'drillRawRows', 'drillRawTotals', 'drillRanges']) {
+      expect(key in bare.data).toBe(false);
+    }
+  });
+
+  it.each([
+    ['dimensionFields', { account: 42 }, 'data.dimensionFields.account'],
+    ['drillRawRows', { account: 'acc_1' }, 'data.drillRawRows'],
+    ['drillRawTotals', [{ account: 'acc_1' }], 'data.drillRawTotals.0'],
+    ['drillRanges', [{ close_date: { field: 'close_date', gte: '2026-04-01' } }], 'data.drillRanges.0.close_date.lt'],
+  ])('should refuse a malformed %s at its own path', (key, value, path) => {
+    const bad = AnalyticsResultResponseSchema.safeParse({
+      success: true,
+      data: { ...drillable, [key]: value },
+    });
+    expect(bad.success).toBe(false);
+    expect(bad.success ? [] : bad.error.issues.map((i) => i.path.join('.'))).toEqual([path]);
+  });
+
   it('should reject a percentScale outside the closed vocabulary, and a totals entry without dimensions', () => {
     expect(() =>
       AnalyticsResultResponseSchema.parse({
@@ -305,9 +386,10 @@ describe('GetAnalyticsMetaRequestSchema', () => {
  */
 describe('AnalyticsMetadataResponseSchema — the CubeMeta[] projection (#6442)', () => {
   /**
-   * A real `GET /analytics/meta` body: what `AnalyticsService.getMeta` and its
-   * `driver-memory` twin both build — measure/dimension names CUBE-QUALIFIED,
-   * `title` projected from the definition's `label`, and no `sql` anywhere.
+   * A real `GET /analytics/meta` body: what `AnalyticsService.getMeta` builds —
+   * measure/dimension names CUBE-QUALIFIED, `title` projected from the
+   * definition's `label`, `description` and a measure's `format` copied from
+   * the definition when it declares them, and no `sql` anywhere.
    */
   const SERVED_BODY = {
     success: true,
@@ -315,11 +397,18 @@ describe('AnalyticsMetadataResponseSchema — the CubeMeta[] projection (#6442)'
       {
         name: 'orders',
         title: 'Orders',
+        description: 'Every order placed in the shop',
         measures: [
-          { name: 'orders.total_revenue', type: 'sum', title: 'Total Revenue' },
+          {
+            name: 'orders.total_revenue',
+            type: 'sum',
+            title: 'Total Revenue',
+            description: 'Sum of order amounts',
+            format: '$0,0.00',
+          },
         ],
         dimensions: [
-          { name: 'orders.status', type: 'string', title: 'Status' },
+          { name: 'orders.status', type: 'string', title: 'Status', description: 'Fulfilment status' },
         ],
       },
     ],
@@ -335,6 +424,12 @@ describe('AnalyticsMetadataResponseSchema — the CubeMeta[] projection (#6442)'
     expect(resp.data[0].measures[0].title).toBe('Total Revenue');
     expect(resp.data[0].dimensions[0].name).toBe('orders.status');
     expect(resp.data[0]).not.toHaveProperty('sql');
+    // The descriptions and the measure format are DECLARED members: a key the
+    // object schema did not declare would be stripped by this parse, not kept.
+    expect(resp.data[0].description).toBe('Every order placed in the shop');
+    expect(resp.data[0].measures[0].description).toBe('Sum of order amounts');
+    expect(resp.data[0].measures[0].format).toBe('$0,0.00');
+    expect(resp.data[0].dimensions[0].description).toBe('Fulfilment status');
   });
 
   it('accepts an empty cube list', () => {
@@ -387,6 +482,22 @@ describe('AnalyticsMetadataResponseSchema — the CubeMeta[] projection (#6442)'
       dimensions: [{ name: 'orders.status', type: 'string' }],
     };
     expect(() => AnalyticsMetadataResponseSchema.parse({ success: true, data: [fromContract] })).not.toThrow();
+
+    // Every optional member the contract declares survives the parse, on the
+    // member kind that declares it: `format` is a measure's, not a dimension's.
+    const fullContract: CubeMeta = {
+      name: 'orders',
+      title: 'Orders',
+      description: 'd',
+      measures: [{ name: 'orders.total_revenue', type: 'sum', title: 't', description: 'd', format: '0.0%' }],
+      dimensions: [{ name: 'orders.status', type: 'string', title: 't', description: 'd' }],
+    };
+    expect(AnalyticsMetadataResponseSchema.parse({ success: true, data: [fullContract] }).data).toEqual([fullContract]);
+    const [cube] = AnalyticsMetadataResponseSchema.parse({
+      success: true,
+      data: [{ ...fullContract, dimensions: [{ name: 'orders.status', type: 'string', format: '0.0%' }] }],
+    }).data;
+    expect(cube.dimensions[0]).not.toHaveProperty('format');
   });
 });
 

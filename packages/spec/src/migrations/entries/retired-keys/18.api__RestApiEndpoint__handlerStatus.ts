@@ -34,5 +34,5 @@
 // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
 // removal ships on the 17.x line (launch-window convention: accept-set
 // narrowings ride minor releases) and the prescription lives at the major
-// boundary where `migrate meta` users look (the #11846 / #12428 grading).
+// boundary where `migrate meta` users look (the commit 0c2334f6c / #12428 grading).
 export const entry = 'api/RestApiEndpoint:handlerStatus';

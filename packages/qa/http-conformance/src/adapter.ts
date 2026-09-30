@@ -29,7 +29,7 @@ import type { HttpResponseObserver } from '@objectstack/core';
  * - **`getPort()`**: used by boot code/tests to discover the OS-assigned
  *   port after `listen(0)`.
  *
- * Since #6143 it also implements the contract's optional
+ * Since commit 12298c7d6 it also implements the contract's optional
  * {@link NodeHttpServer.setFallbackHandler} — see the CONTRACT there. That is
  * NOT a third soft extension: the member is part of `IHttpServer` and carries
  * four testable guarantees, and this adapter has to satisfy them before the
@@ -186,7 +186,7 @@ export class NodeHttpServer implements IHttpServer {
      * Install the LAST-RESORT handler — see the CONTRACT on
      * `IHttpServer.setFallbackHandler` in `@objectstack/spec/contracts`
      * (#5040 §1-C). `node:http` ships no not-found hook to map onto, so this
-     * adapter builds the equivalent out of its own router (#6143). The four
+     * adapter builds the equivalent out of its own router (commit 12298c7d6). The four
      * guarantees, and how each is honoured HERE:
      *
      *  1. **Only after every registered route has missed.** The handler is a
@@ -254,7 +254,7 @@ export class NodeHttpServer implements IHttpServer {
      * an accurate `Allow` when the path exists under another verb, otherwise
      * the shared 404 body.
      *
-     * Extracted from {@link handleRequest} by #6143 because it gained a second
+     * Extracted from {@link handleRequest} by commit 12298c7d6 because it gained a second
      * call site: the fall-through after an installed fallback declined to
      * answer. Both paths must produce the byte-identical answer — a fallback
      * that writes nothing may not cost a caller the `Allow` header.
@@ -343,7 +343,7 @@ export class NodeHttpServer implements IHttpServer {
                 }
             });
         }
-        // The LAST-RESORT seam (#6143): consulted ONLY here, i.e. only once
+        // The LAST-RESORT seam (commit 12298c7d6): consulted ONLY here, i.e. only once
         // every explicitly registered route has missed — see the CONTRACT on
         // {@link setFallbackHandler}. Resolved BEFORE the request body is read
         // so an unmatched request on a server with NO fallback installed still

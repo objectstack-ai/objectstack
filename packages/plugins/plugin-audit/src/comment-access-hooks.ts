@@ -32,7 +32,7 @@
  *      carrying NEITHER an id NOR a `where` is refused outright rather than
  *      authorizing the whole table by resolving zero rows — on BOTH verbs that
  *      refusal reaches this handler through the `dispatchUnscopedMultiWrite`
- *      whole-operation dispatch both registrations declare (#9719/#9798 built
+ *      whole-operation dispatch both registrations declare (#9719/commit c7655d472 built
  *      it for delete; #9974 ruled it onto update).
  *  - {@link installCommentReadVisibility} — the read side: a
  *    `find`/`findOne`/`count`/`aggregate` middleware that intersects the query
@@ -74,7 +74,7 @@ export interface CommentAccessEngine {
     options?: {
       object?: string;
       packageId?: string;
-      /** [#9798, both verbs since #9974] Opt-in whole-operation `beforeUpdate` /
+      /** [commit c7655d472, both verbs since #9974] Opt-in whole-operation `beforeUpdate` /
        * `beforeDelete` dispatch for an UNSCOPED predicate write
        * (`multi: true`, no `where`) — the engine declaration added by #9719.
        * Declared here because this file's registrations pass it; the mechanism,
@@ -219,7 +219,7 @@ function asIdList(id: unknown): Array<string | number> | null {
  * snapshot lacks `permissions`, which sharing bypasses need.
  *
  * [#7136] Typed as the full envelope, which is what `ISharingService` declares
- * for every parameter this value is handed to (#6523 / the #6206 ruling).
+ * for every parameter this value is handed to (commit aa4b90d9a / the full-envelope ruling).
  *
  * [#7141] And FORWARDED as the full envelope, which is the other half of that
  * ruling: a caller "MUST NOT rebuild a subset of it". The five-field projection
@@ -369,7 +369,7 @@ export function installCommentAccessHooks(
       // authorize row-by-row, and "nothing to authorize" must never read as
       // "allowed" (the engine would hand an unscoped AST to deleteMany).
       //
-      // [#9798/#9974] This branch is verb-neutral in what it says AND, since
+      // [commit c7655d472/#9974] This branch is verb-neutral in what it says AND, since
       // #9974, in what reaches it. On BOTH verbs the only dispatch that can
       // deliver this shape is the `dispatchUnscopedMultiWrite` whole-operation
       // dispatch this module's two `before*` registrations declare (see below):
@@ -472,7 +472,7 @@ export function installCommentAccessHooks(
       }
     },
     // [#9974] `dispatchUnscopedMultiWrite` is what makes the #4630 unscoped
-    // refusal in `resolveTargetRows` REACHABLE ON UPDATE — the half #9798 could
+    // refusal in `resolveTargetRows` REACHABLE ON UPDATE — the half commit c7655d472 could
     // not land, ruled in on 2026-08-19. Without it the predicate path dispatches
     // per row with `input.id` bound (so the by-id branch shadows the shape
     // check) and a zero-match predicate dispatches nothing, leaving the declared
@@ -491,7 +491,7 @@ export function installCommentAccessHooks(
       if (!rows.length) return; // nothing matched — nothing to authorize
       await authorizeRows(ctx, rows, 'delete');
     },
-    // [#9798] `dispatchUnscopedMultiWrite` is what makes the #4630 unscoped
+    // [commit c7655d472] `dispatchUnscopedMultiWrite` is what makes the #4630 unscoped
     // refusal in `resolveTargetRows` REACHABLE through the wired engine: the
     // predicate path dispatches per row with `input.id` bound (so the by-id
     // branch shadows the check), and a zero-match predicate dispatches nothing

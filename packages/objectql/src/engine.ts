@@ -269,6 +269,7 @@ import {
   applyHaving,
   aggregatedRowColumns,
   aggregatedRowColumnClasses,
+  aggregatedRowColumnTypes,
   assertAggregationFilterIsEvaluable,
   assertHavingIsEvaluable,
   assertHavingIsFilterCondition,
@@ -1021,6 +1022,10 @@ function lowerWhereFilterArray<T extends object | undefined>(
     // copy-on-write, by `@objectstack/spec/data`'s grammar and verdict. Before
     // the token resolver, like the temporal door: a `{placeholder}` resolves to
     // an id or a date, never a number, so it is refused here unresolved.
+    // [#20546] Its walk carries a second arm, asked first at every field: a
+    // plain object with no `$` key where a scalar column's value belongs
+    // (`{ amount: { a: 1 } }`) is refused `INVALID_FILTER` / 400. Memory
+    // answered it with no rows (every row under `$not`), SQL with its own 400.
     const numeric = narrowNumberComparands(object, operation, schema, where);
     // [#7872] The comparand-type door, on the OBJECT form. `parseFilterAST`
     // runs the same walk on everything it lowers or passes through, but
@@ -1106,7 +1111,9 @@ function lowerWhereFilterArray<T extends object | undefined>(
   // spelling.
   assertTemporalComparandsInterpretable(object, operation, schema, condition);
   // [#20351] Same door as the object branch, on the LOWERED condition — the
-  // array sugar (`[['amount','>','abc']]`) names numeric fields too.
+  // array sugar (`[['amount','>','abc']]`) names numeric fields too. [#20546]
+  // …and lowers `['amount', '=', { a: 1 }]` to the no-operator object its
+  // second arm refuses.
   lowered.where = narrowNumberComparands(object, operation, schema, condition);
   return lowered as T;
 }
@@ -7075,9 +7082,10 @@ export class ObjectQL implements IObjectQLEngine {
     if (!recordId) {
       this.logger.warn(
         `No data.record.${action} event published for '${object}': the write names no single record, ` +
-          `and DataEvent.recordId is required — refusing to publish an off-contract event. ` +
-          `A predicate write publishes data.records.${action} instead (#4639), so reaching this ` +
-          `means a single-id write whose driver returned no usable primary key (#4626)`,
+          `and DataEvent.recordId is required — refusing to publish an off-contract event rather than ` +
+          `fabricate one with an empty recordId. A predicate (multi: true) write publishes its own ` +
+          `data.records.${action} event, carrying the affected-row count, instead — so reaching this ` +
+          `means a single-id write whose driver returned no usable primary key, which is a driver defect`,
         { object },
       );
       return;
@@ -7169,8 +7177,8 @@ export class ObjectQL implements IObjectQLEngine {
       this.logger.warn(
         `No data.records.${action} event published for '${object}': the driver's multi-row result is ` +
           `not an affected-row count (IDataDriver.updateMany/deleteMany are contracted to resolve ` +
-          `a number). The count is the only thing a bulk event states, so publishing one here would ` +
-          `assert something unverified (#4639)`,
+          `a number). The count is the only thing a bulk event states — it carries no records and no ` +
+          `predicate — so publishing one here would assert something unverified`,
         { object },
       );
       return;
@@ -16358,7 +16366,9 @@ export class ObjectQL implements IObjectQLEngine {
               // numeric field counted no row (every row under `$ne`) where its
               // `where` twin was a 500 on PostgreSQL, and a numeric string is
               // narrowed to its number, copy-on-write, before the in-memory
-              // evaluator compares it. Rooted at this position.
+              // evaluator compares it. Rooted at this position. [#20546] Its
+              // walk's no-operator-object arm too: `{ amount: { a: 1 } }` here
+              // counted no row, silently, on every driver.
               const numeric = narrowNumberComparands(
                   object, 'aggregate', this._registry.getObject(object), aggFilter, `aggregations[${i}].filter`,
               );
@@ -16492,7 +16502,14 @@ export class ObjectQL implements IObjectQLEngine {
           // `$ne`) on both `applyHaving` doors, and a numeric string is narrowed
           // to its number. On the bigint-narrowed clause, so the two
           // narrowings compose.
-          const numeric = narrowHavingNumberComparands(object, having, havingColumnClasses);
+          // [#20546] The same walk's no-operator-object arm judges every column
+          // whose TYPE holds scalar values (hence the types, beside the
+          // classes): `{ total: { a: 1 } }` kept no group, silently, on every
+          // driver, where its `where` twin answered two ways.
+          const numeric = narrowHavingNumberComparands(
+              object, having, havingColumnClasses,
+              aggregatedRowColumnTypes(query.groupBy, query.aggregations, declaredFields),
+          );
           if (numeric !== query.having) query = { ...query, having: numeric };
       }
       const driver = this.getDriver(object);

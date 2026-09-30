@@ -1983,6 +1983,19 @@ export interface SuspendedRunStore {
     /** List all currently-stored suspended runs. */
     list(): Promise<SuspendedRun[]>;
     /**
+     * [#20725] Every currently-stored suspended run of the named flows —
+     * COMPLETE. An implementation MUST answer every such run or throw; ⛔ it
+     * never answers a capped page, because its caller decides a write on what
+     * is ABSENT from the answer (the ADR-0126 §7.3 disable guard: "does this
+     * caller still hold a parked run?"), and a truncated answer reads as "no".
+     *
+     * OPTIONAL: a store without it is read through {@link list}, whose own
+     * contract above is "all" — so the question is answered either way; this
+     * member is how a store with a large table asks for a few flows' rows
+     * instead of enumerating every run in the deployment.
+     */
+    listByFlow?(flowNames: readonly string[]): Promise<SuspendedRun[]>;
+    /**
      * [#14333] CONDITIONALLY consume a suspension: remove the durable record
      * only if it is still parked where the caller read it — "delete only if
      * still at node N".
@@ -2428,6 +2441,21 @@ export class AutomationEngine implements IAutomationService {
      * path.
      */
     private readonly policyDisabledFlows = new Set<string>();
+    /**
+     * [#20725, ADR-0126 §7.3] Packaged callers {@link activateFlowTrigger}
+     * declined to arm because a packaged subflow they call is disabled — each
+     * with the reason `/_status` and the binding audit read, naming those
+     * subflows.
+     *
+     * A record, for {@link policyDisabledFlows}'s reason: the audit and the
+     * status door run long after the bind, and must say what HAPPENED rather
+     * than "binding failed". And not a terminal verdict either:
+     * {@link activateFlowTrigger} deletes the entry the moment the flow gets
+     * past the gate, {@link rejudgeSubflowCallers} re-asks the gate for every
+     * entry whenever one of its subflows changes state, and
+     * {@link unregisterFlow} drops it with the flow.
+     */
+    private readonly subflowDeclinedFlows = new Map<string, string>();
     /** Connectors registered by integration plugins, keyed by connector name (ADR-0018 §Addendum). */
     private connectors = new Map<string, RegisteredConnector>();
     /** Connector provider factories keyed by provider name (ADR-0097 §2 — `openapi`/`mcp`/`rest`/…). */
@@ -3274,9 +3302,10 @@ export class AutomationEngine implements IAutomationService {
         this.resumeAuthorityOmissionWarned.add(descriptor.type);
         this.logger.warn(
             `[automation] node type '${descriptor.type}' declares supportsPause but never declares ` +
-            `resumeAuthority, so the #3801 resume gate REFUSES every pause it creates on the generic route ` +
-            `(POST /automation/:name/runs/:runId/resume) — an unclaimed pause is fail-closed since #5561, ` +
-            `because the opposite guess is how #3823 walked past an unrecorded approval decision. ` +
+            `resumeAuthority, so the resume-authority gate REFUSES every pause it creates on the generic route ` +
+            `(POST /automation/:name/runs/:runId/resume) — an undeclared resumeAuthority resolves to ` +
+            `'service', fail-closed, because guessing 'any' is how a raw resume once walked past an approval ` +
+            `decision no service had recorded. ` +
             `Declare it on the descriptor: 'any' if that route IS the intended door (a screen's collected ` +
             `inputs, a signal wait's external producer), or 'service' if resuming is the tail of a decision ` +
             `some service must authorize and record first. Declaring 'any' is what RESTORES the generic ` +
@@ -3371,6 +3400,10 @@ export class AutomationEngine implements IAutomationService {
         // A trigger may be registered *after* its flows (e.g. AutomationServicePlugin
         // pulls flows at start(); a trigger plugin wires up on kernel:ready, which
         // fires later). Activate any already-registered flow that maps to this type.
+        // [ADR-0126 §7.2] A flow that may not run is skipped by
+        // `activateFlowTrigger`'s own enablement gate, so the flows the ledger
+        // hydration left unbound stay unbound here — ⛔ no second check in this
+        // loop: the gate is shared so no arming path can go without it.
         for (const name of this.flows.keys()) {
             if (this.boundFlowTriggers.has(name)) continue;
             const resolved = this.resolveTriggerBinding(name);
@@ -3584,11 +3617,34 @@ export class AutomationEngine implements IAutomationService {
 
     /**
      * Bind a flow to its matching registered trigger (idempotent). No-op when
-     * the flow has no trigger binding or no trigger is registered for its type
-     * yet — {@link registerTrigger} re-attempts activation when one arrives.
+     * the flow may not run ({@link isFlowEnabled}), when it has no trigger
+     * binding, or when no trigger is registered for its type yet —
+     * {@link registerTrigger} re-attempts activation when one arrives.
      */
     private activateFlowTrigger(flowName: string): void {
         if (this.boundFlowTriggers.has(flowName)) return;
+        // [ADR-0126 §7.2] THE enablement gate for arming — here, at the one
+        // point every arming path crosses, and not in its callers. A flow
+        // either disable dimension switches off (the activation ledger, or an
+        // `obsolete` / `invalid` status) is never handed to a trigger, whichever
+        // path asks: {@link registerFlow} (boot pull, publish, hot reload),
+        // {@link registerTrigger}, the enable half of {@link toggleFlow}, and
+        // any path added later.
+        //
+        // Why it cannot live in the callers: `registerTrigger` runs when a
+        // trigger plugin registers at `kernel:ready`, AFTER `start()` pulled
+        // the flows and {@link hydrateFlowActivations} unbound the switched-off
+        // ones. While only `registerFlow` asked, that later registration
+        // re-armed every one of them on every cold boot — `/_status` reported a
+        // disabled flow `bound: true`, and each matching event fired a run
+        // `execute()` then refused.
+        //
+        // Silent on purpose: an unarmed disabled flow is the state the switch
+        // exists to produce, the host's hydration line already named it, and
+        // `getFlowRuntimeStates()` reports it `enabled: false`. Ahead of the
+        // scheduled-work policy gate below for the same reason — a flow that
+        // may not run has no policy refusal to record.
+        if (!this.isFlowEnabled(flowName)) return;
         const resolved = this.resolveTriggerBinding(flowName);
         if (!resolved) return;
         // [#17396] The deployment gate, read HERE rather than only inside the
@@ -3638,6 +3694,24 @@ export class AutomationEngine implements IAutomationService {
         // policy-disabled — with the switch on, the missing trigger really is
         // the reason.
         this.policyDisabledFlows.delete(flowName);
+        // [#20725, ADR-0126 §7.3] The subflow half of the same gate: a PACKAGED
+        // flow is not armed while a packaged subflow it calls is disabled —
+        // armed, it would fail at its subflow node on the child's refusal, the
+        // late, inexplicable failure §7.3 exists to prevent. Here rather than
+        // in the callers for this gate's own reason: every arming path —
+        // create, republish, upgrade, hot reload, the kernel:ready trigger
+        // registration, the enable toggle — crosses this line, so none of them
+        // can arm onto a disabled child and none can forget to ask.
+        //
+        // ⛔ A DECLINE, never a refusal: `registerFlow` still registers, so a
+        // boot or an upgrade never fails on an installation's choice. The flow
+        // stays unarmed, `/_status` says why ({@link describeUnboundReason}),
+        // and it is armed the moment its subflow is enabled
+        // ({@link rejudgeSubflowCallers}). Ahead of the trigger lookup for the
+        // policy gate's reason: with the child off, registering the missing
+        // trigger would change nothing, so "no trigger registered" would name
+        // a remedy that cannot work.
+        if (this.declineOntoDisabledSubflows(flowName, resolved.triggerType)) return;
         const trigger = this.triggers.get(resolved.triggerType);
         if (!trigger) return;
         try {
@@ -3661,18 +3735,44 @@ export class AutomationEngine implements IAutomationService {
             // landed; the only other trace is the passive run-history row.
             // That stderr also survives the CLI's boot-quiet stdout window is
             // stream mechanics, not the verdict.
+            //
+            // [ADR-0126 §7.2] The line states only what happened. Two kinds of
+            // `execute()` answer are not a failed run:
+            //   - `FLOW_DISABLED`: the flow was switched off after the trigger
+            //     took the event — an event in flight at the switch-off, or a
+            //     trigger whose `stop()` failed. The refusal IS the switch
+            //     working, so it is said at `info`, never as an `error` that
+            //     reads as a production failure. The enablement gate above
+            //     keeps a disabled flow from being armed at all, so this is the
+            //     residue, not the steady state.
+            //   - every other never-dispatched exit (a `code` or a missing
+            //     flow, and no `status`): no node ran, so the line claims no
+            //     run-history row. Only a run that dispatched and failed
+            //     carries `status: 'failed'` — the verdict that exit also wrote
+            //     to the run history.
             trigger.start(resolved.binding, (ctx: AutomationContext) =>
                 this.execute(flowName, ctx).then((result) => {
-                    if (!result.success) {
-                        this.logger.error(
-                            `Trigger-fired run of flow '${flowName}' failed (trigger '${resolved.triggerType}') — ` +
-                                `no caller holds this result and nothing retries the run; the terminal failure ` +
-                                `is recorded in the flow's run history, and the run's failure envelope is in ` +
-                                `this record's meta.`,
-                            undefined,
-                            { error: result.error ?? 'unknown error' },
+                    if (result.success) return;
+                    if (result.code === 'FLOW_DISABLED') {
+                        this.logger.info(
+                            `Trigger '${resolved.triggerType}' fired flow '${flowName}', which is disabled — the ` +
+                                `run was refused before it started, nothing ran, and no run-history row records ` +
+                                `it. The refusal is in this record's meta.`,
+                            { error: result.error },
                         );
+                        return;
                     }
+                    this.logger.error(
+                        `Trigger-fired run of flow '${flowName}' failed (trigger '${resolved.triggerType}') — ` +
+                            `no caller holds this result and nothing retries the run; ` +
+                            (result.status === 'failed'
+                                ? `the terminal failure is recorded in the flow's run history, and the run's ` +
+                                  `failure envelope is in this record's meta.`
+                                : `it was refused before it dispatched, and the refusal envelope is in this ` +
+                                  `record's meta.`),
+                        undefined,
+                        { error: result.error ?? 'unknown error' },
+                    );
                 }),
             );
             this.boundFlowTriggers.set(flowName, resolved.triggerType);
@@ -4263,14 +4363,19 @@ export class AutomationEngine implements IAutomationService {
         }
 
         // Re-bind in case the definition changed its trigger, then (re)activate.
-        // [ADR-0126 §7.2] A ledger-disabled flow is NOT re-armed here, which is
-        // what makes the unbind survive a republish and a restart: the boot
-        // pull re-registers every flow, so a hydrated ledger row has to be
-        // able to keep a trigger unbound through exactly this path.
+        // [ADR-0126 §7.2] A disabled flow — ledger or status — is NOT re-armed
+        // here, which is what makes the unbind survive a republish and a
+        // restart: the boot pull re-registers every flow, so a hydrated ledger
+        // row has to be able to keep a trigger unbound through exactly this
+        // path. The refusal is `activateFlowTrigger`'s own enablement gate,
+        // the one every arming path shares — ⛔ not re-asked here, where a
+        // caller-side check once stood alone and `registerTrigger` had none.
         this.deactivateFlowTrigger(name);
-        if (this.isFlowEnabled(name)) {
-            this.activateFlowTrigger(name);
-        }
+        this.activateFlowTrigger(name);
+        // [#20725, ADR-0126 §7.3] And the flows that call THIS one: a subflow
+        // republished `obsolete` disarms its packaged callers, republished
+        // `active` re-arms the ones the gate declined — both through the gate.
+        this.rejudgeSubflowCallers(name);
 
         // #12206 (Option A) — hand the caller the canonicalized flow this
         // registration stored: the same object `this.flows` now holds and
@@ -4279,7 +4384,53 @@ export class AutomationEngine implements IAutomationService {
         return parsed;
     }
 
+    /**
+     * Unregister a flow — the `IAutomationService` removal door, which the
+     * `DELETE /automation/:name` route calls.
+     *
+     * [#20725, ADR-0126 §7.3] REFUSED, synchronously and before anything
+     * moves, while a packaged caller can still reach this packaged subflow —
+     * the disable direction's refusal family (`DELETE_RESTRICTED` / 409, the
+     * callers named, a step that completes), because a removed subflow breaks
+     * its callers at their subflow node exactly as a disabled one does. Which
+     * callers guard, and why a switched-off one is judged by the subflow's
+     * own switch here, is {@link refuseUnderReachingCallers}'s `'remove'` act.
+     * Only a PACKAGED subflow is guarded, for the enable direction's reason: a
+     * subflow the customer authored does not hold a packaged caller's
+     * removal hostage, and is theirs to remove.
+     *
+     * An artifact reload that no longer ships a flow does not come through
+     * here: see {@link withdrawFlow}.
+     *
+     * @throws `DELETE_RESTRICTED` / 409 as above; nothing is removed.
+     */
     unregisterFlow(name: string): void {
+        const flow = this.flows.get(name);
+        if (flow && describeFlowContender(flow).source === 'package') {
+            const callers = this.packagedSubflowCallers(name);
+            if (callers.length > 0) this.refuseUnderReachingCallers(name, 'remove', callers, new Map());
+        }
+        this.withdrawFlow(name);
+    }
+
+    /**
+     * Unregister a flow its own artifact no longer ships — the removal half of
+     * a `metadata:reloaded` re-sync (a package upgrade or uninstall, a Studio
+     * package publish, a dev reload), which is the one other caller of the
+     * engine's removal.
+     *
+     * [#20725] ⛔ NOT guarded by ADR-0126 §7.3, and deliberately: §7.3 guards
+     * an installation's or an operator's act against a vendor flow, and what
+     * this removes is the vendor's own decision. A gate here could not hold
+     * anything either — the next cold boot does not register a flow the
+     * artifact no longer ships, whatever this method did — so refusing would
+     * only delay the same state by one restart, and would make an uninstall
+     * depend on the order its flows are listed in (a caller and its subflow
+     * leave together, and whichever is asked first would refuse the other).
+     * A package that drops a subflow its own caller still calls is a defect of
+     * that package, reported at the caller's subflow node.
+     */
+    withdrawFlow(name: string): void {
         this.deactivateFlowTrigger(name);
         this.flows.delete(name);
         // [ADR-0126 §7.2] `flowLedgerDisabled` is deliberately NOT cleared. It
@@ -4295,6 +4446,7 @@ export class AutomationEngine implements IAutomationService {
         // that one mirrors a DURABLE row and must survive, while this records
         // an in-process bind attempt that no longer has a subject.
         this.policyDisabledFlows.delete(name);
+        this.subflowDeclinedFlows.delete(name);
         this.logger.info(`Flow unregistered: ${name}`);
     }
 
@@ -4387,6 +4539,12 @@ export class AutomationEngine implements IAutomationService {
         if (!this.isFlowEnabled(name)) return undefined;
         if (this.boundFlowTriggers.has(name)) return undefined;
         if (this.policyDisabledFlows.has(name)) return SCHEDULED_WORK_DISABLED_REASON;
+        // [#20725, ADR-0126 §7.3] The arming gate declined it onto a disabled
+        // packaged subflow — read from the record, for the policy line's
+        // reason, and ahead of the trigger branches for the gate's: with the
+        // child off, the trigger would not arm it either.
+        const declined = this.subflowDeclinedFlows.get(name);
+        if (declined !== undefined) return declined;
         return this.triggers.has(resolved.triggerType)
             ? `trigger '${resolved.triggerType}' is registered but binding failed — see earlier warnings`
             : `no '${resolved.triggerType}' trigger is registered — add requires: ['triggers'] (record_change/schedule/time_relative/api ship in @objectstack/trigger-*)`;
@@ -4489,6 +4647,13 @@ export class AutomationEngine implements IAutomationService {
                 disabled.push(row.name);
             }
         }
+        // [#20725, ADR-0126 §7.3] The callers of what the ledger just switched
+        // off go back to the arming gate. On a stock boot none is armed yet
+        // (the trigger plugins register at kernel:ready, and the gate judges
+        // them then), so this changes nothing there; a host whose trigger was
+        // registered before the pull would otherwise keep a caller armed onto
+        // a subflow this read has just switched off.
+        for (const name of disabled) this.rejudgeSubflowCallers(name);
         return disabled;
     }
 
@@ -4526,13 +4691,17 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
-     * [ADR-0126 §7.3] Packaged flows that invoke `name` as a subflow.
+     * [ADR-0126 §7.3] The flow names `flow` invokes as a subflow — the ONE
+     * reading of "flow A calls flow B" that both directions of the subflow
+     * guard share ({@link packagedSubflowCallers} on disable,
+     * {@link disabledPackagedSubflows} on enable), so the two can never
+     * disagree about which pairs exist.
      *
-     * A DEFINITION SCAN, run at disable time — ⛔ deliberately not an index.
-     * ADR-0126 §9 records that no reference index exists and that building one
-     * is not chartered (#11665 §3.2); the flow map is small, this runs once per
-     * disable, and an index would be a durable structure to keep correct
-     * forever for a check that happens when an administrator clicks a switch.
+     * A DEFINITION SCAN — ⛔ deliberately not an index. ADR-0126 §9 records
+     * that no reference index exists and that building one is not chartered
+     * (#11665 §3.2); the flow map is small, the guard runs once per flip, and
+     * an index would be a durable structure to keep correct forever for a
+     * check that happens when an administrator clicks a switch.
      *
      * Two node types invoke another flow by name, and BOTH count: `subflow`
      * (config.flowName) and `map`, whose own descriptor calls its per-item
@@ -4545,27 +4714,424 @@ export class AutomationEngine implements IAutomationService {
      * at load, so only the canonical key reaches a registered definition;
      * re-reading the alias in this consumer would be a tolerant fallback
      * papering over a producer that is already correct.
+     */
+    private subflowTargets(flow: FlowParsed): string[] {
+        const nodes = (flow as { nodes?: unknown }).nodes;
+        if (!Array.isArray(nodes)) return [];
+        const targets: string[] = [];
+        for (const node of nodes) {
+            const n = node as { type?: unknown; config?: { flowName?: unknown } } | null;
+            if (!n || (n.type !== 'subflow' && n.type !== 'map')) continue;
+            if (typeof n.config?.flowName === 'string') targets.push(n.config.flowName);
+        }
+        return targets;
+    }
+
+    /**
+     * [ADR-0126 §7.3] Packaged flows that invoke `name` as a subflow — the
+     * callers the DISABLE direction of the guard judges.
      *
      * Only PACKAGED callers are reported: §7.3's rationale is that a VENDOR
      * flow would break mid-run at its subflow node. A caller the customer
      * authored is theirs to fix, and refusing on it would make the packaged
      * artifact hostage to a tenant's own flow.
+     *
+     * Every packaged caller is reported, whatever its own activation state.
+     * Which of them still GUARD — can still reach the subflow node — is
+     * {@link refuseUnderReachingCallers}'s question, not this scan's.
      */
     private packagedSubflowCallers(name: string): string[] {
         const callers: string[] = [];
         for (const [callerName, flow] of this.flows) {
             if (callerName === name) continue;
             if (describeFlowContender(flow).source !== 'package') continue;
-            const nodes = (flow as { nodes?: unknown }).nodes;
-            if (!Array.isArray(nodes)) continue;
-            const invokes = nodes.some((node) => {
-                const n = node as { type?: unknown; config?: { flowName?: unknown } } | null;
-                if (!n || (n.type !== 'subflow' && n.type !== 'map')) return false;
-                return n.config?.flowName === name;
-            });
-            if (invokes) callers.push(callerName);
+            if (this.subflowTargets(flow).includes(name)) callers.push(callerName);
         }
         return callers;
+    }
+
+    /**
+     * [ADR-0126 §7.3] The runs each of `flowNames` holds PARKED — suspended
+     * and resumable — read from BOTH run stores: this process's hot cache and
+     * the durable {@link SuspendedRunStore}, including a run a previous
+     * process parked that this one has never loaded.
+     *
+     * The ONE answer the disable direction of the subflow guard takes, for its
+     * verdict and for its refusal text alike
+     * ({@link refuseUnderReachingCallers}), so the runs a refusal names
+     * are exactly the runs that made it refuse.
+     *
+     * Read through {@link readSuspendedRuns}, the same merge
+     * {@link listSuspendedRunsDurable} serves, with one difference: an
+     * enumeration that FAILS throws here instead of degrading to the cache.
+     * The listing is an operability read and says so in a warning; this
+     * answer decides a write, and "the store could not say" is not "no parked
+     * run" — read as one, it would let a disable land under a run a previous
+     * process parked, the exact mid-run failure §7.3 refuses.
+     *
+     * [#20725] And it asks for THESE flows' runs, every one of them, rather
+     * than reading the deployment-wide listing: that listing is one capped page
+     * of paused rows, and a guard deciding on a caller's absence from it would
+     * accept a disable whenever the caller's run fell past the page.
+     *
+     * A run that has ENDED — completed, failed, refused, cancelled — is not in
+     * either store, so it never counts.
+     */
+    private async parkedRunsOf(flowNames: ReadonlySet<string>): Promise<Map<string, string[]>> {
+        const parked = new Map<string, string[]>();
+        if (flowNames.size === 0) return parked;
+        for (const run of await this.readSuspendedRuns('throw', flowNames)) {
+            if (!flowNames.has(run.flowName)) continue;
+            parked.set(run.flowName, [...(parked.get(run.flowName) ?? []), run.runId]);
+        }
+        for (const runIds of parked.values()) runIds.sort();
+        return parked;
+    }
+
+    /**
+     * [ADR-0126 §7.3, the disable direction] Refuse switching `name` off while
+     * a packaged flow can still REACH it as a subflow, naming each such caller
+     * and the step that lets the disable complete.
+     *
+     * Reachability, not the caller's switch — triage's answer A on #20678,
+     * the reading of §7.3's own rationale. Switching a caller off stops its
+     * NEW runs only: a run it had already parked — at a `wait`, an `approval`,
+     * a `screen`, or at a `map` node between two items — resumes through
+     * {@link resume}, which does not consult activation, and walks on into its
+     * subflow node. So a packaged caller guards when:
+     *  - it is ENABLED ({@link isFlowEnabled}) — the step is to disable it; or
+     *  - it is disabled, by the ledger or by its definition's `status` alike,
+     *    and holds a parked run ({@link parkedRunsOf}) — the step is to cancel
+     *    each named run through the operator cancel door (ADR-0044) or to let
+     *    it finish.
+     * A disabled caller with no parked run cannot reach the node, and does not
+     * guard.
+     *
+     * `parked` is {@link parkedRunsOf} over the switched-off `callers`, read by
+     * {@link toggleFlow} only when there is one to judge — so a flow whose
+     * callers are all armed never touches the run stores, and awaits nothing
+     * it did not await before.
+     *
+     * ## [#20725] The removal door, through the same family
+     *
+     * `act: 'remove'` is {@link unregisterFlow} — the `DELETE /automation/:name`
+     * door, synchronous by the `IAutomationService.unregisterFlow` contract, so
+     * it cannot await {@link parkedRunsOf} and passes no `parked`. It decides
+     * the same reachability without that read:
+     *  - an ENABLED caller reaches `name` — the step is to disable it first,
+     *    exactly as on the disable door;
+     *  - a switched-off caller reaches `name` only through a parked run, and a
+     *    run that resumes into a DISABLED `name` already fails on its refusal —
+     *    so once `name` is switched off, removing it breaks nothing that was
+     *    not already broken, and a switched-off caller does not guard;
+     *  - while `name` is still ENABLED, whether a switched-off caller holds a
+     *    parked run is the one question this door cannot read. It does not
+     *    guess and it does not read a second way: the step it names is the
+     *    disable door, which reads that answer completely (both run stores,
+     *    every run of the named callers) and names each run to cancel — and
+     *    once that door has switched `name` off, the removal completes.
+     * ⛔ No second reading of "who reaches this subflow": the callers are
+     * {@link packagedSubflowCallers}, "armed" is {@link isFlowEnabled}, and the
+     * parked-run question is left to the one door that asks it.
+     *
+     * ADR-0112 envelope unchanged: `DELETE_RESTRICTED` / 409, and
+     * `subflowCallers` lists exactly the callers that guard.
+     */
+    private refuseUnderReachingCallers(
+        name: string,
+        act: 'disable' | 'remove',
+        callers: string[],
+        parked: ReadonlyMap<string, string[]>,
+    ): void {
+        const armed = callers.filter((c) => this.isFlowEnabled(c));
+        // Removal only: a switched-off caller guards while `name` is enabled,
+        // because whether it still holds a parked run is not readable here.
+        const switchOffFirst = act === 'remove' && this.isFlowEnabled(name);
+        const unread = switchOffFirst ? callers.filter((c) => !armed.includes(c)) : [];
+        const guarding = callers.filter((c) => armed.includes(c) || parked.has(c) || unread.includes(c));
+        if (guarding.length === 0) return;
+
+        const quote = (names: string[]) => names.map((n) => `'${n}'`).join(', ');
+        const one = guarding.length === 1;
+        const steps = [
+            ...(armed.length > 0 ? [`disable the calling flow${armed.length === 1 ? '' : 's'} ${quote(armed)} first`] : []),
+            ...[...parked].map(([caller, runIds]) => {
+                const single = runIds.length === 1;
+                return (
+                    `'${caller}' is disabled but still holds ${single ? 'a parked run' : `${runIds.length} parked runs`} ` +
+                    `that ${single ? 'resumes' : 'resume'} into its subflow node (${quote(runIds)}): cancel ` +
+                    `${single ? 'it' : 'each'} through the operator cancel door, ` +
+                    `POST /automation/${caller}/runs/:runId/cancel (ADR-0044), or let ${single ? 'it' : 'them'} finish`
+                );
+            }),
+            ...(!switchOffFirst
+                ? []
+                : armed.length > 0
+                  ? [
+                        `then switch '${name}' off, which reads whether a switched-off caller still holds a parked ` +
+                            `run and names each one to cancel, and remove it after that`,
+                    ]
+                  : [
+                        `switch '${name}' off first, which reads whether ${quote(unread)} still ` +
+                            `hold${unread.length === 1 ? 's' : ''} a parked run and names each one to cancel, then remove it`,
+                    ]),
+        ].join('; ');
+        const [verb, gerund, keep] = act === 'disable'
+            ? ['disabled', 'Disabling', 'leave this one armed']
+            : ['removed', 'Removing', 'leave this one registered'];
+        throw Object.assign(
+            new Error(
+                `Flow '${name}' cannot be ${verb} while ${guarding.length} packaged flow${one ? '' : 's'} ` +
+                    `still call${one ? 's' : ''} it as a subflow: ${quote(guarding)}. ${gerund} it would break ` +
+                    `${one ? 'that caller' : 'those callers'} mid-run at ${one ? 'its' : 'their'} subflow node with a ` +
+                    `late, inexplicable failure (ADR-0126 §7.3). ` +
+                    `${steps.charAt(0).toUpperCase()}${steps.slice(1)} — or ${keep}.`,
+            ),
+            // ADR-0112 envelope: code AND status. `DELETE_RESTRICTED` is the
+            // standard catalog's "cannot do this due to dependencies" member
+            // (409) — ⛔ no new ledger entry is minted here. Its `DELETE_`
+            // prefix fits because the toggle ruling (commit 266436a7f,
+            // recorded at `isFlowAuthoringWrite` in the runtime's automation
+            // domain) holds that "disabling a shipped flow is functionally
+            // equivalent to deleting it for as long as it stays off".
+            { code: 'DELETE_RESTRICTED', status: 409, subflowCallers: guarding },
+        );
+    }
+
+    /**
+     * [ADR-0126 §7.3, the enable direction] The packaged subflows a packaged
+     * flow `name` calls that may not run now ({@link isFlowEnabled}), each
+     * with the disable dimension(s) holding it off — the enable direction of
+     * the guard refuses on these, because a caller re-armed onto a disabled
+     * child fails at its subflow node on the child's `FLOW_DISABLED`: the same
+     * late, inexplicable failure the disable direction refuses to cause.
+     *
+     * Both dimensions are reported, not just the verdict, because the remedy
+     * differs and a refusal must prescribe one the caller can complete: the
+     * activation switch moves only the LEDGER bit, so "enable the subflow
+     * first" re-arms a ledger-disabled child and does nothing for one whose
+     * definition's `status` disables it.
+     *
+     * ⛔ A child in a CYCLE of switched-off flows with `name` is not reported.
+     * Enabling that child goes through this same guard, which would refuse it
+     * on the chain leading back to `name` — so every order is refused and no
+     * sequence the refusal could name completes. Only a chain of LEDGER-
+     * disabled flows closes that loop: a status-disabled link is re-armed by
+     * publishing its definition, a door this guard does not sit on, and an
+     * enabled link does not refuse at all.
+     *
+     * ⛔ And the exemption answers the LEDGER bit only, so it is asked only of
+     * a child whose status does not disable it too. A child disabled BOTH ways
+     * inside such a cycle is still reported: no enable order re-arms a status,
+     * so the cycle is no reason to leave its publish remedy unnamed — and
+     * skipping it would arm the caller onto a child that stays disabled.
+     *
+     * ⛔ [#20725] And only while `name` ITSELF is ledger-disabled — the one
+     * state in which the loop closes. The arming gate
+     * ({@link declineOntoDisabledSubflows}) asks this same question of a flow
+     * it is about to arm, which is ENABLED: enabling its child then refuses
+     * nothing on the chain back to it, so no order is blocked, and exempting
+     * the child would arm the caller onto it. In the enable direction `name`
+     * is always ledger-disabled here ({@link refuseEnableOntoDisabledSubflow}
+     * returns before asking otherwise), so what that door answers is unchanged.
+     */
+    private disabledPackagedSubflows(name: string): Array<{ name: string; ledger: boolean; status?: string }> {
+        const flow = this.flows.get(name);
+        if (!flow) return [];
+        const loopCanClose = this.flowLedgerDisabled.has(name);
+        const disabled: Array<{ name: string; ledger: boolean; status?: string }> = [];
+        for (const target of new Set(this.subflowTargets(flow))) {
+            const child = this.flows.get(target);
+            if (!child || describeFlowContender(child).source !== 'package') continue;
+            if (this.isFlowEnabled(target)) continue;
+            const ledger = this.flowLedgerDisabled.has(target);
+            const statusDisabled = this.flowStatusDisabled.get(target) === true;
+            if (loopCanClose && ledger && !statusDisabled && this.ledgerDisabledChainReaches(target, name)) continue;
+            const status = statusDisabled ? String((child as { status?: unknown }).status) : undefined;
+            disabled.push({ name: target, ledger, ...(status !== undefined ? { status } : {}) });
+        }
+        return disabled;
+    }
+
+    /**
+     * Whether `to` is reachable from `from` along packaged subflow calls
+     * whose every intermediate flow is ledger-disabled — the loop
+     * {@link disabledPackagedSubflows} must not guard on.
+     */
+    private ledgerDisabledChainReaches(from: string, to: string): boolean {
+        const seen = new Set<string>([from]);
+        const pending = [from];
+        while (pending.length > 0) {
+            const flow = this.flows.get(pending.pop()!);
+            if (!flow) continue;
+            for (const target of this.subflowTargets(flow)) {
+                if (target === to) return true;
+                if (seen.has(target) || !this.flowLedgerDisabled.has(target)) continue;
+                const next = this.flows.get(target);
+                if (!next || describeFlowContender(next).source !== 'package') continue;
+                seen.add(target);
+                pending.push(target);
+            }
+        }
+        return false;
+    }
+
+    /**
+     * [ADR-0126 §7.3, the enable direction] Refuse re-arming a packaged caller
+     * onto a packaged subflow that may not run, naming each child and the
+     * remedy its real state admits.
+     *
+     * Only a RE-enable is judged: a flow the ledger holds off. Enabling a flow
+     * that is already armed re-arms nothing, and refusing it would report a
+     * running flow as one that "cannot be enabled". Only a PACKAGED caller is
+     * judged, for the disable direction's reason: a flow the customer
+     * authored is theirs to arm.
+     *
+     * ADR-0112 envelope: code AND status. `RESOURCE_CONFLICT` (409) is the
+     * standard catalog's generic "the request conflicts with the resource's
+     * current state" member — ⛔ no new ledger entry is minted. Not the
+     * disable direction's `DELETE_RESTRICTED`: its `DELETE_` prefix rests on
+     * disabling a shipped flow being equivalent to deleting it, and enabling
+     * is the opposite act.
+     */
+    private refuseEnableOntoDisabledSubflow(name: string, flow: FlowParsed): void {
+        if (!this.flowLedgerDisabled.has(name)) return;
+        if (describeFlowContender(flow).source !== 'package') return;
+        const disabled = this.disabledPackagedSubflows(name);
+        if (disabled.length === 0) return;
+
+        const { reasons, remedy } = this.describeDisabledSubflows(disabled, 'this switch');
+        const many = disabled.length !== 1;
+        throw Object.assign(
+            new Error(
+                `Flow '${name}' cannot be enabled while ${disabled.length} packaged subflow${many ? 's' : ''} it calls ` +
+                    `${many ? 'are' : 'is'} disabled: ${reasons.join(', ')}. Enabled, it would fail at its subflow node ` +
+                    `on a disabled child — the late, inexplicable failure ADR-0126 §7.3 refuses to cause. ` +
+                    `${remedy.charAt(0).toUpperCase()}${remedy.slice(1)} first, then enable this flow — or leave it disabled.`,
+            ),
+            { code: 'RESOURCE_CONFLICT', status: 409 },
+        );
+    }
+
+    /**
+     * [ADR-0126 §7.3] Each disabled subflow with the dimension(s) holding it
+     * off, and the remedy its REAL state admits — ONE wording for the enable
+     * refusal ({@link refuseEnableOntoDisabledSubflow}) and the arming gate's
+     * warning and `/_status` reason ({@link declineOntoDisabledSubflows}), so
+     * no two of them can name different steps for the same child.
+     *
+     * `switchPhrase` names the activation switch as the reader meets it: "this
+     * switch" to the administrator who just used it, "the activation switch"
+     * everywhere else.
+     */
+    private describeDisabledSubflows(
+        disabled: Array<{ name: string; ledger: boolean; status?: string }>,
+        switchPhrase: 'this switch' | 'the activation switch',
+    ): { reasons: string[]; remedy: string } {
+        const quote = (names: string[]) =>
+            names.length === 1
+                ? `'${names[0]}'`
+                : `${names.slice(0, -1).map((n) => `'${n}'`).join(', ')} and '${names[names.length - 1]}'`;
+        const reasons = disabled.map((d) => {
+            const why = [
+                ...(d.ledger ? ['switched off in the activation ledger'] : []),
+                ...(d.status !== undefined ? [`its definition's status is '${d.status}'`] : []),
+            ].join(', and ');
+            return `'${d.name}' (${why})`;
+        });
+        // The remedy follows each child's REAL state: the switch re-arms the
+        // ledger bit, and only the definition moves a status.
+        const byStatus = disabled.filter((d) => d.status !== undefined).map((d) => d.name);
+        const byLedger = disabled.filter((d) => d.ledger).map((d) => d.name);
+        const remedy = [
+            ...(byStatus.length > 0
+                ? [
+                      `publish ${quote(byStatus)} with status 'active' (${switchPhrase} never changes a definition's ` +
+                          `status; for a package that is read-only here, that takes a package version that ships ` +
+                          `${byStatus.length === 1 ? 'it' : 'them'} active)`,
+                  ]
+                : []),
+            ...(byLedger.length > 0 ? [`enable ${quote(byLedger)}`] : []),
+        ].join(' and ');
+        return { reasons, remedy };
+    }
+
+    /**
+     * [#20725, ADR-0126 §7.3] The arming gate's subflow half, asked by
+     * {@link activateFlowTrigger} of an ENABLED flow it is about to arm: is it
+     * a packaged caller of a packaged subflow that is disabled? Then it is
+     * declined — recorded on {@link subflowDeclinedFlows} for `/_status` and
+     * the binding audit, and said once as a `warn` naming each subflow and the
+     * step that re-arms it.
+     *
+     * "Disabled" is {@link disabledPackagedSubflows}, the SAME reading the
+     * enable refusal takes — ⛔ no second reading of "A calls B": a `subflow`
+     * or `map` target that is ledger-disabled OR status-disabled, the child
+     * and the caller both packaged. Its cycle exemption never applies here,
+     * because the flow being armed is enabled (see that method).
+     *
+     * #4632 verdict: FUNCTIONAL — `warn`. A flow is visibly smaller than
+     * declared (its trigger is not armed), `/_status` reports it `bound: false`
+     * with this reason, and nothing claimed-persisted is lost. Said once per
+     * decline: a re-registration that declines the flow for the same subflows
+     * (a hot reload, the kernel:ready re-bind) records it without repeating it.
+     *
+     * @returns `true` when the flow is declined and must not be armed.
+     */
+    private declineOntoDisabledSubflows(flowName: string, triggerType: string): boolean {
+        const flow = this.flows.get(flowName);
+        const disabled = flow && describeFlowContender(flow).source === 'package'
+            ? this.disabledPackagedSubflows(flowName)
+            : [];
+        if (disabled.length === 0) {
+            this.subflowDeclinedFlows.delete(flowName);
+            return false;
+        }
+        const { reasons, remedy } = this.describeDisabledSubflows(disabled, 'the activation switch');
+        const many = disabled.length !== 1;
+        const reason =
+            `not armed while the packaged subflow${many ? 's' : ''} it calls ${many ? 'are' : 'is'} disabled — ` +
+            `${reasons.join(', ')}; ${remedy} and it is armed (ADR-0126 §7.3)`;
+        const previous = this.subflowDeclinedFlows.get(flowName);
+        this.subflowDeclinedFlows.set(flowName, reason);
+        if (previous === reason) return true;
+        this.logger.warn(
+            `Flow '${flowName}' is registered but NOT armed on trigger '${triggerType}' — ${disabled.length} packaged ` +
+                `subflow${many ? 's' : ''} it calls ${many ? 'are' : 'is'} disabled: ${reasons.join(', ')}. Armed, it ` +
+                `would fail at its subflow node on a disabled child — the late, inexplicable failure ADR-0126 §7.3 ` +
+                `refuses to cause. It is armed the moment ${many ? 'they are' : 'that subflow is'} enabled: ` +
+                `${remedy}.`,
+        );
+        return true;
+    }
+
+    /**
+     * [#20725, ADR-0126 §7.3] `subflow` just changed state — (re)registered,
+     * switched on or off, or read off the ledger at boot — so ask the arming
+     * gate again for each packaged flow that calls it, where the answer can
+     * have moved:
+     *  - a caller the gate DECLINED is re-offered to it, so a caller that
+     *    "registers and stays unarmed" is armed the moment its subflow is
+     *    enabled, through the one gate, rather than staying enabled-but-unbound
+     *    until a restart;
+     *  - an ARMED caller whose subflows the gate would now decline on is
+     *    unbound and offered again, so a subflow republished `obsolete`, or
+     *    switched off by the ledger at boot after a trigger armed its caller,
+     *    does not leave that caller armed onto it.
+     * Every other caller is left exactly as it is: an armed caller whose
+     * subflows are all enabled is not stopped and restarted, and a caller
+     * unbound for a reason of its own is not re-offered here.
+     */
+    private rejudgeSubflowCallers(subflow: string): void {
+        if (this.boundFlowTriggers.size === 0 && this.subflowDeclinedFlows.size === 0) return;
+        for (const caller of this.packagedSubflowCallers(subflow)) {
+            const settled = this.boundFlowTriggers.has(caller)
+                ? this.disabledPackagedSubflows(caller).length === 0
+                : !this.subflowDeclinedFlows.has(caller);
+            if (settled) continue;
+            this.deactivateFlowTrigger(caller);
+            this.activateFlowTrigger(caller);
+        }
     }
 
     /**
@@ -4593,9 +5159,11 @@ export class AutomationEngine implements IAutomationService {
      * every other service method; the wire is the untrusted surface, and the
      * wire goes through the gate.
      *
-     * @throws when the flow is unknown, when §7.3's subflow guard refuses, or
-     *   when the durable write fails — a reported flip that did not persist is
-     *   the failure mode this whole leg exists to remove.
+     * @throws when the flow is unknown, when §7.3's subflow guard refuses in
+     *   either direction, when the durable suspended-run store cannot be
+     *   listed while the disable guard judges a switched-off caller, or when
+     *   the durable write fails — a reported flip that did not persist is the
+     *   failure mode this whole leg exists to remove.
      */
     async toggleFlow(name: string, enabled: boolean): Promise<void> {
         const flow = this.flows.get(name);
@@ -4603,30 +5171,27 @@ export class AutomationEngine implements IAutomationService {
             throw new Error(`Flow '${name}' not found`);
         }
 
-        // [ADR-0126 §7.3] The subflow cascade guard, on DISABLE only. Enable is
-        // never guarded — arming a flow cannot break a caller.
-        if (!enabled) {
+        // [ADR-0126 §7.3] The subflow guard runs in BOTH directions, because
+        // a subflow pair breaks from either end. Disabling a child breaks the
+        // callers that still reach it — armed, or holding a parked run;
+        // re-arming a caller whose child is off breaks the caller itself, at
+        // its subflow node, on the child's refusal. Arming a flow never breaks
+        // the flows that call IT, so enabling a child is not guarded by its
+        // callers.
+        if (enabled) {
+            this.refuseEnableOntoDisabledSubflow(name, flow);
+        } else {
+            // A switched-off caller guards only while it holds a parked run,
+            // so only then are the run stores read — and only that read is
+            // awaited: every other disable flips exactly as it did before,
+            // synchronously up to its durable write. A store that cannot be
+            // listed throws out of `parkedRunsOf` and nothing is written.
             const callers = this.packagedSubflowCallers(name);
-            if (callers.length > 0) {
-                const list = callers.map((c) => `'${c}'`).join(', ');
-                throw Object.assign(
-                    new Error(
-                        `Flow '${name}' cannot be disabled while ${callers.length} packaged flow` +
-                        `${callers.length === 1 ? '' : 's'} still call${callers.length === 1 ? 's' : ''} it as a subflow: ${list}. ` +
-                        `Disabling it would break ${callers.length === 1 ? 'that caller' : 'those callers'} mid-run at ` +
-                        `${callers.length === 1 ? 'its' : 'their'} subflow node with a late, inexplicable failure ` +
-                        `(ADR-0126 §7.3). Disable the calling flow${callers.length === 1 ? '' : 's'} first, or leave this one armed.`,
-                    ),
-                    // ADR-0112 envelope: code AND status. `DELETE_RESTRICTED` is
-                    // the standard catalog's "cannot do this due to
-                    // dependencies" member (409) — ⛔ no new ledger entry is
-                    // minted here. Its `DELETE_` prefix fits because this
-                    // repo's own #10243 ruling records that "disabling a
-                    // shipped flow is functionally equivalent to deleting it
-                    // for as long as it stays off".
-                    { code: 'DELETE_RESTRICTED', status: 409, subflowCallers: callers },
-                );
-            }
+            const switchedOff = callers.filter((c) => !this.isFlowEnabled(c));
+            const parked = switchedOff.length > 0
+                ? await this.parkedRunsOf(new Set(switchedOff))
+                : new Map<string, string[]>();
+            this.refuseUnderReachingCallers(name, 'disable', callers, parked);
         }
 
         // The durable row FIRST. A store that throws aborts the flip with
@@ -4657,11 +5222,20 @@ export class AutomationEngine implements IAutomationService {
         // A disabled flow should stop receiving trigger events; a re-enabled one
         // should resume. execute() also guards disabled flows, but unbinding
         // avoids firing the trigger (and its event-source subscription) at all.
+        // Re-enabling moves only the LEDGER bit: a flow whose `status` still
+        // disables it stays unarmed, by `activateFlowTrigger`'s enablement gate
+        // — armed, it would only fire runs `execute()` refuses.
         if (enabled) {
             this.activateFlowTrigger(name);
         } else {
             this.deactivateFlowTrigger(name);
         }
+        // [#20725, ADR-0126 §7.3] Enabling a subflow arms the packaged callers
+        // the gate declined onto it — through the gate, which still declines
+        // one held back by ANOTHER disabled subflow. (Disabling it re-judges
+        // nothing that the guard above let through: an armed caller refuses
+        // the disable.)
+        this.rejudgeSubflowCallers(name);
     }
 
     /** Get flow version history */
@@ -5962,14 +6536,16 @@ export class AutomationEngine implements IAutomationService {
         const why = declared === 'service'
             ? `which is resumable only through its owning service (resumeAuthority: 'service')`
             : `whose type never declares resumeAuthority, so it is closed to the generic route until it does ` +
-              `(#5561) — declare resumeAuthority: 'any' on its descriptor if this route IS the intended door`;
+              `(an undeclared resumeAuthority resolves to 'service', fail-closed) — declare ` +
+              `resumeAuthority: 'any' on its descriptor if this route IS the intended door`;
         this.logger.warn(`[automation] refused resume of run '${runId}': parked on ${nodeType} node ${at}, ${why}`);
 
         // The fix, identical in both the direct and the linked-run phrasing —
         // what has to change is a descriptor, not the call that just failed.
         const undeclaredFix =
             `and that node type never declares resumeAuthority, so the generic resume route is closed to the ` +
-            `pauses it creates (#5561). If that route IS the intended door — a screen's collected inputs, a ` +
+            `pauses it creates: an undeclared resumeAuthority resolves to 'service', fail-closed. If that ` +
+            `route IS the intended door — a screen's collected inputs, a ` +
             `signal wait's external producer — declare resumeAuthority: 'any' on its action descriptor; declare ` +
             `'service' if resuming is the tail of a decision some service must authorize and record first`;
         return {
@@ -6105,7 +6681,8 @@ export class AutomationEngine implements IAutomationService {
             `node type '${nodeType}' suspended the run but its action descriptor declares ` +
             `supportsPause: false, so the pause is refused — a run that paused here could not be ` +
             `continued on the generic resume route anyway: a type that declares no pause declares no ` +
-            `resumeAuthority either, and an unclaimed pause is fail-closed since #5561. Declare ` +
+            `resumeAuthority either, and an undeclared resumeAuthority resolves to 'service', which the ` +
+            `generic route refuses. Declare ` +
             `supportsPause: true on the descriptor together with the resumeAuthority the pauses need ` +
             `('any' if POST /automation/:name/runs/:runId/resume is the intended door, 'service' if ` +
             `resuming is the tail of a decision some service must authorize and record first) — or stop ` +
@@ -8621,6 +9198,34 @@ export class AutomationEngine implements IAutomationService {
      * the per-id "no row" the strict loader rests on; see the merge below.
      */
     async listSuspendedRunsDurable(): Promise<Array<{ runId: string; flowName: string; nodeId: string; correlation?: string }>> {
+        return this.readSuspendedRuns('degrade');
+    }
+
+    /**
+     * The ONE reader of "which runs are parked" over BOTH run stores — the
+     * body of {@link listSuspendedRunsDurable}, and the read the §7.3 disable
+     * guard takes through {@link parkedRunsOf}, so the listing and the guard
+     * can never disagree about a run the store answered for.
+     *
+     * They differ in ONE thing, the posture on an enumeration that FAILS:
+     *  - `'degrade'` — the listing: warn, and answer from the cache alone.
+     *  - `'throw'` — a caller that decides a WRITE on what is ABSENT from the
+     *    answer: an outage is "unknown", never "not parked", so the store's
+     *    own failure propagates and nothing is decided on a short list.
+     *
+     * [#20725] And in WHAT it asks, through `flowNames`. Absent, it is the
+     * deployment-wide listing — `store.list()`, which a DB-backed store serves
+     * as one capped page. Given, it asks only for those flows' runs, and asks
+     * the durable store for ALL of them ({@link SuspendedRunStore.listByFlow},
+     * complete by contract, or `list()` filtered where a store offers only
+     * that): a guard deciding on a caller's absence from the answer must not
+     * read a page in which that caller's run could be row 1001. ⛔ Raising the
+     * listing's cap would not have been this: a bigger page is still a page.
+     */
+    private async readSuspendedRuns(
+        onEnumerationFailure: 'degrade' | 'throw',
+        flowNames?: ReadonlySet<string>,
+    ): Promise<Array<{ runId: string; flowName: string; nodeId: string; correlation?: string }>> {
         const byId = new Map<string, { runId: string; flowName: string; nodeId: string; correlation?: string }>();
         // [#15832] Did the ENUMERATION answer? The reconcile below is allowed
         // only when it did — see the merge comment for why a failed listing is
@@ -8628,11 +9233,20 @@ export class AutomationEngine implements IAutomationService {
         let enumerated = false;
         if (this.store) {
             try {
-                for (const r of await this.store.list()) {
+                const stored = flowNames === undefined
+                    ? await this.store.list()
+                    : this.store.listByFlow
+                        ? await this.store.listByFlow([...flowNames])
+                        : (await this.store.list()).filter((r) => flowNames.has(r.flowName));
+                for (const r of stored) {
                     byId.set(r.runId, { runId: r.runId, flowName: r.flowName, nodeId: r.nodeId, correlation: r.correlation });
                 }
                 enumerated = true;
             } catch (err) {
+                // A write-deciding caller is told, and decides nothing: see
+                // {@link readSuspendedRuns}. Everything below is the LISTING's
+                // posture.
+                if (onEnumerationFailure === 'throw') throw err;
                 // #6299 — driver text to the structured slot, message one line,
                 // same as the two seams above. The SLOT differs: the `Logger`
                 // contract declares `warn(message, meta?)`, so `meta` is the
@@ -8659,13 +9273,17 @@ export class AutomationEngine implements IAutomationService {
                 // instead. Its scan roots (`packages/metadata`,
                 // `metadata-protocol`, `objectql`) do not reach this package, so
                 // `check:durability-log-level` reports neither rule here.
-                // Reachability is also the weakest of the three: this method has
-                // no production consumer in-repo and is not on the
-                // `AutomationService` spec contract (only the synchronous
-                // `listSuspendedRuns` is), so nothing decides anything on this
-                // list today. Raising it to `error` would alarm for the duration
-                // of an outage on a read nobody acts on — #4632's mirror-image
-                // misuse, the trap #6230 avoided.
+                // Reachability is also the weakest of the three: this method is
+                // not on the `AutomationService` spec contract (only the
+                // synchronous `listSuspendedRuns` is); the in-repo caller that
+                // would ADMIT a write on what this list lacks — the §7.3
+                // disable guard — takes the `'throw'` posture above and never
+                // reaches this line, and plugin-approvals' restored-
+                // continuation proof refuses on an absent entry, so a short
+                // list costs it a retry. Raising it to `error` would alarm for
+                // the duration of an outage on a read no caller acts on
+                // wrongly — #4632's mirror-image misuse, the trap #6230
+                // avoided.
                 this.logger.warn(
                     `[automation] the durable suspended-run store could not be listed — this listing DEGRADES to the ` +
                         `in-memory cache alone, so every run parked by a previous process is missing from the result ` +
@@ -8709,7 +9327,12 @@ export class AutomationEngine implements IAutomationService {
         // entry standing (unknown is not gone), and a store that could not be
         // enumerated at all is not probed row by row — an outage would answer
         // for every live run in the process.
+        //
+        // [#20725] A scoped read takes only the named flows' entries — the hot
+        // map holds every run this process parked, uncapped, so it answers the
+        // scoped question completely for this process — and probes only those.
         for (const r of [...this.suspendedRuns.values()]) {
+            if (flowNames !== undefined && !flowNames.has(r.flowName)) continue;
             if (byId.has(r.runId)) continue;
             if (enumerated && !this.cacheOnlySuspensions.has(r.runId)) {
                 let stored: SuspendedRun | null;

@@ -83,13 +83,17 @@ describe('CATEGORIES_WITHOUT_SCHEMA_CLOSURE — the declared list', () => {
   it('is corroborated by the declared TITLES — Vocabulary, not Protocol', () => {
     // `CATEGORY_TITLES` is an independent, hand-declared surface, and it draws
     // the same boundary: the schema-free entry is titled "Vocabulary" while the
-    // two undeclared ones carry the same word every category WITH a schema
-    // closure carries. That agreement is why one entry is defensible and the
+    // two undeclared ones do not: `conversions` carries the word every category
+    // WITH a schema closure carries, and `migrations` — a published entry since
+    // the #20646 split — the `Entry` word `api-assembled` carries for a
+    // published entry that is not a protocol namespace. Neither claims
+    // "Vocabulary". That agreement is why one entry is defensible and the
     // other two are not.
     expect(CATEGORY_TITLES['meta-spelling']).toBe('Meta-Spelling Vocabulary');
     expect(CATEGORY_TITLES['meta-spelling']).not.toContain('Protocol');
     expect(CATEGORY_TITLES.conversions).toContain('Protocol');
-    expect(CATEGORY_TITLES.migrations).toContain('Protocol');
+    expect(CATEGORY_TITLES.migrations).toBe('Migrations Entry');
+    expect(CATEGORY_TITLES.migrations).not.toContain('Vocabulary');
   });
 });
 

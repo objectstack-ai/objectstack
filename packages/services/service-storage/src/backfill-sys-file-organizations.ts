@@ -83,7 +83,7 @@
  * `createRecordOrganizationResolver`, and the divergence from the precedent is
  * the point of this paragraph. That resolver's limb 0 reads
  * `tenancy.organizationField`, a STAMP-ONLY key whose consumers are scope-pinned
- * by the #8778 ruling (widened by name on cloud#1395) to exactly three
+ * by its ruling (commit 7901b2dd2; widened by name on cloud#1395) to exactly three
  * platform-row writers; a fourth needs its own maintainer ruling. It would also
  * be the WRONG question here. That key answers "which column says who this row
  * is ABOUT"; this sweep needs "which column is this subject WALLED by", because

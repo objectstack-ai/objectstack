@@ -91,7 +91,8 @@ import {
   parseDateMacroParam,
   type DateMacroUnit,
 } from '@objectstack/spec/data';
-import { calendarPartsInTzOrUtc } from './datetime.js';
+import { calendarPartsInTzOrUtc, wallClockToUtcMs } from './datetime.js';
+import { temporalStorageForm } from './temporal-storage-form.js';
 
 /**
  * The slice of an execution context the resolver reads. Structural on purpose —
@@ -180,25 +181,29 @@ export class UnresolvedFilterTokenError extends Error {
   }
 }
 
-/** `YYYY-MM-DD` for a calendar day, zero-padded. */
-function ymd(year: number, month: number, day: number): string {
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${year}-${p(month)}-${p(day)}`;
-}
-
 /**
  * Calendar arithmetic is done on a UTC "proxy" date built from the reference
  * timezone's calendar parts. Working in UTC keeps the math free of DST jumps
  * (a local-midnight `Date` can shift by an hour when `setMonth` crosses a
  * transition); the zone only decides WHICH calendar day "now" is, which
  * {@link calendarPartsInTzOrUtc} answers from the platform tz database.
+ *
+ * [#20599] Every proxy date in this file is built by `wallClockToUtcMs`, never
+ * `Date.UTC`, which reads a year from 0 to 99 as 1900 + year: a step that lands
+ * in 0001..0099 (`{1977_years_ago}`) stays there.
  */
 function proxyDay(now: Date, timezone?: string): Date {
-  const { year, month, day } = calendarPartsInTzOrUtc(now, timezone);
-  return new Date(Date.UTC(year, month - 1, day));
+  return new Date(wallClockToUtcMs(calendarPartsInTzOrUtc(now, timezone)));
 }
 
-const asYmd = (d: Date): string => ymd(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+/**
+ * `YYYY-MM-DD` of a proxy date: the storage rule's `date` spelling, whose year
+ * is padded to four digits (`0049-09-30`, never `49-09-30`, which names no
+ * day). [#20599] Before the proxy dates kept their year, a step into
+ * 0001..0099 came out in the 1900s instead, so this spelling was never reached
+ * for those years; a step into 0100..0999 was already spelled unpadded.
+ */
+const asYmd = (d: Date): string => String(temporalStorageForm(d, 'date'));
 
 type PeriodKind = 'week' | 'month' | 'quarter' | 'year';
 
@@ -212,17 +217,19 @@ function startOfPeriod(kind: PeriodKind, d: Date): Date {
       return r;
     }
     case 'month':
-      return new Date(Date.UTC(r.getUTCFullYear(), r.getUTCMonth(), 1));
+      return new Date(wallClockToUtcMs({ year: r.getUTCFullYear(), month: r.getUTCMonth() + 1, day: 1 }));
     case 'quarter':
-      return new Date(Date.UTC(r.getUTCFullYear(), Math.floor(r.getUTCMonth() / 3) * 3, 1));
+      return new Date(
+        wallClockToUtcMs({ year: r.getUTCFullYear(), month: Math.floor(r.getUTCMonth() / 3) * 3 + 1, day: 1 }),
+      );
     case 'year':
-      return new Date(Date.UTC(r.getUTCFullYear(), 0, 1));
+      return new Date(wallClockToUtcMs({ year: r.getUTCFullYear(), month: 1, day: 1 }));
   }
 }
 
-/** Days in the given (0-based) month of `year`. */
+/** Days in the given (0-based) month of `year`: day 0 of the next month rolls back to its last. */
 function daysInMonth(year: number, month: number): number {
-  return new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  return new Date(wallClockToUtcMs({ year, month: month + 2, day: 0 })).getUTCDate();
 }
 
 /**
@@ -240,10 +247,10 @@ function addMonthsClamped(d: Date, n: number): Date {
   const targetYear = year + Math.floor(month / 12);
   const targetMonth = ((month % 12) + 12) % 12;
   const day = Math.min(d.getUTCDate(), daysInMonth(targetYear, targetMonth));
-  return new Date(Date.UTC(
-    targetYear, targetMonth, day,
-    d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds(), d.getUTCMilliseconds(),
-  ));
+  return new Date(wallClockToUtcMs({
+    year: targetYear, month: targetMonth + 1, day,
+    hour: d.getUTCHours(), minute: d.getUTCMinutes(), second: d.getUTCSeconds(), millisecond: d.getUTCMilliseconds(),
+  }));
 }
 
 /** Shift `d` by `n` whole periods of `kind` (negative shifts backwards). */

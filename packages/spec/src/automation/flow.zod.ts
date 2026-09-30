@@ -624,7 +624,15 @@ function flowNodeObject() { return strictObject(
     {
       connectorId: z.string().describe('Registered connector name'),
       actionId: z.string().describe('Action key declared by the connector'),
-      input: z.record(z.string(), z.unknown()).optional().describe('Mapped inputs for the action'),
+      // Served as authored, like every open map in a flow definition — an
+      // outbound credential belongs in the connector's own `auth.credentialRef`
+      // (ADR-0097 §3), never here. `@objectstack/lint`'s
+      // `flow-credential-literal` advisory names a literal that reads as one.
+      input: z.record(z.string(), z.unknown()).optional().describe(
+        'Mapped inputs for the action. The flow definition, this map included, is served to every member who can '
+          + 'read flows, so never put a credential here: the connector authenticates through its own '
+          + '`auth.credentialRef`.',
+      ),
     },
   ).optional().meta({ title: 'Connector Action' }),
 

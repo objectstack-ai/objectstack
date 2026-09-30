@@ -420,16 +420,13 @@ describe('CubeSchema', () => {
           name: 'users',
         },
       },
-      refreshKey: {
-        every: '1 hour',
-        sql: 'SELECT MAX(updated_at) FROM orders',
-      },
+      // No `refreshKey`: retired whole (#20637), refused with its prescription —
+      // pinned in `cube-refresh-key-retirement.test.ts`.
       public: true,
     });
 
     expect(cube.title).toBe('Orders Cube');
     expect(cube.joins).toBeDefined();
-    expect(cube.refreshKey?.every).toBe('1 hour');
     expect(cube.public).toBe(true);
   });
 
@@ -446,7 +443,8 @@ describe('CubeSchema', () => {
     expect(cube.public).toBe(true);
     expect(cube.title).toBeUndefined();
     expect(cube.joins).toBeUndefined();
-    expect(cube.refreshKey).toBeUndefined();
+    // The retired `refreshKey` tombstone materializes nothing.
+    expect(cube).not.toHaveProperty('refreshKey');
   });
 
   it('should reject cube with invalid name', () => {

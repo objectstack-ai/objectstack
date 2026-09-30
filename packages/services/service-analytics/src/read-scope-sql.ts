@@ -179,7 +179,7 @@ import {
  * anyone parsing prose.
  *
  * ⚠️ At `error.code` — NOT `error.details.code`, which is where this note
- * pointed until #6123 corrected it. `errorResponseBase` only STAGES the code in
+ * pointed until commit 59d1933f9 corrected it. `errorResponseBase` only STAGES the code in
  * a `details` object; `buildApiError` then runs `splitSemanticCode`
  * (`@objectstack/runtime`, `src/error-envelope.ts:117`), which PROMOTES it into
  * the declared `ApiErrorSchema` field and returns the now-empty `details` as

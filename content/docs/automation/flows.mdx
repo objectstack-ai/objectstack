@@ -271,7 +271,7 @@ nothing is assigned or written in its place.
 ```
 
 <Callout type="warn" title="Do not put a secret in an http node's url or headers">
-A flow definition, including an `http` node's `url` and `headers`, is served to every member who can read flows. A token, API key or signed webhook url written there is readable by all of them. Route an outbound credential to a declarative connector's `auth.credentialRef` and call it with a `connector_action` node instead — see [Connectors](/docs/automation/connectors#authentication). Only `signingSecret` (and a start node's `secret`) is withheld when a definition is served; `url` and `headers` are served as written.
+A flow definition, including an `http` node's `url` and `headers`, is served to every member who can read flows. A token, API key or signed webhook url written there is readable by all of them. Route an outbound credential by where it sits, and call the connector with a `connector_action` node instead — see [Connectors](/docs/automation/connectors#authentication). A credential in a header goes to a declarative connector with `bearer`, `basic` or `api-key` auth, whose `auth.credentialRef` names the secret. A key in the query string goes to `api-key` auth with `paramName`. No `credentialRef` variant carries a secret in the url path, so an incoming-webhook url (whose path is the secret) cannot be routed that way: call the service through a token-authenticated connector instead, such as the `slack` connector, whose bot token is supplied to the plugin by host code rather than written in the flow (it is registered by that plugin, not declared as a `connectors:` instance). Otherwise such a url is served with the definition. Only `signingSecret` (and a start node's `secret`) is withheld when a definition is served; `url` and `headers` are served as written.
 </Callout>
 
 **Script:**
@@ -301,7 +301,7 @@ Replace them per branch — they are different mechanisms, not one rename:
 | Retired shape | Use instead |
 | --- | --- |
 | `actionType: 'email'` (+ `template` / `recipients` / `variables`) | a [`notify` node](#node-types) — it delivers through the messaging service: the in-app inbox by default, real email once `@objectstack/plugin-email` is installed |
-| `actionType: 'slack'` | a `connector_action` node with the Slack connector, or an `http` node posting to an incoming webhook |
+| `actionType: 'slack'` | a `connector_action` node with the Slack connector (an incoming-webhook url in an `http` node is not an equivalent: its path is the secret and is served with the flow) |
 | `actionType: 'my_fn'` (shorthand) | `function: 'my_fn'` — the conversion moves it for you |
 | inline `config.script` | move the logic into a registered function and call it via `config.function` |
 

@@ -445,7 +445,7 @@ export function makeExecutionContextResolver(
             // to COMPILE until this face decides it — and the `as any` that
             // suppressed the whole question is gone.
             //
-            // The DEFAULT, fail-closed entry (#6216 Option A), not the guest
+            // The DEFAULT, fail-closed entry (commit f586f1a89, the ruled Option A), not the guest
             // one: a sessionless request never reaches this line (the
             // `session?.user?.id` guard above already returned `undefined`) and
             // all three handlers answer their own no-session body. Adopting

@@ -65,7 +65,7 @@ export interface SmtpTransportOptions {
    *
    * ⚠️ An **integer** in `1-65535`, refused at construction otherwise —
    * `number` cannot say that in the type, and a fractional port is not a
-   * near miss but an address `net.connect` will never accept (#13189).
+   * near miss but an address `net.connect` will never accept (commit 33fbd3566).
    */
   port?: number;
   /**
@@ -124,7 +124,7 @@ export class SmtpTransport implements IEmailTransport {
     // below is GENERATED from it. A hand-written `(expected 1-65535)` on this
     // line is exactly the drift #12993 removed: it sat next to the check it
     // described, so the two could disagree and nothing would fail — which is
-    // not hypothetical. They DID disagree until #13189: the check admitted
+    // not hypothetical. They DID disagree until commit 33fbd3566: the check admitted
     // `587.5` and the sentence said `1-65535`, a range `587.5` satisfies. The
     // guard tests integrality now and the generated sentence says so, so the
     // two still cannot drift apart without one of them being rewritten.

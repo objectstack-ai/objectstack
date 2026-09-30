@@ -126,6 +126,17 @@
  *   flags (`$null` / `$exists` / `$empty`), the text operators and a
  *   `{ $field }` reference are not a value of the field and are left alone.
  *
+ * ## [#20546] The walk's second arm
+ *
+ * The walk below is the one filter walk the engine runs at all three
+ * positions with each column's declaration in hand, so it also carries the
+ * no-operator-object arm (`no-operator-object-door.ts`): a plain object with
+ * no `$` key where a value of a column holding scalar values belongs — any
+ * such column, not only a numeric one — is refused with `INVALID_FILTER` /
+ * 400, naming the field and the path. It is asked first at every field key;
+ * the number arm reads what it lets through. That module holds the arm's
+ * classification and words; ⛔ nothing there walks a filter.
+ *
  * @see numberComparandDoorVerdict — the pure verdict (lane 1, `@objectstack/spec`).
  * @see https://github.com/objectstack-ai/objectstack/issues/20336 (the contract)
  * @see https://github.com/objectstack-ai/objectstack/issues/20351 (this door)
@@ -143,6 +154,12 @@ import {
 } from '@objectstack/spec/data';
 import { invalidFilterError } from './filter-comparand-shape.js';
 import type { AggregatedColumnClass } from './having-filter.js';
+import {
+  holdsScalarValues,
+  isNoOperatorObject,
+  noOperatorObjectRefusalMessage,
+  type NoOperatorObjectRefusal,
+} from './no-operator-object-door.js';
 
 /** The operators whose one comparand is judged — the contract's list, never a re-listing. */
 const SCALAR_OPERATORS: ReadonlySet<string> = new Set(NUMBER_COMPARAND_DOOR_SCALAR_OPERATORS);
@@ -153,8 +170,22 @@ const LIST_OPERATORS: ReadonlySet<string> = new Set(NUMBER_COMPARAND_DOOR_LIST_O
 /** A comparand the door refuses: the site the contract's words are written from. */
 export type NonNumericComparand = NumberComparandRefusalSite;
 
-/** What one filter position supplies to the walk: the field meta a KEY names, or `null`. */
-type MetaOf = (key: string) => NumberComparandDoorFieldMeta | null;
+/**
+ * What one filter position supplies to the walk about a KEY: the two facts its
+ * two arms read, or `null` when the key names no column the position knows.
+ */
+interface KeyFacts {
+  /** The number arm's field meta — `null` when that arm has nothing to judge here. */
+  readonly number: NumberComparandDoorFieldMeta | null;
+  /**
+   * [#20546] The column's declared type when it holds scalar values
+   * (`holdsScalarValues`), so the no-operator-object arm judges it — else `null`.
+   */
+  readonly scalarType: string | null;
+}
+
+/** What one filter position supplies to the walk: the facts a KEY names, or `null`. */
+type FactsOf = (key: string) => KeyFacts | null;
 
 /**
  * [#20510] What the CALLER already knows about the position being walked —
@@ -179,10 +210,15 @@ const AGGREGATION_FILTER_SITE: RefusalSiteContext = { aggregated: false, boundBy
 /** `having`: an aggregated-row column, evaluated by the engine, never bound. */
 const HAVING_SITE: RefusalSiteContext = { aggregated: true, boundByDriver: false };
 
+/** The first refusal the walk met, and which arm raised it. */
+type Refusal =
+  | { readonly arm: 'number'; readonly site: NonNumericComparand }
+  | { readonly arm: 'no-operator-object'; readonly site: NoOperatorObjectRefusal };
+
 /** The walk's answer: the (possibly narrowed) node, or the first refusal. */
 type Outcome =
   | { readonly ok: true; readonly value: unknown }
-  | { readonly ok: false; readonly refusal: NonNumericComparand };
+  | { readonly ok: false; readonly refusal: Refusal };
 
 const kept = (value: unknown): Outcome => ({ ok: true, value });
 
@@ -231,7 +267,7 @@ function judgeComparand(
   if (verdict.verdict !== 'door-refusal') return kept(comparand);
   return {
     ok: false,
-    refusal: {
+    refusal: { arm: 'number', site: {
       field,
       declaredType: meta.type,
       ...(meta.returnType === undefined ? {} : { returnType: meta.returnType }),
@@ -243,7 +279,7 @@ function judgeComparand(
       // driver-bound), which is exactly what `WHERE_SITE` above says.
       ...(ctx.aggregated ? { aggregated: true as const } : {}),
       ...(ctx.boundByDriver ? {} : { boundByDriver: false as const }),
-    },
+    } },
   };
 }
 
@@ -259,7 +295,11 @@ function judgeFieldSpec(
   if (!isFilterNode(spec)) return judgeComparand(meta, field, spec, path, ctx);
   // A field spec with no `$` key is a deep-equality / nested-relation
   // condition; the #5869 gate records why descending into one would invent a
-  // contract no backend agrees with.
+  // contract no backend agrees with. [#20546] Under a column that holds
+  // scalar values — every numeric type — the walk's no-operator-object arm
+  // refuses one before this function is called; what still reaches this line
+  // sits under a column that arm does not judge (a `formula`, refused a door
+  // earlier).
   const ops = Object.keys(spec);
   if (!ops.some((op) => op.startsWith('$'))) return kept(spec);
   if (isFieldReference(spec)) return kept(spec);
@@ -288,7 +328,17 @@ function judgeFieldSpec(
 
 /**
  * The walk, shared by every position: the node structure is judged the same
- * way wherever the condition sits; only {@link MetaOf} differs.
+ * way wherever the condition sits; only {@link FactsOf} differs.
+ *
+ * [#20546] It carries TWO arms, asked in order at every field key: the
+ * no-operator-object arm (`no-operator-object-door.ts` — a plain object with
+ * no `$` key where a scalar column's value belongs), then the number arm
+ * ({@link judgeFieldSpec}). One traversal, one set of boundaries (the depth
+ * bound, the combinators descended, the `$` and dotted keys skipped), two
+ * questions — the shape the spec's save-door walk takes for its own arms
+ * (`checkFilterConditionComparands`: "One walk, one set of boundaries, `n`
+ * arms"). A second walk would have to redraw every one of those boundaries,
+ * and the two copies would part the first time one moved.
  *
  * Structure is discarded the same three conservative ways the sibling gates
  * discard it: `$and` / `$or` / `$not` are descended, any OTHER `$` key at node
@@ -296,7 +346,7 @@ function judgeFieldSpec(
  * fields beneath it ungated — a hole, not a false 400), and a dotted key names
  * a path this door does not judge. Copy-on-write throughout.
  */
-function walkCondition(metaOf: MetaOf, node: unknown, path: string, depth: number, ctx: RefusalSiteContext): Outcome {
+function walkCondition(factsOf: FactsOf, node: unknown, path: string, depth: number, ctx: RefusalSiteContext): Outcome {
   if (depth > 32 || !isFilterNode(node)) return kept(node);
   let out: Record<string, unknown> | undefined;
   for (const [key, value] of Object.entries(node)) {
@@ -306,16 +356,30 @@ function walkCondition(metaOf: MetaOf, node: unknown, path: string, depth: numbe
       if (!Array.isArray(value)) continue;
       let arms: unknown[] | undefined;
       for (const [index, arm] of value.entries()) {
-        const walked = walkCondition(metaOf, arm, `${here}[${index}]`, depth + 1, ctx);
+        const walked = walkCondition(factsOf, arm, `${here}[${index}]`, depth + 1, ctx);
         if (!walked.ok) return walked;
         if (walked.value !== arm) (arms ??= [...value])[index] = walked.value;
       }
       judged = kept(arms ?? value);
     } else if (key === '$not') {
-      judged = walkCondition(metaOf, value, here, depth + 1, ctx);
+      judged = walkCondition(factsOf, value, here, depth + 1, ctx);
     } else {
       if (key.startsWith('$') || key.includes('.')) continue;
-      const meta = metaOf(key);
+      const facts = factsOf(key);
+      if (!facts) continue;
+      // [#20546] The no-operator-object arm, first: filter structure where a
+      // scalar column's value belongs can match no record on any backend, so
+      // it is refused whichever arm would otherwise read the value.
+      if (facts.scalarType !== null && isNoOperatorObject(value)) {
+        return {
+          ok: false,
+          refusal: {
+            arm: 'no-operator-object',
+            site: { field: key, declaredType: facts.scalarType, path: here, keys: Object.keys(value), aggregated: ctx.aggregated },
+          },
+        };
+      }
+      const meta = facts.number;
       // Only a judged field can refuse or narrow a comparand; a `formula`
       // whose return type is unreadable is `deferred`, and everything else is
       // `not-judged` — the spec's verdict, never a list here.
@@ -329,12 +393,17 @@ function walkCondition(metaOf: MetaOf, node: unknown, path: string, depth: numbe
 }
 
 /** The judged fields of a `where` or a per-aggregation `filter`: the object's declared map. */
-function declaredMetaOf(schema: unknown): MetaOf | null {
+function declaredFactsOf(schema: unknown): FactsOf | null {
   // A registry-less host must not invent a verdict about a field map it cannot
   // see — the same early return every neighbour makes.
   const fields = (schema as { fields?: Record<string, unknown> } | undefined)?.fields;
   if (!fields || typeof fields !== 'object') return null;
-  return (key) => (Object.prototype.hasOwnProperty.call(fields, key) ? fieldMetaOf(fields[key]) : null);
+  return (key) => {
+    if (!Object.prototype.hasOwnProperty.call(fields, key)) return null;
+    const meta = fieldMetaOf(fields[key]);
+    if (!meta) return null;
+    return { number: meta, scalarType: holdsScalarValues(meta.type) ? meta.type : null };
+  };
 }
 
 /**
@@ -343,22 +412,29 @@ function declaredMetaOf(schema: unknown): MetaOf | null {
  *
  * Exported for the same reason the sibling walks are: a consumer that needs to
  * ask "would the engine door refuse this?" without provoking the refusal.
+ * [#20546] The number arm's answer only: when the walk's first refusal is the
+ * no-operator-object arm's, this answers `null` — {@link narrowNumberComparands}
+ * is the call that raises either.
  */
 export function findNonNumericComparand(
   schema: unknown,
   where: unknown,
   path = 'where',
 ): NonNumericComparand | null {
-  const metaOf = declaredMetaOf(schema);
-  if (!metaOf) return null;
+  const factsOf = declaredFactsOf(schema);
+  if (!factsOf) return null;
   // [#20510] Every caller of this walk (`where`, the per-aggregation `filter`)
   // reads a real declared field; only `where` itself ever binds to a driver.
-  const walked = walkCondition(metaOf, where, path, 0, path === 'where' ? WHERE_SITE : AGGREGATION_FILTER_SITE);
-  return walked.ok ? null : walked.refusal;
+  const walked = walkCondition(factsOf, where, path, 0, path === 'where' ? WHERE_SITE : AGGREGATION_FILTER_SITE);
+  return walked.ok || walked.refusal.arm !== 'number' ? null : walked.refusal.site;
 }
 
-function refuse(context: string, refusal: NonNumericComparand): never {
-  throw invalidFilterError(numberComparandRefusalMessage(refusal, context));
+function refuse(context: string, refusal: Refusal): never {
+  throw invalidFilterError(
+    refusal.arm === 'number'
+      ? numberComparandRefusalMessage(refusal.site, context)
+      : noOperatorObjectRefusalMessage(refusal.site, context),
+  );
 }
 
 /**
@@ -385,9 +461,9 @@ export function narrowNumberComparands<W>(
   where: W,
   path = 'where',
 ): W {
-  const metaOf = declaredMetaOf(schema);
-  if (!metaOf) return where;
-  const walked = walkCondition(metaOf, where, path, 0, path === 'where' ? WHERE_SITE : AGGREGATION_FILTER_SITE);
+  const factsOf = declaredFactsOf(schema);
+  if (!factsOf) return where;
+  const walked = walkCondition(factsOf, where, path, 0, path === 'where' ? WHERE_SITE : AGGREGATION_FILTER_SITE);
   if (!walked.ok) refuse(`${operation}('${object}')`, walked.refusal);
   return walked.value as W;
 }
@@ -406,14 +482,26 @@ export function narrowNumberComparands<W>(
  * ({@link HAVING_SITE}), and — like the per-aggregation `filter` — the engine
  * evaluates `having` itself, never the driver, so it carries no PostgreSQL
  * clause either.
+ *
+ * [#20546] `types` (`aggregatedRowColumnTypes`, from the same reading of the
+ * query as `classes`) is what the walk's no-operator-object arm reads here:
+ * the column's type, since the class lumps a `json` or `lookup` groupBy in
+ * with a text column. Its refusal names the aggregated column too.
  */
 export function narrowHavingNumberComparands<H>(
   object: string,
   having: H,
   classes: ReadonlyMap<string, AggregatedColumnClass | undefined>,
+  types: ReadonlyMap<string, string | undefined>,
 ): H {
   const walked = walkCondition(
-    (key) => (classes.get(key) === 'numeric' ? { type: 'number' } : null),
+    (key) => {
+      const type = types.get(key);
+      return {
+        number: classes.get(key) === 'numeric' ? { type: 'number' } : null,
+        scalarType: type !== undefined && holdsScalarValues(type) ? type : null,
+      };
+    },
     having,
     'having',
     0,

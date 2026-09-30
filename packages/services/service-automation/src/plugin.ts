@@ -2054,10 +2054,13 @@ export class AutomationServicePlugin implements Plugin {
 
         // Tear down flows that were synced from a prior artifact but are gone
         // now, so their triggers/jobs (e.g. a scheduled job) stop firing.
+        // [#20725] Through `withdrawFlow`, not the `unregisterFlow` door: the
+        // artifact dropped them, which ADR-0126 §7.3's removal guard does not
+        // judge — see `AutomationEngine.withdrawFlow` for why.
         for (const prev of this.syncedFlowNames) {
             if (!freshNames.has(prev)) {
                 try {
-                    this.engine.unregisterFlow(prev);
+                    this.engine.withdrawFlow(prev);
                 } catch {
                     /* best-effort */
                 }

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `IHttpServer.setFallbackHandler` — cross-adapter conformance (#6143).
+ * `IHttpServer.setFallbackHandler` — cross-adapter conformance (commit 12298c7d6).
  *
  * The contract (`packages/spec/src/contracts/http-server.ts`, #5040 §1-C)
  * makes four testable promises, and until this file the conformance package
@@ -24,7 +24,7 @@
  *
  * Every case here runs against BOTH adapters over a real socket: the
  * zero-dependency `NodeHttpServer` (this package's reference implementation,
- * which gained the member for this suite — #6143) and `HonoHttpServer` (the
+ * which gained the member for this suite — commit 12298c7d6) and `HonoHttpServer` (the
  * primary adapter). A Hono-only conditional case would prove nothing about
  * cross-adapter agreement, which is the entire point of this package.
  */

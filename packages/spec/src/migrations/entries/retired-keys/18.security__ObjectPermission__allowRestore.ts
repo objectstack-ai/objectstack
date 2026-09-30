@@ -18,7 +18,7 @@
 // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
 // removal ships on the 17.x line (launch-window convention: accept-set
 // narrowings ride minor releases) and the prescription lives at the major
-// boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+// boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
 // ObjectPermissionSchema is `strictObject` but the def is reachable from the
 // `permission` metadata root, so the route is the `retiredKey()` tombstone
 // (the `rls.priority` posture) — the key stays in the walked shape as

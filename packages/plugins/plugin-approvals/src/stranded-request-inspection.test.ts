@@ -120,7 +120,7 @@ function automation(opts: {
   repairabilityThrowsFor?: string[];
   /**
    * Runs whose host RESOLVES `undefined` — a contract-violating implementation
-   * of its own declared surface (#16709 item 3). ⛔ Deliberately outside
+   * of its own declared surface (commit 8c7cca1ce, item 3). ⛔ Deliberately outside
    * `Verdict`: pinning what happens when a host lies is the whole point, and
    * the cast that makes it expressible is confined to this double.
    */
@@ -621,7 +621,7 @@ describe('#15358 — the third oracle splits `failed` three ways, and its ABSENC
   });
 });
 
-// ── #16709: a failure to DIFFERENTIATE never costs a row its place, and never
+// ── commit 8c7cca1ce: a failure to DIFFERENTIATE never costs a row its place, and never
 //    costs another row its answer ─────────────────────────────────────────────
 //
 // Two residues of the #15358 contract review, ruled together (PM seat,

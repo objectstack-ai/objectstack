@@ -5,13 +5,13 @@ import { ObjectSchema } from '@objectstack/spec/data';
 import { SysActivity } from './index.js';
 
 /**
- * #11507 — the declaration of `sys_activity.type` must say what the column
+ * Commit 88b9d749a — the declaration of `sys_activity.type` must say what the column
  * actually is: an OPEN, author-extensible vocabulary whose declared options are
  * the platform's BUILT-IN set.
  *
  * ## The ruling this file executes
  *
- * Maintainer, 2026-08-24, on #11507 (direction 4 of the four the card framed),
+ * Maintainer, 2026-08-24, on the card behind commit 88b9d749a (direction 4 of the four it framed),
  * verbatim: 「四维分析一致的，接手你的建议。」 Recorded on the card as:
  *
  *   > the column is an open, author-extensible vocabulary. […] make the
@@ -92,7 +92,7 @@ describe('[#11507] sys_activity.type is an OPEN vocabulary and the declaration s
   });
 
   /**
-   * The load-bearing assertion, and the deliverable of #11507. The three
+   * The load-bearing assertion, and the deliverable of commit 88b9d749a. The three
    * markers are the three things an author must be able to learn FROM THE
    * DECLARATION ITSELF:
    *   - the declared list is the BUILT-IN set (not the whole legal set);
