@@ -343,14 +343,14 @@ export interface ISecurityService {
   getMetadataReadableFields?(object: string, context?: SecurityContext): Promise<string[] | undefined>;
 
   /**
-   * The field names `context` may WRITE on `object` — the write-side twin of
-   * {@link getReadableFields}, for anything that must present "the columns a
-   * write may name", such as an import template's header.
+   * The field names `context` may WRITE on `object` as far as field-level
+   * security decides — the write-side twin of {@link getReadableFields}.
    *
    * Computed from schema + context by the same resolution as the write path's
    * field-level-security gate: the returned set is the exact complement of the
-   * fields that gate refuses when a payload names them. Field-level only —
-   * whether the caller may create or edit the OBJECT is not part of the answer.
+   * fields that gate refuses when a payload names them. Neither whether the
+   * caller may create or edit the OBJECT nor a field's own rules (`readonly`,
+   * `system`, a `formula` / `summary` / `autonumber` type) are part of the answer.
    *
    * **Fails SOFT, with the same two distinct empty answers as
    * {@link getReadableFields}:** `undefined` is "no answer — use your own

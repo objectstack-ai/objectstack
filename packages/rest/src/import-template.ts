@@ -17,16 +17,16 @@
  * the import store it?"
  *
  * Each exclusion in {@link TEMPLATE_COLUMN_EXCLUSIONS} names the write-path
- * behaviour that makes the answer "no", measured through the import door
- * (`POST /data/:object/import`) under an ordinary, non-system caller:
+ * behaviour that makes the answer "no", measured through `POST /data/:object/import`
+ * on the SQL driver (better-sqlite3) under a non-system caller:
  *
  * | rule         | what the write path does with a value in that column          |
  * |--------------|----------------------------------------------------------------|
  * | `readonly`   | `stripReadonlyFields` drops it on insert and update, with a    |
  * |              | `warn` and the field's `defaultValue` in its place             |
  * | `autonumber` | `stripRuntimeOwnedFields` drops it; the sequence issues one    |
- * | `computed`   | `formula`: the commit refuses the row. `summary`: stored, then |
- * |              | overwritten by the next write of a child record                |
+ * | `computed`   | `formula`: SQL refuses the row, memory creates it. `summary`:  |
+ * |              | stored, then overwritten by the next write of a child record   |
  * | `system`     | the injected columns are all `readonly` save `owner_id`, which |
  * |              | the security middleware refuses (403) when it names anyone     |
  * |              | but the caller and the caller holds no transfer grant          |
@@ -176,8 +176,8 @@ export type TemplateProjection =
 /**
  * Ask the security service which fields the template may offer.
  *
- * `getWritableFields` first: the fields a write may name without the write
- * gate refusing the row. A service without it, or one that gives no answer,
+ * `getWritableFields` first: the fields a write may name without field-level
+ * security refusing the row. A service without it, or one that gives no answer,
  * is the contract's soft-fail case — the READ projection narrows instead, and
  * `readable` obliges the caller to say so. `unanswered`: a service is present
  * and gave neither answer, so the caller refuses rather than widen silently.

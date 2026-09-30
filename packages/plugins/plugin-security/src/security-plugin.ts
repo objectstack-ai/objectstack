@@ -1903,16 +1903,15 @@ export class SecurityPlugin implements Plugin {
       };
       // [ADR-0106 D7] The metadata-plane readable-field query, registered as an
       // EXTENSION of the published contract rather than inside the typed
-      // literal above: `ISecurityService` lives in `packages/spec`, and the
-      // seat for this method there is a separate change (consumers already
-      // feature-detect, which is exactly why a partial surface degrades instead
-      // of lying). `Object.assign` keeps the literal type-checked against the
-      // contract while the extension stays visible as an extension.
+      // literal above (consumers already feature-detect, which is exactly why a
+      // partial surface degrades instead of lying). `Object.assign` keeps the
+      // literal type-checked against the contract while the extension stays
+      // visible as an extension.
       const registeredSecurityService = Object.assign(securityService, {
         getMetadataReadableFields: (object: string, context?: any) =>
           this.getMetadataReadableFields(object, context),
         // [field report — rc→GA declared≠enforced surfacing] Same extension
-        // pattern as `getMetadataReadableFields` above, same reason:
+        // pattern as `getMetadataReadableFields` above:
         // `ISecurityService` lives in `packages/spec` and this seat there is a
         // separate change. Consumers feature-detect.
         discardPermissionSetOverlay: (callerContext: any, id: string) =>
@@ -5468,10 +5467,9 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
-   * [#18386] Query surface: the field names the caller MAY WRITE on `object`
-   * under `context` — the write-side twin of {@link getReadableFields}, which
-   * the REST export door's `?template=true` import template narrows its
-   * columns by.
+   * [#18386] Query surface: the field names field-level security lets the
+   * caller WRITE on `object` under `context` (a field's own rules, such as
+   * `readonly`, are not asked) — the write-side twin of {@link getReadableFields}.
    *
    * Same derivation as the read projection ({@link resolveProjectionFieldMask}),
    * which is the one the middleware's step 2.5 write gate takes, and the answer

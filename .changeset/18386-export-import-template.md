@@ -10,7 +10,7 @@ The export door takes one more query parameter, `template`. `template=true`
 answers an `.xlsx` workbook with no data rows; `template=false`, or no
 `template` parameter, answers the export exactly as before, byte for byte.
 
-- **Columns.** The fields an import stores: every field of the object except
+- **Columns.** Every field of the object except
   those marked `system` or `readonly`, and `formula`, `summary` and
   `autonumber` fields, in the order the object declares them. A `hidden` field
   that can be written is a column. The seven columns the platform adds to every
