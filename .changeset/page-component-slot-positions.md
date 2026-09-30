@@ -13,15 +13,15 @@ The platform has three walks that descend into a page component's `properties` b
 **`walkAddressedPageComponents` descends `properties.footer`.** It reads the list's authorable entries, in the list's order (`children`, `footer`, then `items[].children`); signature and return shape are unchanged. What follows from it:
 
 - `translatePage` translates the copy of a component in a card footer through `pages.<name>.components.<id>`, like any other nested component.
-- `os i18n extract` offers those keys, and `os i18n coverage` counts them, for a stack whose card footers hold components with an `id` and copy.
+- `os i18n extract` offers those keys, and `os i18n check` counts them, for a stack whose card footers hold components with an `id` and copy.
 - objectui's validator, which judges the nodes this walk visits, now judges a card footer's nodes.
 
 `page:card.body` stays undescended, as #5775 ruled: it is not an authorable spelling.
 
 **The conversion walker reads every entry, the retired one included.** Its reach does not change: it descends `children`, `body`, `footer` and `items[].children`, as before. Stored documents still carry `body`, the renderers still draw it, and a conversion that runs before `page-card-body-to-children` meets the sub-tree there. Within one component the visit order is now `children`, `body`, `footer`, then the panels. That order is observable only as the order of the notices for a component that carries both a direct slot and panels.
 
-**`@objectstack/lint` — `walkPageComponents` reads the list's authorable entries.** It walks `footer` as before, and it stops walking the retired `page:card.body`. #5775 (maintainer ruling 2026-08-06, direction A) made `children` the one composition key. The renderers keep reading `body` only as a back-compat fallback for stored documents. An author who writes `body` is still refused, by the `page:card` tombstone's rename prescription (and by the thin containers' guidance), and the sub-tree is judged once it sits under `children`. So the rules built on this walk no longer report findings about nodes under a card's `body`. The conversion walker keeps reaching them for stored documents.
+**`@objectstack/lint` — `walkPageComponents` reads the list's authorable entries.** It walks `footer` as before, and it stops walking the retired `body` spelling. The walk matches by shape, so this drops a `body` array on any component, not only on `page:card`. #5775 (maintainer ruling 2026-08-06, direction A) made `children` the one composition key. The renderers keep reading `body` only as a back-compat fallback for stored documents. On `page:card` the tombstone's rename prescription still refuses `body`, and so does the thin containers' guidance; the sub-tree is judged once it sits under `children`. So the rules built on this walk no longer report findings about nodes under any component's `body` array. The conversion walker keeps reaching them for stored documents.
 
-**`@objectstack/cli`:** no code change. `os i18n extract` and `os i18n coverage` pick up the `footer` component keys through the shared walk. The extractor's object-section pass stops reading `record:details` sections under a retired `body`, through lint's walk.
+**`@objectstack/cli`:** no code change. `os i18n extract` and `os i18n check` pick up the `footer` component keys through the shared walk. The extractor's object-section pass stops reading `record:details` sections under a retired `body`, through lint's walk.
 
 **Why no ADR-0087 ledger entry.** Nothing an author writes moves: no spec key is retired or renamed, no stored `sys_metadata` shape changes, and no conversion or migration id is touched. `objectstack migrate meta` has nothing to act on.
