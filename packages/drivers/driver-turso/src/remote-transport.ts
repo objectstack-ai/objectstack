@@ -4071,11 +4071,13 @@ export class RemoteTransport {
    * The error for an operator this transport does not compile.
    *
    * `$between` gets its own sentence because it is not missing by oversight:
-   * `TursoDriver.toRemoteFieldSpec` lowers it to `$gte`/`$lte` (#1003) so the
-   * calendar-day upper-bound rule is applied in exactly one place. Growing a
-   * `$between` arm here would be that second implementation, silently without
-   * the rule — so a well-formed range reaching this point means the lowering
-   * step was bypassed, and saying which step it was is the whole value of the
+   * `TursoDriver.toRemoteFieldSpec` splits it into `$gte`/`$lte` (#1003), so
+   * this transport compiles one spelling of a range. (The calendar-day
+   * upper-bound rule is not applied there any more: the shared lowering applies
+   * it at the seams, before the driver sees the filter — ADR-0053 D-D1,
+   * amended; #20822.) Growing a `$between` arm here would be a second range
+   * spelling — so a well-formed range reaching this point means the split was
+   * bypassed, and saying which step it was is the whole value of the
    * message. [#20094] A range that is NOT two bounds is the other way to arrive:
    * the lowering hands it over as written, and it gets the sentence `driver-sql`
    * gives the same mistake instead — a malformed range, not a skipped step.
@@ -4143,20 +4145,20 @@ export class RemoteTransport {
         );
       }
       // [#20039, the #8220 contract] A WELL-FORMED range is unreachable through
-      // `TursoDriver`, which lowers every two-bound `$between` before this
+      // `TursoDriver`, which splits every two-bound `$between` before this
       // transport sees it — and withheld all the same, so that EVERY refusal
       // `buildWhereSQL` can raise goes through the seam and the enumeration pin
       // has no exception to carry.
       return this.withheldRefusal(
         '[RemoteTransport] A $between in this filter must be lowered to $gte/$lte before it reaches ' +
-          'the transport — TursoDriver.toRemoteFieldSpec does that so the calendar-day upper-bound ' +
-          'rule is applied exactly once. Refusing rather than compiling a second, rule-free range. ' +
-          'The field it was aimed at is withheld from the message; the full diagnostic is in the ' +
-          'server log.',
+          'the transport — TursoDriver.toRemoteFieldSpec splits every two-bound range, and this ' +
+          'transport compiles no range of its own. Refusing rather than compiling a second range ' +
+          'spelling. The field it was aimed at is withheld from the message; the full diagnostic is ' +
+          'in the server log.',
         subtree,
         `[RemoteTransport] $between on ${target} must be lowered to $gte/$lte before it reaches the ` +
-          `transport — TursoDriver.toRemoteFieldSpec does that so the calendar-day upper-bound rule is ` +
-          `applied exactly once. Refusing rather than compiling a second, rule-free range.`,
+          `transport — TursoDriver.toRemoteFieldSpec splits every two-bound range, and this transport ` +
+          `compiles no range of its own. Refusing rather than compiling a second range spelling.`,
       );
     }
     // [#20020, the #8220 contract] The two arms below name the target and the

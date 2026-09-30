@@ -5,7 +5,7 @@ import { RemoteTransport } from './remote-transport.js';
 import { TursoDriver } from './turso-driver.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
 import type { QueryAST } from '@objectstack/spec/data';
-import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
+import { lowerFilterCondition, markFilterSubtreeProvenance } from '@objectstack/spec/data';
 
 /**
  * Regression: the remote transport must compile the spec's THIRD logical
@@ -485,6 +485,28 @@ describe('RemoteTransport $not (#1076)', () => {
  * These run the compiled statements against a real SQLite database wearing the
  * libsql interface, the instrument #1066/#1073 used.
  */
+/** The declared field map of the `deal` object the real-rows block syncs. */
+const DEAL_FIELDS: Record<string, { type: string }> = {
+  stage: { type: 'string' },
+  owner_id: { type: 'string' },
+  amount: { type: 'number' },
+  closed_at: { type: 'datetime' },
+};
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5, 7 and 9, as amended] What a TYPED seam hands
+ * this driver: the filter through the shared lowering, reading the declared
+ * field map (`datetime` columns only for the whole-day rule; the NULL-polarity
+ * guards on every column). The remote face keeps no copy of either rule any
+ * more, so the real-rows cases below read the answer every seam-fed read gets;
+ * their expected rows are unchanged.
+ */
+const seamed = (where: unknown): unknown =>
+  lowerFilterCondition(where, {
+    isDatetimeColumn: (column) =>
+      Object.prototype.hasOwnProperty.call(DEAL_FIELDS, column) && DEAL_FIELDS[column]!.type === 'datetime',
+  });
+
 describe('TursoDriver remote — $not on real rows (#1076)', () => {
   let driver: TursoDriver;
   let stub: LibsqlSqliteStub;
@@ -494,15 +516,7 @@ describe('TursoDriver remote — $not on real rows (#1076)', () => {
     driver = new TursoDriver({ url: 'libsql://not-operator.turso.io', client: stub as never });
     await driver.connect();
     expect(driver.transportMode).toBe('remote');
-    await driver.syncSchema('deal', {
-      name: 'deal',
-      fields: {
-        stage: { type: 'string' },
-        owner_id: { type: 'string' },
-        amount: { type: 'number' },
-        closed_at: { type: 'datetime' },
-      },
-    });
+    await driver.syncSchema('deal', { name: 'deal', fields: DEAL_FIELDS });
     await driver.create('deal', { id: 'd_won', stage: 'won', owner_id: 'u1', amount: 10 });
     await driver.create('deal', { id: 'd_lost', stage: 'lost', owner_id: 'u1', amount: 20 });
     await driver.create('deal', { id: 'd_open', stage: 'open', owner_id: 'u2', amount: 30 });
@@ -517,7 +531,7 @@ describe('TursoDriver remote — $not on real rows (#1076)', () => {
   });
 
   const ids = async (where: unknown) =>
-    ((await driver.find('deal', { where } as unknown as QueryAST)) as any[]).map((r) => r.id).sort();
+    ((await driver.find('deal', { where: seamed(where) } as unknown as QueryAST)) as any[]).map((r) => r.id).sort();
 
   it('`$not: { stage: "won" }` returns the other rows, not a `no such column` error', async () => {
     // Pre-fix: threw before reaching SQLite; had it compiled, SQLite would have
@@ -588,6 +602,11 @@ describe('TursoDriver remote — $not on real rows (#1076)', () => {
     // `toRemoteFilter` recursed into `$and`/`$or` only, so conditions inside a
     // `$not` reached the transport on the raw path, skipping the ADR-0053 D-E3
     // seam — which applies at every depth a condition can appear at.
+    //
+    // [#20822] The rule is the shared lowering's now (`seamed`, above): it
+    // reaches every depth of the filter, `$not` included, before this driver
+    // sees it, and `toRemoteFilter` converts the lowered `$lt` bound to storage
+    // form at every depth. The answer is the one this case always pinned.
     //
     // A bare `YYYY-MM-DD` upper bound on a `datetime` column compiles half-open
     // (`$lt` next-midnight, framework#3777) so the whole DAY is inside the
