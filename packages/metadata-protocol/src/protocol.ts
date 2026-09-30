@@ -7192,12 +7192,62 @@ export class ObjectStackProtocolImplementation implements
      * unknown name, and a registry double without the lookup.
      */
     getPackagedDashboardBase(name: string): unknown {
+        return this.packagedArtifactBase('dashboard', name);
+    }
+
+    /**
+     * [#20731] The PACKAGED (code-layer) declaration of a VIEW — the view
+     * item a code package ships, before any tenant `sys_metadata` overlay.
+     * The view twin of {@link getPackagedDashboardBase}, answered the same
+     * way, and the fact `translateView` (`@objectstack/spec/system`) compares
+     * against as its `packagedBase`: the i18n catalog
+     * (`objects.<object>._views.<viewKey>`) is the packaged translation of
+     * exactly this body, so it may only replace a string the served view
+     * still carries unchanged from it (ADR-0029 D9.2a — an explicit override
+     * beats a packaged default; ADR-0126 Regime O — a packaged view is
+     * overlay-editable, and a published overlay is what every read serves).
+     *
+     * Measured before this existed: an org overlay on the showcase's
+     * `showcase_task.in_progress` changed its label, published, and was
+     * returned by {@link getMetaItem} and {@link getMetaItems}, yet a `zh-CN`
+     * reader was served the catalog's translation of the shipped label,
+     * because the translation of the served view had no base to compare with.
+     *
+     * `name` is the served view's REGISTRY identity — the qualified
+     * `<object>.<viewKey>` the boot registers each view of a `defineView`
+     * container under (`expandViewContainer`), which is also the name the
+     * overlay row and both reads carry. ⛔ Not the bare `<viewKey>` the catalog
+     * is keyed by under its object: that key is unique only within one object,
+     * so it can never select the base (it answers `undefined` here unless some
+     * code package registers a view under that literal name).
+     *
+     * Shadow-immune for the same reason as the dashboard's: an overlay hydrated
+     * under the plain registry key is never returned as the base it is meant
+     * to be compared against. A view has no extension fold, so the artifact
+     * item IS the packaged declaration.
+     *
+     * Returns `undefined` for a runtime/tenant-authored view (no code package
+     * ships it), an unknown or empty name, and a registry double without the
+     * lookup — "no packaged baseline", read by the translator as the catalog
+     * applying unchanged.
+     */
+    getPackagedViewBase(name: string): unknown {
+        return this.packagedArtifactBase('view', name);
+    }
+
+    /**
+     * The one body behind {@link getPackagedDashboardBase} and
+     * {@link getPackagedViewBase}: {@link lookupArtifactItem}, and nothing
+     * wider, so only an item whose `_packageId` marks a genuine code package
+     * answers, and an overlay hydrated under the plain registry key never does.
+     */
+    private packagedArtifactBase(type: 'dashboard' | 'view', name: string): unknown {
         if (typeof name !== 'string' || name === '') return undefined;
         try {
-            return this.lookupArtifactItem('dashboard', name);
+            return this.lookupArtifactItem(type, name);
         } catch {
             // A read over the in-memory registry; a failure here must never
-            // turn a served dashboard into a 5xx.
+            // turn a served document into a 5xx.
             return undefined;
         }
     }

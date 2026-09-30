@@ -22,7 +22,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import {
   backfillSeedTenancy,
   buildSeedTenancyReceipt,
@@ -579,13 +579,21 @@ describe('#9451 the seed-tenancy repair leaves a durable receipt', () => {
   function fakeLedger(options: { rows?: Record<string, unknown>[]; failWrites?: boolean } = {}) {
     const rows = options.rows ?? [];
     const calls: Array<{ op: string; data: Record<string, unknown> }> = [];
+    const reads: Array<Record<string, unknown>> = [];
     return {
       rows,
       calls,
+      reads,
       ledger: {
         getObject: (name: string) => (name === 'sys_migration' ? { name } : undefined),
-        find: async (_object: string, opts: any) =>
-          rows.filter((r) => r.id === opts?.where?.id).slice(0, opts?.limit ?? rows.length),
+        // The receipt's only read: its own row, through the single-row route
+        // (#20648), held to the real engine's refusal of a query that selects
+        // no particular record.
+        findOne: async (object: string, opts: any) => {
+          reads.push(opts);
+          assertEngineFindOnePredicate(object, opts);
+          return rows.find((r) => r.id === opts.where.id) ?? null;
+        },
         insert: async (_object: string, data: Record<string, unknown>) => {
           if (options.failWrites) throw new Error('no such table: sys_migration');
           calls.push({ op: 'insert', data });
@@ -674,6 +682,9 @@ describe('#9451 the seed-tenancy repair leaves a durable receipt', () => {
     );
 
     expect(result.status).toBe('applied');
+    // #20648: the existence check is a primary-key lookup through `findOne`,
+    // carrying the system context the old `find` read carried.
+    expect(store.reads).toEqual([{ where: { id: SEED_TENANCY_MIGRATION_ID }, context: { isSystem: true } }]);
     expect(store.calls.map((c) => c.op)).toEqual(['insert']);
     const written = store.calls[0].data;
     expect(written.id).toBe(SEED_TENANCY_MIGRATION_ID);
@@ -750,7 +761,10 @@ describe('#9451 the seed-tenancy repair leaves a durable receipt', () => {
     const log = createLogger();
     const noLedger = {
       getObject: () => undefined,
-      find: async () => [],
+      findOne: async (object: string, opts?: any) => {
+        assertEngineFindOnePredicate(object, opts);
+        return null;
+      },
       insert: async () => { throw new Error('must not be called'); },
       update: async (_object: string, data: Record<string, unknown>, opts?: Record<string, unknown>) => {
         assertEngineUpdateDispatch(data as any, opts as any);
@@ -802,7 +816,10 @@ describe('#9451 the seed-tenancy repair leaves a durable receipt', () => {
     const engine = {
       driver: { execute: async () => [], config: { client: 'better-sqlite3' } },
       getObject: () => ({}),
-      find: async () => [],
+      findOne: async (object: string, opts?: any) => {
+        assertEngineFindOnePredicate(object, opts);
+        return null;
+      },
       insert: async () => ({}),
       update: async (_object: string, data: Record<string, unknown>, opts?: Record<string, unknown>) => {
         assertEngineUpdateDispatch(data as any, opts as any);
@@ -814,7 +831,20 @@ describe('#9451 the seed-tenancy repair leaves a durable receipt', () => {
     // A driver-only host resolves an exec but no ledger — the repair still runs
     // and says, loudly, that it could not record itself.
     expect(resolveSeedTenancySeam({ driver: { execute: async () => [] } })?.ledger).toBeUndefined();
-    expect(resolveSeedTenancyLedger({ getObject: () => ({}), find: async () => [] })).toBeUndefined();
+    expect(resolveSeedTenancyLedger({ getObject: () => ({}), findOne: async () => null })).toBeUndefined();
+    // #20648: the receipt reads through `findOne`, so an engine-shaped host
+    // offering only `find` is not a ledger — its receipt read would throw.
+    expect(
+      resolveSeedTenancyLedger({
+        getObject: () => ({}),
+        find: async () => [],
+        insert: async () => ({}),
+        update: async (_object: string, data: Record<string, unknown>, opts?: Record<string, unknown>) => {
+          assertEngineUpdateDispatch(data as any, opts as any);
+          return {};
+        },
+      }),
+    ).toBeUndefined();
   });
 });
 

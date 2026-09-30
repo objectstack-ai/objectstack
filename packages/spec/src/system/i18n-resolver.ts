@@ -812,13 +812,21 @@ function lookupBulkActionText(
  * Reference identity is load-bearing rather than tidy: `translateView` uses it
  * to decide whether to rebuild `config` at all, so a view with no bulk
  * translations comes back with its config object untouched.
+ *
+ * `packagedConfig` is the `config` of the view's packaged base (`undefined`
+ * when no base was supplied, `{}` when the base carries none): each def and
+ * each param is found in it by the `name` the bundle addresses it by
+ * ({@link packagedPart}), and a string that diverged from its packaged
+ * counterpart is authored and keeps its value (#20731, see
+ * {@link translateView}).
  */
 function translateBulkActionDefs(
   defs: unknown,
   bundle: TranslationBundle | undefined,
   objectName: string,
   viewKey: string,
-  opts?: ResolveOptions,
+  opts: ResolveOptions | undefined,
+  packagedConfig: Record<string, unknown> | undefined,
 ): unknown {
   if (!Array.isArray(defs) || !bundle) return defs;
   let changed = false;
@@ -828,12 +836,21 @@ function translateBulkActionDefs(
       return raw;
     }
     const defName = def.name;
-    const text = (pick: (node: NonNullable<ReturnType<typeof lookupBulkActionNode>>) => unknown) =>
-      lookupBulkActionText(bundle, objectName, viewKey, defName, pick, opts);
+    const packagedDef = packagedPart(packagedConfig, 'bulkActionDefs', (candidate) => candidate.name === defName);
+    // The catalog's string for `attr`, unless the authored value diverged from
+    // `packaged`'s — then `undefined`, which leaves the authored value in place.
+    const text = (
+      packaged: Record<string, unknown> | undefined,
+      attr: string,
+      authored: unknown,
+      pick: (node: NonNullable<ReturnType<typeof lookupBulkActionNode>>) => unknown,
+    ) => valueOverridesPackagedBase(packaged, attr, authored)
+      ? undefined
+      : lookupBulkActionText(bundle, objectName, viewKey, defName, pick, opts);
 
-    const label = text((n) => n.label);
-    const confirmText = text((n) => n.confirmText);
-    const confirmLabel = text((n) => n.confirmLabel);
+    const label = text(packagedDef, 'label', def.label, (n) => n.label);
+    const confirmText = text(packagedDef, 'confirmText', def.confirmText, (n) => n.confirmText);
+    const confirmLabel = text(packagedDef, 'confirmLabel', def.confirmLabel, (n) => n.confirmLabel);
 
     let params = def.params;
     if (Array.isArray(def.params)) {
@@ -843,9 +860,10 @@ function translateBulkActionDefs(
           return param;
         }
         const paramName = param.name;
-        const pLabel = text((n) => n.params?.[paramName]?.label);
-        const pHelp = text((n) => n.params?.[paramName]?.help);
-        const pPlaceholder = text((n) => n.params?.[paramName]?.placeholder);
+        const packagedParam = packagedPart(packagedDef, 'params', (candidate) => candidate.name === paramName);
+        const pLabel = text(packagedParam, 'label', param.label, (n) => n.params?.[paramName]?.label);
+        const pHelp = text(packagedParam, 'help', param.help, (n) => n.params?.[paramName]?.help);
+        const pPlaceholder = text(packagedParam, 'placeholder', param.placeholder, (n) => n.params?.[paramName]?.placeholder);
         if (pLabel === undefined && pHelp === undefined && pPlaceholder === undefined) return param;
         paramsChanged = true;
         return {
@@ -902,24 +920,61 @@ function translateBulkActionDefs(
  * `expandViewContainer` put the whole `ListViewSchema` under `config`. The
  * object is rebuilt only when a def actually gained a translation, so a view
  * with none comes back with the very same `config` reference.
+ *
+ * ## [#20731] The catalog LOSES to an explicit override — ADR-0029 D9.2a
+ *
+ * The catalog (`objects.<object>._views.<viewKey>`) is the packaged
+ * translation of the PACKAGED view. Consulting it first overwrote every
+ * string authored on top of that view — measured: an org overlay on the
+ * showcase's packaged `showcase_task.in_progress` (ADR-0126 Regime O, "yours
+ * to edit directly") changed its label to `In Progress (edited-20680)`, the
+ * metadata protocol's item and list reads both served the edit, an `en`
+ * reader got it, and a `zh-CN` reader — admin or member, item or list — got
+ * `进行中`, the catalog's translation of the label the package shipped.
+ *
+ * So every string here follows the rule {@link translateDashboard} and
+ * {@link translateObject} follow, by the same comparison
+ * ({@link valueOverridesPackagedBase}; ⛔ never a second one): the catalog
+ * applies only while the served value still equals the one in
+ * {@link TranslateDocumentOptions.packagedBase}, which the serving layer
+ * supplies — the packaged view before any tenant overlay,
+ * `getPackagedViewBase` on the metadata protocol, looked up by the served
+ * view's registry identity (the qualified `<object>.<viewKey>` name, never the
+ * bare key the catalog uses, which another object's view may share). The view
+ * `label` and `description` are judged against the base's; each bulk-action
+ * def's `label` / `confirmText` / `confirmLabel` and each of its params'
+ * `label` / `help` / `placeholder` against the def and param the base carries
+ * under the same `name` — the key the bundle addresses them by — and a def or
+ * param the base does not carry was authored after the fact and counts as
+ * diverged. No base supplied is the pre-#20731 behaviour, unchanged: the
+ * catalog applies.
  */
 export function translateView<T extends ViewLike>(
   view: T,
   bundle: TranslationBundle | undefined,
-  opts?: ResolveOptions,
+  opts?: TranslateDocumentOptions,
 ): T {
-  const label = resolveViewLabel(bundle, view, opts);
-  const description = resolveViewDescription(bundle, view, opts);
+  const base = asRecord(opts?.packagedBase);
+  const label = valueOverridesPackagedBase(base, 'label', view.label)
+    ? (view.label as string)
+    : resolveViewLabel(bundle, view, opts);
+  const description = valueOverridesPackagedBase(base, 'description', view.description)
+    ? view.description
+    : resolveViewDescription(bundle, view, opts);
 
   let config = view.config;
   const objectName = viewObjectName(view);
   if (config && typeof config === 'object' && bundle && objectName) {
+    // The base's own `config` — `{}` when the base is known but carries none,
+    // so every def on the served view then counts as authored.
+    const packagedConfig = base === undefined ? undefined : asRecord(base.config) ?? {};
     const defs = translateBulkActionDefs(
       config.bulkActionDefs,
       bundle,
       objectName,
       viewTranslationKey(view, objectName),
       opts,
+      packagedConfig,
     );
     if (defs !== config.bulkActionDefs) config = { ...config, bulkActionDefs: defs };
   }
@@ -1240,9 +1295,10 @@ function isOptionValue(value: unknown): value is string | number | boolean {
 }
 
 /**
- * [#20680] The packaged counterpart of one addressable part of a dashboard —
- * a widget, a global filter, a filter option — found in `parent[key]` (an
- * array) by the key the bundle addresses it by.
+ * [#20680] The packaged counterpart of one addressable part of a translated
+ * document — a dashboard's widget, global filter or filter option; a view's
+ * bulk-action def or its param (#20731) — found in `parent[key]` (an array) by
+ * the key the bundle addresses it by.
  *
  * Three answers, and the difference between the first two is the point:
  *
@@ -1254,10 +1310,13 @@ function isOptionValue(value: unknown): value is string | number | boolean {
  *    it counts as diverged, as a scalar the packaged object never declared
  *    does under #8284;
  *  - the packaged part itself otherwise.
+ *
+ * One finder for both translators ({@link translateDashboard},
+ * {@link translateView}), as there is one comparison behind them.
  */
-function packagedDashboardPart(
+function packagedPart(
   parent: Record<string, unknown> | undefined,
-  key: 'widgets' | 'globalFilters' | 'options',
+  key: 'widgets' | 'globalFilters' | 'options' | 'bulkActionDefs' | 'params',
   matches: (candidate: Record<string, any>) => boolean,
 ): Record<string, unknown> | undefined {
   if (parent === undefined) return undefined;
@@ -1278,7 +1337,7 @@ function packagedDashboardPart(
  * moved.
  *
  * `packagedFilter` is the same filter in the dashboard's packaged base
- * ({@link packagedDashboardPart}); a label that diverged from it is authored
+ * ({@link packagedPart}); a label that diverged from it is authored
  * and keeps its value (#20680, see {@link translateDashboard}).
  */
 function translateGlobalFilter(
@@ -1307,7 +1366,7 @@ function translateGlobalFilter(
       // is the one spelling every value has; `null`/`undefined`/objects have
       // no such spelling and are left alone.
       if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') return option;
-      const packagedOption = packagedDashboardPart(
+      const packagedOption = packagedPart(
         packagedFilter,
         'options',
         (candidate) => isOptionValue(candidate.value) && String(candidate.value) === String(value),
@@ -1427,7 +1486,7 @@ export function translateDashboard<T extends DashboardLike>(
     const rebuilt = doc.globalFilters.map((filter) => {
       if (!filter || typeof filter !== 'object') return filter;
       const key = globalFilterKey(filter);
-      const packagedFilter = packagedDashboardPart(
+      const packagedFilter = packagedPart(
         base,
         'globalFilters',
         (candidate) => key !== undefined && globalFilterKey(candidate) === key,
@@ -1443,7 +1502,7 @@ export function translateDashboard<T extends DashboardLike>(
     ? doc.widgets.map((w) => {
         if (!w || typeof w !== 'object' || typeof w.id !== 'string') return w;
         const next: WidgetLike = { ...w };
-        const packagedWidget = packagedDashboardPart(base, 'widgets', (candidate) => candidate.id === w.id);
+        const packagedWidget = packagedPart(base, 'widgets', (candidate) => candidate.id === w.id);
         const title = valueOverridesPackagedBase(packagedWidget, 'title', w.title)
           ? undefined
           : lookupWidgetAttr(bundle, name, w.id, 'title', opts);
@@ -2650,9 +2709,11 @@ export function scalarOverridesPackagedBase(
  * keyed by any attribute name — the exported predicate's key union names the
  * object scalars its two callers ask about, and the dashboard translator
  * ({@link translateDashboard}) asks the same question of `title`, which that
- * union does not carry. One implementation, so the three conservative edges
- * documented on the exported predicate hold for every caller alike; ⛔ never
- * a second copy of the comparison.
+ * union does not carry; the view translator ({@link translateView}, #20731)
+ * asks it of a bulk-action def's `confirmText` and its params' `help`. One
+ * implementation, so the three conservative edges documented on the exported
+ * predicate hold for every caller alike; ⛔ never a second copy of the
+ * comparison.
  */
 function valueOverridesPackagedBase(base: unknown, key: string, value: unknown): boolean {
   if (!base || typeof base !== 'object') return false;

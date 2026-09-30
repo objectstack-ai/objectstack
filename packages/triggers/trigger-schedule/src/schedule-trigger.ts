@@ -29,7 +29,7 @@ export interface FlowTriggerBinding {
     readonly condition?: string | { dialect?: string; source?: string; ast?: unknown };
     readonly schedule?: unknown;
     /**
-     * [#16659] The ACTING ORGANIZATION a time-triggered flow declares on its
+     * [commit ecdfc9411] The ACTING ORGANIZATION a time-triggered flow declares on its
      * start node (`config.organization`), lifted onto the binding by the
      * engine's `resolveTriggerBinding` the same way `schedule` is.
      *
@@ -248,7 +248,7 @@ export interface TriggerLogger {
 const JOB_PREFIX = 'flow-schedule';
 
 /**
- * Resolve the acting organization of a time-triggered binding (#16659), or
+ * Resolve the acting organization of a time-triggered binding (commit ecdfc9411), or
  * `null` when the flow declared none.
  *
  * Reads the binding's lifted `organization` first and the raw start-node
@@ -369,7 +369,7 @@ export function refuseScheduledWorkDisabled(
 
 /**
  * Refuse to bind a time-triggered flow that declares no acting organization
- * (#16659): say why at `error`, then THROW so the engine records the refusal.
+ * (commit ecdfc9411): say why at `error`, then THROW so the engine records the refusal.
  *
  * ## When this fires, after #17396 and #18378
  *
@@ -700,7 +700,7 @@ export class ScheduleTrigger implements FlowTrigger {
             return;
         }
 
-        // [#16659] The acting organization is part of the BINDING, so it is
+        // [commit ecdfc9411] The acting organization is part of the BINDING, so it is
         // checked before the job service is even resolved: a flow that cannot
         // legally run must not be reported as "not scheduled because the job
         // service is missing", which is a different defect with a different
@@ -774,7 +774,7 @@ export class ScheduleTrigger implements FlowTrigger {
             try {
                 const ctx: AutomationContext = {
                     event: 'schedule',
-                    // [#16659] When the flow declares one, the run executes AS
+                    // [commit ecdfc9411] When the flow declares one, the run executes AS
                     // that organization: `tenantId` is the acting run's
                     // organization, and every consumer already reads it —
                     // `notify-node.ts` threads it onto the notification it
