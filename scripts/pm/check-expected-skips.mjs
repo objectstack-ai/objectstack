@@ -1083,6 +1083,68 @@ function measuredPayload() {
   return { total_count: MEASURED_18315.length, check_runs: MEASURED_18315.map(([name, conclusion, suite]) => fixtureRun(name, conclusion, suite)) };
 }
 
+/**
+ * Measured 2026-09-30 on PR #20748's head `a84b73af13` (a `create-objectstack`
+ * landing, so `scaffold-e2e.yml` ran on `pull_request`): 42 check-runs, 34
+ * success / 8 skipped, full `GET /commits/{head}/check-runs` listing. Names,
+ * conclusions and check-suite ids VERBATIM. Its one skip outside the listed
+ * roster is `Registry canary: ${{ matrix.template }}` (run 36658032070) —
+ * the raw pre-expansion name the derived half exists to admit.
+ */
+const MEASURED_20748 = [
+  ['Auto Label', 'success', 99276458818],
+  ['Auto Label', 'skipped', 99276487096],
+  ['Build Core', 'success', 99276458806],
+  ['Build Docs', 'skipped', 99276458806],
+  ['Check Changeset', 'skipped', 99276487096],
+  ['Check Changeset', 'success', 99276458818],
+  ['Check Documentation Links', 'success', 99276459150],
+  ['Check PR Size', 'skipped', 99276487096],
+  ['Check PR Size', 'success', 99276458818],
+  ['Close issues referenced in other repositories', 'success', 99283715448],
+  ['Console Pin Gate', 'skipped', 99276458806],
+  ['Dogfood Regression Gate', 'success', 99276458806],
+  ['Dogfood Regression Gate (1/3)', 'success', 99276458806],
+  ['Dogfood Regression Gate (2/3)', 'success', 99276458806],
+  ['Dogfood Regression Gate (3/3)', 'success', 99276458806],
+  ['Dogfood Verify CLI', 'success', 99276458806],
+  ['filter', 'success', 99276458806],
+  ['Flag docs affected by code changes', 'success', 99276458808],
+  ['Governed Surface Queue Guard', 'success', 99280116148],
+  ['Governed Surface Queue Guard', 'success', 99276459094],
+  ['Lint & Repo Gates', 'success', 99276458889],
+  ['No other open PR may claim the same issue', 'success', 99276458886],
+  ['No other open PR may claim the same single-writer path', 'success', 99276458829],
+  ['Packed-tarball smoke (opt-in)', 'skipped', 99276487117],
+  ['Packed-tarball smoke (opt-in)', 'skipped', 99276458917],
+  ['Part-of PR must not also close its card', 'success', 99276458819],
+  ['Registry canary: ${{ matrix.template }}', 'skipped', 99276458880],
+  ['Scaffold with repo dist', 'success', 99276458880],
+  ['Temporal Conformance (live PG + MySQL)', 'success', 99276458806],
+  ['Test Core', 'success', 99276458806],
+  ['Test Core (1/6)', 'success', 99276458806],
+  ['Test Core (2/6)', 'success', 99276458806],
+  ['Test Core (3/6)', 'success', 99276458806],
+  ['Test Core (4/6)', 'success', 99276458806],
+  ['Test Core (5/6)', 'success', 99276458806],
+  ['Test Core (6/6)', 'success', 99276458806],
+  ['The card this PR closes must claim this branch', 'success', 99276458997],
+  ['Type Check · consumer gates', 'success', 99276458889],
+  ['Type Check · debt ledger', 'success', 99276458889],
+  ['Type Check · source gates', 'success', 99276458889],
+  ['Type Check · workspace', 'success', 99276458889],
+  ['TypeScript Type Check', 'success', 99276458889],
+];
+
+/** The measured #20748 head, plus any extra runs a control case adds. */
+function measured20748Payload(extra = []) {
+  const runs = [...MEASURED_20748.map(([name, conclusion, suite]) => fixtureRun(name, conclusion, suite)), ...extra];
+  return { total_count: runs.length, check_runs: runs };
+}
+
+/** The raw pre-expansion name the measured #20748 head carries, spelled once. */
+const CANARY_RAW_NAME = 'Registry canary: ${{ matrix.template }}';
+
 /** Spawn this file's CLI on a payload file, offline; returns { status, stdout, stderr }. */
 function spawnSelf(args) {
   const child = spawnSync(process.execPath, [SELF_PATH, ...args], {
@@ -1185,6 +1247,104 @@ export function selfTest() {
   t('fixture: a null payload → NOT MEASURED', verdictExit(judgeCheckRuns(null)), 3);
   t('fixture: a roster override is honoured (the judge is pure over its roster)', verdictExit(judgeCheckRuns({ total_count: 1, check_runs: [fixtureRun('Build Core', 'skipped')] }, [])), 4);
 
+  // ---- the derived half: the recogniser, one exact shape ---------------------
+  const gate = (cond) => JSON.stringify(nonPrEventGate(cond));
+  const BOTH = '["schedule","workflow_dispatch"]';
+  t("derive: the measured canary if: reads as schedule | workflow_dispatch", gate("github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"), BOTH);
+  t('derive: …the same, wrapped whole in one ${{ }}', gate("${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' }}"), BOTH);
+  t('derive: …the same, one term per line (a folded block scalar)', gate("github.event_name == 'schedule'\n  || github.event_name == 'workflow_dispatch'\n"), BOTH);
+  t('derive: a single schedule term is admitted', gate("github.event_name == 'schedule'"), '["schedule"]');
+  t('derive: a repeated term de-duplicates', gate("github.event_name == 'schedule' || github.event_name == 'schedule'"), '["schedule"]');
+  t('derive: NARROWNESS — a pull_request term beside schedule is NOT admitted', gate("github.event_name == 'schedule' || github.event_name == 'pull_request'"), 'null');
+  t('derive: …nor a push term (push fires on a PR branch)', gate("github.event_name == 'schedule' || github.event_name == 'push'"), 'null');
+  t('derive: …nor merge_group (the queue build is a verdict, not a skip)', gate("github.event_name == 'merge_group'"), 'null');
+  t("derive: …nor a negation (scaffold-local's live `!= 'schedule'` runs on every PR)", gate("github.event_name != 'schedule'"), 'null');
+  t('derive: …nor an inputs conjunct (release.yml version-pr, live)', gate("github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.refresh_version_pr)"), 'null');
+  t(
+    'derive: …nor success() and inputs beside event terms (merged-branch-reaper.yml reap, live)',
+    gate("success() && github.event_name != 'pull_request' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false))"),
+    'null',
+  );
+  t('derive: …nor a needs output', gate("github.event_name == 'schedule' || needs.filter.outputs.core != 'false'"), 'null');
+  t('derive: …nor a matrix value', gate("github.event_name == 'schedule' || matrix.os == 'linux'"), 'null');
+  t('derive: …nor a label read', gate("github.event_name == 'schedule' || contains(github.event.pull_request.labels.*.name, 'nightly')"), 'null');
+  t('derive: …nor a parenthesised term (the allow-list names one bare comparison)', gate("(github.event_name == 'schedule')"), 'null');
+  t("derive: …nor a case-folded event (GitHub's == folds case; the recogniser refuses rather than folds)", gate("github.event_name == 'Schedule'"), 'null');
+  t('derive: …nor a double-quoted literal (not a GitHub string)', gate('github.event_name == "schedule"'), 'null');
+  t('derive: …nor two ${{ }} blocks joined outside an expression', gate("${{ github.event_name == 'schedule' }} || ${{ github.event_name == 'workflow_dispatch' }}"), 'null');
+  t('derive: …nor an empty or absent if:', gate('') === 'null' && gate(undefined) === 'null' && gate(true) === 'null', true);
+
+  t('derive: a matrix name is kept verbatim, raw', skippedCheckRunName('registry-canary', { name: CANARY_RAW_NAME, strategy: { matrix: { template: ['blank'] } } }).name, CANARY_RAW_NAME);
+  t('derive: a job with no name: is named by its key', skippedCheckRunName('nightly', { if: "github.event_name == 'schedule'" }).name, 'nightly');
+  t('derive: a name holding a non-matrix expression is refused (its skipped spelling is unmeasured)', 'refused' in skippedCheckRunName('x', { name: 'Nightly ${{ inputs.target }}' }), true);
+  t('derive: a matrix reference on a job with no strategy.matrix is refused', 'refused' in skippedCheckRunName('x', { name: 'N: ${{ matrix.os }}' }), true);
+  t('derive: a non-string name: is refused', 'refused' in skippedCheckRunName('x', { name: 42 }), true);
+
+  // A synthetic tree: every admission and every refusal the derivation claims.
+  const synthetic = {
+    'a.yml': {
+      jobs: {
+        canary: { name: 'Nightly: ${{ matrix.os }}', if: "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'", strategy: { matrix: { os: ['linux'] } } },
+        mixed: { name: 'Mixed', if: "github.event_name == 'schedule' || github.event_name == 'pull_request'" },
+        plain: { name: 'Plain', if: "github.event_name == 'pull_request'" },
+      },
+    },
+    'b.yml': {
+      jobs: {
+        weekly: { name: 'Shared', if: "github.event_name == 'schedule'" },
+        always: { name: 'Shared' },
+        listed: { name: 'Build Core', if: "github.event_name == 'schedule'" },
+        opaque: { name: 'Nightly ${{ inputs.target }}', if: "github.event_name == 'workflow_dispatch'" },
+      },
+    },
+  };
+  const derivedSyn = deriveNonPrEventSkips(['a.yml', 'b.yml', 'c.yml'], (f) => synthetic[f] ?? null);
+  const refusedAt = (job) => derivedSyn.refused.find((r) => r.job === job)?.reason ?? '';
+  t('derive: the synthetic tree admits exactly the schedule/dispatch-only matrix job', JSON.stringify(derivedSyn.rows.map((r) => `${r.workflow} › ${r.job} › ${r.name}`)), JSON.stringify(['a.yml › canary › Nightly: ${{ matrix.os }}']));
+  t('derive: …as a derived row with the non-pr-event gate and its events', derivedSyn.rows[0]?.derived === true && derivedSyn.rows[0]?.gate.kind === 'non-pr-event' && JSON.stringify(derivedSyn.rows[0]?.gate.events) === BOTH, true);
+  t('derive: …whose reason names the raw template', derivedSyn.rows[0]?.reason.includes('raw `name:` template'), true);
+  t('derive: the mixed pull_request + schedule job is neither admitted nor refused (it is simply not this shape)', derivedSyn.rows.some((r) => r.job === 'mixed') || derivedSyn.refused.some((r) => r.job === 'mixed'), false);
+  t('derive: a name two jobs carry is refused (a skip of the other would read expected)', refusedAt('weekly').includes('2 jobs in the tree carry'), true);
+  t("derive: a name the listed roster carries is refused (derive, don't list)", refusedAt('listed').includes("derive, don't list"), true);
+  t('derive: a name that cannot be told is refused, with the reason', refusedAt('opaque').includes('inputs.target'), true);
+  t('derive: an unreadable workflow is refused by file', derivedSyn.refused.some((r) => r.workflow === 'c.yml' && r.job === null), true);
+  t('derive: …and the scan counts every file handed to it', derivedSyn.scanned, 3);
+  const synRoster = [...EXPECTED_SKIPS, ...derivedSyn.rows];
+  t('derive: the admitted raw-named skip judges exit 0', verdictExit(judgeCheckRuns({ total_count: 1, check_runs: [fixtureRun('Nightly: ${{ matrix.os }}', 'skipped')] }, synRoster)), 0);
+  t('derive: NARROWNESS — the mixed pull_request + schedule job skipped still judges exit 4', verdictExit(judgeCheckRuns({ total_count: 1, check_runs: [fixtureRun('Mixed', 'skipped')] }, synRoster)), 4);
+  t('derive: …and so does the refused shared name', verdictExit(judgeCheckRuns({ total_count: 1, check_runs: [fixtureRun('Shared', 'skipped')] }, synRoster)), 4);
+
+  // ---- the derived half on this checkout's workflows ---------------------------
+  const liveFiles = listWorkflowFiles(ROOT);
+  const live = expectedSkipRoster(ROOT);
+  const liveKeys = live.derivation.rows.map((r) => `${r.workflow} › ${r.job}`);
+  t('live derive: the workflow listing is not vacuous', liveFiles.length > 0 && live.derivation.scanned === liveFiles.length, true);
+  t(`live derive: nothing refused on this tree (${live.derivation.refused.map((r) => `${r.workflow} › ${r.job}: ${r.reason}`).join(' | ') || 'none'})`, live.derivation.refused.length, 0);
+  t('live derive: scaffold-e2e.yml › registry-canary is derived under its raw name', live.derivation.rows.find((r) => r.workflow === 'scaffold-e2e.yml' && r.job === 'registry-canary')?.name, CANARY_RAW_NAME);
+  t(
+    "live derive: the measured refusals stay out (release.yml version-pr, merged-branch-reaper.yml reap, scaffold-e2e.yml's PR-running scaffold-local)",
+    ['release.yml › version-pr', 'merged-branch-reaper.yml › reap', 'scaffold-e2e.yml › scaffold-local'].some((k) => liveKeys.includes(k)),
+    false,
+  );
+  t('live derive: the listed and derived halves share no name', live.derivation.rows.some((r) => EXPECTED_SKIPS.some((l) => l.name === r.name)), false);
+  t('live derive: the joined roster is frozen and duplicate-free', Object.isFrozen(live.roster) && new Set(live.roster.map((r) => r.name)).size === live.roster.length, true);
+
+  // ---- the measured #20748 head: the card's pins -------------------------------
+  const m20748 = judgeCheckRuns(measured20748Payload(), live.roster);
+  t('measured #20748: the raw-named skipped canary judges exit 0 against the joined roster', verdictExit(m20748), 0);
+  t('measured #20748: 8 skipped, every one expected', m20748.expected.reduce((n, e) => n + e.count, 0) === 8 && m20748.unexpected.length === 0, true);
+  t('measured #20748: …the canary read as a derived expected skip', m20748.expected.find((e) => e.name === CANARY_RAW_NAME)?.derived, true);
+  t('measured #20748: …and the report tags it derived', renderReport(m20748).some((l) => l.includes(CANARY_RAW_NAME) && l.includes('; derived')), true);
+  t('measured #20748: the LISTED half alone still answers exit 4 on it (the derivation is what moved it)', judgeCheckRuns(measured20748Payload()).unexpected[0]?.name, CANARY_RAW_NAME);
+  const m20748Control = judgeCheckRuns(measured20748Payload([fixtureRun('TypeScript Type Check', 'skipped', 99276458889)]), live.roster);
+  t('measured #20748 CONTROL: a genuinely unexpected skip beside the canary still judges exit 4', verdictExit(m20748Control), 4);
+  t('measured #20748 CONTROL: …naming only it', JSON.stringify(m20748Control.unexpected.map((u) => u.name)), '["TypeScript Type Check"]');
+  t(
+    "measured #20748 CONTROL: the canary's PR-running sibling skipped still judges exit 4",
+    verdictExit(judgeCheckRuns(measured20748Payload([fixtureRun('Scaffold with repo dist', 'skipped', 99276458880)]), live.roster)),
+    4,
+  );
+
   // ---- read classification ---------------------------------------------------
   t('read: a network throw is unreachable', classifyRead({ networkError: 'ECONNREFUSED' }).kind, 'unreachable');
   t('read: 422 is the garbage-sha answer', classifyRead({ status: 422 }).kind, 'no-such-commit');
@@ -1254,6 +1414,18 @@ export function selfTest() {
     t('cli: no mode → usage on stderr, exit 2', usage.status === 2 && usage.stderr.includes('usage:'), true);
     const roster = spawnSelf(['--roster']);
     t('cli: --roster prints every row without a network', roster.status === 0 && EXPECTED_SKIPS.every((r) => roster.stdout.includes(r.name)), true);
+    t('cli: …the derived rows too, tagged derived', live.derivation.rows.length > 0 && live.derivation.rows.every((r) => roster.stdout.includes(`${r.name}  [${r.workflow} › ${r.job}; gate: non-pr-event`)), true);
+
+    const canaryFile = join(dir, 'canary.json');
+    writeFileSync(canaryFile, JSON.stringify({ head_sha: 'a84b73af13', ...measured20748Payload() }));
+    const canary = spawnSelf(['--check-runs-json', canaryFile]);
+    t('cli: the measured #20748 head on disk (raw-named skipped canary) → exit 0', canary.status, 0);
+    t('cli: …with the canary on stdout as a derived expected skip', canary.stdout.includes(`${CANARY_RAW_NAME}  [scaffold-e2e.yml › registry-canary; derived]`), true);
+    const canaryControlFile = join(dir, 'canary-control.json');
+    writeFileSync(canaryControlFile, JSON.stringify(measured20748Payload([fixtureRun('Lint & Repo Gates', 'skipped', 99276458889)])));
+    const canaryControl = spawnSelf(['--check-runs-json', canaryControlFile]);
+    t('cli: CONTROL — the same head plus a genuinely unexpected skip → exit 4', canaryControl.status, 4);
+    t('cli: …naming it under the ⛔ heading', canaryControl.stdout.includes('⛔ unexpected skips (1)') && canaryControl.stdout.includes('Lint & Repo Gates'), true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -1286,8 +1458,12 @@ export function selfTest() {
       'declared gate kinds — and its truth on this checkout\'s workflows, with the audit driven red on a deleted, renamed, un-gated and ' +
       "re-gated job, a lost || 'true' widening and an unreadable workflow; the judge on the measured 39-run head and on fixtures for an " +
       'expected skip, an unexpected skip named as a filter miss, a same-suite failure read as a dependency skip, a raw matrix template, ' +
-      'other conclusions, a pending run and an empty head; read classification for 422 / 404 / 401 / 403 / 5xx / network; argv; the real ' +
-      'CLI on payload files for 0 / 4 / 3 and --json; and the structural no-write-path, single-sourced transport and SKILL.md pointer pins).',
+      'other conclusions, a pending run and an empty head; the derived half — the non-PR-event recogniser admitting only its one shape and ' +
+      'refusing a pull_request / push / merge_group term, a negation and every live mixed if:, the raw-name rule, and the derivation ' +
+      'refusing a shared, a listed and an untellable name — on a synthetic tree and on this checkout\'s workflows; the measured #20748 ' +
+      'head judged 0 with its raw-named canary and 4 with a genuinely unexpected skip beside it; read classification for 422 / 404 / 401 / ' +
+      '403 / 5xx / network; argv; the real CLI on payload files for 0 / 4 / 3 and --json; and the structural no-write-path, ' +
+      'single-sourced transport and SKILL.md pointer pins).',
   );
   return { code: EXIT_OK, verdict: SELF_TEST_VERDICT };
 }
