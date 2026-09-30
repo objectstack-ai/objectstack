@@ -14335,10 +14335,17 @@ export class ObjectStackProtocolImplementation implements
      *     never silently stripped (the caller would never learn that what it
      *     sent is not what was stored).
      *  3. **Everything else is admitted.** A tenant row's own stamps, echoed
-     *     on a round trip — `_provenance: 'org'`, the `sys_metadata`
-     *     sentinel, an app package bound to a tenant row — agree with the
-     *     server's fact and classify the body as tenant-authored, so they are
-     *     a no-op here.
+     *     on a round trip, agree with the server's fact, so they are a no-op
+     *     here. Most classify the body as tenant-authored already
+     *     (`_provenance: 'org'`, the `sys_metadata` sentinel). One does not,
+     *     and it is MEASURED, not hypothetical: a stored flow bound to a
+     *     package is served with its binding surfaced as `_packageId` and no
+     *     `_provenance` (the `/meta` read's parity with the list path), so its
+     *     round trip carries stamps `isCodeArtifactBody` reads as code-shipped.
+     *     Those stamps name the package the SERVER binds that row to, so they
+     *     agree with its fact: {@link storedFlowBindingAgrees} asks the store,
+     *     and the write this door is making — a `/meta` save naming that same
+     *     package as its base — agrees by the same token.
      *
      * `INVALID_METADATA` / 422 — registered to this package in the ADR-0112
      * ledger, ⛔ no code is minted — for the reason `saveMetaItem`'s
@@ -14354,9 +14361,9 @@ export class ObjectStackProtocolImplementation implements
      * @returns the refusal to relay verbatim, or `null` when the write may
      *          proceed on these grounds.
      */
-    tenantAuthoredWriteRefusal(
+    async tenantAuthoredWriteRefusal(
         request: { type: string; name: string; item: unknown; packageId?: string | null },
-    ): Error | null {
+    ): Promise<Error | null> {
         const folded = canonicalizeMetaRequestType(request);
         const singular = PLURAL_TO_SINGULAR[folded.type] ?? folded.type;
         if (singular !== 'flow') return null;
@@ -14369,6 +14376,9 @@ export class ObjectStackProtocolImplementation implements
             });
         }
         if (!isCodeArtifactBody(folded.item)) return null;
+        const stamped = String((folded.item as { _packageId?: unknown })._packageId);
+        if (folded.packageId === stamped) return null;
+        if (await this.storedFlowBindingAgrees(folded.name, stamped)) return null;
         const err = new Error(
             `Flow '${folded.name}' was sent with a code-package provenance, but no managed package ships a flow of `
             + `that name. A flow written through an authoring door is authored in this deployment: which flows a `
@@ -14379,6 +14389,34 @@ export class ObjectStackProtocolImplementation implements
         (err as any).code = 'INVALID_METADATA';
         (err as any).status = 422;
         return err;
+    }
+
+    /**
+     * [#20761] Does a stored flow row named `name` bind to `packageId` — the
+     * server's own fact behind a `_packageId` stamp a tenant row's served body
+     * echoes (see rule 3 of {@link tenantAuthoredWriteRefusal})?
+     *
+     * Asked only on the rare path — a body whose stamps would classify it as
+     * code-shipped, for a name the loader's set does not hold — so an
+     * ordinary write pays no read. Any state and any scope count: a draft
+     * bound to the package is as much the server's fact as the live row.
+     *
+     * An UNPROVISIONED store answers "no", and the refusal stands: a store with
+     * no `sys_metadata` table holds no row the stamps could agree with. Any
+     * OTHER read failure propagates ({@link rethrowUnlessMetadataStoreUnprovisioned}),
+     * never an invented "no" — refusing a legitimate round trip because the
+     * store was unreachable would state a disagreement nobody measured.
+     */
+    private async storedFlowBindingAgrees(name: string, packageId: string): Promise<boolean> {
+        try {
+            const row = await this.engine.findOne('sys_metadata', {
+                where: { type: 'flow', name, package_id: packageId },
+            });
+            return row != null;
+        } catch (error) {
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+            return false;
+        }
     }
 
     /**
@@ -16299,7 +16337,7 @@ export class ObjectStackProtocolImplementation implements
         // #16702 strip may still carry stale stamps, and rewriting it keeps
         // the silent strip it always had rather than failing the rewrite.
         if (request.source === undefined && request.writeFace !== 'package-duplicate') {
-            const authored = this.tenantAuthoredWriteRefusal({
+            const authored = await this.tenantAuthoredWriteRefusal({
                 type: request.type,
                 name: request.name,
                 item: request.item,

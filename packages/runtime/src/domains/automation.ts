@@ -1545,7 +1545,7 @@ async function refuseUnauthoredFlowWrite(
     if (typeof protocol?.tenantAuthoredWriteRefusal !== 'function') {
         return refusePackagedFlowBaseChange(deps, context, name, 'save');
     }
-    const refusal = protocol.tenantAuthoredWriteRefusal({ type: FLOW_METADATA_TYPE, name, item: definition });
+    const refusal = await protocol.tenantAuthoredWriteRefusal({ type: FLOW_METADATA_TYPE, name, item: definition });
     if (!refusal) return undefined;
     return { handled: true, response: deps.errorFromThrown(refusal) };
 }
