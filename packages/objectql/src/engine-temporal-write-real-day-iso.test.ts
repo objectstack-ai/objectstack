@@ -101,14 +101,25 @@ const ACCEPTED: ReadonlyArray<readonly [Field, unknown]> = [
   ['opened_at', '2026-07-15 10:00'],
   ['opened_at', '2026-07-15 10:00:00.5'],
   ['opened_at', ' 2026-07-15 10:00'],
-  ['opened_at', '0050-01-01T10:00:00Z'],
+  // [#20280] The `datetime` floor's edge; a `date` in year 0050 stays above.
+  ['opened_at', '1000-01-01T10:00:00Z'],
   ['opened_at', new Date(Date.UTC(2026, 6, 15, 10))],
+];
+
+/**
+ * [#20280] Accepted here until a `datetime` began at year 1000 (MySQL's
+ * documented `DATETIME` floor): a real day in an ISO spelling, refused now for
+ * its year alone, with the same `invalid_date` code.
+ */
+const BEFORE_THE_DATETIME_FLOOR: ReadonlyArray<readonly [Field, unknown]> = [
+  ['opened_at', '0050-01-01T10:00:00Z'],
 ];
 
 const REFUSED: ReadonlyArray<readonly [Field, unknown]> = [
   ...IMPOSSIBLE_DAY,
   ...NON_ISO_DATETIME.map((v) => ['opened_at', v] as const),
   ...STILL_REFUSED,
+  ...BEFORE_THE_DATETIME_FLOOR,
 ];
 
 /** A driver that records every read and write, and answers none. */
