@@ -268,7 +268,7 @@ function scalarWords(refusal: NoOperatorObjectRefusal): string {
   const { field, column } = refusal;
   return (
     `where a value of ${describeColumn(refusal)} belongs. An object with no "$" operator is filter `
-    + 'structure, not a value, and the filter was NOT applied. Compare '
+    + 'structure, not a value. The filter was NOT applied. Compare '
     + `'${field}' with a value ({ "${field}": VALUE }) or an operator ({ "${field}": { "$eq": VALUE } }). `
     + `A ${column.type} column holds scalar values — one, or a list of them — so no record can match an `
     + 'object there, and an empty answer would read exactly like a real one.'
