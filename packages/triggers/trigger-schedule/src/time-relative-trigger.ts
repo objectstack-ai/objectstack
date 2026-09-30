@@ -19,6 +19,7 @@ import {
     type ScheduledWorkTriggerOptions,
 } from './schedule-trigger.js';
 import type { ScheduledRunOwnership } from '@objectstack/types';
+import { wallClockToUtcMs } from '@objectstack/core';
 // [#18378] The ONE resolver for "which organization does this record BELONG
 // to" — the WALL question (`tenancy.enabled: false` ⇒ nothing, then a declared
 // `tenancy.tenantField`, then the kernel's `organization_id`), shared with the
@@ -113,14 +114,23 @@ export interface DateWindow {
 
 // ─── Pure window math (day-granular, UTC) ───────────────────────────
 
+/**
+ * `d`'s UTC calendar day as parts. [#20599] Both bounds below are built from
+ * them by core's `wallClockToUtcMs`, never `Date.UTC`, which reads a year from
+ * 0 to 99 as 1900 + year: an offset that reaches 0001..0099 keeps its year.
+ */
+function utcDayParts(d: Date): { year: number; month: number; day: number } {
+    return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+}
+
 /** Start of `d`'s UTC calendar day (00:00:00.000Z). */
 function startOfUtcDay(d: Date): Date {
-    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0));
+    return new Date(wallClockToUtcMs(utcDayParts(d)));
 }
 
 /** End of `d`'s UTC calendar day (23:59:59.999Z) — inclusive upper bound. */
 function endOfUtcDay(d: Date): Date {
-    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999));
+    return new Date(wallClockToUtcMs({ ...utcDayParts(d), hour: 23, minute: 59, second: 59, millisecond: 999 }));
 }
 
 /** `d`'s UTC day shifted by `n` whole days (exact in UTC — no DST drift). */
