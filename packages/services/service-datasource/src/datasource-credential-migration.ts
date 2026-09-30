@@ -172,14 +172,14 @@ export function planCredentialMigration(record: StoredDatasource): CredentialMig
 
   const config = record.config;
 
-  // The passthrough spelling (#9040): a stored `options.auth.password` (or a
+  // The passthrough spelling (commit 24206416a): a stored `options.auth.password` (or a
   // legacy row's equivalent) is a LIVE login credential — measured, the client
   // resolves the block into `MongoCredentials` — that this action cannot
   // re-home mechanically: dropping the nested leaf would leave an `auth` block
   // with only a username, which the client refuses at construction
   // (`credentials must be an object with 'username' and 'password'
   // properties`, measured on mongodb@7.5.0), and the DSN branch injects a
-  // bound secret only through a URL that already names a user (#8696). Refused
+  // bound secret only through a URL that already names a user (commit 90a12fb18). Refused
   // with the per-row remedy, exactly like the URL spellings below.
   const passthroughKeys = refusedPassthroughSecretPaths(record.driver)
     .filter((path) => {

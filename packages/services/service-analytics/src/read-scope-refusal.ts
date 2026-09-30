@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#17130] The row-scope fail-closed refusals, in the ADR-0112 envelope.
+ * [commit 54b3d1d4a] The row-scope fail-closed refusals, in the ADR-0112 envelope.
  *
  * ## What was wrong
  *
@@ -26,7 +26,7 @@
  * the caller as a confident empty chart, with one `warn` and no exception.
  *
  * The two messages happen to match none of the six today. ⛔ That is a
- * coincidence, not a construction, and #17130 exists to remove it rather than
+ * coincidence, not a construction, and commit 54b3d1d4a was made to remove it rather than
  * to keep picking lucky strings. Declaring the envelope answers the
  * classification question at the producer, where it is known, so no reword of
  * these messages — and no message the resolution stage grows later — can ever

@@ -11,6 +11,7 @@ import {
   Logger,
   createLogger,
   nextUtcCalendarDay,
+  isUnboundedAbove,
   // [#16322] The ONE lowering of the closed `dateRange` preset vocabulary and
   // the ONE refusal for a string outside it, shared with the SQL analytics
   // path so the two backends cannot answer one input differently again.
@@ -27,6 +28,10 @@ import {
   bucketDateKey,
   isBucketGranularity,
   type BucketGranularity,
+  // [#20544] The ONE compensated fold for `sum` / `avg`, the one objectql's
+  // rows path, this package's data face and SQLite add with — see
+  // {@link compensatedAddendAccumulator}.
+  compensatedSum,
 } from '@objectstack/core';
 // [#16178] The pipeline below is split at its `$group` when a time dimension
 // buckets, so the bucket key can be folded in JS between the two halves — mingo
@@ -153,7 +158,7 @@ interface NormalizedCubeFilter {
   operator: CubeOperator;
   /**
    * The comparands, as authored. Temporal values are put into the field's
-   * storage form at the exits ({@link MemoryAnalyticsService.comparandsFor}),
+   * storage form at the exits ({@link MemoryAnalyticsService.storageFormFor}),
    * never here — that rule needs the resolved field path, which only an exit has.
    */
   values: unknown[];
@@ -203,9 +208,64 @@ interface MongoPredicateInput {
    * Unicode range and would answer `CAFÉ` for `café`.
    */
   readonly asciiSubstring: (value: unknown) => RegExp;
+  /**
+   * [#20661] One value put into the storage form of the field this entry
+   * constrains — the SAME conversion `comparands` came out of
+   * ({@link MemoryAnalyticsService.storageFormFor}), handed over for the one
+   * value that is not an authored operand: a bound the builder DERIVES.
+   * See {@link lteUpperBound}.
+   */
+  readonly storageForm: (value: unknown) => unknown;
 }
 
 type MongoPredicateBuilder = (input: MongoPredicateInput) => Record<string, unknown>;
+
+/**
+ * [#20661] What an `lte` bound compiles to, decided ONCE for both exits — the
+ * mingo `$match` ({@link CUBE_OPERATOR_TO_MONGO_PREDICATE}) and the SQL echo
+ * ({@link CUBE_OPERATOR_TO_SQL_PREDICATE}) only render it, so the rows a chart
+ * is drawn from and the statement shown beside it cannot disagree on it.
+ *
+ * - `before` — a bare `YYYY-MM-DD` means the WHOLE day (#4042; the SQL twin is
+ *   #3777): the bound is the next day's midnight, exclusive.
+ * - `unbounded` — the same on `9999-12-31`, which has no next day (#20600):
+ *   every value is inside the bound, so what is left to ask is a value.
+ * - `through` — anything else keeps instant semantics, inclusive, compared
+ *   against the authored comparand in its storage form.
+ *
+ * ## ⛔ The order is the fix: widen the AUTHORED string, then convert the bound
+ *
+ * ADR-0053 D-E3: the calendar-day rewrite is a *calendar* operation and runs
+ * on the bare-day STRING first; only the resulting bound is converted to the
+ * storage form. Both rows used to ask {@link nextUtcCalendarDay} about
+ * `comparands[0]`, which is ALREADY in storage form — on a declared `datetime`
+ * field that is the instant `2026-07-28T00:00:00.000Z`, which the helper
+ * correctly refuses to widen, so `$lte: '2026-07-28'` compiled an inclusive
+ * bound at that midnight and dropped the rest of the day, while `find()` on the
+ * same filter (which widens `val` and converts `nextDay`, `memory-driver.ts`)
+ * kept it. On an undeclared field the storage form IS the authored string,
+ * which is why only the declared case was wrong. ⛔ Never teach
+ * `nextUtcCalendarDay` to widen an instant instead: it refuses one because an
+ * instant already says where it stops.
+ *
+ * `comparand` is the authored value's storage form, passed in rather than
+ * recomputed: it already exists, and the `through` arm is exactly it.
+ */
+type LteUpperBound =
+  | { readonly kind: 'before'; readonly bound: unknown }
+  | { readonly kind: 'unbounded' }
+  | { readonly kind: 'through'; readonly bound: unknown };
+
+function lteUpperBound(
+  authored: unknown,
+  comparand: unknown,
+  storageForm: (value: unknown) => unknown,
+): LteUpperBound {
+  const nextDay = nextUtcCalendarDay(authored);
+  if (isUnboundedAbove(nextDay)) return { kind: 'unbounded' };
+  if (nextDay != null) return { kind: 'before', bound: storageForm(nextDay) };
+  return { kind: 'through', bound: comparand };
+}
 
 /**
  * [#5374] How each cube operator becomes a mingo field predicate — the whole
@@ -266,9 +326,15 @@ const CUBE_OPERATOR_TO_MONGO_PREDICATE: Readonly<Record<CubeOperator, MongoPredi
   // A bare-day `lte` bound means "through that whole day" (#4042; the SQL twin
   // is #3777): compile half-open so timestamp values on the final day stay in.
   // Order-equivalent to `$lte` for plain `YYYY-MM-DD` values.
-  lte: ({ comparands }) => {
-    const nextDay = nextUtcCalendarDay(comparands[0]);
-    return nextDay != null ? { $lt: nextDay } : { $lte: comparands[0] };
+  // [#20600] On the last supported day there is no next day: every value is
+  // inside the bound, so what `lte` still asks is a value (the `set` row below).
+  // [#20661] Decided from the AUTHORED value by {@link lteUpperBound}, which
+  // the SQL twin shares — widening `comparands[0]` read an instant on a
+  // declared `datetime` field and never widened at all.
+  lte: ({ raw, comparands, storageForm }) => {
+    const upper = lteUpperBound(raw[0], comparands[0], storageForm);
+    if (upper.kind === 'unbounded') return { $ne: null };
+    return upper.kind === 'before' ? { $lt: upper.bound } : { $lte: upper.bound };
   },
   // The list operators take the WHOLE list. An empty one is a real predicate —
   // `$in: []` selects nothing, `$nin: []` selects everything — and saying so
@@ -322,6 +388,11 @@ interface SqlPredicateInput {
    * See {@link globSubstringPattern} for why GLOB and not LIKE.
    */
   readonly globSubstring: (value: unknown) => string;
+  /**
+   * [#20661] The storage-form conversion `comparands` came out of, for a bound
+   * the builder derives — the twin of {@link MongoPredicateInput.storageForm}.
+   */
+  readonly storageForm: (value: unknown) => unknown;
 }
 
 type SqlPredicateBuilder = (input: SqlPredicateInput) => string;
@@ -458,11 +529,17 @@ const CUBE_OPERATOR_TO_SQL_PREDICATE: Readonly<Record<CubeOperator, SqlPredicate
   // Half-open on a bare-day bound, exactly as the mingo row above is (#4042; the
   // SQL twin is #3777). `<= '2026-01-02'` drops that day's timestamped rows,
   // which is measurable as an echo one row NARROWER than the chart it describes.
-  lte: ({ column, comparands, literal }) => {
-    const nextDay = nextUtcCalendarDay(comparands[0]);
-    return nextDay != null
-      ? `${column} < ${literal(nextDay)}`
-      : `${column} <= ${literal(comparands[0])}`;
+  // [#20600] …and `IS NOT NULL` on the last supported day, as the mingo row
+  // above answers `$ne: null` there.
+  // [#20661] The same {@link lteUpperBound} decision the mingo row renders, so
+  // on a declared `datetime` field the echo reads `< '2026-07-29T00:00:00.000Z'`
+  // where it used to read `<= '2026-07-28T00:00:00.000Z'`.
+  lte: ({ column, raw, comparands, storageForm, literal }) => {
+    const upper = lteUpperBound(raw[0], comparands[0], storageForm);
+    if (upper.kind === 'unbounded') return `${column} IS NOT NULL`;
+    return upper.kind === 'before'
+      ? `${column} < ${literal(upper.bound)}`
+      : `${column} <= ${literal(upper.bound)}`;
   },
   // The list operators take the WHOLE list, and an EMPTY one is a real
   // predicate on this side too — `$in: []` selects nothing, `$nin: []`
@@ -575,6 +652,80 @@ function numericAggregandExpr(path: string): Record<string, unknown> {
 }
 
 /**
+ * [#20544] A `sum` or `avg` measure as ONE `$group` accumulator that adds with
+ * `@objectstack/core`'s {@link compensatedSum} — the fold objectql's rows path,
+ * this package's data face (`memory-driver.ts`, `computeAggregate`) and SQLite
+ * add with.
+ *
+ * ## What it replaced
+ *
+ * mingo's `$sum` and `$avg` add in a plain loop, so this face answered
+ * `0.6000000000000001` / `0.20000000000000004` over `0.1`, `0.2` and `0.3`
+ * where the rows path and SQLite answer `0.6` / `0.19999999999999998`, and
+ * `1e16, 1, -1e16` summed to `0` rather than `1`.
+ *
+ * ## Why an `$accumulator`, measured against the other two routes (mingo 7.2.4)
+ *
+ * - **A post-group recompute** is ruled out by the reason in
+ *   {@link numericAggregandExpr}'s header: it runs after the pipeline's own
+ *   `$sort` and `$limit`, so `order` over a `sum` measure would rank the value
+ *   the measure does not answer.
+ * - **A custom accumulator operator** cannot replace `$sum` / `$avg` through
+ *   the `mingo` entry point this package imports: its `Aggregator` merges the
+ *   default operators first (`Context.from`), and `addOps` keeps an operator
+ *   already present, so a caller's context can only ADD a name. A new name
+ *   would have to be registered where each `Aggregator` is built — the
+ *   driver's public `aggregate()` and {@link MemoryAnalyticsService}'s own
+ *   time-bucket half — widening the pipeline dialect the driver accepts.
+ * - **`$accumulator`** is in mingo's default operator set and needs
+ *   `scriptEnabled`, which `ComputeOptions.init` defaults to `true`; both
+ *   `Aggregator`s this face runs take the default options. It stays inside the
+ *   `$group` stage, so every later stage sees the finished number.
+ *
+ * ## What does not move
+ *
+ * Only the addition. The aggregand is {@link numericAggregandExpr}, as before,
+ * and the addends are the values mingo's own `$sum` / `$avg` add: numbers,
+ * NaN excluded (mingo's `isNumber`), so null, a missing key and a non-numeric
+ * string stay ignored. `avg` over no addend is `null`, `sum` over none is `0`,
+ * exactly as mingo answered. The values are added in the group's row order,
+ * the order mingo's `$push` collects them in, so the naive running sum inside
+ * {@link compensatedSum} is the one `$sum` computed.
+ *
+ * The functions are named, and {@link pipelineDumpReplacer} renders a function
+ * by its name, so the pipeline dump still says which fold a measure runs.
+ */
+function compensatedAddendAccumulator(path: string, fn: 'sum' | 'avg'): Record<string, unknown> {
+  return {
+    $accumulator: {
+      init: startAddends,
+      accumulateArgs: [numericAggregandExpr(path)],
+      accumulate: collectAddend,
+      finalize: fn === 'sum' ? compensatedSumOfAddends : compensatedMeanOfAddends,
+      lang: 'js',
+    },
+  };
+}
+
+function startAddends(): number[] {
+  return [];
+}
+
+/** mingo's `isNumber`: the values its `$sum` and `$avg` add. */
+function collectAddend(addends: number[], value: unknown): number[] {
+  if (typeof value === 'number' && !Number.isNaN(value)) addends.push(value);
+  return addends;
+}
+
+function compensatedSumOfAddends(addends: readonly number[]): number {
+  return compensatedSum(addends);
+}
+
+function compensatedMeanOfAddends(addends: readonly number[]): number | null {
+  return addends.length === 0 ? null : compensatedSum(addends) / addends.length;
+}
+
+/**
  * [#7853] A `JSON.stringify` replacer that renders a `RegExp` operand instead of
  * dropping it — the one value type the pipeline dump carries that
  * `JSON.stringify` erases.
@@ -621,13 +772,19 @@ function numericAggregandExpr(path: string): Record<string, unknown> {
  *
  * Every other value on this path already renders faithfully, measured rather
  * than assumed: a `Date` comparand is canonicalized to an ISO string by
- * {@link MemoryAnalyticsService.comparandsFor} before it reaches here, and
+ * {@link MemoryAnalyticsService.storageFormFor} before it reaches here, and
  * `toJSON` runs BEFORE a replacer in any case, so dates are unchanged. A
  * `BigInt` comparand does throw — but out of mingo's own `Query.compile` during
  * EXECUTION, before this dump is ever built, so no replacer here reaches it.
  */
 function pipelineDumpReplacer(_key: string, value: unknown): unknown {
-  return value instanceof RegExp ? `/${value.source}/${value.flags}` : value;
+  if (value instanceof RegExp) return `/${value.source}/${value.flags}`;
+  // [#20544] A function is the other value `JSON.stringify` erases, and the
+  // `sum` / `avg` `$accumulator` carries three ({@link
+  // compensatedAddendAccumulator}). Dropped, the two measures dump identically;
+  // by name, the dump still says which fold each one runs.
+  if (typeof value === 'function') return `[function ${value.name}]`;
+  return value;
 }
 
 /**
@@ -875,9 +1032,11 @@ export class MemoryAnalyticsService implements IAnalyticsService {
         // FROM: a boolean reaches mingo as a boolean and `null` as `null`, so a
         // predicate over `is_active` or `closed_at` selects the same rows
         // `find()` selects instead of none / all of them.
+        const storageForm = this.storageFormFor(cube, filter.member);
         const predicate = this.mongoPredicateBuilder(filter.operator)({
-          comparands: this.comparandsFor(cube, filter.member, filter.values),
+          comparands: filter.values.map(storageForm),
           raw: filter.values,
+          storageForm,
           substring: (value) => this.driver.filterSubstringPattern(value),
           // [#6520] `$icontains`' fold, from the spec's shared definition rather
           // than from the driver's Unicode-folding `filterSubstringPattern`.
@@ -991,17 +1150,27 @@ export class MemoryAnalyticsService implements IAnalyticsService {
           //
           // Anything else -- a full timestamp the CALLER wrote -- keeps
           // instant semantics and stays INCLUSIVE, byte for byte as before.
-          const widenedDay = resolved.endExclusive ? null : nextUtcCalendarDay(end);
+          //
+          // [#20600] A caller's bare end on the last supported day has no next
+          // day to stop before: every value is inside it, so the window keeps
+          // its start alone, in both spellings.
+          const widened = resolved.endExclusive ? null : nextUtcCalendarDay(end);
+          const unbounded = isUnboundedAbove(widened);
+          const widenedDay = isUnboundedAbove(widened) ? null : widened;
           const upperString = resolved.endExclusive ? end : widenedDay;
           const upperDate = widenedDay != null
             ? new Date(`${widenedDay}T00:00:00.000Z`)
             : (resolved.endExclusive ? new Date(end) : null);
-          const stringBounds = upperString != null
-            ? { $gte: start, $lt: upperString }
-            : { $gte: start, $lte: end };
-          const dateBounds = upperDate != null
-            ? { $gte: new Date(start), $lt: upperDate }
-            : { $gte: new Date(start), $lte: new Date(end) };
+          const stringBounds = unbounded
+            ? { $gte: start }
+            : upperString != null
+              ? { $gte: start, $lt: upperString }
+              : { $gte: start, $lte: end };
+          const dateBounds = unbounded
+            ? { $gte: new Date(start) }
+            : upperDate != null
+              ? { $gte: new Date(start), $lt: upperDate }
+              : { $gte: new Date(start), $lte: new Date(end) };
           pipeline.push({
             $match: {
               $or: [
@@ -1345,10 +1514,12 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     const normalizedFilters = this.normalizeFilters(query);
     for (const filter of normalizedFilters) {
       const fieldPath = this.resolveFieldPath(cube, filter.member);
+      const storageForm = this.storageFormFor(cube, filter.member);
       whereClauses.push(this.sqlPredicateBuilder(filter.operator)({
         column: fieldPath,
-        comparands: this.comparandsFor(cube, filter.member, filter.values),
+        comparands: filter.values.map(storageForm),
         raw: filter.values,
+        storageForm,
         literal: (value) => this.toSqlLiteral(value),
         globSubstring: (value) => this.toSqlLiteral(globSubstringPattern(value)),
       }));
@@ -1520,9 +1691,13 @@ export class MemoryAnalyticsService implements IAnalyticsService {
   }
 
   /**
-   * [#5373] The comparands of one lowered entry, in the storage form of the
-   * field they are compared against — the ONE place either exit converts a
-   * value, so the two exits cannot drift apart.
+   * [#5373] The conversion that puts a value into the storage form of the field
+   * one lowered entry is compared against — the ONE place either exit converts
+   * a value, so the two exits cannot drift apart. Each exit maps the entry's
+   * comparands through it, and hands the same function to its predicate builder
+   * for the one value a builder derives rather than receives: the whole-day
+   * bound of an `lte` (#20661, {@link lteUpperBound}), which has to be widened
+   * from the AUTHORED day before it is converted (ADR-0053 D-E3).
    *
    * The only conversion left is the temporal one (#4047): a `datetime` column
    * holds canonical UTC ISO text, so a `Date` comparand has to become that text
@@ -1535,10 +1710,10 @@ export class MemoryAnalyticsService implements IAnalyticsService {
    * boolean stays a boolean, `null` stays `null`, and a text column's `'100'`
    * stays the string `'100'` instead of becoming the number `100`.
    */
-  private comparandsFor(cube: Cube, member: string, values: unknown[]): unknown[] {
+  private storageFormFor(cube: Cube, member: string): (value: unknown) => unknown {
     const table = this.extractTableName(cube.sql);
     const fieldPath = this.resolveFieldPath(cube, member);
-    return values.map(v => this.driver.filterComparandStorageForm(table, fieldPath, v));
+    return (value) => this.driver.filterComparandStorageForm(table, fieldPath, value);
   }
 
   /**
@@ -1637,10 +1812,12 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     switch (measure.type) {
       case 'count':
         return { $sum: 1 };
+      // [#20544] Compensated, as every other face the platform owns adds —
+      // see {@link compensatedAddendAccumulator}.
       case 'sum':
-        return { $sum: numericAggregandExpr(`$${fieldPath}`) };
+        return compensatedAddendAccumulator(`$${fieldPath}`, 'sum');
       case 'avg':
-        return { $avg: numericAggregandExpr(`$${fieldPath}`) };
+        return compensatedAddendAccumulator(`$${fieldPath}`, 'avg');
       // [#11152] `min`/`max` take the SAME boolean coercion as `sum`/`avg` —
       // maintainer ruling 2026-08-28 (superseding #11249's `false`/`true`):
       // booleans aggregate as NUMBERS on every face, no per-aggregate

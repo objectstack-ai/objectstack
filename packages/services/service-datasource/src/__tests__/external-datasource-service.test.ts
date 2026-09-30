@@ -441,7 +441,7 @@ describe('validateAll', () => {
   });
 
   /**
-   * [#11166] The card's measured defect, reproduced: an introspector throwing
+   * [commit 735f5c709] Its card's measured defect, reproduced: an introspector throwing
    * `connect ECONNREFUSED 10.0.0.5:5432` used to come back as
    * `kind: 'missing_table'` — indistinguishable from a genuinely dropped
    * table, and an abort under the boot gate's default `onMismatch: 'fail'`.
@@ -490,7 +490,7 @@ describe('validateAll', () => {
   });
 
   /**
-   * [#11166] The other half of the distinction: a table genuinely absent from
+   * [commit 735f5c709] The other half of the distinction: a table genuinely absent from
    * a schema that WAS read stays `missing_table` — the classification change
    * must not blur the measured fact into the indeterminate kind.
    */
@@ -514,7 +514,7 @@ describe('validateAll', () => {
 });
 
 /**
- * [#10537] `validateDatasource` — the same sweep, scoped to one datasource.
+ * [commit e634ecf6a] `validateDatasource` — the same sweep, scoped to one datasource.
  *
  * The card it closes is a COST/SHAPE defect, not a wrong answer:
  * `POST /datasources/:name/external/validate` used to run `validateAll()` and
@@ -585,7 +585,7 @@ describe('validateDatasource', () => {
     return { svc, introspected };
   }
 
-  /** What the pre-#10537 route computed: the whole sweep, filtered afterwards. */
+  /** What the route computed before commit e634ecf6a: the whole sweep, filtered afterwards. */
   async function sweptThenFiltered(datasource: string, opts?: { unreachable?: readonly string[] }) {
     const { svc, introspected } = makeMulti(opts);
     const report = await svc.validateAll();
@@ -649,7 +649,7 @@ describe('validateDatasource', () => {
 
     // The scoped path still turns a per-object throw into a row rather than
     // rejecting the whole report — the sweep's `catch`, not a second one.
-    // [#11166] The row's kind is `unreachable` (the fixture's introspector
+    // [commit 735f5c709] The row's kind is `unreachable` (the fixture's introspector
     // threw a connection error), no longer the invented `missing_table`.
     expect(introspected).toEqual(['wh_b']);
     expect(report.ok).toBe(false);
@@ -673,7 +673,7 @@ describe('validateDatasource', () => {
 });
 
 /**
- * [#10962] Per-sweep introspection memo — the CALL COUNT is the deliverable.
+ * [commit 29d067646] Per-sweep introspection memo — the CALL COUNT is the deliverable.
  *
  * `validateObject` reads the live remote schema on every call, so a sweep over
  * M federated objects on one datasource used to perform M concurrent
@@ -810,7 +810,7 @@ describe('per-sweep introspection memo [#10962]', () => {
         datasource: M_DATASOURCE,
         diffs: [
           expect.objectContaining({
-            // [#11166] A throw out of introspect is `unreachable`, never an
+            // [commit 735f5c709] A throw out of introspect is `unreachable`, never an
             // invented `missing_table` — this pin is about the COUNT (one
             // shared connection attempt), and rides the kind ruling as-is.
             kind: 'unreachable',

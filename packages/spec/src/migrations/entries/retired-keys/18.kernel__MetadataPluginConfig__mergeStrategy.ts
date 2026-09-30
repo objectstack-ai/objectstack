@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
-// #12057, adopting retirement; re-charter #13135 executes the widened
+// Commit 9e0ba21a1 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+// #12057, adopting retirement; re-chartered, that commit executes the widened
 // surface). `mergeStrategy` embedded the paper protocol's
 // `MergeStrategyConfigSchema` (keep-custom / accept-incoming /
 // three-way-merge) and was read by NOTHING: no 3-way merge engine ever

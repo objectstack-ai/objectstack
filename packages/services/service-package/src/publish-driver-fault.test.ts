@@ -354,7 +354,7 @@ describe('[#8131] the caller-facing sentence interpolates nothing', () => {
  * an accident the `{code}`-only fakes above cannot see.
  *
  * ⛔ Not a re-judgement of `declaresHttpAnswer`: its docblock already says a
- * declared 5xx is re-thrown too. The reviewer of PR #16650 required the flip
+ * declared 5xx is re-thrown too. The reviewer of commit 001a83b04 required the flip
  * to be pinned, not the predicate to be changed.
  */
 describe('[#16019] a raw-statement fault that DECLARES its status is re-thrown, where its undeclared ancestor was swallowed', () => {

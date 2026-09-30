@@ -32,7 +32,7 @@ import { buildExistingByName } from './seed-name-lookup.js';
  *     `organization_id: null` unsatisfiable here while working in production.
  *  4. **`$in` membership**, because the real engine has it (`security-plugin.ts`
  *     already reads `sys_permission_set` with `{ name: { $in: names } }`) and
- *     the curated half's batched existence read (#11451) uses it. A double that
+ *     the curated half's batched existence read (commit c33f18592) uses it. A double that
  *     refused it would be pinning the double's limits, not the seeder's
  *     behaviour. Every OTHER value-level operator is still REFUSED rather than
  *     read as a column comparison.
@@ -954,7 +954,7 @@ describe('[#8751] a platform-STAMPED row inside an organization is not the platf
 });
 
 /**
- * [#11451] WHY THE #8470 PREDICATE TRAVELS INSIDE THE BATCHED READ.
+ * [commit c33f18592] WHY THE #8470 PREDICATE TRAVELS INSIDE THE BATCHED READ.
  *
  * The filing offered "two batched reads, the curated half post-filtering on
  * `managed_by`/`organization_id` in memory" as the cheap option. It is not
@@ -1015,11 +1015,11 @@ describe('#11451 — the batched curated read must carry its predicate, not filt
 
   it('WITHOUT the predicate the page hauls every organization\'s copy — and the wrong row answers', async () => {
     const ql = fixture();
-    // ⚠️ [#11518] THIS TEST USED TO PIN THE OPPOSITE OUTCOME, and the change is
+    // ⚠️ [commit e1d773eb7] THIS TEST USED TO PIN THE OPPOSITE OUTCOME, and the change is
     // the repair rather than a weakened assertion. The unscoped page was capped
     // at one row per requested name, so on this same 10-row fixture the two
     // highest-id platform rows fell off the 8-row page and their names read as
-    // `absent` — which routes the caller to its INSERT branch. That was #11518's
+    // `absent` — which routes the caller to its INSERT branch. That was commit e1d773eb7's
     // measurement, taken here; the cap is now measured rather than trusted
     // (`seed-name-lookup.ts`), so the page carries all ten rows and loses nobody.
     const index = await buildExistingByName(ql, 'sys_capability', CURATED_NAMES);
@@ -1027,10 +1027,10 @@ describe('#11451 — the batched curated read must carry its predicate, not filt
       expect((await index.get(name)).status, name).toBe('present');
     }
 
-    // What #11518 does NOT repair — and cannot — is WHICH row answers. The
+    // What commit e1d773eb7 does NOT repair — and cannot — is WHICH row answers. The
     // unpredicated read still hauls both organizations' copies into the page,
     // and unscoped the first row is the row, so an organization's authored copy
-    // answers for the platform's own definition. That is #11451 exactly, and no
+    // answers for the platform's own definition. That is the defect commit c33f18592 fixed, and no
     // page budget reaches it: only the predicate does.
     const shared = await index.get(SHARED);
     expect((shared as { row: any }).row.id).toBe('aaa_org_jia');
@@ -1070,7 +1070,7 @@ describe('#11451 — the batched curated read must carry its predicate, not filt
 });
 
 /**
- * [#11518] THE UNSCOPED PAGE CAP IS A MEASUREMENT, NOT A PROMISE.
+ * [commit e1d773eb7] THE UNSCOPED PAGE CAP IS A MEASUREMENT, NOT A PROMISE.
  *
  * `readNamePage` used to cap an unscoped page at `names.length`, which is exact
  * only while one row can exist per name. Since #8461 / ADR-0120 D1 the identity
@@ -1145,7 +1145,7 @@ describe('#11518 — a page that could not fit the answer must not report "absen
     // the tail of the curated list that falls off a `length`-capped page. This
     // read hard-coded `[6]`/`[7]` while the list had eight entries, and went
     // red the day the list grew — the count belongs to the list, never to
-    // prose (this file's own #8919-era rule, applied to indices).
+    // prose (the rule of the write-door census commit b5378550e created, applied to indices).
     for (const lost of CURATED_NAMES.slice(-2)) {
       expect(namesOnThePage.has(lost)).toBe(false);
       expect(ql.rows.some((r: any) => r.name === lost && r.managed_by === 'platform')).toBe(true);

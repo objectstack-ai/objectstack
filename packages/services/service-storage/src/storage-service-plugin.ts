@@ -389,7 +389,7 @@ export class StorageServicePlugin implements Plugin {
         // deployment flag, fresh — before any byte is deleted.
         installFileReferenceHooks(engine as any, () => this.storage, ctx.logger);
         // "Is anything still holding this tombstone?" for RECORD FILE-FIELD
-        // HYDRATION (#11427). The download path got this question in #10246;
+        // HYDRATION (commit c3c72a4bc). The download path got this question in #10246;
         // the record read kept the older `status === 'committed'` rule, so one
         // `sys_file` row answered 200 at `/files/:id` and a bare id inside a
         // record payload — which UI and export render as "no attachment".
@@ -1045,7 +1045,7 @@ function buildAuthSessionResolver(
  * SUPPORTED and its behaviour here is exactly what it was.
  *
  * The throw is raised inside the authorizer's own `try`, so it takes the
- * #13279 relay that block already runs for the identical fault one seam over
+ * relay that block has run since commit 6a180e42d for the identical fault one seam over
  * (`isAuthzStoreUnavailableError(err)` re-raises instead of returning
  * `'deny'`). Deliberately NOT a second net.
  *
@@ -1054,9 +1054,9 @@ function buildAuthSessionResolver(
  * authorizer in `catch { verdict = 'deny' }`, so the re-raise was absorbed one
  * frame up and a failed posture read rendered as the download gate's own 403
  * refusal — fail-CLOSED, never an admission, but wearing the costume of a
- * capability denial, which is the confusion #13279 exists to prevent. That
- * flattening was PRE-EXISTING (it had swallowed the #13279 permission-store
- * outage at this door since that card landed, out of the same `catch`) and was
+ * capability denial, which is the confusion commit 6a180e42d was made to prevent. That
+ * flattening was PRE-EXISTING (it had swallowed the branded permission-store
+ * outage at this door since commit 6a180e42d landed, out of the same `catch`) and was
  * repaired by #15999's ruling item 3: the `catch` now RELAYS the declared
  * `503` / `SERVICE_UNAVAILABLE` envelope. The pin below still asserts the
  * outage CLASS — never 200, never a minted capability — and its 403 arm retired
@@ -1146,7 +1146,7 @@ function buildFileReadAuthorizer(
       // posture-conditional API-key refusals unreachable here — see
       // `resolveAdmissionTenancyPosture` above for the classification, and for
       // why a quiet `catch` at this seam would be the defect rather than the
-      // fix. Raised INSIDE this `try`, so an outage takes the #13279 relay in
+      // fix. Raised INSIDE this `try`, so an outage takes the relay (commit 6a180e42d) in
       // the `catch` below rather than a new net.
       const tenancyPosture = await resolveAdmissionTenancyPosture(registry);
       const authz = await resolveAuthzContext({ ql: engine, headers, getSession, tenancyPosture });
@@ -1226,7 +1226,7 @@ function buildFileReadAuthorizer(
       }
       return 'deny';
     } catch (err) {
-      // [#13279] A permission-store outage is not a read verdict. Re-raised so
+      // [commit 6a180e42d] A permission-store outage is not a read verdict. Re-raised so
       // the file-read door answers the 503 it is instead of a silent 'deny'
       // indistinguishable from a genuine refusal.
       if (isAuthzStoreUnavailableError(err)) throw err;

@@ -187,4 +187,32 @@ describe('matchesFilterCondition — calendar-day upper bounds (ADR-0053 D-D, #3
     expect(m(at('2026-07-28T09:15:00.000Z'), { created_at: { $lte: null } as never })).toBe(false);
     expect(m(at('2026-07-28T09:15:00.000Z'), { created_at: { $between: ['2026-04-29', null] } as never })).toBe(false);
   });
+
+  // [#20600] 9999-12-31, the last supported day, has no next day: every instant
+  // is inside its whole-day bound. It compared against the five-digit
+  // '10000-01-01', which every '2026-…' value sorts above, so the check DENIED
+  // every write it should have admitted.
+  it('on the last supported day, every instant is admitted — string or Date', () => {
+    expect(m(at('2026-07-15T14:00:00.000Z'), { created_at: { $lte: '9999-12-31' } })).toBe(true);
+    expect(m(at('9999-12-31T23:59:59.999Z'), { created_at: { $lte: '9999-12-31' } })).toBe(true);
+    expect(m({ created_at: new Date('9999-12-31T10:00:00.000Z') }, { created_at: { $lte: '9999-12-31' } })).toBe(true);
+    expect(m({ signed_on: '9999-12-31' }, { signed_on: { $lte: '9999-12-31' } })).toBe(true);
+    expect(m(at('2026-07-15T14:00:00.000Z'), { created_at: { $between: ['2026-01-01', '9999-12-31'] } })).toBe(true);
+    expect(m(at('9999-12-31T10:00:00.000Z'), { created_at: { $between: ['9999-12-31', '9999-12-31'] } })).toBe(true);
+    // The min still bounds.
+    expect(m(at('2025-12-31T23:59:59.999Z'), { created_at: { $between: ['2026-01-01', '9999-12-31'] } })).toBe(false);
+  });
+
+  it('…9999-12-30 is still a bound (the control)', () => {
+    expect(m(at('9999-12-30T10:00:00.000Z'), { created_at: { $lte: '9999-12-30' } })).toBe(true);
+    expect(m(at('9999-12-31T10:00:00.000Z'), { created_at: { $lte: '9999-12-30' } })).toBe(false);
+  });
+
+  it('…a value that denotes no instant keeps the comparison as written — no schema here says it is temporal', () => {
+    expect(m({ code: 'zzz' }, { code: { $lte: '9999-12-31' } })).toBe(false);
+    expect(m({ code: '5000' }, { code: { $lte: '9999-12-31' } })).toBe(true);
+    expect(m({ code: true }, { code: { $lte: '9999-12-31' } })).toBe(false);
+    expect(m({ code: null }, { code: { $lte: '9999-12-31' } })).toBe(false);
+    expect(m({}, { code: { $lte: '9999-12-31' } })).toBe(false);
+  });
 });

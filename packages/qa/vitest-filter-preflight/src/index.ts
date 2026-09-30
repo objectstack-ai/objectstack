@@ -2,7 +2,7 @@
 
 /**
  * A vitest FILE FILTER that selects nothing must say so — even when the rest
- * of the same run selects something (#17853, #17978).
+ * of the same run selects something (commit 08f5f0e5a, #17978).
  *
  * ## The defect this closes, and the half vitest already covers
  *
@@ -270,7 +270,7 @@ export function testFilesUnder(root: string): string[] {
  * other seven: its `Populations` is a record of CONCRETE paths and a glob
  * pattern cannot be a member of one. `packages/cli` satisfies the concrete-path
  * contract only as a by-product of a tier walk it already performed for
- * unrelated reasons (#13504 / #14554), so it passes its two exact arrays to
+ * unrelated reasons (commit 44813ba57 / #14554), so it passes its two exact arrays to
  * `runFilterPreflight` directly and never calls this function.
  *
  * The exact project's population is `L` itself — exact, not a superset, because

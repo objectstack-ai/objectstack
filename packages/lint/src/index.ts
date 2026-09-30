@@ -849,6 +849,13 @@ export {
   FLOW_DECISION_INCLUSIVE_OVERLAP,
 } from './lint-flow-patterns.js';
 
+// A credential typed as a literal into a served flow position — the advisory,
+// its rule id, and the ONE predicate it asks (the name lists live in that
+// module and nowhere else; a consumer that needs the verdict calls it).
+export { lintFlowCredentialLiterals, FLOW_CREDENTIAL_LITERAL } from './lint-flow-credential-literals.js';
+export type { FlowCredentialLiteralFinding } from './lint-flow-credential-literals.js';
+export { isCredentialShapedLiteral } from './credential-literal.js';
+
 export { lintLivenessProperties } from './lint-liveness-properties.js';
 // #11624 — the ledger's warn set, as a decision procedure. `os lint` runs the
 // rule above AND the CLI's i18n coverage walker in one pass, and the walker has

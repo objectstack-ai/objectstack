@@ -19,6 +19,7 @@ import {
     type ScheduledWorkTriggerOptions,
 } from './schedule-trigger.js';
 import type { ScheduledRunOwnership } from '@objectstack/types';
+import { wallClockToUtcMs } from '@objectstack/core';
 // [#18378] The ONE resolver for "which organization does this record BELONG
 // to" — the WALL question (`tenancy.enabled: false` ⇒ nothing, then a declared
 // `tenancy.tenantField`, then the kernel's `organization_id`), shared with the
@@ -46,7 +47,7 @@ export interface TimeRelativeDataEngine {
             limit?: number;
             /**
              * The sweep's execution context. Two INDEPENDENT axes, and this
-             * sweep sets both (#16659):
+             * sweep sets both (commit ecdfc9411):
              *
              *  - `isSystem` is AUTHORIZATION — a background sweep must see
              *    every row the organization holds, not the RLS-scoped subset
@@ -113,14 +114,23 @@ export interface DateWindow {
 
 // ─── Pure window math (day-granular, UTC) ───────────────────────────
 
+/**
+ * `d`'s UTC calendar day as parts. [#20599] Both bounds below are built from
+ * them by core's `wallClockToUtcMs`, never `Date.UTC`, which reads a year from
+ * 0 to 99 as 1900 + year: an offset that reaches 0001..0099 keeps its year.
+ */
+function utcDayParts(d: Date): { year: number; month: number; day: number } {
+    return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+}
+
 /** Start of `d`'s UTC calendar day (00:00:00.000Z). */
 function startOfUtcDay(d: Date): Date {
-    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0));
+    return new Date(wallClockToUtcMs(utcDayParts(d)));
 }
 
 /** End of `d`'s UTC calendar day (23:59:59.999Z) — inclusive upper bound. */
 function endOfUtcDay(d: Date): Date {
-    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999));
+    return new Date(wallClockToUtcMs({ ...utcDayParts(d), hour: 23, minute: 59, second: 59, millisecond: 999 }));
 }
 
 /** `d`'s UTC day shifted by `n` whole days (exact in UTC — no DST drift). */
@@ -205,7 +215,7 @@ export function buildWindowWhere(desc: TimeRelativeDescriptor, window: DateWindo
 }
 
 /**
- * [#16659] Why the engine will DROP this sweep's tenant scope for `schema`, or
+ * [commit ecdfc9411] Why the engine will DROP this sweep's tenant scope for `schema`, or
  * `null` when it will apply it.
  *
  * `Engine.buildDriverOptions` scopes a read by `context.tenantId` unless the
@@ -333,7 +343,7 @@ export class TimeRelativeTrigger implements FlowTrigger {
         }
         const desc = parsed.data;
 
-        // [#16659] A time-relative sweep launches from a clock, exactly as a
+        // [commit ecdfc9411] A time-relative sweep launches from a clock, exactly as a
         // plain schedule flow does, so it owes the same declaration and takes
         // the same refusal. It is NOT the weaker case for carrying an
         // organization, it is the stronger one: the sweep runs ELEVATED
@@ -352,7 +362,7 @@ export class TimeRelativeTrigger implements FlowTrigger {
         // elevation argument above is why the `single` case is still safe: an
         // unscoped `isSystem` read on a one-organization install selects that
         // organization's rows and the platform's NULL-tenant rows, which is
-        // exactly what it selected before #16659 and what the #8844 guard
+        // exactly what it selected before commit ecdfc9411 and what the #8844 guard
         // resolves beneath it.
         const organization = resolveBindingOrganization(binding);
         if (policy.requiresActingOrganization && organization === null) {
@@ -405,7 +415,7 @@ export class TimeRelativeTrigger implements FlowTrigger {
                 // author never made.
                 const inertBecause = organization !== null ? organizationScopeIsInertFor(known) : null;
                 if (inertBecause) {
-                    // [#16659] ⛔ A DISCLOSURE, never a narrowing. The sweep
+                    // [commit ecdfc9411] ⛔ A DISCLOSURE, never a narrowing. The sweep
                     // passes `context.tenantId` unconditionally and the ENGINE
                     // decides whether it applies; this branch re-reads the two
                     // declarations the engine documents as its exemptions
@@ -450,7 +460,7 @@ export class TimeRelativeTrigger implements FlowTrigger {
                 // Error isolation: a sweep failure must not crash the job
                 // runner / ticker. Log and swallow.
                 //
-                // [#16659] At `error` when the logger has one, for the reason
+                // [commit ecdfc9411] At `error` when the logger has one, for the reason
                 // {@link TriggerLogger.error} already states: the CLI's
                 // boot-quiet window swallows stdout, so a `warn` here can be
                 // the whole of what a broken sweep says and still be invisible.
@@ -474,7 +484,7 @@ export class TimeRelativeTrigger implements FlowTrigger {
                 const mode = desc.offsetDays
                     ? `offsets [${desc.offsetDays.join(', ')}]d`
                     : `within ${desc.withinDays}d`;
-                // [#16659] The organization is on the BIND line, not only in
+                // [commit ecdfc9411] The organization is on the BIND line, not only in
                 // the refusal: it is now the sweep's selection scope as well as
                 // the run's identity, so "which rows can this flow ever see" is
                 // answerable from the boot log instead of from the metadata.
@@ -514,7 +524,7 @@ export class TimeRelativeTrigger implements FlowTrigger {
         desc: TimeRelativeDescriptor,
         maxRecords: number,
         /**
-         * [#16659] The declared organization, or `null`.
+         * [commit ecdfc9411] The declared organization, or `null`.
          *
          * When declared it bounds this sweep TWICE, and both halves are
          * load-bearing:
@@ -530,7 +540,7 @@ export class TimeRelativeTrigger implements FlowTrigger {
          * second organization to cross to there (plugin-auth's org-create
          * posture gate refuses one), so an
          * unscoped sweep is not the cross-organization task the ruling forbids
-         * — it is the shape a single-organization install had before #16659.
+         * — it is the shape a single-organization install had before commit ecdfc9411.
          * Under `isolated` `start()` still refuses an undeclared binding, and
          * with the switch off nothing binds, so `null` cannot arrive from
          * either.
@@ -548,7 +558,7 @@ export class TimeRelativeTrigger implements FlowTrigger {
          * Only `'per-record'` changes behaviour here, and only while
          * `organization === null`: an explicit declaration outranks it, because
          * a declaration bounds SELECTION as well as identity and silently
-         * widening a flow the author scoped would be the #16659 defect again.
+         * widening a flow the author scoped would be the defect commit ecdfc9411 fixed, again.
          */
         ownership: ScheduledRunOwnership,
         callback: (ctx: AutomationContext) => Promise<void>,
@@ -572,7 +582,7 @@ export class TimeRelativeTrigger implements FlowTrigger {
                 (await engine.find(desc.object, {
                     where,
                     limit: maxRecords,
-                    // [#16659] SELECTION is scoped to the declared organization,
+                    // [commit ecdfc9411] SELECTION is scoped to the declared organization,
                     // not just the run that follows it.
                     //
                     // `isSystem` alone was the whole context here, and it made
@@ -602,7 +612,7 @@ export class TimeRelativeTrigger implements FlowTrigger {
                     // (`tenancy.enabled: false`, ADR-0066; federated, ADR-0015),
                     // and every driver that CAN isolate then scopes, while
                     // `driver-memory` — which cannot — refuses the call by name
-                    // (#16589). Refusal is the correct answer for a sweep that
+                    // (commit 555a89cbd). Refusal is the correct answer for a sweep that
                     // is required to stay inside one organization and is talking
                     // to a store that cannot keep it there, and it arrives as a
                     // logged sweep failure rather than as silence.
@@ -689,7 +699,7 @@ export class TimeRelativeTrigger implements FlowTrigger {
                     record,
                     object: desc.object,
                     event: 'time_relative',
-                    // [#16659] The acting organization — the same key a
+                    // [commit ecdfc9411] The acting organization — the same key a
                     // record-change run inherits from its triggering session,
                     // and the one `notify-node.ts` and the run-history writer
                     // already read.

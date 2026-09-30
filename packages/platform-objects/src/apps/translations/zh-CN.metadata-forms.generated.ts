@@ -1798,7 +1798,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "本报表渲染的语义层数据集。度量与行分别来自该数据集的度量与维度"
       },
       joined_blocks: {
-        label: "关联对象",
+        label: "joined 报表分块",
         description: "叠加进同一张报表的其他数据集分块（仅 joined 报表）"
       },
       filter_and_chart: {
@@ -1853,7 +1853,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       blocks: {
         label: "分块",
-        helpText: "joined 报表的联合查询块"
+        helpText: "绑定数据集的子报表（仅 joined 报表）"
       },
       "blocks.name": {
         label: "名称"
@@ -2248,7 +2248,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       tab_and_row_level_security: {
         label: "标签页与行级安全",
-        description: "导航可见性与共享规则"
+        description: "标签页可见性与行级安全策略"
       }
     },
     fields: {
@@ -2344,7 +2344,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       capabilities: {
         label: "能力配置",
-        description: "代理可使用的技能、工具与知识来源"
+        description: "代理可使用的技能与知识来源"
       },
       access: {
         label: "访问与安全",

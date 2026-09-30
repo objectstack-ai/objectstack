@@ -613,7 +613,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
   }
 
   /**
-   * [#10962] The body of {@link validateObject}, with the live-schema read
+   * [commit 29d067646] The body of {@link validateObject}, with the live-schema read
    * abstracted behind `readSchema` so one sweep can share a single read per
    * datasource across all of its objects. `readSchema` is either
    * `config.introspect` itself (the public single-object path above) or the
@@ -716,7 +716,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
   }
 
   /**
-   * [#10962] One live schema read per datasource per SWEEP.
+   * [commit 29d067646] One live schema read per datasource per SWEEP.
    *
    * Returns a reader that memoises `config.introspect` by datasource name for
    * the lifetime of ONE {@link validateEach} call. The memo is a local of that
@@ -751,7 +751,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
    * one object whose definition vanished mid-sweep) must not erase the verdicts
    * of the objects that did validate.
    *
-   * [#10962] All objects in one call share one live schema read per datasource
+   * [commit 29d067646] All objects in one call share one live schema read per datasource
    * (see {@link sweepScopedIntrospect}); the memo dies with this call.
    *
    * ## Why the row's kind is `unreachable` for EVERY throw — no error sniffing
@@ -770,7 +770,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
    * from a successfully read schema in which the table is absent. A throw
    * means the comparison never ran, and per the repo's read-failure
    * classification precedent (`READ_FAILURE_DISCRIMINATORS`,
-   * `packages/types/src/driver-error-classification.ts` (#13279 moved it there
+   * `packages/types/src/driver-error-classification.ts` (commit 6a180e42d moved it there
    * from `packages/metadata/src/utils/schema-sync-errors.ts`): a fact verdict must
    * be POSITIVELY EARNED, never defaulted to), no signature test on the thrown
    * value can earn a claim about a remote schema nobody read. Deliberately NOT
@@ -819,7 +819,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
   }
 
   /**
-   * [#10537] Validate the federated objects bound to ONE datasource.
+   * [commit e634ecf6a] Validate the federated objects bound to ONE datasource.
    *
    * The scoped twin of {@link validateAll}, composed from the same primitives
    * (`listObjects` → filter → `validateObject`) so a caller that asked about

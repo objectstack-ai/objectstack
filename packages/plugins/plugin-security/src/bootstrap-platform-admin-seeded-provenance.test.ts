@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #8692 — what provenance a REAL `bootstrapPlatformAdmin` run leaves on the
+ * [commit 712e185db] What provenance a REAL `bootstrapPlatformAdmin` run leaves on the
  * platform default permission sets, and what `os meta resync` then does with it.
  *
  * ## Why this file exists at all
@@ -136,7 +136,7 @@ async function rowViaEngine(engine: ObjectQL, name: string): Promise<any> {
 }
 
 /**
- * A row exactly as a PRE-#8692 install holds it — written the way the old
+ * A row exactly as an install before commit 712e185db holds it — written the way the old
  * seeder wrote it, which is to say WITHOUT `managed_by`, so the value comes
  * from the declaration's `defaultValue: 'admin'` by the very mechanism that
  * produced it on every install created before the ruling.

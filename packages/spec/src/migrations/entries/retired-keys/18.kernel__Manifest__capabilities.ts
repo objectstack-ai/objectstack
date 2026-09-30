@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// #11332 — ADR-0049 enforce-or-remove on the plugin manifest's three dead
+// Commit dce5cd4f0 — ADR-0049 enforce-or-remove on the plugin manifest's three dead
 // top-level containers (triage graded 2026-08-23; cloud leg measured clean
 // 2026-08-29 on #12400 with positive controls). The census found ZERO reads
 // of the `capabilities` container itself in objectstack, objectui and cloud,

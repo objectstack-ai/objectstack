@@ -199,15 +199,25 @@ describe('[#20240] a date field\'s number or Date outside the four-digit years i
     expect(reads.length).toBeGreaterThan(0);
   });
 
-  it('[#20264] refuses the same numbers on a datetime field, and leaves the time field alone — a wall clock has no year', async () => {
+  // [#20480] This pin read every one of these on the time field ("a wall clock
+  // has no year"). A time field reads a number or a `Date` as an instant and
+  // keeps its UTC time of day only when its UTC year has four digits: year 0
+  // does (`0000-…`), so it is read; 10000 and -1 do not, and the rule handed
+  // the number back as written — compared with `HH:MM:SS` text. Refused now.
+  it('[#20264] refuses the same numbers on a datetime field; [#20480] the time field reads year 0 and refuses the rest', async () => {
     for (const [name, ms] of OUT_OF_RANGE) {
       for (const comparand of [ms, new Date(ms)]) {
         const err = await refusalOf(engine.find('ledger', { where: { opened_at: { $gt: comparand } } }));
         expect(err, `datetime ${name}`).toMatchObject({ code: 'INVALID_FILTER', status: 400 });
-        await expect(engine.find('ledger', { where: { opens_at: { $gt: comparand } } })).resolves.toEqual([]);
+        if (name === '0000-01-01') {
+          await expect(engine.find('ledger', { where: { opens_at: { $gt: comparand } } }), `time ${name}`).resolves.toEqual([]);
+        } else {
+          const time = await refusalOf(engine.find('ledger', { where: { opens_at: { $gt: comparand } } }));
+          expect(time, `time ${name}`).toMatchObject({ code: 'INVALID_FILTER', status: 400 });
+        }
       }
     }
-    expect(reads).toHaveLength(OUT_OF_RANGE.length * 2);
+    expect(reads, 'only the two year-0 time comparands reached the driver').toHaveLength(2);
   });
 
   it('does not judge NaN, ±Infinity or an Invalid Date — no instant, no year', async () => {

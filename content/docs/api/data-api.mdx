@@ -461,12 +461,13 @@ never as guaranteed present.
 The **cube's metric/dimension definition** (`MetricSchema.label` / `MetricSchema.format`,
 `DimensionSchema.label`) is the *declaration* surface, not a substitute for this one.
 `GET /analytics/meta` below publishes a deliberately narrow projection of it — `name`,
-`type` and `title` (the definition's `label`) only, with `format` dropped
+`type`, `title` (the definition's `label`), `description`, and on a measure its declared
+`format`; never `sql` or `granularities`
 ([#6442](https://github.com/objectstack-ai/objectstack/issues/6442)). So a client that
 renders table headers or formats amounts takes `label` / `format` / `currency` /
-`percentScale` off the query result's `fields[]`: those are resolved server-side (the
-currency chain below, the percent-scale chain), and `format` is not reachable through
-the metadata endpoint at all.
+`percentScale` off the query result's `fields[]`: those are resolved server-side, per
+column (the currency chain below, the percent-scale chain), and `currency` and
+`percentScale` are not reachable through the metadata endpoint at all.
 
 The currency chain runs on the dataset query (`POST /analytics/dataset/query`). A
 monetary measure column takes the measure's own `currency`; then, only when the source

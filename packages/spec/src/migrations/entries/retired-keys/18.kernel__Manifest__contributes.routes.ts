@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// #10726 — ADR-0049 enforce-or-remove fork on `contributes.routes`, the ONE
-// `contributes` member deliberately excluded from #10724's nine-member
+// Commit bc56e1881 — ADR-0049 enforce-or-remove fork on `contributes.routes`, the ONE
+// `contributes` member deliberately excluded from commit be21955ba's nine-member
 // retirement because removing it needed a ruling, not a tombstone: the key
 // was the only DECLARED channel for a real capability (serving a code-handler
 // endpoint), and four published surfaces — a customer-published skill among
@@ -9,8 +9,8 @@
 // (「接受所有」 on the decision batch carrying the four-axis analysis): remove
 // the key; author-facing materials redirect to the imperative `http.server`
 // mount, the form that actually works. The ruling's cloud precondition was
-// discharged 2026-08-24 (#10812: cloud @ 5b5925a, zero `manifest.contributes`
-// reads, controls green), completing #10627's three-repo census at exactly
+// discharged 2026-08-24 (the cloud census: cloud @ 5b5925a, zero `manifest.contributes`
+// reads, controls green), completing commit be21955ba's three-repo census at exactly
 // one live read (engine.ts, member `kinds` — now the block's sole survivor).
 //
 // Registered under 18, not 17: v17.0.0 was cut before this landed, so the

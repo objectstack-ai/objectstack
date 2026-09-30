@@ -73,7 +73,7 @@
  * `fallback-seam.conformance.test.ts`) repeated a parameter at all.
  *
  * Consumer-side tests do not cover it either: `packages/rest`'s
- * `package-routes-query-multiplicity.test.ts` (#6307) hand-constructs
+ * `package-routes-query-multiplicity.test.ts` (commit 293476148) hand-constructs
  * `query: { version: [...] }` and drives the handler directly, so it asserts a
  * shape no adapter is obliged to produce. A hand-built double can produce
  * anything, which is precisely why that suite stayed green while the adapters
@@ -293,7 +293,7 @@ describe('node ↔ hono: the repeated-parameter answer no longer depends on whic
     });
 
     it('hands a consumer the SAME operand on either adapter — the ambiguity is visible, not collapsed', async () => {
-        // Why the shape agreement is not cosmetic: this is the read #6307
+        // Why the shape agreement is not cosmetic: this is the read commit 293476148
         // found on `DELETE /api/v1/packages/:id`, where a truthy single
         // `version` silently narrowed a destructive operation's scope. Before
         // route 2 the operand differed by server — `'1.0.0'` on Hono, an ARRAY

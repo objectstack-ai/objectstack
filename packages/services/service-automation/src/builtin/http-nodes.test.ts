@@ -61,6 +61,25 @@ describe('http (canonical node)', () => {
         expect(d?.paradigms).toEqual(expect.arrayContaining(['flow', 'approval']));
     });
 
+    // #20590 — the designer palette (`GET /api/v1/automation/actions`) serves
+    // this configSchema as the node's authoring form. A credential typed into
+    // `url` or `headers` is served with the flow definition, so both fields
+    // name the route that keeps it out: a declarative connector's
+    // `auth.credentialRef`, called through `connector_action` (for `url`, the
+    // route for a query-string key; a path-borne secret has no `credentialRef`
+    // variant and is sent to a token-authenticated connector instead). The
+    // prose is free to change; the named route is what is held here.
+    it.each(['url', 'headers'])('the %s field names the connector credentialRef route for a credential', (key) => {
+        const engine = new AutomationEngine(createTestLogger());
+        registerHttpNodes(engine, createCtx());
+        const props = (engine.getActionDescriptor('http')?.configSchema as
+            | { properties?: Record<string, { description?: string }> }
+            | undefined)?.properties;
+        const description = props?.[key]?.description ?? '';
+        expect(description).toContain('auth.credentialRef');
+        expect(description).toContain('connector_action');
+    });
+
     it('does NOT register the removed http_request/http_call/webhook aliases (11.0)', () => {
         const engine = new AutomationEngine(createTestLogger());
         registerHttpNodes(engine, createCtx());

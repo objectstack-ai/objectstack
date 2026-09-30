@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack contributors. Apache-2.0 license.
 //
-// #16331 — a scaffolded project's FIRST `git add -A` must stage the skills
+// Commit fd75728bc — a scaffolded project's FIRST `git add -A` must stage the skills
 // bundle exactly once, and a clone of that commit must yield readable
 // `SKILL.md` files.
 //

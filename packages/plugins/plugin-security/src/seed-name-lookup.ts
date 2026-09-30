@@ -37,7 +37,7 @@
  *  - a response that is neither an array
  *    nor `{ records: [...] }`             → could not answer
  *  - a page carrying MORE rows than it
- *    budgeted for (#11518, below)         → could not answer
+ *    budgeted for (commit e1d773eb7)      → could not answer
  *  - `[]`                                 → ANSWERED: none of these names exist
  *
  * "Could not answer" degrades — loudly warned — to the per-item read the loops
@@ -57,7 +57,7 @@
  * Directive #12): the batched and per-item reads ask the driver the same
  * question, and the answer has one meaning.
  *
- * ## The page budget, and why it is measured rather than trusted (#11518)
+ * ## The page budget, and why it is measured rather than trusted (commit e1d773eb7)
  *
  * A `LIMIT` cannot express "one row per name", so the page needs a cap and no
  * cap is CORRECT. `limit: names.length` was exact only while one row could exist
@@ -195,10 +195,10 @@ export interface ExistingByNameIndex {
 }
 
 /**
- * [#11518] Rows per requested name an UNSCOPED page is willing to hold before
+ * [commit e1d773eb7] Rows per requested name an UNSCOPED page is willing to hold before
  * it stops trying to answer in one read.
  *
- * ⚠️ A BUDGET, not a bound — the distinction is the whole of #11518. Nothing
+ * ⚠️ A BUDGET, not a bound — the distinction is the whole of commit e1d773eb7. Nothing
  * bounds rows-per-name here: `sys_capability.name` and `sys_permission_set.name`
  * are unique PER ORGANIZATION (#8461 / ADR-0120 D1) and ADR-0066 D1 encourages
  * admins to EXTEND the registry inside their own organization, so one name
@@ -222,7 +222,7 @@ const UNSCOPED_PAGE_FLOOR = 20;
  * index is unique per organization, so each name has at most this organization's
  * row plus one organization-less leftover. Kept exact deliberately: a scoped
  * page that overflows it means the uniqueness the catalog is built on is not
- * holding, and #11518's probe turns that into a loud degradation instead of a
+ * holding, and commit e1d773eb7's probe turns that into a loud degradation instead of a
  * silent truncation.
  */
 const SCOPED_ROWS_PER_NAME = 2;
@@ -246,7 +246,7 @@ type NamePage =
  * Read one page of names — `ok: false`, distinct from an empty page, when this
  * read cannot answer.
  *
- * ## [#11518] Truncation is "could not answer", not "none of them exist"
+ * ## [commit e1d773eb7] Truncation is "could not answer", not "none of them exist"
  *
  * A `LIMIT` cannot say "one row per name", so any cap this read picks can be
  * exceeded by a healthy install (see {@link UNSCOPED_ROWS_PER_NAME}). The rows
@@ -283,12 +283,12 @@ async function readNamePage(
     rows = await ql.find(
       object,
       {
-        // [#11451] `...(equals ?? {})` spreads NOTHING when no predicate was
+        // [commit c33f18592] `...(equals ?? {})` spreads NOTHING when no predicate was
         // given, so a caller that passes none emits the exact key set it
         // emitted before — not the same keys plus `undefined`-valued ones,
         // which `toEqual` would have quietly accepted.
         where: { name: { $in: names }, ...(equals ?? {}) },
-        // [#11518] ONE MORE than the budget, always — the extra row is the
+        // [commit e1d773eb7] ONE MORE than the budget, always — the extra row is the
         // probe, and reading it back is how truncation is told from a page that
         // merely happens to be full.
         limit: budget + 1,
@@ -337,7 +337,7 @@ function perItemIndex(
         // driver ordered first, and this read must be able to tell this
         // organization's row from an organization-less leftover.
         //
-        // [#11451] The predicate rides the DEGRADATION read too. A fallback
+        // [commit c33f18592] The predicate rides the DEGRADATION read too. A fallback
         // that dropped it would ask a WIDER question than the batched read it
         // is standing in for — and for the caller that needs one, wider is not
         // "slower but the same": it is a different row.
@@ -398,7 +398,7 @@ export async function buildExistingByName(
    */
   organizationId?: string,
   /**
-   * [#11451] An extra EQUALITY predicate ANDed onto the `$in`, for a caller
+   * [commit c33f18592] An extra EQUALITY predicate ANDed onto the `$in`, for a caller
    * whose existence question is narrower than "a row with this name".
    *
    * `bootstrapSystemCapabilities`' curated half asks for the platform's OWN
@@ -415,7 +415,7 @@ export async function buildExistingByName(
    * it. Narrowing can only SHRINK a page, so passing a predicate never makes
    * truncation likelier than the unpredicated read it replaces.
    *
-   * [#11518] That used to be a CORRECTNESS precondition the caller had to
+   * [commit e1d773eb7] That used to be a CORRECTNESS precondition the caller had to
    * discharge — an unscoped page was capped at `names.length`, so a
    * non-singleton question truncated, and a truncated page read as `absent`,
    * which INSERTS. {@link readNamePage} now measures its own truncation, so a
@@ -423,7 +423,7 @@ export async function buildExistingByName(
    * and it says so) rather than a wrong answer. What the predicate still buys is
    * WHICH row answers: unscoped, the first row of the page is the row, so a
    * question wide enough to match somebody else's copy resolves to it — the
-   * separate harm #11451 exists for, and one no page budget can repair.
+   * separate harm commit c33f18592 closed, and one no page budget can repair.
    */
   equals?: Readonly<Record<string, unknown>>,
 ): Promise<ExistingByNameIndex> {
@@ -460,7 +460,7 @@ export async function buildExistingByName(
       // ⛔ NOT "none of them exist" — see the module header. Fall back to the
       // per-item read so behaviour is exactly what it was before the hoist.
       //
-      // [#11518] TWO events, ONE consequence. A truncated page is not a broken
+      // [commit e1d773eb7] TWO events, ONE consequence. A truncated page is not a broken
       // driver — the read worked and the answer is simply wider than one page —
       // so it is named separately, because the remedies differ: an unreadable
       // database is an outage, while a truncated page is an install whose

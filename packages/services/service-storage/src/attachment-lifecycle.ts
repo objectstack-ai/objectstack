@@ -367,7 +367,7 @@ export async function findFileHolder(
 
 /**
  * The BATCHED form of {@link findFileHolder} — "which of these files is still
- * held?" — for callers holding many rows at once (#11427).
+ * held?" — for callers holding many rows at once (commit c3c72a4bc).
  *
  * Record file-field hydration is such a caller: it must reach the same verdict
  * the download path reaches (#10246) or one `sys_file` row gets two answers,

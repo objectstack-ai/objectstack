@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { isDataMigrationVerified } from '@objectstack/platform-objects/system';
+import { assertEngineFindOnePredicate } from '@objectstack/objectql';
 import {
   runFilesToReferencesMigration,
   type FilesToReferencesEngine,
@@ -35,6 +36,12 @@ function fakeEngine(tables: Record<string, Array<Record<string, unknown>>>) {
       const start = typeof options?.offset === 'number' ? options.offset : 0;
       const end = typeof options?.limit === 'number' ? start + options.limit : undefined;
       return rows.slice(start, end);
+    },
+    // The flag reader's single-row route (#20648), held to the real engine's
+    // refusal of a query that selects no particular record.
+    async findOne(object, options: any) {
+      assertEngineFindOnePredicate(object, options);
+      return (tables[object] ?? []).find((r) => r.id === options.where.id) ?? null;
     },
     async insert(object, data: any) {
       (tables[object] ??= []).push({ ...data });

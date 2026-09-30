@@ -18,7 +18,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_position: {
     label: "岗位",
     pluralLabel: "岗位",
-    description: "用于 RBAC 访问控制的岗位定义",
+    description: "用于分发授权能力的岗位定义（ADR-0090）",
     fields: {
       label: {
         label: "显示名称"

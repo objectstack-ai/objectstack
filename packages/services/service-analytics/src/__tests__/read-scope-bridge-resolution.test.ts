@@ -5,7 +5,7 @@
  * must tell apart — the sibling of `admission-bridge-resolution.test.ts`, one
  * function up in the same file.
  *
- * The object-level bridge was made an explicit three-way (#16860); this one had
+ * The object-level bridge was made an explicit three-way (commit 041d9fdc6); this one had
  * the identical shape and still collapsed it:
  *
  * ```ts
@@ -24,7 +24,7 @@
  * has no row restriction on this object". So a deployment whose security
  * service was broken ran its analytics queries with NO row-level policy at
  * all, and the only difference from a correctly unrestricted caller was a state
- * nothing reported. After #16860 one door of `plugin.ts` failed closed on a
+ * nothing reported. After commit 041d9fdc6 one door of `plugin.ts` failed closed on a
  * throwing resolver and its neighbour failed open — and the neighbour is the
  * one carrying row-level policy.
  *
@@ -213,7 +213,7 @@ describe('analytics row-scope bridge — resolving the "security" service', () =
   // ── The two doors of this file now agree on a broken provider ──────────────
 
   it('refuses a throwing resolver with BOTH auto-bridges live (no door falls open)', async () => {
-    // With no `admitObjectRead` override the object-level bridge (#16860)
+    // With no `admitObjectRead` override the object-level bridge (commit 041d9fdc6)
     // answers first, with `PERMISSION_DENIED`. Pinned so the file-level
     // property — a broken security service serves no analytics rows through
     // EITHER door — cannot regress from the other side.

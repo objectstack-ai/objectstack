@@ -112,8 +112,8 @@ import { isAggregateCompatibleWithFieldType } from '@objectstack/spec/data';
  * `number` it has (the accurate word for the raw SQLite value).
  *
  * ⚠️ ⛔ This is NOT a missing refusal. `AGGREGATE_FIELD_TYPE_COMPATIBILITY`
- * ACCEPTS `sum` / `avg` / `min` / `max` over `boolean` / `toggle` — #16685
- * ruled A, landed as #16750, on the authority of maintainer ruling #11152 — so
+ * ACCEPTS `sum` / `avg` / `min` / `max` over `boolean` / `toggle` — commit
+ * ed7243d52 (#16750) added those rows, on the authority of maintainer ruling #11152 — so
  * the pair is deliberately allowed and the compile leg never refuses it. This
  * is the one accepted class where the rule declines, and it declines because
  * the readings disagree, not because the pair is unsupported.

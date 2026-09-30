@@ -45,7 +45,7 @@
  * leaves into the same one member view. Both producers are now judged by one
  * check, which is why they are pinned in one file.
  *
- * ## [#11461] The third producer, and the door it left open on BOTH doors
+ * ## [commit 399ecad58] The third producer, and the door it left open on BOTH doors
  *
  * #10413 phase 2 added a THIRD route to `engine.aggregate`'s predicate: a
  * compiled MEASURE's own `filter`, lowered onto that measure's
@@ -110,14 +110,14 @@
  *      predicate — the load-bearing half of ⑤, and the pin a
  *      "refuse every dataset scope" implementation fails
  *   ⑦ a CROSS-OBJECT per-measure `filter` is REFUSED on both doors, naming the
- *      measure whose declaration holds the leaf (#11461)
+ *      measure whose declaration holds the leaf (commit 399ecad58)
  *   ⑧ an ORDINARY per-measure `filter` still reaches the engine CARRYING its
  *      own `aggregations[].filter`, and a cross-object one on a measure the
  *      query does NOT ask for changes nothing — the two load-bearing halves of
  *      ⑦, and the pins a "refuse every measure filter" and a "refuse on the
  *      dataset's whole `measureFilters` map" implementation each fail
  *
- * ①–④ are #10759's, re-run unchanged; ⑤–⑥ are #10861's; ⑦–⑧ are #11461's.
+ * ①–④ are #10759's, re-run unchanged; ⑤–⑥ are #10861's; ⑦–⑧ are commit 399ecad58's.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -131,7 +131,7 @@ const ctxA = { tenantId: 'org_A', userId: 'u_a' } as ExecutionContext;
 interface Refusal extends Error { code?: string; status?: number; member?: string; param?: string; cube?: string }
 interface AggSpec { field: string; method: string; alias: string; filter?: Record<string, unknown> }
 /**
- * [#11461] `aggregations` is captured too, not just the whole-call `filter`.
+ * [commit 399ecad58] `aggregations` is captured too, not just the whole-call `filter`.
  * The third producer never lands in the whole-call filter — it lands on ONE
  * aggregation's own `filter` — so a harness that only watched `options.filter`
  * could not have seen this card's defect at all, and ⑧'s "still carries its
@@ -195,7 +195,7 @@ const MIXED_SCOPED_SALES: Dataset = DatasetSchema.parse({
 }) as Dataset;
 
 /**
- * [#11461] ONE dataset carrying all three of ⑦/⑧'s directions, so the
+ * [commit 399ecad58] ONE dataset carrying all three of ⑦/⑧'s directions, so the
  * distinctions are structural rather than three fixtures that happen to differ.
  *
  *   `revenue`       no filter at all — the neighbour every other measure is
@@ -277,7 +277,7 @@ const DATASET_SCOPE_MESSAGE =
   /cannot evaluate the cross-object filter \("account\.region"\) that dataset "[^"]+" declares at its definition level/;
 
 /**
- * [#11461] A THIRD distinct message. The two above name where the member came
+ * [commit 399ecad58] A THIRD distinct message. The two above name where the member came
  * from; this one has to name something neither can — WHICH MEASURE's own
  * declaration holds the leaf. A dataset can declare two measures filtering the
  * same field and mean two different edits, so a rewording that dropped the
@@ -564,7 +564,7 @@ describe('[#10861] a CROSS-OBJECT definition-level filter is refused on BOTH doo
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// ⑦ + ⑧ [#11461] the CROSS-OBJECT per-measure filter — the third producer
+// ⑦ + ⑧ [commit 399ecad58] the CROSS-OBJECT per-measure filter — the third producer
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -684,7 +684,7 @@ describe('[#11461] a CROSS-OBJECT per-measure filter is refused on BOTH doors', 
   it('the KNOWN-PRESENT control: a cross-object member in the CALLER’s where keeps its own diagnostic on this fixture too', async () => {
     // The counter-check for every "refused" above, on the SAME cube — so the
     // refusal ⑦ adds cannot be mistaken for the fixture simply being unable to
-    // serve anything, and #11461 is shown not to have repainted the refusal
+    // serve anything, and commit 399ecad58 is shown not to have repainted the refusal
     // #10759 restored. Refused before this card and after it, with the OTHER
     // message and with `param: 'where'`.
     const { execute, generateSql, calls } = await bothDoors('measure_filter_sales', {
@@ -700,7 +700,7 @@ describe('[#11461] a CROSS-OBJECT per-measure filter is refused on BOTH doors', 
     // The ordering pin. `filterMemberView` inserts measure-filter leaves FIRST
     // and `where` last, last write wins — so a member named by the request too
     // keeps the provenance the caller can act on directly, and every shape
-    // refused before #11461 keeps the exact message it had.
+    // refused before commit 399ecad58 keeps the exact message it had.
     const { execute } = await bothDoors('measure_filter_sales', {
       dimensions: ['stage'], measures: ['revenue', 'west_revenue'],
       where: { 'account.region': 'West' },

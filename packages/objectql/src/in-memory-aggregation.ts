@@ -84,7 +84,7 @@
 // every entry: labels fell back to raw ids, and cross-object rebucketing filed
 // every row under `'(restricted)'` while the grand total still reconciled.
 
-import { bucketDateKey } from '@objectstack/core';
+import { bucketDateKey, compensatedSum } from '@objectstack/core';
 import type { QueryAST, GroupByNode, AggregationNode, DateGranularityValue } from '@objectstack/spec/data';
 import { declaredFieldClasses, matchesAggregationFilter } from './having-filter.js';
 
@@ -231,6 +231,8 @@ function aggregateBucket(
       // [#20489] Both arms add through ONE compensated fold
       // ({@link compensatedSum}) — the summation SQLite's own `sum` / `avg`
       // use — so the rows path and SQLite's native path answer the same double.
+      // [#20544] The fold is `@objectstack/core`'s now, and driver-memory's
+      // two faces and the analytics draft preview call the same one.
       case 'sum':
         out[alias] = compensatedSum(values.map(toNumber));
         break;
@@ -285,44 +287,6 @@ function toNumber(v: any): number {
   if (v == null) return 0;
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
-}
-
-/**
- * [#20489] The sum of `nums`, added in order with Kahan-Babuska-Neumaier
- * compensation — the summation SQLite (3.43 and later) uses for its own `sum`
- * and `avg`, transcribed from its `kahanBabuskaNeumaierStep` and the
- * finalizers' overflow guard.
- *
- * Why: this fold used to add naively (`reduce((a, b) => a + b, 0)`), so one
- * query answered two doubles on SQLite depending on the path `engine.aggregate`
- * took. A `number` column holding `0.1`, `0.2` and `0.3` summed to `0.6`
- * natively and to `0.6000000000000001` here (`avg` `0.19999999999999998`
- * against `0.20000000000000004`), and `having { s: { $eq: 0.6 } }` kept the
- * group on the native path alone. Compensated, the two paths agree, and the
- * answer is the more accurate one (`1e16 + 1 - 1e16` is `1`, not `0`).
- *
- * What does not move: two addends (the compensated `a + b` IS the naive one),
- * integers whose partial sums stay within 2^53 (every addition is exact), and
- * a non-finite total. `s` below is exactly the naive running sum; once it
- * overflows or meets a NaN, the error term is non-finite and the naive answer
- * is returned as it was, which is SQLite's rule too.
- *
- * ⚠️ Residual, stated: PostgreSQL and MySQL add their doubles natively without
- * compensation, so over three or more fractions their native path can still
- * differ from this one in the last place. So can the folds that do not call
- * this one: `driver-memory`'s `aggregate` and analytics faces, and
- * `service-analytics`' draft preview (`preview-evaluator.ts`). An exact `$eq`
- * on a fractional sum compares doubles; compare with a range.
- */
-function compensatedSum(nums: readonly number[]): number {
-  let s = 0;
-  let c = 0;
-  for (const r of nums) {
-    const t = s + r;
-    c += Math.abs(s) > Math.abs(r) ? (s - t) + r : (r - t) + s;
-    s = t;
-  }
-  return Number.isFinite(c) ? s + c : s;
 }
 
 /**

@@ -41,7 +41,7 @@
  * organizations by construction — which is correct for a seeder, and is exactly
  * why the predicate has to say which row it means.
  *
- * [#11520] The two batched reads inherit that property rather than re-deriving
+ * [commit 1a6855226] The two batched reads inherit that property rather than re-deriving
  * it: `seed-name-lookup.ts` reads under `seedCtx(organizationId)`, and with no
  * organization threaded that is `{ isSystem: true }` — the same object literal as
  * `SYSTEM_CTX`. Both batched reads and the surviving `tryFind` bucket reads
@@ -170,7 +170,7 @@
  * of firing on every authored row, which is the state #4632 declined to alarm
  * about and which remains counted in `skippedAuthored`.
  *
- * [#11451] ROUND TRIPS. The curated half's existence read is now ONE batched
+ * [commit c33f18592] ROUND TRIPS. The curated half's existence read is now ONE batched
  * `$in`, and the reconcile is equality-gated for both halves. The design choice
  * the filing asked to be made deliberately is recorded here so it is not
  * re-litigated from the diff:
@@ -192,8 +192,8 @@
  *    question and silently reverses part of the #8552 ruling; batching it
  *    unnarrowed needed an unbounded read.
  *
- * [#11520] The derived half is now batched too — UNNARROWED, on the second of
- * those two objections being removed rather than accepted. #11518 turned the
+ * [commit 1a6855226] The derived half is now batched too — UNNARROWED, on the second of
+ * those two objections being removed rather than accepted. Commit e1d773eb7 turned the
  * page cap from a promise into a measurement (`readNamePage` asks for one row
  * more than its budget and calls the overflow `truncated` = "could not answer",
  * degrading to the per-item read), so "batching it unnarrowed needs an unbounded
@@ -421,7 +421,7 @@ export interface CapabilitySeedResult {
    */
   blockedCurated: number;
   /**
-   * [#11451] Rows found ALREADY MATCHING the platform's definition, so no
+   * [commit c33f18592] Rows found ALREADY MATCHING the platform's definition, so no
    * `UPDATE` was issued. Reported rather than folded into `updated`, for the
    * same reason #10946 reports it on the sibling seeders: without it, "wrote
    * nothing because nothing differed" and "wrote nothing because the writes
@@ -429,10 +429,10 @@ export interface CapabilitySeedResult {
    */
   unchanged: number;
   /**
-   * [#11451] Definitions left ENTIRELY alone because the existence read could
+   * [commit c33f18592] Definitions left ENTIRELY alone because the existence read could
    * not answer — not read as absent, and therefore never inserted.
    *
-   * [#11520] Counts BOTH halves since the derived read was batched. It was
+   * [commit 1a6855226] Counts BOTH halves since the derived read was batched. It was
    * curated-only while the derived half swallowed a failed read into `[]` and
    * went on to attempt an insert; that half now declines on `unknown` like every
    * other caller of the shared oracle, so its unanswerable names land here. One
@@ -515,7 +515,7 @@ export async function bootstrapSystemCapabilities(
   let unchanged = 0;
   let unreadable = 0;
 
-  // [#11451] ONE batched existence read for the CURATED half, hoisted out of the
+  // [commit c33f18592] ONE batched existence read for the CURATED half, hoisted out of the
   // loop below — the shape #10946 established and #11096 carried to the seeder
   // next door. Each curated definition used to cost its own sequential
   // `SELECT … LIMIT 1`: invisible on a local file database, one separate awaited
@@ -534,8 +534,8 @@ export async function bootstrapSystemCapabilities(
   // .ts`'s own index comment names ("exactly the bucket this key part keeps a
   // singleton").
   //
-  // [#11451] What this half does NOT do is narrow the derived read — see the
-  // derived index below, which #11520 batched on the terms #11451 could not.
+  // [commit c33f18592] What this half does NOT do is narrow the derived read — see the
+  // derived index below, which commit 1a6855226 batched on terms commit c33f18592 could not.
   const curatedExisting = await buildExistingByName(
     ql,
     'sys_capability',
@@ -545,10 +545,10 @@ export async function bootstrapSystemCapabilities(
     CURATED_LOOKUP,
   );
 
-  // [#11520] The DERIVED half, batched — UNNARROWED, which is the only shape
-  // that preserves what it computes. #11451 filed this rather than taking it,
+  // [commit 1a6855226] The DERIVED half, batched — UNNARROWED, which is the only shape
+  // that preserves what it computes. Commit c33f18592 filed this rather than taking it,
   // and the two objections it recorded resolved in opposite ways: one was
-  // removed by #11518, the other still stands and still forbids the cheap fix.
+  // removed by commit e1d773eb7, the other still stands and still forbids the cheap fix.
   //
   // ## Why the batched read is the SAME question, not a cheaper one
   //
@@ -571,7 +571,7 @@ export async function bootstrapSystemCapabilities(
   //    (`bootstrap-declared-capabilities.ts`: "an unscoped lookup is EXACTLY the
   //    question the per-item read asked").
   //
-  // ## What #11518 removed
+  // ## What commit e1d773eb7 removed
   //
   // The blocking objection was the PAGE CAP, not the question: this set is
   // bounded only by the number of organizations, against a page that was capped
@@ -579,7 +579,7 @@ export async function bootstrapSystemCapabilities(
   // `absent`, which INSERTS. `readNamePage` now asks for one row MORE than its
   // budget and reports the overflow as `truncated` — "could not answer" —
   // degrading, loudly, to exactly the per-item read this half used to do
-  // unconditionally. So the unbounded-read trade #11451 declined no longer
+  // unconditionally. So the unbounded-read trade commit c33f18592 declined no longer
   // exists: the worst case is the old cost plus a warning naming the budget.
   //
   // ## What is still forbidden
@@ -605,7 +605,7 @@ export async function bootstrapSystemCapabilities(
     // question — its own `managed_by` guard below is what keeps it off rows it
     // does not own (#5876), and narrowing its lookup is the thing #8552/#8751
     // forbid rather than an optimisation left undone.
-    // [#11520] ONE consumption idiom for both halves. They consult DIFFERENT
+    // [commit 1a6855226] ONE consumption idiom for both halves. They consult DIFFERENT
     // indexes — the curated one carries the #8470 predicate, the derived one is
     // deliberately unpredicated — but "what does a lookup answer mean" is one
     // question with one answer, and a second spelling of it is how the two halves
@@ -622,7 +622,7 @@ export async function bootstrapSystemCapabilities(
       // insert per curated name and then report a `blockedCurated` collision
       // for each, describing a row nobody ever saw.
       //
-      // [#11520] The DERIVED half reaches this branch now too, and there the
+      // [commit 1a6855226] The DERIVED half reaches this branch now too, and there the
       // strictness replaces something worse than a phantom diagnostic: its
       // `tryFind` swallowed a failed read into `[]`, which reads as absent, so
       // the half went on to attempt an insert. Where the read failed but the
@@ -774,7 +774,7 @@ export async function bootstrapSystemCapabilities(
       // refreshed (#2909 T3). A curated scope change in a new platform version
       // needs a data migration — recorded in the ADR-0094 addendum.
       //
-      // [#11451] …and only where they actually DIFFER. This write used to fire
+      // [commit c33f18592] …and only where they actually DIFFER. This write used to fire
       // on every boot for every row the pass owns, storing bytes already there —
       // one more sequential request per definition on a remote database. The
       // gate sits AFTER the derived-ownership guard above, so it removes write
@@ -810,7 +810,7 @@ export async function bootstrapSystemCapabilities(
         // records the row anyway rather than making the batched read depend on
         // an invariant that lives somewhere else.
         //
-        // [#11520] …and now the derived half records on ITS index for the same
+        // [commit 1a6855226] …and now the derived half records on ITS index for the same
         // reason. `byName` is keyed by name so no name repeats within one pass
         // in either half; both record anyway, because "the read cannot see rows
         // this loop just inserted" is a property of the hoist, not of the half.
@@ -884,7 +884,7 @@ export async function bootstrapSystemCapabilities(
     // genuinely absent has not been seeded and a drifted one has not been
     // reconciled; the next boot with a readable database does both.
     //
-    // [#11520] "capabilities", not "curated capabilities": the derived half can
+    // [commit 1a6855226] "capabilities", not "curated capabilities": the derived half can
     // land here too now. `total` is the whole definition set for the same
     // reason — measured against `KNOWN_CAPABILITIES.length` a count that
     // included derived names could exceed its own total.

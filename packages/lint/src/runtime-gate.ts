@@ -832,6 +832,49 @@ export function nameKeyFindingPath(path: string, candidate: AnyRec): string {
   return `${stackKey}.${name}${rest}`;
 }
 
+/**
+ * [#20611] The host's restored-credential positions, re-spelled from the
+ * redactor registry's item-relative dotted form (`nodes.1.config.secret`) into
+ * the finding-path form the rules emit and compare against, anchored at the
+ * written item's place in `candidate` (`flows[0].nodes[1].config.secret`).
+ *
+ * The written item is the LAST member of its collection in the candidate —
+ * {@link buildRuntimeWriteSnapshots} appends it — so that index is the anchor.
+ * Each segment is spelled `[n]` exactly where the item holds an array at that
+ * point of the walk and `.key` everywhere else: read off the item, never
+ * guessed from the segment's digits, so a record key that happens to be
+ * numeric keeps its key spelling. A path that walks off the item keeps the key
+ * spelling from there on; it names no position any rule reports, so it
+ * excuses nothing.
+ */
+function restoredCredentialStackPaths(
+  candidate: AnyRec,
+  type: string,
+  dottedPaths: readonly string[],
+): ReadonlySet<string> {
+  const stackKey = stackKeyForType(type);
+  const collection = stackKey ? candidate[stackKey] : undefined;
+  if (!stackKey || !Array.isArray(collection) || collection.length === 0) return new Set();
+  const index = collection.length - 1;
+  const item: unknown = collection[index];
+  const out = new Set<string>();
+  for (const dotted of dottedPaths) {
+    let path = `${stackKey}[${index}]`;
+    let node: unknown = item;
+    for (const segment of dotted.split('.')) {
+      if (Array.isArray(node) && /^(0|[1-9][0-9]*)$/.test(segment)) {
+        path += `[${segment}]`;
+        node = node[Number(segment)];
+      } else {
+        path += `.${segment}`;
+        node = node !== null && typeof node === 'object' ? (node as AnyRec)[segment] : undefined;
+      }
+    }
+    out.add(path);
+  }
+  return out;
+}
+
 function runRules(
   rules: readonly AuthoringRule[],
   stack: AnyRec,
@@ -894,6 +937,20 @@ export function runRuntimeAuthoringRules(args: {
    * it skip the engine's judgement and answer as they did without it.
    */
   judgeFilter?: IObjectQLEngine['judgeFilter'];
+  /**
+   * [#20611] The positions in `item` at which the host's write path restores a
+   * credential from the stored row before it persists the item — dotted and
+   * item-relative, the `@objectstack/spec/kernel` redactor registry's
+   * `redactedKeys` spelling (`nodes.1.config.secret`). The read path withholds
+   * those credentials, so a body saved back after a read arrives without them,
+   * and the host restores them only after this gate has run.
+   *
+   * Handed to the rules as `AuthoringRuleContext.restoredCredentialPaths`,
+   * translated into the candidate snapshot's finding-path spelling; see
+   * {@link restoredCredentialStackPaths}. Omitted, every position is judged on
+   * the body as sent. ⛔ Positions only: no credential value reaches this gate.
+   */
+  restoredCredentialPaths?: readonly string[];
 }): RuntimeGateResult {
   const rules = runtimeAuthoringRulesFor(args.type);
   const empty: RuntimeGateResult = { errors: [], advisories: [], rulesRun: [] };
@@ -921,6 +978,19 @@ export function runRuntimeAuthoringRules(args: {
     sduiManifest: args.sduiManifest,
     runtimeWriteType: args.type,
     judgeFilter: args.judgeFilter,
+    // [#20611] Spelled against the CANDIDATE, the one snapshot that holds the
+    // written item. The baseline pass shares the set and cannot match it: the
+    // item is not in the baseline, and every other entry sits at an index the
+    // item does not.
+    ...(args.restoredCredentialPaths !== undefined && args.restoredCredentialPaths.length > 0
+      ? {
+          restoredCredentialPaths: restoredCredentialStackPaths(
+            snapshots.candidate,
+            args.type,
+            args.restoredCredentialPaths,
+          ),
+        }
+      : {}),
   };
   const before = new Set(runRules(rules, snapshots.baseline, ctx).map(fingerprint));
   const added = runRules(rules, snapshots.candidate, ctx)

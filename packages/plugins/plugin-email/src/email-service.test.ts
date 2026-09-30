@@ -339,7 +339,7 @@ describe('rowToNormalized', () => {
   });
 });
 
-// ── #11741 — sys_email organization stamping ────────────────────────────────
+// ── Commit b706af987 — sys_email organization stamping ──────────────────────
 // The writer runs under a constant SYSTEM context, so the ONLY organization a
 // row can carry is the one the input carries: `SendEmailInput.organizationId`
 // is stamped onto `sys_email.organization_id` verbatim (pass-through), and its

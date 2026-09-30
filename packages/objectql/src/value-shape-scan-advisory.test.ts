@@ -21,7 +21,11 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from './engine';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 
-/** Minimal driver whose `find` serves whatever rows the test seeded. */
+/**
+ * Minimal driver whose `find` serves whatever rows the test seeded, and whose
+ * `findOne` serves the seeded row a primary-key lookup names — the route the
+ * engine's flag read takes (#20648).
+ */
 function makeDriver(seed: Record<string, Array<Record<string, unknown>>> = {}): IDataDriver {
   const store = new Map<string, Array<Record<string, unknown>>>(Object.entries(seed));
   return {
@@ -30,7 +34,9 @@ function makeDriver(seed: Record<string, Array<Record<string, unknown>>> = {}): 
     async connect() {},
     async disconnect() {},
     async find(object: string) { return store.get(object) ?? []; },
-    async findOne() { return null; },
+    async findOne(object: string, ast: any) {
+      return (store.get(object) ?? []).find((r) => r.id === ast?.where?.id) ?? null;
+    },
     async count() { return 0; },
     async create(_o: string, data: any) { return data; },
     async update(_o: string, id: string, data: any) { return { ...data, id }; },

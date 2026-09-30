@@ -5269,6 +5269,19 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`filter`.',
   },
   {
+    id: 'cube-refresh-key-retired',
+    order: 49,
+    text:
+      'It also retires a cube\'s `refreshKey` whole — the refresh cadence `every` and the '
+      + 'data-change probe `sql` (ADR-0049 enforce-or-remove). Nothing read either key, and no '
+      + 'analytics result is cached, so a declared cadence refreshed nothing and every query was '
+      + 'computed when it was asked, as it still is. The key is a retiredKey tombstone on '
+      + '`CubeSchema`, and the D2 conversion `cube-refresh-key-removed` strips the whole block from '
+      + 'every cube as a pure lossless delete, retired from the load path. Its D3 record is the '
+      + 'semantic entry `cube-refresh-key-retired`. A refresh cadence is declared again when a '
+      + 'result cache exists.',
+  },
+  {
     id: 'currency-config-precision-retired',
     order: 41,
     text:
@@ -5664,8 +5677,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`object-grid.defaultFilters` — to the rule array wherever the mapping is lossless, '
       + 'and leaves a filter carrying `$and` / `$or` / `$not` (or any part with no lossless '
       + 'rule spelling) exactly as stored, because flattening a combinator changes which rows '
-      + 'a page selects — as it does every filter of a component whose rows are inline, which '
-      + 'the renderer matches in the record dialect and would empty for a rule array. It is retired from the load path, so authors are still refused at '
+      + 'a page selects. It is retired from the load path, so authors are still refused at '
       + 'the door and taught the array; the stored-row seams and this chain replay it.',
   },
   {
@@ -5795,6 +5807,18 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'rather than mechanical: an authored palette has no lossless target (N themes vs '
       + 'M apps is a judgment), so the entry prescribes the hand move instead of deleting '
       + 'authored content silently.',
+  },
+  {
+    id: 'time-default-zone-refused',
+    order: 50,
+    text:
+      'It also narrows the `time` stored form to the zone-less wall clock the record validator '
+      + 'already enforces (ADR-0053 D-C1), so a field default or an action param default or value '
+      + 'with a `Z` or a UTC offset is refused when it is authored or submitted rather than on '
+      + 'every insert that falls back to it. The D2 conversion `time-default-utc-suffix-dropped` '
+      + 'drops a `Z` or a zero offset, which names the same wall clock, and leaves a non-zero '
+      + 'offset as stored for its author to rewrite; its D3 record is the semantic entry '
+      + '`time-default-zone-refused`.',
   },
   {
     id: 'translation-component-submit-label-retired',
@@ -6343,9 +6367,11 @@ const step18: MigrationStep = {
       // `Metric.filters[]` item, but `Metric.filters` was REMOVED outright later
       // in this same unpublished major (retired-key entry `data/Metric:filters`,
       // conversion `metric-filters-removed`), so this entry no longer names a
-      // surface an 18.x author can reach.
+      // surface an 18.x author can reach. The same holds for the cube's
+      // `refreshKey` block, which batch D closed and #20637 then retired whole
+      // (conversion `cube-refresh-key-removed`).
       surface: 'analytics cube definitions (`defineCube` / `defineStack({ analyticsCubes })`: the '
-        + 'cube, its `refreshKey`, each metric, each dimension, each '
+        + 'cube, each metric, each dimension, each '
         + 'join) and the `/analytics/query` body\'s nested `timeDimensions[]` items — undeclared keys',
       replacement: 'the declared key the rejection names. Every rejection carries the surface, the '
         + 'offending key and a rename suggestion (`title` → `label` on a metric/dimension, `label` → '
@@ -6364,12 +6390,13 @@ const step18: MigrationStep = {
         + 'top-level strictness does not recurse — `timeDimensions: [{ dimension, granuarity: '
         + '\'day\' }]` rode through the strict wrapper with the typo stripped, bucketing the whole '
         + 'range as one group under an ordinary 200. Undeclared keys on all eight sites are now '
-        + 'refused at parse time with a prescriptive message. (One of the eight — the nested metric '
-        + '`filters[]` item — was itself removed later in this major, because nothing ever read it: '
-        + '`metric-filters-removed`.)',
+        + 'refused at parse time with a prescriptive message. (Two of the eight were themselves '
+        + 'removed later in this major, because nothing ever read them: the nested metric '
+        + '`filters[]` item, by `metric-filters-removed`, and the cube\'s `refreshKey` block, by '
+        + '`cube-refresh-key-removed`.)',
       acceptanceCriteria:
         'Every cube in `defineStack({ analyticsCubes })` / `defineCube` parses with only declared '
-        + 'keys at every level (cube, refreshKey, measures, dimensions, joins); '
+        + 'keys at every level (cube, measures, dimensions, joins); '
         + 'every `/analytics/query` body\'s `timeDimensions[]` items carry only '
         + '`dimension`/`granularity`/`dateRange`. Declared keys parse byte-identically to before.',
     },
@@ -6415,6 +6442,68 @@ const step18: MigrationStep = {
         + 'to be queried) or keep it and confirm that `/analytics/meta` omits the cube and that a query '
         + 'naming it answers 404 `CUBE_NOT_FOUND`. Every compiled artifact in use was built by '
         + '`os compile` from this release or later.',
+    },
+    // An inert key made real, and the request class that goes from answered to
+    // refused because of it: the engine aggregate path's whole refusal set, which a
+    // newly bucketed query reaches by leaving the raw-SQL path. The shape of
+    // `analytics-cube-public-default-visible-enforced`. There is no D2 conversion:
+    // no spelling moves, and whether a one-interval list means "bucket by this by
+    // default" or "the one interval I happened to list" is the author's intent,
+    // which the chain cannot read. The protocol-18 conversion
+    // `cube-sub-day-granularities-removed` is why the entry is owed even to an
+    // author who never wrote a one-interval list. No backticks in `surface`: the
+    // upgrade guide renders it inside a code span and a table cell.
+    {
+      id: 'analytics-cube-single-granularity-default-enforced',
+      surface:
+        'data.Cube.dimensions.granularities — an analytics cube time dimension whose granularities '
+        + 'list holds exactly one interval, whether an author wrote it that way or the protocol 18 '
+        + 'conversion cube-sub-day-granularities-removed reduced a longer list to it',
+      replacement:
+        'nothing, when that one interval is the bucket the dimension should be grouped at by default. '
+        + 'When it is not, list every interval the dimension serves (two or more state no default) or '
+        + 'omit the key. A dashboard or report whose query the engine aggregate path cannot evaluate '
+        + '(a custom-SQL measure, or a member of a cube with `joins` that resolves through one) either '
+        + 'stops grouping by such a dimension or groups by one that declares no single interval',
+      reason:
+        'An inert key made real. A cube time dimension\'s `granularities` was read only for a cube the '
+        + 'dataset compiler minted, where a one-interval list is the dataset\'s default bucket. A cube '
+        + 'authored with `defineCube()` or `defineStack({ analyticsCubes })` never reached that reader, '
+        + 'so grouping by its time dimension grouped raw timestamps, one group per distinct instant, '
+        + 'whatever the list said. The analytics service now reads every cube by the compiled-dataset '
+        + 'rule: on `/analytics/query` and on the `/analytics/sql` dry run, a time dimension the query '
+        + 'groups by without stating a granularity is bucketed at the one interval its list declares. '
+        + 'A granularity the query states still wins, one the list does not name is not refused, and a '
+        + 'list of two or more states no default. Two holdings change on upgrade. A query grouping by '
+        + 'such a dimension answers one row per bucket where it answered one row per timestamp. And a '
+        + 'bucketed query leaves the raw-SQL path, which declines every bucketed query, for the engine '
+        + 'aggregate path, which answers 400 `INVALID_FIELD` for every member it cannot evaluate — the '
+        + 'same refusal, byte for byte, that the same query already got with that granularity stated by '
+        + 'hand. Those members are: a custom-SQL measure (a `number`, `string` or `boolean` measure '
+        + 'whose `sql` is an expression); and, on a cube whose members resolve through its `joins`, a '
+        + 'measure or a `where` field over a joined object, a `timeDimensions` entry over a joined object '
+        + '(bucketed or a window, so grouping by a one-interval time dimension over a joined object is '
+        + 'refused too), a dimension that traverses more than one relationship, and an `avg` or '
+        + '`count_distinct` measure beside any dimension over a joined object. The raw-SQL path serves '
+        + 'every one of these, so each such query grouped by such a dimension goes from answered to '
+        + 'refused. On a host whose `queryCapabilities` offers raw SQL with no engine aggregate bridge '
+        + '(a hand override: the analytics plugin wires both), no strategy remains for a bucketed '
+        + 'query, so every newly bucketed query, a plain count included, goes from answered to "No '
+        + 'strategy can handle query". The protocol-18 conversion `cube-sub-day-granularities-removed` strips the retired '
+        + 'sub-day intervals from every authored and stored cube, so a dimension that offered one '
+        + 'sub-day interval and one coarser interval now holds a one-interval list: a default bucket its '
+        + 'author never wrote.',
+      acceptanceCriteria:
+        'Every cube time dimension whose `granularities` lists exactly one interval is one you mean to '
+        + 'bucket at that interval by default: a query that groups by it on `/analytics/query` answers '
+        + 'one row per bucket, and `/analytics/sql` shows the bucketed statement. Every time dimension '
+        + 'that should have no default lists two or more intervals or omits the key. No dashboard or '
+        + 'report groups by a one-interval dimension a query the engine aggregate path refuses — a '
+        + 'custom-SQL measure; a measure, `where` field or `timeDimensions` entry over a joined object; '
+        + 'a dimension that traverses more than one relationship; an `avg` or `count_distinct` measure '
+        + 'beside a dimension over a joined object — or each one that did now groups by a dimension '
+        + 'without a single interval. A host that overrides `queryCapabilities` to raw SQL only either '
+        + 'adds an engine aggregate bridge or groups by no one-interval dimension.',
     },
     {
       id: 'analytics-date-range-array-two-bounds-required',
@@ -8088,6 +8177,30 @@ const step18: MigrationStep = {
         + 'over a fixture where the condition excludes rows returns the filtered aggregate (strictly '
         + 'smaller for a positive sum over excluded rows), not the unfiltered one.',
     },
+    // #20637 — ADR-0049 enforce-or-remove (maintainer ruling, letter C) — the D3
+    // entry of the `cube-refresh-key-removed` family (one D3 entry per retirement
+    // family, even when D2 is lossless). Registered key: `data/Cube:refreshKey`.
+    // The strip changes no query answer; what it cannot decide is whether anything
+    // the author built assumed that cube results were cached or refreshed.
+    {
+      id: 'cube-refresh-key-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell.
+      surface:
+        'analyticsCubes[].refreshKey (every, sql) — a cube\'s declared refresh cadence and data-change probe',
+      replacement:
+        'Nothing: delete the key. No analytics result is cached, so every query against a cube is computed '
+        + 'when it is asked. A refresh cadence is declared again when a result cache exists.',
+      reason:
+        'The D2 conversion `cube-refresh-key-removed` deletes `refreshKey` from every cube, and the delete is '
+        + 'lossless: nothing read `every` or `sql`, and no analytics result was ever cached for them to '
+        + 'refresh, so no query answers differently. What the conversion cannot check is whether anything the '
+        + 'author built assumed that cube results were cached or refreshed on a schedule. They never were.',
+      acceptanceCriteria:
+        'No cube carries `refreshKey`, and the parse refuses one with the prescription. Every analytics '
+        + 'query answers as it did before the upgrade. Nothing the author maintains relies on cube results '
+        + 'being cached or refreshed on a schedule.',
+    },
     // #19992 (ADR-0049 enforce-or-remove; triage direction REMOVE under ruling 乙
     // on #19910: 「a currency's decimal places are the currency's, not a
     // setting」) — the D3 entry of the `currency-config-precision-removed` family
@@ -8888,7 +9001,7 @@ const step18: MigrationStep = {
         'stored `sys_metadata` row or authored source.',
     },
     // The COMPOSED-branch twin of `datasource-credentialsref-mongo-url-no-user-refused`
-    // (#9147 widening #9041's refinement). Same silent discard, one branch over, and a
+    // (#9147 widening commit d491625c1's refinement). Same silent discard, one branch over, and a
     // DIFFERENT remedy — which is why it is its own entry rather than a widened surface
     // on that one: with no `url` the discrete `config.username` is the live field, so the
     // fix is `config.username`, not the URL's userinfo.
@@ -9296,15 +9409,19 @@ const step18: MigrationStep = {
         + 'path: an author writing the record form is still refused at the `filter` door. ⚠️ A '
         + 'filter carrying `$and` / `$or` / `$not` is left exactly as stored — the rule array '
         + 'only ANDs, and flattening a combinator changes which rows the page selects — and so is '
-        + 'any filter with a part that has no lossless rule spelling: a `null` value (the renderer '
-        + 'skips that key, so it constrains nothing today, where a rule would test IS NULL), an '
+        + 'any filter with a part that has no lossless rule spelling: a `null` value (where a block '
+        + 'queries an object the renderer skips that key, so it constrains nothing, and where its '
+        + 'rows are inline it selects the rows whose value is null — no one rule keeps both, so the '
+        + 'TODO names the `is_null` rule for the rows with no value and leaves which rows to select '
+        + 'to the author), an '
         + 'operator such as `$null` / `$exists` or an AST `like`, an array or object comparand in '
-        + 'equality position, or an AST `and` / `or` group. So is every filter — the binding\'s '
-        + 'included — of a component whose rows are INLINE (`data: { provider: \'value\' }`, a '
-        + '`data` array, or `staticData`): at the pinned `.objectui-sha` the `object-map`, '
-        + '`object-tree`, `object-calendar` and `object-gantt` blocks match that filter against '
-        + 'their own rows in an in-memory data source that reads the record form and excludes '
-        + 'EVERY row for a rule array, so a rewrite there would empty the block. Such a row keeps loading unchanged '
+        + 'equality position, or an AST `and` / `or` group. None of this depends on where a '
+        + 'block\'s rows come from: a filter on a component whose rows are inline (`data: { '
+        + 'provider: \'value\' }` or `staticData`) — the binding\'s included — is '
+        + 'rewritten or left exactly as it would be on a block that queries an object, because the '
+        + '`object-map`, `object-tree`, `object-calendar` and `object-gantt` blocks of the objectui '
+        + 'version this release pins match a rule array against those rows and select the rows the '
+        + 'stored form selected. A row left as stored keeps loading unchanged '
         + '(`applyConversionsToStoredItem` replays the chain without validating, by its own '
         + 'contract), and its `filter` door refuses the form: at `dataSource.filter` on the page\'s '
         + 'next save; at a block\'s `properties.filter` — like `properties.defaultFilters`, a key of '
@@ -11388,6 +11505,9 @@ const step18: MigrationStep = {
         + '`\'exclusive\' | \'inclusive\'`, is refused at registration and by `os validate` with the '
         + 'schema\'s own sentence; nothing else about `conditions`-list decisions changes. '
         + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+      // The edits this entry judges: every `mode: 'inclusive'` that conversion
+      // writes is one decision to keep, delete or narrow, per the criteria above.
+      conversionIds: ['flow-decision-mode-inclusive-explicit'],
     },
     // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
     // span already, and a nested backtick would close it.
@@ -12325,13 +12445,13 @@ const step18: MigrationStep = {
         + 'the audience that does not parse. Measured on 884e8347d: the only in-repo readers are '
         + 'packages/core/src/health-monitor.ts and packages/core/src/hot-reload.ts, both moved in '
         + 'this same change; and the pinned objectui checkout — the pin this repo builds '
-        + 'against, `.objectui-sha` = `dd3f7e1be3561d63267d7162f3fc0ac52e72834d` — names '
+        + 'against, `.objectui-sha` = `db11afd4967cd9d39381c5e21dc2deec9d706204` — names '
         + 'neither def and neither key: all thirteen exports of plugin-lifecycle-advanced.zod.ts and '
-        + 'the string debounceDelay each occur 0 times across its 9283 tracked files (0 across the '
+        + 'the string debounceDelay each occur 0 times across its 9546 tracked files (0 across the 9283 at dd3f7e1be, the '
         + '8512 at f8a9d0fb0 and the 8303 at 62597c588 too), against lit '
         + 'controls objectstack 12966 and @objectstack/spec 4997 on the same corpus at 87af769e9, '
         + 'which re-count to 13125 and 5043 respectively at 62597c588, to 13347 and 5123 at '
-        + 'f8a9d0fb0 and to 13745 and 5466 at this pin (git grep -o -F, the method that reproduces '
+        + 'f8a9d0fb0, to 13745 and 5466 at dd3f7e1be and to 14704 and 5545 at this pin (git grep -o -F, the method that reproduces '
         + 'every earlier count).',
       acceptanceCriteria:
         'Every producer and reader of a PluginHealthCheck spells intervalMs and timeoutMs, and every '
@@ -12536,10 +12656,10 @@ const step18: MigrationStep = {
         + 'spells timeout 0 times; outside the zod file and its test the only live occurrences are the '
         + 'generated rows in content/docs/references/kernel/plugin-security-advanced.mdx, which this '
         + 'rename regenerates. The pinned objectui checkout — this is the pin we build against, '
-        + '`.objectui-sha` = `dd3f7e1be3561d63267d7162f3fc0ac52e72834d`, re-read from this tree — '
+        + '`.objectui-sha` = `db11afd4967cd9d39381c5e21dc2deec9d706204`, re-read from this tree — '
         + 'spells resourceLimits.timeout 0 times across '
-        + '9283 tracked files, against lit controls timeout 1172, RuntimeConfig 263 and resourceLimits '
-        + '2 on the same corpus (0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
+        + '9546 tracked files, against lit controls timeout 1197, RuntimeConfig 273 and resourceLimits '
+        + '2 on the same corpus (0 across 9283, and 1172 / 263 / 2, at dd3f7e1be; 0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
         + '1086 / 240 / 2, at 62597c588); both resourceLimits hits are prose in packages/app-shell recording '
         + 'that objectui\'s own AppShellRuntimeConfig shares not one key with the spec\'s '
         + 'RuntimeConfig, so nothing there authors this key and no pin bump is owed. ADR-0087.',
@@ -12775,10 +12895,11 @@ const step18: MigrationStep = {
         + 'no in-repo runtime reads any of the four — outside `packages/spec/src/system/logging.zod.ts` '
         + 'and its test the only occurrences are the generated rows in '
         + '`content/docs/references/system/logging.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `dd3f7e1be3561d63267d7162f3fc0ac52e72834d` — spells '
+        + 'objectui checkout — `.objectui-sha` = `db11afd4967cd9d39381c5e21dc2deec9d706204` — spells '
         + '`flushInterval` 0 times, `initialDelay` 0, `HttpDestinationConfig` 0 and `LoggingConfig` 0 '
-        + 'across its 9283 tracked files, against lit controls `useState` 2435 and `timeout` 1172 on '
-        + 'the same corpus (all four 0 across 8512, against 2391 and 1096, at f8a9d0fb0, and 0 across '
+        + 'across its 9546 tracked files, against lit controls `useState` 2449 and `timeout` 1197 on '
+        + 'the same corpus (all four 0 across 9283, against 2435 and 1172, at dd3f7e1be, 0 across 8512, '
+        + 'against 2391 and 1096, at f8a9d0fb0, and 0 across '
         + '8303, against 2389 and 1086, at 62597c588).',
       acceptanceCriteria:
         'Every HTTP log destination spells `batch.flushIntervalMs`, `retry.initialDelayMs` and '
@@ -13271,6 +13392,58 @@ const step18: MigrationStep = {
         + 'set stays exactly `DEFAULT_METADATA_TYPE_REGISTRY` plus item-population growth, '
         + 'before and after.',
     },
+    // The ADR-0087 D3/D4 surface leaves the package root for its own subpath, so the
+    // migration registry's text stops riding in every bundle of the root entry. The
+    // conversion layer (D2) stays on the root: the authoring funnel reads it at run time.
+    //
+    // Form D: no tracker number anywhere in the author-shown text; the decision is
+    // stated in words.
+    //
+    // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+    // span already, and a nested backtick would close it.
+    {
+      id: 'migrations-entry-split',
+      surface:
+        'The ADR-0087 migration chain and change manifest, imported from the package root '
+        + '@objectstack/spec: MIGRATIONS_BY_MAJOR, MIGRATION_MAJORS, MIGRATION_SUPPORT_FLOOR, '
+        + 'RETIRED_KEYS_BY_MAJOR, RETIRED_DEFS_BY_MAJOR, applyMetaMigrations, composeMigrationChain, '
+        + 'MigrationFloorError, composeSpecChanges, composeReleaseChanges, the seven change-manifest '
+        + 'schemas (SpecChangesSchema, SpecConvertedSchema, SpecMigratedSchema, SpecSurfaceAddSchema, '
+        + 'SpecSurfaceRemoveSchema, SpecReleaseChangesSchema, SpecReleaseSurfaceSchema), and the types '
+        + 'MigrationStep, MigrationApplication, MigrationChainResult, MigrationHopResult, MigrationTodo, '
+        + 'SemanticMigration, SpecChanges, SpecConverted, SpecMigrated, SpecSurfaceAdd, SpecSurfaceRemove, '
+        + 'SpecReleaseChanges, SpecReleaseSurface, SurfaceDiff, ReleaseSurfaceDiff and '
+        + 'PreviousReleaseRegistries',
+      replacement:
+        'the same names, unchanged, imported from `@objectstack/spec/migrations` — change the import '
+        + 'path and nothing else. The chain, its steps and semantic entries, the retired-key and '
+        + 'retired-def tables and the change-manifest schemas are the same objects, and '
+        + '`objectstack migrate meta` replays the same chain. The ADR-0087 conversion layer stays on the '
+        + 'package root: `ALL_CONVERSIONS`, `CONVERSIONS_BY_MAJOR`, `applyConversions`, '
+        + '`applyConversionsToFlow`, `applyConversionsToStoredItem`, `collectConversionNotices`, the '
+        + 'three `CONVERSION_*_CODE` constants and their types still import from `@objectstack/spec`.',
+      reason:
+        'The maintainer ruled that the console first-screen size ceiling is raised now and paid back at '
+        + 'the source; this split is that payback. The migration registry is mostly the guidance text '
+        + '`objectstack migrate meta` prints, and the package root re-exported it. The registry does work '
+        + 'when its module loads (the list of majors and each step\'s rationale are computed then), so no '
+        + 'bundler could prove it unused, and all of that text rode in every bundle of the root, whatever '
+        + 'the consumer imported: 1,761,987 of the root ESM bundle\'s 3,766,221 bytes. With the chain on '
+        + 'its own subpath the CommonJS root is 2,009,810 bytes instead of 3,780,033, and a browser bundle '
+        + 'of the ten names the Studio console imports from the root drops from 700,884 to 301,287 bytes '
+        + 'gzipped. The conversion layer does not move: `defineStack` and `normalizeStackInput` read it '
+        + 'at run time, so moving its names would narrow the root and shrink it by under two kilobytes. The split '
+        + 'moves an import path, which is TypeScript source rather than metadata — nothing authors, '
+        + 'stores or parses it — so there is no source a D2 conversion could rewrite, and the move is '
+        + 'recorded here.',
+      acceptanceCriteria:
+        'No code imports any of these names from the package root `@objectstack/spec` — each such '
+        + 'import is a TS2305 "has no exported member" error after upgrade, and at run time the binding '
+        + 'is undefined. The same names import cleanly from `@objectstack/spec/migrations`. No metadata '
+        + 'document, stored row or JSON Schema reference needs editing: the chain, its tables and the '
+        + 'schemas did not change, and `objectstack migrate meta` rewrites the same documents it did '
+        + 'before.',
+    },
     {
       id: 'object-block-sort-item-array',
       surface:
@@ -13438,9 +13611,8 @@ const step18: MigrationStep = {
         + 'page-component-filter-record-to-rule-array, wherever the mapping is lossless — by '
         + 'os migrate meta --stored, and on every stored-row read until it runs. What it cannot '
         + 'map losslessly is left exactly as stored and keeps rendering as it does today — a '
-        + 'combinator, a null value, an operator the rule vocabulary does not spell, the bare '
-        + 'string or number this key also took, and any filter on a grid whose rows are inline '
-        + '(data with provider value, or staticData), for the reason its sibling gives — and '
+        + 'combinator, a null value, an operator the rule vocabulary does not spell, or the bare '
+        + 'string or number this key also took — and '
         + 'its door refuses such a value only as the component-props gate\'s advisory finding '
         + '(os validate, os build, os lint), since a re-save through the metadata API is not '
         + 'refused there: a record form with the message the filter door gives, a worked rewrite '
@@ -16358,10 +16530,10 @@ const step18: MigrationStep = {
         + 'against a lit control of 1195 defineStack occurrences on that same corpus at fc28c1d38 '
         + '(1195 again at 9b62f54671); and the objectui '
         + 'checkout this repo builds against — this is the pin, '
-        + '`.objectui-sha` = `dd3f7e1be3561d63267d7162f3fc0ac52e72834d`, re-read from this tree — '
-        + 'spells all six metrics def names and both distinctive keys 0 times across 9283 tracked '
-        + 'files at that sha, against lit controls window 3681, timeout 1172, period 183, '
-        + 'interval 176 and metrics 340 on that same corpus and sha (0 across 8512, against 3581 / '
+        + '`.objectui-sha` = `db11afd4967cd9d39381c5e21dc2deec9d706204`, re-read from this tree — '
+        + 'spells all six metrics def names and both distinctive keys 0 times across 9546 tracked '
+        + 'files at that sha, against lit controls window 3772, timeout 1197, period 228, '
+        + 'interval 196 and metrics 341 on that same corpus and sha (0 across 9283, against 3681 / 1172 / 183 / 176 / 340, at dd3f7e1be, 0 across 8512, against 3581 / '
         + '1096 / 171 / 179 / 326, at f8a9d0fb0, and 0 across 8303, against 3526 / 1086 / 170 / 179 / '
         + '324, at 62597c588), so no pin bump is owed. '
         + 'ADR-0087.',
@@ -16574,12 +16746,12 @@ const step18: MigrationStep = {
         + 'dark control of 0; inside packages/spec the '
         + 'only occurrences are tracing.zod.ts, its test, and the generated rows in '
         + 'content/docs/references/system/tracing.mdx, which this rename regenerates. And the '
-        + 'pinned objectui checkout — `.objectui-sha` = `dd3f7e1be3561d63267d7162f3fc0ac52e72834d` — names none of it: all 37 exports of '
-        + 'tracing.zod.ts and each of the four key names occur 0 times across the 9283 files '
-        + 'tracked at that sha (the 485 Span and 53 SpanSchema hits are objectui\'s own HTML '
+        + 'pinned objectui checkout — `.objectui-sha` = `db11afd4967cd9d39381c5e21dc2deec9d706204` — names none of it: all 37 exports of '
+        + 'tracing.zod.ts and each of the four key names occur 0 times across the 9546 files '
+        + 'tracked at that sha (the 486 Span and 53 SpanSchema hits are objectui\'s own HTML '
         + 'text-span component, TextSpanSchema, an unrelated name, plus colSpan and prose), against '
-        + 'two lit controls on that same corpus and sha: 13745 hits for the bare token objectstack, '
-        + 'and 5466 for the package specifier @objectstack/spec (at f8a9d0fb0: 0 across 8512, '
+        + 'two lit controls on that same corpus and sha: 14704 hits for the bare token objectstack, '
+        + 'and 5545 for the package specifier @objectstack/spec (at dd3f7e1be: 0 across 9283, Span 485, 13745 and 5466; at f8a9d0fb0: 0 across 8512, '
         + 'Span 488, 13347 and 5123; at 62597c588: 0 across 8303, Span 486, 13125 and 5043).',
       acceptanceCriteria:
         'Every author and reader of an OpenTelemetryCompatibility spells exporter.timeoutMs, '
@@ -16686,9 +16858,9 @@ const step18: MigrationStep = {
         + 'bd25e897dc: no in-repo runtime reads the key — outside `packages/spec/src/system/tenant.zod.ts` '
         + 'and its test the only occurrences are the four generated rows in '
         + '`content/docs/references/system/tenant.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `dd3f7e1be3561d63267d7162f3fc0ac52e72834d` — spells it 0 '
-        + 'times across 9283 tracked files, against lit controls `TTL` 181 and `tenant` 1185 on the '
-        + 'same corpus (0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
+        + 'objectui checkout — `.objectui-sha` = `db11afd4967cd9d39381c5e21dc2deec9d706204` — spells it 0 '
+        + 'times across 9546 tracked files, against lit controls `TTL` 181 and `tenant` 1200 on the '
+        + 'same corpus (0 across 9283, against 181 and 1185, at dd3f7e1be; 0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
         + 'and 987, at 62597c588).',
       acceptanceCriteria:
         'Every schema-level tenant isolation source spells `performance.schemaCacheTtlSeconds`; '
@@ -16724,6 +16896,33 @@ const step18: MigrationStep = {
         + '`sessionTimeoutSeconds`; authoring `idleTimeout` or `sessionTimeout` fails to compile and '
         + 'fails to parse with the rename prescription naming the suffixed key; the parsed defaults '
         + 'are 300 and 3600 as before.',
+    },
+    // The D3 entry of the `time-default-utc-suffix-dropped` family: the stored form
+    // of a `time` value (`ClockTimeValueSchema`) no longer admits a zone, so the
+    // literal defaults it judges move with it.
+    {
+      id: 'time-default-zone-refused',
+      surface: 'a literal `defaultValue` with a `Z` or a UTC offset on a `time` field, or on an '
+        + 'action param typed `time`',
+      replacement: 'the wall clock itself, `HH:MM` or `HH:MM:SS` with no zone, or a `datetime` field '
+        + 'when the value is an instant. The conversion drops a `Z` or a zero offset, which names the '
+        + 'same wall clock. It does not touch a non-zero offset (`08:00+08:00`): whether that meant '
+        + '08:00 or the UTC 00:00 only the author knows, so rewrite it by hand',
+      reason:
+        'A `time` value is a zone-less wall clock (ADR-0053 D-C1), and the record validator already '
+        + 'refuses a zone-suffixed time of day on write. The stored form still admitted one, so a '
+        + 'field default such as `10:00Z` parsed clean and every insert that fell back to it was then '
+        + 'refused `invalid_time` on a field the caller never sent, and an action param default or '
+        + 'submitted value passed the dispatcher. The stored form now refuses the zone, so the field '
+        + 'and action-param default gates refuse it when it is authored and the dispatcher refuses it '
+        + 'at submit.',
+      acceptanceCriteria:
+        'No `time` field or `time` action param declares a literal default with a zone. Zone-less '
+        + 'defaults, the `NOW()` token and expression defaults parse as before. A stored `sys_metadata` '
+        + 'row whose default carried a `Z` or a zero offset loads with the zone dropped; one with a '
+        + 'non-zero offset keeps loading as stored, is listed by `os migrate meta --stored` as a TODO '
+        + 'naming the field or param, and fails the schema wherever it is parsed until it is rewritten.',
+      conversionIds: ['time-default-utc-suffix-dropped'],
     },
     {
       id: 'time-update-interval-sub-day-retired',
@@ -16981,6 +17180,56 @@ const step18: MigrationStep = {
         + 'is wrong or missing for your locale, correct it in the platform bundle '
         + '(`@objectstack/service-settings`’s `settingsBuiltinTranslations`) — ⛔ do not re-add '
         + 'app-side copy at either door, which is refused.',
+    },
+    // A forced local mode beside a remote to replicate from, refused at both doors
+    // together: the datasource contract (on mode) and the turso driver's
+    // constructor, in one message. The driver used to label it local and run it as
+    // an embedded replica anyway. The twin of
+    // turso-config-forced-replica-without-sync-url-refused, the other way round. A
+    // structured TODO, not a D2 conversion: whether the author meant an embedded
+    // replica of that remote or a plain local file is intent no artifact records.
+    {
+      id: 'turso-config-forced-local-with-sync-url-refused',
+      // No backticks in `surface` — build-upgrade-guide renders it inside a code
+      // span already, and a nested backtick would close it.
+      surface:
+        'data.TursoConfig (a turso / libsql datasource.config) and the TursoDriver constructor of '
+        + '@objectstack/driver-turso — mode local beside a non-empty syncUrl is now refused, on mode at '
+        + 'authoring and at construction. The published TursoConfigSchema mirror of '
+        + '@objectstack/driver-turso carries the same text for parity but declares no mode key and strips '
+        + 'an authored one, so it cannot see a forced mode and still accepts the config as a replica',
+      replacement:
+        'the configuration the author meant. An embedded replica drops mode: keep the file: url and '
+        + 'syncUrl, for example url file:./data/replica.db with syncUrl naming the remote, and the url '
+        + 'and syncUrl select the replica. A plain local database drops syncUrl and sync: a file: url '
+        + '(or :memory:) with no syncUrl is a local database, with or without mode local',
+      reason:
+        'A syncUrl names the remote an embedded replica syncs with, and the turso driver syncs whenever '
+        + 'it is set on a local engine, whatever mode says. The triage ruling of 2026-09-29 weighed '
+        + 'refusing this shape against honouring mode local by skipping the sync, and refused it: '
+        + 'honouring it would ignore a declared syncUrl, the same defect with the keys swapped, and a '
+        + 'loud contradiction is the author\'s to resolve. A forced mode local beside a syncUrl parsed '
+        + 'clean at authoring, and the driver built it with a local transport label and then ran it as '
+        + 'a replica: it synced on connect, started the sync interval and answered true to the '
+        + 'sync-enabled check, exactly as the same config with no mode did (measured on the driver '
+        + 'source). A declared mode the runtime ignores is the declared-but-not-enforced shape ADR-0049 '
+        + 'does not ship, so the datasource contract and the constructor now refuse it together, with '
+        + 'one message, which names both ways out. The sibling refusals keep their order: a forced '
+        + 'local mode on a remote url or a bare path meets its url refusal first. An empty syncUrl is '
+        + 'unset and is not refused. Stored datasource rows are not re-parsed when they load, so a '
+        + 'stored row in this shape now fails when its driver is built: the connection service records '
+        + 'it as failed-degraded, a test connection answers ok false, and under ADR-0062 D5 the boot '
+        + 'fails fast when objects bind to that datasource, unless OS_ALLOW_DRIVER_CONNECT_FAILURE is '
+        + 'set. Measured on this tree at the change: no example, template, published skill or '
+        + 'hand-written doc authors the shape, and no host default or environment variable sets mode '
+        + 'or syncUrl. ADR-0049 / ADR-0087 / ADR-0112.',
+      acceptanceCriteria:
+        'Validate every stack and re-save every turso datasource: os validate or defineStack, and a '
+        + 'save or test connection through the datasource admin service, report a forced local mode '
+        + 'beside a syncUrl at config.mode with both ways out. Decide per datasource whether it is an '
+        + 'embedded replica (drop mode) or a local file (drop syncUrl and sync). Done when every turso '
+        + 'datasource parses, the driver builds from it, and no datasource that declares mode local '
+        + 'carries a syncUrl.',
     },
     // A forced embedded replica with no remote to replicate from, refused at both
     // doors together: the datasource contract (on mode) and the turso driver's
@@ -17453,7 +17702,9 @@ const step18: MigrationStep = {
         'An html page\'s source is a JSX string, not a keyed document: `objectstack migrate meta` '
         + 'rewrites stored metadata by key and cannot rewrite a tag inside authored source, so the '
         + 'move is by hand, and which wrapper keeps a page\'s layout is the author\'s call. '
-        + '`objectstack validate`, `objectstack compile` (which `dev` and `start` run first) and '
+        + '`objectstack validate`, `objectstack compile` (which `dev` and `start` run before they '
+        + 'boot only when the artifact is missing or `--compile` is passed, and `dev`\'s watch mode '
+        + 'when a watched file changes) and '
         + '`objectstack lint` check that source against an SDUI component manifest: the '
         + '`sdui.manifest.json` in the directory the command runs in, then the copy '
         + '`@objectstack/console` ships. The second lookup asked for a file the console package '
@@ -18541,9 +18792,9 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // that ships the login UI (objectui#4179). Until then the standing record is
     // `PUBLIC_AUTH_FEATURES_NOT_ADVERTISED` in `kernel/public-auth-features.ts`.
     'api/AuthFeaturesConfig:passkeys',
-    // #6361 — the notification-inbox pagination key, tombstoned on BOTH halves
+    // Commit 90bbf2510 — the notification-inbox pagination key, tombstoned on BOTH halves
     // of `GET /api/v1/notifications` because one capability is never half-
-    // deleted (maintainer ruling 2026-08-07, ruled jointly with #6363). Two
+    // deleted (maintainer ruling 2026-08-07, ruled jointly with the `unreadCount` fix, commit 17d095413). Two
     // keys, one prescription: `NOTIFICATIONS_CURSOR_REMOVED` in
     // `api/protocol.zod.ts` is the single string both rejection sites raise.
     //
@@ -18777,8 +19028,8 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // cannot say whether the value was ever in seconds. Registered under 18 for
     // the launch-window reason its neighbours state.
     'api/ApiEndpoint:cacheTtl',
-    // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
-    // executing the #14369 liveness census (15 `dead` rows across the `crud` /
+    // Commit b3a63d32c — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
+    // executing the liveness census commit a3d5724c8 recorded (15 `dead` rows across the `crud` /
     // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
     // outside `normalizeConfig` and the normalized-config type; objectui @d4c6a86
     // clean; cloud @9b6abe0f2fd5 clean STRUCTURALLY — cloud never authors a
@@ -18800,8 +19051,8 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // semantics of callers who send nothing, the exact move ADR-0119 D4 refused,
     // so this is a remove, not an enforce.
     'api/BatchEndpointsConfig:defaultAtomic',
-    // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
-    // executing the #14369 liveness census (15 `dead` rows across the `crud` /
+    // Commit b3a63d32c — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
+    // executing the liveness census commit a3d5724c8 recorded (15 `dead` rows across the `crud` /
     // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
     // outside `normalizeConfig` and the normalized-config type; objectui @d4c6a86
     // clean; cloud @9b6abe0f2fd5 clean STRUCTURALLY — cloud never authors a
@@ -18823,8 +19074,8 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // gated by `enableBatchEndpoint`. Nested key of an inline block — no
     // `authorable-surface/` line of its own.
     'api/BatchEndpointsConfig:operations.upsertMany',
-    // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
-    // executing the #14369 liveness census (15 `dead` rows across the `crud` /
+    // Commit b3a63d32c — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
+    // executing the liveness census commit a3d5724c8 recorded (15 `dead` rows across the `crud` /
     // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
     // outside `normalizeConfig` and the normalized-config type; objectui @d4c6a86
     // clean; cloud @9b6abe0f2fd5 clean STRUCTURALLY — cloud never authors a
@@ -18843,8 +19094,8 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // segment; `'query'` was validated against the enum and mounted exactly what
     // `'path'` mounts.
     'api/CrudEndpointsConfig:objectParamStyle',
-    // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
-    // executing the #14369 liveness census (15 `dead` rows across the `crud` /
+    // Commit b3a63d32c — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
+    // executing the liveness census commit a3d5724c8 recorded (15 `dead` rows across the `crud` /
     // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
     // outside `normalizeConfig` and the normalized-config type; objectui @d4c6a86
     // clean; cloud @9b6abe0f2fd5 clean STRUCTURALLY — cloud never authors a
@@ -18866,8 +19117,8 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // per-operation method/path knob would make every one of them lie. The live
     // door for a custom path or method is a declarative `api` endpoint. Its value
     // def `api/CrudEndpointPattern` leaves with it (RETIRED_DEFS_BY_MAJOR[18]); its
-    // four ledger child rows collapse into the one `patterns` row. Closes #14365's
-    // question about the record's input type — there is no record left to reshape.
+    // four ledger child rows collapse into the one `patterns` row. Closes the open
+    // `z.partialRecord` question (commit f60ab90ae) — there is no record left to reshape.
     'api/CrudEndpointsConfig:patterns',
     // #15677 (stack card 2/6 of #14478) — ruling B: the unit lives in the key NAME.
     // `DataLoaderConfig.cacheTtl` named seconds only in its describe. Renamed to
@@ -18956,7 +19207,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // is HTTP-only — nobody authors a `ListInstalledPackagesRequest` and nothing
     // persists one. The prescription reaches consumers as the D3 semantic entry
     // `packages-list-pagination-retired` plus this tombstone, the disposition
-    // `api/ListNotificationsRequest:cursor` (#6361) already took for the same
+    // `api/ListNotificationsRequest:cursor` (commit 90bbf2510) already took for the same
     // shape one route over.
     'api/ListInstalledPackagesRequest:limit',
     // #19543 — ADR-0049 enforce-or-remove (director seat, decision batch #204
@@ -18988,8 +19239,8 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // D3 semantic entry `automation-runs-cursor-retired` carries the record to
     // `spec-changes.json`, the generated upgrade guide and `os migrate meta`.
     'api/ListRunsRequest:cursor',
-    // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
-    // executing the #14369 liveness census (15 `dead` rows across the `crud` /
+    // Commit b3a63d32c — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
+    // executing the liveness census commit a3d5724c8 recorded (15 `dead` rows across the `crud` /
     // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
     // outside `normalizeConfig` and the normalized-config type; objectui @d4c6a86
     // clean; cloud @9b6abe0f2fd5 clean STRUCTURALLY — cloud never authors a
@@ -19010,8 +19261,8 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // bound, `-1` accepted — #11984 pinned it as accepted because that was the
     // contract) dies with the key.
     'api/MetadataEndpointsConfig:cacheTtl',
-    // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
-    // executing the #14369 liveness census (15 `dead` rows across the `crud` /
+    // Commit b3a63d32c — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
+    // executing the liveness census commit a3d5724c8 recorded (15 `dead` rows across the `crud` /
     // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
     // outside `normalizeConfig` and the normalized-config type; objectui @d4c6a86
     // clean; cloud @9b6abe0f2fd5 clean STRUCTURALLY — cloud never authors a
@@ -19120,7 +19371,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // removal ships on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #11846 / #12428 grading).
+    // boundary where `migrate meta` users look (the commit 0c2334f6c / #12428 grading).
     'api/RestApiEndpoint:handlerStatus',
     // #15677 (stack card 2/6 of #14478) — ruling B. `RestApiEndpoint.timeout`
     // (milliseconds) sat THREE LINES above `cacheTtl` (seconds), each unit named
@@ -19152,8 +19403,8 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // local `RouteDefinition` interface for the `ai:routes` hook payload — a
     // different type, with no duration key at all, and untouched by this rename.
     'api/RouteDefinition:timeout',
-    // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
-    // executing the #14369 liveness census (15 `dead` rows across the `crud` /
+    // Commit b3a63d32c — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
+    // executing the liveness census commit a3d5724c8 recorded (15 `dead` rows across the `crud` /
     // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
     // outside `normalizeConfig` and the normalized-config type; objectui @d4c6a86
     // clean; cloud @9b6abe0f2fd5 clean STRUCTURALLY — cloud never authors a
@@ -19173,8 +19424,8 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `RestServerConfigSchema`'s own `@example` advertised
     // `routes: { excludeObjects: ['system_log'] }`; corrected in the same change.
     'api/RouteGenerationConfig:excludeObjects',
-    // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
-    // executing the #14369 liveness census (15 `dead` rows across the `crud` /
+    // Commit b3a63d32c — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
+    // executing the liveness census commit a3d5724c8 recorded (15 `dead` rows across the `crud` /
     // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
     // outside `normalizeConfig` and the normalized-config type; objectui @d4c6a86
     // clean; cloud @9b6abe0f2fd5 clean STRUCTURALLY — cloud never authors a
@@ -19195,8 +19446,8 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `enable.apiMethods` → 405), so the capability exists where the contract
     // belongs and this key was a second, unread dialect of it.
     'api/RouteGenerationConfig:includeObjects',
-    // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
-    // executing the #14369 liveness census (15 `dead` rows across the `crud` /
+    // Commit b3a63d32c — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
+    // executing the liveness census commit a3d5724c8 recorded (15 `dead` rows across the `crud` /
     // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
     // outside `normalizeConfig` and the normalized-config type; objectui @d4c6a86
     // clean; cloud @9b6abe0f2fd5 clean STRUCTURALLY — cloud never authors a
@@ -19216,8 +19467,8 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `name` is the canonical id on every surface including the REST path segment
     // (Prime Directive #6) — a URL transform would contradict the one-name rule.
     'api/RouteGenerationConfig:nameTransform',
-    // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
-    // executing the #14369 liveness census (15 `dead` rows across the `crud` /
+    // Commit b3a63d32c — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
+    // executing the liveness census commit a3d5724c8 recorded (15 `dead` rows across the `crud` /
     // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
     // outside `normalizeConfig` and the normalized-config type; objectui @d4c6a86
     // clean; cloud @9b6abe0f2fd5 clean STRUCTURALLY — cloud never authors a
@@ -19238,7 +19489,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `enable.apiMethods`); `basePath` per object would contradict the one
     // deployment-wide data base (`crud.dataPrefix`) the discovery document
     // advertises. Its three ledger child rows collapse into the one `overrides`
-    // row. Closes #14365's question about `overrides.*.operations` — no record left.
+    // row. Closes the `z.partialRecord` question (commit f60ab90ae) on `overrides.*.operations` — no record left.
     'api/RouteGenerationConfig:overrides',
     // #14788 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-03, option
     // D). `SessionUserSchema.language` (`api/auth.zod.ts`) was declared with a
@@ -19259,7 +19510,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // removal ships on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
     // The schema is a non-strict `z.object`, so the route is a `retiredKey()`
     // tombstone (a bare delete would strip the key silently, ADR-0104). A RESPONSE
     // surface — the server mints a `SessionUser` and nobody authors or persists
@@ -19338,6 +19589,20 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // covered by `memory-persistence-auto-save-interval-to-ms`, which converts both
     // arms in one pass.
     'data/AutoPersistenceConfig:autoSaveInterval',
+    // #20637 — ADR-0049 enforce-or-remove (maintainer ruling, letter C: retire
+    // whole, no cache built). `Cube.refreshKey` — the refresh cadence `every` and
+    // the data-change probe `sql` — was read by nothing, and no analytics result
+    // is cached for it to key on. Measured: `git grep refreshKey` over the non-test
+    // sources of `packages/services`, `packages/drivers` and `packages/rest`
+    // answered 0 lines (4 for the neighbouring `.public` in the same pathspec).
+    //
+    // `retiredKey()` on a `strictObject`, for the prescription and the `tsc`
+    // channel (the `data/Metric:name` precedent). One row, not three: the nested
+    // `every` and `sql` left with the block, and a dotted row under a tombstoned
+    // parent names a path this build no longer emits (check (b3)). The D2
+    // conversion `cube-refresh-key-removed` strips the block wherever the chain is
+    // replayed; the D3 record is `cube-refresh-key-retired`.
+    'data/Cube:refreshKey',
     // #18612 — ADR-0049 enforce-or-remove, the same ruling and the same diff as
     // `data/CubeJoin:sql`. `CubeJoin.relationship` carried a
     // `.default('many_to_one')` and nothing dispatched on the cardinality, so
@@ -19542,7 +19807,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // removal ships on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
     // `MetricSchema` is `strictObject`, so the route is strict deletion + a
     // `guidance` entry carrying the prescription (no retiredKey tombstone — the
     // key is out of the walked shape entirely). Sources are rewritten by the D2
@@ -19728,7 +19993,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // boundary where `migrate meta` users look — the disposition
     // `18.integration__Connector__errorMapping.ts` records for the same schema.
     'integration/Connector:connectionTimeoutMs',
-    // #14676 — ADR-0049 enforce-or-remove on `ConnectorSchema.errorMapping` (triage
+    // Commit 13c48c2a5 — ADR-0049 enforce-or-remove on `ConnectorSchema.errorMapping` (triage
     // ruling 2026-09-02: removal via the `spec-property-retirement` playbook; the
     // split condition — a downstream consumer in objectui or a customer stack —
     // measured empty at objectui `0d8fd7c`, hotcrm not measurable). The key carried
@@ -19911,7 +20176,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // carry the key — measured, not assumed, before the tombstone landed.
     // See `18.integration__Connector__connectionTimeoutMs.ts` for the retirement record.
     'integration/DeclarativeConnectorEntry:connectionTimeoutMs',
-    // #14676 — the same tombstone seen through the second carrier.
+    // Commit 13c48c2a5 — the same tombstone seen through the second carrier.
     // `DeclarativeConnectorEntrySchema` and `ConnectorSchema` both wrap the shared
     // private `ConnectorBaseSchema` in the retired-default residue stage, the entry
     // schema adding the ADR-0097 cross-field rules on the base before wrapping.
@@ -20057,7 +20322,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // declaration, and the registration-time refusal in
     // `HotReloadManager.registerPlugin` is the door for the audience that exists.
     'kernel/HotReloadConfig:watchPatterns',
-    // #11846 — ADR-0049 enforce-or-remove on the preview-mode block (maintainer
+    // Commit 0c2334f6c — ADR-0049 enforce-or-remove on the preview-mode block (maintainer
     // ruling 2026-08-27, Option A: remove). The key was declared as an auth bypass
     // — its docstring promised auto-login as a simulated admin and named a
     // production guard "the runtime must enforce" — and NOTHING implemented any of
@@ -20080,7 +20345,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // removal ships on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
     'kernel/KernelContext:previewMode',
     // #15676 — the epoch-instant half of #14478 ruling B. `KernelContext.startTime`
     // is the boot INSTANT: it moved onto the shared `EpochMs` schema and was renamed
@@ -20111,7 +20376,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `KernelSecurityPolicy` is a plugin security manifest's policy block, never a
     // stack collection member. See `kernel-plugin-security-durations-unit-in-key`.
     'kernel/KernelSecurityPolicy:authentication.tokenExpiration',
-    // #11332 — ADR-0049 enforce-or-remove on the plugin manifest's three dead
+    // Commit dce5cd4f0 — ADR-0049 enforce-or-remove on the plugin manifest's three dead
     // top-level containers (triage graded 2026-08-23; cloud leg measured clean
     // 2026-08-29 on #12400 with positive controls). The census found ZERO reads
     // of the `capabilities` container itself in objectstack, objectui and cloud,
@@ -20139,7 +20404,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // and through the D3 semantic entry
     // `plugin-manifest-dead-containers-retired`.
     'kernel/Manifest:capabilities',
-    // #11332 — ADR-0049 enforce-or-remove on the plugin manifest's three dead
+    // Commit dce5cd4f0 — ADR-0049 enforce-or-remove on the plugin manifest's three dead
     // top-level containers; census and registration major recorded once in the
     // sibling entry `kernel/Manifest:capabilities`, the why-no-D2-conversion
     // reasoning in `kernel/Manifest:loading` (the precedent); the D3 semantic
@@ -20155,7 +20420,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // composition: the options object passed to the plugin's constructor in
     // `defineStack({ plugins: [new MyPlugin({ … })] })`.
     'kernel/Manifest:configuration',
-    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // Commit be21955ba — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
     // block; one of NINE members tombstoned together. Census, registration major,
     // and the why-no-D2-conversion reasoning are recorded once in the sibling
     // entry `kernel/Manifest:contributes.events` (this family) and in
@@ -20166,7 +20431,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // working surfaces are the stack `actions` collection (METADATA_ARRAY_KEYS,
     // registered by the engine) and `engine.registerAction`.
     'kernel/Manifest:contributes.actions',
-    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // Commit be21955ba — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
     // block; one of NINE members tombstoned together. Census, registration major,
     // and the why-no-D2-conversion reasoning are recorded once in the sibling
     // entry `kernel/Manifest:contributes.events` (this family) and in
@@ -20179,7 +20444,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // "The `objectstack.config.ts` plugins array no longer determines CLI
     // commands").
     'kernel/Manifest:contributes.commands',
-    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // Commit be21955ba — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
     // block; one of NINE members tombstoned together. Census, registration major,
     // and the why-no-D2-conversion reasoning are recorded once in the sibling
     // entry `kernel/Manifest:contributes.events` (this family) and in
@@ -20191,9 +20456,9 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `registerDriver` on it); the only in-repo author (driver-memory) was
     // registered that way, not by its declaration.
     'kernel/Manifest:contributes.drivers',
-    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // Commit be21955ba — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
     // block (triage graded 2026-08-21; cloud leg measured clean 2026-08-24). One
-    // of NINE members tombstoned together: #10627 measured exactly ONE non-test
+    // of NINE members tombstoned together: that commit's census measured exactly ONE non-test
     // read of `manifest.contributes` monorepo-wide (engine.ts, member `kinds`),
     // with controls, re-verified across objectstack + objectui + cloud at claim
     // time. `events` in particular was decorative twice over: its only in-repo
@@ -20213,7 +20478,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `os plugin build` → `ManifestSchema.safeParse` and through the D3 semantic
     // entry `plugin-manifest-contributes-dead-members-retired`.
     'kernel/Manifest:contributes.events',
-    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // Commit be21955ba — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
     // block; one of NINE members tombstoned together. Census, registration major,
     // and the why-no-D2-conversion reasoning are recorded once in the sibling
     // entry `kernel/Manifest:contributes.events` (this family) and in
@@ -20224,7 +20489,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // there is no `registerFieldType` seam anywhere — zero hits monorepo-wide.
     // The field-type vocabulary is the spec `FieldType` enum.
     'kernel/Manifest:contributes.fieldTypes',
-    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // Commit be21955ba — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
     // block; one of NINE members tombstoned together. Census, registration major,
     // and the why-no-D2-conversion reasoning are recorded once in the sibling
     // entry `kernel/Manifest:contributes.events` (this family) and in
@@ -20261,7 +20526,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `os plugin build` → `ManifestSchema.safeParse` and through the D3 semantic
     // entry `plugin-manifest-kind-globs-retired`.
     'kernel/Manifest:contributes.kinds.globs',
-    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // Commit be21955ba — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
     // block; one of NINE members tombstoned together. Census, registration major,
     // and the why-no-D2-conversion reasoning are recorded once in the sibling
     // entry `kernel/Manifest:contributes.events` (this family) and in
@@ -20274,8 +20539,8 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `navigation` / `manifest.navigationContributions` (ADR-0029 D7), which the
     // engine registers.
     'kernel/Manifest:contributes.menus',
-    // #10726 — ADR-0049 enforce-or-remove fork on `contributes.routes`, the ONE
-    // `contributes` member deliberately excluded from #10724's nine-member
+    // Commit bc56e1881 — ADR-0049 enforce-or-remove fork on `contributes.routes`, the ONE
+    // `contributes` member deliberately excluded from commit be21955ba's nine-member
     // retirement because removing it needed a ruling, not a tombstone: the key
     // was the only DECLARED channel for a real capability (serving a code-handler
     // endpoint), and four published surfaces — a customer-published skill among
@@ -20283,8 +20548,8 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // (「接受所有」 on the decision batch carrying the four-axis analysis): remove
     // the key; author-facing materials redirect to the imperative `http.server`
     // mount, the form that actually works. The ruling's cloud precondition was
-    // discharged 2026-08-24 (#10812: cloud @ 5b5925a, zero `manifest.contributes`
-    // reads, controls green), completing #10627's three-repo census at exactly
+    // discharged 2026-08-24 (the cloud census: cloud @ 5b5925a, zero `manifest.contributes`
+    // reads, controls green), completing commit be21955ba's three-repo census at exactly
     // one live read (engine.ts, member `kinds` — now the block's sole survivor).
     //
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
@@ -20299,7 +20564,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `os plugin build` → `ManifestSchema.safeParse` and through the D3 semantic
     // entry `plugin-manifest-contributes-routes-retired`.
     'kernel/Manifest:contributes.routes',
-    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // Commit be21955ba — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
     // block; one of NINE members tombstoned together. Census, registration major,
     // and the why-no-D2-conversion reasoning are recorded once in the sibling
     // entry `kernel/Manifest:contributes.events` (this family) and in
@@ -20312,7 +20577,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // stack-level theme hits reach the registry through top-level metadata
     // collections, never through `contributes.themes`.
     'kernel/Manifest:contributes.themes',
-    // #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+    // Commit be21955ba — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
     // block; one of NINE members tombstoned together. Census, registration major,
     // and the why-no-D2-conversion reasoning are recorded once in the sibling
     // entry `kernel/Manifest:contributes.events` (this family) and in
@@ -20324,7 +20589,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `translations` collection (`defineTranslationBundle`), governed by
     // `packages/spec/liveness/translation.json`.
     'kernel/Manifest:contributes.translations',
-    // #11332 — ADR-0049 enforce-or-remove on the plugin manifest's three dead
+    // Commit dce5cd4f0 — ADR-0049 enforce-or-remove on the plugin manifest's three dead
     // top-level containers; census and registration major recorded once in the
     // sibling entry `kernel/Manifest:capabilities`, the why-no-D2-conversion
     // reasoning in `kernel/Manifest:loading` (the precedent); the D3 semantic
@@ -20399,8 +20664,8 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // metadata-manager config is not a stack collection member. D3 semantic entry:
     // `metadata-manager-config-inert-cache-keys-retired`.
     'kernel/MetadataManagerConfig:cache.ttlSeconds',
-    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
-    // #12057, adopting retirement; re-charter #13135 executes the widened
+    // Commit 9e0ba21a1 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057, adopting retirement; re-chartered, that commit executes the widened
     // surface). `persistence.overlayWritable` gated exactly one method —
     // `MetadataManager.saveOverlay()` — which belonged to the paper
     // metadata-customization protocol removed whole in the same change: no route
@@ -20433,7 +20698,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // tombstone ships on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
     //
     // Registered here but NOT in `src/conversions/registry.ts`, for the reason
     // `kernel/Manifest:loading` gives: the conversion chain walks a normalized
@@ -20445,8 +20710,8 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // The prescription reaches authors through the tombstone (`tsc` + the parse)
     // and the D3 semantic entry `metadata-plugin-additional-types-retired`.
     'kernel/MetadataPluginConfig:additionalTypes',
-    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
-    // #12057, adopting retirement; re-charter #13135 executes the widened
+    // Commit 9e0ba21a1 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057, adopting retirement; re-chartered, that commit executes the widened
     // surface). `customizationPolicies` embedded the paper metadata-customization
     // protocol's `CustomizationPolicySchema` (lockedFields / customizableFields
     // whitelists) and was read by NOTHING: no code ever consulted a policy before
@@ -20473,8 +20738,8 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // through the tombstone (`tsc` + the parse) and the D3 semantic entry
     // `metadata-customization-protocol-retired`.
     'kernel/MetadataPluginConfig:customizationPolicies',
-    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
-    // #12057, adopting retirement; re-charter #13135 executes the widened
+    // Commit 9e0ba21a1 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057, adopting retirement; re-chartered, that commit executes the widened
     // surface). `mergeStrategy` embedded the paper protocol's
     // `MergeStrategyConfigSchema` (keep-custom / accept-incoming /
     // three-way-merge) and was read by NOTHING: no 3-way merge engine ever
@@ -20899,7 +21164,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // conversion: the result is EMITTED at the end of a boot, never authored. See
     // `kernel-startup-orchestrator-durations-unit-in-key`.
     'kernel/StartupOrchestrationResult:totalDuration',
-    // #11846 — the `TenantRuntimeContextSchema` copy of
+    // Commit 0c2334f6c — the `TenantRuntimeContextSchema` copy of
     // `kernel/KernelContext:previewMode`: the def is `KernelContextSchema.extend(…)`,
     // so the tombstone lands in this walked shape too and `authorable-surface/`
     // marks it `[RETIRED]` separately. Registered per key, as gate (b) reads them —
@@ -20988,7 +21253,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // removal ships on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
     // ObjectPermissionSchema is `strictObject` but the def is reachable from the
     // `permission` metadata root, so the route is the `retiredKey()` tombstone
     // (the `rls.priority` posture) — the key stays in the walked shape as
@@ -21019,7 +21284,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // removal ships on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
     // ObjectPermissionSchema is `strictObject` but the def is reachable from the
     // `permission` metadata root, so the route is the `retiredKey()` tombstone
     // (the `rls.priority` posture) — the key stays in the walked shape as
@@ -21892,7 +22157,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // tombstones ship on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
     // Sources are rewritten by the D2 conversion `element-filter-removed`, which
     // strips all six keys and leaves the bare node — which the parse then refuses
     // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
@@ -21914,7 +22179,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // tombstones ship on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
     // Sources are rewritten by the D2 conversion `element-filter-removed`, which
     // strips all six keys and leaves the bare node — which the parse then refuses
     // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
@@ -21936,7 +22201,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // tombstones ship on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
     // Sources are rewritten by the D2 conversion `element-filter-removed`, which
     // strips all six keys and leaves the bare node — which the parse then refuses
     // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
@@ -21958,7 +22223,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // tombstones ship on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
     // Sources are rewritten by the D2 conversion `element-filter-removed`, which
     // strips all six keys and leaves the bare node — which the parse then refuses
     // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
@@ -21980,7 +22245,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // tombstones ship on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
     // Sources are rewritten by the D2 conversion `element-filter-removed`, which
     // strips all six keys and leaves the bare node — which the parse then refuses
     // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
@@ -22002,7 +22267,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // tombstones ship on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
     // Sources are rewritten by the D2 conversion `element-filter-removed`, which
     // strips all six keys and leaves the bare node — which the parse then refuses
     // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
@@ -22026,7 +22291,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // tombstones ship on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
     // Sources are rewritten by the D2 conversion `element-form-removed`, which
     // strips all six keys and leaves the bare node — which the parse then refuses
     // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
@@ -22050,7 +22315,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // tombstones ship on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
     // Sources are rewritten by the D2 conversion `element-form-removed`, which
     // strips all six keys and leaves the bare node — which the parse then refuses
     // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
@@ -22074,7 +22339,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // tombstones ship on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
     // Sources are rewritten by the D2 conversion `element-form-removed`, which
     // strips all six keys and leaves the bare node — which the parse then refuses
     // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
@@ -22098,7 +22363,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // tombstones ship on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
     // Sources are rewritten by the D2 conversion `element-form-removed`, which
     // strips all six keys and leaves the bare node — which the parse then refuses
     // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
@@ -22122,7 +22387,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // tombstones ship on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
     // Sources are rewritten by the D2 conversion `element-form-removed`, which
     // strips all six keys and leaves the bare node — which the parse then refuses
     // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
@@ -22146,7 +22411,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // tombstones ship on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
     // Sources are rewritten by the D2 conversion `element-form-removed`, which
     // strips all six keys and leaves the bare node — which the parse then refuses
     // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the
@@ -22167,7 +22432,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // tombstone ships on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
     // Sources are rewritten by the D2 conversion
     // `element-input-target-variable-removed`.
     'ui/ElementRecordPickerProps:targetVariable',
@@ -22189,7 +22454,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // tombstone ships on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
     // Sources are rewritten by the D2 conversion
     // `element-input-target-variable-removed` (a page component IS a stack
     // collection member, unlike the `kernel/Manifest:loading` family).
@@ -22267,7 +22532,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // removal ships on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent,
+    // boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666,
     // as `data/Metric:filters` before it). Tombstoned with `retiredKey()` in
     // `ObjectGridPropsSchema` (the surface baseline line carries `[RETIRED]`);
     // sources are rewritten by the D2 conversion `object-grid-default-sort-removed`
@@ -22368,7 +22633,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // tombstone ships on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
     // Sources are rewritten by the D2 conversion `page-component-responsive-removed`.
     'ui/PageComponent:responsive',
     // #10054 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-21, executing
@@ -22391,7 +22656,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // removal ships on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
     // The object arm is `strictObject`, so the route is strict deletion + a
     // `guidance` entry carrying the prescription (no retiredKey tombstone — the
     // key is out of the walked shape entirely, and the refusal is the arm's own
@@ -22607,7 +22872,7 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
     // FILE — never by editing between the markers, which is generated.
     // <os-generated retired-def:17>
-    // #6239 — api/protocol.zod.ts view-management operations
+    // Commit f549a0d4a — api/protocol.zod.ts view-management operations
     'api/CreateViewRequest',
     'api/CreateViewResponse',
     'api/DeleteViewRequest',
@@ -22769,7 +23034,7 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // conversion — this table plus the D3 semantic entry
     // `export-job-family-retired` are the declaration.
     'api/CreateExportJobResponse',
-    // #14691 — `api/CrudEndpointPattern` (the `{ method, path, summary, description }`
+    // Commit b3a63d32c — `api/CrudEndpointPattern` (the `{ method, path, summary, description }`
     // value shape of `crud.patterns`) leaves with its carrier key: its ONLY consumer
     // was `CrudEndpointsConfigSchema.patterns`, tombstoned in the same change under
     // ADR-0049 enforce-or-remove, and an exported value schema with no consumer
@@ -22889,8 +23154,8 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // See `18.api__ListFlowsRequest.ts` and the D3 semantic entry
     // `automation-flow-list-route-retired` for the record.
     'api/ListFlowsResponse',
-    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
-    // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
+    // Commit 9e0ba21a1 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057: retirement adopted, re-scope rejected; re-chartered, that commit executes
     // the widened surface). Part of the whole-module removal of
     // `kernel/metadata-customization.zod.ts` — the paper three-layer
     // customization protocol ADR-0126 §6 wall 4 supersedes on the record
@@ -22910,11 +23175,11 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // boundary where `migrate meta` users look. No carrier key survives for
     // these defs and no authored document embedded them, so no tombstone and no
     // D2 conversion — this table plus the D3 semantic entry
-    // `metadata-customization-protocol-retired` ARE the declaration (the #8715
+    // `metadata-customization-protocol-retired` ARE the declaration (commit 2c86fe3ea's
     // route-3 shape).
     'api/MetadataEffectiveResponse',
-    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
-    // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
+    // Commit 9e0ba21a1 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057: retirement adopted, re-scope rejected; re-chartered, that commit executes
     // the widened surface). Part of the whole-module removal of
     // `kernel/metadata-customization.zod.ts` — the paper three-layer
     // customization protocol ADR-0126 §6 wall 4 supersedes on the record
@@ -22933,11 +23198,11 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // boundary where `migrate meta` users look. No carrier key survives for
     // these defs and no authored document embedded them, so no tombstone and no
     // D2 conversion — this table plus the D3 semantic entry
-    // `metadata-customization-protocol-retired` ARE the declaration (the #8715
+    // `metadata-customization-protocol-retired` ARE the declaration (commit 2c86fe3ea's
     // route-3 shape).
     'api/MetadataOverlayResponse',
-    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
-    // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
+    // Commit 9e0ba21a1 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057: retirement adopted, re-scope rejected; re-chartered, that commit executes
     // the widened surface). Part of the whole-module removal of
     // `kernel/metadata-customization.zod.ts` — the paper three-layer
     // customization protocol ADR-0126 §6 wall 4 supersedes on the record
@@ -22955,7 +23220,7 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // boundary where `migrate meta` users look. No carrier key survives for
     // these defs and no authored document embedded them, so no tombstone and no
     // D2 conversion — this table plus the D3 semantic entry
-    // `metadata-customization-protocol-retired` ARE the declaration (the #8715
+    // `metadata-customization-protocol-retired` ARE the declaration (commit 2c86fe3ea's
     // route-3 shape).
     'api/MetadataOverlaySaveRequest',
     // #12038 — `api/package-api.zod.ts` `PackageRollbackResponseSchema`, retired
@@ -22970,7 +23235,7 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // §5.2): only its own unit test and the #11925 negative guard, both updated
     // in the retiring PR. No carrier key, no authored document, so no tombstone
     // and no D2 conversion — this table plus the D3 semantic entry
-    // `package-rollback-response-retired` ARE the declaration (the #8715 route-3
+    // `package-rollback-response-retired` ARE the declaration (commit 2c86fe3ea's route-3
     // shape). The live route's true contract is
     // `RollbackToPackageCommitResponseSchema` (`api/package-lifecycle.zod.ts`),
     // authored in the same PR AFTER this retirement per the ruling's sequencing.
@@ -22978,7 +23243,7 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // removal ships on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8586 / #8715 precedent).
+    // boundary where `migrate meta` users look (the #8586 / commit 2c86fe3ea precedent).
     'api/PackageRollbackResponse',
     // #13823 — `api/RouteCoverageEntry` (one declared endpoint's coverage row:
     // `path` / `method` / `category` / `handlerStatus` / `service` /
@@ -23355,7 +23620,7 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // the cloud repo's own declarations, not an open-source protocol). Prescription: the
     // `cloud-subpath-retired` semantic entry of this major.
     'cloud/VersionRelease',
-    // #8715 — identity/identity.zod.ts `ApiKeySchema`, retired whole (ADR-0049
+    // Commit 2c86fe3ea — identity/identity.zod.ts `ApiKeySchema`, retired whole (ADR-0049
     // enforce-or-remove; maintainer ruling 2026-08-15, disposition B: delete).
     // The schema documented better-auth's `apiKey` PLUGIN shape — a plugin this
     // platform does not load: `start`, `lastRefetchAt`, `enabled` (the real
@@ -23388,7 +23653,7 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // deliberately exempts. See `retired-keys/18.integration__Connector__health.ts`
     // for the retirement record.
     'integration/CircuitBreakerConfig',
-    // #14676 — `integration/ConnectorErrorCategory` (the 8-value connector-side
+    // Commit 13c48c2a5 — `integration/ConnectorErrorCategory` (the 8-value connector-side
     // error category enum) left with its two carriers: `ErrorMappingRule.targetCategory`
     // and `ErrorMappingConfig.defaultCategory`, both retired in this same major
     // (`RETIRED_DEFS_BY_MAJOR[18]`). Measured before removal: outside the declaring
@@ -23426,7 +23691,7 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `retired-keys/18.integration__Connector__triggers.ts` for the retirement
     // record.
     'integration/ConnectorTrigger',
-    // #14676 — `integration/ErrorMappingConfig` (`rules`, `defaultCategory`,
+    // Commit 13c48c2a5 — `integration/ErrorMappingConfig` (`rules`, `defaultCategory`,
     // `unmappedBehavior`, `logUnmapped`) leaves with its only carrier:
     // `ConnectorSchema.errorMapping`, tombstoned in this same major under ADR-0049
     // enforce-or-remove (`RETIRED_KEYS_BY_MAJOR[18]`). Nothing outside the declaring
@@ -23438,7 +23703,7 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // no default). See `retired-keys/18.integration__Connector__errorMapping.ts`
     // for the retirement record.
     'integration/ErrorMappingConfig',
-    // #14676 — `integration/ErrorMappingRule` (`sourceCode`, `sourceMessage`,
+    // Commit 13c48c2a5 — `integration/ErrorMappingRule` (`sourceCode`, `sourceMessage`,
     // `targetCode`, `targetCategory`, `severity`, `retryable`, `userMessage`) leaves
     // with `integration/ErrorMappingConfig`, whose `rules[]` was its only carrier.
     // The `userMessage` member is the reason the census filed the card: its
@@ -23514,7 +23779,7 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // (ADR-0049 enforce-or-remove; triage graded 2026-08-25, the exported
     // orphan-value-schema class — #3950). The pair described a "CLI Command
     // Contribution declaration in the manifest" and claimed retention "for
-    // describing command metadata in plugin manifests" — but after #10724
+    // describing command metadata in plugin manifests" — but after commit be21955ba
     // tombstoned `manifest.contributes.commands`, no manifest surface could
     // legally carry these entries: the exported schema advertised a shape whose
     // only declared carrier rejects it. The manifest never referenced this schema
@@ -23535,8 +23800,8 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8586 / PR #8702 precedent).
     'kernel/CLICommandContribution',
-    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
-    // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
+    // Commit 9e0ba21a1 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057: retirement adopted, re-scope rejected; re-chartered, that commit executes
     // the widened surface). Part of the whole-module removal of
     // `kernel/metadata-customization.zod.ts` — the paper three-layer
     // customization protocol ADR-0126 §6 wall 4 supersedes on the record
@@ -23554,11 +23819,11 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // boundary where `migrate meta` users look. No carrier key survives for
     // these defs and no authored document embedded them, so no tombstone and no
     // D2 conversion — this table plus the D3 semantic entry
-    // `metadata-customization-protocol-retired` ARE the declaration (the #8715
+    // `metadata-customization-protocol-retired` ARE the declaration (commit 2c86fe3ea's
     // route-3 shape).
     'kernel/CustomizationOrigin',
-    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
-    // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
+    // Commit 9e0ba21a1 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057: retirement adopted, re-scope rejected; re-chartered, that commit executes
     // the widened surface). Part of the whole-module removal of
     // `kernel/metadata-customization.zod.ts` — the paper three-layer
     // customization protocol ADR-0126 §6 wall 4 supersedes on the record
@@ -23578,7 +23843,7 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // boundary where `migrate meta` users look. No carrier key survives for
     // these defs and no authored document embedded them, so no tombstone and no
     // D2 conversion — this table plus the D3 semantic entry
-    // `metadata-customization-protocol-retired` ARE the declaration (the #8715
+    // `metadata-customization-protocol-retired` ARE the declaration (commit 2c86fe3ea's
     // route-3 shape).
     'kernel/CustomizationPolicy',
     // #12340 — kernel/plugin-lifecycle-advanced.zod.ts
@@ -23617,8 +23882,8 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // receive a parse-time tombstone. This table plus the D3 semantic entry
     // `hot-reload-inert-state-strategies-retired` ARE the declaration.
     'kernel/DistributedStateConfig',
-    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
-    // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
+    // Commit 9e0ba21a1 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057: retirement adopted, re-scope rejected; re-chartered, that commit executes
     // the widened surface). Part of the whole-module removal of
     // `kernel/metadata-customization.zod.ts` — the paper three-layer
     // customization protocol ADR-0126 §6 wall 4 supersedes on the record
@@ -23639,7 +23904,7 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // boundary where `migrate meta` users look. No carrier key survives for
     // these defs and no authored document embedded them, so no tombstone and no
     // D2 conversion — this table plus the D3 semantic entry
-    // `metadata-customization-protocol-retired` ARE the declaration (the #8715
+    // `metadata-customization-protocol-retired` ARE the declaration (commit 2c86fe3ea's
     // route-3 shape).
     'kernel/FieldChange',
     // #11825 — `kernel/GracefulDegradation` left with
@@ -23723,8 +23988,8 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // module `kernel/plugin-security.zod.ts`. Those are separate defs with their own
     // self-test and are outside this ruling.
     'kernel/KernelSecurityVulnerability',
-    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
-    // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
+    // Commit 9e0ba21a1 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057: retirement adopted, re-scope rejected; re-chartered, that commit executes
     // the widened surface). Part of the whole-module removal of
     // `kernel/metadata-customization.zod.ts` — the paper three-layer
     // customization protocol ADR-0126 §6 wall 4 supersedes on the record
@@ -23742,11 +24007,11 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // boundary where `migrate meta` users look. No carrier key survives for
     // these defs and no authored document embedded them, so no tombstone and no
     // D2 conversion — this table plus the D3 semantic entry
-    // `metadata-customization-protocol-retired` ARE the declaration (the #8715
+    // `metadata-customization-protocol-retired` ARE the declaration (commit 2c86fe3ea's
     // route-3 shape).
     'kernel/MergeConflict',
-    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
-    // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
+    // Commit 9e0ba21a1 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057: retirement adopted, re-scope rejected; re-chartered, that commit executes
     // the widened surface). Part of the whole-module removal of
     // `kernel/metadata-customization.zod.ts` — the paper three-layer
     // customization protocol ADR-0126 §6 wall 4 supersedes on the record
@@ -23764,11 +24029,11 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // boundary where `migrate meta` users look. No carrier key survives for
     // these defs and no authored document embedded them, so no tombstone and no
     // D2 conversion — this table plus the D3 semantic entry
-    // `metadata-customization-protocol-retired` ARE the declaration (the #8715
+    // `metadata-customization-protocol-retired` ARE the declaration (commit 2c86fe3ea's
     // route-3 shape).
     'kernel/MergeResult',
-    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
-    // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
+    // Commit 9e0ba21a1 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057: retirement adopted, re-scope rejected; re-chartered, that commit executes
     // the widened surface). Part of the whole-module removal of
     // `kernel/metadata-customization.zod.ts` — the paper three-layer
     // customization protocol ADR-0126 §6 wall 4 supersedes on the record
@@ -23790,7 +24055,7 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // boundary where `migrate meta` users look. No carrier key survives for
     // these defs and no authored document embedded them, so no tombstone and no
     // D2 conversion — this table plus the D3 semantic entry
-    // `metadata-customization-protocol-retired` ARE the declaration (the #8715
+    // `metadata-customization-protocol-retired` ARE the declaration (commit 2c86fe3ea's
     // route-3 shape).
     'kernel/MergeStrategyConfig',
     // #14180 — kernel/cluster.zod.ts `MetadataChangeOperationSchema` /
@@ -23848,8 +24113,8 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look.
     'kernel/MetadataChangedEventPayload',
-    // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
-    // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
+    // Commit 9e0ba21a1 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
+    // #12057: retirement adopted, re-scope rejected; re-chartered, that commit executes
     // the widened surface). Part of the whole-module removal of
     // `kernel/metadata-customization.zod.ts` — the paper three-layer
     // customization protocol ADR-0126 §6 wall 4 supersedes on the record
@@ -23871,7 +24136,7 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // boundary where `migrate meta` users look. No carrier key survives for
     // these defs and no authored document embedded them, so no tombstone and no
     // D2 conversion — this table plus the D3 semantic entry
-    // `metadata-customization-protocol-retired` ARE the declaration (the #8715
+    // `metadata-customization-protocol-retired` ARE the declaration (commit 2c86fe3ea's
     // route-3 shape).
     'kernel/MetadataOverlay',
     // #11825 — `kernel/PluginUpdateStrategy` left with
@@ -23890,7 +24155,7 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // implementation first. See `18.kernel__AdvancedPluginLifecycleConfig.ts`
     // for the family record.
     'kernel/PluginUpdateStrategy',
-    // #11846 — `kernel/PreviewModeConfig` (the six-key preview/demo config block:
+    // Commit 0c2334f6c — `kernel/PreviewModeConfig` (the six-key preview/demo config block:
     // `autoLogin` default true, `simulatedRole` default 'admin',
     // `simulatedUserName`, `readOnly`, `expiresInSeconds`, `bannerMessage`). Its
     // only carrier key, `KernelContext.previewMode`, is tombstoned in this same
@@ -23905,7 +24170,7 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // never implemented by any layer; preview DEPLOYMENTS belong to the
     // deployment layer, whose `OS_PREVIEW_MODE` is routing-only and stays. If a
     // preview experience becomes a product capability it re-declares fresh, with
-    // the production-posture hard-refusal as the first-landed half (#11846 ruling
+    // the production-posture hard-refusal as the first-landed half (commit 0c2334f6c's ruling
     // record).
     'kernel/PreviewModeConfig',
     // #16059 — `StartupOptionsSchema` (`timeoutMs`, `rollbackOnFailure`,
@@ -23949,7 +24214,7 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // deliberate `z.string()` — the ruling adds no constraint there. No authored
     // document is invalidated (the accept set at the three fields widens), so no
     // tombstone and no D2 conversion — this table plus the D3 semantic entry
-    // `event-name-schema-retired` are the declaration (the #8715 route-3 shape).
+    // `event-name-schema-retired` are the declaration (commit 2c86fe3ea's route-3 shape).
     'shared/EventName',
     // #13612 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-01, director
     // batch C: retire; binding was weighed and not adopted). One of the six
@@ -23984,7 +24249,7 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // five surfaces' real validators as the contract of record). No authored
     // document ever embedded a branded value, so no tombstone and no D2
     // conversion — this table plus the D3 semantic entry
-    // `branded-identifier-schemas-retired` are the declaration (the #8715
+    // `branded-identifier-schemas-retired` are the declaration (commit 2c86fe3ea's
     // route-3 shape).
     'shared/ObjectName',
     // #13612 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-01, director
@@ -24476,7 +24741,7 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // entries stay as history — gate (b2) of build-schemas.ts accepts an entry
     // naming a key the build no longer emits.
     'system/TrainingRecord',
-    // #10485 — `ui/BorderRadius` (the border-radius scale sub-block) left with `ui/Theme`:
+    // Commit 35ad101bc — `ui/BorderRadius` (the border-radius scale sub-block) left with `ui/Theme`:
     // its ONLY consumer was the retired `ThemeSchema` (the #3950 rule — an
     // exported value schema with no consumer reads as a capability). See
     // `18.ui__Theme.ts` for the retirement record and the ruling.
@@ -24502,7 +24767,7 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // with no consumer reads as a capability). See `18.ui__ResponsiveConfig.ts`
     // for the retirement record and the measurement.
     'ui/BreakpointOrderMap',
-    // #10485 — `ui/ColorPalette` (the colour palette sub-block) left with `ui/Theme`:
+    // Commit 35ad101bc — `ui/ColorPalette` (the colour palette sub-block) left with `ui/Theme`:
     // its ONLY consumer was the retired `ThemeSchema` (the #3950 rule — an
     // exported value schema with no consumer reads as a capability). See
     // `18.ui__Theme.ts` for the retirement record and the ruling.
@@ -24519,12 +24784,12 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // which stays. The Tailwind-style layout vocabulary returns if and when a
     // renderer implements it — in one change, with the engine (the #4834 rule).
     'ui/ResponsiveConfig',
-    // #10485 — `ui/Shadow` (the shadow scale sub-block) left with `ui/Theme`:
+    // Commit 35ad101bc — `ui/Shadow` (the shadow scale sub-block) left with `ui/Theme`:
     // its ONLY consumer was the retired `ThemeSchema` (the #3950 rule — an
     // exported value schema with no consumer reads as a capability). See
     // `18.ui__Theme.ts` for the retirement record and the ruling.
     'ui/Shadow',
-    // #10485 — `ui/theme.zod.ts` `ThemeSchema`, retired whole with its
+    // Commit 35ad101bc — `ui/theme.zod.ts` `ThemeSchema`, retired whole with its
     // `defineStack({ themes })` carrier key (ADR-0049 enforce-or-remove;
     // maintainer ruling 2026-08-21, disposition B: 退役授权面 — `app.branding`
     // stays the one colour surface; objectui's ThemeEngine/ThemeContext and their
@@ -24540,14 +24805,14 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // removal ships on the 17.x line (launch-window convention: accept-set
     // narrowings ride minor releases) and the prescription lives at the major
-    // boundary where `migrate meta` users look (the #8586 / #8715 precedent).
+    // boundary where `migrate meta` users look (the #8586 / commit 2c86fe3ea precedent).
     'ui/Theme',
-    // #10485 — `ui/ThemeMode` (the theme mode enum (light/dark/auto)) left with `ui/Theme`:
+    // Commit 35ad101bc — `ui/ThemeMode` (the theme mode enum (light/dark/auto)) left with `ui/Theme`:
     // its ONLY consumer was the retired `ThemeSchema` (the #3950 rule — an
     // exported value schema with no consumer reads as a capability). See
     // `18.ui__Theme.ts` for the retirement record and the ruling.
     'ui/ThemeMode',
-    // #10485 — `ui/Typography` (the typography sub-block) left with `ui/Theme`:
+    // Commit 35ad101bc — `ui/Typography` (the typography sub-block) left with `ui/Theme`:
     // its ONLY consumer was the retired `ThemeSchema` (the #3950 rule — an
     // exported value schema with no consumer reads as a capability). See
     // `18.ui__Theme.ts` for the retirement record and the ruling.

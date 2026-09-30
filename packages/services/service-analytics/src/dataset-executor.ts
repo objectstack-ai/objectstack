@@ -16,6 +16,7 @@ import {
   filterTokenContextFrom,
   resolveAnalyticsDateRangeString,
   resolveFilterTokens,
+  wallClockToUtcMs,
   zonedDateStartToUtcMs,
   type LoweredDateRangeWindow,
 } from '@objectstack/core';
@@ -336,6 +337,41 @@ export function resolveDimensionGranularity(
   return selection.dateGranularity ?? (datasetDefault as DateGranularityValue | undefined);
 }
 
+/**
+ * The bucket size a cube dimension DECLARES as its default — the one reading of
+ * `analytics_cube.dimensions.granularities` there is, whoever produced the cube.
+ *
+ * A `time` dimension whose `granularities` lists exactly ONE interval defaults
+ * to it; any other shape states no default. That is the reading the dataset
+ * compiler's output was built for: it lowers an explicit
+ * `dataset.dimensions[].dateGranularity` to a single-entry list and writes the
+ * five-entry "all intervals" list when the dataset stated none, and
+ * `CubeRegistry.inferFromObject` / the ad-hoc inference mint the same five. A
+ * multi-entry list therefore offers several and chooses none.
+ *
+ * The default is the LOWEST rung of the precedence
+ * {@link resolveDimensionGranularity} states: a granularity the request states
+ * is never overridden, and nothing here refuses one the list does not name —
+ * the compiled-dataset path has never compared a requested granularity against
+ * the list, so this reading does not either.
+ *
+ * Two callers, one rule: {@link DatasetExecutor}'s `granularityOf` for a
+ * compiled dataset, and `AnalyticsService`'s query doors for every other cube —
+ * an authored one (`AnalyticsServiceConfig.cubes`) included, which is the
+ * producer this key is authored on and which never becomes a
+ * `CompiledDataset`.
+ */
+export function declaredDefaultGranularity(
+  dimension: { type?: string; granularities?: readonly unknown[] } | undefined,
+): DateGranularityValue | undefined {
+  if (dimension?.type !== 'time') return undefined;
+  // Typed as bare strings by the cube layer (Cube.js heritage); the values are
+  // `TimeUpdateInterval`, which is `DateGranularity`'s own member list.
+  return dimension.granularities?.length === 1
+    ? (String(dimension.granularities[0]) as DateGranularityValue)
+    : undefined;
+}
+
 // ── ordering + windowing (#3588) ─────────────────────────────────────────────
 
 /**
@@ -560,7 +596,7 @@ function shiftYear(date: string, years: number): string {
  * ## What was wrong
  *
  * The STRING arm was spelled `[td.dateRange, td.dateRange]` — the degenerate
- * `[range, range]` fallback #17015 removed from every OTHER analytics face.
+ * `[range, range]` fallback commit 0da638cd9 removed from every OTHER analytics face.
  * `parseUTC` was handed the preset NAME, so a DECLARED, honoured member of the
  * closed vocabulary was refused. MEASURED on `b3b43b6ea`, `last_30_days` plus
  * `compareTo`:
@@ -571,7 +607,7 @@ function shiftYear(date: string, years: number): string {
  *
  * ⇒ the diagnostic is not merely unhelpful, it is FALSE, and it sends the
  * author to check a date that is exactly what the schema and the docs tell them
- * to write. This face was not in #17015's kit, so nothing measured it.
+ * to write. This face was not in commit 0da638cd9's kit, so nothing measured it.
  *
  * ## Why it reports INSTANTS while `runCompare` shifts DAYS
  *
@@ -584,7 +620,7 @@ function shiftYear(date: string, years: number): string {
  * ⛔ The ARRAY arm is the CALLER's explicit window and is handed back bound for
  * bound, with the inclusive upper reading it has always had (#16179) — the
  * refusal for anything that is not a two-bound window is
- * `explicitDateRangeWindow`'s, unchanged (#17124).
+ * `explicitDateRangeWindow`'s, unchanged (commit 86c505286).
  *
  * @throws the ADR-0112 `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` envelope for a
  *   string outside `DATE_RANGE_PRESETS` — the same envelope the sibling faces
@@ -803,7 +839,9 @@ function isoWeekKeyOfUtcMs(ms: number): string {
   const target = new Date(ms);
   const dayNum = (target.getUTCDay() + 6) % 7; // Mon=0..Sun=6
   target.setUTCDate(target.getUTCDate() - dayNum + 3); // that week's Thursday
-  const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4));
+  // [#20599] Core's `wallClockToUtcMs`, never `Date.UTC`, which reads a year
+  // from 0 to 99 as 1900 + year and put this Thursday's January 4 in the 1900s.
+  const firstThursday = new Date(wallClockToUtcMs({ year: target.getUTCFullYear(), month: 1, day: 4 }));
   const weekNo =
     1 +
     Math.round(
@@ -1326,8 +1364,7 @@ export class DatasetExecutor {
   ): DateGranularityValue | undefined {
     const cd = compiled.cube.dimensions[name];
     if (cd?.type !== 'time') return undefined;
-    const datasetDefault = cd.granularities?.length === 1 ? String(cd.granularities[0]) : undefined;
-    return resolveDimensionGranularity(selection, name, datasetDefault);
+    return resolveDimensionGranularity(selection, name, declaredDefaultGranularity(cd));
   }
 
   private buildQuery(
@@ -1472,7 +1509,7 @@ export class DatasetExecutor {
     // questions are answered in one place — see `resolveCompareDimension`.
     const dimension = resolveCompareDimension(selection);
     const td = (selection.timeDimensions ?? []).find((t) => t.dimension === dimension)!;
-    // [#17124] The ARRAY arm goes through the one `explicitDateRangeWindow` every
+    // [commit 86c505286] The ARRAY arm goes through the one `explicitDateRangeWindow` every
     // face in this package calls. ⛔ What this replaced filled a missing upper
     // bound in from the lower one, so a one-element array silently became a
     // point window HERE while the primary pass it is compared against may have
@@ -1481,7 +1518,7 @@ export class DatasetExecutor {
     // [#17973] The STRING arm is the CLOSED preset vocabulary, lowered by the one
     // shared `resolveAnalyticsDateRangeString` every other face calls and then
     // projected onto calendar days. ⛔ What this replaced was the
-    // degenerate `[range, range]` fallback #17015 removed everywhere else: it
+    // degenerate `[range, range]` fallback commit 0da638cd9 removed everywhere else: it
     // handed the preset NAME to this module's date parser, so `last_30_days` —
     // declared, honoured, and exactly what the schema tells an author to write —
     // came back as `DATASET_INVALID "invalid date in dateRange"`. A false
@@ -1504,7 +1541,7 @@ export class DatasetExecutor {
     );
     const range: [string, string] = Array.isArray(td.dateRange)
       ? // The caller's own bounds, untouched — `explicitDateRangeWindow` already
-        // refused anything that is not a two-bound window (#17124).
+        // refused anything that is not a two-bound window (commit 86c505286).
         [lowered.start, lowered.end]
       : inclusiveCalendarDayWindow(lowered, timezone);
     const shifted = shiftRange(range, cmp.kind);

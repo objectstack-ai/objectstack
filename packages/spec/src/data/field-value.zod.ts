@@ -80,7 +80,7 @@ export const INSTANT_TYPES: ReadonlySet<string> = new Set([
   'datetime',
 ] as const satisfies readonly FieldType[]);
 
-/** Wall-clock time of day, `HH:MM[:SS[.fff]]` (+ optional zone) — not `Date.parse`-able (#2004). */
+/** Wall-clock time of day, `HH:MM[:SS[.fff]]` with no zone (ADR-0053 D-C1) — not `Date.parse`-able (#2004). */
 export const CLOCK_TIME_TYPES: ReadonlySet<string> = new Set([
   'time',
 ] as const satisfies readonly FieldType[]);
@@ -372,10 +372,10 @@ export const InstantValueSchema = lazySchema(() =>
     'expected an ISO-8601 instant with explicit zone (e.g. 2026-03-15T14:30:00.000Z)'));
 export type InstantValue = z.input<typeof InstantValueSchema>;
 
-/** `HH:MM[:SS[.fff]]` with optional zone — the `time` stored form (#2004). */
+/** `HH:MM[:SS[.fff]]` with no zone — the `time` stored form (#2004, ADR-0053 D-C1). */
 export const ClockTimeValueSchema = lazySchema(() =>
-  z.string().regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d+)?)?(Z|[+-]([01]\d|2[0-3]):?[0-5]\d)?$/,
-    'expected HH:MM or HH:MM:SS (wall-clock time of day)'));
+  z.string().regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d+)?)?$/,
+    'expected HH:MM or HH:MM:SS (wall-clock time of day, no time zone)'));
 export type ClockTimeValue = z.input<typeof ClockTimeValueSchema>;
 
 /**

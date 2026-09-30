@@ -274,6 +274,14 @@ describe('valueSchemaFor — stored form (field-zoo reality)', () => {
     bad({ type: 'time' }, 'not-a-time');
   });
 
+  it('[#20740] time carries no zone: a `Z` or an offset is refused, as the record validator refuses it', () => {
+    ok({ type: 'time' }, '14:30:00.500');
+    bad({ type: 'time' }, '14:30:00Z');
+    bad({ type: 'time' }, '14:30+08:00');
+    bad({ type: 'time' }, '08:15:00-0530');
+    bad({ type: 'time' }, '14:30+00:00');
+  });
+
   it('option types enforce declared option codes; free-form without options', () => {
     const options = [{ value: 'high' }, { value: 'low' }];
     ok({ type: 'select', options }, 'high');

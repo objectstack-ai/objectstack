@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { FieldSchema } from '@objectstack/spec/data';
+import { renderValidationMessage } from '@objectstack/spec/system';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError } from './record-validator.js';
 
 /**
@@ -51,7 +52,7 @@ describe('validateRecord — required + autonumber exemption', () => {
 describe('validateRecord — time field accepts time-of-day', () => {
   const schema = { fields: { at: { type: 'time' } } };
 
-  for (const v of ['14:30', '09:05:30', '23:59', '00:00:00', '14:30:00Z', '14:30:00.500', '08:15:00+02:00']) {
+  for (const v of ['14:30', '09:05:30', '23:59', '00:00:00', '14:30:00.500']) {
     it(`accepts ${v}`, () => {
       expect(() => validateRecord(schema, { at: v }, 'insert')).not.toThrow();
     });
@@ -60,6 +61,24 @@ describe('validateRecord — time field accepts time-of-day', () => {
   it('accepts a full ISO datetime for a time field (lenient)', () => {
     expect(() => validateRecord(schema, { at: '2026-06-17T14:30:00Z' }, 'insert')).not.toThrow();
   });
+
+  // [#20671] A time field is a zone-less wall clock. These two were accepted
+  // here before, and were stored verbatim on memory and SQLite and as
+  // `14:30:00` / `08:15:00` on PostgreSQL. Refused now with `invalid_time`, in
+  // the sentence that says to drop the suffix or use a datetime field.
+  for (const v of ['14:30:00Z', '08:15:00+02:00']) {
+    it(`rejects the zone-suffixed ${v} with invalid_time and the zone sentence`, () => {
+      let err: ValidationError | undefined;
+      try {
+        validateRecord(schema, { at: v }, 'insert');
+      } catch (e) {
+        err = e as ValidationError;
+      }
+      expect(err, v).toBeInstanceOf(ValidationError);
+      expect(err!.fields.map((f) => [f.field, f.code])).toEqual([['at', 'invalid_time']]);
+      expect(err!.fields[0]!.message).toBe(renderValidationMessage({ messageKey: 'invalid_time_zoned', label: 'at', field: 'at' }));
+    });
+  }
 
   for (const v of ['25:00', '14:60', 'not-a-time', '14']) {
     it(`rejects ${v}`, () => {

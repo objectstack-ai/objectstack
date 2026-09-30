@@ -481,7 +481,9 @@ export default class Compile extends Command {
       //     too; it never changes this command's exit status. A project
       //     manifest that exists but cannot be used is refused instead
       //     (already reported on stderr; the catch-all exits 1).
-      const jsxGate = resolveJsxGateManifest(result.data as Record<string, unknown>);
+      //     [#20166] Read beside the config this run was given, never in the
+      //     invoker's working directory.
+      const jsxGate = resolveJsxGateManifest(result.data as Record<string, unknown>, path.dirname(absolutePath));
       jsxGateNotices = [...jsxGate.notices];
       if (!flags.json) printJsxGateNotices(jsxGateNotices);
       const parsedUnion = authoringRuleUnionStack(result.data as Record<string, unknown>);

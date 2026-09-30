@@ -43,7 +43,7 @@
  * The fix is to resolve from the host app's root and import the resolved
  * absolute path. The importing package's own resolution stays as the fallback,
  * for the framework-owned packages it depends on and the host does not declare
- * — and since #10943 that fallback is the base the CALLER hands in
+ * — and since commit 46d34ab7c that fallback is the base the CALLER hands in
  * ({@link HostImporterOptions.fallbackImport}), because a fallback written here
  * resolved from `@objectstack/types` and could only ever see
  * `@objectstack/spec`. Same defect class as the paragraph above, one level up:
@@ -293,7 +293,7 @@ export function isDeclaredByHost(specifier: string, hostRoot?: string): boolean 
  * - `declared-unresolvable` — the app declares it and it still would not
  *   resolve. Remedy: fix the INSTALL. Re-reading the manifest is wasted effort.
  *   ⚠️ One sub-case under this kind is NOT an install problem and does not say
- *   it is (#15045): a `link:` / `file:` (or git / tarball) declaration names a
+ *   it is (commit 288fe9c34): a `link:` / `file:` (or git / tarball) declaration names a
  *   LOCATION rather than a package, so the fallback cannot verify the directory
  *   by NAME. #17046 gave it the second axis — the declared path — so a
  *   correctly linked package now LOADS; what still lands here is the residue
@@ -365,7 +365,7 @@ function hostImportError(
  * ({@link HostImporterOptions.fallbackImport})? When it did not, the fallback
  * ran from `@objectstack/types`, which sees only `@objectstack/spec` — so the
  * absence being reported may be an artefact of the missing base rather than a
- * real one. #10943 kept that default for out-of-tree callers; saying so here is
+ * real one. Commit 46d34ab7c kept that default for out-of-tree callers; saying so here is
  * what stops it being silent, because the alternative is a reader re-deriving
  * the whole measurement from a `MODULE_NOT_FOUND` that names nothing.
  */
@@ -632,7 +632,7 @@ const ALIAS_DECLARATION_PROTOCOLS = [
  *   directory it consults, `<hostRoot>/node_modules/<key>`;
  * - the #13330 succeeding leg ({@link packageRootOf}) recognises the package
  *   root while walking up from the entry the CJS resolver already returned
- *   (#15044).
+ *   (commit 088f761e5).
  *
  * ⚠️ This moves each leg's EXPECTATION, never its strictness. The
  * manifest-name check is what keeps the fallback strictly tighter than the CJS
@@ -657,7 +657,7 @@ const ALIAS_DECLARATION_PROTOCOLS = [
  * directory is what gets verified when the name cannot be. On the #13330 leg
  * the residue is still a load rather than a refusal: a `link:` target whose
  * manifest names something else keeps today's `require`-condition entry,
- * unchanged by #15044 and by #17046, and pinned as such.
+ * unchanged by commit 088f761e5 and by #17046, and pinned as such.
  */
 function declaredManifestName(declaration: HostDeclaration): string {
   const { packageName, specifier } = declaration;
@@ -675,7 +675,7 @@ function declaredManifestName(declaration: HostDeclaration): string {
 
 /**
  * Declaration value prefixes that name a LOCATION on disk or a REMOTE ARTEFACT
- * instead of a package (#15045).
+ * instead of a package (commit 288fe9c34).
  *
  * The complement of {@link ALIAS_DECLARATION_PROTOCOLS} on the axis that
  * matters to the FALLBACK's diagnostic: an alias protocol names a package, and
@@ -715,7 +715,7 @@ const NAMELESS_DECLARATION_PREFIXES = [
 
 /**
  * Does the host's declaration leave this key's manifest name UNKNOWABLE from
- * the declaration alone (#15045)? See {@link NAMELESS_DECLARATION_PREFIXES}.
+ * the declaration alone (commit 288fe9c34)? See {@link NAMELESS_DECLARATION_PREFIXES}.
  */
 function declarationNamesNoPackage(declaration: HostDeclaration): boolean {
   const { specifier } = declaration;
@@ -740,7 +740,7 @@ function declarationNamesNoPackage(declaration: HostDeclaration): boolean {
  *
  * ⚠️ This list exists because the two questions are NOT the same question.
  * `NAMELESS_…` asks *"does the declaration name a package?"* (a WORDING
- * question, #15045); this one asks *"does the declaration name a directory I
+ * question, commit 288fe9c34); this one asks *"does the declaration name a directory I
  * can compare against?"* — the question that decides whether a load happens.
  * Merging them would license `github:acme/bar` to be verified against a path
  * nobody wrote.
@@ -750,7 +750,7 @@ const LOCATION_DECLARATION_PREFIXES = ['link:', 'file:', 'portal:'] as const;
 /**
  * What {@link declaredLocationAxis} measured — kept as a record rather than a
  * boolean because the REFUSAL has to be able to say what it compared, exactly
- * as #15045 made the name axis say what it read.
+ * as commit 288fe9c34 made the name axis say what it read.
  */
 interface DeclaredLocationAxis {
   /** The declared path, resolved against `hostRoot` — as written, not canonicalised. */
@@ -888,7 +888,7 @@ function declaredLocationAxis(
  * framework.
  *
  * ⚠️ `manifestName` is what {@link declaredManifestName} reads out of the
- * host's declaration, NOT the declaration key (#15044). For an aliased install
+ * host's declaration, NOT the declaration key (commit 088f761e5). For an aliased install
  * — `{"foo": "npm:bar@1"}` — the realpath this walk climbs is `bar`'s own
  * package directory, whose manifest is named `bar`; matching the key `foo`
  * never succeeded, so the caller fell back to the CJS resolver's answer and an
@@ -922,7 +922,7 @@ function packageRootOf(resolvedFile: string, manifestName: string): string | und
  * The file the `import` condition names for `specifier`, or `undefined` when
  * this seam has nothing to change — see the narrowness list in the #13330 note.
  *
- * ⚠️ The two names here are different questions and only look alike (#15044).
+ * ⚠️ The two names here are different questions and only look alike (commit 088f761e5).
  * The package ROOT is recognised by the name the DECLARATION promises
  * ({@link declaredManifestName}); the exports SUBPATH is cut from the
  * declaration KEY, because the key is what the specifier is spelled with —
@@ -1002,7 +1002,7 @@ function esmEntryForDeclared(
  *     asks neither question, which is what "strictly tighter" means here.
  *
  * `import.meta.resolve` with a parent URL is NOT the mechanism, on the same
- * measurement the #10943 note below records: without
+ * measurement the note below records for commit 46d34ab7c: without
  * `--experimental-import-meta-resolve` the parent argument is SILENTLY
  * IGNORED, so it answers from the WRONG base with full confidence — the exact
  * failure class this card removes.
@@ -1029,7 +1029,7 @@ type DeclaredCjsResolveFallback =
   | { outcome: 'absent' }
   /**
    * Present at the key, holding a package named something ELSE, under a
-   * declaration that names no package to expect (#15045) — and, when that
+   * declaration that names no package to expect (commit 288fe9c34) — and, when that
    * declaration DID name a directory, not that directory either (#17046).
    * Refused exactly as `absent` is — same kind, same throw — but it is a
    * different measurement and gets its own wording: nothing about the install
@@ -1099,8 +1099,8 @@ function hasInvalidExportsSubpathSegments(subpath: string): boolean {
  *
  * ⚠️ Absent and PRESENT-BUT-NAMED-OTHERWISE both answer `undefined` to the
  * check that consults it, which is correct — neither is the declared package's
- * install. They are different FACTS about the app, though, and #15045 is the
- * card about telling an operator which one was measured.
+ * install. They are different FACTS about the app, though, and commit 288fe9c34 is the
+ * change that tells an operator which one was measured.
  */
 function manifestNameAt(dir: string): string | undefined {
   try {
@@ -1148,7 +1148,7 @@ function hostNodeModulesEntry(declaration: HostDeclaration): string {
 function hostInstalledPackageDir(declaration: HostDeclaration): string | undefined {
   const linked = hostNodeModulesEntry(declaration);
   // Unreadable, unparseable, or named something else — all `undefined`, exactly
-  // as before #15045; the CALLER is what now distinguishes them, and only to
+  // as before commit 288fe9c34; the CALLER is what now distinguishes them, and only to
   // pick the wording.
   const namedAsDeclared = manifestNameAt(linked) === declaredManifestName(declaration);
   if (!namedAsDeclared && declaredLocationAxis(declaration, linked)?.verified !== true) {
@@ -1173,7 +1173,7 @@ function declaredCjsResolveFallback(
   const { packageName } = declaration;
   const packageDir = hostInstalledPackageDir(declaration);
   if (packageDir === undefined) {
-    // #15045: the finder has REFUSED. Re-read the one directory it consulted so
+    // Commit 288fe9c34: the finder has REFUSED. Re-read the one directory it consulted so
     // the failure can say which of the two absences it measured. A cold error
     // path that was already about to build a multi-line message, so the second
     // read costs nothing anyone can observe.
@@ -1239,11 +1239,11 @@ function declaredCjsResolveFallback(
 
 /**
  * The wording for {@link DeclaredCjsResolveFallback} `unverifiable-location`
- * (#15045) — a `link:` / `file:` (or git / tarball) install whose linked
+ * (commit 288fe9c34) — a `link:` / `file:` (or git / tarball) install whose linked
  * manifest names something other than the key, and which #17046's location
  * axis could not tie to the declaration either.
  *
- * The refusal it explains is deliberate; what #15045 changed is that it no
+ * The refusal it explains is deliberate; what commit 288fe9c34 changed is that it no
  * longer prescribes {@link unresolvableMessage}'s remedies, every one of which
  * is measurably false here: the package IS on disk, so it was neither "never
  * installed" nor pruned away, and its `import` target exists. An operator
@@ -1258,7 +1258,7 @@ function declaredCjsResolveFallback(
  * compared and came back DIFFERENT — pnpm's `file:` virtual-store copy being
  * the measured example. Both facts are now stated rather than assumed, because
  * a message asserting a limit the finder no longer has is the same defect
- * #15045 removed.
+ * commit 288fe9c34 removed.
  *
  * The closing remedy is one fact stated from both ends, and it was MEASURED,
  * not reasoned: make the key and the linked manifest's `name` agree — rename
@@ -1378,7 +1378,7 @@ function noLoadableEntryMessage(
  *    surface; a package that RESOLVES and then throws while evaluating is a
  *    genuine crash and propagates untouched, as before.
  *
- * ── The caller supplies that base, and why it is a FUNCTION (#10943) ─────────
+ * ── The caller supplies that base, and why it is a FUNCTION (commit 46d34ab7c) ─
  *
  * Step 3 said "the importing package's own resolution" long before anything
  * made it true. The fallback was a bare `import()` written HERE, and ESM
@@ -1425,8 +1425,8 @@ function noLoadableEntryMessage(
  * because a `NodeRequire` cannot be asked where it was anchored and the manifest
  * has to be read from there.
  * @param options {@link HostImporterOptions.fallbackImport} carries the caller's
- * resolution base. Omitting it keeps the pre-#10943 behaviour (this package's
- * own resolution) so no out-of-tree caller changes under its feet.
+ * resolution base. Omitting it keeps the behaviour before commit 46d34ab7c
+ * (this package's own resolution) so no out-of-tree caller changes under its feet.
  */
 export function createHostImporter(
   hostRoot: string = process.cwd(),
@@ -1440,16 +1440,16 @@ export function createHostImporter(
     // Not a bare package name (a path, a URL, a `node:` builtin) — nothing a
     // manifest could declare. Hand it to the normal resolver untouched.
     //
-    // ⚠️ Deliberately NOT re-based onto `fallbackImport` (#10943). Every
+    // ⚠️ Deliberately NOT re-based onto `fallbackImport` (commit 46d34ab7c). Every
     // base-INDEPENDENT spelling here — `file://`, `node:`, `data:`, an absolute
     // path — means the same module whoever imports it, so the base is not a
     // question they can even ask. The one spelling it WOULD move is a RELATIVE
-    // one, and where that should resolve from is an open policy question owned
-    // by #10944 (`serve` refuses a relative `plugins: [...]` entry rather than
+    // one, and where that should resolve from is the policy question commit e598b1cbc
+    // settled for `serve` (it refuses a relative `plugins: [...]` entry rather than
     // silently re-basing it) — with a measured consumer count of zero here:
     // `serve` handles non-package specifiers before this helper is reached, and
     // `bootStack` / the dogfood probe pass package names only. Answering half
-    // of another card's undecided question, for nobody, is not a repair.
+    // of another change's question, for nobody, is not a repair.
     if (packageNameFromSpecifier(pkg) === undefined) {
       return import(/* webpackIgnore: true */ pkg);
     }
@@ -1471,9 +1471,9 @@ export function createHostImporter(
           return import(pathToFileURL(fallback.entry).href);
         }
         if (fallback.outcome === 'unverifiable-location') {
-          // #15045: the SAME kind and the SAME throw as every other unrescued
+          // Commit 288fe9c34: the SAME kind and the SAME throw as every other unrescued
           // outcome below — this branch decides WORDING only. Turning this into
-          // a load is the second verification axis the card holds open, and is
+          // a load is the second verification axis that commit left unbuilt, and is
           // a contract change, not a diagnostic one.
           throw hostImportError(
             'declared-unresolvable',
@@ -1504,7 +1504,7 @@ export function createHostImporter(
       // which entry an `import()` gets, so the caller's ESM chain and this
       // load share one instance of everything the package brings with it.
       //
-      // #15044: the whole DECLARATION goes in, not just the key. Recognising
+      // Commit 088f761e5: the whole DECLARATION goes in, not just the key. Recognising
       // the package root by the key made an aliased install unrecognisable to
       // its own re-decision — the walk failed, the `?? resolved` here caught
       // it, and the load silently stayed on the `require` build #13330 exists

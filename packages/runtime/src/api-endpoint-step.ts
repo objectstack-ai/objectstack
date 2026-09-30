@@ -243,8 +243,9 @@ export async function runAppEndpointStep(
         // about what ran is worse than no report.
         return notImplemented(match, method, path,
             'This request reached the step without a policy context, so authRequired / rateLimit / cacheTtlSeconds '
-            + 'were not evaluated — and nothing was executed either. The composed runtime always threads one '
-            + '(#5040 E5b), so reaching this answer means a host mounted the step by hand and omitted it.');
+            + 'were not evaluated — and nothing was executed either. The composed runtime always threads one, '
+            + 'because execution is reachable only on the far side of the policy chain, so reaching this answer '
+            + 'means a host mounted the step by hand and omitted it.');
     }
 
     const verdict = await applyEndpointPolicies({ ...input.policy, endpoint: match.endpoint, method });
@@ -263,7 +264,7 @@ export async function runAppEndpointStep(
         return notImplemented(match, method, path,
             'Policies (authRequired / rateLimit / cacheTtlSeconds) were enforced and this request passed them, but no '
             + 'execution wiring was supplied, so the target was not run. The composed runtime always supplies '
-            + 'it (#5040 E5b).');
+            + 'it together with the policy context; only a host that mounts the step by hand can leave it out.');
     }
 
     const { request, deps, executionContext, environmentId, dataDriver } = input.execution;
@@ -344,7 +345,7 @@ function notImplemented(
         httpStatus: 501,
         message:
             `Declarative endpoint '${match.endpoint.name}' claims ${method} ${path}, but the caller of the `
-            + 'endpoint step supplied no wiring to serve it with (#5040).',
+            + 'endpoint step supplied no wiring to serve it with, so nothing was executed.',
         extra: { hint },
     });
 }

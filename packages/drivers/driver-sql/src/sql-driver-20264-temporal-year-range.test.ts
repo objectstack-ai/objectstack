@@ -27,6 +27,19 @@
  * MySQL cell asserts their STORED text, and the misread is a decision returned
  * to the maintainer. From year 0100 up MySQL reads a `DATETIME` back as written,
  * which the cell asserts.
+ *
+ * ## [#20549] A leap day, and the ISO spellings, beside the range
+ *
+ * The comparand door now refuses a day that does not exist and a `datetime`
+ * string outside the ISO 8601 spellings, exactly as the write door does (one
+ * rule, `@objectstack/core`'s `isUninterpretableTemporalComparand`). Measured
+ * on the base, `date $eq "2026-02-30"` was a 500 on PostgreSQL 16. The refusal
+ * is the engine's (`packages/objectql/src/engine-temporal-comparand-door.test.ts`,
+ * and the REST door over SQLite and PostgreSQL in
+ * `packages/rest/src/data-temporal-write-real-day-iso.test.ts`); what each
+ * dialect owes it is the controls it stands beside: a real leap day is stored
+ * and compared as that day, and each ISO spelling the door admits names the
+ * same instant with the process and the server in two different zones.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -48,6 +61,8 @@ const ROWS = [
   { id: 'y0100', placed_on: '0100-03-04', opened_at: '0100-03-04T10:00:00.000Z' },
   { id: 'y0999', placed_on: '0999-06-15', opened_at: '0999-06-15T10:00:00.000Z' },
   { id: 'c2026', placed_on: '2026-02-01', opened_at: '2026-02-01T10:00:00.000Z' },
+  // [#20549] The leap control: a February 29 that exists.
+  { id: 'l2028', placed_on: '2028-02-29', opened_at: '2028-02-29T10:00:00.000Z' },
   { id: 'last', placed_on: '9999-12-31', opened_at: '9999-12-31T23:59:59.999Z' },
 ];
 const ORDER = ROWS.map((r) => r.id);
@@ -115,6 +130,22 @@ function measure(cell: DialectCell): void {
             .toBe(`${row.opened_at.slice(0, 10)} ${row.opened_at.slice(11, 23)}`);
         }
       }
+    });
+
+    it('[#20549] each ISO spelling the comparand door admits names the leap row\'s instant, whatever the two zones', async () => {
+      for (const spelling of [
+        '2028-02-29T10:00:00Z',
+        '2028-02-29T10:00:00.000Z',
+        '2028-02-29T18:00:00+08:00',
+        '2028-02-29T05:00:00-0500',
+        '2028-02-29T10:00',
+        '2028-02-29 10:00',
+        '2028-02-29 10:00:00.000',
+      ]) {
+        expect(await ids({ opened_at: { $eq: spelling } }), spelling).toEqual(['l2028']);
+      }
+      expect(await ids({ placed_on: { $eq: '2028-02-29' } }), 'the leap day on a date').toEqual(['l2028']);
+      expect(await ids({ placed_on: { $gt: '2028-02-28', $lt: '2028-03-01' } }), 'the day between its neighbours').toEqual(['l2028']);
     });
 
     for (const field of ['placed_on', 'opened_at'] as const) {

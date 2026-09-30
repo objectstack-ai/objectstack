@@ -77,7 +77,7 @@ export interface FileRecord {
  * every walled deployment — a warning naming exactly this defect ("writes will
  * not be tenant-isolated").
  *
- * ## What the SAME context does on update / delete (#13178)
+ * ## What the SAME context does on update / delete (commit f087c376f)
  *
  * ⚠️ Not the same thing, and the difference is the whole reason the
  * `update`/`delete` doors are not a copy-paste of the insert ones. Write-side
@@ -350,7 +350,7 @@ export class StorageMetadataStore {
   /**
    * Update one `sys_file` row.
    *
-   * `context` carries the acting organization (#13178). It is the SAME channel
+   * `context` carries the acting organization (commit f087c376f). It is the SAME channel
    * {@link createFile} opened in #12745 — `{ context: { tenantId } }` on the
    * engine options bag — and this door is the `update` half of that insert
    * that #12745 did not repair. What the value MEANS differs by verb, and
@@ -381,7 +381,7 @@ export class StorageMetadataStore {
       // stand up a second isolation mechanism outside the driver that owns
       // the one real one. A no-engine deployment has no wall to be on the
       // wrong side of (the same sentence `createFile`'s stand-in already
-      // makes), so this branch is unchanged by #13178.
+      // makes), so this branch is unchanged by commit f087c376f.
       this.files.set(id, merged);
       return merged;
     }
@@ -395,7 +395,7 @@ export class StorageMetadataStore {
   /**
    * Delete one `sys_file` row.
    *
-   * `context` carries the acting organization (#13178) — the `delete` half of
+   * `context` carries the acting organization (commit f087c376f) — the `delete` half of
    * #12745's insert, repaired for the same reason and through the same
    * channel as {@link updateFile}. See {@link StorageWriteContext} for what
    * the value does on this verb (it scopes the statement; it stamps nothing).
@@ -480,7 +480,7 @@ export class StorageMetadataStore {
   /**
    * Update one `sys_upload_session` row.
    *
-   * `context` carries the acting organization (#13178) — the `update` half of
+   * `context` carries the acting organization (commit f087c376f) — the `update` half of
    * the insert #12928 repaired, the `sys_upload_session` sibling of
    * {@link updateFile}. Same channel, same chokepoint, and the same split
    * between stamping and scoping that {@link StorageWriteContext} records.
@@ -522,7 +522,7 @@ export class StorageMetadataStore {
   /**
    * Delete one `sys_upload_session` row.
    *
-   * `context` carries the acting organization (#13178) — the `delete` half of
+   * `context` carries the acting organization (commit f087c376f) — the `delete` half of
    * #12928's insert. See {@link StorageWriteContext} for what the value does
    * on this verb.
    */

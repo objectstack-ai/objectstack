@@ -84,7 +84,7 @@ function makeCountingQl(
       if (key.startsWith('$')) {
         throw new Error(`counting driver: unsupported combinator ${key}`);
       }
-      // [#11451] A `null` comparand is IS NULL, not `=== null`. `driver-sql`
+      // [commit c33f18592] A `null` comparand is IS NULL, not `=== null`. `driver-sql`
       // compiles `{ field: null }` to `IS NULL`; a column never written is NULL
       // in the database and `undefined` in this double, and strict equality
       // matches neither. Inert for every describe above — none of them issues a
@@ -759,13 +759,13 @@ describe('#11096 — a read that CANNOT ANSWER is not the answer "none exist"', 
 });
 
 /**
- * [#11451] `bootstrapSystemCapabilities` — the OTHER capability seeder, whose
+ * [commit c33f18592] `bootstrapSystemCapabilities` — the OTHER capability seeder, whose
  * definition set is the union of every `systemPermissions[]` string rather than
  * the explicit `defineCapability` declarations.
  *
  * ## What is pinned, and what is deliberately NOT
  *
- * Two halves, and since #11520 BOTH are batched — as two SEPARATE reads asking
+ * Two halves, and since commit 1a6855226 BOTH are batched — as two SEPARATE reads asking
  * two different questions, which is the whole subtlety:
  *
  *  - the CURATED half (`KNOWN_CAPABILITIES`) costs ONE batched `$in` read
@@ -779,9 +779,9 @@ describe('#11096 — a read that CANNOT ANSWER is not the answer "none exist"', 
  *    and the `platformStampedInOrg` suite in `bootstrap-system-capabilities.test
  *    .ts` are what stop it.
  *
- * ⚠️ These counts MOVED in #11520, deliberately: this doc previously stated the
+ * ⚠️ These counts MOVED in commit 1a6855226, deliberately: this doc previously stated the
  * derived residue as `1 + derived` and said "a later card that batches it is
- * expected to move these numbers deliberately". #11518 removed the objection
+ * expected to move these numbers deliberately". Commit e1d773eb7 removed the objection
  * that kept it per-item (the page cap became a measurement, so an unnarrowed
  * batched read that truncates degrades loudly instead of silently reading
  * `absent` and inserting), so the residue is now a second constant read rather
@@ -810,7 +810,7 @@ describe('#11451/#11520 — BOTH halves are O(1) round trips, as two differently
     };
 
     const rows = [await measure(0), await measure(5), await measure(20)];
-    // [#11520] FLAT, not `1 + d`. One read for the curated half, one for the
+    // [commit 1a6855226] FLAT, not `1 + d`. One read for the curated half, one for the
     // derived half — and at d=0 the derived read is not issued at all, because
     // `buildExistingByName` returns before reading when no name survives its
     // filter. That asymmetry is the reason the expectation is written out per
@@ -846,7 +846,7 @@ describe('#11451/#11520 — BOTH halves are O(1) round trips, as two differently
   });
 
   /**
-   * ⭐ [#11520] The RULED pin on the derived read's SHAPE. `bootstrap-system-
+   * ⭐ [commit 1a6855226] The RULED pin on the derived read's SHAPE. `bootstrap-system-
    * capabilities.test.ts` pins the consequences (#8751's `platformStampedInOrg`,
    * #8552's untouched bucket); this pins the cause, because the cheap fix that
    * reverses both is a one-key edit right here.
@@ -949,7 +949,7 @@ describe('#11451/#11520 — BOTH halves are O(1) round trips, as two differently
       scope: c.scope, managed_by: 'platform', organization_id: null, active: true,
     })));
     const warns: string[] = [];
-    // No derived names here: this pin is about the CURATED half, and #11520 adds
+    // No derived names here: this pin is about the CURATED half, and commit 1a6855226 adds
     // the derived counterpart as its own test below rather than widening this one.
     const r = await bootstrapSystemCapabilities(broken, [], { logger: { warn: (m) => warns.push(m) } });
     expect(r.unreadable).toBe(KNOWN_CAPABILITIES.length);
@@ -961,7 +961,7 @@ describe('#11451/#11520 — BOTH halves are O(1) round trips, as two differently
   });
 
   /**
-   * ⭐ [#11520] The derived counterpart — and the one place this card changes
+   * ⭐ [commit 1a6855226] The derived counterpart — and the one place that commit changes
    * observable behaviour, pinned so the change is a decision rather than a
    * side effect.
    *
@@ -975,7 +975,7 @@ describe('#11451/#11520 — BOTH halves are O(1) round trips, as two differently
    *
    * AFTER: `unknown` is declined, exactly as the shared oracle's module header
    * requires of every other caller. Strictly stricter, in the direction #10946
-   * chose deliberately for the curated half and #11518 extended to truncation.
+   * chose deliberately for the curated half and commit e1d773eb7 extended to truncation.
    */
   it('⭐ [#11520] a DERIVED name whose read cannot answer is DECLINED, never blind-inserted', async () => {
     const DERIVED = 2;

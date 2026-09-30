@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#16657] `operatorFacingErrorText` — the dialect's words for a record an
+ * [commit 5a95b0e93] `operatorFacingErrorText` — the dialect's words for a record an
  * operator reads later.
  *
  * ## The regression this closes, and why "one `cause` away" was not enough

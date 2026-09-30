@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// #14676 — `integration/ConnectorErrorCategory` (the 8-value connector-side
+// Commit 13c48c2a5 — `integration/ConnectorErrorCategory` (the 8-value connector-side
 // error category enum) left with its two carriers: `ErrorMappingRule.targetCategory`
 // and `ErrorMappingConfig.defaultCategory`, both retired in this same major
 // (`RETIRED_DEFS_BY_MAJOR[18]`). Measured before removal: outside the declaring

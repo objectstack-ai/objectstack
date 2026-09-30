@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#12010] The seam pin for `ConnectionEngineLike`.
+ * [commit 77b91bdb4] The seam pin for `ConnectionEngineLike`.
  *
  * `ConnectionEngineLike` is the exported view `DatasourceConnectionService`
  * drives the ObjectQL `'data'` engine through. It used to re-declare seven
@@ -55,7 +55,7 @@ describe('ConnectionEngineLike is the contract, not a fork of it (#12010)', () =
   it('refuses a value that is not a driver, at the call site', () => {
     const engine = {} as ConnectionEngineLike;
     // @ts-expect-error - a bare `{ name }` is not an `IDataDriver`. This call
-    // compiled before #12010, which is precisely the hole: the seam promised
+    // compiled before commit 77b91bdb4, which is precisely the hole: the seam promised
     // the engine accepts any value as a driver, and it does not.
     engine.registerDriver?.({ name: 'com.example.not-a-driver' });
     expect(engine).toBeTruthy();

@@ -85,6 +85,14 @@ const CARD_WHERE_TWINS: ReadonlyArray<readonly [string, () => FilterCondition, n
   ['row 6 — the same Date, $eq', () => ({ placed_on: { $eq: new Date('2026-02-01T10:00:00.000Z') } }), 2],
   ['row 7 — a Date on a time field', () => ({ slot: { $gt: new Date('2026-02-01T11:00:00.000Z') } }), 3],
   ['control — a zone-naive datetime string', () => ({ opened_at: { $gt: '2026-02-01 09:00' } }), 4],
+  // [#20480] The 2026 control beside the engine's refusal of an instant with
+  // no four-digit UTC year on a time field (`+010000-01-01T11:00:00Z`, which
+  // this driver compared as text: every row for `$gt`). The same wall clock in
+  // 2026, in each spelling the door admits, keeps its UTC time of day here.
+  ['[#20480] a 2026 instant $gt on a time field — the control', () => ({ slot: { $gt: '2026-02-01T11:00:00Z' } }), 3],
+  ['[#20480] the same instant, $lt', () => ({ slot: { $lt: '2026-02-01T11:00:00Z' } }), 2],
+  ['[#20480] the same instant with an offset', () => ({ slot: { $gt: '2026-02-01T19:00:00+08:00' } }), 3],
+  ['[#20480] the same instant as epoch milliseconds', () => ({ slot: { $gt: Date.parse('2026-02-01T11:00:00Z') } }), 3],
 ];
 
 describe('[#20176] the where twins of the card\'s rows, on this driver', () => {

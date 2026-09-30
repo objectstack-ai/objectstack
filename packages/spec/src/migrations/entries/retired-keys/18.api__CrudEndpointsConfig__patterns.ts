@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
-// executing the #14369 liveness census (15 `dead` rows across the `crud` /
+// Commit b3a63d32c — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
+// executing the liveness census commit a3d5724c8 recorded (15 `dead` rows across the `crud` /
 // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
 // outside `normalizeConfig` and the normalized-config type; objectui @d4c6a86
 // clean; cloud @9b6abe0f2fd5 clean STRUCTURALLY — cloud never authors a
@@ -23,6 +23,6 @@
 // per-operation method/path knob would make every one of them lie. The live
 // door for a custom path or method is a declarative `api` endpoint. Its value
 // def `api/CrudEndpointPattern` leaves with it (RETIRED_DEFS_BY_MAJOR[18]); its
-// four ledger child rows collapse into the one `patterns` row. Closes #14365's
-// question about the record's input type — there is no record left to reshape.
+// four ledger child rows collapse into the one `patterns` row. Closes the open
+// `z.partialRecord` question (commit f60ab90ae) — there is no record left to reshape.
 export const entry = 'api/CrudEndpointsConfig:patterns';

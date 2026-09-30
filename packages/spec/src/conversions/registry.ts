@@ -28,6 +28,7 @@ import {
 } from './walk.js';
 import { resolveDriverId, type BuiltinDriverId } from '../data/driver/config-registry.zod.js';
 import { RETIRED_SUB_DAY_INTERVALS } from '../data/analytics.zod.js';
+import { ClockTimeValueSchema } from '../data/field-value.zod.js';
 import {
   FILTER_ARRAY_LOGIC_KEYWORDS,
   FILTER_OPERATORS,
@@ -463,7 +464,7 @@ function renameVisibilityAlias(
  * `visibleWhen` across all layers. Applies to form sections and (recursively
  * nested) form fields in every FORM payload {@link mapViewPayloads} reaches —
  * `views[].form` / `views[].formViews.*`, a ViewItem record's `config`, and a
- * flattened form overlay's top level (#13031). **Live window**: the protocol-15 loader accepts the deprecated
+ * flattened form overlay's top level (commit b799ac553). **Live window**: the protocol-15 loader accepts the deprecated
  * key (the zod schemas also normalize it at parse — this entry makes the
  * acceptance *declared, loud, and expiring* per ADR-0087 D2, and will
  * graduate into the step-16 chain when the alias is removed).
@@ -2095,9 +2096,10 @@ const toolInertAuthoringKeysRemoved: MetadataConversion = {
  *
  * ⚠️ Fact 2 is about the MECHANISM, not about this entry, and it outlived the
  * entry: `retiredFromLoadPath` still holds nothing back at three runtime seams
- * (#16864). Before setting that flag on a DEFAULT FLIP — as opposed to a
- * lossless delete or a rename — read that card, because the flag does not mean
- * what its name and every docblock around it say it means.
+ * (ADR-0087's 2026-09-13 addendum names all three). Before setting that flag on a DEFAULT FLIP — as opposed to a
+ * lossless delete or a rename — read that addendum, because the flag does not mean
+ * what its name says: its own docblock (`RetiredConversionState` in `types.ts`) has
+ * stated the authoring-only reach since commit 29dd1a6dd.
  */
 
 /**
@@ -3368,7 +3370,7 @@ const DATASOURCE_CONFIG_KEY_ALIASES: Readonly<
   'sqlite-wasm': [['file', 'filename'], ['database', 'filename']],
   postgres: [['connectionString', 'url'], ['user', 'username']],
   mysql: [['connectionString', 'url'], ['user', 'username']],
-  // `mongodb` since #6345 — the canonical id was renamed from `mongo` so the
+  // `mongodb` since commit e2798fab7 — the canonical id was renamed from `mongo` so the
   // contract canon matches what both boot hosts, the driver package and every
   // URL scheme already said. Keyed by the CANONICAL id `resolveDriverId`
   // returns, so a stored `driver: 'mongo'` still lands here through the alias.
@@ -3473,14 +3475,14 @@ const datasourceConfigDriverKeyAliases: MetadataConversion = {
 };
 
 /**
- * `datasource.driver: 'mongo'` → `'mongodb'` (protocol 17, #6345).
+ * `datasource.driver: 'mongo'` → `'mongodb'` (protocol 17, commit e2798fab7).
  *
  * ## Why a stored value has to move at all
  *
  * `mongo` and `mongodb` have both been accepted spellings since #4410, and both
  * still are — this conversion does NOT rescue a broken boot, and a deployment
  * that never runs it keeps connecting exactly as before. What moved is the
- * CANONICAL id: #6345's ruling renamed it to `mongodb`, the spelling both boot
+ * CANONICAL id: commit e2798fab7 landed the ruling that renamed it to `mongodb`, the spelling both boot
  * hosts, the driver package (`@objectstack/driver-mongodb`) and every URL scheme
  * already used, so that the id which selects a driver and the id which selects
  * its config contract are one string with no mapping layer between them.
@@ -3525,7 +3527,8 @@ const datasourceDriverMongoToMongodb: MetadataConversion = {
   surface: 'datasource.driver',
   summary:
     "datasource driver id 'mongo' → 'mongodb' — the canonical id both boot hosts, the driver "
-    + 'package and the published DRIVER_CATALOG already used (#6345)',
+    + 'package and the published DRIVER_CATALOG already used, so the id that selects a driver '
+    + 'and the id that selects its config contract are one string with no mapping between them',
   apply(stack, emit) {
     return mapDatasources(stack, (ds, path) => {
       // Only the exact legacy canon, trimmed and lower-cased the same way
@@ -7340,13 +7343,159 @@ const translationPerAppSettingsRemoved: MetadataConversion = {
 };
 
 /**
+ * A `time` literal default drops a `Z` or zero-offset suffix (protocol 18).
+ *
+ * A `time` value is a zone-less wall clock (ADR-0053 D-C1), and the stored form
+ * (`ClockTimeValueSchema`) no longer admits a zone. A `Z` or a zero offset
+ * (`+00:00`, `+0000`, `-00:00`, `-0000`) names the same wall clock without it,
+ * so the suffix is dropped. A non-zero offset is left as stored and reported as
+ * a TODO: whether it meant its own digits or the UTC time is the author's call,
+ * and the parse refuses it where it lands. Only the suffixes the old stored
+ * form admitted are recognised, and `ClockTimeValueSchema` judges the rest.
+ *
+ * Reach: the literal defaults the narrowed gates judge — a `time` field's
+ * (`objects[]`, `objectExtensions[]`) and an action param typed `time`
+ * (`actions[]`, `objects[].actions[]`, an `element:button`'s inline action).
+ * Retired from the load path: an author is refused at parse, and data at rest
+ * and `os migrate meta` replay it.
+ */
+const timeDefaultUtcSuffixDropped: MetadataConversion = {
+  id: 'time-default-utc-suffix-dropped',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.5.0',
+  surface:
+    'object.fields.*.defaultValue / action.params[].defaultValue / '
+    + 'page.component.element:button.action.params[].defaultValue (type time)',
+  summary:
+    "a `time` literal default's `Z` or zero-offset suffix is dropped, which names the same wall "
+    + 'clock; a default with a non-zero offset is left as stored and reported as a TODO, because '
+    + 'a `time` value carries no zone (ADR-0053 D-C1) and only its author knows which wall clock '
+    + 'it meant',
+  apply(stack, emit, context) {
+    const convert = (holder: Dict, path: string, subject: string): Dict => {
+      const value = holder.defaultValue;
+      if (typeof value !== 'string') return holder;
+      const suffix = /(?:Z|[+-](?:[01]\d|2[0-3]):?[0-5]\d)$/.exec(value);
+      if (!suffix) return holder;
+      const wallClock = value.slice(0, suffix.index);
+      if (!ClockTimeValueSchema.safeParse(wallClock).success) return holder;
+      const at = `${path}.defaultValue`;
+      if (/[1-9]/.test(suffix[0])) {
+        context?.reportTodo?.({
+          path: at,
+          from: JSON.stringify(value),
+          reason: `${subject} is a time with no time zone, and this default carries a non-zero UTC `
+            + 'offset. Left as stored, it is refused where it is parsed. Rewrite it by hand as the wall '
+            + 'clock it meant, HH:MM or HH:MM:SS with no zone, or use a datetime field for an instant.',
+        });
+        return holder;
+      }
+      emit({ from: JSON.stringify(value), to: JSON.stringify(wallClock), path: at });
+      return { ...holder, defaultValue: wallClock };
+    };
+    const params = (action: Dict, path: string): Dict => {
+      const list = action.params;
+      if (!Array.isArray(list)) return action;
+      let changed = false;
+      const next = list.map((p, i) => {
+        if (!isDict(p) || p.type !== 'time') return p;
+        const name = typeof p.name === 'string' ? p.name : String(p.field ?? '');
+        const mapped = convert(p, `${path}.params[${i}]`, `Action param "${name}"`);
+        if (mapped !== p) changed = true;
+        return mapped;
+      });
+      return changed ? { ...action, params: next } : action;
+    };
+    const fields = (owner: Dict, path: string): Dict => {
+      const map = owner.fields;
+      if (!isDict(map)) return owner;
+      let changed = false;
+      const next: Dict = {};
+      for (const [name, def] of Object.entries(map)) {
+        next[name] = isDict(def) && def.type === 'time'
+          ? convert(def, `${path}.fields.${name}`, `Field "${name}"`)
+          : def;
+        if (next[name] !== def) changed = true;
+      }
+      return changed ? { ...owner, fields: next } : owner;
+    };
+    let next = mapCollection(stack, 'objects', (obj, path) =>
+      mapCollection(fields(obj, path), 'actions', (action, actionPath) => params(action, `${path}.${actionPath}`)));
+    next = mapCollection(next, 'objectExtensions', fields);
+    next = mapCollection(next, 'actions', params);
+    return mapPageComponents(next, (component, path) => {
+      if (component.type !== 'element:button') return component;
+      const properties = component.properties;
+      if (!isDict(properties) || !isDict(properties.action)) return component;
+      const action = params(properties.action, `${path}.properties.action`);
+      return action === properties.action ? component : { ...component, properties: { ...properties, action } };
+    });
+  },
+  fixture: {
+    before: {
+      objects: [{
+        name: 'shift',
+        fields: {
+          starts_at: { type: 'time', defaultValue: '09:00Z' },
+          ends_at: { type: 'time', defaultValue: '17:30:00+00:00' },
+          // A non-zero offset: left as stored (a TODO, not a notice).
+          handover_at: { type: 'time', defaultValue: '08:00+08:00' },
+          label: { type: 'text', defaultValue: '09:00Z' },
+        },
+        actions: [{ name: 'reschedule', params: [{ name: 'at', type: 'time', defaultValue: '10:00-0000' }] }],
+      }],
+      objectExtensions: [{ extend: 'shift', fields: { breaks_at: { type: 'time', defaultValue: '12:00Z' } } }],
+      actions: [{ name: 'clock_in', params: [{ name: 'at', type: 'time', defaultValue: '07:45:00.500Z' }] }],
+      pages: [{
+        name: 'shift_board',
+        regions: [{
+          name: 'main',
+          components: [{
+            type: 'element:button',
+            properties: { action: { type: 'script', target: 'clockOut', params: [{ name: 'at', type: 'time', defaultValue: '18:00Z' }] } },
+          }],
+        }],
+      }],
+    },
+    after: {
+      objects: [{
+        name: 'shift',
+        fields: {
+          starts_at: { type: 'time', defaultValue: '09:00' },
+          ends_at: { type: 'time', defaultValue: '17:30:00' },
+          handover_at: { type: 'time', defaultValue: '08:00+08:00' },
+          label: { type: 'text', defaultValue: '09:00Z' },
+        },
+        actions: [{ name: 'reschedule', params: [{ name: 'at', type: 'time', defaultValue: '10:00' }] }],
+      }],
+      objectExtensions: [{ extend: 'shift', fields: { breaks_at: { type: 'time', defaultValue: '12:00' } } }],
+      actions: [{ name: 'clock_in', params: [{ name: 'at', type: 'time', defaultValue: '07:45:00.500' }] }],
+      pages: [{
+        name: 'shift_board',
+        regions: [{
+          name: 'main',
+          components: [{
+            type: 'element:button',
+            properties: { action: { type: 'script', target: 'clockOut', params: [{ name: 'at', type: 'time', defaultValue: '18:00' }] } },
+          }],
+        }],
+      }],
+    },
+    // One per dropped suffix: two object fields, the object-nested action, the
+    // extension field, the stack action and the inline action.
+    expectedNotices: 6,
+  },
+};
+
+/**
  * `translation.pages.<name>.components.<id>.submitLabel` — the component-copy
- * key retired with its only declarer (protocol 18, #10926, ADR-0049).
+ * key retired with its only declarer (protocol 18, commit d173125fb, ADR-0049).
  *
  * The face is measured, not mirrored: each copy key exists because some
  * component in `ComponentPropsMap` declares it, and `submitLabel`'s only
  * declarer was `element:form` — retired whole by #9249 (`element-form-removed`
- * above). The maintainer ruled retire over re-anchor (#10926): the live form
+ * above). The maintainer ruled retire over re-anchor (2026-08-22, landed as commit d173125fb): the live form
  * surface's submit copy is `object-form`'s `submitText` (`I18nLabelSchema`),
  * localizable at its own authoring site, so re-anchoring would have widened
  * the face for one word. The key, its `submit` alias and its
@@ -7367,10 +7516,11 @@ const translationComponentSubmitLabelRemoved: MetadataConversion = {
   retiredAfter: '17.2.0',
   surface: 'translation.pages.components.submitLabel',
   summary:
-    "translation component-copy key 'submitLabel' removed (#10926 — its only declared carrier, "
-    + "'element:form', retired whole in #9249, so the resolver no longer overlays it and a stored "
-    + "string was read by nothing; the live form surface's submit copy is 'object-form''s "
-    + "'submitText', localized at its own authoring site)",
+    "translation component-copy key 'submitLabel' removed (retired rather than re-anchored — its "
+    + "only declared carrier, 'element:form', retired whole in #9249, so the resolver no longer "
+    + "overlays it and a stored string was read by nothing; the live form surface's submit copy "
+    + "is 'object-form''s 'submitText', localized at its own authoring site, and re-anchoring the "
+    + 'key there would only have added a second place to translate one word)',
   apply(stack, emit) {
     const stripFromData = (data: Record<string, unknown>, path: string): Record<string, unknown> => {
       const pages = data.pages;
@@ -7707,6 +7857,111 @@ const metricFiltersRemoved: MetadataConversion = {
     },
     // One notice: the single metric carrying `filters`.
     expectedNotices: 1,
+  },
+};
+
+/**
+ * `refreshKey` — a cube's refresh cadence (`every`) and data-change probe
+ * (`sql`), retired whole (#20637, ADR-0049 enforce-or-remove; maintainer ruling
+ * letter C).
+ *
+ * Nothing read either key, and there was nothing for them to key on: no
+ * analytics result is cached, so a declared cadence refreshed nothing. The
+ * tombstone on `CubeSchema` refuses the key at parse (see
+ * `CUBE_REFRESH_KEY_REMOVED` in `analytics.zod.ts`).
+ *
+ * ## Why a D2 strip
+ *
+ * The key was optional with no default, so a persisted cube carries it only
+ * where an author wrote it — as the showcase did. After the tombstone the boot
+ * door refuses such a cube (`ObjectStackDefinitionSchema` spreads
+ * `analyticsCubes: z.array(CubeSchema)`), and only the D2 table is replayed at
+ * the rehydration seams (`applyArtifactForwardConversions`,
+ * `applyConversionsToStoredItem`), so a built artifact or a stored
+ * `analytics_cube` row that carries the key loads only through this entry. The
+ * strip is lossless: a key that never had an effect has none to lose.
+ *
+ * The WHOLE block leaves, whatever it holds — `every`, `sql`, both, neither, or
+ * a value no longer an object: the tombstone refuses every value, so a partial
+ * strip would leave a cube that still cannot load. The emitted path NAMES the
+ * cube, as `cube-join-sql-and-relationship-removed` does: an index into the
+ * author's `analyticsCubes[]` is a position, not a name. The D3 record is the
+ * semantic entry `cube-refresh-key-retired`.
+ */
+const cubeRefreshKeyRemoved: MetadataConversion = {
+  id: 'cube-refresh-key-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.5.0',
+  surface: 'analyticsCubes[].refreshKey',
+  summary:
+    "cube key 'refreshKey' removed, with its 'every' and 'sql' (ADR-0049 enforce-or-remove — nothing read "
+    + 'it: no analytics result is cached, so a declared refresh cadence refreshed nothing. Delete the key; '
+    + 'a refresh cadence is declared again when a result cache exists)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'analyticsCubes', (cube, path) => {
+      // Name the cube, not just its index: the notice is the only record an
+      // upgrading author gets of WHICH cube lost the key.
+      const where = typeof cube.name === 'string' ? `${path}(${cube.name})` : path;
+      return stripKeys(cube, ['refreshKey'], emit, where);
+    });
+  },
+  fixture: {
+    before: {
+      analyticsCubes: [
+        {
+          // The showcase's shape: a cadence alone.
+          name: 'delivery',
+          sql: 'task',
+          measures: { count: { label: 'Tasks', type: 'count', sql: 'id' } },
+          dimensions: { status: { label: 'Status', type: 'string', sql: 'status' } },
+          refreshKey: { every: '1 hour' },
+        },
+        {
+          // A SECOND cube, so the notices have to distinguish two of them: both
+          // keys, the probe included.
+          name: 'billing',
+          sql: 'invoice',
+          measures: { amount: { label: 'Amount', type: 'sum', sql: 'amount' } },
+          dimensions: { issued_on: { label: 'Issued', type: 'time', sql: 'issued_on' } },
+          refreshKey: { every: '1 day', sql: 'SELECT MAX(updated_at) FROM invoice' },
+        },
+        {
+          // Already canonical — rides through untouched. The fixture's own
+          // control: the strip dispatches on key presence, and copy-on-write
+          // keeps this reference.
+          name: 'accounts',
+          sql: 'account',
+          measures: { count: { label: 'Accounts', type: 'count', sql: 'id' } },
+          dimensions: { tier: { label: 'Tier', type: 'string', sql: 'tier' } },
+        },
+      ],
+    },
+    after: {
+      analyticsCubes: [
+        {
+          name: 'delivery',
+          sql: 'task',
+          measures: { count: { label: 'Tasks', type: 'count', sql: 'id' } },
+          dimensions: { status: { label: 'Status', type: 'string', sql: 'status' } },
+        },
+        {
+          name: 'billing',
+          sql: 'invoice',
+          measures: { amount: { label: 'Amount', type: 'sum', sql: 'amount' } },
+          dimensions: { issued_on: { label: 'Issued', type: 'time', sql: 'issued_on' } },
+        },
+        {
+          name: 'accounts',
+          sql: 'account',
+          measures: { count: { label: 'Accounts', type: 'count', sql: 'id' } },
+          dimensions: { tier: { label: 'Tier', type: 'string', sql: 'tier' } },
+        },
+      ],
+    },
+    // Two notices, one per STRIPPED KEY (the whole block is one key): `delivery`
+    // and `billing`, none for the canonical `accounts`.
+    expectedNotices: 2,
   },
 };
 
@@ -8243,7 +8498,7 @@ const recordHighlightsFieldIconRemoved: MetadataConversion = {
 };
 
 /**
- * `mapping.fieldMapping[].params` lookup keys removed (#10329, ADR-0049
+ * `mapping.fieldMapping[].params` lookup keys removed (commit 15d58dbf1, ADR-0049
  * enforce-or-remove — the sub-walk half of the 17.0.0 #4509 mapping cleanup).
  *
  * `object` / `fromField` / `toField` / `autoCreate` declared a per-entry
@@ -8253,7 +8508,7 @@ const recordHighlightsFieldIconRemoved: MetadataConversion = {
  * `import-coerce.ts` off the TARGET FIELD's own metadata — never off these
  * keys. Implementing them (a second reference-resolution dialect on the import
  * path) is what the code comment in `packages/rest/src/import-mapping.ts`
- * declines to build, and the #10329 triage ruling confirms that posture.
+ * declines to build, and the triage ruling commit 15d58dbf1 landed confirms that posture.
  *
  * `autoCreate` was the one with teeth: it read as "create the referenced
  * record when nothing matches", and nothing was ever created — with or without
@@ -8278,10 +8533,11 @@ const mappingLookupParamsRemoved: MetadataConversion = {
   retiredAfter: '17.2.0',
   surface: 'mapping.fieldMapping[].params.object / .fromField / .toField / .autoCreate',
   summary:
-    "mapping lookup params 'object'/'fromField'/'toField'/'autoCreate' removed (#10329, "
-    + 'ADR-0049 — the import path never read them: `lookup` copies the cell through and '
+    "mapping lookup params 'object'/'fromField'/'toField'/'autoCreate' removed (ADR-0049 — "
+    + 'the import path never read them: `lookup` copies the cell through and '
     + "reference resolution runs off the target field's own metadata. `autoCreate` never "
-    + 'created anything — an unresolved reference fails the row either way)',
+    + 'created anything — an unresolved reference fails the row either way. Implementing them '
+    + 'instead would have added a second reference-resolution dialect to the import path)',
   apply(stack, emit) {
     const RETIRED = ['object', 'fromField', 'toField', 'autoCreate'];
     return mapCollection(stack, 'mappings', (m, path) => {
@@ -8933,7 +9189,7 @@ const permissionAllowRestorePurgeRemoved: MetadataConversion = {
 };
 
 /**
- * [#12868] The per-option `default` key leaves the FORM-VIEW options
+ * [commit c459da6bc] The per-option `default` key leaves the FORM-VIEW options
  * vocabulary (protocol 18; maintainer-ruled narrowing 2026-08-28 on the
  * objectui#6263 analysis, disposition 甲).
  *
@@ -8951,7 +9207,7 @@ const permissionAllowRestorePurgeRemoved: MetadataConversion = {
  *
  * Walks the same payloads as `view-visibleOn-to-visibleWhen` — every FORM
  * payload {@link mapViewPayloads} reaches, in all three persisted spellings
- * (#13031) — through `sections[]`/`groups[]` and top-level
+ * (commit b799ac553) — through `sections[]`/`groups[]` and top-level
  * `fields[]`, recursing into nested `fields` (composite/repeater/record rows
  * carry their own option lists). Only the exact key `default` is stripped —
  * the alias spellings `isDefault`/`selected` were never accepted on this
@@ -9242,7 +9498,7 @@ const fieldReferenceToAlias: MetadataConversion = {
 };
 
 /**
- * `connector.errorMapping` removed (protocol 18, #14676 — ADR-0049
+ * `connector.errorMapping` removed (protocol 18, commit 13c48c2a5 — ADR-0049
  * enforce-or-remove; triage ruling 2026-09-02, route: removal via the
  * `spec-property-retirement` playbook; the split condition — a downstream
  * consumer in objectui or a customer stack — measured empty at objectui
@@ -9287,9 +9543,10 @@ const connectorErrorMappingRemoved: MetadataConversion = {
   retiredAfter: '17.3.0',
   surface: 'connector.errorMapping',
   summary:
-    "connector key 'errorMapping' removed (#14676, ADR-0049 — no engine ever mapped an external "
+    "connector key 'errorMapping' removed (ADR-0049 — no engine ever mapped an external "
     + 'error through the rules, so the eleven nested keys configured nothing, and the rule-level '
-    + '`userMessage` shared its spelling with the live API-error channel while never being shown. '
+    + '`userMessage` shared its spelling with the live API-error channel while never being shown; '
+    + 'deleting the block resolves that collision without a rename. '
     + 'The whole ErrorMappingConfig / ErrorMappingRule shape and the ConnectorErrorCategory enum '
     + 'went with it)',
   apply(stack, emit) {
@@ -11204,11 +11461,22 @@ function dollarKeysReason(keys: readonly string[]): string {
  * — `$and` / `$or` / `$not` above all — is not a field, so its record is left
  * alone; that is the ruled boundary, and flattening a combinator into the AND
  * list is exactly the silent selection change it excludes. A `null` value is
- * declined too, and not for a schema reason: the renderer at the
- * `.objectui-sha` pin (`convertFiltersToAST`) SKIPS a record key whose value is
- * null, so that key constrains nothing today, while an `equals null` rule would
- * test IS NULL. An empty operator object is declined for the same reason — it
- * constrains nothing, and no rule says "nothing".
+ * declined too, and not for a schema reason: at the `.objectui-sha` pin the key
+ * selects different rows on different blocks, so no one rule keeps it. Where a
+ * block queries an object, `convertFiltersToAST` SKIPS a record key whose value
+ * is null, so the key constrains nothing; where a block's rows are inline,
+ * `ValueDataSource.find` matches the record through `comparandEquals`, so the
+ * key selects the rows whose value is null. This entry never reads where a
+ * block's rows come from, so its reason states both and advises neither
+ * rewrite: it names the `is_null` rule for the rows with no value, and leaves
+ * which rows the filter should select to the author. An empty operator object
+ * is declined for a different reason: it names a field and no operator, so no
+ * rule spells it. At the same pin the renderer refuses it rather than ignoring
+ * it — where a block queries an object, `convertFiltersToAST` throws through
+ * `refuseEmptyOperatorMap` (`INVALID_FILTER`, 400); where a block's rows are
+ * inline, `ValueDataSource.find` answers no rows through
+ * `zeroKeyConditionRefusal`. Its reason says both and keeps the renderer's own
+ * remedy, dropping the key.
  *
  * Every top-level `$` key is judged before any field key, so the reason names
  * the combinator even when a field key beside it would decline as well. The
@@ -11226,10 +11494,15 @@ function recordFilterToRules(record: Record<string, unknown>): FilterMapping {
       continue;
     }
     if (value === null) {
+      const isNull = 'is_null' satisfies ViewFilterOperator;
       return {
-        declined: `has the key \`${field}\` set to null: the renderer skips a null-valued key, so `
-          + `today it constrains nothing, while an \`${equals}\` rule would test for null. Drop the `
-          + 'key, or write a rule that tests for null if that is what it should select',
+        declined: `has the key \`${field}\` set to null, and what that key selects depends on where `
+          + 'the block\'s rows come from, so no one rule keeps it: where the block queries an object, '
+          + 'the renderer skips a null-valued key, so it constrains nothing; where its rows are inline '
+          + '(`data: { provider: \'value\' }` or `staticData`), it selects the rows whose '
+          + `\`${field}\` is null. Decide which rows it should select: the rows with no \`${field}\` `
+          + `value are the rule \`${JSON.stringify({ field, operator: isNull })}\`, and a filter that `
+          + `leaves \`${field}\` unconstrained has no rule for it`,
       };
     }
     if (!isRecordForm(value)) {
@@ -11242,8 +11515,10 @@ function recordFilterToRules(record: Record<string, unknown>): FilterMapping {
     const operators = Object.entries(value);
     if (operators.length === 0) {
       return {
-        declined: `has the key \`${field}\` set to an empty operator object, which constrains `
-          + 'nothing — and no rule says "nothing". Drop the key',
+        declined: `has the key \`${field}\` set to an empty operator object, which names the field `
+          + 'and no operator, so no rule spells it. The renderer does not ignore it today: where the '
+          + 'block queries an object, it refuses the filter (`INVALID_FILTER`, 400); where its rows '
+          + 'are inline, it answers no rows. Drop the key',
       };
     }
     for (const [op, comparand] of operators) {
@@ -11382,50 +11657,6 @@ function legacyFilterToRuleArray(value: unknown): FilterMapping | undefined {
   return mapping;
 }
 
-/**
- * Does this component render INLINE rows — rows carried on the node — rather
- * than query an object? Then none of its filters is rewritten.
- *
- * Measured at the `.objectui-sha` pin `f8a9d0fb`: `object-map`
- * (`ObjectMap.tsx:831-833`), `object-tree` (`ObjectTree.tsx:835-837`),
- * `object-calendar` (`ObjectCalendar.tsx:645-647`) and `object-gantt`
- * (`resolveDataSource.ts:70`, then `ObjectGantt.tsx:865`) hand `schema.filter`
- * UNLOWERED to an in-memory `ValueDataSource` when their rows are inline, and
- * `ValueDataSource.find` (`ValueDataSource.ts:1093-1105`) reads an OBJECT
- * `$filter` in the record dialect but an ARRAY one as an AST, whose matcher
- * refuses a rule object (`:564-597`, `:70-73`) and so excludes EVERY row. A
- * converted filter there would take a block from its filtered rows to none —
- * the silent selection change the ruling excluded. The binding goes with its
- * component: `ElementDataSourceGate` composes `dataSource.filter` into that
- * same `schema.filter` (`plugin-map/src/index.tsx:38-41`, `filter: true`).
- *
- * Read by SHAPE, on every component type, rather than by the four types
- * measured: the other inline-row renderers at the pin ignore `filter` for
- * inline rows (`object-grid`, `object-kanban`) or issue no query at all
- * (`object-timeline`), so leaving their filter as stored changes nothing they
- * select, and a type list would go stale the day a fifth renderer starts
- * filtering its own rows. The three shapes are the record-source ladder's
- * (`record-source.ts`, `resolveRecordSourceConfig`) plus the bare-array
- * `data` the spec declares on the kanban, calendar and timeline blocks:
- * `data: { provider: 'value', … }`, `data: [ … ]`, and a truthy `staticData`.
- *
- * Answers with the shape it found, spelled for the TODO that names why the
- * node's filters were left as stored, or `undefined` for an object-bound node.
- *
- * ⚠️ A fact about the RENDERER AT THE PIN, not about the protocol — and the TODO
- * says so in those terms. objectui#10767 taught the inline-row matcher the rule
- * array upstream, but the `.objectui-sha` pin this decline was measured at does
- * not carry it, so the decline stands. Retiring it is owed once the pin moves
- * past that fix, as its own change — never assumed from the upstream merge.
- */
-function rendersInlineRows(properties: unknown): string | undefined {
-  if (!isDict(properties)) return undefined;
-  const { data, staticData } = properties;
-  if (Array.isArray(data)) return 'a `data` array';
-  if (isDict(data) && data.provider === 'value') return "`data: { provider: 'value' }`";
-  return staticData ? '`staticData`' : undefined;
-}
-
 /** How a TODO names the page component a filter sits on: its type, and its `id` when it has one. */
 function describeBlock(component: Dict): string {
   const type = typeof component.type === 'string' ? `the \`${component.type}\` block` : 'this component';
@@ -11459,13 +11690,11 @@ function describeBlock(component: Dict): string {
  *
  * A record carrying `$and` / `$or` / `$not` (or any top-level `$` key), an AST
  * `and` / `or` group, an operator the rule vocabulary does not spell (`$null`,
- * `$exists`, `like`, …), a `null` value (the renderer skips that key today),
+ * `$exists`, `like`, …), a `null` value (skipped where a block queries an
+ * object, matched where its rows are inline — no one rule keeps both),
  * an array or object comparand in equality position, and any rule the door
  * would refuse. All-or-nothing per filter: converting part of an AND-list
- * widens it. And every filter of a component that renders INLINE rows
- * ({@link rendersInlineRows}): the pin's in-memory `ValueDataSource` matches
- * the record form and excludes every row for a rule array, so there the
- * rewrite is not lossless. ⛔ A combinator is never flattened into the AND list — for `$or`
+ * widens it. ⛔ A combinator is never flattened into the AND list — for `$or`
  * and `$not` that changes which rows the page selects, which is the option the
  * ruling excluded. Such a row keeps loading unchanged (the stored-row seam
  * does not validate), and its door's schema refuses the form — but WHERE that
@@ -11498,6 +11727,20 @@ function describeBlock(component: Dict): string {
  * The `filter` of any other component type is not this entry's surface and is
  * never touched.
  *
+ * Where a component's rows come from does not move the verdict. A block whose
+ * rows ride on the node (`data: { provider: 'value' }`, a `data` array,
+ * `staticData`) is rewritten exactly as a block that queries an object:
+ * measured at the `.objectui-sha` pin `dd3f7e1be356`, the renderers that match
+ * inline rows in memory (`object-map`, `object-tree`, `object-calendar`,
+ * `object-gantt`, through `ValueDataSource.find`) take those rows from
+ * `data: { provider: 'value' }` or `staticData`, lower a rule array through
+ * the grid's own sink before matching, and select the same rows for it as for
+ * the stored form — every mapped operator, against a control where the
+ * lowering is absent and the rule array selects none. A bare `data` array
+ * reaches none of them: `object-calendar` draws it as pre-fetched rows with no
+ * filter applied, and `object-map` / `object-gantt` do not take it as a record
+ * source.
+ *
  * ## Why `retiredFromLoadPath`
  *
  * The ruling is `Clause-②: no` — no accept-set change. Replayed on the
@@ -11520,16 +11763,12 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
     'a record-form or single-level AST filter at a converged rule-array door becomes the '
     + '`[{ field, operator, value }]` rule array wherever the mapping is lossless (flat keys → '
     + '`equals` rules, `{ $op: v }` → the mapped operator, AST comparisons → one rule each); a '
-    + 'filter carrying `$and` / `$or` / `$not`, any part with no lossless rule spelling, or any '
-    + 'filter of a component whose rows are inline (`data: { provider: \'value\' }`, a `data` '
-    + 'array, `staticData`) is left exactly as stored — reported as a TODO, which `os migrate meta '
+    + 'filter carrying `$and` / `$or` / `$not` or any part with no lossless rule spelling is '
+    + 'left exactly as stored — reported as a TODO, which `os migrate meta '
     + '--stored` lists — and is not the form its door declares (one filter '
     + 'orthography platform-wide, objectui#6206; #17321 ruling B)',
   apply(stack, emit, context) {
     return mapPageComponents(stack, (component, path) => {
-      // Inline rows: every filter of this node stays as stored, the binding's
-      // included. Its children are separate nodes and are judged on their own.
-      const inline = rendersInlineRows(component.properties);
       const block = describeBlock(component);
 
       const rewrite = (holder: Dict, key: string, basePath: string): Dict => {
@@ -11540,26 +11779,17 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
         // on its own): neither converted nor reported.
         if (!mapping) return holder;
         const at = `${basePath}.${key}`;
-        // The filter's own blocker first — it would decline on an object-bound
-        // block too, and it is what names the combinator — then the node's.
-        let declined: string;
         if ('declined' in mapping) {
-          declined = mapping.declined;
-        } else if (inline) {
-          declined = `sits on a block whose rows are inline (${inline}), and the objectui renderer `
-            + 'this release pins cannot match a rule array against inline rows — it would exclude '
-            + 'every row — so no rewrite here is lossless yet';
-        } else {
-          emit({ from: JSON.stringify(value), to: JSON.stringify(mapping.rules), path: at });
-          return { ...holder, [key]: mapping.rules };
+          context?.reportTodo?.({
+            path: at,
+            from: JSON.stringify(value),
+            reason: `On ${block}, this filter ${mapping.declined}. Left as stored, it keeps loading unchanged, `
+              + 'but it is not the rule-array form its door declares — rewrite it by hand.',
+          });
+          return holder;
         }
-        context?.reportTodo?.({
-          path: at,
-          from: JSON.stringify(value),
-          reason: `On ${block}, this filter ${declined}. Left as stored, it keeps loading unchanged, `
-            + 'but it is not the rule-array form its door declares — rewrite it by hand.',
-        });
-        return holder;
+        emit({ from: JSON.stringify(value), to: JSON.stringify(mapping.rules), path: at });
+        return { ...holder, [key]: mapping.rules };
       };
 
       let next = component;
@@ -11618,9 +11848,8 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
                     filter: { $or: [{ stage: 'open' }, { stage: 'won' }] },
                   },
                 },
-                // Inline rows: a mappable filter, left byte-identical, because
-                // the renderer matches it against those rows in the record
-                // dialect and would exclude every row for a rule array.
+                // Inline rows convert like any other block: the renderer
+                // lowers the rule array before matching those rows.
                 {
                   type: 'object-map',
                   properties: {
@@ -11701,7 +11930,7 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
                   properties: {
                     objectName: 'deal',
                     data: { provider: 'value', items: [{ stage: 'open' }, { stage: 'won' }] },
-                    filter: { stage: 'open' },
+                    filter: [{ field: 'stage', operator: 'equals', value: 'open' }],
                   },
                 },
                 {
@@ -11733,8 +11962,8 @@ const pageComponentFilterRecordToRuleArray: MetadataConversion = {
       ],
     },
     // One per converted door: the binding, the grid filter, the grid
-    // defaultFilters, the nested element:number.
-    expectedNotices: 4,
+    // defaultFilters, the inline-row map's filter, the nested element:number.
+    expectedNotices: 5,
   },
 };
 
@@ -12532,6 +12761,124 @@ function rewriteDecisionModesInGraph(
   return changed ? { ...graph, nodes: nextNodes } : graph;
 }
 
+/**
+ * One conversion of an OPEN major, with its place in that major's application
+ * order (#20574).
+ *
+ * A major's list is APPLICATION order — the loader runs the conversions in
+ * sequence — but the major that retirements still add to is authored as
+ * entries, because a list appended at its end does not merge: every retirement
+ * PR inserted into the same gap, so any two in flight conflicted.
+ */
+interface OrderedConversion {
+  /** The conversion. Its IDENTIFIER is the key the list is kept sorted by. */
+  readonly conversion: MetadataConversion;
+  /** Where it applies within its major: ascending `order`, ties broken by the conversion's `id`. */
+  readonly order: number;
+}
+
+/** A major's conversions in application order: ascending `order`, ties by the conversion's `id`. */
+function inApplicationOrder(entries: readonly OrderedConversion[]): readonly MetadataConversion[] {
+  return [...entries]
+    .sort((a, b) => a.order - b.order || (a.conversion.id < b.conversion.id ? -1 : a.conversion.id > b.conversion.id ? 1 : 0))
+    .map((e) => e.conversion);
+}
+
+/**
+ * Major 18's conversions, one entry per conversion.
+ *
+ * ⚠️ SORTED BY THE CONVERSION'S IDENTIFIER, NOT BY APPLICATION ORDER — that is
+ * the point of the shape. Git reports a conflict whenever two branches insert
+ * into the SAME gap between two unchanged lines, whatever they insert, and
+ * GitHub's server-side merge runs no driver that could say otherwise. A list
+ * appended at its end is one gap, so any two retirements in flight conflicted
+ * here. Kept sorted by identifier, two retirements insert into different gaps
+ * and merge clean — one existing entry between them is enough. `order`, not the
+ * position in this list, says where a conversion applies: `ALL_CONVERSIONS`,
+ * which the loader runs in sequence, and step 18's `conversionIds` both read
+ * `CONVERSIONS_BY_MAJOR[18]`, which is this list in `order`.
+ *
+ * To add a conversion:
+ * - Insert `{ conversion: <identifier>, order: <n> }` where its identifier
+ *   sorts (code-unit order, as `<` compares two strings) — never at the end.
+ * - `order` is one more than the highest here. Two retirements in flight may
+ *   take the same number; they then apply in `id` order. One that must apply
+ *   BEFORE an existing entry takes a number between its neighbours' (`23.5`)
+ *   instead of renumbering them.
+ * - DEFINE it directly above the definition of the entry that follows it in
+ *   this list, so the conversion defined next after it is that entry. One that
+ *   sorts last is defined after every other conversion, directly above
+ *   `OrderedConversion`. The end of the definitions is one gap too: defining
+ *   every new conversion there conflicts exactly as appending here did.
+ *
+ * `scripts/conversions-major18-merge.test.ts` holds both rules for every entry
+ * added after this shape, and proves the merge.
+ */
+const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
+  { conversion: actionAriaRemoved, order: 43 },
+  { conversion: apiEndpointCacheTtlToCacheTtlSeconds, order: 23 },
+  { conversion: chartConfigAriaRemoved, order: 32 },
+  { conversion: connectorConnectionTimeoutMsRemoved, order: 20 },
+  { conversion: connectorErrorMappingRemoved, order: 19 },
+  // The connector duration rename that applied just before these two
+  // (`connector-health-and-trigger-durations-unit-in-key`, between orders 24
+  // and 25) was absorbed by the two removals below, each of which strips the
+  // container a renamed key lived in — see its ABSORBED note.
+  { conversion: connectorResilienceKeysRemoved, order: 25 },
+  { conversion: connectorTriggersRemoved, order: 26 },
+  { conversion: cubeJoinSqlAndRelationshipRemoved, order: 9 },
+  { conversion: cubeMemberInnerNameRemoved, order: 44 },
+  { conversion: cubeRefreshKeyRemoved, order: 47 },
+  { conversion: cubeSubDayGranularitiesRemoved, order: 8 },
+  { conversion: currencyConfigPrecisionRemoved, order: 41 },
+  { conversion: dashboardRefreshIntervalToRefreshIntervalSeconds, order: 24 },
+  { conversion: dashboardWidgetChartConfigStructureRemoved, order: 33 },
+  { conversion: elementFilterRemoved, order: 4 },
+  { conversion: elementFormRemoved, order: 5 },
+  { conversion: elementInputTargetVariableRemoved, order: 3 },
+  { conversion: fieldColumnListsCanonicalized, order: 6 },
+  { conversion: fieldMalformedScalePrecisionRemoved, order: 1 },
+  { conversion: fieldReferenceToAlias, order: 18 },
+  { conversion: flowDecisionModeInclusiveExplicit, order: 45 },
+  { conversion: formLayoutInlineGridToVertical, order: 40 },
+  { conversion: formViewOptionDefaultRemoved, order: 17 },
+  { conversion: hookTimeoutToTimeoutMs, order: 21 },
+  { conversion: jobTimeoutToTimeoutMs, order: 22 },
+  { conversion: listViewSortStringClauseToArray, order: 30 },
+  { conversion: mappingLookupParamsRemoved, order: 11 },
+  { conversion: memoryPersistenceAutoSaveIntervalToMs, order: 27 },
+  { conversion: metricFiltersRemoved, order: 7 },
+  { conversion: objectGridDefaultSortRemoved, order: 14 },
+  { conversion: objectKanbanQuickAddRemoved, order: 15 },
+  { conversion: objectTenancyOrganizationFieldRemoved, order: 35 },
+  { conversion: pageAssignedProfilesRemoved, order: 31 },
+  { conversion: pageComponentFilterRecordToRuleArray, order: 36 },
+  { conversion: pageComponentResponsiveRemoved, order: 13 },
+  { conversion: permissionAllowRestorePurgeRemoved, order: 16 },
+  { conversion: permissionRlsTagsRemoved, order: 42 },
+  { conversion: recordChatterPositionVocabulary, order: 2 },
+  { conversion: recordHighlightsFieldIconRemoved, order: 10 },
+  { conversion: reportJoinedChartRemoved, order: 38 },
+  { conversion: timeDefaultUtcSuffixDropped, order: 48 },
+  { conversion: translationComponentSubmitLabelRemoved, order: 12 },
+  { conversion: translationPerAppSettingsRemoved, order: 34 },
+  { conversion: tursoConfigTimeoutToTimeoutMs, order: 28 },
+  { conversion: viewItemOwnerHiddenRemoved, order: 37 },
+  { conversion: viewListTabsRemoved, order: 46 },
+  { conversion: viewOverlayOwnerHiddenRemoved, order: 39 },
+  { conversion: viewPageMountRemoved, order: 29 },
+];
+
+/**
+ * Every conversion, grouped by the major that introduced its canonical shape
+ * (`toMajor`), each major's list in APPLICATION order: {@link ALL_CONVERSIONS}
+ * concatenates them by ascending major and the loader runs it in sequence.
+ *
+ * A released major's list is a plain array, closed with its release. The major
+ * that retirements still add to is authored as sorted entries with an explicit
+ * `order` ({@link MAJOR_18_CONVERSIONS}), so two retirements in flight do not
+ * conflict here; the next major takes the same shape when it opens.
+ */
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -12603,58 +12950,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     appHiddenToUnpublished,
     actionGlobalNavLocationRemoved,
   ],
-  18: [
-    fieldMalformedScalePrecisionRemoved,
-    recordChatterPositionVocabulary,
-    elementInputTargetVariableRemoved,
-    elementFilterRemoved,
-    elementFormRemoved,
-    fieldColumnListsCanonicalized,
-    metricFiltersRemoved,
-    cubeSubDayGranularitiesRemoved,
-    cubeJoinSqlAndRelationshipRemoved,
-    recordHighlightsFieldIconRemoved,
-    mappingLookupParamsRemoved,
-    translationComponentSubmitLabelRemoved,
-    pageComponentResponsiveRemoved,
-    objectGridDefaultSortRemoved,
-    objectKanbanQuickAddRemoved,
-    permissionAllowRestorePurgeRemoved,
-    formViewOptionDefaultRemoved,
-    fieldReferenceToAlias,
-    connectorErrorMappingRemoved,
-    connectorConnectionTimeoutMsRemoved,
-    hookTimeoutToTimeoutMs,
-    jobTimeoutToTimeoutMs,
-    apiEndpointCacheTtlToCacheTtlSeconds,
-    dashboardRefreshIntervalToRefreshIntervalSeconds,
-    // The connector duration rename that sat here
-    // (`connector-health-and-trigger-durations-unit-in-key`) was absorbed by the
-    // two removals below, each of which strips the container a renamed key
-    // lived in — see its ABSORBED note.
-    connectorResilienceKeysRemoved,
-    connectorTriggersRemoved,
-    memoryPersistenceAutoSaveIntervalToMs,
-    tursoConfigTimeoutToTimeoutMs,
-    viewPageMountRemoved,
-    listViewSortStringClauseToArray,
-    pageAssignedProfilesRemoved,
-    chartConfigAriaRemoved,
-    dashboardWidgetChartConfigStructureRemoved,
-    translationPerAppSettingsRemoved,
-    objectTenancyOrganizationFieldRemoved,
-    pageComponentFilterRecordToRuleArray,
-    viewItemOwnerHiddenRemoved,
-    reportJoinedChartRemoved,
-    viewOverlayOwnerHiddenRemoved,
-    formLayoutInlineGridToVertical,
-    currencyConfigPrecisionRemoved,
-    permissionRlsTagsRemoved,
-    actionAriaRemoved,
-    cubeMemberInnerNameRemoved,
-    flowDecisionModeInclusiveExplicit,
-    viewListTabsRemoved,
-  ],
+  18: inApplicationOrder(MAJOR_18_CONVERSIONS),
 };
 
 /** Flattened, deterministic list of every conversion the loader knows about. */

@@ -23,6 +23,51 @@
  * of every driver; the engine-level pin with a recording driver and the dry-run
  * `validate` is `packages/objectql/src/engine-temporal-write-real-day-iso.test.ts`.
  *
+ * ## [#20549] The comparand door, over the same cells
+ *
+ * The same values as filter comparands, through `POST /api/v1/data/:object/query`
+ * with the process in America/New_York. Measured on the base (`f1e921ab8e`),
+ * PostgreSQL 16 at Asia/Shanghai:
+ *
+ * | `where` | SQLite | PostgreSQL 16 |
+ * |:--|:--|:--|
+ * | `opened_at $eq "2026-02-30T10:00:00Z"` | 200, the row at 2026-03-02T10:00Z (rolled over) | the same |
+ * | `opened_at $eq "07/15/2026 10:00"`, `"2026/07/15 10:00"` | 200, the row at 2026-07-15T14:00Z (the process zone) | the same |
+ * | `placed_on $eq "2026-02-30"` | 200 `[]` (compared as text) | 500 `DATABASE_ERROR` |
+ *
+ * (InMemoryDriver answered as SQLite.) Both doors now ask
+ * `@objectstack/core`'s one rule, so each is `400 INVALID_FILTER` naming the
+ * field, before any read, and the leap day and the ISO spellings still find
+ * their rows; the engine-level pin is
+ * `packages/objectql/src/engine-temporal-comparand-door.test.ts`.
+ *
+ * ## [#20480] A time comparand whose instant has no four-digit UTC year
+ *
+ * Measured on the base through this door, rows `09:00:00` / `10:30:00` /
+ * `12:00:00`: `slot $gt "+010000-01-01T10:00:00Z"` answered 3 of 3 on SQLite
+ * (compared as text) and 500 on PostgreSQL (`22009`); the number of that
+ * instant answered 3 of 3 on SQLite. Each is `400 INVALID_FILTER` now, and the
+ * same wall clock as a 2026 instant still answers 2 / 1.
+ *
+ * ## [#20671] The same class as a WRITTEN time
+ *
+ * Measured on the base (`fa0a4b661`) through this door, a create then a
+ * read-back, the process in America/New_York, PostgreSQL 16 at Asia/Shanghai:
+ *
+ * | written to `slot` | SQLite | PostgreSQL 16 |
+ * |:--|:--|:--|
+ * | `"+010000-01-01T10:00:00Z"`, `"9999-12-31T23:00:00-02:00"` | 201, read back verbatim | 500 `DATABASE_ERROR` |
+ * | `"10:00Z"`, `"10:00+08:00"` | 201, read back verbatim | 201, `"10:00:00"` |
+ * | `"10:00"`, `"10:00:00"`, `"2026-07-15T10:00:00Z"` | 201, `"10:00:00"` | the same |
+ *
+ * (InMemoryDriver answered as SQLite.) The `time` write arm now asks the same
+ * core rule as the comparand door: the first four are `400 VALIDATION_FAILED`
+ * / `invalid_time` with no write, a zone suffix on a time of day in its own
+ * sentence, and the controls read back unchanged on both cells. The
+ * engine-level pin is `packages/objectql/src/engine-time-write-zone-less.test.ts`,
+ * and the memory driver's half is
+ * `packages/drivers/driver-memory/src/memory-20671-time-write-zone-less.test.ts`.
+ *
  * ## The dialect axis of THIS file
  *
  * The SQLite cell always runs. The PostgreSQL cell runs where
@@ -39,6 +84,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { renderValidationMessage } from '@objectstack/spec/system';
 import { RestServer } from './rest-server';
 
 const OBJECT = 'rest_temporal_20525';
@@ -51,6 +97,8 @@ const LEDGER = {
     customer_id: { name: 'customer_id', type: 'text' as const },
     placed_on: { name: 'placed_on', type: 'date' as const },
     opened_at: { name: 'opened_at', type: 'datetime' as const },
+    // [#20480] A time column, for the third kind of the same rule.
+    slot: { name: 'slot', type: 'time' as const },
   },
 };
 
@@ -119,6 +167,7 @@ for (const cell of CELLS) {
       let engine: ObjectQL;
       let driver: any;
       const writes = { n: 0 };
+      const reads = { n: 0 };
       let call: (method: string, path: string, params: Record<string, string>, body: unknown) => Promise<{ status: number; body: any }>;
       const readBack = async (id: string, field: Field) =>
         (await call('POST', '/api/v1/data/:object/query', { object: OBJECT }, { where: { id } })).body.records[0]?.[field];
@@ -143,6 +192,12 @@ for (const cell of CELLS) {
           if (typeof driver[verb] !== 'function') continue;
           const real = driver[verb].bind(driver);
           driver[verb] = (o: string, ...rest: unknown[]) => { if (o === OBJECT) writes.n += 1; return real(o, ...rest); };
+        }
+        // [#20549] …and reads of it, for the comparand door's "before any read".
+        for (const verb of ['find', 'findOne', 'count', 'aggregate'] as const) {
+          if (typeof driver[verb] !== 'function') continue;
+          const real = driver[verb].bind(driver);
+          driver[verb] = (o: string, ...rest: unknown[]) => { if (o === OBJECT) reads.n += 1; return real(o, ...rest); };
         }
 
         const protocol = new ObjectStackProtocolImplementation(engine as any);
@@ -200,6 +255,115 @@ for (const cell of CELLS) {
         expect(patched.status, JSON.stringify(patched.body)).toBe(200);
         expect(await readBack('o1', 'placed_on')).toBe('2028-02-29');
         expect(await readBack('o1', 'opened_at'), 'zone-naive ISO is UTC, not the host zone').toBe('2026-07-15T10:00:00.000Z');
+      });
+
+      it('[#20480] an instant with no four-digit UTC year on a time field is 400 INVALID_FILTER before any read — and the 2026 control answers 2 / 1', async () => {
+        for (const [id, slot] of [['s09', '09:00:00'], ['s1030', '10:30:00'], ['s12', '12:00:00']] as const) {
+          const created = await call('POST', '/api/v1/data/:object', { object: OBJECT }, { id, customer_id: 'cs', slot });
+          expect(created.status, JSON.stringify(created.body)).toBe(201);
+        }
+        const query = (where: Record<string, unknown>) =>
+          call('POST', '/api/v1/data/:object/query', { object: OBJECT }, { where: { $and: [{ customer_id: 'cs' }, where] } });
+        const before = reads.n;
+        for (const value of ['+010000-01-01T10:00:00Z', '9999-12-31T23:00:00-02:00', Date.parse('+010000-01-01T10:00:00Z')]) {
+          for (const op of ['$gt', '$lt'] as const) {
+            const res = await query({ slot: { [op]: value } });
+            expect(res.status, `${op} ${String(value)}: ${JSON.stringify(res.body)}`).toBe(400);
+            expect(res.body.code, `${op} ${String(value)}`).toBe('INVALID_FILTER');
+            expect(JSON.stringify(res.body), 'names the field').toContain('slot');
+          }
+        }
+        expect(reads.n - before, 'no read of the object — every refusal precedes the driver').toBe(0);
+        const ids = async (where: Record<string, unknown>) => {
+          const res = await query(where);
+          expect(res.status, `${JSON.stringify(where)}: ${JSON.stringify(res.body)}`).toBe(200);
+          return (res.body.records as Array<{ id: string }>).map((r) => r.id).sort();
+        };
+        for (const at of ['2026-07-15T10:00:00Z', '2026-07-15T18:00:00+08:00', Date.parse('2026-07-15T10:00:00Z')]) {
+          expect(await ids({ slot: { $gt: at } }), `$gt ${String(at)}`).toEqual(['s1030', 's12']);
+          expect(await ids({ slot: { $lt: at } }), `$lt ${String(at)}`).toEqual(['s09']);
+        }
+      });
+
+      it('[#20671] a zone-suffixed time of day and an instant with no four-digit UTC year are 400 VALIDATION_FAILED / invalid_time on create and on PATCH — and a plain wall clock reads back identically', async () => {
+        const readSlot = async (id: string) =>
+          (await call('POST', '/api/v1/data/:object/query', { object: OBJECT }, { where: { id } })).body.records[0]?.slot;
+        const created0 = await call('POST', '/api/v1/data/:object', { object: OBJECT }, { id: 't0', customer_id: 'ct', slot: '09:00' });
+        expect(created0.status, JSON.stringify(created0.body)).toBe(201);
+        const before = writes.n;
+        for (const [value, zoned] of [
+          ['+010000-01-01T10:00:00Z', false],
+          ['9999-12-31T23:00:00-02:00', false],
+          ['10:00Z', true],
+          ['10:00+08:00', true],
+        ] as const) {
+          for (const [door, res] of [
+            ['create', await call('POST', '/api/v1/data/:object', { object: OBJECT }, { id: 'refused-t', customer_id: 'ct', slot: value })],
+            ['PATCH', await call('PATCH', '/api/v1/data/:object/:id', { object: OBJECT, id: 't0' }, { slot: value })],
+          ] as const) {
+            expect(res.status, `${door} ${value}: ${JSON.stringify(res.body)}`).toBe(400);
+            expect(res.body).toMatchObject({ code: 'VALIDATION_FAILED' });
+            expect(res.body.fields.map((x: any) => [x.field, x.code]), `${door} ${value}`).toEqual([['slot', 'invalid_time']]);
+            const sentence = renderValidationMessage({ messageKey: zoned ? 'invalid_time_zoned' : 'invalid_time', label: res.body.fields[0].label, field: 'slot' });
+            expect(res.body.fields[0].message, `${door} ${value}: the ${zoned ? 'zone' : 'plain'} sentence`).toBe(sentence);
+          }
+        }
+        expect(writes.n - before, 'no write — every refusal precedes the driver').toBe(0);
+        expect(await readSlot('t0'), 't0 kept its wall clock').toBe('09:00:00');
+        expect(await readSlot('refused-t'), 'no row was created').toBeUndefined();
+
+        for (const [i, [value, stored]] of ([
+          ['10:00', '10:00:00'],
+          ['10:00:00', '10:00:00'],
+          ['10:00:00.250', '10:00:00.250'],
+          // A full ISO instant with a four-digit year stays admitted, and keeps its UTC time of day.
+          ['2026-07-15T10:00:00Z', '10:00:00'],
+          ['2026-07-15T18:00:00+08:00', '10:00:00'],
+        ] as const).entries()) {
+          const created = await call('POST', '/api/v1/data/:object', { object: OBJECT }, { id: `t${i + 1}`, customer_id: 'ct', slot: value });
+          expect(created.status, `create ${value}: ${JSON.stringify(created.body)}`).toBe(201);
+          expect(await readSlot(`t${i + 1}`), `read back ${value}`).toBe(stored);
+        }
+        const patched = await call('PATCH', '/api/v1/data/:object/:id', { object: OBJECT, id: 't0' }, { slot: '10:00' });
+        expect(patched.status, JSON.stringify(patched.body)).toBe(200);
+        expect(await readSlot('t0')).toBe('10:00:00');
+      });
+
+      it('[#20549] the same values as filter comparands are 400 INVALID_FILTER naming the field, before any read — and the leap day and the ISO spellings still find their rows', async () => {
+        // The rows the base's misreadings matched: March 2 (a rolled-over
+        // February 30) and 14:00Z (10:00 in the process zone).
+        for (const [id, placed_on, opened_at] of [
+          ['q-mar2', '2026-03-02', '2026-03-02T10:00:00Z'],
+          ['q-jul15', '2026-07-15', '2026-07-15T14:00:00Z'],
+          ['q-leap', '2028-02-29', '2028-02-29T10:00:00Z'],
+        ] as const) {
+          const created = await call('POST', '/api/v1/data/:object', { object: OBJECT }, { id, customer_id: 'cq', placed_on, opened_at });
+          expect(created.status, JSON.stringify(created.body)).toBe(201);
+        }
+        const query = (where: Record<string, unknown>) =>
+          call('POST', '/api/v1/data/:object/query', { object: OBJECT }, { where: { $and: [{ customer_id: 'cq' }, where] } });
+
+        const before = reads.n;
+        for (const [field, value] of REFUSED) {
+          const res = await query({ [field]: { $eq: value } });
+          expect(res.status, `${field} ${value}: ${JSON.stringify(res.body)}`).toBe(400);
+          expect(res.body.code, `${field} ${value}`).toBe('INVALID_FILTER');
+          expect(JSON.stringify(res.body), `${field} ${value} names the field`).toContain(field);
+        }
+        expect(reads.n - before, 'no read of the object — every refusal precedes the driver').toBe(0);
+
+        const ids = async (where: Record<string, unknown>) => {
+          const res = await query(where);
+          expect(res.status, `${JSON.stringify(where)}: ${JSON.stringify(res.body)}`).toBe(200);
+          return (res.body.records as Array<{ id: string }>).map((r) => r.id).sort();
+        };
+        expect(await ids({ placed_on: { $eq: '2028-02-29' } }), 'a leap day on a date').toEqual(['q-leap']);
+        expect(await ids({ opened_at: { $eq: '2028-02-29T10:00:00Z' } }), 'a leap day on a datetime').toEqual(['q-leap']);
+        expect(await ids({ opened_at: { $eq: '2026-07-15T14:00:00Z' } }), 'ISO, Z').toEqual(['q-jul15']);
+        expect(await ids({ opened_at: { $eq: '2026-07-15T22:00:00+08:00' } }), 'ISO, an offset').toEqual(['q-jul15']);
+        expect(await ids({ opened_at: { $eq: '2026-07-15 14:00' } }), 'zone-naive ISO is UTC, not the host zone').toEqual(['q-jul15']);
+        expect(await ids({ opened_at: { $gte: '2026-03-02', $lt: '2026-03-03' } }), 'bare days as bounds').toEqual(['q-mar2']);
+        expect(await ids({ placed_on: { $eq: '2026-03-02' } }), 'the day February 30 was rolled onto').toEqual(['q-mar2']);
       });
     },
   );

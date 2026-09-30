@@ -14,6 +14,8 @@ import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 // `ObjectStoreSuspendedRunStore.claimSuspension` testable at all: drop
 // `multi: true` from it and this fake THROWS, exactly as a running server does.
 import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
+import { InMemoryFlowActivationStore } from './flow-activation-store.js';
+import { registerSubflowNode } from './builtin/subflow-node.js';
 
 /**
  * The `resumeAuthority: 'any'` declaration every pausing fixture below needs
@@ -46,13 +48,26 @@ function createFakeEngine(
     schemas?: Record<string, any>,
 ): SuspendedRunStoreEngine & { rows: Map<string, any> } {
     const rows = new Map<string, any>();
-    // Equality plus the `$lt` operator (kept for where-clause generality).
-    const matches = (row: any, where: any) =>
+    // Equality, the `$lt` / `$gt` field operators, and `$and` — [#20725] the
+    // last two are what a seek walk (`keysetWalk`) sends: `{ $and: [where,
+    // { id: { $gt: cursor } }] }`. `$and` is ANDed with its siblings, as a
+    // driver does; any other combinator or field operator is REFUSED rather
+    // than compared as a value, so a query this double cannot answer turns a
+    // suite red instead of green.
+    const matches = (row: any, where: any): boolean =>
         !where || Object.entries(where).every(([k, v]) => {
+            if (k === '$and') {
+                if (!Array.isArray(v)) throw new Error('fake driver: `$and` takes an array');
+                return v.every((w) => matches(row, w));
+            }
             if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
-            return v && typeof v === 'object' && '$lt' in (v as any)
-                ? row[k] < (v as any).$lt
-                : row[k] === v;
+            if (v !== null && typeof v === 'object') {
+                const ops = Object.keys(v as object);
+                if (ops.length === 1 && ops[0] === '$lt') return row[k] < (v as any).$lt;
+                if (ops.length === 1 && ops[0] === '$gt') return row[k] > (v as any).$gt;
+                throw new Error(`fake driver: unsupported field operator ${ops.join(', ')} on ${k}`);
+            }
+            return row[k] === v;
         });
     return {
         rows,
@@ -60,6 +75,15 @@ function createFakeEngine(
         async find(_object, options) {
             const where = options?.where;
             const out = [...rows.values()].filter(r => matches(r, where));
+            // [#20725] One ascending key — the seek walk's own order — or a refusal.
+            if (options?.orderBy !== undefined) {
+                const order = options.orderBy;
+                if (!Array.isArray(order) || order.length !== 1 || order[0]?.order !== 'asc') {
+                    throw new Error('fake driver: supports exactly one ascending orderBy key');
+                }
+                const field = String(order[0].field);
+                out.sort((a, b) => (String(a[field]) < String(b[field]) ? -1 : String(a[field]) > String(b[field]) ? 1 : 0));
+            }
             return typeof options?.limit === 'number' ? out.slice(0, options.limit) : out;
         },
         async insert(_object, data) {
@@ -1405,5 +1429,128 @@ describe('ObjectStoreSuspendedRunStore — the refused terminal and its message 
         await store.recordTerminal(terminalRecord(4, { status: 'completed' }));
         expect(engine.rows.get('run_r4').refusal_message).toBeNull();
         expect((await store.loadTerminal('r4'))!.refusalMessage).toBeUndefined();
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [#20725] The read behind the ADR-0126 §7.3 disable guard is COMPLETE
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A guard that decides from a truncated list is not a guard. `list()` is the
+ * deployment-wide LISTING and reads one capped page of `paused` rows; the §7.3
+ * disable guard asks a narrower question — "does THIS caller hold a parked
+ * run?" — so it asks the store for the named flows' runs, every one of them.
+ */
+describe('#20725 the parked-run read behind the §7.3 disable guard asks for the named callers\' runs — never a capped deployment-wide page', () => {
+    /** `count` paused rows of flows OTHER than the ones under test, ahead of them in the table. */
+    function seedOtherPausedRows(engine: ReturnType<typeof createFakeEngine>, count: number) {
+        for (let i = 0; i < count; i++) {
+            const id = `other_${String(i).padStart(5, '0')}`;
+            engine.rows.set(id, {
+                id, flow_name: `other_flow_${i % 7}`, node_id: 'pause', status: 'paused',
+                started_at: '2026-01-01T00:00:00.000Z',
+            });
+        }
+    }
+
+    it('listByFlow answers a named flow\'s paused run that lies beyond the first 1000 paused rows of other flows', async () => {
+        const engine = createFakeEngine();
+        seedOtherPausedRows(engine, 1000);
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+        await store.save({ ...baseRun(), runId: 'run_vendor', flowName: 'vendor_process' });
+
+        const runs = await store.listByFlow(['vendor_process']);
+
+        expect(runs.map((r) => r.runId)).toEqual(['run_vendor']);
+        expect(runs[0].flowName).toBe('vendor_process');
+    });
+
+    it('listByFlow reads every page of a named flow — 1201 parked runs come back whole, not one page of them', async () => {
+        const engine = createFakeEngine();
+        seedOtherPausedRows(engine, 1000);
+        for (let i = 0; i < 1201; i++) {
+            const id = `vendor_${String(i).padStart(5, '0')}`;
+            engine.rows.set(id, { id, flow_name: 'vendor_process', node_id: 'pause', status: 'paused', started_at: '2026-01-01T00:00:00.000Z' });
+        }
+        // A TERMINAL row of the same flow is history, never a parked run.
+        engine.rows.set('run_vendor_done', { id: 'run_vendor_done', flow_name: 'vendor_process', status: 'completed' });
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+
+        const runs = await store.listByFlow(['vendor_process', 'nobody_calls_this']);
+
+        expect(runs).toHaveLength(1201);
+        expect(new Set(runs.map((r) => r.runId)).size).toBe(1201);
+        expect(runs.every((r) => r.flowName === 'vendor_process')).toBe(true);
+    });
+
+    it('listByFlow REFUSES rather than answers short when the read cannot advance past a full page', async () => {
+        const engine = createFakeEngine();
+        // Rows that carry no `id` column: the seek walk has nothing to advance
+        // past, so after one full page it cannot say whether more rows remain.
+        for (let i = 0; i < 600; i++) {
+            engine.rows.set(`keyless_${i}`, { flow_name: 'vendor_process', node_id: 'pause', status: 'paused' });
+        }
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+
+        await expect(store.listByFlow(['vendor_process'])).rejects.toThrow(/could not be read to their end/);
+    });
+
+    it('the disable guard, on a restarted engine over the DB-backed store, refuses naming the caller\'s run parked behind 1000 other runs', async () => {
+        const engine = createFakeEngine();
+        seedOtherPausedRows(engine, 1000);
+        const logger = createTestLogger();
+        const nodeCtx = { logger, getService: () => undefined } as any;
+
+        /** One process lifetime over the shared table: a packaged caller that parks, then calls its subflow. */
+        function build() {
+            const e = new AutomationEngine(logger, new ObjectStoreSuspendedRunStore(engine, logger));
+            e.setFlowActivationStore(new InMemoryFlowActivationStore());
+            registerSubflowNode(e, nodeCtx);
+            e.registerNodeExecutor({
+                type: 'pause_node',
+                descriptor: PAUSE_NODE_DESCRIPTOR,
+                async execute() { return { success: true, suspend: true, correlation: 'areq_1' }; },
+            });
+            e.registerFlow('shared_step', {
+                name: 'shared_step', label: 'Shared step', type: 'autolaunched', _packageId: 'crm',
+                nodes: [{ id: 'start', type: 'start', label: 'Start' }, { id: 'end', type: 'end', label: 'End' }],
+                edges: [{ id: 'e1', source: 'start', target: 'end' }],
+            } as never);
+            e.registerFlow('vendor_process', {
+                name: 'vendor_process', label: 'Vendor process', type: 'autolaunched', _packageId: 'crm',
+                nodes: [
+                    { id: 'start', type: 'start', label: 'Start' },
+                    { id: 'pause', type: 'pause_node', label: 'Approval' },
+                    { id: 'call', type: 'subflow', label: 'Call', config: { flowName: 'shared_step' } },
+                    { id: 'end', type: 'end', label: 'End' },
+                ],
+                edges: [
+                    { id: 'e1', source: 'start', target: 'pause' },
+                    { id: 'e2', source: 'pause', target: 'call' },
+                    { id: 'e3', source: 'call', target: 'end' },
+                ],
+            } as never);
+            return e;
+        }
+
+        const parked = await build().execute('vendor_process');
+        expect(parked.status).toBe('paused');
+        const runId = parked.runId!;
+        expect(engine.rows.get(runId)?.status).toBe('paused');
+
+        // The restarted process: an empty hot cache, the run only in the table,
+        // behind 1000 paused rows of other flows.
+        const restarted = build();
+        expect(restarted.listSuspendedRuns()).toEqual([]);
+        await restarted.toggleFlow('vendor_process', false);
+
+        const thrown = await restarted.toggleFlow('shared_step', false).then(() => undefined, (e: any) => e);
+
+        expect(thrown, 'disabling shared_step was accepted').toBeDefined();
+        expect(thrown.code).toBe('DELETE_RESTRICTED');
+        expect(thrown.status).toBe(409);
+        expect(thrown.subflowCallers).toEqual(['vendor_process']);
+        expect(thrown.message).toContain(`'${runId}'`);
     });
 });

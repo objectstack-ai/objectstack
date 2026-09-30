@@ -11,7 +11,7 @@
  *
  * The refusal now renders through the shared Operation Message Catalog
  * (`@objectstack/spec/system`, key `approval_recall_not_submitter`, landed by
- * #12493) instead of a package-local string.
+ * commit aa5994e17) instead of a package-local string.
  *
  * ⚠️ These tests assert the SENTENCE AN OPERATOR READS, in zh-CN specifically.
  * Asserting only that a catalog key was passed would pass against a message

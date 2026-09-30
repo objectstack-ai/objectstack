@@ -6,7 +6,7 @@
  *
  * ## What this repairs, and what it deliberately does not
  *
- * #10101 (landed as PR #11311) fixed the WRITERS: a `sys_approval_request` and
+ * #10101 (landed as commit 1272f0a6b) fixed the WRITERS: a `sys_approval_request` and
  * a `sys_automation_run` are now stamped from the SUBJECT record's own
  * organization, with the acting context as the ruled fallback. It wrote
  * nothing to existing rows, so the population produced before it persists —
@@ -32,7 +32,7 @@
  * ONE shared resolver (`createRecordOrganizationResolver`,
  * `@objectstack/metadata-core`) — never hard-coded to `organization_id`. That
  * is what keeps `sys_api_key`'s deliberate divergence intact: its
- * `tenancy.organizationField: 'active_organization_id'` (stamp-only, #8778)
+ * `tenancy.organizationField: 'active_organization_id'` (stamp-only, commit 7901b2dd2)
  * wins limb 0 of the resolver, so a platform row ABOUT an API key is repaired
  * from that column, and the credential table itself is never written to. A
  * sweep written on the intuition "unify everything onto one organization

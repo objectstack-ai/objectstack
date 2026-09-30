@@ -32,7 +32,7 @@
  *          → lists currently installed marketplace packages. Requires an
  *            authenticated principal (anonymous → 401); `installedBy` and
  *            `storageDir` are served only to a `manage_metadata` holder
- *            (#9011). The four routes above require `manage_metadata`
+ *            (commit 01074e551). The four routes above require `manage_metadata`
  *            outright (#8976).
  *
  *   DELETE /api/v1/marketplace/install-local/:manifestId
@@ -95,7 +95,7 @@ const ROUTE_BASE = '/api/v1/marketplace/install-local';
  *
  * `manage_metadata` is ADR-0066 D1's authoring capability and the SAME key the
  * platform's other metadata-write doors already require — `PUT`/`DELETE`
- * `/api/v1/meta/:type/:name`, `POST /meta/_migrate-stored`, and since #8919 the
+ * `/api/v1/meta/:type/:name`, `POST /meta/_migrate-stored`, and since commit b5378550e the
  * publish/rollback promotion verbs. These four routes are a metadata-write door
  * by every measure that matters: `POST` hot-registers an inline manifest's
  * objects into the shared registry and then runs `syncSchemas()` against the
@@ -998,7 +998,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * short list was served with `success: true` and nobody, anywhere, could
      * have known.
      *
-     * ## [#9011] Authenticated floor + field narrowing — the posture, ruled
+     * ## [commit 01074e551] Authenticated floor + field narrowing — the posture, ruled
      *
      * #8976 gated the four MUTATING doors and left this read as the only
      * anonymous door on the surface: `handleList` opened on `this.readAll()`,
@@ -1810,7 +1810,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 systemPermissions: Array.isArray(authz.systemPermissions) ? authz.systemPermissions : [],
             };
         } catch (err) {
-            // [#13279] `null` here means "nobody is authenticated", which is
+            // [commit 6a180e42d] `null` here means "nobody is authenticated", which is
             // not what a permission-store outage established. Re-raised.
             if (isAuthzStoreUnavailableError(err)) throw err;
             return null;
@@ -1818,7 +1818,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
-     * [#9011] The ONE `401` this plugin issues — every door, one literal.
+     * [commit 01074e551] The ONE `401` this plugin issues — every door, one literal.
      *
      * The five routes now share an authenticated floor but NOT a capability
      * requirement (the four writes demand `manage_metadata`; the read narrows

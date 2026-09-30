@@ -9,6 +9,7 @@ import type { Logger } from '@objectstack/spec/contracts';
 // recorder-local re-derivation here was rejected by name (Option B): it would
 // be a third answer to a question the codebase already answered two ways.
 import { createRecordOrganizationResolver, type RecordOrganizationResolver } from '@objectstack/metadata-core';
+import { keysetWalk } from '@objectstack/types';
 import { isTerminalRunStatus } from './engine.js';
 import type {
   ConsumedSuspensionDropNotice,
@@ -87,6 +88,10 @@ type CountedMultiDeleteCapability =
  * state and never match the predicate.
  */
 export const DEFAULT_MAX_TERMINAL_RUNS_PER_FLOW = 100;
+
+/** [#20725] Rows per page of {@link ObjectStoreSuspendedRunStore.listByFlow}'s
+ *  seek walk. A page size, ⛔ not a cap: the walk reads every page. */
+const LIST_BY_FLOW_PAGE_SIZE = 500;
 
 /** Max deletes one write-time overflow prune may issue — bounds the write
  *  amplification a single `recordTerminal` can incur on a legacy oversized
@@ -621,6 +626,45 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       where: { status: 'paused' }, limit: 1000, context: SYSTEM_CTX,
     });
     return (Array.isArray(rows) ? rows : []).map(r => this.deserialize(r));
+  }
+
+  /**
+   * [#20725] The named flows' `paused` rows — ALL of them, never a page.
+   *
+   * {@link list} is the deployment-wide listing and reads one capped page of
+   * `paused` rows in whatever order the driver returns them, so past 1000 live
+   * suspensions a given flow's run may simply not be on it. That is tolerable
+   * for an operability listing and fatal for the ADR-0126 §7.3 disable guard,
+   * which accepts a disable on a caller's ABSENCE from the answer. So this
+   * asks the narrower question the guard actually has, per flow, on the
+   * `(flow_name, status)` index `sys_automation_run` declares for it — and
+   * reads it to its end with a seek walk ({@link keysetWalk}: `id` order, no
+   * `offset`, so a row that moves while the walk runs cannot be skipped).
+   *
+   * ⛔ Not the listing's cap raised: a bigger page is still a page. A walk that
+   * cannot seek (a row without an `id`, a reader that drops the predicate)
+   * stops and reports truncation, and that THROWS here — an answer this method
+   * cannot vouch for is refused, never returned short.
+   */
+  async listByFlow(flowNames: readonly string[]): Promise<SuspendedRun[]> {
+    const runs: SuspendedRun[] = [];
+    for (const flowName of new Set(flowNames)) {
+      const walk = keysetWalk<Record<string, unknown>>(
+        (query) => this.engine.find(TABLE, { ...query, context: SYSTEM_CTX }),
+        { where: { flow_name: flowName, status: 'paused' }, pageSize: LIST_BY_FLOW_PAGE_SIZE },
+      );
+      for await (const page of walk.pages()) {
+        for (const row of page) runs.push(this.deserialize(row));
+      }
+      if (walk.truncated) {
+        throw new Error(
+          `[automation] the suspended runs of flow '${flowName}' could not be read to their end ` +
+            `(${walk.scanned} row(s) read before the walk could not advance past the last one) — ` +
+            `refused rather than answered short.`,
+        );
+      }
+    }
+    return runs;
   }
 
   /**

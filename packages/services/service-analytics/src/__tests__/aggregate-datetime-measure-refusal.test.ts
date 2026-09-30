@@ -62,8 +62,8 @@
  * `min` × `text` — which this file pinned as compiling, deliberately and
  * conditionally on a ruling landing first — is now refused beside `sum` × `text`.
  *
- * The BOOLEAN rows were never a collision in any scope: #16685 was ruled A and
- * #16750 added `boolean` / `toggle` to the `sum` / `avg` / `min` / `max` rows
+ * The BOOLEAN rows were never a collision in any scope: commit ed7243d52
+ * (#16750) added `boolean` / `toggle` to the `sum` / `avg` / `min` / `max` rows
  * (maintainer ruling #11152 — booleans aggregate as numbers on every backend),
  * so the table ACCEPTS them and nothing refuses them anywhere. The non-temporal
  * population is pinned in `aggregate-nontemporal-measure-refusal.test.ts`; this

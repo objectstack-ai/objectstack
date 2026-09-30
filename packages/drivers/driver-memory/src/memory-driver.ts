@@ -14,7 +14,7 @@ import { hasDanglingLikeEscape, hasNulInLikePattern, likePatternToRegExp } from 
 // the ruled 「is empty」 table, asked of the spec by the live query path.
 import { expandEmptyOperator, type ValueShapeFieldDef } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
-import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
+import { Logger, createLogger, nextUtcCalendarDay, isUnboundedAbove, compensatedSum } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
 import {
   assertSingleTenantPosture,
@@ -112,7 +112,7 @@ interface LoweredWrite {
  * | lowered key | written by |
  * |---|---|
  * | `$eq`  | `$eq`, `$null: true`,  `$exists: false` |
- * | `$ne`  | `$ne`, `$null: false`, `$exists: true`  |
+ * | `$ne`  | `$ne`, `$null: false`, `$exists: true`, `$lte` (the LAST supported day, `9999-12-31` — #20600: no bound, a value) |
  * | `$gte` | `$gte`, `$between` |
  * | `$lte` | `$lte`, `$between` |
  * | `$lt`  | `$lt`, `$lte` (BARE CALENDAR DAY — #4042's half-open rewrite), `$between` (bare-day max) |
@@ -1397,7 +1397,11 @@ export class InMemoryDriver implements IDataDriver {
         // compiles half-open (`< 2026-07-29`), which is also order-equivalent
         // to `<=` for plain `YYYY-MM-DD` date values — so no field-type lookup
         // is needed, exactly the argument the preview evaluator uses.
+        // [#20600] On the last supported day there is no next day: every value
+        // is inside the bound, so what `<=` still asks is a value (`$ne: null`,
+        // the `is_not_null` arm below).
         const nextDay = nextUtcCalendarDay(value);
+        if (isUnboundedAbove(nextDay)) return { [field]: { $ne: null } };
         return { [field]: nextDay != null ? { $lt: store(nextDay) } : { $lte: store(value) } };
       }
       case 'in':
@@ -1469,7 +1473,10 @@ export class InMemoryDriver implements IDataDriver {
       case 'between':
         if (Array.isArray(value) && value.length === 2) {
           // Bare-day max → half-open, inheriting `<=`'s whole-day rule (#4042).
+          // [#20600] A max on the last supported day bounds nothing: the range
+          // keeps its minimum alone.
           const nextDay = nextUtcCalendarDay(value[1]);
+          if (isUnboundedAbove(nextDay)) return { [field]: { $gte: store(value[0]) } };
           return {
             [field]: nextDay != null
               ? { $gte: store(value[0]), $lt: store(nextDay) }
@@ -1716,7 +1723,10 @@ export class InMemoryDriver implements IDataDriver {
           if (!Array.isArray(val) || val.length !== 2) throw malformedBetweenError(field, val, `${path}.$between`);
           put('$gte', store(val[0]));
           // Bare-day max → half-open, inheriting `$lte`'s whole-day rule (#4042).
+          // [#20600] A max on the last supported day bounds nothing: the
+          // range keeps its minimum alone.
           const betweenNextDay = nextUtcCalendarDay(val[1]);
+          if (isUnboundedAbove(betweenNextDay)) break;
           if (betweenNextDay != null) put('$lt', store(betweenNextDay));
           else put('$lte', store(val[1]));
           break;
@@ -1728,8 +1738,13 @@ export class InMemoryDriver implements IDataDriver {
           // [#13524] `$lt` here is a key an AUTHOR can also write — this arm is
           // the member of the clobber class no card had named. See
           // {@link assembleLoweredWrites}.
+          // [#20600] On the last supported day there is no next day: every
+          // value is inside the bound, so what `$lte` still asks is a value —
+          // `$ne: null`, the lowering `$null: false` takes below. Collected like
+          // every other write, so an author's own `$ne` survives beside it.
           const nextDay = nextUtcCalendarDay(val);
-          if (nextDay != null) put('$lt', store(nextDay));
+          if (isUnboundedAbove(nextDay)) put('$ne', null);
+          else if (nextDay != null) put('$lt', store(nextDay));
           else put('$lte', store(val));
           break;
         }
@@ -1999,12 +2014,21 @@ export class InMemoryDriver implements IDataDriver {
           // because "the faces disagree" is this package's recurring defect
           // class (#5374, #6814) and one face aligned alone leaves the other
           // free to keep its own answer.
+          //
+          // [#20544] The addition is `@objectstack/core`'s `compensatedSum`,
+          // the fold objectql's rows path and SQLite add with. It used to be a
+          // naive `reduce`, so on this driver `engine.aggregate` answered two
+          // doubles by path — `0.1 + 0.2 + 0.3` was `0.6000000000000001` here
+          // and `0.6` on the rows path a filtered sibling aggregation forces,
+          // and `having { s: { $eq: 0.6 } }` kept the group on that path alone.
+          // Which values count as addends is untouched: the boolean rule above
+          // and the `typeof === 'number'` gate decide that, the fold only adds.
           case 'sum':
           case 'avg': {
               const nums = values
                   .map(v => (typeof v === 'boolean' ? (v ? 1 : 0) : v))
                   .filter(v => typeof v === 'number');
-              const sum = nums.reduce((a, b) => a + b, 0);
+              const sum = compensatedSum(nums);
               if (func === 'sum') return sum;
               return nums.length > 0 ? sum / nums.length : null;
           }

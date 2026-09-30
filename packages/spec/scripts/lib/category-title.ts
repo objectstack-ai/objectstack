@@ -92,7 +92,13 @@ export const CATEGORY_TITLES: Readonly<Record<string, string>> = {
   // "Protocol": the entry carries the spelling contract's data and folds
   // without the schema machinery every Protocol category links.
   'meta-spelling': 'Meta-Spelling Vocabulary',
-  migrations: 'Migrations Protocol',
+  // [#20646] The ADR-0087 migration chain + change manifest, published as its
+  // own entry once it left the package root (its registry text rode in every
+  // root bundle). The protocol-upgrade TOOLING surface, not a metadata
+  // protocol domain: titled "Entry", not "Protocol", so
+  // `check-docs-spec-enumerations.mjs` counts it as a subpath and never as a
+  // protocol namespace — the `api-assembled` precedent above.
+  migrations: 'Migrations Entry',
   qa: 'QA Protocol',
   security: 'Security Protocol',
   shared: 'Shared Protocol',

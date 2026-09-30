@@ -4,7 +4,7 @@
  * Driver-error classification: "which driver failures may be silenced?"
  * (#4728, #4825; rule from #4632).
  *
- * ## Home — `@objectstack/types`, since #13279
+ * ## Home — `@objectstack/types`, since commit 6a180e42d
  *
  * This module was born in `@objectstack/metadata` and lived there through
  * #4728 / #4825 / #5841. `@objectstack/metadata/errors`' own docblock recorded
@@ -16,7 +16,7 @@
  *
  * What forced it: `resolveAuthzContext` (`@objectstack/core`) must ask
  * {@link isMissingTableError} to tell a permission-store OUTAGE from a
- * deployment whose `sys_*` tables were never provisioned (#13279). Core cannot
+ * deployment whose `sys_*` tables were never provisioned (commit 6a180e42d). Core cannot
  * import `@objectstack/metadata` — metadata **depends on** core — so the
  * predicate had to move to a package both sides already depend on, or be
  * copied. Copying was measured and rejected: two vocabularies of "which driver
@@ -134,7 +134,7 @@
 // `relation-sub-object.ts` next door for the superstring hole it closes and for
 // why the exclusion's width deliberately differs from the extractor's. That
 // module was already this one's dependency across the package boundary; since
-// #13279 moved this file into `@objectstack/types`, the two are siblings.
+// commit 6a180e42d moved this file into `@objectstack/types`, the two are siblings.
 import { isRelationSubObjectPhrase } from './relation-sub-object.js';
 
 /**
@@ -372,7 +372,7 @@ const MISSING_TABLE: DriverErrorSignature = {
          *
          * [#6615] All three now read one home — `@objectstack/types` — instead
          * of three hand-kept copies, so the phrase can no longer be taught to
-         * the repo a fourth time or drift in one package only. [#13279] This
+         * the repo a fourth time or drift in one package only. [commit 6a180e42d] This
          * file now lives in that same home, so the read is a sibling import. The **width**
          * difference that used to justify the copy is preserved and is the
          * reason the home exports two functions rather than one: those two
@@ -386,7 +386,7 @@ const MISSING_TABLE: DriverErrorSignature = {
          */
         matchesMessage: isRelationSubObjectPhrase,
         /**
-         * [#13324] "…and the relation it names is not the one you read."
+         * [commit 4cda78c9b] "…and the relation it names is not the one you read."
          *
          * The sibling of the phrase above, reached one step further out. That
          * one recognises a failure about something INSIDE a relation, which
@@ -408,7 +408,7 @@ const MAX_CAUSE_DEPTH = 4;
  * [#13438] The physical table a driver's statement TARGETED, declared on the
  * error envelope by the producer that knows it.
  *
- * `readObject` closed the #13324 hole for callers that can name what they read
+ * `readObject` (commit 4cda78c9b) closed the hole for callers that can name what they read
  * — and left a residual one layer down. A caller names its OBJECT (the API
  * name); a driver compiles the statement against the PHYSICAL table, and for a
  * federated object (ADR-0015, `external.remoteName`) those are two different
@@ -424,7 +424,7 @@ const MAX_CAUSE_DEPTH = 4;
  * stamps the table its statement targeted onto it — and the predicate PREFERS
  * a declared table over the caller-supplied `readObject`. The caller never
  * needs to know a federated object's remote name, and a driver that declares
- * nothing gets exactly the #13324 behaviour.
+ * nothing gets exactly the behaviour commit 4cda78c9b introduced.
  *
  * A symbol key from the global registry, held non-enumerable: the carrier
  * discipline `driver-sql` already applies to its withheld-diagnostic symbols
@@ -438,7 +438,7 @@ const MAX_CAUSE_DEPTH = 4;
  * ⚠️ A declaration is EVIDENCE, so it also narrows the one-argument form: an
  * envelope declaring `legacy_orders` whose dialect phrase names some other
  * relation reads not-benign even with no `readObject` — the driver supplied
- * the fact the caller could not. That is the #13324 verdict reached without
+ * the fact the caller could not. That is commit 4cda78c9b's verdict, reached without
  * the caller's help, in the direction the module docblock calls cheap.
  */
 export const DRIVER_TARGETED_TABLE: symbol = Symbol.for('objectstack.driver.targetedTable');
@@ -596,7 +596,7 @@ export function isSchemaAlreadyExistsError(error: unknown, depth = 0): boolean {
  * Postgres' two phrasings — the relation is right there in the message because
  * it exists (#6347). See {@link MISSING_TABLE}'s `excludes`.
  *
- * [#13324] Neither is a failure that names a **different relation**, and that
+ * [commit 4cda78c9b] Neither is a failure that names a **different relation**, and that
  * one cannot be seen without `readObject`. The message test asks what the
  * phrase LOOKS like and never which table it names, so a read of a view whose
  * base table has been dropped — `no such table: main.<base>`, measured on
@@ -605,7 +605,7 @@ export function isSchemaAlreadyExistsError(error: unknown, depth = 0): boolean {
  * be about the table the caller asked for, or it is not evidence about it.
  *
  * Pass `readObject` from every in-repo call site. It is **optional** so that
- * omitting it is exactly the pre-#13324 behaviour rather than a new loud
+ * omitting it is exactly the behaviour before commit 4cda78c9b rather than a new loud
  * failure — this is a published export (`@objectstack/types`, and still
  * `@objectstack/metadata/errors` by re-export), and a required parameter would
  * be a breaking change to it. The cost of the choice
@@ -626,12 +626,12 @@ export function isSchemaAlreadyExistsError(error: unknown, depth = 0): boolean {
  * federated object (ADR-0015) that is not the name the driver put in the
  * statement — `crm_order` reads `external.remoteName: 'legacy_orders'`, so a
  * genuinely absent remote raised a phrase naming `legacy_orders` against a
- * caller naming `crm_order`, and the #13324 comparison read it loud. A driver
+ * caller naming `crm_order`, and the comparison commit 4cda78c9b added read it loud. A driver
  * that knows the table it targeted now DECLARES it on the envelope
  * ({@link declareTargetedTable}), and a declared table is preferred over
  * `readObject` outright: the phrase is compared against the declared name, and
  * the caller-supplied one is not consulted at that node or below it. Absent a
- * declaration the comparison is the #13324 one, unchanged. Two consequences,
+ * declaration the comparison is commit 4cda78c9b's, unchanged. Two consequences,
  * both pinned: a genuinely absent federated remote reads benign again without
  * the caller learning the mapping; and — because a declaration is evidence the
  * caller did not have — an envelope whose phrase names a relation other than
@@ -654,11 +654,11 @@ export function isMissingTableError(error: unknown, readObject?: string, depth =
 }
 
 // ---------------------------------------------------------------------------
-// Operator-facing text for a DECLARED driver fault (#16657)
+// Operator-facing text for a DECLARED driver fault (commit 5a95b0e93)
 // ---------------------------------------------------------------------------
 
 /**
- * [#16657] The ADR-0112 code a driver declares when the backend, not the
+ * [commit 5a95b0e93] The ADR-0112 code a driver declares when the backend, not the
  * caller, refused the work. Spelled as a literal for the same reason
  * {@link declaresServerFault} spells `status`/`code` by hand: this package is
  * the common dependency every consumer of the question already has, and reading
@@ -667,7 +667,7 @@ export function isMissingTableError(error: unknown, readObject?: string, depth =
 const DECLARED_DATABASE_FAULT_CODE = 'DATABASE_ERROR';
 
 /**
- * [#16657] The fragment that identifies `SqlDriver`'s RAW-path envelope, and
+ * [commit 5a95b0e93] The fragment that identifies `SqlDriver`'s RAW-path envelope, and
  * only it.
  *
  * The raw terminal (`rawStatementFaultError`, `driver-sql/src/sql-driver.ts`;
@@ -727,7 +727,7 @@ function messageChannelOf(node: unknown): string {
 
 /**
  * The text an OPERATOR should read for `error` — the dialect's own words when a
- * driver composed over them, the error's own message otherwise (#16657).
+ * driver composed over them, the error's own message otherwise (commit 5a95b0e93).
  *
  * # The defect this closes
  *

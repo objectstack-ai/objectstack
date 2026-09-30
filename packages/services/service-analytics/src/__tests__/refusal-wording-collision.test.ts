@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#17130] No BARE refusal this package raises may be readable as a driver
+ * [commit 54b3d1d4a] No BARE refusal this package raises may be readable as a driver
  * saying "the backing table is gone".
  *
  * ## The fragility this exists to hold down
@@ -18,7 +18,7 @@
  * exactly the phrasings a REGISTRY or SECURITY refusal reaches for. So a bare
  * refusal this package raises on purpose is one wording away from being served
  * to the caller as "no data": a fail-closed gate turned back into a fail-open
- * one by substring match. PR #17125's row-scope refusal propagates today
+ * one by substring match. Commit 5d12b16e7's row-scope refusal propagates today
  * because its text happens to match none of the six — a coincidence, not a
  * construction, and the coincidence is what this file removes.
  *
@@ -35,7 +35,7 @@
  *   - **The envelope (the primary).** A refusal that declares `code` + `status`
  *     is re-thrown at `hasDeclaredErrorEnvelope` before the sniffer is asked at
  *     all (#5717 defence B), so its wording cannot classify it and its runtime
- *     interpolations cannot either. #17130's other half gives the two
+ *     interpolations cannot either. Commit 54b3d1d4a's other half gives the two
  *     read-scope refusals that envelope.
  *   - **This guard (the second line).** A refusal that is deliberately bare —
  *     an internal invariant, the families `dataset-refusal.ts`'s header lists
@@ -46,7 +46,7 @@
  * The split is why an enveloped refusal is deliberately NOT held to the wording
  * rule: forcing one to be reworded would buy no safety (nothing reads its
  * words) and would push authors toward picking luckier strings — the exact move
- * #17130 forbids.
+ * commit 54b3d1d4a ruled out.
  *
  * ## Where the population comes from — ⛔ never a hand-written list
  *

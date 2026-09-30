@@ -1221,17 +1221,22 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
     // unjudged — the ruling's carve-out, pinned as a control below.
     // ─────────────────────────────────────────────────────────────
 
-    it('CONTROL — the nested-relation OBJECT form still passes both doors: the refusal targets the dotted-STRING spelling alone', async () => {
-        // `{ project_id: { name: 'x' } }` is a legitimate nested-relation
-        // condition whose inner keys belong to ANOTHER object — the exact
-        // shape the collectors refuse to descend into. If this control goes
-        // red, the verdict has started judging comparand VALUES, which is a
-        // different (and wrong) gate.
-        await expect(protocol.findData({
-            object: 'showcase_task', query: { where: { project_id: { name: 'Apollo' } } },
-        })).resolves.toMatchObject({ records: expect.any(Array) });
-        await expect(engine.find('showcase_task', { where: { project_id: { name: 'Apollo' } } }))
-            .resolves.toEqual(expect.any(Array));
+    it('CONTROL — the nested-relation OBJECT form is not the dotted verdict\'s at either door: the refusal targets the dotted-STRING spelling alone', async () => {
+        // `{ project_id: { name: 'x' } }` is a nested-relation condition whose
+        // inner keys belong to ANOTHER object — the exact shape the collectors
+        // refuse to descend into. If this control answers the dotted verdict's
+        // INVALID_FIELD, that verdict has started judging comparand VALUES,
+        // which is a different (and wrong) gate. [#20745] The engine refuses
+        // the form itself — no driver serves it — so both doors answer the
+        // no-operator-object arm's INVALID_FILTER, in its own words.
+        for (const run of [
+            () => protocol.findData({ object: 'showcase_task', query: { where: { project_id: { name: 'Apollo' } } } }),
+            () => engine.find('showcase_task', { where: { project_id: { name: 'Apollo' } } }),
+        ]) {
+            const err: any = await run().then(() => null, (e: any) => e);
+            expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
+            expect(err.message).toContain('nested-relation form');
+        }
     });
 
     it('⛔ CONTROL — the structured/JSON head stays UNJUDGED at both doors: the ruled carve-out', async () => {

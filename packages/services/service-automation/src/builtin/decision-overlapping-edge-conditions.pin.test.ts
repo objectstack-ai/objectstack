@@ -1,7 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ALL_CONVERSIONS, applyMetaMigrations } from '@objectstack/spec';
+import { ALL_CONVERSIONS } from '@objectstack/spec';
+import { applyMetaMigrations } from '@objectstack/spec/migrations';
 import { AutomationEngine } from '../engine.js';
 import { registerLogicNodes } from './logic-nodes.js';
 

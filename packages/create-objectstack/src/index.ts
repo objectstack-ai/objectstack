@@ -438,7 +438,7 @@ const program = new Command()
     // accurate "Next steps" instead of a guess: the probe is a read-only
     // `<pm> --version` check, so running it costs nothing even when there is
     // no install to drive. Previously "Next steps" hardcoded `npm` regardless
-    // of which package manager actually ran (#10322) — a newcomer who just
+    // of which package manager actually ran (fixed by commit 8d21f7a76) — a newcomer who just
     // watched `pnpm install` run was then told `npm run dev`.
     //
     // The probe reports WHY as well as WHAT. `npm` used to mean two different

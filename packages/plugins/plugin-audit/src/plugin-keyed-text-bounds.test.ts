@@ -6,10 +6,10 @@ import { AuditPlugin } from './audit-plugin.js';
 /**
  * The ActivityPointer id columns carry the REFERENCED column's bound.
  *
- * ## What used to be here, and where it went (#12147)
+ * ## What used to be here, and where it went (commit 945e91a13)
  *
  * This file carried route A's rule — "every text-family column a declared index
- * keys on declares a `maxLength`" (#11374) — enumerated over the objects this
+ * keys on declares a `maxLength`" (commit 3954fb7df) — enumerated over the objects this
  * plugin registers, with a vacuity control and an `UNBOUNDABLE` allowlist. That
  * is now `scripts/check-keyed-text-bounds.mjs`, a source scan over EVERY
  * `*.object.ts` in the repository.
@@ -18,7 +18,7 @@ import { AuditPlugin } from './audit-plugin.js';
  * `@objectstack/platform-objects`' pin enumerates that package's exports and
  * cannot reach a plugin's objects — this package's `package.json` declares only
  * the `.` export and the root barrel does not re-export `./objects`, and making
- * it importable would invert the dependency graph (measured on PR #12143:
+ * it importable would invert the dependency graph (measured on commit f64668d3c:
  * `platform-objects` depends only on `metadata-core` + `spec`, while this
  * plugin depends on `platform-objects`). So each shipping package carried its
  * own copy until a class-level instrument existed. It exists now.

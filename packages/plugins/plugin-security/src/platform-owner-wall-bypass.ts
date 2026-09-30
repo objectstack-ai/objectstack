@@ -2,7 +2,7 @@
 
 /**
  * [#12974] The VERIFIED-platform-owner row predicate — the one comparison the
- * #11343 verified-owner family makes, extracted so its two in-package
+ * verified-owner family (commit c0714eb5d) makes, extracted so its two in-package
  * consumers can never drift:
  *
  *  - **The platform-admin standing surface** (`platform-admin-service.ts`,
@@ -66,7 +66,7 @@ export const PLATFORM_OWNER_WALL_BYPASS_EVENT = 'platform_owner_wall_bypass';
 
 /**
  * Does this `sys_user` row's email match ONE OF the env-declared platform
- * administrators — the canonical #11184/#11343 comparison (trimmed,
+ * administrators — the canonical #11184 / commit c0714eb5d comparison (trimmed,
  * case-insensitive), asked of the ONE parser.
  *
  * [#13147] `config` is `resolvePlatformAdminEmails()`'s output, never a raw
@@ -81,7 +81,7 @@ export function matchesDeclaredOwnerEmail(row: unknown, config: PlatformAdminEma
 /**
  * Is this `sys_user` row the VERIFIED declared platform owner? — the whole
  * predicate the Layer 0 owner wall bypass keys on: declared-owner email
- * match AND the #11343 verified-email allow-list. Server-side row facts
+ * match AND commit c0714eb5d's verified-email allow-list. Server-side row facts
  * only; never a client-supplied claim.
  */
 export function isVerifiedPlatformOwnerRow(row: unknown, config: PlatformAdminEmailConfig): boolean {

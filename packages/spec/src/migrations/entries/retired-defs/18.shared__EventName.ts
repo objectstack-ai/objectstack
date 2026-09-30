@@ -12,5 +12,5 @@
 // deliberate `z.string()` — the ruling adds no constraint there. No authored
 // document is invalidated (the accept set at the three fields widens), so no
 // tombstone and no D2 conversion — this table plus the D3 semantic entry
-// `event-name-schema-retired` are the declaration (the #8715 route-3 shape).
+// `event-name-schema-retired` are the declaration (commit 2c86fe3ea's route-3 shape).
 export const entry = 'shared/EventName';

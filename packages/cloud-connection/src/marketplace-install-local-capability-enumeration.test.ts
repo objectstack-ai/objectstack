@@ -37,7 +37,7 @@
  *
  * ## Why an enumeration and not four more assertions
  *
- * The same reason as the `/meta` precedent (#8919,
+ * The same reason as the `/meta` precedent (commit b5378550e,
  * `meta-write-door-capability-enumeration.test.ts`): a gate held by repetition
  * drifts the moment someone adds a fifth route by copying whichever neighbour
  * was nearest. `derives every mutating route the plugin mounts` builds the door
@@ -47,7 +47,7 @@
  * ⚠️ The `GET` listing is deliberately NOT in this family. It is a read, and
  * this card's ruling is about the four mutating doors; silently folding it in
  * here would have decided its posture by accident. That posture has since been
- * ruled on separately (#9011: authenticated floor, with `installedBy` and
+ * ruled on separately (commit 01074e551: authenticated floor, with `installedBy` and
  * `storageDir` narrowed to `manage_metadata` holders) and is pinned in
  * `marketplace-install-local-list-posture.test.ts` — so the filter below still
  * means "not this family", never "ungated".
@@ -300,7 +300,7 @@ describe('#8976 — the mutating install-local doors are enumerated, not recited
         // Without this, a refactor that stopped mounting the GET would leave the
         // assertion above passing while silently proving less than it claims.
         // The listing's OWN posture lives in
-        // `marketplace-install-local-list-posture.test.ts` (#9011); ⛔ the fix
+        // `marketplace-install-local-list-posture.test.ts` (commit 01074e551); ⛔ the fix
         // for an unauthorized read there is a refusal, never an unmounted route
         // — cloud#1287 made this mount unconditional so air-gapped boxes stop
         // 404ing, and this assertion is what keeps that true.
