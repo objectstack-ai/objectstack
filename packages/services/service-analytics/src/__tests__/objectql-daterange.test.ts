@@ -348,9 +348,12 @@ describe('ObjectQLStrategy — window ∧ where on one field (#3650)', () => {
     // What this case is about is unchanged and still visible: BOTH operands
     // survive, the second as its own `$and` conjunct rather than overwriting the
     // bare equality.
+    // [ADR-0053 D-D1, amended — #5930 step 3] The null predicate now arrives
+    // twice, the shared lowering's escape around this face's own copy — the
+    // same rows; both operands still survive.
     expect(seen[0].filter).toEqual({
       stage: 'won',
-      $and: [{ $or: [{ stage: null }, { stage: { $ne: 'lost' } }] }],
+      $and: [{ $or: [{ stage: null }, { $or: [{ stage: null }, { stage: { $ne: 'lost' } }] }] }],
     });
   });
 });

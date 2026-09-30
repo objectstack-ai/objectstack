@@ -148,18 +148,20 @@ describe('[#20661] the siblings on this face', () => {
     expect(ids(result.rows)).toEqual(['r27', 'r28']);
   });
 
-  it('`$between` is refused on both exits, so its maximum never reaches a bound here', async () => {
-    // Not a lowering this face owns: widening `MONGO_TO_CUBE_OPERATOR` to take
-    // `$between` turns this red, and its maximum then owes the same whole-day
-    // order as the `lte` rows (`lteUpperBound`).
-    const { service } = await setup('declared');
-    const between = cubeQuery({ created_at: { $between: ['2026-07-01', '2026-07-28'] } });
-    for (const exit of [() => service.query(between), () => service.generateSql(between)]) {
-      const err = await exit().then(
-        () => undefined,
-        (e: unknown) => e as { code?: unknown; status?: unknown },
-      );
-      expect(err).toMatchObject({ code: 'INVALID_FILTER', status: 400 });
+  it('`$between` reaches the face as its two bounds, and its maximum is widened BEFORE it is converted', async () => {
+    // [ADR-0053 D-D1, amended — #5930 step 3] This row used to pin `$between`
+    // refused on both exits, and said what widening it would owe: the same
+    // whole-day order as the `lte` rows. The face's door now runs the shared
+    // lowering first, which splits the range and widens the AUTHORED maximum
+    // in the calendar-string domain (`$lt: '2026-07-29'`); the exit converts
+    // that bound to the storage form like any comparand. D-E3's order holds by
+    // construction, declared or not.
+    for (const declaration of ['undeclared', 'declared'] as const) {
+      const got = await answer(declaration, { created_at: { $between: ['2026-07-01', '2026-07-28'] } });
+      expect(got.cube, declaration).toEqual(got.find);
+      expect(got.cube, declaration).toEqual(['r27', 'r28']);
     }
+    expect((await answer('declared', { created_at: { $between: ['2026-07-01', '2026-07-28'] } })).echo)
+      .toBe("created_at >= '2026-07-01T00:00:00.000Z' AND created_at < '2026-07-29T00:00:00.000Z'");
   });
 });

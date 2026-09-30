@@ -302,6 +302,13 @@ export function isBucketGranularity(value: unknown): value is BucketGranularity 
  * Null and unparseable deliberately share one bucket: SQL cannot tell them apart
  * either (`strftime('%Y-%m', 'not-a-date')` is NULL), and splitting them here
  * would re-open the seam this function exists to close.
+ *
+ * [#20760] The year of every key is spelled with four digits
+ * ({@link bucketKeyYear}): `0050`, `0050-Q2`, `0050-06`, `0050-06-15`,
+ * `0049-W52` — what the drivers' bucket expressions answer for the same
+ * instant. A `date` value keeps the years 0001..9999, and a `datetime` row
+ * stored before the engine doors refused a year below 1000 can still hold one,
+ * so 0001..0999 reach this function.
  */
 export function bucketDateKey(
   value: unknown,
@@ -319,13 +326,13 @@ export function bucketDateKey(
   const { year: y, month: m, day } = calendarPartsInTzOrUtc(d, timezone);
   switch (granularity) {
     case 'year':
-      return String(y);
+      return bucketKeyYear(y);
     case 'quarter':
-      return `${y}-Q${Math.floor((m - 1) / 3) + 1}`;
+      return `${bucketKeyYear(y)}-Q${Math.floor((m - 1) / 3) + 1}`;
     case 'month':
-      return `${y}-${String(m).padStart(2, '0')}`;
+      return `${bucketKeyYear(y)}-${String(m).padStart(2, '0')}`;
     case 'day':
-      return `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      return bucketDayKey(y, m, day);
     case 'week':
       return isoWeekLabelFromCalendarDay(y, m, day);
     default:
@@ -338,6 +345,33 @@ export function bucketDateKey(
 }
 
 /**
+ * [#20760] The year of a bucket key, spelled with four digits: `50` is
+ * `0050`, `999` is `0999`, `2026` is `2026`.
+ *
+ * The ONE statement of the key's year spelling. Every key
+ * {@link bucketDateKey} writes, the ISO week label, and the calendar bounds
+ * {@link bucketKeyToCalendarRange} answers spell their year through it, so
+ * the writer and the reader cannot disagree about it. It is the width the
+ * drivers' bucket expressions answer (`strftime('%Y')` on SQLite, `YYYY` /
+ * `IYYY` in PostgreSQL's `to_char`, `%Y` / `%x` in MySQL's `date_format`),
+ * and `bucketDateKey`'s contract is that its label equals theirs.
+ *
+ * A year below 0 has no four-digit form and keeps its plain spelling (`-1`),
+ * never a padded fragment such as `00-1`; a year past 9999 is longer than four
+ * digits already. Neither is reached: at both engine doors a `date` value
+ * names a year from 0001 to 9999 and a `datetime` one a year from 1000 to
+ * 9999, and {@link bucketKeyToCalendarRange} reads neither spelling.
+ */
+function bucketKeyYear(year: number): string {
+  return year >= 0 ? String(year).padStart(4, '0') : String(year);
+}
+
+/** [#20760] The `day` key (`YYYY-MM-DD`) of a calendar day, `month` 1-12. */
+function bucketDayKey(year: number, month: number, day: number): string {
+  return `${bucketKeyYear(year)}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/**
  * ISO-8601 week label (Mon-start weeks, week 1 = the week of the first
  * Thursday) of a calendar day given that day's parts (`month` is 1-12).
  *
@@ -347,6 +381,10 @@ export function bucketDateKey(
  *
  * [#20599] Both days are built by {@link wallClockToUtcMs}, so a day in
  * 0001..0099 lands in its own ISO week, never in the 1900s one.
+ *
+ * [#20760] The label's year is the ISO week-numbering year, spelled with four
+ * digits ({@link bucketKeyYear}). Early in January it can be the previous
+ * calendar year: 0050-01-01 is in `0049-W52`.
  */
 function isoWeekLabelFromCalendarDay(year: number, month: number, day: number): string {
   const target = new Date(wallClockToUtcMs({ year, month, day }));
@@ -361,7 +399,7 @@ function isoWeekLabelFromCalendarDay(year: number, month: number, day: number): 
         ((firstThursday.getUTCDay() + 6) % 7)) /
         7,
     );
-  return `${target.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+  return `${bucketKeyYear(target.getUTCFullYear())}-W${String(weekNo).padStart(2, '0')}`;
 }
 
 /**
@@ -398,17 +436,20 @@ function isoWeekLabelUtc(d: Date): string {
  * never the 1900s one. The arms lean on its rollover, which is `Date.UTC`'s:
  * month 13 is next January (Q4's and December's end), and day 32 the next
  * month.
+ *
+ * [#20760] It reads exactly what {@link bucketDateKey} writes: a four-digit
+ * year at every granularity, the week key included (`0050-W01`). The day and
+ * week arms check a key against the label the writer gives the reconstructed
+ * day, and every bound is spelled by the writer's own day key, so the reader
+ * cannot drift from the writer. An unpadded key (`50-06`, `49-W52`) is not a
+ * bucket key and answers `null`.
  */
 export function bucketKeyToCalendarRange(
   key: string | null | undefined,
   granularity: BucketGranularity,
 ): { start: string; end: string } | null {
   if (typeof key !== 'string' || key.length === 0) return null;
-  const fmt = (dt: Date) =>
-    `${String(dt.getUTCFullYear()).padStart(4, '0')}-${String(dt.getUTCMonth() + 1).padStart(
-      2,
-      '0',
-    )}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+  const fmt = (dt: Date) => bucketDayKey(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate());
   /** Midnight UTC of `year`-`month`-`day`, `month` 1-12, rolled over past its end. */
   const utcDay = (year: number, month: number, day: number) =>
     new Date(wallClockToUtcMs({ year, month, day }));

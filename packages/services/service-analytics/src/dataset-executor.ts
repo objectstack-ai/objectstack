@@ -18,6 +18,7 @@ import {
   resolveFilterTokens,
   wallClockToUtcMs,
   zonedDateStartToUtcMs,
+  type BucketGranularity,
   type LoweredDateRangeWindow,
 } from '@objectstack/core';
 import type { CompiledDataset, DerivedMeasureSpec } from './dataset-compiler.js';
@@ -570,15 +571,25 @@ const DAY_MS = 86_400_000;
  * proxy back, round-tripping {@link boundInstantMs} exactly.
  */
 function calendarDayAt(ms: number, timezone?: string): string {
-  const day = bucketDateKey(ms, 'day', timezone);
-  if (day == null) {
+  return bucketKeyAt(ms, 'day', timezone);
+}
+
+/**
+ * [#20760] The canonical bucket key of the instant at `ms`, at `granularity`:
+ * `@objectstack/core`'s `bucketDateKey` — the labeller the in-memory grouping
+ * faces delegate to, whose label is contracted to equal the drivers' — so this
+ * module spells no key of its own.
+ */
+function bucketKeyAt(ms: number, granularity: BucketGranularity, timezone?: string): string {
+  const key = bucketDateKey(ms, granularity, timezone);
+  if (key == null) {
     // `bucketDateKey` answers `null` only for an absent or unparseable instant,
     // and every caller here holds a finite epoch ms this module just computed.
-    // Loud rather than a fabricated day: same condition, same envelope as an
+    // Loud rather than a fabricated key: same condition, same envelope as an
     // unparseable bound above (#5716).
-    throw datasetInvalidError(`[dataset-executor] compareTo date math produced no calendar day for ${ms}`);
+    throw datasetInvalidError(`[dataset-executor] compareTo date math produced no ${granularity} bucket for ${ms}`);
   }
-  return day;
+  return key;
 }
 
 function shiftYear(date: string, years: number): string {
@@ -824,33 +835,6 @@ export function shiftRange(range: [string, string], kind: CompareTo['kind']): [s
 // ── compareTo bucket alignment (#6007) ───────────────────────────────────────
 
 /**
- * The ISO-8601 week label (`2026-W23`) of the UTC calendar day at `ms`.
- *
- * Mirrors the week branch of `@objectstack/objectql`'s `bucketDateValue` — the
- * function that MINTS the bucket keys this executor then has to realign. It is
- * copied rather than imported because `service-analytics` does not depend on
- * `objectql` (it talks to the runtime through `IAnalyticsService`), and the
- * copy is not a blind one: {@link bucketKeyAtOrdinal} is pinned round-trip
- * against `bucketKeyToCalendarRange` — `@objectstack/core`'s exported INVERSE
- * of the same vocabulary, which rejects an impossible week outright — so a
- * drift in either direction fails a test rather than mislabelling a bucket.
- */
-function isoWeekKeyOfUtcMs(ms: number): string {
-  const target = new Date(ms);
-  const dayNum = (target.getUTCDay() + 6) % 7; // Mon=0..Sun=6
-  target.setUTCDate(target.getUTCDate() - dayNum + 3); // that week's Thursday
-  // [#20599] Core's `wallClockToUtcMs`, never `Date.UTC`, which reads a year
-  // from 0 to 99 as 1900 + year and put this Thursday's January 4 in the 1900s.
-  const firstThursday = new Date(wallClockToUtcMs({ year: target.getUTCFullYear(), month: 1, day: 4 }));
-  const weekNo =
-    1 +
-    Math.round(
-      ((target.getTime() - firstThursday.getTime()) / DAY_MS - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7,
-    );
-  return `${target.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
-}
-
-/**
  * The ORDINAL of the bucket a UTC calendar day falls in: a monotone integer
  * that advances by exactly 1 per bucket, at every granularity.
  *
@@ -890,25 +874,39 @@ export function bucketOrdinalOfDay(ymd: string, granularity: DateGranularityValu
 
 /**
  * The canonical bucket KEY at an ordinal — the inverse of
- * {@link bucketOrdinalOfDay}, and the only place this package mints a bucket key
- * of its own.
+ * {@link bucketOrdinalOfDay}.
  *
  * The keys produced here MUST be byte-identical to the ones the runtime's
  * grouping produced for the primary pass, because they are compared as merge
  * keys: `2026-01`, `2026-Q1`, `2026`, `2026-01-07`, `2026-W03`. That equality is
  * pinned round-trip against `bucketKeyToCalendarRange` rather than asserted by
  * eye — see `dataset-compare-bucket-alignment.test.ts`.
+ *
+ * [#20760] ⛔ This function spells no key itself. It finds the UTC instant the
+ * ordinal's bucket starts at, and `@objectstack/core`'s `bucketDateKey`
+ * spells the key of that instant ({@link bucketKeyAt}), so a minted key and a
+ * grouped key cannot differ in spelling. A year below 1000 is four digits on both (`0050-06`,
+ * `0049-W52`). It replaced a local spelling of each granularity and a private
+ * copy of the ISO week rule, which wrote such a year unpadded (`50-06`,
+ * `49-W52`).
  */
 export function bucketKeyAtOrdinal(ordinal: number, granularity: DateGranularityValue): string {
   switch (granularity) {
     case 'year':
-      return String(ordinal);
-    case 'quarter':
-      return `${Math.floor(ordinal / 4)}-Q${(ordinal % 4) + 1}`;
-    case 'month':
-      return `${Math.floor(ordinal / 12)}-${String((ordinal % 12) + 1).padStart(2, '0')}`;
+      return bucketKeyAt(wallClockToUtcMs({ year: ordinal, month: 1, day: 1 }), 'year');
+    case 'quarter': {
+      const year = Math.floor(ordinal / 4);
+      const quarter = ordinal - year * 4; // 0..3
+      return bucketKeyAt(wallClockToUtcMs({ year, month: quarter * 3 + 1, day: 1 }), 'quarter');
+    }
+    case 'month': {
+      const year = Math.floor(ordinal / 12);
+      const month = ordinal - year * 12; // 0..11
+      return bucketKeyAt(wallClockToUtcMs({ year, month: month + 1, day: 1 }), 'month');
+    }
     case 'week':
-      return isoWeekKeyOfUtcMs(ordinal * 7 * DAY_MS - 3 * DAY_MS);
+      // The Monday the ordinal's ISO week starts on (see bucketOrdinalOfDay).
+      return bucketKeyAt(ordinal * 7 * DAY_MS - 3 * DAY_MS, 'week');
     case 'day':
     default:
       return calendarDayAt(ordinal * DAY_MS);

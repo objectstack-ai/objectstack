@@ -77,6 +77,10 @@ const GATED_AT: Readonly<Record<string, string>> = {
   action: 'actions',
   report: 'reports',
   dataset: 'datasets',
+  // [#19518] `picklist` registered as a closed shape (`PicklistSchema` is
+  // `strictObject`), and the stack authors it at `picklists:` as a flat array
+  // of that same shape, so it is gated from the start.
+  picklist: 'picklists',
   flow: 'flows',
   job: 'jobs',
   datasource: 'datasources',

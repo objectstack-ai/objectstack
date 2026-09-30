@@ -177,14 +177,27 @@ const ACCEPTED_CASES: Record<string, FilterCondition> = {
   $icontains: { name: { $icontains: 'industries' } },
   $notContains: { name: { $notContains: 'Industries' } },
   $exists: { name: { $exists: true } },
+  // [ADR-0053 D-D1, amended — #5930 step 3] `$null` joined the face's table:
+  // the shared lowering emits it. Row 6's NULL `name` makes it a real predicate.
+  $null: { name: { $null: true } },
 };
 
 /**
- * The spellings this face REFUSES — the complement, so the two sets are total.
- * [#20446] `$empty` joined `FILTER_OPERATORS`, and this cube face refuses it as
- * it refuses `$null`: a declared operator it has no lowering for.
+ * [ADR-0053 D-D1, amended — #5930 step 3] The spellings the face's door LOWERS
+ * before its vocabulary is asked: a `$between` reaches the face as the two
+ * bounds the shared lowering splits it into. Not in the face's table and not
+ * refused — so a third set, held to the same executed-echo invariant.
  */
-const REFUSED_OPERATORS = ['$between', '$startsWith', '$endsWith', '$null', '$empty'] as const;
+const LOWERED_CASES: Record<string, FilterCondition> = {
+  $between: { amount: { $between: [20, 40] } },
+};
+
+/**
+ * The spellings this face REFUSES — the complement, so the three sets are total.
+ * [#20446] `$empty` joined `FILTER_OPERATORS`, and this cube face refuses it: a
+ * declared operator it has no lowering for.
+ */
+const REFUSED_OPERATORS = ['$startsWith', '$endsWith', '$empty'] as const;
 
 describe('[#7117] the analytics echo renders the query it describes', () => {
   let db: any;
@@ -441,8 +454,8 @@ describe('[#7117] the analytics echo renders the query it describes', () => {
   // ── The vocabulary, enumerated so the two tables cannot drift apart ────────
 
   describe('the closed vocabulary, enumerated', () => {
-    it('the accepted and refused sets together are the whole Filter Protocol', () => {
-      expect(sortIds([...Object.keys(ACCEPTED_CASES), ...REFUSED_OPERATORS]))
+    it('the accepted, lowered and refused sets together are the whole Filter Protocol', () => {
+      expect(sortIds([...Object.keys(ACCEPTED_CASES), ...Object.keys(LOWERED_CASES), ...REFUSED_OPERATORS]))
         .toEqual(sortIds([...FILTER_OPERATORS]));
     });
 
@@ -451,7 +464,7 @@ describe('[#7117] the analytics echo renders the query it describes', () => {
         .toEqual(sortIds([...ANALYTICS_FILTER_CAPABILITIES.fieldOperators]));
     });
 
-    for (const [op, where] of Object.entries(ACCEPTED_CASES)) {
+    for (const [op, where] of Object.entries({ ...ACCEPTED_CASES, ...LOWERED_CASES })) {
       it(`${op}: running the echo returns exactly the rows the query returns`, async () => {
         const executed = await executedIds(where);
         const echoed = await echoIds(where);

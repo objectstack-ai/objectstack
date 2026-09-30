@@ -27,7 +27,7 @@ import type { CronJobAdapter } from './cron-job-adapter.js';
  * explicit `trigger()`, a second execution landed, and CI reddened on a package
  * the offending PR had usually not touched.
  *
- * Measured (#8748) by faking ONLY `Date` — real timers, croner's real
+ * Measured (commit 226cb71d5) by faking ONLY `Date` — real timers, croner's real
  * scheduling path — with the registration placed 2/5/10/15 ms before the
  * expression's own instant. Under the firing spellings each case gained
  * exactly one extra handler run: `records executions` went 1 → 2 execution

@@ -5700,6 +5700,19 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '(pure lossless delete — it never had an effect to lose).',
   },
   {
+    id: 'page-header-breadcrumb-retired',
+    order: 51,
+    text:
+      'It also retires the page header\'s `breadcrumb` switch (ADR-0049 enforce-or-remove): no '
+      + 'renderer ever drew a trail for it — objectui drew an empty slot that nothing filled — and '
+      + 'the navigation trail is drawn once, by the app shell\'s header. The key is a retiredKey '
+      + 'tombstone on `PageHeaderProps`, beside the `icon` that row lost at 17, and the D2 '
+      + 'conversion `page-header-breadcrumb-removed` strips it from every `page:header`, `true` and '
+      + '`false` alike, retired from the load path. Its D3 record is the semantic entry '
+      + '`page-header-breadcrumb-retired`. The `nav:breadcrumb` component type is not part of it: '
+      + 'the Studio page palette still offers it.',
+  },
+  {
     id: 'permission-restore-purge-bits-retired',
     order: 18,
     text:
@@ -14198,6 +14211,32 @@ const step18: MigrationStep = {
         + 'adaptation through `responsiveStyles`, resizing the viewport across the named breakpoints '
         + 'shows it — a component declared hidden on the narrowest breakpoint is absent there and '
         + 'present above it.',
+    },
+    // #20758 (ADR-0049 enforce-or-remove) — the D3 entry of the
+    // `page-header-breadcrumb-removed` family (one D3 entry per retirement family,
+    // even when D2 is lossless). Registered key: `ui/PageHeaderProps:breadcrumb`.
+    // The strip changes no trail, because none was ever drawn; what it leaves is
+    // the one visible trace either value had, the empty slot's spacing.
+    {
+      id: 'page-header-breadcrumb-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell.
+      surface: 'page.component.page:header.breadcrumb — the page header\'s "Show breadcrumb" switch',
+      replacement:
+        'Nothing: delete the key, whether it was `true` or `false`. The navigation trail is drawn once, '
+        + 'by the app shell\'s header, and is unchanged.',
+      reason:
+        'The D2 conversion `page-header-breadcrumb-removed` deletes `breadcrumb` from every page header, '
+        + 'and no trail is lost: the renderer drew an empty slot for it and nothing ever filled that slot. '
+        + 'The slot was the only thing either value changed — present for `true` and for an absent key, '
+        + 'gone for `false` — so a header that said `false` reads as absent after the strip and shows the '
+        + 'empty slot\'s spacing again until the renderer stops drawing it. What the conversion cannot '
+        + 'decide is whether a page needs a trail of its own: inside an app the shell already draws one, '
+        + 'and a page outside the shell that needs one is a feature to ask for, not a key to keep.',
+      acceptanceCriteria:
+        'No page header carries `breadcrumb`, and the props lint reports one with the prescription. Every '
+        + 'page shows the same navigation trail in the app shell\'s header as before the upgrade, and each '
+        + 'page header shows the same title, subtitle and actions.',
     },
     // #12497 (ADR-0049, maintainer ruling accepting #1883's recommendation B) — the
     // D3 entry of the `permission-allow-restore-purge-removed` family (ruling B on
@@ -22699,6 +22738,29 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
     // Sources are rewritten by the D2 conversion `page-component-responsive-removed`.
     'ui/PageComponent:responsive',
+    // #20758 — ADR-0049 enforce-or-remove through the ADR-0087 D2 route, the spec
+    // half of objectui#11166 (triage ruling on the card: RETIRE, no consumer).
+    // `PageHeaderProps.breadcrumb` switched a trail that never existed: objectui's
+    // `PageHeaderRenderer` draws an EMPTY `div[data-page-breadcrumb-slot]` unless
+    // the key is `false`, nothing fills it, and the console draws the navigation
+    // trail once, in the shell (`AppHeader`). Tombstoned with `retiredKey()` in the
+    // `strictObject`, beside the `icon` this row lost at 17 (the surface baseline
+    // line carries `[RETIRED]`); stored and built pages are stripped of both values
+    // by the D2 conversion `page-header-breadcrumb-removed`, whose D3 record is
+    // `page-header-breadcrumb-retired`.
+    //
+    // ⭐ RETIRED-DEFAULT RESIDUE: not owed, although the key carried
+    // `.default(true)`. The default was never materialized: a page parses its
+    // component `properties` as an open bag, and this row is parsed only by the
+    // advisory props lint, which writes nothing back — so no released toolchain
+    // emitted `breadcrumb: true` into an artifact nobody authored.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look — the
+    // `ui/ObjectKanbanProps:quickAdd` precedent.
+    'ui/PageHeaderProps:breadcrumb',
     // #10054 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-21, executing
     // the 2026-08-20 census verdict). `icon` on the object arm of
     // `RecordHighlightsField` was declared, described (`Icon name (lucide icon

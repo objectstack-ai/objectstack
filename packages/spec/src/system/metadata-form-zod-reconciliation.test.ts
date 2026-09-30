@@ -393,6 +393,13 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
   },
   {
     kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'picklist',
+    why: 'declared, not enforced yet — liveness verdict `planned` (the server-side resolution that serves a picklist-bound field its options is not landed). No offer until it is enforced; the field designer offering a picklist is a later Studio phase',
+  },
+  {
+    kind: 'omit',
     type: 'page',
     path: ROOT_PATH,
     key: 'requires',

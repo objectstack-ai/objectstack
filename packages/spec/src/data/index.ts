@@ -205,6 +205,7 @@ export * from './hook-api';
 // flag per event so "not yet" can never read as "yes".
 export * from './bulk-write-hook-conformance';
 export * from './mapping.zod';
+export * from './picklist.zod';
 export * from './data-engine.zod';
 export * from './driver.zod';
 export * from './driver-sql.zod';

@@ -179,7 +179,7 @@ const result = MetadataBulkResultSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **types** | `Enum<'object' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'api' \| 'email_template' \| 'doc' \| 'book' \| 'permission' \| 'position' \| 'capability' \| 'agent' \| 'tool' \| 'skill'>[]` | optional | Filter by metadata types |
+| **types** | `Enum<'object' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'picklist' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'api' \| 'email_template' \| 'doc' \| 'book' \| 'permission' \| 'position' \| 'capability' \| 'agent' \| 'tool' \| 'skill'>[]` | optional | Filter by metadata types |
 | **namespaces** | `string[]` | optional | Filter by namespaces |
 | **packageId** | `string` | optional | Filter by owning package |
 | **search** | `string` | optional | Full-text search query |
@@ -230,6 +230,7 @@ const result = MetadataBulkResultSchema.parse(data);
 * `hook`
 * `seed`
 * `mapping`
+* `picklist`
 * `view`
 * `page`
 * `dashboard`
@@ -262,7 +263,7 @@ const result = MetadataBulkResultSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'object' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| … +12 more>` | ✅ | Metadata type identifier |
+| **type** | `Enum<'object' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'picklist' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| … +13 more>` | ✅ | Metadata type identifier |
 | **label** | `string` | ✅ | Display label for the metadata type |
 | **description** | `string` | optional | Description of the metadata type |
 | **filePatterns** | `string[]` | ✅ | Glob patterns to discover files of this type |
@@ -282,6 +283,7 @@ const result = MetadataBulkResultSchema.parse(data);
 * `hook`
 * `seed`
 * `mapping`
+* `picklist`
 * `view`
 * `page`
 * `dashboard`

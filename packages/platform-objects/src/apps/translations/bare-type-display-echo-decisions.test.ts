@@ -766,28 +766,29 @@ describe('#19403 round 7 — the provenance table agrees these leaves are now au
 });
 
 describe('#19403 round 7 — the population, DERIVED from the registry and a shape', () => {
-  it('⭐ the registry and the catalog describe the same 27 metadata types', () => {
+  it('⭐ the registry and the catalog describe the same 28 metadata types', () => {
     // The ratchet's anchor. The catalog is GENERATED from this registry, so a
     // new metadata type arrives in both at once — which is what makes the bare
     // class below pick up a future unauthored display pair without anybody
     // adding it to a list.
-    expect(REGISTRY_TYPES.length).toBe(27);
+    // 27 → 28: `picklist` joined the registry, a bare type (no form) with a description.
+    expect(REGISTRY_TYPES.length).toBe(28);
     expect([...REGISTRY_TYPES].sort()).toEqual(Object.keys(enMetadataForms as Record<string, any>).sort());
   });
 
   it('the BARE predicate splits that population, and is read off the SHAPE not a name list', () => {
     // Lit.
-    expect(BARE_TYPES.length).toBe(10);
+    expect(BARE_TYPES.length).toBe(11);
     expect(PANEL_TYPES.length).toBe(17);
     expect(BARE_TYPES.length + PANEL_TYPES.length).toBe(REGISTRY_TYPES.length);
-    for (const type of ['seed', 'mapping', 'api', 'doc', 'book', 'capability']) {
+    for (const type of ['seed', 'mapping', 'api', 'doc', 'book', 'capability', 'picklist']) {
       expect(BARE_TYPES, `${type} is bare`).toContain(type);
     }
     for (const type of AUTHORED_BARE_TYPES) expect(BARE_TYPES, `${type} is bare`).toContain(type);
-    // 16 leaves: ten labels, and a description on the six that carry one.
-    expect(BARE_LEAVES.length).toBe(16);
-    expect(BARE_LEAVES.filter((l) => l.prop === 'label').length).toBe(10);
-    expect(BARE_LEAVES.filter((l) => l.prop === 'description').length).toBe(6);
+    // 18 leaves: eleven labels, and a description on the seven that carry one.
+    expect(BARE_LEAVES.length).toBe(18);
+    expect(BARE_LEAVES.filter((l) => l.prop === 'label').length).toBe(11);
+    expect(BARE_LEAVES.filter((l) => l.prop === 'description').length).toBe(7);
     expect(BARE_LEAVES.every((l) => ['label', 'description'].includes(l.prop))).toBe(true);
   });
 
@@ -806,8 +807,8 @@ describe('#19403 round 7 — the population, DERIVED from the registry and a sha
     expect(registryEntry('dataset')?.description, 'dataset carries a registry description like the six').toBeTruthy();
     expect(isBare('dataset')).toBe(false);
     const described = REGISTRY_TYPES.filter((t) => typeof registryEntry(t)?.description === 'string');
-    expect([...described].sort()).toEqual(['api', 'book', 'capability', 'dataset', 'doc', 'mapping', 'seed']);
-    expect(described.filter(isBare).sort()).toEqual(['api', 'book', 'capability', 'doc', 'mapping', 'seed']);
+    expect([...described].sort()).toEqual(['api', 'book', 'capability', 'dataset', 'doc', 'mapping', 'picklist', 'seed']);
+    expect(described.filter(isBare).sort()).toEqual(['api', 'book', 'capability', 'doc', 'mapping', 'picklist', 'seed']);
     // And no panel type's own display pair echoes — the exclusion removes only
     // leaves that are already decided elsewhere or already authored.
     const panelEchoes: string[] = [];
@@ -868,13 +869,13 @@ describe('#19403 round 7 — the population, DERIVED from the registry and a sha
     expect(flagged.length).toBe(BARE_LEAVES.length);
   });
 
-  it('⭐ this class is now DONE — zero of its 16 leaves echoes in all three locales', () => {
+  it('⭐ this class is now DONE — zero of its 18 leaves echoes in all three locales', () => {
     const echoing = BARE_LEAVES.filter((l) =>
       TRANSLATED_LOCALES.every(([, forms]) => forms[l.type]?.[l.prop] === l.en),
     );
     expect(echoing.map((l) => `${l.type}.${l.prop}`)).toEqual([]);
     // Lit — and it really walked the class, which a zero alone would not show.
-    expect(BARE_LEAVES.length).toBe(16);
+    expect(BARE_LEAVES.length).toBe(18);
   });
 });
 

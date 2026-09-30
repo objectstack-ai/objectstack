@@ -49,7 +49,7 @@ import { assertListComparandShapes, type Cube } from '@objectstack/spec/data';
 import { DatasetSchema, type Dataset } from '@objectstack/spec/ui';
 import type { AnalyticsQuery, StrategyContext } from '@objectstack/spec/contracts';
 
-import { normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
+import { normalizeAnalyticsFilterTree, NO_DATETIME_COLUMNS } from '../strategies/filter-normalizer.js';
 import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
 import { evaluateAnalyticsQueryOverRows } from '../preview-evaluator.js';
@@ -60,7 +60,7 @@ interface Refusal extends Error {
   status?: unknown;
 }
 
-const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where } as never);
+const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where } as never, NO_DATETIME_COLUMNS);
 
 function refusalOf(run: () => unknown): Refusal {
   let out: unknown;
@@ -255,7 +255,9 @@ describe('[#20010] the neighbouring shapes compile exactly as before', () => {
     ['a list under $in', { stage: { $in: ['won', 'lost'] } }, leaf('stage', 'in', ['won', 'lost'])],
     ['falsy $in members are values, not blanks', { stage: { $in: [0, '', false] } }, leaf('stage', 'in', [0, '', false])],
     ['the empty $in — the FALSE constant', { stage: { $in: [] } }, { kind: 'const', value: false }],
-    ['the empty $nin — the TRUE constant', { stage: { $nin: [] } }, { kind: 'const', value: true }],
+    // [ADR-0053 D-D1, amended — #5930 step 3] The TRUE constant, inside the
+    // shared lowering's NULL escape (`$nin` is negative-polarity): TRUE still.
+    ['the empty $nin — the TRUE constant', { stage: { $nin: [] } }, { kind: 'or', children: [leaf('stage', 'notSet', []), { kind: 'const', value: true }] }],
     ['a scalar ordering comparand', { amt: { $gt: 5 } }, leaf('amt', 'gt', [5])],
     ['a { $field } in an ordering slot (served on the engine path)', { amt: { $gt: { $field: 'id' } } }, leaf('amt', 'gt', [{ $field: 'id' }])],
     ['the implicit null — the has-no-value predicate', { stage: null }, leaf('stage', 'notSet', [])],

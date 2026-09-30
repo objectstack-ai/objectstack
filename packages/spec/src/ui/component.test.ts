@@ -36,7 +36,6 @@ describe('PageHeaderProps', () => {
   it('should accept minimal header', () => {
     const result = PageHeaderProps.parse({ title: 'My Page' });
     expect(result.title).toBe('My Page');
-    expect(result.breadcrumb).toBe(true);
     expect(result.subtitle).toBeUndefined();
     expect(result.actions).toBeUndefined();
   });
@@ -45,11 +44,11 @@ describe('PageHeaderProps', () => {
     const header = {
       title: 'Dashboard',
       subtitle: 'Overview',
-      breadcrumb: false,
+      recordChrome: false,
       actions: ['action-1', 'action-2'],
     };
     const result = PageHeaderProps.parse(header);
-    expect(result.breadcrumb).toBe(false);
+    expect(result.recordChrome).toBe(false);
     expect(result.actions).toHaveLength(2);
   });
 
@@ -69,7 +68,7 @@ describe('PageHeaderProps', () => {
   it('accepts a completely empty header — every field optional or defaulted', () => {
     const result = PageHeaderProps.parse({});
     expect(result.title).toBeUndefined();
-    expect(result.breadcrumb).toBe(true);
+    expect(result.recordChrome).toBe(true);
   });
 
   it('still validates a present title as an I18nLabel', () => {

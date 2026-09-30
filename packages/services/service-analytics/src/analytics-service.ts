@@ -61,6 +61,7 @@ import {
   collectFilterLeaves,
   lowerAnalyticsWhere,
   conjunctFieldKeys,
+  NO_DATETIME_COLUMNS,
 } from './strategies/filter-normalizer.js';
 import { findCrossFieldComparand } from './comparand-shape.js';
 import { compileDataset, type CompiledDataset, type RelationshipResolver } from './dataset-compiler.js';
@@ -2785,7 +2786,12 @@ export class AnalyticsService implements IAnalyticsService {
     /** Every member the compiled predicate will bind against, structure discarded. */
     let members: string[];
     try {
-      members = collectFilterLeaves(normalizeAnalyticsFilterTree(query)).map((leaf) => leaf.member);
+      // [ADR-0053 D-D1, amended — #5930 step 3] The tree the strategies compile
+      // is LOWERED; this gate reads the same lowering, so a member the
+      // lowering's NULL guard names is a member it judges. The column-type
+      // reader is immaterial here: the whole-day rule and the `$between` split
+      // never change which member a leaf names.
+      members = collectFilterLeaves(normalizeAnalyticsFilterTree(query, NO_DATETIME_COLUMNS)).map((leaf) => leaf.member);
     } catch {
       // A `where` this layer refuses outright — see the stand-down note above.
       return;

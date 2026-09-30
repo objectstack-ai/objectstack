@@ -97,7 +97,7 @@ import {
 import type { Cube, FilterCondition } from '@objectstack/spec/data';
 import type { AnalyticsQuery, StrategyContext } from '@objectstack/spec/contracts';
 
-import { normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
+import { normalizeAnalyticsFilterTree, NO_DATETIME_COLUMNS } from '../strategies/filter-normalizer.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
 import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
 import {
@@ -129,7 +129,7 @@ function refusalOf(run: () => unknown): WireBearingError {
   );
 }
 
-const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where } as any);
+const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where } as any, NO_DATETIME_COLUMNS);
 const scope = (where: unknown) => compileScopedFilterToSql(where as FilterCondition, 'deal');
 
 /** Every leaf comparand the normalizer produced, structure discarded. */
@@ -214,12 +214,22 @@ describe("[#7598] the #5222 corpus's SUPPORTED arm is ROUTED by the `where` door
     expect(tree({ amount: { $ne: { $field: 'budget' } } })).toEqual({
       kind: 'leaf', member: 'amount', operator: 'notEquals', values: [{ $field: 'budget' }],
     });
-    // …and the literal keeps its guard, unchanged. This pair is the whole claim.
+    // …and the literal keeps its guard. This pair is the whole claim.
+    // [ADR-0053 D-D1, amended — #5930 step 3] The guard now arrives twice: the
+    // shared lowering's NULL escape (outer), around this face's own interim
+    // copy of it (inner) — the same rows, until the copy's deletion card. The
+    // reference above gets neither, from either.
     expect(tree({ amount: { $ne: 5 } })).toEqual({
       kind: 'or',
       children: [
         { kind: 'leaf', member: 'amount', operator: 'notSet', values: [] },
-        { kind: 'leaf', member: 'amount', operator: 'notEquals', values: [5] },
+        {
+          kind: 'or',
+          children: [
+            { kind: 'leaf', member: 'amount', operator: 'notSet', values: [] },
+            { kind: 'leaf', member: 'amount', operator: 'notEquals', values: [5] },
+          ],
+        },
       ],
     });
   });

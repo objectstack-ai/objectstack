@@ -1,0 +1,65 @@
+{
+  "type": "picklist",
+  "_note": "PicklistSchema (`data/picklist.zod.ts`) — a shared option list that select fields reference by name (`Field.select({ picklist })`). Seeded 2026-09-30 with the spec layer (#19518), every key `planned`: the kind is registered ahead of its runtime reader by ruling (spec layer first, runtime layer #19519 Blocked-by it). The ADR-0010 envelope keys carry the same `null` verdict as `capability`: loader-stamped, not authored.",
+  "props": {
+    "name": {
+      "status": "planned",
+      "verifiedAt": "2026-09-30",
+      "note": "The handle a field's `picklist` names. Declared with the spec layer of the picklist kind (#19518); its runtime reader is the runtime layer (#19519: load before `object`, additive merge of `picklistExtensions`, resolve onto the served field, write validation against the resolved set), which has NOT landed. No code outside `packages/spec` reads a picklist yet, so this is `planned`, not `live`. Re-verify to `live` against #19519's resolver."
+    },
+    "label": {
+      "status": "planned",
+      "verifiedAt": "2026-09-30",
+      "note": "Display label of the list (the Studio picklist page is a later phase). Declared with the spec layer of the picklist kind (#19518); its runtime reader is the runtime layer (#19519: load before `object`, additive merge of `picklistExtensions`, resolve onto the served field, write validation against the resolved set), which has NOT landed. No code outside `packages/spec` reads a picklist yet, so this is `planned`, not `live`. Re-verify to `live` against #19519's resolver."
+    },
+    "description": {
+      "status": "planned",
+      "verifiedAt": "2026-09-30",
+      "note": "Author-facing summary of what the list enumerates. Declared with the spec layer of the picklist kind (#19518); its runtime reader is the runtime layer (#19519: load before `object`, additive merge of `picklistExtensions`, resolve onto the served field, write validation against the resolved set), which has NOT landed. No code outside `packages/spec` reads a picklist yet, so this is `planned`, not `live`. Re-verify to `live` against #19519's resolver."
+    },
+    "options": {
+      "status": "planned",
+      "verifiedAt": "2026-09-30",
+      "note": "The options every referencing field is served, resolved onto the field (`PicklistServedFieldSchema`). Declared with the spec layer of the picklist kind (#19518); its runtime reader is the runtime layer (#19519: load before `object`, additive merge of `picklistExtensions`, resolve onto the served field, write validation against the resolved set), which has NOT landed. No code outside `packages/spec` reads a picklist yet, so this is `planned`, not `live`. Re-verify to `live` against #19519's resolver.",
+      "children": {
+        "label": {
+          "status": "planned",
+          "verifiedAt": "2026-09-30",
+          "note": "A picklist option — the field option shape reused verbatim (`SelectOptionSchema`). Read, like the list itself, by the #19519 resolver once it lands; it reaches every consumer through the referencing field's resolved `options`, where the same key is `live` on `field.json`."
+        },
+        "value": {
+          "status": "planned",
+          "verifiedAt": "2026-09-30",
+          "note": "A picklist option — the field option shape reused verbatim (`SelectOptionSchema`). Read, like the list itself, by the #19519 resolver once it lands; it reaches every consumer through the referencing field's resolved `options`, where the same key is `live` on `field.json`."
+        },
+        "description": {
+          "status": "planned",
+          "verifiedAt": "2026-09-30",
+          "note": "A picklist option — the field option shape reused verbatim (`SelectOptionSchema`). Read, like the list itself, by the #19519 resolver once it lands; it reaches every consumer through the referencing field's resolved `options`, where the same key is `live` on `field.json`."
+        },
+        "color": {
+          "status": "planned",
+          "verifiedAt": "2026-09-30",
+          "note": "A picklist option — the field option shape reused verbatim (`SelectOptionSchema`). Read, like the list itself, by the #19519 resolver once it lands; it reaches every consumer through the referencing field's resolved `options`, where the same key is `live` on `field.json`."
+        },
+        "default": {
+          "status": "planned",
+          "verifiedAt": "2026-09-30",
+          "note": "A picklist option — the field option shape reused verbatim (`SelectOptionSchema`). Read, like the list itself, by the #19519 resolver once it lands; it reaches every consumer through the referencing field's resolved `options`, where the same key is `live` on `field.json`."
+        },
+        "visibleWhen": {
+          "status": "planned",
+          "verifiedAt": "2026-09-30",
+          "note": "A picklist option — the field option shape reused verbatim (`SelectOptionSchema`). Read, like the list itself, by the #19519 resolver once it lands; it reaches every consumer through the referencing field's resolved `options`, where the same key is `live` on `field.json`."
+        }
+      }
+    },
+    "_lock": null,
+    "_lockReason": null,
+    "_lockSource": null,
+    "_provenance": null,
+    "_packageId": null,
+    "_packageVersion": null,
+    "_lockDocsUrl": null
+  }
+}

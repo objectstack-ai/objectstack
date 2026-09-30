@@ -153,6 +153,17 @@ const PROBES: Record<string, { name: string; item: Record<string, unknown> }> = 
             type: 'text',
         },
     },
+    // `picklist` is package-owned (`allowRuntimeCreate: false`): a shared option
+    // list ships in a package (`*.picklist.ts`), and a per-org overlay is a later
+    // phase. Schema-valid for the same reason as the rest.
+    picklist: {
+        name: 'rc3_picklist_probe',
+        item: {
+            name: 'rc3_picklist_probe',
+            label: 'Probe',
+            options: [{ label: 'One', value: 'one' }],
+        },
+    },
 };
 
 function makeStubEngine(artifacts: Array<{ type: string; name: string }> = []) {
@@ -269,7 +280,7 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
         // auto-enrolment is the point of deriving the set instead of listing it
         // (Prime Directive #8).
         expect(CODE_ONLY_TYPES.length).toBeGreaterThan(0);
-        expect([...CODE_ONLY_TYPES].sort()).toEqual(['agent', 'api', 'capability', 'field', 'job']);
+        expect([...CODE_ONLY_TYPES].sort()).toEqual(['agent', 'api', 'capability', 'field', 'job', 'picklist']);
         for (const type of CODE_ONLY_TYPES) {
             expect(PROBES[type], `no probe payload for code-only type '${type}'`).toBeDefined();
         }

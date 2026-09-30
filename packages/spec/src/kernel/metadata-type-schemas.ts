@@ -34,6 +34,7 @@ import { HookSchema } from '../data/hook.zod';
 import { DatasourceSchema } from '../data/datasource.zod';
 import { SeedSchema } from '../data/seed.zod';
 import { MappingSchema } from '../data/mapping.zod';
+import { PicklistSchema } from '../data/picklist.zod';
 
 import { ViewMetadataSchema } from '../ui/view.zod';
 import { PageSchema } from '../ui/page.zod';
@@ -96,6 +97,7 @@ const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = 
   // owning object.
   seed: SeedSchema, // fixture/init data; runtime-draftable, applied on publish
   mapping: MappingSchema as unknown as z.ZodType, // #2611: reusable import mapping; runtime-creatable so the wizard can save one
+  picklist: PicklistSchema, // shared option list select fields reference by name; package-owned (no runtime create)
 
   // UI Protocol
   // #3095 — a union over the three runtime `view` shapes (defineView container,
