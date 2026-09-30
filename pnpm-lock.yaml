@@ -27,12 +27,12 @@ overrides:
   cookie@<0.8.0: ^0.7.0
   svelte: ^5.55.7
   '@tootallnate/once@<2.0.1': 2.0.1
-  brace-expansion@>=5.0.0 <6.0.0: ^5.0.9
+  brace-expansion@>=5.0.0 <6.0.0: ^5.0.12
   sharp@>=0.34.0 <0.36.0: ^0.35.4
   react-router@<8.3.0: ^8.3.0
   '@sveltejs/kit@<2.69.1': ^2.69.1
   '@hono/node-server@<3.0.0': ^2.0.10
-  fast-uri@<4.0.0: ^3.1.6
+  fast-uri@<4.0.0: ^3.1.8
   hono@<5.0.0: ^4.13.5
   dompurify@<4.0.0: ^3.4.13
   nanoid@<4.0.0: ^3.3.17
@@ -1236,8 +1236,8 @@ importers:
         specifier: ^13.0.6
         version: 13.0.6
       js-yaml:
-        specifier: ^5.2.3
-        version: 5.2.3
+        specifier: ^5.4.1
+        version: 5.4.2
       zod:
         specifier: ^4.6.1
         version: 4.6.1
@@ -1322,6 +1322,9 @@ importers:
       '@objectstack/metadata-core':
         specifier: workspace:*
         version: link:../metadata-core
+      '@objectstack/sdui-parser':
+        specifier: workspace:*
+        version: link:../sdui-parser
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../spec
@@ -5841,8 +5844,8 @@ packages:
   bowser@2.14.1:
     resolution: {integrity: sha512-tzPjzCxygAKWFOJP011oxFHs57HzIhOEracIgAePE4pqB3LikALKnSzUyU4MGs9/iCEUuHlAJTjTc5M+u7YEGg==}
 
-  brace-expansion@5.0.9:
-    resolution: {integrity: sha512-ScQ4IuvIEF1TMlP7Zt+vjJ//9zlPb2SDcxWxM3bk8s6t6GGdJ7KO1dCcTidOPJKePW30LE/2cT7wCyPho9/Wxg==}
+  brace-expansion@5.0.12:
+    resolution: {integrity: sha512-YovQ3rzhaLMIrDjNDMkNS01tea93qhEhG5xy8f6+R0l+dw3Ki+5sCoIoI942iuLZTHWogWktgwVDhU09iNEimQ==}
     engines: {node: 20 || >=22}
 
   bson@7.3.1:
@@ -6615,8 +6618,8 @@ packages:
   fast-string-width@3.0.2:
     resolution: {integrity: sha512-gX8LrtNEI5hq8DVUfRQMbr5lpaS4nMIWV+7XEbXk2b8kiQIizgnlr12B4dA3ZEx3308ze0O4Q1R+cHts8kyUJg==}
 
-  fast-uri@3.1.7:
-    resolution: {integrity: sha512-dOvZVzjdZdz7phd9v6jCbwxrBW3fK6n8Rc0CtdmM4bumzMnxywBYhuph6J819RRw/ku+rLbelwfMunktuzVVHg==}
+  fast-uri@3.1.8:
+    resolution: {integrity: sha512-GZMtZUTNRpOVIECoXwLNZS5xUGE+mVNbTB8h/7Rwh2TFWcBQiPzTgyZi05BF9UMZKkLJv8XBRJTlU7zg8+ZfMg==}
 
   fast-wrap-ansi@0.2.2:
     resolution: {integrity: sha512-7F2Fl+TjRSenLqlU3UjSH0iyqopqoZIu7eZVpEirP2g1GtWa2G/ecEmBdgz31+Mxr+ELclgg6sokpSFIQiZ02Q==}
@@ -7192,8 +7195,8 @@ packages:
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
 
-  js-yaml@5.2.3:
-    resolution: {integrity: sha512-n+mUVyUX5bVv7G/G2zyIHOhdxfuU1dY2NOFzTQUWiMUbFss8b57NFlgCCaggU78wSw5KVS9cllzeLyzyR+n5nw==}
+  js-yaml@5.4.2:
+    resolution: {integrity: sha512-m+aqu+LwO1O6sIopafj8HUVl5aawITwZQe/yHpMCKjaWBaA/d07B/QdMb3529REftiU+RMMHL3Vlsw3hON7vWg==}
     hasBin: true
 
   jsdom@30.0.1:
@@ -11866,7 +11869,7 @@ snapshots:
   ajv@8.20.0:
     dependencies:
       fast-deep-equal: 3.1.3
-      fast-uri: 3.1.7
+      fast-uri: 3.1.8
       json-schema-traverse: 1.0.0
       require-from-string: 2.0.2
 
@@ -12098,7 +12101,7 @@ snapshots:
 
   bowser@2.14.1: {}
 
-  brace-expansion@5.0.9:
+  brace-expansion@5.0.12:
     dependencies:
       balanced-match: 4.0.4
 
@@ -12924,7 +12927,7 @@ snapshots:
     dependencies:
       fast-string-truncated-width: 3.0.3
 
-  fast-uri@3.1.7: {}
+  fast-uri@3.1.8: {}
 
   fast-wrap-ansi@0.2.2:
     dependencies:
@@ -13554,7 +13557,7 @@ snapshots:
 
   js-tokens@4.0.0: {}
 
-  js-yaml@5.2.3:
+  js-yaml@5.4.2:
     dependencies:
       argparse: 2.0.1
 
@@ -14376,11 +14379,11 @@ snapshots:
 
   minimatch@10.2.3:
     dependencies:
-      brace-expansion: 5.0.9
+      brace-expansion: 5.0.12
 
   minimatch@10.2.6:
     dependencies:
-      brace-expansion: 5.0.9
+      brace-expansion: 5.0.12
 
   minimist@1.2.8: {}
 

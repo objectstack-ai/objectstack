@@ -31,7 +31,7 @@
  * Anything else returns `supports() === false`, so the admin service degrades
  * gracefully (testConnection → `{ ok: false }`, create skips hot pool reg).
  *
- * `turso` joined in #6345, and it HAD to: `supports()` is
+ * `turso` joined in commit e2798fab7, and it HAD to: `supports()` is
  * `resolveKind() !== undefined`, so the moment turso became a builtin id this
  * factory started claiming it. Without an arm the claim would have been answered
  * by the trailing `memory` fall-through — a libSQL datasource silently built as
@@ -99,7 +99,7 @@ export const TURSO_DRIVER_INSTALL_COMMAND = `npm install ${TURSO_DRIVER_PACKAGE}
  * Until #7314 this arm said only *"turso driver requested but
  * @objectstack/driver-turso is not installed (…)"* — the fault and nothing
  * else. The host loader (`@objectstack/runtime`'s `loadTursoDriverFactory`,
- * single owner since #6268) has answered the SAME missing package with the
+ * single owner since commit 68f5eccb1) has answered the SAME missing package with the
  * install command, the consequence and the reason for refusing since #5602, so
  * an operator who booted with a libSQL url was told how to fix it while an
  * admin who added the identical datasource in Setup was not. One missing
@@ -224,7 +224,7 @@ function missingDriverPackageMessage(
  * command an operator runs to install it.
  *
  * Optional from THIS package's side, which is the side that matters here:
- * `@objectstack/service-datasource` declares it as an OPTIONAL PEER (#12943) —
+ * `@objectstack/service-datasource` declares it as an OPTIONAL PEER (commit 090f2302e) —
  * which tells an installing consumer the relationship exists while installing
  * nothing — alongside the `devDependencies` entry this package's own suites
  * build real drivers from. So a host that installs this service on its own does
@@ -245,7 +245,7 @@ export const SQLITE_WASM_DRIVER_INSTALL_COMMAND = `npm install ${SQLITE_WASM_DRI
  * The optional package that provides the MongoDB driver, and the exact command
  * an operator runs to install it.
  *
- * `@objectstack/service-datasource` declares it as an OPTIONAL PEER (#12943)
+ * `@objectstack/service-datasource` declares it as an OPTIONAL PEER (commit 090f2302e)
  * beside its `devDependencies` entry, and `@objectstack/runtime` carries it as
  * an `optionalDependencies` entry — two different optional idioms, and neither
  * installs it for a consumer of THIS package — so `--omit=optional` and a direct
@@ -380,7 +380,7 @@ function resolveSslOption(spec: DatasourceConnectionSpec): unknown {
 }
 
 /**
- * {@link resolveSslOption}'s answer in the spelling `mysql2` accepts (#8874).
+ * {@link resolveSslOption}'s answer in the spelling `mysql2` accepts (commit d70428ae7).
  *
  * ## `ssl: true` is not a mysql2 value — it throws
  *
@@ -409,7 +409,7 @@ function resolveSslOption(spec: DatasourceConnectionSpec): unknown {
  * declarations — `ssl: { enabled: true }` with no certificate material, and the
  * `config.ssl` shorthand, whose schema (`DriverSslToggleSchema`) is
  * `z.boolean()` and so has no other authorable value. So the mysql arm's
- * DISCRETE-FIELDS branch — the one #8874 describes as honouring the
+ * DISCRETE-FIELDS branch — the one commit d70428ae7's card describes as honouring the
  * declaration — has been handing `mysql2` a value that makes every connection
  * acquisition throw. That is the same declared-≠-enforced defect as the dropped
  * DSN-branch block, one spelling further along, and it is fixed here rather
@@ -436,7 +436,7 @@ function mysqlSslOption(resolved: unknown): unknown {
 
 /**
  * What this factory says when `pg`'s own parser rejects a postgres DSN that
- * carries a bound credential (#8873).
+ * carries a bound credential (commit 096106522).
  *
  * Reached only on the secret-bound path, and only for a url `pg` itself cannot
  * read: {@link postgresDsnFields} runs the client's own parser, so anything it
@@ -514,12 +514,12 @@ function buildSqlConnection(spec: DatasourceConnectionSpec, client: 'pg' | 'bett
     };
 
     // Nothing bound: byte-for-byte the shape this arm has always emitted. The
-    // blast radius of #8873 is "a secret was bound", so a datasource that binds
+    // blast radius of commit 096106522 is "a secret was bound", so a datasource that binds
     // none must not change at all — including keeping the DSN unparsed here, so
     // a url `pg` rejects still fails where it fails today.
     if (!spec.secret) return { connectionString: url, ...siblings };
 
-    // A bound secret, on the DSN branch (#8873).
+    // A bound secret, on the DSN branch (commit 096106522).
     //
     // ## Why `connectionString` is gone rather than accompanied
     //
@@ -596,7 +596,7 @@ function buildSqlConnection(spec: DatasourceConnectionSpec, client: 'pg' | 'bett
     // a password only when the server asks for one — so injecting cannot break
     // a datasource that connects today, and refusing would drop a credential the
     // operator bound. Making that contradictory pair loud belongs at the
-    // authoring door, where both halves are visible at once (#9041).
+    // authoring door, where both halves are visible at once (commit d491625c1).
     return {
       ...siblings,
       ...postgresDsnFields(url, spec.name),
@@ -715,7 +715,7 @@ function buildSqlPool(spec: DatasourceConnectionSpec): Record<string, unknown> {
  * (`url`) selects the connection-string form; otherwise discrete fields, with
  * the secret as the password (never part of `config`).
  *
- * ## A bound secret reaches the client on the DSN branch too (#8696)
+ * ## A bound secret reaches the client on the DSN branch too (commit 72050cc47)
  *
  * This arm used to be `if (url) return url;` — the DSN string became the whole
  * knex `connection` and an injected `spec.secret` was dropped on the floor,
@@ -733,7 +733,7 @@ function buildSqlPool(spec: DatasourceConnectionSpec): Record<string, unknown> {
  *
  * `mysql2` merges a `uri` with sibling keys itself, and the EXPLICIT key wins
  * (`ConnectionConfig`: uri-derived values are only filled in for keys the
- * caller supplied no TRUTHY value for — see the falsy-value note under #8874
+ * caller supplied no TRUTHY value for — see the falsy-value note under commit d70428ae7
  * below, which matters for `ssl` and not for a bound secret). So the DSN keeps
  * being parsed by the client that
  * owns its grammar — no URL parsing, no re-encoding, no second dialect of
@@ -758,13 +758,13 @@ function buildSqlPool(spec: DatasourceConnectionSpec): Record<string, unknown> {
  * `Object.assign({}, config, parse(config.connectionString))`, i.e. the DSN
  * overrides the explicit key — so `{connectionString, password}` there resolves
  * to the DSN's own (absent) password. That was a live defect for as long as this
- * comment described it as one; #8873 closed it by dropping `connectionString`
+ * comment described it as one; commit 096106522 closed it by dropping `connectionString`
  * entirely on that branch and handing `pg` its own parse of the url with the
  * credential attached. It was NOT fixed by symmetry with this arm, and the two
  * clients disagreeing is exactly why each arm's precedence is measured rather
  * than assumed.
  *
- * ## A declared `ssl` reaches the client on the DSN branch too (#8874)
+ * ## A declared `ssl` reaches the client on the DSN branch too (commit d70428ae7)
  *
  * The gap the paragraph above used to describe as "filed separately". This arm
  * resolved the TLS option and then returned before anything could use it, so a
@@ -821,9 +821,9 @@ function buildMysqlConnection(spec: DatasourceConnectionSpec): unknown {
   const url = cfg.url as string | undefined;
   if (url) {
     // Nothing to carry beside the DSN: the bare-string passthrough this arm has
-    // always emitted, unchanged. The blast radius of both #8696 and #8874 is
-    // "something was declared", so a datasource that declared neither a secret
-    // nor TLS must not move at all.
+    // always emitted, unchanged. The blast radius of both commit 72050cc47 and
+    // commit d70428ae7 is "something was declared", so a datasource that declared
+    // neither a secret nor TLS must not move at all.
     if (mysqlSsl === undefined && !spec.secret) return url;
     return {
       uri: url,
@@ -923,7 +923,7 @@ function buildMemoryConfig(spec: DatasourceConnectionSpec): Record<string, unkno
  * dropped the same way. Both now behave the way the SQL builders already did:
  * a datasource secret wins, the config value is the fallback.
  *
- * The DSN branch's half of that is closed by {@link buildMongoAuth} (#8696),
+ * The DSN branch's half of that is closed by {@link buildMongoAuth} (commit 90a12fb18),
  * NOT here: this function still returns the authored `config.url` byte for
  * byte. The credential rides beside it in the client options, so nothing in
  * this repo re-encodes or rewrites a `mongodb://…` — the client keeps owning
@@ -951,7 +951,7 @@ function buildMongoUrl(spec: DatasourceConnectionSpec): string {
 
 /**
  * The `MongoClient` `auth` block that carries a bound `spec.secret` onto the
- * DSN branch of the mongo arm (#8696) — the half {@link buildMongoUrl} does
+ * DSN branch of the mongo arm (commit 90a12fb18) — the half {@link buildMongoUrl} does
  * not, and cannot, do.
  *
  * ## The defect this closes
@@ -991,14 +991,14 @@ function buildMongoUrl(spec: DatasourceConnectionSpec): string {
  * rewrite could not have promised: `new URL()` cannot even PARSE the multi-host
  * form this schema documents (measured `ERR_INVALID_URL`), which is why the
  * username is read through the platform's own DSN grammar
- * ({@link urlUserinfoUsername}, #8876) rather than WHATWG parsing, and why
+ * ({@link urlUserinfoUsername}, commit d634e665b) rather than WHATWG parsing, and why
  * hand-rolling that parse here would have been the second copy of the userinfo
  * boundaries #8082's ruling rejects by name.
  *
  * ⛔ Do NOT reach this shape by symmetry from the mysql arm. The clients merge
  * a DSN against explicit keys in OPPOSITE directions — `pg` merges
  * `parse(connectionString)` OVER the explicit config, which is why the postgres
- * arm looked correct while being broken one layer lower, and why #8873 had to
+ * arm looked correct while being broken one layer lower, and why commit 096106522 had to
  * close it with a THIRD shape again (no `connectionString` at all). Each arm's
  * precedence is measured against its own client.
  *
@@ -1240,7 +1240,7 @@ export function createDefaultDatasourceDriverFactory(
         // same change — the pin in `datasource-pool-support.test.ts` reads this
         // arm's source and fails if the two disagree.
         const pool = (spec.pool ?? {}) as Record<string, unknown>;
-        // #8696 — the bound secret rides into the SAME passthrough on the DSN
+        // Commit 90a12fb18 — the bound secret rides into the SAME passthrough on the DSN
         // branch (see `buildMongoAuth`), so it is merged rather than assigned:
         // the author's `options` keep arriving verbatim, and the injected
         // `auth` is spread LAST so a resolved `external.credentialsRef` wins
@@ -1265,7 +1265,7 @@ export function createDefaultDatasourceDriverFactory(
       }
 
       if (kind === 'turso') {
-        // libSQL/Turso (#6345). Lazy + caught exactly like `mongodb` and
+        // libSQL/Turso (commit e2798fab7). Lazy + caught exactly like `mongodb` and
         // `sqlite-wasm` above: all three ship in optional packages, and a driver
         // being an optional INSTALL has never meant it lacks a contract.
         //
@@ -1287,7 +1287,7 @@ export function createDefaultDatasourceDriverFactory(
         // It is now also the SAME CLASS. `MissingDriverPackageError` used to be
         // declared in `@objectstack/runtime`, which DEPENDS on this package, so
         // this arm could neither import it (dependency inversion) nor declare
-        // its own (the identity hazard #6268 closed — `serve.ts` decides boot
+        // its own (the identity hazard commit 68f5eccb1 closed — `serve.ts` decides boot
         // fatality with `instanceof`). #7314 moved the one class DOWN to
         // `missing-driver-package-error.ts` here; runtime re-exports it from its
         // old home, so both loaders now raise an error that satisfies the same
@@ -1323,7 +1323,7 @@ export function createDefaultDatasourceDriverFactory(
         const url = resolveTursoUrl(spec);
         if (!url) {
           // `TursoConfigSchema.url` is required, so the authoring and wizard
-          // gates already refuse this. A stored row written before #6345 had no
+          // gates already refuse this. A stored row written before commit e2798fab7 had no
           // gate at all, and refusing here is the difference between a named
           // failure and `@libsql/client` opening something unexpected.
           throw new Error(
@@ -1350,7 +1350,7 @@ export function createDefaultDatasourceDriverFactory(
         return toHandle(new InMemoryDriver(buildMemoryConfig(spec)));
       }
 
-      // Every `BuiltinDriverId` must have an arm above (#6345). Until then this
+      // Every `BuiltinDriverId` must have an arm above (commit e2798fab7). Until then this
       // was `memory`'s implicit position: an id the spec table knew and this
       // switch did not silently became an in-process store that accepted writes
       // and lost them. `kind` is `never` here, so adding a builtin without an

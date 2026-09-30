@@ -2554,6 +2554,8 @@ describe('ObjectQL Engine', () => {
  * evidence cannot be read keeps writing rather than starting to reject.
  */
 describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
+  // [#20648] The flag read is a primary-key lookup through `findOne`, so the
+  // driver's `findOne` is what answers it in every case below.
   let engine: ObjectQL;
   let driver: IDataDriver;
 
@@ -2594,28 +2596,28 @@ describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
 
   it('a verified flag makes a malformed media value reject', async () => {
     withMediaObject();
-    vi.mocked(driver.find).mockResolvedValue([verifiedRow] as any);
+    vi.mocked(driver.findOne).mockResolvedValue(verifiedRow as any);
 
     await expect(engine.insert('note', { ...legacyBlob })).rejects.toThrow(/invalid file value/i);
   });
 
   it('no flag row → lenient (the write goes through)', async () => {
     withMediaObject();
-    vi.mocked(driver.find).mockResolvedValue([]);
+    vi.mocked(driver.findOne).mockResolvedValue(null);
 
     await expect(engine.insert('note', { ...legacyBlob })).resolves.toBeDefined();
   });
 
   it('a failed run (verified_at cleared) → lenient', async () => {
     withMediaObject();
-    vi.mocked(driver.find).mockResolvedValue([{ ...verifiedRow, verified_at: null, blocking: 3 }] as any);
+    vi.mocked(driver.findOne).mockResolvedValue({ ...verifiedRow, verified_at: null, blocking: 3 } as any);
 
     await expect(engine.insert('note', { ...legacyBlob })).resolves.toBeDefined();
   });
 
   it('an unreadable sys_migration → lenient, and the write is not failed by the probe', async () => {
     withMediaObject();
-    vi.mocked(driver.find).mockRejectedValue(new Error('no such table: sys_migration'));
+    vi.mocked(driver.findOne).mockRejectedValue(new Error('no such table: sys_migration'));
 
     await expect(engine.insert('note', { ...legacyBlob })).resolves.toBeDefined();
   });
@@ -2631,10 +2633,10 @@ describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
       if (name === 'sys_migration') return { name: 'sys_migration', fields: { id: { type: 'text' } } } as any;
       return undefined;
     });
-    vi.mocked(driver.find).mockResolvedValue([verifiedRow] as any);
+    vi.mocked(driver.findOne).mockResolvedValue(verifiedRow as any);
 
     await expect(engine.insert('invoice', { amount: 10 })).resolves.toBeDefined();
-    expect(vi.mocked(driver.find).mock.calls.filter((c) => c[0] === 'sys_migration')).toHaveLength(0);
+    expect(vi.mocked(driver.findOne).mock.calls.filter((c) => c[0] === 'sys_migration')).toHaveLength(0);
   });
 
   /** No storage service → no sys_migration object → not even a query. */
@@ -2642,33 +2644,34 @@ describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
     vi.mocked(SchemaRegistry.getObject).mockImplementation((name: string) =>
       name === 'note' ? ({ name: 'note', fields: { doc: { type: 'file' } } } as any) : undefined,
     );
-    vi.mocked(driver.find).mockResolvedValue([]);
+    vi.mocked(driver.findOne).mockResolvedValue(null);
 
     await expect(engine.insert('note', { ...legacyBlob })).resolves.toBeDefined();
     expect(driver.find).not.toHaveBeenCalled();
+    expect(driver.findOne).not.toHaveBeenCalled();
   });
 
   it('reads the flag once per process, not once per write', async () => {
     withMediaObject();
-    vi.mocked(driver.find).mockResolvedValue([verifiedRow] as any);
+    vi.mocked(driver.findOne).mockResolvedValue(verifiedRow as any);
 
     await expect(engine.insert('note', { doc: 'file_01' })).resolves.toBeDefined();
     await expect(engine.insert('note', { doc: 'file_02' })).resolves.toBeDefined();
     await expect(engine.insert('note', { doc: 'file_03' })).resolves.toBeDefined();
 
-    const flagReads = vi.mocked(driver.find).mock.calls.filter((c) => c[0] === 'sys_migration');
+    const flagReads = vi.mocked(driver.findOne).mock.calls.filter((c) => c[0] === 'sys_migration');
     expect(flagReads).toHaveLength(1);
   });
 
   it('invalidateDataMigrationFlags forces a re-read', async () => {
     withMediaObject();
-    vi.mocked(driver.find).mockResolvedValue([verifiedRow] as any);
+    vi.mocked(driver.findOne).mockResolvedValue(verifiedRow as any);
 
     await engine.insert('note', { doc: 'file_01' });
     engine.invalidateDataMigrationFlags();
     await engine.insert('note', { doc: 'file_02' });
 
-    const flagReads = vi.mocked(driver.find).mock.calls.filter((c) => c[0] === 'sys_migration');
+    const flagReads = vi.mocked(driver.findOne).mock.calls.filter((c) => c[0] === 'sys_migration');
     expect(flagReads).toHaveLength(2);
   });
 
@@ -2735,7 +2738,7 @@ describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
         place: { name: 'place', fields: { spot: { type: 'location' } } },
         sys_migration: SYS_MIGRATION,
       });
-      vi.mocked(driver.find).mockResolvedValue([]); // no flag row → gate open
+      vi.mocked(driver.findOne).mockResolvedValue(null); // no flag row → gate open
       const info = vi.spyOn((engine as any).logger, 'info');
 
       await engine.announceOpenMigrationGates();
@@ -2748,7 +2751,7 @@ describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
         note: { name: 'note', fields: { doc: { type: 'file' } } },
         sys_migration: SYS_MIGRATION,
       });
-      vi.mocked(driver.find).mockResolvedValue([]);
+      vi.mocked(driver.findOne).mockResolvedValue(null);
       const info = vi.spyOn((engine as any).logger, 'info');
 
       await engine.announceOpenMigrationGates();
@@ -2763,7 +2766,7 @@ describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
         note: { name: 'note', fields: { doc: { type: 'file' } } },
         sys_migration: SYS_MIGRATION,
       });
-      vi.mocked(driver.find).mockResolvedValue([verifiedRow] as any);
+      vi.mocked(driver.findOne).mockResolvedValue(verifiedRow as any);
       const info = vi.spyOn((engine as any).logger, 'info');
 
       await engine.announceOpenMigrationGates();
@@ -2782,6 +2785,7 @@ describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
 
       expect(lines(info)).not.toMatch(/os migrate/);
       expect(driver.find).not.toHaveBeenCalled();
+    expect(driver.findOne).not.toHaveBeenCalled();
     });
 
     it('announces once per process, not once per caller', async () => {
@@ -2789,7 +2793,7 @@ describe('ObjectQL — file-as-reference migration flag (#3617)', () => {
         place: { name: 'place', fields: { spot: { type: 'location' } } },
         sys_migration: SYS_MIGRATION,
       });
-      vi.mocked(driver.find).mockResolvedValue([]);
+      vi.mocked(driver.findOne).mockResolvedValue(null);
       const info = vi.spyOn((engine as any).logger, 'info');
 
       await engine.announceOpenMigrationGates();

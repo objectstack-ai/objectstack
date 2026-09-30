@@ -22,7 +22,7 @@
  * `validate-top-level-strict.e2e.test.ts` pattern) and reads the artifact the
  * shell was left holding.
  *
- * ⛔ THE CALL LANDED (#10917). The maintainer ruled the directive RETIRED under
+ * ⛔ THE CALL LANDED (commit 7940de5e0). The maintainer ruled the directive RETIRED under
  * ADR-0049 enforce-or-remove: the override branch, its docs block and the two
  * unit tests that masked it are gone, and `body.capabilities` — measured here to
  * survive — is the covered route for the same need. Per this header's own
@@ -32,7 +32,7 @@
  * What the first describe pins is now the RETIREMENT'S BLAST RADIUS, and the
  * expected reading is that there isn't one: the directive contributed nothing
  * before the removal (esbuild had already stripped it) and contributes nothing
- * after, so every artifact-side number here is unchanged by #10917. That is the
+ * after, so every artifact-side number here is unchanged by commit 7940de5e0. That is the
  * claim worth pinning over a real build — a retirement of an inert surface must
  * be observationally identical for authors, and if any of these flips, the
  * removal took something live with it.
@@ -93,7 +93,7 @@ const OBJECT = `{
   }`;
 
 /**
- * The retired-directive fixture (#10678 defect 1, kept as the #10917 regression
+ * The retired-directive fixture (#10678 defect 1, kept as the commit 7940de5e0 regression
  * probe). The handler asks for `api.write log` via the directive AND contains a
  * `.find(...)` call that inference reads as `api.read`. Both halves matter: the
  * inferred token proves the extractor really ran on this body (an assertion of
@@ -125,7 +125,7 @@ export default defineStack({
 `;
 
 /**
- * The route the docs point at, and after #10917 the ONLY way to declare
+ * The route the docs point at, and after commit 7940de5e0 the ONLY way to declare
  * capabilities a body's code does not reveal: `body.capabilities` is DATA, not a
  * comment, so nothing in the pipeline strips it. This fixture is what makes the
  * retirement safe to have shipped — the need did not go away with the directive,
@@ -224,7 +224,7 @@ describe('#10917 — the retired `@capabilities` directive changes nothing on th
 
     // Inference won; the directive contributed nothing. `api.read` comes from
     // `.object(...).find(...)`; `api.write` and `log` are what the directive
-    // asked for and — before and after #10917 alike — did not get.
+    // asked for and — before and after commit 7940de5e0 alike — did not get.
     expect(hook.body.capabilities).toEqual(['api.read']);
     expect(hook.body.capabilities).not.toContain('api.write');
     expect(hook.body.capabilities).not.toContain('log');

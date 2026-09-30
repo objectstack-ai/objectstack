@@ -1,6 +1,6 @@
 # ADR-0053: `date` is a timezone-naive calendar day; `datetime` is an instant rendered in a reference timezone
 
-**Status**: Accepted (2026-06-16) — Phase 1 + addendum D-A1 implemented (`sql-driver.ts` `toDateOnly` write/read/filter normalization; analytics `coerceTemporalFilterValue`), Phase 2 landing incrementally; D-A2 resolved 2026-07-30: `temporalFilterValue` + `temporalFilterColumnSql` are optional `IDataDriver` contract members with identity semantics, and analytics types its driver seam from the contract. **Partly superseded (2026-07-29, addendum D-B1..D-B4):** Phase 1's "`Field.datetime` stays stored as UTC epoch ms" is replaced by one canonical UTC instant per dialect — `YYYY-MM-DDTHH:MM:SS.sssZ` text on SQLite, `timestamptz` on Postgres, `DATETIME(3)` on MySQL — applied on write and to filter comparands alike (#3912, #3942). **Extended (2026-07-30, addendum D-C1..D-C3):** `Field.time` takes the same construction — canonical `HH:MM:SS[.fff]` wall-clock text, one function on write/filter/read, `TIME(3)` on MySQL, UTC `NOW()` defaults on every dialect (#3994). **Extended (2026-09-07, addendum D-F1..D-F3):** the READ side takes the same canon — every `@objectstack/driver-sql` record read door ~~but `findWithWindowFunctions` (#16609)~~ presents `Field.datetime` values and the builtin `created_at` / `updated_at` audit stamps as the canonical `YYYY-MM-DDTHH:MM:SS.sssZ` text on every dialect, folded at the driver's read boundary with the client parsers untouched; those doors never hand out a JS `Date` for those columns, save an Invalid `Date`, which has no canonical text and passes through unchanged (#13973, maintainer ruling B1 narrow, 2026-09-02). **Corrected 2026-09-08 (#16609 / PR #16716):** that exception is gone — `findWithWindowFunctions` now routes each row through the same `formatOutput` pass, so those two column classes present as the same canonical text there, with the window ALIAS columns carved out (a computed alias wins the key and its value stays raw). D-F1 rules those two classes and no more: the other presentations that pass applies at that door are #16609's contract, not this ADR's.
+**Status**: Accepted (2026-06-16) — Phase 1 + addendum D-A1 implemented (`sql-driver.ts` `toDateOnly` write/read/filter normalization; analytics `coerceTemporalFilterValue`), Phase 2 landing incrementally; D-A2 resolved 2026-07-30: `temporalFilterValue` + `temporalFilterColumnSql` are optional `IDataDriver` contract members with identity semantics, and analytics types its driver seam from the contract. **Partly superseded (2026-07-29, addendum D-B1..D-B4):** Phase 1's "`Field.datetime` stays stored as UTC epoch ms" is replaced by one canonical UTC instant per dialect — `YYYY-MM-DDTHH:MM:SS.sssZ` text on SQLite, `timestamptz` on Postgres, `DATETIME(3)` on MySQL — applied on write and to filter comparands alike (#3912, #3942). **Extended (2026-07-30, addendum D-C1..D-C3):** `Field.time` takes the same construction — canonical `HH:MM:SS[.fff]` wall-clock text, one function on write/filter/read, `TIME(3)` on MySQL, UTC `NOW()` defaults on every dialect (#3994). **Extended (2026-09-07, addendum D-F1..D-F3):** the READ side takes the same canon — every `@objectstack/driver-sql` record read door ~~but `findWithWindowFunctions` (#16609)~~ presents `Field.datetime` values and the builtin `created_at` / `updated_at` audit stamps as the canonical `YYYY-MM-DDTHH:MM:SS.sssZ` text on every dialect, folded at the driver's read boundary with the client parsers untouched; those doors never hand out a JS `Date` for those columns, save an Invalid `Date`, which has no canonical text and passes through unchanged (#13973, maintainer ruling B1 narrow, 2026-09-02). **Corrected 2026-09-08 (#16609 / PR #16716):** that exception is gone — `findWithWindowFunctions` now routes each row through the same `formatOutput` pass, so those two column classes present as the same canonical text there, with the window ALIAS columns carved out (a computed alias wins the key and its value stays raw). D-F1 rules those two classes and no more: the other presentations that pass applies at that door are #16609's contract, not this ADR's. **Amended (2026-09-30, D-D1, #5930):** the bare-day upper bound is applied once, by one shared `FilterCondition → FilterCondition` lowering in `@objectstack/spec/data` (never the package root entry), at the seams that already run the shared comparand doors — after the doors and after filter-token resolution — instead of at each comparison emitter; drivers receive the lowered filter, and each face keeps its own copy only until its deletion card lands. D-A1 and D-E3 are kept, D-E3 now structural (maintainer ruling 「5930 v18 启动」, 2026-09-30, recorded on #5930 as comment 5902355785).
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0032](./0032-unified-expression-layer.md) (unified expression layer — CEL dialect, `today()`/`daysFromNow()`), [ADR-0014](./0014-record-form-field-type.md) (field types)
 **Consumers**: `@objectstack/spec` (`Field.date`/`Field.datetime`), `@objectstack/driver-sql` (`coerceFilterValue`, `formatInput`/`formatOutput`, `dateFields`/`datetimeFields`), `@objectstack/formula` (`stdlib` time functions, `cel-engine` hydration), `@object-ui/core` (`FormulaFunctions`, the client-evaluated `TODAY()`; addendum D-G1), `@objectstack/objectql` (`applyFormulaPlan`), schedule/cron executors, report/analytics date bucketing, `sys-user-preference.timezone`.
@@ -702,14 +702,18 @@ temporal-conformance job's non-UTC matrix).
 > "today", so `{ $lte: <today> }` anchored to midnight silently dropped every
 > row created after 00:00 of the final day.
 
-### D-D1 — Operator-sensitive translation lives at the comparison EMITTERS
+### D-D1 — Operator-sensitive translation lives ~~at the comparison EMITTERS~~ in one shared lowering, run at the seams (amended 2026-09-30)
 
 `YYYY-MM-DD` anchors to midnight UTC (D-B1). That instant is the correct
 comparand for `$gte`/`$gt`/`$lt` — and the wrong one for `$lte`, whose author
 means "through the whole of that day". The translation is therefore a property
 of the *comparison*, not of the value: `temporalFilterValue` stays
-operator-blind (form only), and each emitter that owns an operator compiles a
-bare-day upper bound half-open:
+operator-blind (form only), and ~~each emitter that owns an operator compiles a
+bare-day upper bound half-open:~~ — **amended 2026-09-30** — one shared lowering
+rewrites a bare-day upper bound half-open, at the seams, before any emitter sees
+the filter (*Amended*, at the end of this section). The emitters below compiled
+it themselves when this addendum landed; each keeps its copy only until its
+deletion card lands:
 
 - **`SqlDriver` filter compiler** (`calendarDayUpperBoundRewrite` /
   `calendarDayBetweenRewrite`): `$lte`/`<=` → `< next-day-midnight` in storage
@@ -719,13 +723,15 @@ bare-day upper bound half-open:
   `where` spellings. `driver-sqlite-wasm` inherits.
 - **`NativeSQLStrategy`** windows and `lte` filters bind `< next-day` instead
   of `BETWEEN`/`<=` when the bound is a bare day.
-- **`ObjectQLStrategy`** leaves its lowered `{$gte, $lte}` bounds bare — the
-  driver rewrite is the single execution-path authority — and renders
-  `/analytics/sql` half-open so the echoed SQL reproduces execution.
+- **`ObjectQLStrategy`** leaves its lowered `{$gte, $lte}` bounds bare — ~~the
+  driver rewrite is the single execution-path authority~~ the shared lowering
+  is, since 2026-09-30 — and renders `/analytics/sql` half-open so the echoed
+  SQL reproduces execution.
 - **The dataset preview evaluator** applies the same rule in memory, replacing
   its `'~'`-suffix string hack, so draft numbers match published numbers.
 
-One primitive backs all of them: `nextUtcCalendarDay` (`@objectstack/core`),
+One primitive backs all of them: `nextUtcCalendarDay` (~~`@objectstack/core`~~
+`@objectstack/spec/data` since D-D2 below; `@objectstack/core` re-exports it),
 which rejects instants, `Date`s and impossible days (`2026-02-30`) rather than
 inventing a bound. Half-open — never an inclusive `23:59:59.999`, which
 re-opens the gap at whatever precision the dialect stores beyond milliseconds
@@ -737,9 +743,114 @@ scopes the rewrite to `datetime` so `date`/`time` columns compile byte-identical
 to before.
 
 The filter-token resolver (`filter-tokens.ts`) keeps its documented refusal to
-widen: a resolver-side fix would change what a token *is*; the emitter-side fix
-changes what a comparison *does* with it, per column type — which is the layer
-that owns that knowledge.
+widen: a resolver-side fix would change what a token *is*; the ~~emitter-side~~
+comparison-side fix (since 2026-09-30, the shared lowering, which runs after the
+token has resolved) changes what a comparison *does* with it, per column type —
+which is the layer that owns that knowledge.
+
+> **Amended (2026-09-30) — the rule stands; where it is applied moves to one
+> shared lowering, run at the seams.** Provenance: maintainer ruling on #5930 —
+> 「5930 v18 启动」, 2026-09-30, given to the director seat on batch #248, which
+> carried the `domain:engine` seat's decision request (comment 5900897393) on
+> the convergence investigation
+> ([`docs/design/predicate-compilation-convergence.md`](../design/predicate-compilation-convergence.md));
+> recorded on the card as comment 5902355785: the investigation's shape A as the
+> end state, built in the order of its first slice (B), starting with this
+> amendment. The ruling's D5 amends this section in place and keeps D-A1 and
+> D-E3 as they are. Why: the investigation found this rule applied by hand in
+> ten face files (41 call sites), missing on one face that binds raw SQL
+> (#20733) and applied after the storage-form conversion on another (#20661),
+> while a rule enforced once at a shared seam cost one dev round and no face
+> file (its §2).
+>
+> 1. **One lowering, applied once.** A `$lte` whose comparand is a bare
+>    `YYYY-MM-DD` becomes `$lt` `nextUtcCalendarDay(day)`; a `$between` becomes
+>    two `$and` conjuncts, `$gte` its minimum and `$lte` its maximum, which the
+>    same rule then reads; on the last supported day (`UNBOUNDED_ABOVE`) the
+>    upper bound is dropped, so a lone `$lte` keeps only `{ $null: false }`. One
+>    shared `FilterCondition → FilterCondition` lowering does this (the ruling's
+>    D2, T1), in the calendar-string domain. What the bound *means* is
+>    unchanged: half-open, never `23:59:59.999`; `$gte`/`$gt`/`$lt` keep their
+>    midnight anchor; an instant or a `Date` comparand is never widened. The
+>    same lowering carries the NULL-polarity guards, which are rulings recorded
+>    in code, not in this ADR.
+> 2. **Where it runs: the seams that already run the shared comparand doors**
+>    (`assertListComparandShapes`, `normalizeFilterComparandTypes`), the seven
+>    positions of the investigation's §3.6 — the engine's `where` admission, its
+>    `aggregations[i].filter` and its `having` (`@objectstack/objectql`
+>    `engine.ts`); the RLS compile seam, `judgeCompiledComparands`
+>    (`plugin-security` `rls-compiler.ts`), which serves `using` and `check`
+>    alike; the analytics `where` and draft-preview door,
+>    `normalizeWhereComparands` (`service-analytics` `filter-normalizer.ts`); the
+>    analytics read scope, at the entry of `compileScopedFilterToSql`
+>    (`read-scope-sql.ts`, which applies no whole-day bound today, #20733); and
+>    `driver-memory`'s cube face, `normalizeFilters` (`memory-analytics.ts`), the
+>    one new door, which also installs the two comparand doors that face runs
+>    without. A seam added later runs the lowering too, in the order item 3
+>    states.
+> 3. **At a seam, after the doors and after filter-token resolution.** The
+>    lowering reads the comparand the comparison will run with: a date macro
+>    (`{today}`, `{current_month_end}`) resolves to the bare day this rule
+>    widens. On the engine, the doors run in the first stage of `where`
+>    admission (`lowerWhereFilterArray`) and tokens resolve in the second
+>    (`resolveWhereTokens` on the read verbs, `withResolvedWhere` on `update` /
+>    `delete`; the same order on `aggregations[i].filter` and `having`), so the
+>    lowering runs after the second stage, not beside the doors. Run beside
+>    them, it would meet `{today}` unresolved and leave it bare — the #3777 loss,
+>    back on every token bound once the faces' copies are deleted.
+> 4. **It lives in `@objectstack/spec/data`**, beside `calendar-day.ts` and the
+>    shared comparand doors — **never the package root entry**
+>    (`@objectstack/spec`). The ruling's reason: D-D2 below already put
+>    `nextUtcCalendarDay` there, because what a day denotes as a bound is
+>    protocol, and `@objectstack/formula` depends on `spec` alone. Every seam's
+>    package already depends on `spec`, so no dependency edge is added. The
+>    tension with Prime Directive #2 is the one the investigation named (§3.6):
+>    the lowering is a pure function of the filter, holding no I/O, no state and
+>    no dialect.
+> 5. **Drivers receive the lowered filter (the ruling's D4 (b)).** A driver is
+>    not a seam: it inherits the rule by receiving already-lowered input, the
+>    pattern the comparand-type door set (`filter-comparand-type.ts`, ruling
+>    #7872). No face keeps a permanent copy for a caller that reaches it without
+>    passing a seam — a direct driver call, or a filter composed onto the query
+>    after its seam; once that face's copy is deleted, such a caller gets the
+>    comparison it wrote.
+> 6. **D-A1 and D-E3 are kept; D-E3 becomes structural.** The lowering emits a
+>    calendar string, never a storage form: `temporalFilterValue` stays
+>    operator-blind, and each driver converts the lowered bound as it converts
+>    any comparand. And because the lowering runs at the seam, before any face
+>    converts a comparand to its storage form, D-E3's order — widen the bare day
+>    first, convert the resulting bound second — holds by construction on every
+>    seam-fed face; the #20661 class (a face that converted first) cannot recur
+>    there.
+> 7. **The column-type scope is unchanged.** The rewrite is meant for a
+>    `datetime` column. A seam that can read the declared field type rewrites
+>    that column only, so a `date`, `time` or non-temporal column lowers
+>    byte-identical — the scope `SqlDriver` holds today. A seam that cannot
+>    applies the rewrite type-blind, as the type-blind emitters above do today
+>    (sound on `Field.date` text, where `< next-day` orders exactly as
+>    `<= day`). The RLS compile seam reads nothing but the filter today, and its
+>    `using` output reaches typed drivers while its `check` output reaches
+>    `matchesFilterCondition`; which reading it applies is measured on the card
+>    that wires it.
+> 8. **Windows.** An explicit `dateRange` window end takes this rule too; a
+>    resolved preset window states its own upper reading and never does
+>    (#16322). A window is not a `FilterCondition`, so it reaches the lowering
+>    only once its face expresses it as the `{ $gte, $lte }` pair the ObjectQL
+>    strategy already hands the engine; until then that face's window arm is one
+>    of the interim copies below.
+> 9. **Interim state.** Until a face's deletion card lands, the face keeps its
+>    own copy of the rule: the emitters listed above and the others the
+>    investigation counted, 41 call sites in 10 face files at `origin/main`
+>    `97005aed04`. A copy is idempotent on lowered input — the lowering turns
+>    each bare-day `$lte` it applies to into a `$lt`, leaves no `$between`, and
+>    no copy rewrites a `$lt`, so a bound is widened at most once. Each copy is
+>    removed by its
+>    lane's deletion card, queued as the seam that feeds that face lands (the
+>    ruling's order of work, step 4); none is left without one.
+> 10. **Open.** Unmeasured, and recorded by the ruling as a confidence gap:
+>     whether an in-repo direct driver caller, or a filter composed after a
+>     seam, carries a bare-day upper bound that a deleted copy would have
+>     widened.
 
 ### D-D2 — Consequences for D-A3
 

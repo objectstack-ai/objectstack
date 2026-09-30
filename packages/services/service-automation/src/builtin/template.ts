@@ -16,13 +16,13 @@
  *   {round(x)} {floor(x)} {ceil(x)}
  *   {abs(x)} {min(a, b)} {max(a, b)}
  *                             → the CEL stdlib's numeric six, names and
- *                               semantics mirrored 1:1 (#11060 — see
+ *                               semantics mirrored 1:1 (commit 815585513 — see
  *                               KNOWN_EXPRESSION_FUNCTIONS below)
  *
  * Anything that fails to resolve becomes the literal `null` value (for
  * single-token templates) or the empty string (for embedded substitution),
  * matching the behavior of common low-code formula engines — with ONE loud
- * exception (#11060): an identifier in CALL position (`name(…)`) that is not a
+ * exception (commit 815585513): an identifier in CALL position (`name(…)`) that is not a
  * supported function throws {@link FlowExpressionFunctionError} instead of
  * being rewritten to `null`. Before that diagnostic, `ROUND(…)` /
  * `Math.round(…)` / `(x).toFixed(2)` all compiled to `null(…)`, the TypeError
@@ -42,11 +42,11 @@ import { markGuardRefusal } from '../guard-refusal.js';
 export type VariableMap = Map<string, unknown>;
 
 /**
- * A function-shaped defect in a flow VALUE expression (#11060) — an unknown
+ * A function-shaped defect in a flow VALUE expression (commit 815585513) — an unknown
  * name in call position, a supported name called at the wrong arity, or an
  * argument outside the function's domain.
  *
- * This is the LOUD half of the #11060 ruling: the silent-`null` rewrite of
+ * This is the LOUD half of the ruling commit 815585513 records: the silent-`null` rewrite of
  * unknown identifiers hid every one of these as an `undefined` field write.
  * The error is a guard refusal (#3863) — the metadata (the authored
  * expression) is wrong, re-running the flow unchanged can never succeed, and
@@ -68,7 +68,7 @@ export class FlowExpressionFunctionError extends Error {
 }
 
 /**
- * The value-expression function table (#11060) — maintainer ruling 2026-08-23:
+ * The value-expression function table (commit 815585513) — maintainer ruling 2026-08-23:
  * exactly `round` / `floor` / `ceil` / `abs` / `min` / `max`, every name and
  * semantic mirrored **1:1 from the CEL stdlib** (`@objectstack/formula`
  * `src/stdlib.ts`, "Numbers" block), ⛔ no second semantics invented. A parity
@@ -113,7 +113,7 @@ function requireArity(fn: string, args: unknown[]): void {
     if (args.length !== want) {
         // cel-js refuses the same call with "no matching overload" — same
         // outcome, message written for self-correction (ADR-0032 §1d). The
-        // `round(x, 2)` precision form is THE anticipated misuse (#11060), so
+        // `round(x, 2)` precision form is THE anticipated misuse (commit 815585513), so
         // its refusal carries the supported spelling.
         const precisionHint = fn === 'round' && args.length === 2
             ? ' There is no precision form — the CEL stdlib\'s round() is integer-only; for N-decimal rounding write round(x * 100) / 100.0 (scale 2). Keep the decimal point: in CEL round() returns an int and int / int is integer division, so / 100 drops the decimals there, while / 100.0 is right in both dialects.'
@@ -281,7 +281,7 @@ function resolveToken(token: string, variables: VariableMap, context: Automation
         // Don't substitute reserved literals
         if (match === 'true' || match === 'false' || match === 'null' || match === 'undefined') return match;
         // CALL position (`name(…)`) resolves against the function table, never
-        // against flow variables (#11060). A known name stays literal — it is
+        // against flow variables (commit 815585513). A known name stays literal — it is
         // bound as a Function parameter below. An unknown one is the loud half
         // of the ruling: refuse with a named error instead of the old `null`
         // rewrite, whose swallowed TypeError wrote the field as `undefined`.
@@ -307,7 +307,7 @@ function resolveToken(token: string, variables: VariableMap, context: Automation
     } catch (err) {
         // The named diagnostics (arity / domain, thrown inside a table
         // function) must escape — swallowing them here would re-create the
-        // exact silence #11060 removes. Everything else (junk syntax after
+        // exact silence commit 815585513 removed. Everything else (junk syntax after
         // substitution) keeps the documented fail-soft contract.
         if (err instanceof FlowExpressionFunctionError) throw err;
         return undefined;

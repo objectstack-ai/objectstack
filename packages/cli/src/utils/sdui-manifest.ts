@@ -230,6 +230,50 @@ export function resolveSduiManifest(
 }
 
 /**
+ * `os serve`'s half of the save door's page compile (#20312, ADR-0080 §5):
+ * hand the deployment's manifest to the runtime once, at boot, or say once why
+ * there is none.
+ *
+ * `register` receives the manifest when {@link resolveSduiManifest} answers
+ * `resolved` — `os serve` registers it under `@objectstack/metadata-protocol`'s
+ * `SDUI_MANIFEST_SERVICE`, where the save door reads it per publish and
+ * compiles every html page's `source` against it. For `absent` and `unusable`
+ * nothing is registered, the boot continues, and the returned line is the one
+ * thing the host prints: without a manifest the save door stores an html page
+ * as it always did, with its source and `requires` unjudged, and AGENTS.md
+ * "Route & surface ownership" rule 3 says that absence is said once at boot,
+ * naming the remedy. `undefined` when a manifest was registered.
+ *
+ * ⛔ An `unusable` manifest is not refused here the way the authoring commands
+ * refuse it ({@link resolveJsxGateManifest}): those judge a project, and their
+ * author asked for full validation; a server that refused to boot over it would
+ * take the whole deployment down for one damaged file. It is named in the line
+ * instead.
+ *
+ * `projectDir` is the directory of the config being served, as for the
+ * authoring commands; `resolution` is the pins' seam.
+ */
+export function registerDeploymentSduiManifest(
+  register: (manifest: unknown) => void,
+  projectDir: string,
+  resolution: SduiManifestResolution = resolveSduiManifest(projectDir),
+): string | undefined {
+  if (resolution.status === 'resolved') {
+    register(resolution.manifest);
+    return undefined;
+  }
+  const why =
+    resolution.status === 'unusable'
+      ? `${resolution.path} is not a usable SDUI component manifest: ${resolution.reason}`
+      : `no SDUI component manifest at ${resolution.lookedAt.join(' or ')}`;
+  return (
+    `Page source and \`requires\` not validated at save: ${why}. Html pages are stored without being ` +
+    `compiled against this deployment's components — add ${join(projectDir, PROJECT_SDUI_MANIFEST_FILE)} ` +
+    `or install @objectstack/console with its manifest.`
+  );
+}
+
+/**
  * Every stack the JSX gate is handed in one run of `os validate` / `os build` /
  * `os lint`, from the stack the command parsed: the union run's
  * `authoringRuleUnionStack()` fold, then each `packages[]` body as the

@@ -14,14 +14,13 @@ import { hasDanglingLikeEscape, hasNulInLikePattern, likePatternToRegExp } from 
 // the ruled 「is empty」 table, asked of the spec by the live query path.
 import { expandEmptyOperator, type ValueShapeFieldDef } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
-import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
+import { Logger, createLogger, nextUtcCalendarDay, isUnboundedAbove, compensatedSum } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
 import {
   assertSingleTenantPosture,
   assertObjectsNotTenantScoped,
   assertCallNotTenantScoped,
 } from './memory-tenancy-guard.js';
-import { getValueByPath } from './memory-matcher.js';
 import {
   assertFilterConditionShape,
   filterArrayReachedDriverError,
@@ -112,7 +111,7 @@ interface LoweredWrite {
  * | lowered key | written by |
  * |---|---|
  * | `$eq`  | `$eq`, `$null: true`,  `$exists: false` |
- * | `$ne`  | `$ne`, `$null: false`, `$exists: true`  |
+ * | `$ne`  | `$ne`, `$null: false`, `$exists: true`, `$lte` (the LAST supported day, `9999-12-31` — #20600: no bound, a value) |
  * | `$gte` | `$gte`, `$between` |
  * | `$lte` | `$lte`, `$between` |
  * | `$lt`  | `$lt`, `$lte` (BARE CALENDAR DAY — #4042's half-open rewrite), `$between` (bare-day max) |
@@ -131,9 +130,10 @@ interface LoweredWrite {
  * key). Taken key → the write becomes its own `$and` branch on the same field,
  * where both constraints survive. That is exactly the guard #13195 landed for
  * `$exists` alone, generalised to every writer rather than restated per
- * operator — the reference matcher (`memory-matcher.ts`), which loops the
- * operators and therefore CANNOT express this defect, is the oracle both
- * agree with.
+ * operator — the reference matcher (`memory-matcher.ts`, retired since #5930
+ * step 4), which looped the operators and therefore COULD NOT express this
+ * defect, was the oracle; `memory-operator-key-clobber.test.ts` keeps its
+ * answers as literals.
  *
  * ## Why rank, and not author order
  *
@@ -263,9 +263,10 @@ export interface InMemoryDriverConfig {
  *
  *  - `projectFields` skips `undefined` values, so the same stored row answered
  *    `'status' in row === false` under a projection and `true` without one;
- *  - the matcher reads it as absent — measured, `{ status: { $exists: true } }`
- *    excludes it and `{ status: { $null: true } }` includes it, exactly as for
- *    a row that never carried the key at all.
+ *  - the reference matcher (retired since #5930 step 4) read it as absent —
+ *    measured, `{ status: { $exists: true } }` excluded it and
+ *    `{ status: { $null: true } }` included it, exactly as for a row that
+ *    never carried the key at all.
  *
  * So the returned row was the only surface still claiming the key was present.
  *
@@ -298,6 +299,18 @@ function withoutUndefinedOwnKeys<T extends Record<string, any>>(record: T): T {
     delete out[key];
   }
   return (out as T) ?? record;
+}
+
+/**
+ * Read a nested property by dot-notation (`"user.name"`).
+ *
+ * [#5930 step 4] Lived in `memory-matcher.ts` and was the ONE symbol this
+ * driver imported from it; moved here, byte-for-byte, when ruling D6 retired
+ * that reference matcher (no production caller).
+ */
+function getValueByPath(obj: any, path: string): any {
+  if (!path.includes('.')) return obj[path];
+  return path.split('.').reduce((o, i) => (o ? o[i] : undefined), obj);
 }
 
 /**
@@ -1353,9 +1366,10 @@ export class InMemoryDriver implements IDataDriver {
         return { [op]: conditions };
       }
       // MongoDB/FilterCondition format: { field: value } or { field: { $op: value } }
-      // [#5324/#5328] Shape first, then translate — the SAME gate the reference
-      // matcher runs (`filter-refusal.ts`), so the two faces cannot answer one
-      // filter differently again. It must run before `normalizeFilterCondition`
+      // [#5324/#5328] Shape first, then translate — the ONE gate every face of
+      // this package runs (`filter-refusal.ts`; the since-retired reference
+      // matcher ran it too), so no two faces can answer one filter differently
+      // again. It must run before `normalizeFilterCondition`
       // and not inside it: the translator recurses per key and would therefore
       // refuse or not refuse depending on where in the tree it gave up.
       assertFilterConditionShape(filters, 'filter');
@@ -1397,7 +1411,11 @@ export class InMemoryDriver implements IDataDriver {
         // compiles half-open (`< 2026-07-29`), which is also order-equivalent
         // to `<=` for plain `YYYY-MM-DD` date values — so no field-type lookup
         // is needed, exactly the argument the preview evaluator uses.
+        // [#20600] On the last supported day there is no next day: every value
+        // is inside the bound, so what `<=` still asks is a value (`$ne: null`,
+        // the `is_not_null` arm below).
         const nextDay = nextUtcCalendarDay(value);
+        if (isUnboundedAbove(nextDay)) return { [field]: { $ne: null } };
         return { [field]: nextDay != null ? { $lt: store(nextDay) } : { $lte: store(value) } };
       }
       case 'in':
@@ -1469,7 +1487,10 @@ export class InMemoryDriver implements IDataDriver {
       case 'between':
         if (Array.isArray(value) && value.length === 2) {
           // Bare-day max → half-open, inheriting `<=`'s whole-day rule (#4042).
+          // [#20600] A max on the last supported day bounds nothing: the range
+          // keeps its minimum alone.
           const nextDay = nextUtcCalendarDay(value[1]);
+          if (isUnboundedAbove(nextDay)) return { [field]: { $gte: store(value[0]) } };
           return {
             [field]: nextDay != null
               ? { $gte: store(value[0]), $lt: store(nextDay) }
@@ -1522,7 +1543,7 @@ export class InMemoryDriver implements IDataDriver {
       }
       if (key === '$not') {
         // [#5324] The whole point of the issue. `$not` is a declared combinator
-        // (spec `LOGICAL_OPERATORS`), `driver-sql` compiles it, `memory-matcher`
+        // (spec `LOGICAL_OPERATORS`), `driver-sql` compiles it, `formula`
         // evaluates it, and `cel-to-filter` EMITS it — a CEL `!expr` in an RLS
         // read scope lowers to `{ $not: {…} }`. Passing it through unchanged
         // meant mingo received a document-level `$not`, which MongoDB does not
@@ -1533,9 +1554,9 @@ export class InMemoryDriver implements IDataDriver {
         // is what `driver-mongodb` rewrites to for the identical reason (#4405).
         // It is also NULL-safe by construction, which is the semantics #5146
         // ruled canonical: a row whose field is null or missing does not satisfy
-        // the inner condition, so `$nor` admits it — the same answer this
-        // package's matcher and `@objectstack/formula` give, and the one
-        // driver-sql was rewritten to match.
+        // the inner condition, so `$nor` admits it — the same answer
+        // `@objectstack/formula` gives (and this package's reference matcher
+        // gave, until retired), and the one driver-sql was rewritten to match.
         //
         // At most one `$not` per node (it is one object key), so this never
         // overwrites a sibling `$nor`, and an input `$nor` cannot reach here —
@@ -1548,8 +1569,8 @@ export class InMemoryDriver implements IDataDriver {
       // Field-level: value may be primitive (implicit eq) or operator object
       if (value && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date) && !(value instanceof RegExp)) {
         // A field spec with no `$` keys is a nested-object COMPARAND, not an
-        // operator map — mingo compares it structurally, `driver-mongodb` says
-        // so explicitly, and the matcher deep-equals it. Handing it to the
+        // operator map — mingo compares it structurally, and `driver-mongodb`
+        // says so explicitly. Handing it to the
         // operator translator would read its field names as operators.
         if (!Object.keys(value).some((k) => k.startsWith('$'))) {
           result[key] = value;
@@ -1716,7 +1737,10 @@ export class InMemoryDriver implements IDataDriver {
           if (!Array.isArray(val) || val.length !== 2) throw malformedBetweenError(field, val, `${path}.$between`);
           put('$gte', store(val[0]));
           // Bare-day max → half-open, inheriting `$lte`'s whole-day rule (#4042).
+          // [#20600] A max on the last supported day bounds nothing: the
+          // range keeps its minimum alone.
           const betweenNextDay = nextUtcCalendarDay(val[1]);
+          if (isUnboundedAbove(betweenNextDay)) break;
           if (betweenNextDay != null) put('$lt', store(betweenNextDay));
           else put('$lte', store(val[1]));
           break;
@@ -1728,8 +1752,13 @@ export class InMemoryDriver implements IDataDriver {
           // [#13524] `$lt` here is a key an AUTHOR can also write — this arm is
           // the member of the clobber class no card had named. See
           // {@link assembleLoweredWrites}.
+          // [#20600] On the last supported day there is no next day: every
+          // value is inside the bound, so what `$lte` still asks is a value —
+          // `$ne: null`, the lowering `$null: false` takes below. Collected like
+          // every other write, so an author's own `$ne` survives beside it.
           const nextDay = nextUtcCalendarDay(val);
-          if (nextDay != null) put('$lt', store(nextDay));
+          if (isUnboundedAbove(nextDay)) put('$ne', null);
+          else if (nextDay != null) put('$lt', store(nextDay));
           else put('$lte', store(val));
           break;
         }
@@ -1999,12 +2028,21 @@ export class InMemoryDriver implements IDataDriver {
           // because "the faces disagree" is this package's recurring defect
           // class (#5374, #6814) and one face aligned alone leaves the other
           // free to keep its own answer.
+          //
+          // [#20544] The addition is `@objectstack/core`'s `compensatedSum`,
+          // the fold objectql's rows path and SQLite add with. It used to be a
+          // naive `reduce`, so on this driver `engine.aggregate` answered two
+          // doubles by path — `0.1 + 0.2 + 0.3` was `0.6000000000000001` here
+          // and `0.6` on the rows path a filtered sibling aggregation forces,
+          // and `having { s: { $eq: 0.6 } }` kept the group on that path alone.
+          // Which values count as addends is untouched: the boolean rule above
+          // and the `typeof === 'number'` gate decide that, the fold only adds.
           case 'sum':
           case 'avg': {
               const nums = values
                   .map(v => (typeof v === 'boolean' ? (v ? 1 : 0) : v))
                   .filter(v => typeof v === 'number');
-              const sum = nums.reduce((a, b) => a + b, 0);
+              const sum = compensatedSum(nums);
               if (func === 'sum') return sum;
               return nums.length > 0 ? sum / nums.length : null;
           }

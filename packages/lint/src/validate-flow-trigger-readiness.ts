@@ -57,9 +57,10 @@
 //      arm it — yet `os validate` never builds the engine, so until this rule
 //      it answered "passed" for a flow no runtime will ever register. It is its
 //      OWN exported rule, `validateFlowApiTriggerSecret` (1h, at the foot of
-//      this file), because it runs on the CLI surface only until #20611 — see
-//      its docblock for why, and see `FLOW_API_TRIGGER_SECRET_MISSING` for why
-//      the judgement is carried here rather than read from the runtime.
+//      this file), because at the runtime publish gate it reads one input the
+//      rest of the family does not (#20611) — see its docblock for why, and see
+//      `FLOW_API_TRIGGER_SECRET_MISSING` for why the judgement is carried here
+//      rather than read from the runtime.
 //
 //   ⚠️ One more rule lived here and is RETIRED (#17396):
 //      `flow-schedule-organization-missing`, a `warning` on a time-triggered
@@ -140,13 +141,14 @@
 // flows keep being served. What IS refused is the dead flow's own publish — and,
 // on the CLI surface, a package build whose stack contains one.
 //
-// ⚠️ All of the above is about `validateFlowTriggerReadiness`. The sixth id,
-// `flow-api-trigger-secret-missing`, lives in `validateFlowApiTriggerSecret` on
-// its own registry entry, which is CLI-only until #20611: the publish gate
-// judges a `/meta` save before the stored `config.secret` the read path withheld
-// is restored, so at that door a signed flow's round trip would read as
-// secretless. That door still stores a secretless flow today, and the engine
-// refuses it at registration.
+// The sixth id, `flow-api-trigger-secret-missing`, lives in
+// `validateFlowApiTriggerSecret` on its own registry entry, which crosses the
+// runtime wall too (#20611) on the same per-write snapshot. It reads one more
+// input there: the publish gate judges a `/meta` save before the stored
+// `config.secret` the read path withheld is restored, so the gate hands the rule
+// the positions that restore fills, and a withheld-and-stored secret reads as
+// present. A secretless `api` flow is refused at that door; a signed flow's
+// round trip is not.
 
 import {
   TimeRelativeTriggerSchema,
@@ -773,8 +775,9 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
 
     // 1h. ⚠️ NOT here — the `api` trigger's secret (#20553) is its own exported
     //     rule, {@link validateFlowApiTriggerSecret} below, on its own registry
-    //     entry: it sits on the OTHER side of the runtime wall (CLI-only until
-    //     #20611), and one rule id sits on ONE side of it.
+    //     entry: at the runtime publish gate it reads the host's
+    //     restored-credential positions (#20611), an input nothing else in this
+    //     family has a use for.
 
     // 2. Auto-triggered flow whose status is 'draft' — authored or defaulted
     //    (defineFlow parses at definition time, so the two are the same here).
@@ -822,25 +825,34 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
  * engine reads its `config` as `{}` and refuses it for the same reason — and is
  * located at `nodes`, since there is no start node to point at.
  *
- * ## Why this is a separate function from {@link validateFlowTriggerReadiness}
+ * ## At the runtime publish gate: a withheld-and-stored secret is present (#20611)
  *
- * A surface boundary, not taste — the registry's `validateSecurityRoleWord`
- * split is the precedent. `validateFlowTriggerReadiness` runs on the runtime
- * publish gate too; this rule cannot, yet (#20611). The flow read path withholds
- * `config.secret` from every served definition (#20552), and `saveMetaItem`
- * restores the stored secret only just before the put — AFTER the runtime
- * authoring gate has judged the body the caller sent. So an ordinary `/meta`
- * GET → edit → PUT of a SIGNED flow reaches the gate secretless, and this rule
- * would refuse a save that keeps the secret. Measured on `825c33ff9f`: with this
- * id at the gate, `protocol.metadata-redaction.test.ts` fails exactly its two
- * round-trip pins; with it dropped there, 26/26 pass. So this id stays CLI-only
- * (`os validate` / `os build` / `os lint`, whose stacks carry the author's own
- * secret) until the gate judges the carried-forward body, and it is split out
- * WHOLE rather than filtered at one entry: one rule id sits on ONE side of the
- * wall. Meanwhile the `/meta` door behaves as it did before this rule existed:
- * it stores a secretless flow, and the engine refuses it at registration.
+ * The flow read path withholds `config.secret` from every served definition
+ * (#20552), and `saveMetaItem` restores the stored secret only just before the
+ * put — AFTER the runtime authoring gate has judged the body the caller sent,
+ * and deliberately so: no gate handles a restored credential. So an ordinary
+ * `/meta` GET → edit → PUT of a SIGNED flow reaches this rule without its
+ * secret, exactly like a flow that never had one. The body alone cannot tell
+ * the two apart; the host can, and the gate passes its answer in as
+ * `options.restoredCredentialPaths` (`AuthoringRuleContext`): the positions the
+ * host's carry-forward will fill from the stored row. The start node's secret
+ * path listed there is WITHHELD AND STORED, and reads as present; one not
+ * listed is judged on the body as sent, so a secret that is absent and not
+ * stored is missing, and the save is refused. The CLI never sets the option —
+ * its stacks carry the author's own secret.
+ *
+ * It is a separate function from {@link validateFlowTriggerReadiness} because
+ * that option is its input alone: the rest of the family judges nothing the
+ * read path withholds.
+ *
+ * @param options.restoredCredentialPaths Stack-relative paths, in this rule's
+ *   own finding-path spelling (`flows[0].nodes[1].config.secret`), that the
+ *   write path restores from the stored row. Positions only, never values.
  */
-export function validateFlowApiTriggerSecret(stack: AnyRec): FlowTriggerReadinessFinding[] {
+export function validateFlowApiTriggerSecret(
+  stack: AnyRec,
+  options: { restoredCredentialPaths?: ReadonlySet<string> } = {},
+): FlowTriggerReadinessFinding[] {
   const findings: FlowTriggerReadinessFinding[] = [];
   recordsOf(stack.flows).forEach((flow, flowIndex) => {
     const flowName = typeof flow.name === 'string' ? flow.name : `#${flowIndex}`;
@@ -848,6 +860,10 @@ export function validateFlowApiTriggerSecret(stack: AnyRec): FlowTriggerReadines
     const config = (start?.node.config ?? {}) as AnyRec;
     const triggerType = typeof config.triggerType === 'string' ? config.triggerType : undefined;
     const bindsApiTrigger = !isArrayRecordTriggerType(config) && resolveFlowTriggerKind(flow) === 'api';
+    const secretPath = start ? `flows[${flowIndex}].nodes[${start.index}].config.secret` : undefined;
+    // [#20611] Withheld and stored ⇒ present: the host restores the stored
+    // secret at exactly this position before the item is persisted.
+    if (secretPath !== undefined && options.restoredCredentialPaths?.has(secretPath)) return;
     const secretProblem = bindsApiTrigger ? describeUnusableSecret(start, config) : undefined;
     if (!secretProblem) return;
     // Which declaration binds it — the engine's own message names the same
@@ -864,9 +880,7 @@ export function validateFlowApiTriggerSecret(stack: AnyRec): FlowTriggerReadines
       severity: 'error',
       rule: FLOW_API_TRIGGER_SECRET_MISSING,
       where: start ? `flow "${flowName}" › start node` : `flow "${flowName}"`,
-      path: start
-        ? `flows[${flowIndex}].nodes[${start.index}].config.secret`
-        : `flows[${flowIndex}].nodes`,
+      path: secretPath ?? `flows[${flowIndex}].nodes`,
       message:
         `binds the inbound api trigger (${binds.join(' and ')}) but ${secretProblem}. An inbound hook ` +
         `is armed only with a per-flow secret that every post is HMAC-verified against (ADR-0041), so the ` +

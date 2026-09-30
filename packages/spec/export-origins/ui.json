@@ -171,6 +171,8 @@
     "ElementRepeaterPropsSchema": "src/ui/component.zod.ts#ElementRepeaterPropsSchema (const)",
     "ElementTextInputPropsSchema": "src/ui/component.zod.ts#ElementTextInputPropsSchema (const)",
     "ElementTextPropsSchema": "src/ui/component.zod.ts#ElementTextPropsSchema (const)",
+    "EmptyState": "src/ui/view.zod.ts#EmptyState (type)",
+    "EmptyStateSchema": "src/ui/view.zod.ts#EmptyStateSchema (const)",
     "ExpandViewResult": "src/ui/view.zod.ts#ExpandViewResult (interface)",
     "ExpandedViewItem": "src/ui/view.zod.ts#ExpandedViewItem (interface)",
     "ExpressionBindableTextKey": "src/ui/expression-bindable-text-keys.zod.ts#ExpressionBindableTextKey (type)",

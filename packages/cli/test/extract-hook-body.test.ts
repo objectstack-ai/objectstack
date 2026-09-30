@@ -113,7 +113,7 @@ describe('extractHookBody', () => {
     expect(() => extractHookBody(fn, 'hook bad')).toThrow(/eval/);
   });
 
-  // ── the `@capabilities` directive, RETIRED (#10917) ─────────────────────
+  // ── the `@capabilities` directive, RETIRED (commit 7940de5e0) ───────────
   //
   // Ruled under ADR-0049 enforce-or-remove: the comment-borne override was read
   // off `String(fn)`, and every ordinary authoring path (`.ts`, `.js`, `.mjs`,
@@ -171,7 +171,7 @@ describe('extractHookBody', () => {
   });
 
   // The #4391 sibling that pinned `crypto.hash` being filtered OUT of an
-  // explicit `@capabilities` override went with the directive (#10917): with no
+  // explicit `@capabilities` override went with the directive (commit 7940de5e0): with no
   // override branch there is no token list to filter, so the guarantee is now
   // structural rather than a case. The inference half of #4391 is still pinned
   // by the test above, which is the route `crypto.hash` could still arrive on.

@@ -46,7 +46,7 @@ export const SEMCONV = {
     // status, elapsedMs}` and no throw signal at all.
     // ⇒ Read the 5xx rate from `http_requests_total{status=~"5.."}` instead.
     // The transport emits that family through the seam, so it covers every
-    // inbound surface (#9650 / #9835 / #10004) and carries the status label
+    // inbound surface (#9650 / #9835 / commit 1e050a5b1) and carries the status label
     // this counter only stood in for. Maintainer ruling 2026-08-20.
 
     // ── Storage — emitted by `@objectstack/service-storage` adapters ──

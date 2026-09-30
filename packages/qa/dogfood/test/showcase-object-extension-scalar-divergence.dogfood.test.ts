@@ -69,10 +69,10 @@
 // Whether a package extension's label should outrank a tenant's Studio rename
 // is a fold-precedence decision the 2026-08-13 ruling did not make, and it is
 // NOT arm B (nothing here proposes dropping scalars from the fold). It was filed
-// as a sub-issue of #8284 — #8460 — and ruled on separately.
+// as a sub-issue of #8284 and ruled on separately (ADR-0029 D9.2a).
 //
 // ══════════════════════════════════════════════════════════════════════════
-// [#8460] THE FOLD LAYER, RULED AND FIXED — THE SECOND PIN IS NOW GREEN
+// [ADR-0029 D9.2a] THE FOLD LAYER, RULED AND FIXED — THE SECOND PIN IS NOW GREEN
 // ══════════════════════════════════════════════════════════════════════════
 //
 // Maintainer ruling, 2026-08-13 (option A, "tenant wins"): an extender's scalar
@@ -244,11 +244,11 @@ describe('dogfood: the object-extension fold and the i18n catalog disagree on sc
         // is not the file's only word about it. This case asserts AGREEMENT and
         // the absence of the catalog string — never which value they agree on —
         // so it held under #8284 (all three served the extension's label, the
-        // tenant's rename lost inside the fold) and it holds under #8460 (all
+        // tenant's rename lost inside the fold) and it holds under ADR-0029 D9.2a (all
         // three serve the tenant's 'Customer', because the extender now yields
         // to a diverged base). That is the point of stating it this way: the
         // convergence #8284 bought is pinned independently of the fold
-        // precedence #8460 then settled, so a regression in either is visible
+        // precedence ADR-0029 D9.2a then settled, so a regression in either is visible
         // here without this case having to be rewritten when the other moves.
         //
         // Performs its own PUT rather than leaning on the case above: that case

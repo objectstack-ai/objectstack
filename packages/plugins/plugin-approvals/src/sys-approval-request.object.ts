@@ -135,13 +135,13 @@ export const SysApprovalRequest = ObjectSchema.create({
     // measured on cloud#1395 as 27 of 27 rows org-less on a walled HotCRM SaaS
     // boot — such a request LOCKED the record it was about while being
     // invisible in every inbox, its owner's included. Subject-first is also
-    // what `sys_audit_log`'s writer already did (#8707 honouring #8287's
+    // what `sys_audit_log`'s writer already did (commit 1408fe385 honouring #8287's
     // ruling), so an approval row and an audit row about the same record now
     // land behind the same wall instead of two.
     //
     // The `sys_api_key` divergence is deliberate and preserved: its
     // `tenancy.organizationField: 'active_organization_id'` (stamp-only,
-    // #8778) wins limb 0 of the shared resolver, while the credential table
+    // commit 7901b2dd2) wins limb 0 of the shared resolver, while the credential table
     // itself stays unwalled (`tenancy.enabled: false`) — who a row is ABOUT
     // and what an object is WALLED by remain different questions.
     organization_id: Field.lookup('sys_organization', {
@@ -197,7 +197,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       //
       // ⚠️ ORDERING CONSTRAINT — this id half is `required: true`, and that
       // makes it ORDER-DEPENDENT in seeds even though a pointer pair
-      // contributes no static ordering edge (#11674, measured against the real
+      // contributes no static ordering edge (commit 1cba33f16, measured against the real
       // engine in `packages/objectql/src/engine-seed-required-deferral.test.ts`):
       // the seed loader defers an unresolvable reference by DELETING the column
       // from the pass-1 insert, required-validation rejects that row, and pass 2
@@ -205,7 +205,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       // an OPTIONAL id half order-independent (`sys_audit_log`) does not reach
       // this one. ⇒ SEED THE TARGET DATASET FIRST. The failure if you do not is
       // loud in three places — a write error naming this column, a
-      // dropped-deferral error, and `success: false` — and since #11674 the
+      // dropped-deferral error, and `success: false` — and since commit 1cba33f16 the
       // loader also WARNS at load time, before the engine rejects the row.
       referenceVia: 'object_name',
     }),

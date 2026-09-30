@@ -52,6 +52,7 @@ import {
   NUMBER_COMPARAND_DOOR_FIXTURE_OBJECT,
   NUMBER_COMPARAND_DOOR_LIST_OPERATORS,
   NUMBER_COMPARAND_DOOR_SCALAR_OPERATORS,
+  lowerFilterCondition,
   type EngineAggregateOptions,
   type EngineQueryOptions,
   type FilterCondition,
@@ -67,6 +68,19 @@ import {
 } from './number-comparand-declared-type-door.js';
 
 const OBJECT = NUMBER_COMPARAND_DOOR_FIXTURE_OBJECT;
+
+/**
+ * [ADR-0053 D-D1, amended — #5930] What a driver receives is the door's output
+ * after the engine's shared lowering (the NULL-polarity guards on `$ne` / `$nin`
+ * / `$notContains`, the whole-day rule on a declared `datetime`), which runs
+ * after this door on every verb. The door adds nothing beyond that, so a pin on
+ * the driver's input compares against the same lowering of the door's answer.
+ */
+const lowered = (where: unknown): unknown =>
+  lowerFilterCondition(where, {
+    isDatetimeColumn: (column) =>
+      (NUMBER_COMPARAND_DOOR_FIXTURE.fields as Record<string, { type?: string } | undefined>)[column]?.type === 'datetime',
+  });
 
 interface SeenRead { ast: any }
 
@@ -195,7 +209,7 @@ describe('[#20351] the number-comparand declared-type door at the engine collect
       const asWritten = JSON.stringify(filter);
       await expect(engine.find(OBJECT, { where: filter }), c.name).resolves.toBeDefined();
       expect(reads, `${c.name}: the driver must have been read`).toHaveLength(1);
-      expect(reads[0]?.ast?.where, `${c.name}: the driver must receive the number`).toEqual(c.expectedFilter());
+      expect(reads[0]?.ast?.where, `${c.name}: the driver must receive the number`).toEqual(lowered(c.expectedFilter()));
       // Copy-on-write: the filter belongs to the caller (view metadata, flow config).
       expect(JSON.stringify(filter), `${c.name}: the caller's filter must not be edited`).toBe(asWritten);
     }
@@ -207,7 +221,7 @@ describe('[#20351] the number-comparand declared-type door at the engine collect
       const filter = c.filter();
       await expect(engine.find(OBJECT, { where: filter }), c.name).resolves.toBeDefined();
       expect(reads, `${c.name}: the driver must have been read`).toHaveLength(1);
-      expect(reads[0]?.ast?.where, `${c.name}: the filter must reach the driver unchanged`).toEqual(filter);
+      expect(reads[0]?.ast?.where, `${c.name}: the filter must reach the driver unchanged`).toEqual(lowered(filter));
     }
   });
 
@@ -291,7 +305,7 @@ describe('[#20351] the number-comparand declared-type door at the engine collect
       expect(reads).toHaveLength(0);
     }
     await engine.find(OBJECT, { where: { $or: [{ f_text: 'a' }, { $not: { f_number: { $in: ['12', 5] } } }] } });
-    expect(reads[0]?.ast?.where).toEqual({ $or: [{ f_text: 'a' }, { $not: { f_number: { $in: [12, 5] } } }] });
+    expect(reads[0]?.ast?.where).toEqual(lowered({ $or: [{ f_text: 'a' }, { $not: { f_number: { $in: [12, 5] } } }] }));
   });
 
   it('refuses a {placeholder} against a number field UNRESOLVED — before the token resolver, in the door\'s words', async () => {
@@ -508,12 +522,15 @@ describe('[#20351] the number-comparand declared-type door at the engine collect
 
   it('GUARD the having walk narrows copy-on-write and judges only columns classed numeric', () => {
     const classes = new Map([['total', 'numeric' as const], ['label', 'text' as const], ['unknown', undefined]]);
+    // [#20546] The same reading's types, for the walk's no-operator-object arm
+    // (nothing here is an object without a `$` key, so it refuses nothing).
+    const types = new Map<string, string | undefined>([['total', 'number'], ['label', 'text'], ['unknown', undefined]]);
     const having = { total: { $in: ['1', 2] }, label: { $eq: 'abc' }, unknown: { $eq: 'abc' } };
-    const narrowed = narrowHavingNumberComparands(OBJECT, having, classes);
+    const narrowed = narrowHavingNumberComparands(OBJECT, having, classes, types);
     expect(narrowed).toEqual({ total: { $in: [1, 2] }, label: { $eq: 'abc' }, unknown: { $eq: 'abc' } });
     expect(having.total.$in).toEqual(['1', 2]);
     const untouched = { total: { $gt: 5 } };
-    expect(narrowHavingNumberComparands(OBJECT, untouched, classes)).toBe(untouched);
+    expect(narrowHavingNumberComparands(OBJECT, untouched, classes, types)).toBe(untouched);
   });
 
   // ── the REST doors that reach findData ──────────────────────────────────

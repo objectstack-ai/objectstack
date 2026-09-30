@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// #14676 — `integration/ErrorMappingConfig` (`rules`, `defaultCategory`,
+// Commit 13c48c2a5 — `integration/ErrorMappingConfig` (`rules`, `defaultCategory`,
 // `unmappedBehavior`, `logUnmapped`) leaves with its only carrier:
 // `ConnectorSchema.errorMapping`, tombstoned in this same major under ADR-0049
 // enforce-or-remove (`RETIRED_KEYS_BY_MAJOR[18]`). Nothing outside the declaring

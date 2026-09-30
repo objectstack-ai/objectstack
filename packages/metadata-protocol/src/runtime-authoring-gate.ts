@@ -62,6 +62,18 @@ import {
 // may only reach that package through its kernel-safe `/runtime` entry (the
 // wiring guard's third invariant), and `walkFlowNodes` is not on it.
 import { FLOW_REGION_SLOTS_BY_TYPE } from '@objectstack/spec/automation';
+// [#20312] The ADR-0080 compiler itself — the function behind the CLI-only
+// `validateJsxPages` rule, imported rather than re-implemented, so the save
+// door and `os validate` judge a page's source with one compiler. Imported from
+// its own package, never through `@objectstack/lint`: the wiring guard allows
+// this file only the kernel-safe `/runtime` entry and no registry rule by name.
+// The parser is pure (no dependencies, never executes the source), so it adds
+// nothing the kernel boot path may not load (`runtime-lazy-deps.test.ts`).
+import {
+    compile as compileSduiSource,
+    type CompileResult as SduiCompileResult,
+    type Manifest as SduiManifest,
+} from '@objectstack/sdui-parser';
 import type { RuntimeAuthoringIssue } from '@objectstack/spec/api';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 
@@ -329,7 +341,8 @@ export function findPlatformScheduleOrgGaps(args: {
             hint:
                 `Declare the owning organization on this node: `
                 + `config.fields.${ORGANIZATION_FIELD}. An author-supplied value always wins over the `
-                + `engine's fill (#6153), so this is the one place the answer can come from for a `
+                + `engine's fill, and the engine fills only an organization the run resolved — so this is `
+                + `the one place the answer can come from for a `
                 + `scheduled run. A NULL ${ORGANIZATION_FIELD} is not merely untidy: an `
                 + `(${ORGANIZATION_FIELD}, …) unique index does not constrain across NULL and org-scoped `
                 + `queries never see the row. Alternatively, publish this flow into an organization, or `
@@ -517,6 +530,163 @@ export function mergePendingDeclarations(
     return [...kept, ...pending];
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// #20312 — an html page's source is compiled at save against the deployment's
+// SDUI component manifest (ADR-0080 §5).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The service key a host registers its deployment's ADR-0080 SDUI component
+ * manifest under — the parsed `sdui.manifest.json` object, a JSON object with a
+ * `components` map. `os serve` resolves it once at boot through the CLI's
+ * `resolveSduiManifest` and registers the result here; a host that registers
+ * nothing keeps the save door exactly as it was before this key existed.
+ *
+ * A plain service key, deliberately not a `CoreServiceName` slot: the manifest
+ * is a fact about the console this deployment serves, not a kernel capability.
+ * The protocol reads it per publish (`resolveSduiManifest` on the protocol,
+ * the `resolveFlowCanonicalizer` pattern), never at construction, so a value
+ * registered after the protocol is assembled is still seen by the next publish.
+ */
+export const SDUI_MANIFEST_SERVICE = 'sdui-manifest' as const;
+
+/**
+ * The gate-local rule that refuses a page whose hand-written `requires`
+ * disagrees with the namespaces its compiled source uses. A namespace the
+ * deployment's manifest does not carry at all always disagrees: the compiled
+ * `requires` holds only namespaces of components the manifest declares.
+ */
+export const PAGE_REQUIRES_DISAGREES_WITH_SOURCE = 'page-requires-disagrees-with-source';
+
+/**
+ * The `rulesRun` name for the save door's own compile of an html page's
+ * source. Its findings carry the compiler's diagnostic codes as `jsx-CODE` —
+ * the rule ids `os validate` / `os build` report for the same source against
+ * the same manifest, so a page refused here is refused under the same name on
+ * the CLI.
+ */
+export const HTML_PAGE_SOURCE_COMPILE = 'html-page-source-compile';
+
+/** The page kinds whose `source` is constrained JSX (the deprecated `jsx` spells `html`). */
+const COMPILED_PAGE_KINDS: ReadonlySet<unknown> = new Set(['html', 'jsx']);
+
+/**
+ * Whether a value can be compiled against: an object with a `components` map,
+ * the one key `compile()` dereferences unconditionally — the same floor the
+ * CLI's `resolveSduiManifest` holds a manifest file to.
+ */
+export function isUsableSduiManifest(value: unknown): value is SduiManifest {
+    return isRec(value) && isRec(value.components);
+}
+
+/** The compile of one html page body, or `undefined` when the save door does not compile it. */
+function compileHtmlPage(
+    type: string,
+    body: unknown,
+    sduiManifest: unknown,
+): { name: string; result: SduiCompileResult } | undefined {
+    if (type !== 'page' || !isRec(body) || !COMPILED_PAGE_KINDS.has(body.kind)) return undefined;
+    if (!isUsableSduiManifest(sduiManifest)) return undefined;
+    // An empty source is PageSchema's refusal, already made before this gate.
+    if (typeof body.source !== 'string' || body.source.trim() === '') return undefined;
+    const name = typeof body.name === 'string' && body.name !== '' ? body.name : 'page';
+    return { name, result: compileSduiSource(body.source, sduiManifest) };
+}
+
+const sameNamespaces = (a: readonly string[], b: readonly string[]): boolean => {
+    const left = new Set(a);
+    const right = new Set(b);
+    return left.size === right.size && [...left].every((ns) => right.has(ns));
+};
+
+/**
+ * Judge an html page's source against the deployment's manifest: every
+ * compiler diagnostic becomes a finding (errors refuse, warnings advise), and
+ * a hand-written `requires` that disagrees with the compiled one is refused
+ * with each disagreeing namespace named.
+ *
+ * Returns `null` when nothing was judged — not a page, not an html page, or
+ * no usable manifest — so the caller discloses these rules only when they ran.
+ */
+export function findHtmlPageSourceGaps(args: {
+    type: string;
+    body: unknown;
+    sduiManifest?: unknown;
+}): AuthoringFinding[] | null {
+    const compiled = compileHtmlPage(args.type, args.body, args.sduiManifest);
+    if (!compiled) return null;
+    const { name, result } = compiled;
+    const findings: AuthoringFinding[] = result.diagnostics.map((d) => ({
+        severity: d.severity === 'error' ? 'error' : 'warning',
+        rule: `jsx-${d.code}`,
+        where: d.tag ? `page "${name}" › <${d.tag}>` : `page "${name}"`,
+        path: `pages.${name}.source`,
+        message: d.message,
+        hint: 'The source is compiled at save against the SDUI component manifest of the console this '
+            + 'deployment serves — fix the JSX; a component the manifest does not declare needs the plugin '
+            + 'that provides it installed in that console.',
+    }));
+    // A source that does not compile has no trustworthy namespace set to
+    // compare against; its own errors are the verdict.
+    if (!result.ok) return findings;
+
+    const declared = (args.body as AnyRec).requires;
+    if (declared === undefined) return findings;
+    const declaredList: unknown[] = Array.isArray(declared) ? declared : [declared];
+    const declaredNames = declaredList.filter((ns): ns is string => typeof ns === 'string');
+    if (declaredNames.length === declaredList.length && sameNamespaces(declaredNames, result.requires)) {
+        return findings;
+    }
+
+    const manifestNamespaces = new Set(
+        Object.values((args.sduiManifest as SduiManifest).components)
+            .map((c) => c?.namespace)
+            .filter((ns): ns is string => typeof ns === 'string'),
+    );
+    const used = new Set(result.requires);
+    const unprovided = declaredNames.filter((ns) => !manifestNamespaces.has(ns));
+    const unused = declaredNames.filter((ns) => manifestNamespaces.has(ns) && !used.has(ns));
+    const missing = result.requires.filter((ns) => !declaredNames.includes(ns));
+    const clauses = [
+        ...unprovided.map((ns) => `'${ns}' is a namespace no component in this deployment's manifest carries`),
+        ...unused.map((ns) => `'${ns}' is not used by the source`),
+        ...missing.map((ns) => `'${ns}' is used by the source but not listed`),
+    ];
+    if (declaredNames.length !== declaredList.length) clauses.push('every entry must be a namespace string');
+    findings.push({
+        severity: 'error',
+        rule: PAGE_REQUIRES_DISAGREES_WITH_SOURCE,
+        where: `page "${name}"`,
+        path: `pages.${name}.requires`,
+        message: `\`requires\` disagrees with the source: ${clauses.join('; ')}.`,
+        hint: `\`requires\` is derived from the source at save — omit it, or write exactly `
+            + `${JSON.stringify(result.requires)}.`,
+    });
+    return findings;
+}
+
+/**
+ * The body to persist for an html page saved on a host with a manifest: its
+ * `requires` stamped from the compiled source. Returned unchanged — the same
+ * reference — when there is nothing to stamp: not an html page, no usable
+ * manifest, a source that does not compile, or a hand-written `requires` that
+ * disagrees. The last two are refusals on a publish and are left as written on
+ * a draft (drafts are not gated, #4463 D1), so the draft's own publish refuses
+ * them rather than a stamp silently replacing what the author wrote.
+ */
+export function stampHtmlPageRequires(type: string, body: unknown, sduiManifest: unknown): unknown {
+    const compiled = compileHtmlPage(type, body, sduiManifest);
+    if (!compiled || !compiled.result.ok) return body;
+    const declared = (body as AnyRec).requires;
+    if (declared !== undefined) {
+        const agrees = Array.isArray(declared)
+            && declared.every((ns) => typeof ns === 'string')
+            && sameNamespaces(declared as string[], compiled.result.requires);
+        if (!agrees) return body;
+    }
+    return { ...(body as AnyRec), requires: [...compiled.result.requires] };
+}
+
 const toIssue = (f: AuthoringFinding): RuntimeAuthoringIssue => ({
     rule: f.rule,
     path: f.path,
@@ -621,7 +791,15 @@ export function evaluateRuntimeAuthoringGate(args: {
      * publish.
      */
     pending?: RuntimePendingDeclarations;
-    /** ADR-0080 SDUI manifest when the host has one. */
+    /**
+     * ADR-0080 SDUI manifest when the host has one — the value registered under
+     * {@link SDUI_MANIFEST_SERVICE}, read by the caller per publish.
+     *
+     * [#20312] A usable one (a `components` map) makes the gate compile an html
+     * page's `source` against it ({@link findHtmlPageSourceGaps}): an unknown
+     * component or a `requires` that disagrees with the source refuses the
+     * write. Absent, an html page is judged exactly as before.
+     */
     sduiManifest?: unknown;
     /**
      * [#9612] The package this write belongs to, and the transitive closure of
@@ -673,6 +851,22 @@ export function evaluateRuntimeAuthoringGate(args: {
      * double), that judgement is skipped and every rule answers as before.
      */
     judgeFilter?: IObjectQLEngine['judgeFilter'];
+    /**
+     * [#20611] The positions in `body` where the write path will restore a
+     * credential the read path withheld — dotted, item-relative
+     * (`nodes.1.config.secret`), as `redactedPathsCarriedForward` answers
+     * them from the stored row. The fourth input of the #6285 kind: a fact only
+     * the host holds (the row at rest), gathered by the impure caller and passed
+     * in so this function stays pure.
+     *
+     * The carry-forward itself runs AFTER this gate, deliberately, so no rule
+     * handles a restored credential; this hands the rules the positions and
+     * nothing else. A rule judging whether a credential is present then reads a
+     * listed position as present (withheld and stored), and an unlisted one on
+     * the body as sent (absent and not stored is missing). Absent, every
+     * position is judged on the body as sent.
+     */
+    restoredCredentialPaths?: readonly string[];
 }): RuntimeAuthoringVerdict {
     // D1 — drafts are never gated. Publishing one runs this same function.
     // No rules ran, so there is nothing to report on either half.
@@ -696,6 +890,9 @@ export function evaluateRuntimeAuthoringGate(args: {
         },
         ...(args.sduiManifest !== undefined ? { sduiManifest: args.sduiManifest } : {}),
         ...(args.judgeFilter !== undefined ? { judgeFilter: args.judgeFilter } : {}),
+        ...(args.restoredCredentialPaths !== undefined
+            ? { restoredCredentialPaths: args.restoredCredentialPaths }
+            : {}),
     });
 
     // [#6285] The gate-local refusal, folded into the SAME verdict set as the
@@ -705,7 +902,7 @@ export function evaluateRuntimeAuthoringGate(args: {
     // wiring guard's invariant that this file names no REGISTRY rule is
     // untouched, and everything downstream — the 422, the issues array, the
     // migration hatch, the `rulesRun` disclosure — treats it identically.
-    const localIssues = findPlatformScheduleOrgGaps({
+    const scheduleOrgGaps = findPlatformScheduleOrgGaps({
         type: args.type,
         name: args.name,
         body: args.body,
@@ -713,15 +910,36 @@ export function evaluateRuntimeAuthoringGate(args: {
         orgWallEnforced: args.orgWallEnforced === true,
     });
 
+    // [#20312] The save door's own compile of an html page's source against
+    // the deployment's manifest (ADR-0080 §5) — gate-local for the reason the
+    // #6285 refusal above is: the manifest is a fact about the deployment, and
+    // the registry's `validateJsxPages` is CLI-only. Same verdict set, same
+    // 422, same hatch. `null` when it did not run (no usable manifest, not an
+    // html page), which keeps an html page on a manifest-less host judged
+    // exactly as before.
+    const pageSourceFindings = findHtmlPageSourceGaps({
+        type: args.type,
+        body: args.body,
+        ...(args.sduiManifest !== undefined ? { sduiManifest: args.sduiManifest } : {}),
+    });
+    const localIssues = [
+        ...scheduleOrgGaps,
+        ...(pageSourceFindings ?? []).filter((f) => f.severity === 'error').map(toIssue),
+    ];
+    const advisoryFindings = [
+        ...result.advisories,
+        ...(pageSourceFindings ?? []).filter((f) => f.severity !== 'error'),
+    ];
+
     // [#4717] The advisory half of D3, now with somewhere to go. The deduped
     // log below is KEPT — it is the operator's channel and costs one Set lookup
     // — but it is no longer the only one: these travel back to the caller in
     // `advisories` and `saveMetaItem` puts them on the 2xx response, which is
     // the channel the Studio / MCP / AI author this gate exists for can
     // actually read.
-    const advisories = result.advisories.map(toIssue);
+    const advisories = advisoryFindings.map(toIssue);
 
-    for (const advisory of result.advisories) {
+    for (const advisory of advisoryFindings) {
         const key = `${args.type}|${args.name}|${advisory.rule}|${advisory.path}`;
         if (_advisoryWarned.has(key)) continue;
         _advisoryWarned.add(key);
@@ -762,9 +980,11 @@ export function evaluateRuntimeAuthoringGate(args: {
     // applicable to this type. `rulesRun` exists so a caller can tell "clean"
     // from "nothing ran"; a judgement that can refuse a write and never appears
     // here would reintroduce exactly the ambiguity it was added to remove.
-    const rulesRun = args.type === 'flow'
-        ? [...result.rulesRun, PLATFORM_SCHEDULE_CREATE_RECORD_ORG_MISSING]
-        : result.rulesRun;
+    const rulesRun = [
+        ...result.rulesRun,
+        ...(args.type === 'flow' ? [PLATFORM_SCHEDULE_CREATE_RECORD_ORG_MISSING] : []),
+        ...(pageSourceFindings !== null ? [HTML_PAGE_SOURCE_COMPILE, PAGE_REQUIRES_DISAGREES_WITH_SOURCE] : []),
+    ];
 
     if (unlintedWritesAllowed()) {
         // Loud by construction (#4463 acceptance): the operator who set the

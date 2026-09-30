@@ -495,7 +495,7 @@ export class ObjectQLPlugin implements Plugin {
       });
       this.subscribeMetadataRebind(ctx, protocolShim);
     } else {
-      ctx.logger.info('registerProtocol=false — protocol assembly delegated to MetadataProtocolPlugin (ADR-0076 Step 2, #2462)');
+      ctx.logger.info('registerProtocol=false — protocol assembly delegated to MetadataProtocolPlugin (ADR-0076 Step 2)');
     }
 
     // ADR-0057: the platform-owned LifecycleService. Registered from the

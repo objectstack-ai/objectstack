@@ -82,7 +82,7 @@ import {
 } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
-// [#8422] The repo's ONE single-record 404 (#4435/#5138/#7867). Imported from
+// [commit 4810dd628] The repo's ONE single-record 404 (#4435/#5138/#7867). Imported from
 // `@objectstack/core` rather than re-minted here or reached via
 // `@objectstack/metadata-protocol`'s re-export: this package already declares
 // a direct `@objectstack/core` dependency (`plugin.ts` imports from it too),
@@ -391,7 +391,7 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // nothing is the #5138/#5581 defect the HTTP path already paid for: an
       // integrator reading a success receipt records the change as landed.
       // `registerObjectTools` turns a throw into a tool error, so the caller
-      // is told. [#8422] Throws the repo's ONE not-found envelope
+      // is told. [commit 4810dd628] Throws the repo's ONE not-found envelope
       // (`recordNotFoundError`, `@objectstack/core`) rather than a bare
       // `Error`, so a stdio caller sees the same `RECORD_NOT_FOUND` / 404 the
       // HTTP bridge's `callData` path throws for the identical miss.

@@ -15,7 +15,7 @@
  * to appear exactly ONCE — the payload now carries the notice, and the terminal
  * gains no second stderr line for it.
  *
- * #12125 — `os validate --json`'s FAILURE payloads dropped the `conversions`
+ * The defect commit 79cf692b0 fixed — `os validate --json`'s FAILURE payloads dropped the `conversions`
  * field the run had ALREADY COMPUTED, on all five of its failure exits.
  *
  * The same "computed, then dropped on a failure exit" shape as the `warnings`
@@ -394,7 +394,7 @@ describe('#12125 — every `os validate --json` failure exit carries the convers
     // ⛔ NOT an argument that folding is wrong. Whether the two should become
     // one field is an OPEN question this card was not given authority to
     // settle; this records the shape as-shipped so a fold happens deliberately
-    // rather than as a side effect. Green both before and after #12125.
+    // rather than as a side effect. Green both before and after commit 79cf692b0.
     const run = await runCli(['validate', '--json'], dirs.docsfail);
     const payload = payloadOf(run, 'docsfail');
     const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];

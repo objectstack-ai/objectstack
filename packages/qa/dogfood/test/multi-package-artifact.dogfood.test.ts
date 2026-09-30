@@ -202,7 +202,7 @@ describe('dogfood: the metadata door attributes a two-package artifact per packa
   beforeAll(async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'os-14599-mp-'));
     const artifactPath = join(tempDir, 'objectstack.json');
-    // The real build lowering, not `JSON.stringify(stack)` (#6293).
+    // The real build lowering, not `JSON.stringify(stack)` (commit c39a911ae).
     writeBuildShapedArtifact(multiPackageStack as unknown as Record<string, unknown>, artifactPath);
 
     stack = await bootStack(multiPackageStack, {

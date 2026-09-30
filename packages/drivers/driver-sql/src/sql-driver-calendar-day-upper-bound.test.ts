@@ -23,7 +23,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { parseFilterAST } from '@objectstack/spec/data';
+import { parseFilterAST, UNBOUNDED_ABOVE, type FilterCondition } from '@objectstack/spec/data';
 import { SqlDriver } from '../src/index.js';
 import { LegacyStorageDriver } from '../src/legacy-datetime-storage.testkit.js';
 
@@ -278,5 +278,97 @@ describe('calendarDayUpperBoundRewrite — dialect and boundary matrix', () => {
     expect(d.betweenRewrite('t', 'on', ['2026-04-29', '2026-07-28'])).toBeNull();
     expect(d.betweenRewrite('t', 'at', ['2026-04-29', '2026-07-28T12:00:00Z'])).toBeNull();
     expect(d.betweenRewrite('t', 'at', ['2026-04-29'])).toBeNull(); // malformed → caller's error
+  });
+});
+
+/**
+ * [#20600] `9999-12-31`, the last supported day, has no next day: every
+ * supported value is inside its whole-day bound, so `$lte` and a `$between`
+ * max on that day compile NO upper bound. The spec's helper used to answer the
+ * five-digit `'10000-01-01'`, which this driver bound as `'+010000-…'` / the
+ * five-digit text; a SQLite column (ISO text) sorts every row above it, so
+ * both answered no rows. `9999-12-30` is the control: an ordinary bound.
+ */
+describe('[#20600] a bare-day upper bound on the last supported day', () => {
+  it('the rewrite answers UNBOUNDED_ABOVE on every dialect for $lte and <=, and the between max carries it', () => {
+    const lowerByClient: Record<string, string> = {
+      'better-sqlite3': '2026-01-01T00:00:00.000Z',
+      pg: '2026-01-01T00:00:00.000Z',
+      mysql2: '2026-01-01 00:00:00.000',
+    };
+    for (const [client, lower] of Object.entries(lowerByClient)) {
+      const d = makeProbe(client);
+      d.seedDatetime('t', 'at');
+      d.seedDate('t', 'on');
+      expect(d.rewrite('t', 'at', '$lte', '9999-12-31'), client).toBe(UNBOUNDED_ABOVE);
+      expect(d.rewrite('t', 'at', '<=', '9999-12-31'), client).toBe(UNBOUNDED_ABOVE);
+      expect(d.betweenRewrite('t', 'at', ['2026-01-01', '9999-12-31']), client).toEqual({ lower, upper: UNBOUNDED_ABOVE });
+      // The control: the day before is an ordinary bound.
+      expect((d.rewrite('t', 'at', '$lte', '9999-12-30') as any)?.op, client).toBe('$lt');
+      // Outside the calendar-day-on-datetime cell nothing changes.
+      expect(d.rewrite('t', 'on', '$lte', '9999-12-31'), client).toBeNull();
+      expect(d.rewrite('t', 'at', '$gte', '9999-12-31'), client).toBeNull();
+      expect(d.rewrite('t', 'at', '$lte', '9999-12-31T10:00:00.000Z'), client).toBeNull();
+    }
+  });
+
+  describe('row results — canonical text and the un-backfilled legacy column', () => {
+    const LAST_DAY_ROWS = [
+      ['c26', '2026-07-15T14:00:00.000Z'],
+      ['prev', '9999-12-30T10:00:00.000Z'],
+      ['open', '9999-12-31T00:00:00.000Z'],
+      ['mid', '9999-12-31T10:00:00.000Z'],
+      ['last', '9999-12-31T23:59:59.999Z'],
+    ] as const;
+
+    /** `where` on `at` · the ids it answers, sorted — `none` has no value. */
+    const CASES: ReadonlyArray<readonly [string, FilterCondition, readonly string[]]> = [
+      ["$lte '9999-12-31'", { at: { $lte: '9999-12-31' } }, ['c26', 'last', 'mid', 'open', 'prev']],
+      ["$between ['2026-01-01', '9999-12-31']", { at: { $between: ['2026-01-01', '9999-12-31'] } }, ['c26', 'last', 'mid', 'open', 'prev']],
+      ["$between ['9999-12-31', '9999-12-31']", { at: { $between: ['9999-12-31', '9999-12-31'] } }, ['last', 'mid', 'open']],
+      ["$not $lte '9999-12-31'", { $not: { at: { $lte: '9999-12-31' } } }, ['none']],
+      ["$or [$lte '9999-12-31', title 'none']", { $or: [{ at: { $lte: '9999-12-31' } }, { title: 'none' }] }, ['c26', 'last', 'mid', 'none', 'open', 'prev']],
+      ["$lte '9999-12-30' (control)", { at: { $lte: '9999-12-30' } }, ['c26', 'prev']],
+      ["$between ['2026-01-01', '9999-12-30'] (control)", { at: { $between: ['2026-01-01', '9999-12-30'] } }, ['c26', 'prev']],
+      ["$gt '9999-12-31' (unchanged)", { at: { $gt: '9999-12-31' } }, ['last', 'mid']],
+      ["$lt '9999-12-31' (unchanged)", { at: { $lt: '9999-12-31' } }, ['c26', 'prev']],
+    ];
+
+    const run = async (driver: SqlDriver) => {
+      const got: Record<string, string[]> = {};
+      for (const [name, where] of CASES) got[name] = ids(await driver.find('task', { where }));
+      expect(got).toEqual(Object.fromEntries(CASES.map(([name, , want]) => [name, want])));
+    };
+
+    it('canonical text: $lte and the $between max on 9999-12-31 compile no upper bound', async () => {
+      const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+      try {
+        await driver.initObjects([{ name: 'task', fields: { title: { type: 'string' }, at: { type: 'datetime' } } }]);
+        for (const [id, at] of LAST_DAY_ROWS) await driver.create('task', { id, title: id, at }, { bypassTenantAudit: true });
+        await driver.create('task', { id: 'none', title: 'none' }, { bypassTenantAudit: true });
+        await run(driver);
+      } finally {
+        await driver.disconnect?.();
+      }
+    });
+
+    it('legacy mixed storage: the same answers through the normalised column expression', async () => {
+      const driver = new LegacyStorageDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+      try {
+        await driver.initObjects([{ name: 'task', fields: { title: { type: 'string' }, at: { type: 'datetime' } } }]);
+        // Both pre-#3912 storage forms: an INTEGER epoch and zone-naive TEXT.
+        await driver.seedLegacyRows('task', 'at', [
+          ...LAST_DAY_ROWS.map(([id, at], i) => ({
+            id,
+            title: id,
+            at: i % 2 === 0 ? Date.parse(at) : at.replace('T', ' ').replace('Z', ''),
+          })),
+          { id: 'none', title: 'none', at: null },
+        ]);
+        await run(driver);
+      } finally {
+        await driver.disconnect?.();
+      }
+    });
   });
 });

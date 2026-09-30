@@ -10,7 +10,7 @@
  * `EngineAggregateOptions.aggregations[].function`) is the SIX-value
  * `AggregationFunction`. Nothing compiled the two against each other, so the
  * bridge forwarded whatever string reached it — and the engine then failed in
- * the two ways #12209 documents: `driver-sql` blaming a `function` key the
+ * the two ways commit 017130a09 documents: `driver-sql` blaming a `function` key the
  * author never wrote, or the in-memory evaluator answering `null` for every
  * bucket under the author's own measure name (the #4157 class).
  *
@@ -21,7 +21,7 @@
  *
  * The reachable producer of a non-aggregate method — a custom-SQL measure
  * (`AggregationMetricType` `number`/`string`/`boolean`) — is refused earlier
- * and caller-facing by `ObjectQLStrategy.resolveMeasureAggregation` (#12209,
+ * and caller-facing by `ObjectQLStrategy.resolveMeasureAggregation` (commit 017130a09,
  * `INVALID_FIELD` / 400). Anything still arriving at the bridge is host drift
  * (an unparsed cube object, our own drift), which `dataset-refusal.ts`'s module
  * header assigns to the bare-`Error`, undeclared-500 tier — the same tier it

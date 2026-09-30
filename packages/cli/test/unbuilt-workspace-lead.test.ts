@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The DECISION half of #12964 — when oclif's "command … not found" is really a
+ * The DECISION half of commit e6fd1caf7 — when oclif's "command … not found" is really a
  * dependency that has no build output, and when it is genuinely a missing
  * command and must be left alone.
  *
@@ -173,7 +173,7 @@ describe('unbuiltWorkspaceLines — build output that was never consulted (#1654
     const lines = unbuiltWorkspaceLines(notFound(), [REDIRECTED_DETAIL], INVOCATION_PREFIX, () => REDIRECTED_TO);
 
     expect(lines).toHaveLength(2);
-    // Still contradicts "not found" — that half of #12964 is unchanged.
+    // Still contradicts "not found" — that half of commit e6fd1caf7 is unchanged.
     expect(lines?.[0]).toContain('NOT A MISSING COMMAND');
     // …but the attribution is inverted, and says so in words a reader cannot
     // misread as the old line: the precondition is NOT the build output.

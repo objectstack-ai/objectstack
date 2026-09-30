@@ -486,19 +486,19 @@ const SITES = [
     waivers: [
       {
         direction: 'missing',
-        keys: ['views', 'objectExtensions', 'data', 'translations'],
+        keys: ['views', 'objectExtensions', 'picklistExtensions', 'data', 'translations'],
         reason:
-          'the four SHAPE exclusions the declaration already documents, pinned here so the prose is checked: '
-          + 'ViewSchema has no `name` (its identity is the target object), ObjectExtensionSchema keys by '
+          'the five SHAPE exclusions, pinned here so the prose is checked: ViewSchema has no `name` (its '
+          + 'identity is the target object), ObjectExtensionSchema and PicklistExtensionSchema key by '
           + '`extend`, SeedSchema keys by `object`, and TranslationBundleSchema is itself a record.',
       },
       {
         direction: 'missing',
-        keys: ['datasourceMapping', 'capabilities', 'docs', 'books', 'tools', 'skills'],
+        keys: ['datasourceMapping', 'capabilities', 'docs', 'books', 'tools', 'skills', 'picklists'],
         reason:
           'no map form has ever been offered for these. `datasourceMapping` is a rule LIST whose precedence is '
-          + 'positional, so a map would lose the ordering that decides which rule wins; the other five are '
-          + 'array-only authoring surfaces. Offering a map form for any of them WIDENS what parses — an '
+          + 'positional, so a map would lose the ordering that decides which rule wins; the other six are '
+          + 'array-only authoring surfaces (`picklists` since it was declared). Offering a map form for any of them WIDENS what parses — an '
           + 'acceptance change, which belongs to its own reviewed diff rather than to this gate.',
       },
     ],
@@ -525,13 +525,13 @@ const SITES = [
       },
       {
         direction: 'missing',
-        keys: ['datasourceMapping', 'translations', 'objectExtensions', 'data'],
+        keys: ['datasourceMapping', 'translations', 'objectExtensions', 'picklistExtensions', 'data'],
         reason:
-          'there is no singular metadata-type name to map to. `objectExtensions` merges into its target '
-          + 'object rather than registering as a type, `datasourceMapping` is stack-level routing '
-          + 'configuration, `translations` is a bundle record consumed by the i18n resolvers, and `data` '
-          + 'seeds are applied by SeedLoaderService. `pluralToSingular` returns its input unchanged for all '
-          + 'four, which is the correct answer rather than a gap.',
+          'there is no singular metadata-type name to map to. `objectExtensions` and `picklistExtensions` '
+          + 'merge into their target rather than registering as a type, `datasourceMapping` is stack-level '
+          + 'routing configuration, `translations` is a bundle record consumed by the i18n resolvers, and '
+          + '`data` seeds are applied by SeedLoaderService. `pluralToSingular` returns its input unchanged '
+          + 'for all five, which is the correct answer rather than a gap.',
       },
     ],
   },
@@ -559,13 +559,13 @@ const SITES = [
         keys: [
           'datasources', 'datasourceMapping', 'objectExtensions', 'apps', 'jobs', 'emailTemplates',
           'docs', 'books', 'positions', 'capabilities', 'sharingRules', 'webhooks', 'tools', 'skills',
-          'hooks', 'mappings', 'analyticsCubes', 'connectors', 'data',
+          'hooks', 'mappings', 'analyticsCubes', 'connectors', 'data', 'picklists', 'picklistExtensions',
         ],
         reason:
           'DRIFT in the opposite direction, under the same acceptance constraint: ADDING a member widens '
           + 'what an artifact may declare and presumes a packaging layout (one subdirectory per category) '
           + 'that does not exist for these. The omissions are inert today because this enum is not the '
-          + 'artifact ingest path — `ARTIFACT_FIELD_TO_TYPE` below is — but 19 of 32 collections absent is '
+          + 'artifact ingest path — `ARTIFACT_FIELD_TO_TYPE` below is — but 21 of 33 collections absent is '
           + 'the measurement that says so out loud (#6242 row 5).',
       },
     ],
@@ -618,6 +618,15 @@ const SITES = [
         reason:
           'ADR-0090 D3 positions reach the registry through the security bootstrap, which reads them off the '
           + 'stack directly; the loop\'s sibling `permissions` entry is what makes the absence look like a gap.',
+      },
+      {
+        direction: 'missing',
+        keys: ['picklists', 'picklistExtensions'],
+        reason:
+          'PENDING the picklist runtime layer (#19519): the spec declares `picklists` and '
+          + '`picklistExtensions` ahead of their reader, by ruling (the spec layer lands first). Registering '
+          + 'them — and merging the extensions into their target list — is that layer\'s work, so this row '
+          + 'goes STALE, and fails, the day it lands. The liveness ledger grades the same keys `planned`.',
       },
     ],
   },
@@ -676,6 +685,15 @@ const SITES = [
         keys: ['datasourceMapping'],
         reason: 'stack-level routing configuration, never a registry item.',
       },
+      {
+        direction: 'missing',
+        keys: ['picklists', 'picklistExtensions'],
+        reason:
+          'PENDING the picklist runtime layer (#19519): the spec declares `picklists` and '
+          + '`picklistExtensions` ahead of their reader, by ruling (the spec layer lands first). Registering '
+          + 'them — and merging the extensions into their target list — is that layer\'s work, so this row '
+          + 'goes STALE, and fails, the day it lands. The liveness ledger grades the same keys `planned`.',
+      },
     ],
   },
   {
@@ -700,6 +718,7 @@ const SITES = [
         keys: [
           'objectExtensions', 'datasourceMapping', 'datasources', 'jobs', 'apis', 'webhooks',
           'hooks', 'mappings', 'analyticsCubes', 'connectors', 'capabilities', 'datasets',
+          'picklists', 'picklistExtensions',
         ],
         reason:
           'DELIBERATE, and load-bearing. This is a HEURISTIC, not a registration list: it answers "did the '
@@ -737,7 +756,7 @@ const SITES = [
           'datasources', 'datasourceMapping', 'translations', 'objects', 'objectExtensions', 'apps',
           'views', 'pages', 'dashboards', 'reports', 'datasets', 'actions', 'flows', 'jobs',
           'emailTemplates', 'docs', 'books', 'apis', 'webhooks', 'agents', 'tools', 'skills',
-          'hooks', 'mappings', 'analyticsCubes', 'connectors', 'data',
+          'hooks', 'mappings', 'analyticsCubes', 'connectors', 'data', 'picklists', 'picklistExtensions',
         ],
         reason:
           'DELIBERATE — a four-collection SUBSET, not an enumeration of the collection set. This block '

@@ -59,8 +59,8 @@ nothing. The one item-name grammar itself lives in
 ## TypeScript Usage
 
 ```typescript
-import { AddRecordConfigSchema, AppearanceConfigSchema, CalendarConfigSchema, ColumnPrefixSchema, ColumnSummarySchema, ColumnSummaryConfigSchema, FormButtonConfigSchema, FormFieldSchema, FormFieldPublicPickerSchema, FormSectionSchema, FormSelectOptionSchema, FormViewSchema, GalleryConfigSchema, GanttConfigSchema, GanttQuickFilterSchema, GroupingConfigSchema, GroupingFieldSchema, HttpMethodSubsetSchema, HttpRequestSchema, KanbanConfigSchema, ListChartConfigSchema, ListColumnSchema, ListMapConfigSchema, ListViewSchema, NavigationConfigSchema, NavigationModeSchema, ObjectListViewSchema, ObjectUserFiltersSchema, PaginationConfigSchema, RowColorConfigSchema, RowHeightSchema, SelectionConfigSchema, TimelineConfigSchema, TreeConfigSchema, UserActionsConfigSchema, UserFilterFieldSchema, UserFiltersSchema, ViewSchema, ViewDataSchema, ViewFilterRuleSchema, ViewItemSchema, ViewItemNameSchema, ViewItemWireSchema, ViewKindSchema, ViewScopeSchema, ViewSharingSchema, ViewTabSchema, VisualizationTypeSchema } from '@objectstack/spec/ui';
-import type { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnPrefix, ColumnSummary, ColumnSummaryConfig, FormButtonConfig, FormField, FormFieldPublicPicker, FormSection, FormSelectOption, FormView, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, HttpMethodSubset, HttpRequest, KanbanConfig, ListChartConfig, ListColumn, ListMapConfig, ListView, NavigationConfig, NavigationMode, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, View, ViewData, ViewFilterRule, ViewItem, ViewItemName, ViewItemWire, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
+import { AddRecordConfigSchema, AppearanceConfigSchema, CalendarConfigSchema, ColumnPrefixSchema, ColumnSummarySchema, ColumnSummaryConfigSchema, EmptyStateSchema, FormButtonConfigSchema, FormFieldSchema, FormFieldPublicPickerSchema, FormSectionSchema, FormSelectOptionSchema, FormViewSchema, GalleryConfigSchema, GanttConfigSchema, GanttQuickFilterSchema, GroupingConfigSchema, GroupingFieldSchema, HttpMethodSubsetSchema, HttpRequestSchema, KanbanConfigSchema, ListChartConfigSchema, ListColumnSchema, ListMapConfigSchema, ListViewSchema, NavigationConfigSchema, NavigationModeSchema, ObjectListViewSchema, ObjectUserFiltersSchema, PaginationConfigSchema, RowColorConfigSchema, RowHeightSchema, SelectionConfigSchema, TimelineConfigSchema, TreeConfigSchema, UserActionsConfigSchema, UserFilterFieldSchema, UserFiltersSchema, ViewSchema, ViewDataSchema, ViewFilterRuleSchema, ViewItemSchema, ViewItemNameSchema, ViewItemWireSchema, ViewKindSchema, ViewScopeSchema, ViewSharingSchema, ViewTabSchema, VisualizationTypeSchema } from '@objectstack/spec/ui';
+import type { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnPrefix, ColumnSummary, ColumnSummaryConfig, EmptyState, FormButtonConfig, FormField, FormFieldPublicPicker, FormSection, FormSelectOption, FormView, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, HttpMethodSubset, HttpRequest, KanbanConfig, ListChartConfig, ListColumn, ListMapConfig, ListView, NavigationConfig, NavigationMode, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, View, ViewData, ViewFilterRule, ViewItem, ViewItemName, ViewItemWire, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
 
 // Validate data
 const result = AddRecordConfigSchema.parse(data);
@@ -162,6 +162,19 @@ Column footer summary configuration
 
 ---
 
+## EmptyState
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **title** | `string \| Record<string, string>` | optional | Heading of the empty state |
+| **message** | `string \| Record<string, string>` | optional | Line of text below the heading |
+| **icon** | `string` | optional | Icon name drawn above the heading; a name that resolves to no icon draws the default empty-state glyph |
+
+
+---
+
 ## FormButtonConfig
 
 ### Properties
@@ -200,7 +213,7 @@ Column footer summary configuration
 | **required** | `boolean` | optional | Required override |
 | **hidden** | `boolean` | optional | Hidden override |
 | **colSpan** | `integer` | optional | Absolute column span (1-4). The renderer clamps it to the form grid's current column count, so the cell starts at a real column boundary at every surface width and never overflows (`colSpan: 4` in a 3-column grid renders as 3); a `colSpan` within the column count renders as authored, and `colSpan: 1` emits no span class at all. |
-| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `dd3f7e1be356`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest. |
+| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `db11afd4967c`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest. |
 | **widget** | `string` | optional | Custom widget/component name (overrides type-based inference) |
 | **language** | `string` | optional | Code editor language (for type=code) |
 | **keyField** | `{ field?: string; label?: string \| Record<string, string>; placeholder?: string \| Record<string, string>; helpText?: string \| Record<string, string>; … }` | optional | Key column config for record-typed fields |
@@ -365,7 +378,7 @@ View filter rule
 | **required** | `boolean` | optional | Required override |
 | **hidden** | `boolean` | optional | Hidden override |
 | **colSpan** | `integer` | optional | Absolute column span (1-4). The renderer clamps it to the form grid's current column count, so the cell starts at a real column boundary at every surface width and never overflows (`colSpan: 4` in a 3-column grid renders as 3); a `colSpan` within the column count renders as authored, and `colSpan: 1` emits no span class at all. |
-| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `dd3f7e1be356`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest. |
+| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `db11afd4967c`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest. |
 | **widget** | `string` | optional | Custom widget/component name (overrides type-based inference) |
 | **language** | `string` | optional | Code editor language (for type=code) |
 | **keyField** | `{ field?: string; label?: string \| Record<string, string>; placeholder?: string \| Record<string, string>; helpText?: string \| Record<string, string>; … }` | optional | Key column config for record-typed fields |
@@ -1128,9 +1141,9 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **title** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
-| **message** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
-| **icon** | `string` | optional |  |
+| **title** | `string \| Record<string, string>` | optional | Heading of the empty state |
+| **message** | `string \| Record<string, string>` | optional | Line of text below the heading |
+| **icon** | `string` | optional | Icon name drawn above the heading; a name that resolves to no icon draws the default empty-state glyph |
 
 ### Nested Shape: `ListView.aria`
 
@@ -1511,9 +1524,9 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **title** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
-| **message** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
-| **icon** | `string` | optional |  |
+| **title** | `string \| Record<string, string>` | optional | Heading of the empty state |
+| **message** | `string \| Record<string, string>` | optional | Line of text below the heading |
+| **icon** | `string` | optional | Icon name drawn above the heading; a name that resolves to no icon draws the default empty-state glyph |
 
 ### Nested Shape: `ObjectListView.aria`
 
@@ -2260,6 +2273,7 @@ This schema accepts one of the following structures:
 | **sortOrder** | `integer` | optional | Console round-trip: the view's position among the object's saved views in the switcher, 0-based and counted over saved views only (a code-defined view carries none). Written by the console's drag-reorder and read back to order the tabs. Not authored: `order` is the authored default position. |
 | **visibility** | `Enum<'private' \| 'team' \| 'organization' \| 'public'>` | optional | Console round-trip: the group the switcher files this view's tab under (private, team, organization or public). Display grouping only, NOT access control: nothing restricts who can list or open the view by this value. No console control sets it; the console carries a stored value forward when it re-saves the row. Not authored. |
 | **columnState** | `{ order?: string[]; widths?: Record<string, number> }` | optional | Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view's row, which has no per-user scope — not authored) |
+| **options** | `never` | optional | Refused: a view item record carries no top-level `options` bag. Its per-kind blocks live under `config` (`config.kanban`, `config.timeline`, …); the legacy `options.KIND` bag belongs to the flattened list overlay only. |
 
 ### Nested Shape: `ViewItemWire[viewKind='list'].config`
 
@@ -2361,6 +2375,7 @@ This schema accepts one of the following structures:
 | **sortOrder** | `integer` | optional | Console round-trip: the view's position among the object's saved views in the switcher, 0-based and counted over saved views only (a code-defined view carries none). Written by the console's drag-reorder and read back to order the tabs. Not authored: `order` is the authored default position. |
 | **visibility** | `Enum<'private' \| 'team' \| 'organization' \| 'public'>` | optional | Console round-trip: the group the switcher files this view's tab under (private, team, organization or public). Display grouping only, NOT access control: nothing restricts who can list or open the view by this value. No console control sets it; the console carries a stored value forward when it re-saves the row. Not authored. |
 | **columnState** | `{ order?: string[]; widths?: Record<string, number> }` | optional | Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view's row, which has no per-user scope — not authored) |
+| **options** | `never` | optional | Refused: a view item record carries no top-level `options` bag. Its per-kind blocks live under `config` (`config.kanban`, `config.timeline`, …); the legacy `options.KIND` bag belongs to the flattened list overlay only. |
 
 ### Nested Shape: `ViewItemWire[viewKind='form'].config`
 

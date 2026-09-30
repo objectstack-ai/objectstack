@@ -106,7 +106,7 @@
 //     `RestServer.getRoutes()` on a booted server and guarded per route by
 //     `rest-route-ledger.conformance.test.ts`. It reaches all 17 registrars;
 //     this table reaches 1.
-//   `packages/runtime/src/route-ledger.ts`: 81 rows over 21 domains. Its
+//   `packages/runtime/src/route-ledger.ts`: 82 rows over 21 domains. Its
 //     machine contract is DOMAIN-level, by live registry introspection
 //     (`domainRegistry.list()`), the per-route rows being documentation. It
 //     covers all 15 `async handle*(` methods in `http-dispatcher.ts` and all
@@ -362,11 +362,15 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // route (door ④ — the list is `GET /meta/flow`). It carried
     // `domain: '/automation'`, a key other rows still carry, so `reachable`
     // moves with `population`, `blindSpot` stays 0 and `keys` stays 21.
-    population: 81,
-    reachable: 81,
+    // [#20676] 81 -> 82: the `POST /automation/:name/clone` row arrived with its
+    // mount (ADR-0126 §7.1). It carries `domain: '/automation'`, an EXISTING
+    // key, so `reachable` moves with `population`, `blindSpot` stays 0 and
+    // `keys` stays 21 (21 distinct domains before and after, re-derived).
+    population: 82,
+    reachable: 82,
     blindSpot: 0,
     populationRule: 'ledger rows inside ROUTE_LEDGER; reachable = rows carrying a `domain` (each distinct value mints a key)',
-    controls: { "route: '": 81, "domain: '": 81, RouteLedgerEntry: 2 },
+    controls: { "route: '": 82, "domain: '": 82, RouteLedgerEntry: 2 },
     note:
       'The dispatcher half. Its machine contract is DOMAIN-level by live registry introspection ' +
       '(domainRegistry.list()), guarded in BOTH directions by route-ledger.conformance.test.ts: every ' +
@@ -427,9 +431,9 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // `this.routeManager.register(` reads 73 because the helper's forwarder is
     // one of them, and it is sliced out before counting.
     //
-    // [#13214] `enforceAuth` 61 -> 64. ⛔ RE-ANCHORED, not relaxed: the control
+    // [commit cc837dbfe] `enforceAuth` 61 -> 64. ⛔ RE-ANCHORED, not relaxed: the control
     // exists to prove this census is still reading the file it thinks it is, and
-    // a rising `enforceAuth` is precisely what the 2026-08-30 ruling on #13214
+    // a rising `enforceAuth` is precisely what the 2026-08-30 ruling (commit cc837dbfe)
     // was supposed to cause — `registerUiEndpoints` was the ONE route in this
     // file that resolved no identity, and it is now guarded. The move is +3 over
     // the whole file (`occurrences` counts the bare term, comments included):
@@ -441,9 +445,9 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // ⚠️ The three sibling numbers were re-derived and did NOT move, which is
     // what says this is a guard change and not a surface change: `population`
     // 80, `reachable` 19, `private register*Endpoints(` 17 and
-    // `this.routeManager.register(` 80 are all unchanged — #13214 added no route
+    // `this.routeManager.register(` 80 are all unchanged — commit cc837dbfe added no route
     // and no registrar. `blindSpot` therefore stays 61 as well.
-    // ⚠️ That last figure is the reading AS OF #13214 and is left as written:
+    // ⚠️ That last figure is the reading AS OF commit cc837dbfe and is left as written:
     // the control is 73 today for the spelling reason recorded above, and the
     // population it feeds is still 80. Do not "correct" the paragraph — it is a
     // dated measurement, not a live claim.

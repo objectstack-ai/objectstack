@@ -30,7 +30,7 @@ export type {
     FlowDispatchOutcome,
     // [ADR-0126 §7.2] The packaged-flow activation ledger port and its row —
     // the durable off-switch that REPLACES the retired process-local
-    // `flowEnabled` map (#10243). Exported so a host can supply its own
+    // `flowEnabled` map (the leak commit 02b41232d measured). Exported so a host can supply its own
     // backing store, and so the shape a consumer reads is the platform's.
     FlowActivationStore,
     FlowActivationRow,
@@ -70,6 +70,10 @@ export type {
     // consumer needs the name to annotate a result or switch exhaustively over
     // `reason` — the three negatives exist precisely to be branched on.
     ConsumedSuspensionInspection,
+    // [#20761] The reader `AutomationEngine.setPackagedFlowSource` takes — the
+    // method is barrel-reachable, so a host building a custom composition
+    // needs the name to hand it the loader's set.
+    PackagedFlowSource,
 } from './engine.js';
 
 // [#11997] ADR-0005 overlay precedence for same-named flow definitions. The boot

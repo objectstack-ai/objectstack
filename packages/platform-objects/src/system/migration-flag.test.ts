@@ -8,7 +8,7 @@ import { describe, it, expect, vi } from 'vitest';
 // package — that import would close a dependency cycle turbo rejects, and is
 // why this file's `update` entry sat in the gate's DEBT ledger until #5619 sank
 // the predicate into a package that depends on neither side.
-import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import {
   CREATION_ATTESTED_MIGRATION_IDS,
   FILE_REFERENCES_MIGRATION_ID,
@@ -31,9 +31,12 @@ function fakeEngine(rows: Array<Record<string, unknown>> = [], opts: { registere
   const engine: MigrationFlagEngine & { tables: typeof tables } = {
     getObject: (name) =>
       name === 'sys_migration' && opts.registered !== false ? { name: 'sys_migration' } : undefined,
-    async find(object, options: any) {
-      const id = options?.where?.id;
-      return (tables[object] ?? []).filter((r) => id === undefined || r.id === id);
+    // The single-row route the reader takes (#20648), held to the real
+    // engine's refusal of a query that selects no particular record.
+    async findOne(object, options: any) {
+      assertEngineFindOnePredicate(object, options);
+      const id = options.where.id;
+      return (tables[object] ?? []).find((r) => r.id === id) ?? null;
     },
     async insert(object, data: any) {
       (tables[object] ??= []).push({ ...data });
@@ -67,10 +70,25 @@ describe('deployment-level data-migration flags (#3617)', () => {
 
   it('a failing read closes the gate rather than opening it', async () => {
     const engine = fakeEngine();
-    engine.find = async () => {
+    engine.findOne = async () => {
       throw new Error('db down');
     };
     expect(await isDataMigrationVerified(engine, MIGRATION)).toBe(false);
+  });
+
+  it('reads the row by primary key through findOne, carrying the system context (#20648)', async () => {
+    // The read the SQL driver's paging check exempts. The options that made the
+    // old `find` read a SYSTEM read must survive the move: without
+    // `isSystem` the engine would apply the caller's row-level security to
+    // the deployment ledger.
+    const engine = fakeEngine([{ id: MIGRATION, last_run_at: 'x', verified_at: 'x', blocking: 0 }]);
+    const findOne = vi.spyOn(engine, 'findOne');
+    expect(await readDataMigrationFlag(engine, MIGRATION)).toMatchObject({ id: MIGRATION, blocking: 0 });
+    expect(findOne).toHaveBeenCalledTimes(1);
+    expect(findOne).toHaveBeenCalledWith('sys_migration', {
+      where: { id: MIGRATION },
+      context: { isSystem: true },
+    });
   });
 
   it('records a passing run: verified_at set, blocking 0 — gate opens', async () => {

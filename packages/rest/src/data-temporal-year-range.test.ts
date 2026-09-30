@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#20264] A `date` or `datetime` value names a year from 0001 to 9999, or it
- * is refused at the public door — `POST /api/v1/data/:object/query` answers
+ * [#20264] A `date` value names a year from 0001 to 9999, and [#20280] a
+ * `datetime` value a year from 1000 to 9999, or it is refused at the public door — `POST /api/v1/data/:object/query` answers
  * `400 INVALID_FILTER` for a comparand (`where`, a per-aggregation `filter`,
  * `having`), and `POST /api/v1/data/:object` / `PATCH …/:id` answer
  * `400 VALIDATION_FAILED` / `invalid_date` for a written value — over a real
@@ -32,11 +32,13 @@
  * dialect in `sql-driver-20264-temporal-year-range.test.ts`). Each live cell
  * owns one table, dropped before and after.
  *
- * One cell is not asserted on read-back: a MySQL `DATETIME` in years
- * 0001..0099 is stored right and read back a century late through mysql2's
- * instant parser, which ADR-0053 D-F2 keeps. That year is inside the range, so
- * the write door accepts it; the MySQL cell below checks its STORED text, and
- * the misread is a decision returned to the maintainer, not a verdict here.
+ * [#20280] A MySQL `DATETIME` in years 0001..0099 is stored right and read
+ * back a century late through mysql2's instant parser, which ADR-0053 D-F2
+ * keeps, and MySQL documents its `DATETIME` from year 1000 only. So a
+ * `datetime` begins at 1000: a comparand or a written value in 0001..0999 —
+ * each read or written at the base on every cell — is refused here now, beside
+ * the floor's edge (1000) and a `date` in those years (the control, still read
+ * and written). No `datetime` below 1000 reaches a cell's read-back any more.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -104,15 +106,21 @@ const REFUSED: ReadonlyArray<readonly [string, string, unknown]> = [
   ['date, year 0, a number', 'placed_on', at('0000-06-15T00:00:00.000Z')],
   ['date, year 0, its ISO string', 'placed_on', '0000-06-15T00:00:00.000Z'],
   ['date, year 0, a bare day', 'placed_on', '0000-06-15'],
+  // [#20280] A datetime before year 1000, in every spelling — each read at the base.
+  ['datetime, the first instant of year 1, its ISO string', 'opened_at', '0001-01-01T00:00:00.000Z'],
+  ['datetime, year 99, a number', 'opened_at', at('0099-03-04T10:00:00.000Z')],
+  ['datetime, year 999, a bare day (midnight UTC)', 'opened_at', '0999-12-31'],
+  ['datetime, 1000 in its zone, 999 in UTC', 'opened_at', '1000-01-01T00:00:00+08:00'],
 ];
 
 /** field · comparand · `where` counts for `$gt` / `$lt` / `$eq` — the edges and the 2026 control */
 const READ: ReadonlyArray<readonly [string, string, unknown, readonly [number, number, number]]> = [
-  ['datetime, the first instant of year 1', 'opened_at', '0001-01-01T00:00:00.000Z', [7, 0, 0]],
+  ['datetime, the first instant of year 1000 (the floor)', 'opened_at', '1000-01-01T00:00:00.000Z', [7, 0, 0]],
   ['datetime, the last instant of year 9999, a number', 'opened_at', at('9999-12-31T23:59:59.999Z'), [0, 7, 0]],
   ['datetime, 2026-02-01T10:00Z (control)', 'opened_at', '2026-02-01T10:00:00.000Z', [4, 2, 1]],
   ['datetime, 2026-02-01T10:00Z as a number (control)', 'opened_at', at('2026-02-01T10:00:00.000Z'), [4, 2, 1]],
   ['date, 0001-01-01', 'placed_on', '0001-01-01', [7, 0, 0]],
+  ['date, 0999-12-31 (a date keeps the years before 1000)', 'placed_on', '0999-12-31', [7, 0, 0]],
   ['date, 9999-12-31', 'placed_on', '9999-12-31', [0, 7, 0]],
   ['date, 2026-02-01 (control)', 'placed_on', '2026-02-01', [2, 3, 2]],
 ];
@@ -125,6 +133,10 @@ const WRITE_REFUSED: ReadonlyArray<readonly [string, string]> = [
   ['opened_at', '+010000-01-01T00:00:00.000Z'],
   ['opened_at', '0000-06-15T10:00:00.000Z'],
   ['opened_at', '9999-12-31T23:59:59-01:00'],
+  // [#20280] Each a 201 at the base.
+  ['opened_at', '0001-01-01T00:00:00.000Z'],
+  ['opened_at', '0100-03-04T10:00:00.000Z'],
+  ['opened_at', '0999-12-31T23:59:59.999Z'],
 ];
 
 /** field · written value · what reads back — the edges and the 2026 control */
@@ -132,9 +144,9 @@ const WRITE_ACCEPTED: ReadonlyArray<readonly [string, string, string]> = [
   ['placed_on', '0001-01-01', '0001-01-01'],
   ['placed_on', '9999-12-31', '9999-12-31'],
   ['placed_on', '2026-02-01', '2026-02-01'],
-  ['opened_at', '0001-01-01T00:00:00.000Z', '0001-01-01T00:00:00.000Z'],
+  ['placed_on', '0999-12-31', '0999-12-31'],
+  ['opened_at', '1000-01-01T00:00:00.000Z', '1000-01-01T00:00:00.000Z'],
   ['opened_at', '9999-12-31T23:59:59.999Z', '9999-12-31T23:59:59.999Z'],
-  ['opened_at', '0100-03-04T10:00:00.000Z', '0100-03-04T10:00:00.000Z'],
   ['opened_at', '2026-02-01T10:00:00.000Z', '2026-02-01T10:00:00.000Z'],
 ];
 
@@ -165,7 +177,7 @@ const grouped = (field: string, having: FilterCondition): EngineAggregateOptions
 for (const cell of CELLS) {
   const config = cell.config();
   describe.skipIf(!config)(
-    `[#20264] the supported years 0001..9999 at the public door — ${cell.label}${config ? '' : ` (skipped: set ${cell.env} to run this cell)`}`,
+    `[#20264] the supported years, a date 0001..9999 and a datetime 1000..9999, at the public door — ${cell.label}${config ? '' : ` (skipped: set ${cell.env} to run this cell)`}`,
     () => {
       let engine: ObjectQL;
       let driver: any;
@@ -214,7 +226,7 @@ for (const cell of CELLS) {
         try { await engine?.destroy(); } catch { /* noop */ }
       });
 
-      it('a comparand outside 0001..9999 is 400 INVALID_FILTER at where, the per-aggregation filter and having — no read', async () => {
+      it('a comparand outside its kind\'s years is 400 INVALID_FILTER at where, the per-aggregation filter and having — no read', async () => {
         const before = reads.n;
         for (const [name, field, comparand] of REFUSED) {
           for (const op of ['$gt', '$lt', '$eq'] as const) {
@@ -249,7 +261,7 @@ for (const cell of CELLS) {
         }
       });
 
-      it('a written value outside 0001..9999 is 400 VALIDATION_FAILED / invalid_date on create and on PATCH — nothing written', async () => {
+      it('a written value outside its kind\'s years is 400 VALIDATION_FAILED / invalid_date on create and on PATCH — nothing written', async () => {
         const before = writes.n;
         for (const [field, value] of WRITE_REFUSED) {
           const created = await call('POST', '/api/v1/data/:object', { object: OBJECT }, { id: 'refused', customer_id: 'cw', [field]: value });
@@ -271,12 +283,6 @@ for (const cell of CELLS) {
           const created = await call('POST', '/api/v1/data/:object', { object: OBJECT }, { id, customer_id: 'cw', [field]: value });
           expect(created.status, `create ${field} ${value}: ${JSON.stringify(created.body)}`).toBe(201);
           const got = (await query({ where: { id } })).body.records[0]?.[field];
-          // The one MySQL cell the module note sets aside: stored right, read a century late.
-          if (cell.id === 'mysql' && field === 'opened_at' && Number(value.slice(0, 4)) < 100) {
-            const [rows] = await driver.execute(`select cast(opened_at as char) as t from ${OBJECT} where id = ?`, [id]);
-            expect(rows[0].t, `stored ${field} ${value}`).toBe(`${value.slice(0, 10)} ${value.slice(11, 23)}`);
-            continue;
-          }
           expect(got, `read back ${field} ${value}`).toBe(readBack);
         }
       });

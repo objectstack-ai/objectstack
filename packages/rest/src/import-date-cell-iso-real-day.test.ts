@@ -37,6 +37,11 @@
  *
  * The reader's own case table is `import-coerce.test.ts`'s `[#20534]` block;
  * this file pins the door.
+ *
+ * [#20280] The `datetime` cell `0001-01-01` in the table above is read right
+ * by the reader and is refused now by the write door behind it: a `datetime`
+ * begins at year 1000 (MySQL's documented `DATETIME` floor). The floor's own
+ * day is the admitted `datetime` control; a `date` keeps 0001..0999.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -74,13 +79,18 @@ const REFUSED: ReadonlyArray<readonly [field: Field, cell: string]> = [
   ['t', '07/15/2026 10:00'],
   ['dt', '2026-07-15 24:00'],
   ['d', '2026/2/30'],
+  // [#20280] Read right, and refused by the write door: a datetime begins at 1000.
+  ['dt', '0001-01-01'],
 ];
+
+/** [#20722] The write door's field code for a refused cell: `invalid_time` for a `time`. */
+const codeOf = (field: Field) => (field === 't' ? 'invalid_time' : 'invalid_date');
 
 /** Admitted cells and what they store — the padding, the ISO control and the export shape. */
 const ADMITTED: ReadonlyArray<readonly [field: Field, cell: string, stored: string]> = [
   ['d', '0500-01-01', '0500-01-01'],
   ['d', '0001-01-01', '0001-01-01'],
-  ['dt', '0001-01-01', '0001-01-01T00:00:00.000Z'],
+  ['dt', '1000-01-01', '1000-01-01T00:00:00.000Z'],
   ['d', '2026-07-15', '2026-07-15'],
   ['dt', '2026-07-15T10:00:00Z', '2026-07-15T10:00:00.000Z'],
   ['dt', '2026-07-15T10:00:00+08:00', '2026-07-15T02:00:00.000Z'],
@@ -180,7 +190,7 @@ describe.each(HOST_ZONES)('[#20534] /import date cells, host TZ=$tz', ({ tz, jul
     else process.env.TZ = originalTz;
   });
 
-  it.each(REFUSED)('refuses the %s cell %j as that row\'s invalid_date and writes its sibling row', async (field, cell) => {
+  it.each(REFUSED)('refuses the %s cell %j as that row\'s invalid_date (a time cell: invalid_time) and writes its sibling row', async (field, cell) => {
     const res = await ctx.importRows({
       format: 'json', writeMode: 'insert',
       rows: [{ id: 'bad', [field]: cell }, { id: 'good', d: '2026-07-15' }],
@@ -189,7 +199,7 @@ describe.each(HOST_ZONES)('[#20534] /import date cells, host TZ=$tz', ({ tz, jul
     expect(res._status ?? 200).toBe(200);
     expect(res._json).toMatchObject({ total: 2, ok: 1, errors: 1, created: 1 });
     expect(res._json.results[0]).toMatchObject({
-      row: 1, ok: false, action: 'failed', field, code: 'invalid_date',
+      row: 1, ok: false, action: 'failed', field, code: codeOf(field),
     });
     // Refused, not stored as some other day or instant.
     expect(await ctx.engine.findOne(OBJECT, { where: { id: 'bad' } })).toBeNull();
@@ -267,7 +277,7 @@ describe.each(HOST_ZONES)('[#20534] /import date cells, host TZ=$tz', ({ tz, jul
 
     expect(res._json).toMatchObject({ total: REFUSED.length, ok: 0, errors: REFUSED.length });
     const failedFields = res._json.results.map((r: any) => [r.field, r.code]);
-    expect(failedFields).toEqual(REFUSED.map(([field]) => [field, 'invalid_date']));
+    expect(failedFields).toEqual(REFUSED.map(([field]) => [field, codeOf(field)]));
   });
 
   it('dry run predicts the same refusals and persists nothing', async () => {
@@ -278,7 +288,7 @@ describe.each(HOST_ZONES)('[#20534] /import date cells, host TZ=$tz', ({ tz, jul
 
     expect(res._json).toMatchObject({ dryRun: true, total: REFUSED.length, ok: 0, errors: REFUSED.length });
     for (const [i, r] of res._json.results.entries()) {
-      expect(r).toMatchObject({ ok: false, field: REFUSED[i][0], code: 'invalid_date' });
+      expect(r).toMatchObject({ ok: false, field: REFUSED[i][0], code: codeOf(REFUSED[i][0]) });
     }
     for (const [i] of REFUSED.entries()) {
       expect(await ctx.engine.findOne(OBJECT, { where: { id: `d${i}` } })).toBeNull();

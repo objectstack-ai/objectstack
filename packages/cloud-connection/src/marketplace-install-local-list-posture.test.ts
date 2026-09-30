@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#9011] `GET /api/v1/marketplace/install-local` — the read door's posture.
+ * [commit 01074e551] `GET /api/v1/marketplace/install-local` — the read door's posture.
  *
  * ## THIS is the file that answers "is the installed-apps LISTING gated?"
  *
@@ -299,7 +299,7 @@ describe('#9011 — a `manage_metadata` holder still gets the full payload', () 
         expect(res.payload.data.storageDir).toBe(new LocalManifestSource(dir).dir);
         const [item] = res.payload.data.items;
         expect(item.installedBy).toBe('usr_operator');
-        // The pre-#9011 wire shape, intact for the caller who is entitled to it.
+        // The wire shape before commit 01074e551, intact for the caller who is entitled to it.
         expect(Object.keys(item).sort()).toEqual(
             ['installedAt', 'installedBy', 'manifestId', 'packageId', 'version', 'versionId', 'withSampleData'],
         );

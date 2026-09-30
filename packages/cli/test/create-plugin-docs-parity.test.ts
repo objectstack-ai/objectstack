@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The `plugin` template's SHAPE against what the docs promise (#14824).
+ * The `plugin` template's SHAPE against what the docs promise (commit cf6b67164).
  *
  * ## Why this pin exists
  *
@@ -14,7 +14,7 @@
  * govern at all (it emits no `objectstack.config.ts`). So the docs were the
  * only statement of its shape, and nothing held them to it.
  *
- * The maintainer's ruling on #14824 is that a documented developer-facing
+ * The maintainer's ruling that commit cf6b67164 landed is that a documented developer-facing
  * command must work for the developer who follows the docs. This file is the
  * half of that which no install can check: that the listing the developer READS
  * is the listing they GET.

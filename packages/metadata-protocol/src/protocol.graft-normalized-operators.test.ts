@@ -10,6 +10,11 @@
  * table that keeps growing can never be retired.
  *
  * `graftNormalizedOperators` copies the normalization back on and nothing else.
+ * [#20051] A `view` save no longer runs it: a view stores the parsed value of
+ * every key its body carried (`projectStorableViewBody`), which normalises the
+ * operator the same way. The graft serves every other type, and these helper
+ * pins keep using view bodies because `ViewMetadataSchema` is the schema whose
+ * operator normalisation the graft was written for.
  * The tests below pin both halves of that claim: operators DO change, and
  * everything else — auxiliary fields, unknown keys, `$`-token conditions, array
  * order, absent optionals — does NOT.
@@ -124,7 +129,8 @@ describe('graftNormalizedOperators — through the real view metadata schema', (
 
 describe('graftNormalizedOperators — what it must never touch', () => {
   it('keeps Studio-only auxiliary fields a `parsed.data` swap would strip', () => {
-    // The exact reason saveMeta persists verbatim (ADR-0005 §Validation).
+    // Why the graft, not a `parsed.data` swap, is the helper's contract (ADR-0005
+    // appendix (c) for every type but `view`).
     const authored = view(
       [{ field: 'status', operator: 'gt', value: 1 }],
       { isPinned: true, isDefault: false, sortOrder: 3 },

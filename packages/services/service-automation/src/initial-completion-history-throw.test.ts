@@ -286,7 +286,7 @@ describe('#16274 — a completed run must not be failed, and never re-run, by it
         // run — the judgment question answers YES, so `error`, with the
         // consequence and the fix in the first line.
         //
-        // ⚠️ And NOT a #13398-class raise: `Logger` from
+        // ⚠️ And NOT a raise under the published-sink ruling (commit e238c79f0): `Logger` from
         // `@objectstack/spec/contracts` declares `error` as a REQUIRED member,
         // so nothing is grown onto a published sink that lacks it.
         const { engine, errors, flowName } = boot({ retry: false, store: new SyncThrowTerminalStore() });

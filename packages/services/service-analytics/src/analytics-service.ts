@@ -41,7 +41,7 @@ import {
   assertObjectsReadable,
   type ObjectReadAdmissionProvider,
 } from './read-admission.js';
-// [#17130] The ROW-scope half's refusal envelope — the sibling of the
+// [commit 54b3d1d4a] The ROW-scope half's refusal envelope — the sibling of the
 // object-level `readAdmissionDeniedError` above, and the reason a fail-closed
 // row-scope denial can no longer be re-judged by its wording.
 import { readScopeUnresolvedError } from './read-scope-refusal.js';
@@ -61,10 +61,16 @@ import {
   collectFilterLeaves,
   lowerAnalyticsWhere,
   conjunctFieldKeys,
+  NO_DATETIME_COLUMNS,
 } from './strategies/filter-normalizer.js';
 import { findCrossFieldComparand } from './comparand-shape.js';
 import { compileDataset, type CompiledDataset, type RelationshipResolver } from './dataset-compiler.js';
-import { DatasetExecutor, resolveDimensionGranularity, type DateGranularityValue } from './dataset-executor.js';
+import {
+  DatasetExecutor,
+  declaredDefaultGranularity,
+  resolveDimensionGranularity,
+  type DateGranularityValue,
+} from './dataset-executor.js';
 import {
   resolveDimensionLabels,
   createOrderLabelResolver,
@@ -77,56 +83,14 @@ import { evaluateAnalyticsQueryOverRows } from './preview-evaluator.js';
 // member as the request spelled it (see `dataset-refusal.ts`'s header for why
 // that code and not `DATASET_INVALID`).
 import { invalidMemberError } from './dataset-refusal.js';
+// [#20807] A grouped dimension on a structured-JSON field is refused in
+// `ensureCube`, ahead of both strategies, naming the member the caller wrote.
+import { assertNoStructuredJsonDimension } from './structured-json-dimension-door.js';
 // [#16206] The `sqlDialect` hook's DECLARED accept set, and the predicate that
 // says whether a host answered outside it. Both live next to the membership set
 // the compilers read, so the contract has one definition and this file states
 // it rather than restating it.
 import { ACCEPTED_SQL_DIALECTS, isUnrecognisedSqlDialectAnswer, type AcceptedSqlDialect } from './text-match-sql.js';
-
-/**
- * Analytics result augmented with drill-through metadata (ADR-0021 D2; see
- * queryDataset). Carried alongside `rows` so the host can drill a clicked bucket
- * back to the underlying records without the renderer knowing field mappings.
- */
-type AnalyticsResultWithDrill = AnalyticsResult & {
-  /** The dataset's base object — the host drills into its records. */
-  object?: string;
-  /** Selected drillable dimension NAME → underlying object FIELD name. */
-  dimensionFields?: Record<string, string>;
-  /**
-   * RAW grouped values per row, aligned to `rows` by index — each a map of
-   * drillable dimension NAME → stored value (BEFORE label resolution rewrote
-   * `rows[i][dim]` to the display label). The exact-match drill filter is built
-   * from these, never from the display labels.
-   */
-  drillRawRows?: Array<Record<string, unknown>>;
-  /**
-   * RAW grouped values for the totals/subtotal rows (#3214), the totals-side
-   * companion to `drillRawRows`: `drillRawTotals[i]` aligns to `result.totals[i]`
-   * and `drillRawTotals[i][j]` to `result.totals[i].rows[j]`. Each map holds that
-   * grouping's DRILLABLE dimension NAME → stored value, snapshotted in the SAME
-   * pre-label-resolution pass (the totals loop below overwrites a subtotal row's
-   * dimension value with its display label just like the data rows). Restricted
-   * to the drillable dims present in the grouping, so the grand-total grouping
-   * (`[]`) contributes an empty map per row — which keeps the index alignment
-   * intact and correctly drills the whole (unfiltered) object.
-   */
-  drillRawTotals?: Array<Array<Record<string, unknown>>>;
-  /**
-   * #1752 — half-open date-range drill scope per row, the RANGE companion to
-   * `drillRawRows` (which handles equality dims). A time-bucketed date
-   * dimension (`dateGranularity`) groups a SPAN of records into one bucket
-   * ("2026-Q2"), so its drill needs `[gte, lt)`, not equality — the humanized
-   * bucket can't be exact-matched (which is why date dims are excluded from
-   * `dimensionFields`/`drillRawRows`). Aligned to `rows` by index; each entry
-   * maps a drillable date-dimension NAME → `{ field, gte, lt }` with `gte`
-   * inclusive and `lt` exclusive (bounds as `YYYY-MM-DD`). Present only for
-   * buckets whose boundaries are unambiguous — a `datetime` field under a
-   * non-UTC reference timezone is omitted (host drills an unscoped superset)
-   * until instant-boundary support lands.
-   */
-  drillRanges?: Array<Record<string, { field: string; gte: string; lt: string }>>;
-};
 
 /**
  * [#5717] Does this error carry an ADR-0112 envelope — i.e. did its PRODUCER
@@ -228,7 +192,7 @@ function isMissingColumnOfRelation(message: string): boolean {
  * object "O"`, where the "relation" is inside "relationship" and the missing
  * thing is a RELATIONSHIP, not a table. The anchor is the same pattern the
  * sibling {@link missingSourceRelation} already uses for postgres (and the same
- * shape as `packages/types/src/driver-error-classification.ts` — #13279
+ * shape as `packages/types/src/driver-error-classification.ts` — commit 6a180e42d
  * moved it there from `metadata/src/utils/schema-sync-errors.ts`), so "is
  * something missing" and "what is missing" can no longer disagree on this
  * limb.
@@ -248,7 +212,7 @@ function isMissingColumnOfRelation(message: string): boolean {
  * exclude it — only asking the more specific question FIRST can. That makes the
  * ORDER the fix, not the pattern.
  *
- * [#17130] EXPORTED — module-internal still (it is absent from `index.ts`, and
+ * [commit 54b3d1d4a] EXPORTED — module-internal still (it is absent from `index.ts`, and
  * this package's `exports` map publishes only that entry, so no consumer can
  * reach it), but reachable from `refusal-wording-collision.test.ts`. That guard
  * asserts no BARE refusal this package raises can be mistaken for a driver
@@ -354,6 +318,9 @@ const BARE_IDENTIFIER = /^[a-z_][a-z0-9_]*$/i;
  *   `measures.revenue = {sql: 'annual_revenue'}` answers
  *   `where: {revenue: {$gt: 100}}` as `annual_revenue > ?`, and a
  *   dimensions-only lookup would have called `revenue` a missing column.
+ * - `'measure'` — {@link withDeclaredMeasureFormats}, matching
+ *   `lookupMember(…, 'measure')`, which looks in `cube.measures` only: a
+ *   measure column must never borrow a same-named dimension's entry.
  *
  * Extracted from #5520's gate so #5669's second caller reads the tree the same
  * way — two open-coded copies of `lookupMember` in one file is exactly how
@@ -362,15 +329,17 @@ const BARE_IDENTIFIER = /^[a-z_][a-z0-9_]*$/i;
 function declaredMemberEntry(
   cube: Cube,
   member: string,
-  kind: 'dimension' | 'any',
+  kind: 'dimension' | 'measure' | 'any',
 ): { key: string; sql?: unknown } | undefined {
   const bags: Array<Record<string, { sql?: unknown } | undefined>> =
     kind === 'dimension'
       ? [cube.dimensions as Record<string, { sql?: unknown } | undefined>]
-      : [
-          cube.dimensions as Record<string, { sql?: unknown } | undefined>,
-          cube.measures as Record<string, { sql?: unknown } | undefined>,
-        ];
+      : kind === 'measure'
+        ? [cube.measures as Record<string, { sql?: unknown } | undefined>]
+        : [
+            cube.dimensions as Record<string, { sql?: unknown } | undefined>,
+            cube.measures as Record<string, { sql?: unknown } | undefined>,
+          ];
   // `key` is spread LAST in every arm: it is the bag key this member RESOLVED
   // to, and a `key` property on the cube entry itself must not shadow it.
   for (const bag of bags) {
@@ -414,6 +383,102 @@ function resolveMemberSource(
 }
 
 /**
+ * `analytics_cube.dimensions.granularities` on the query doors: bucket every
+ * GROUPED time dimension that names no granularity at the default its cube
+ * dimension declares ({@link declaredDefaultGranularity} — a single-entry
+ * list).
+ *
+ * The compiled-dataset path has always done this, one layer up:
+ * `DatasetExecutor.buildQuery` fills the same default into the query it hands
+ * `query()`, and until this ran on the query doors that was the ONLY place the
+ * key was read. A cube registered through `AnalyticsServiceConfig.cubes` —
+ * the authoring door — never becomes a `CompiledDataset`, so its declared
+ * `granularities` reached no reader: a query grouping by the dimension got one
+ * group per distinct timestamp, the #3588 shape. Run here, the one rule covers
+ * every cube that answers the name, whoever produced it; on the dataset path
+ * it finds the default already filled and changes nothing.
+ *
+ * The same scoping `buildQuery` applies, and for the same reason (#5688):
+ *
+ * - a `timeDimensions` entry that names no granularity is filled only when its
+ *   dimension is also GROUPED (listed in `dimensions`) — an entry carrying
+ *   only a `dateRange` is a window, a filter, and must stay one;
+ * - a grouped time dimension with no `timeDimensions` entry at all gets one,
+ *   spelled as the `dimensions` entry spells it, because the strategies key a
+ *   bucket by that spelling;
+ * - a stated `granularity` is never overridden, and one outside the declared
+ *   list is not refused (the dataset path compares against no list either).
+ *
+ * Returns `query` itself when nothing applies, so a query with nothing to
+ * default reaches the strategies byte-identical to before.
+ */
+function withDeclaredGranularityDefaults(query: AnalyticsQuery, cube: Cube | undefined): AnalyticsQuery {
+  if (!cube || !query.dimensions?.length) return query;
+  const defaultOf = (member: string): DateGranularityValue | undefined => {
+    const entry = declaredMemberEntry(cube, member, 'dimension');
+    return entry ? declaredDefaultGranularity(cube.dimensions[entry.key]) : undefined;
+  };
+  const grouped = new Set(query.dimensions);
+  let filled = false;
+  const timeDimensions = (query.timeDimensions ?? []).map((t) => {
+    if (t.granularity || !grouped.has(t.dimension)) return t;
+    const granularity = defaultOf(t.dimension);
+    if (!granularity) return t;
+    filled = true;
+    return { ...t, granularity };
+  });
+  const named = new Set(timeDimensions.map((t) => t.dimension));
+  for (const member of query.dimensions) {
+    if (named.has(member)) continue;
+    const granularity = defaultOf(member);
+    if (!granularity) continue;
+    filled = true;
+    named.add(member);
+    timeDimensions.push({ dimension: member, granularity });
+  }
+  return filled ? { ...query, timeDimensions } : query;
+}
+
+/**
+ * `analytics_cube.measures.format` on the query doors: describe each MEASURE
+ * column of a result with the display `format` its cube measure declares.
+ *
+ * `fields[].format` is the presentation surface a client formats amounts from
+ * (`AnalyticsResult`), column by column; `GET /analytics/meta` publishes the
+ * same declared value per measure (`getMeta`), with no column to attach it to.
+ * The compiled-dataset path fills it from the dataset's own measure
+ * (`enrichResultColumns`), and the dataset compiler copies that same value onto
+ * the cube it mints — so for a compiled dataset the value read here is the one
+ * already there. A cube registered through `AnalyticsServiceConfig.cubes` has
+ * no dataset: until this ran, its authored `format` reached no reader and
+ * `POST /analytics/query` described the column with `name` and `type` only.
+ *
+ * Only columns the request named under `measures` are described (the
+ * strategies name a measure column by the request's own spelling), resolved
+ * through the measures bag alone. A value a column already carries is never
+ * replaced — this describes, it does not correct. Copy-on-write: the strategy,
+ * or the delegated fallback service, owns the object it returned.
+ */
+function withDeclaredMeasureFormats(
+  result: AnalyticsResult,
+  query: AnalyticsQuery,
+  cube: Cube | undefined,
+): AnalyticsResult {
+  if (!cube || !result?.fields?.length || !query.measures?.length) return result;
+  const requested = new Set(query.measures);
+  let fields: AnalyticsResult['fields'] | undefined;
+  result.fields.forEach((f, i) => {
+    if (f.format != null || !requested.has(f.name)) return;
+    const entry = declaredMemberEntry(cube, f.name, 'measure');
+    const format = entry ? cube.measures[entry.key]?.format : undefined;
+    if (typeof format !== 'string' || format === '') return;
+    fields ??= [...result.fields];
+    fields[i] = { ...f, format };
+  });
+  return fields ? { ...result, fields } : result;
+}
+
+/**
  * Configuration for AnalyticsService.
  */
 export interface AnalyticsServiceConfig {
@@ -449,7 +514,7 @@ export interface AnalyticsServiceConfig {
      *   forward this field or a measure-scoped filter `ObjectQLStrategy`
      *   lowers never reaches storage.
      * - `method` is the spec's OWN six-value `AggregationFunction`, not
-     *   `string`: #12776 narrowed the contract, #12940 brought this mirror
+     *   `string`: #12776 narrowed the contract, commit aa16721b6 brought this mirror
      *   back into line. Widening it here again would not be a local matter —
      *   a bridge author types their handler against THIS declaration, so what
      *   they would get is a vocabulary the contract no longer has.
@@ -1400,7 +1465,7 @@ export class AnalyticsService implements IAnalyticsService {
    * Fail-closed: if the provider throws for an object, the whole query is
    * rejected rather than emitting SQL with that object unscoped.
    *
-   * [#17130] And the rejection DECLARES itself. This throw lands inside
+   * [commit 54b3d1d4a] And the rejection DECLARES itself. This throw lands inside
    * {@link AnalyticsService.queryDataset}'s catch, whose first question is
    * `hasDeclaredErrorEnvelope` and whose second is {@link isMissingSourceError}
    * — six substrings over driver phrasing, three of which are what a registry
@@ -1428,7 +1493,7 @@ export class AnalyticsService implements IAnalyticsService {
           `rejecting query (fail-closed, ADR-0021 D-C)`,
           e instanceof Error ? e : new Error(String(e)),
         );
-        // ⛔ The message is unchanged, deliberately: #17130's fix is the
+        // ⛔ The message is unchanged, deliberately: commit 54b3d1d4a's fix is the
         // DECLARATION, not a luckier string. Rewording to dodge the sniffer
         // would leave the next author to rediscover the mine.
         throw readScopeUnresolvedError(
@@ -1492,7 +1557,13 @@ export class AnalyticsService implements IAnalyticsService {
     // period boundary. An unresolvable placeholder throws the resolver's
     // `FILTER_TOKEN_*` 400 instead of charting zero.
     const tokenCtx = filterTokenContextFrom(context, new Date());
-    const query = this.resolveQueryTokens(queryInput, tokenCtx);
+    // `analytics_cube.dimensions.granularities` — the cube's declared default
+    // bucket, filled in before the gates and strategy selection run, so both
+    // see the query that will actually be bucketed.
+    const query = withDeclaredGranularityDefaults(
+      this.resolveQueryTokens(queryInput, tokenCtx),
+      scope.getCube(queryInput.cube),
+    );
 
     this.ensureCube(query, scope);
     const ctx = await this.callCtx(query, context, tokenCtx, scope);
@@ -1508,7 +1579,12 @@ export class AnalyticsService implements IAnalyticsService {
         // service minted (e.g. `MemoryAnalyticsService`, which always echoes).
         // Gating any one of those would leave the others serving, which is the
         // shape the defect already had.
-        return this.applySqlEchoPolicy(await strategy.execute(query, ctx));
+        //
+        // `analytics_cube.measures.format` is described at the same seam, for
+        // the same reason: whichever strategy answered, the measure columns
+        // leave with the format the cube declares.
+        const result = await strategy.execute(query, ctx);
+        return this.applySqlEchoPolicy(withDeclaredMeasureFormats(result, query, scope.getCube(query.cube!)));
       } catch (e) {
         if ((e as { code?: string })?.code === 'RAW_SQL_UNSUPPORTED') {
           this.logger.warn(
@@ -1640,8 +1716,32 @@ export class AnalyticsService implements IAnalyticsService {
    * call's queries and nothing else, so a dataset named like a configured cube
    * neither replaces that cube nor re-publishes it, whatever the request's
    * admission answers.
+   *
+   * [#20644] Every answer names the dataset's base object as `object`
+   * (`AnalyticsResult.object`), whatever dimensions were selected and whether
+   * or not rows came back. It is set here, once, on the path every exit of
+   * {@link answerDataset} leaves through — the draft-preview return, the
+   * degraded "backing object unavailable" return and the main return — so an
+   * exit added later inherits it instead of needing its own copy. `query()`
+   * never passes through here, so a cube answer carries none.
    */
   async queryDataset(
+    dataset: Dataset,
+    selection: DatasetSelection,
+    context?: ExecutionContext,
+    options?: { previewDrafts?: boolean },
+  ): Promise<AnalyticsResult> {
+    const answer = await this.answerDataset(dataset, selection, context, options);
+    // A copy rather than a write onto `answer`, which may be the very object a
+    // strategy returned (the same ownership rule `applySqlEchoPolicy` keeps).
+    return { ...answer, object: dataset.object };
+  }
+
+  /**
+   * The body of {@link queryDataset}. None of its exits sets `object`: the
+   * caller sets it once, for all of them.
+   */
+  private async answerDataset(
     dataset: Dataset,
     selection: DatasetSelection,
     context?: ExecutionContext,
@@ -1817,17 +1917,17 @@ export class AnalyticsService implements IAnalyticsService {
     // dimension NAMES, and the label resolution below OVERWRITES the raw grouped
     // value in each row with its display label. So before that happens, snapshot
     // the raw grouped values into a PARALLEL array (aligned to `rows` by index —
-    // the result rows are NOT mutated) and expose the dataset's `object` +
-    // dimension→field mapping so the renderer can build an exact-match filter.
+    // the result rows are NOT mutated) and expose the dimension→field mapping so
+    // the renderer can build an exact-match filter over the answer's `object`
+    // (set by {@link queryDataset} on every answer, drillable or not).
     // Date buckets are excluded — a humanized bucket ("2026-06") can't be
     // exact-matched against the stored timestamp, so they are not drillable.
     const drillDims = selectedDims.filter((d) => !!d.field && d.type !== 'date');
     if (drillDims.length && result.rows.length) {
-      (result as AnalyticsResultWithDrill).object = dataset.object;
-      (result as AnalyticsResultWithDrill).dimensionFields = Object.fromEntries(
+      result.dimensionFields = Object.fromEntries(
         drillDims.map((d) => [d.name, d.field as string]),
       );
-      (result as AnalyticsResultWithDrill).drillRawRows = result.rows.map((row) => {
+      result.drillRawRows = result.rows.map((row) => {
         const raw: Record<string, unknown> = {};
         for (const d of drillDims) raw[d.name] = row[d.name];
         return raw;
@@ -1839,7 +1939,7 @@ export class AnalyticsService implements IAnalyticsService {
       // groups by (the grand-total grouping `[]` keeps empty maps, so a subtotal
       // drill filters by the stored value while the grand total drills unfiltered).
       if (result.totals?.length) {
-        (result as AnalyticsResultWithDrill).drillRawTotals = result.totals.map((total) => {
+        result.drillRawTotals = result.totals.map((total) => {
           const groupingDims = drillDims.filter((d) => total.dimensions.includes(d.name));
           return total.rows.map((row) => {
             const raw: Record<string, unknown> = {};
@@ -1888,7 +1988,7 @@ export class AnalyticsService implements IAnalyticsService {
     if (rangeDims.length && result.rows.length) {
       const bound = (ymd: string, instant: boolean): string =>
         instant ? new Date(zonedDateStartToUtcMs(ymd, rangeTz)).toISOString() : ymd;
-      (result as AnalyticsResultWithDrill).drillRanges = result.rows.map((row) => {
+      result.drillRanges = result.rows.map((row) => {
         const ranges: Record<string, { field: string; gte: string; lt: string }> = {};
         for (const { d, granularity, instant } of rangeDims) {
           // A row in the empty bucket carries `null` here (#3839) and yields no
@@ -1900,10 +2000,6 @@ export class AnalyticsService implements IAnalyticsService {
         }
         return ranges;
       });
-      // The equality drill block sets `object` only when a NON-date drill dim
-      // exists; a report grouped ONLY by time still needs the base object so the
-      // host can open its list. Safe to (re)set to the same dataset object.
-      (result as AnalyticsResultWithDrill).object = dataset.object;
     }
 
     // ADR-0021 — resolve grouped dimension values to human display labels
@@ -2169,6 +2265,13 @@ export class AnalyticsService implements IAnalyticsService {
    * Only cubes the analytics API exposes are listed: a cube declared
    * `public: false` is omitted, and asking for it by name answers `[]` — the
    * same answer as a name no cube has (`cube-visibility.ts`).
+   *
+   * `description` (cube, measure, dimension) and a measure's `format` are the
+   * registered definition's own values, copied when declared and left off when
+   * not — never filled in. An authored cube carries what its author wrote; a
+   * compiled dataset's cube carries the `format` the dataset compiler copies
+   * from each dataset measure, and no `description`, because the compiler
+   * writes none.
    */
   async getMeta(cubeName?: string): Promise<CubeMeta[]> {
     const cubes = (cubeName
@@ -2179,15 +2282,19 @@ export class AnalyticsService implements IAnalyticsService {
     return cubes.map(cube => ({
       name: cube.name,
       title: cube.title,
+      ...(cube.description === undefined ? {} : { description: cube.description }),
       measures: Object.entries(cube.measures).map(([key, measure]) => ({
         name: `${cube.name}.${key}`,
         type: measure.type,
         title: measure.label,
+        ...(measure.description === undefined ? {} : { description: measure.description }),
+        ...(measure.format === undefined ? {} : { format: measure.format }),
       })),
       dimensions: Object.entries(cube.dimensions).map(([key, dimension]) => ({
         name: `${cube.name}.${key}`,
         type: dimension.type,
         title: dimension.label,
+        ...(dimension.description === undefined ? {} : { description: dimension.description }),
       })),
     }));
   }
@@ -2208,11 +2315,16 @@ export class AnalyticsService implements IAnalyticsService {
     // the same `FILTER_TOKEN_*` refusal), never a literal `{current_user_id}`
     // the real execution would not bind.
     const tokenCtx = filterTokenContextFrom(context, new Date());
-    const query = this.resolveQueryTokens(queryInput, tokenCtx);
 
     // [#20381] Same request scope as `query()`: nothing minted here reaches the
     // shared registry, admitted or refused.
     const scope = this.requestScope();
+    // …and the same declared default bucket, so the dry run shows the
+    // statement `query()` would run rather than an unbucketed one.
+    const query = withDeclaredGranularityDefaults(
+      this.resolveQueryTokens(queryInput, tokenCtx),
+      scope.getCube(queryInput.cube),
+    );
     this.ensureCube(query, scope);
     const ctx = await this.callCtx(query, context, tokenCtx, scope);
     const strategy = this.resolveStrategy(query, ctx);
@@ -2264,6 +2376,12 @@ export class AnalyticsService implements IAnalyticsService {
    * where), so a query that gets several wrong is answered about one at a time,
    * naming a real mistake either way.
    *
+   * [#20807] One more door runs between the dimension gate and the `where`
+   * gate, on the same paths: {@link assertDimensionsGroupScalarColumns}, which
+   * refuses a grouped dimension whose column EXISTS but is declared
+   * structured JSON — a question about the column's type, not its existence,
+   * and so asked after it.
+   *
    * [#20356] "Registered" means registered in `scope`: the cube is read from it
    * and what this method mints is recorded in it — the call's own request
    * scope, on every door, so nothing minted here reaches the shared registry
@@ -2292,6 +2410,8 @@ export class AnalyticsService implements IAnalyticsService {
       // spelling is in there — which is why the suggestion list is computed by
       // subtraction inside the gate rather than echoed verbatim.
       this.assertDimensionFields(query, cube, Object.keys(cube.dimensions));
+      // [#20807] …and a grouped dimension's column must not be structured JSON.
+      this.assertDimensionsGroupScalarColumns(query, cube);
       // [#5669] …and the `where`'s, third and last of the three request keys that
       // carry a field name. Its members are read from the filter TREE, not from
       // `cube.dimensions` — which on this path was minted from this very query,
@@ -2363,6 +2483,7 @@ export class AnalyticsService implements IAnalyticsService {
       // authored/compiled list IS the vocabulary a caller may name — and the one
       // the rejection suggests.
       this.assertDimensionFields(query, augmented, Object.keys(cube.dimensions));
+      this.assertDimensionsGroupScalarColumns(query, augmented);
       // [#5669] The `where` gate resolves a filter member through dimensions AND
       // measures (that is what the strategies do for a filter member), so it is
       // handed the AUGMENTED cube — a caller filtering on a suffix-inferred
@@ -2377,8 +2498,47 @@ export class AnalyticsService implements IAnalyticsService {
       // authored cube can declare a measure over a field the object dropped.
       this.assertMeasureFields(query, cube, Object.keys(cube.measures));
       this.assertDimensionFields(query, cube, Object.keys(cube.dimensions));
+      this.assertDimensionsGroupScalarColumns(query, cube);
       this.assertWhereFields(query, cube, Object.keys(cube.dimensions));
     }
+  }
+
+  /**
+   * [#20807] Refuse a GROUPED dimension whose column is a declared
+   * structured-JSON field — `INVALID_FIELD` / 400, naming the member the caller
+   * wrote — before either strategy builds anything. The rule, the
+   * measurements and the envelope are {@link assertNoStructuredJsonDimension}'s
+   * (`structured-json-dimension-door.ts`); this method supplies the two
+   * answers only the service has.
+   *
+   * - The dimension `sql` a member resolves to is {@link declaredMemberEntry}'s
+   *   (`cube.dimensions` only, the `'dimension'` kind the strategies'
+   *   `resolveDimensionSql` / `resolveFieldName(…, 'dimension')` resolve by),
+   *   and the member itself when the cube declares none — the column the
+   *   strategies group by in that case.
+   * - Its declared type is {@link AnalyticsServiceConfig.sourceFieldMeta}'s.
+   *
+   * Runs after the dimension source-field gate on every `ensureCube` path, so a
+   * member naming a column the object does not have is answered as that first.
+   * Same stand-downs as that gate: no `sourceFieldMeta`, or a cube whose `sql`
+   * is not a bare object name.
+   */
+  private assertDimensionsGroupScalarColumns(query: AnalyticsQuery, cube: Cube): void {
+    const fieldMeta = this.sourceFieldMeta;
+    if (!fieldMeta) return;
+    const object = typeof cube.sql === 'string' ? cube.sql.trim() : '';
+    if (!object || !BARE_IDENTIFIER.test(object)) return;
+    assertNoStructuredJsonDimension(
+      query,
+      cube,
+      object,
+      (member) => {
+        const entry = declaredMemberEntry(cube, member, 'dimension');
+        if (!entry) return member;
+        return typeof entry.sql === 'string' ? entry.sql : '';
+      },
+      (o, field) => fieldMeta(o, field)?.type,
+    );
   }
 
   /**
@@ -2677,7 +2837,12 @@ export class AnalyticsService implements IAnalyticsService {
     /** Every member the compiled predicate will bind against, structure discarded. */
     let members: string[];
     try {
-      members = collectFilterLeaves(normalizeAnalyticsFilterTree(query)).map((leaf) => leaf.member);
+      // [ADR-0053 D-D1, amended — #5930 step 3] The tree the strategies compile
+      // is LOWERED; this gate reads the same lowering, so a member the
+      // lowering's NULL guard names is a member it judges. The column-type
+      // reader is immaterial here: the whole-day rule and the `$between` split
+      // never change which member a leaf names.
+      members = collectFilterLeaves(normalizeAnalyticsFilterTree(query, NO_DATETIME_COLUMNS)).map((leaf) => leaf.member);
     } catch {
       // A `where` this layer refuses outright — see the stand-down note above.
       return;

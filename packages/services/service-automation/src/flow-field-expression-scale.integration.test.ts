@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #11060 end-to-end oracle — the hotcrm quote-flow shape (hotcrm#1206),
+ * The end-to-end oracle for the issue behind commit 815585513 — the hotcrm quote-flow shape (hotcrm#1206),
  * reproduced in-tree because that repo is out of reach from here: a flow
  * computes a discounted money value (`180000 * (1 - 30/100)` =
  * `125999.99999999999`) and writes it into a `scale: 2` field.
@@ -186,7 +186,7 @@ describe('flow-computed money lands within its declared scale (#11060, oracle fo
         const dump = JSON.stringify(res);
         expect(dump).toContain("unknown function 'ROUND'");
         expect(dump).toContain('round'); // the did-you-mean prescription travels with the failure
-        // Nothing persisted — before #11060 this wrote the field as undefined.
+        // Nothing persisted — before commit 815585513 this wrote the field as undefined.
         expect(await quoteByTitle('shouty')).toBeFalsy();
     });
 });

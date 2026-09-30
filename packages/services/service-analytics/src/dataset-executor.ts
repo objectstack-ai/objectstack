@@ -16,7 +16,9 @@ import {
   filterTokenContextFrom,
   resolveAnalyticsDateRangeString,
   resolveFilterTokens,
+  wallClockToUtcMs,
   zonedDateStartToUtcMs,
+  type BucketGranularity,
   type LoweredDateRangeWindow,
 } from '@objectstack/core';
 import type { CompiledDataset, DerivedMeasureSpec } from './dataset-compiler.js';
@@ -336,6 +338,41 @@ export function resolveDimensionGranularity(
   return selection.dateGranularity ?? (datasetDefault as DateGranularityValue | undefined);
 }
 
+/**
+ * The bucket size a cube dimension DECLARES as its default — the one reading of
+ * `analytics_cube.dimensions.granularities` there is, whoever produced the cube.
+ *
+ * A `time` dimension whose `granularities` lists exactly ONE interval defaults
+ * to it; any other shape states no default. That is the reading the dataset
+ * compiler's output was built for: it lowers an explicit
+ * `dataset.dimensions[].dateGranularity` to a single-entry list and writes the
+ * five-entry "all intervals" list when the dataset stated none, and
+ * `CubeRegistry.inferFromObject` / the ad-hoc inference mint the same five. A
+ * multi-entry list therefore offers several and chooses none.
+ *
+ * The default is the LOWEST rung of the precedence
+ * {@link resolveDimensionGranularity} states: a granularity the request states
+ * is never overridden, and nothing here refuses one the list does not name —
+ * the compiled-dataset path has never compared a requested granularity against
+ * the list, so this reading does not either.
+ *
+ * Two callers, one rule: {@link DatasetExecutor}'s `granularityOf` for a
+ * compiled dataset, and `AnalyticsService`'s query doors for every other cube —
+ * an authored one (`AnalyticsServiceConfig.cubes`) included, which is the
+ * producer this key is authored on and which never becomes a
+ * `CompiledDataset`.
+ */
+export function declaredDefaultGranularity(
+  dimension: { type?: string; granularities?: readonly unknown[] } | undefined,
+): DateGranularityValue | undefined {
+  if (dimension?.type !== 'time') return undefined;
+  // Typed as bare strings by the cube layer (Cube.js heritage); the values are
+  // `TimeUpdateInterval`, which is `DateGranularity`'s own member list.
+  return dimension.granularities?.length === 1
+    ? (String(dimension.granularities[0]) as DateGranularityValue)
+    : undefined;
+}
+
 // ── ordering + windowing (#3588) ─────────────────────────────────────────────
 
 /**
@@ -534,15 +571,25 @@ const DAY_MS = 86_400_000;
  * proxy back, round-tripping {@link boundInstantMs} exactly.
  */
 function calendarDayAt(ms: number, timezone?: string): string {
-  const day = bucketDateKey(ms, 'day', timezone);
-  if (day == null) {
+  return bucketKeyAt(ms, 'day', timezone);
+}
+
+/**
+ * [#20760] The canonical bucket key of the instant at `ms`, at `granularity`:
+ * `@objectstack/core`'s `bucketDateKey` — the labeller the in-memory grouping
+ * faces delegate to, whose label is contracted to equal the drivers' — so this
+ * module spells no key of its own.
+ */
+function bucketKeyAt(ms: number, granularity: BucketGranularity, timezone?: string): string {
+  const key = bucketDateKey(ms, granularity, timezone);
+  if (key == null) {
     // `bucketDateKey` answers `null` only for an absent or unparseable instant,
     // and every caller here holds a finite epoch ms this module just computed.
-    // Loud rather than a fabricated day: same condition, same envelope as an
+    // Loud rather than a fabricated key: same condition, same envelope as an
     // unparseable bound above (#5716).
-    throw datasetInvalidError(`[dataset-executor] compareTo date math produced no calendar day for ${ms}`);
+    throw datasetInvalidError(`[dataset-executor] compareTo date math produced no ${granularity} bucket for ${ms}`);
   }
-  return day;
+  return key;
 }
 
 function shiftYear(date: string, years: number): string {
@@ -560,7 +607,7 @@ function shiftYear(date: string, years: number): string {
  * ## What was wrong
  *
  * The STRING arm was spelled `[td.dateRange, td.dateRange]` — the degenerate
- * `[range, range]` fallback #17015 removed from every OTHER analytics face.
+ * `[range, range]` fallback commit 0da638cd9 removed from every OTHER analytics face.
  * `parseUTC` was handed the preset NAME, so a DECLARED, honoured member of the
  * closed vocabulary was refused. MEASURED on `b3b43b6ea`, `last_30_days` plus
  * `compareTo`:
@@ -571,7 +618,7 @@ function shiftYear(date: string, years: number): string {
  *
  * ⇒ the diagnostic is not merely unhelpful, it is FALSE, and it sends the
  * author to check a date that is exactly what the schema and the docs tell them
- * to write. This face was not in #17015's kit, so nothing measured it.
+ * to write. This face was not in commit 0da638cd9's kit, so nothing measured it.
  *
  * ## Why it reports INSTANTS while `runCompare` shifts DAYS
  *
@@ -584,7 +631,7 @@ function shiftYear(date: string, years: number): string {
  * ⛔ The ARRAY arm is the CALLER's explicit window and is handed back bound for
  * bound, with the inclusive upper reading it has always had (#16179) — the
  * refusal for anything that is not a two-bound window is
- * `explicitDateRangeWindow`'s, unchanged (#17124).
+ * `explicitDateRangeWindow`'s, unchanged (commit 86c505286).
  *
  * @throws the ADR-0112 `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` envelope for a
  *   string outside `DATE_RANGE_PRESETS` — the same envelope the sibling faces
@@ -788,31 +835,6 @@ export function shiftRange(range: [string, string], kind: CompareTo['kind']): [s
 // ── compareTo bucket alignment (#6007) ───────────────────────────────────────
 
 /**
- * The ISO-8601 week label (`2026-W23`) of the UTC calendar day at `ms`.
- *
- * Mirrors the week branch of `@objectstack/objectql`'s `bucketDateValue` — the
- * function that MINTS the bucket keys this executor then has to realign. It is
- * copied rather than imported because `service-analytics` does not depend on
- * `objectql` (it talks to the runtime through `IAnalyticsService`), and the
- * copy is not a blind one: {@link bucketKeyAtOrdinal} is pinned round-trip
- * against `bucketKeyToCalendarRange` — `@objectstack/core`'s exported INVERSE
- * of the same vocabulary, which rejects an impossible week outright — so a
- * drift in either direction fails a test rather than mislabelling a bucket.
- */
-function isoWeekKeyOfUtcMs(ms: number): string {
-  const target = new Date(ms);
-  const dayNum = (target.getUTCDay() + 6) % 7; // Mon=0..Sun=6
-  target.setUTCDate(target.getUTCDate() - dayNum + 3); // that week's Thursday
-  const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4));
-  const weekNo =
-    1 +
-    Math.round(
-      ((target.getTime() - firstThursday.getTime()) / DAY_MS - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7,
-    );
-  return `${target.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
-}
-
-/**
  * The ORDINAL of the bucket a UTC calendar day falls in: a monotone integer
  * that advances by exactly 1 per bucket, at every granularity.
  *
@@ -852,25 +874,39 @@ export function bucketOrdinalOfDay(ymd: string, granularity: DateGranularityValu
 
 /**
  * The canonical bucket KEY at an ordinal — the inverse of
- * {@link bucketOrdinalOfDay}, and the only place this package mints a bucket key
- * of its own.
+ * {@link bucketOrdinalOfDay}.
  *
  * The keys produced here MUST be byte-identical to the ones the runtime's
  * grouping produced for the primary pass, because they are compared as merge
  * keys: `2026-01`, `2026-Q1`, `2026`, `2026-01-07`, `2026-W03`. That equality is
  * pinned round-trip against `bucketKeyToCalendarRange` rather than asserted by
  * eye — see `dataset-compare-bucket-alignment.test.ts`.
+ *
+ * [#20760] ⛔ This function spells no key itself. It finds the UTC instant the
+ * ordinal's bucket starts at, and `@objectstack/core`'s `bucketDateKey`
+ * spells the key of that instant ({@link bucketKeyAt}), so a minted key and a
+ * grouped key cannot differ in spelling. A year below 1000 is four digits on both (`0050-06`,
+ * `0049-W52`). It replaced a local spelling of each granularity and a private
+ * copy of the ISO week rule, which wrote such a year unpadded (`50-06`,
+ * `49-W52`).
  */
 export function bucketKeyAtOrdinal(ordinal: number, granularity: DateGranularityValue): string {
   switch (granularity) {
     case 'year':
-      return String(ordinal);
-    case 'quarter':
-      return `${Math.floor(ordinal / 4)}-Q${(ordinal % 4) + 1}`;
-    case 'month':
-      return `${Math.floor(ordinal / 12)}-${String((ordinal % 12) + 1).padStart(2, '0')}`;
+      return bucketKeyAt(wallClockToUtcMs({ year: ordinal, month: 1, day: 1 }), 'year');
+    case 'quarter': {
+      const year = Math.floor(ordinal / 4);
+      const quarter = ordinal - year * 4; // 0..3
+      return bucketKeyAt(wallClockToUtcMs({ year, month: quarter * 3 + 1, day: 1 }), 'quarter');
+    }
+    case 'month': {
+      const year = Math.floor(ordinal / 12);
+      const month = ordinal - year * 12; // 0..11
+      return bucketKeyAt(wallClockToUtcMs({ year, month: month + 1, day: 1 }), 'month');
+    }
     case 'week':
-      return isoWeekKeyOfUtcMs(ordinal * 7 * DAY_MS - 3 * DAY_MS);
+      // The Monday the ordinal's ISO week starts on (see bucketOrdinalOfDay).
+      return bucketKeyAt(ordinal * 7 * DAY_MS - 3 * DAY_MS, 'week');
     case 'day':
     default:
       return calendarDayAt(ordinal * DAY_MS);
@@ -1326,8 +1362,7 @@ export class DatasetExecutor {
   ): DateGranularityValue | undefined {
     const cd = compiled.cube.dimensions[name];
     if (cd?.type !== 'time') return undefined;
-    const datasetDefault = cd.granularities?.length === 1 ? String(cd.granularities[0]) : undefined;
-    return resolveDimensionGranularity(selection, name, datasetDefault);
+    return resolveDimensionGranularity(selection, name, declaredDefaultGranularity(cd));
   }
 
   private buildQuery(
@@ -1472,7 +1507,7 @@ export class DatasetExecutor {
     // questions are answered in one place — see `resolveCompareDimension`.
     const dimension = resolveCompareDimension(selection);
     const td = (selection.timeDimensions ?? []).find((t) => t.dimension === dimension)!;
-    // [#17124] The ARRAY arm goes through the one `explicitDateRangeWindow` every
+    // [commit 86c505286] The ARRAY arm goes through the one `explicitDateRangeWindow` every
     // face in this package calls. ⛔ What this replaced filled a missing upper
     // bound in from the lower one, so a one-element array silently became a
     // point window HERE while the primary pass it is compared against may have
@@ -1481,7 +1516,7 @@ export class DatasetExecutor {
     // [#17973] The STRING arm is the CLOSED preset vocabulary, lowered by the one
     // shared `resolveAnalyticsDateRangeString` every other face calls and then
     // projected onto calendar days. ⛔ What this replaced was the
-    // degenerate `[range, range]` fallback #17015 removed everywhere else: it
+    // degenerate `[range, range]` fallback commit 0da638cd9 removed everywhere else: it
     // handed the preset NAME to this module's date parser, so `last_30_days` —
     // declared, honoured, and exactly what the schema tells an author to write —
     // came back as `DATASET_INVALID "invalid date in dateRange"`. A false
@@ -1504,7 +1539,7 @@ export class DatasetExecutor {
     );
     const range: [string, string] = Array.isArray(td.dateRange)
       ? // The caller's own bounds, untouched — `explicitDateRangeWindow` already
-        // refused anything that is not a two-bound window (#17124).
+        // refused anything that is not a two-bound window (commit 86c505286).
         [lowered.start, lowered.end]
       : inclusiveCalendarDayWindow(lowered, timezone);
     const shifted = shiftRange(range, cmp.kind);

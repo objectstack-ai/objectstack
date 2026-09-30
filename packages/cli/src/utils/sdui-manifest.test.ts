@@ -21,6 +21,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { validateJsxPages } from '@objectstack/lint';
+import { SDUI_MANIFEST_SERVICE } from '@objectstack/metadata-protocol';
 import {
   CONSOLE_SDUI_MANIFEST,
   JSX_PARSE_LEVEL_ONLY_RULE,
@@ -30,6 +31,7 @@ import {
   countJsxGatePages,
   jsxGateStacks,
   printJsxGateNotices,
+  registerDeploymentSduiManifest,
   resolveJsxGateManifest,
   resolveSduiManifest,
   type SduiManifestResolution,
@@ -523,5 +525,68 @@ describe('printJsxGateNotices — the text face of `os validate` / `os build`', 
     } finally {
       log.mockRestore();
     }
+  });
+});
+
+describe('registerDeploymentSduiManifest — `os serve` hands the save door its manifest, or says once why not (#20312)', () => {
+  const PROJECT = '/srv/app';
+
+  it('resolved: registers the manifest itself and prints nothing', () => {
+    const registered: unknown[] = [];
+    const line = registerDeploymentSduiManifest((m) => registered.push(m), PROJECT, {
+      status: 'resolved',
+      manifest: MANIFEST,
+      path: `${PROJECT}/sdui.manifest.json`,
+    });
+    expect(line).toBeUndefined();
+    expect(registered).toEqual([MANIFEST]);
+    expect(registered[0]).toBe(MANIFEST);
+  });
+
+  it('absent: registers nothing, and ONE line naming what is not validated and every place looked', () => {
+    const registered: unknown[] = [];
+    const lookedAt = [`${PROJECT}/sdui.manifest.json`, '/opt/node_modules/@objectstack/console/dist/sdui.manifest.json'];
+    const line = registerDeploymentSduiManifest((m) => registered.push(m), PROJECT, { status: 'absent', lookedAt });
+    expect(registered).toEqual([]);
+    expect(line).toMatch(/^Page source and `requires` not validated at save: /);
+    for (const place of lookedAt) expect(line).toContain(place);
+    expect(line?.split('\n')).toHaveLength(1);
+  });
+
+  it('unusable: registers nothing and names the file and the reason — the boot is not refused', () => {
+    const registered: unknown[] = [];
+    const path = `${PROJECT}/sdui.manifest.json`;
+    const line = registerDeploymentSduiManifest((m) => registered.push(m), PROJECT, {
+      status: 'unusable',
+      source: 'project',
+      path,
+      reason: 'it is not valid JSON (Unexpected token)',
+    });
+    expect(registered).toEqual([]);
+    expect(line).toMatch(/^Page source and `requires` not validated at save: /);
+    expect(line).toContain(path);
+    expect(line).toContain('it is not valid JSON');
+  });
+
+  it('defaults to the resolver over the project directory: a project manifest is what gets registered', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'os-serve-sdui-'));
+    try {
+      writeFileSync(join(dir, PROJECT_SDUI_MANIFEST_FILE), JSON.stringify(MANIFEST));
+      const registered: unknown[] = [];
+      expect(registerDeploymentSduiManifest((m) => registered.push(m), dir)).toBeUndefined();
+      expect(registered).toEqual([MANIFEST]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('`os serve` registers it under the save door\'s key, from the served config\'s directory, once', () => {
+    expect(SDUI_MANIFEST_SERVICE).toBe('sdui-manifest');
+    const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'commands', 'serve.ts'), 'utf8');
+    const calls = source.match(/registerDeploymentSduiManifest\(/g) ?? [];
+    expect(calls).toHaveLength(1);
+    expect(source).toMatch(
+      /registerDeploymentSduiManifest\(\s*\(manifest\) => \{ kernel\.registerService\(SDUI_MANIFEST_SERVICE, manifest\); \},\s*path\.dirname\(absolutePath\),\s*\);/,
+    );
   });
 });

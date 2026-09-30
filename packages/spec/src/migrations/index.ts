@@ -1,7 +1,9 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Metadata migration chain + change manifest (ADR-0087 D3/D4) — public surface.
+ * Metadata migration chain + change manifest (ADR-0087 D3/D4) — public surface,
+ * published as its own entry, `@objectstack/spec/migrations`, and deliberately NOT
+ * re-exported from the package root (see the note in `../index.ts`).
  *
  * The permanent, replayable chain that carries metadata from the support floor
  * (`MIGRATION_SUPPORT_FLOOR`, below which `--from` refuses) to current in one

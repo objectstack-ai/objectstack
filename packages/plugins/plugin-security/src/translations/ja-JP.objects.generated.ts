@@ -18,7 +18,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_position: {
     label: "ポジション",
     pluralLabel: "ポジション",
-    description: "RBAC アクセス制御のためのポジション定義",
+    description: "ケイパビリティ配分のためのポジション定義（ADR-0090）",
     fields: {
       label: {
         label: "表示名"

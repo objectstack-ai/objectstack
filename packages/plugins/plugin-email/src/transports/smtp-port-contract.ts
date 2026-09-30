@@ -84,7 +84,7 @@ export const SMTP_PORT_RANGE_TEXT = `${SMTP_PORT_MIN}-${SMTP_PORT_MAX}`;
  * Three conditions, and `Number.isInteger` carries the first two of them:
  * finite (it refuses `NaN` and both infinities), whole, and inside the range.
  *
- * ## ⭐ Why integrality is part of the contract (#13189)
+ * ## ⭐ Why integrality is part of the contract (commit 33fbd3566)
  *
  * This predicate arrived from `smtp.ts` as `Number.isFinite` and no more, and
  * #12993 kept it that way on purpose — narrowing an accept set inside a
@@ -131,7 +131,7 @@ export function isValidSmtpPort(port: number): boolean {
  * `raw` is the caller's ORIGINAL value, not the coerced number: an operator
  * who configured `"abc"` needs to see `abc`, not `NaN`.
  *
- * ⭐ **"an integer" is load-bearing, not decoration (#13189).** This sentence
+ * ⭐ **"an integer" is load-bearing, not decoration (commit 33fbd3566).** This sentence
  * used to read `(expected 1-65535)` while the guard admitted `587.5` — which
  * IS in 1-65535 — so the door stated a rule it did not enforce. Now that the
  * guard tests integrality, the sentence has to say so or the lie has merely

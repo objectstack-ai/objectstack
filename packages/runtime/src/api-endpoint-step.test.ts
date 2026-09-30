@@ -140,7 +140,7 @@ describe('a match with no wiring answers an honest 501', () => {
         // "matched but not executed" must never read as "executed and empty".
         expect(body.error.message).toContain('showcase_tasks');
         expect(body.error.message).toContain('no wiring');
-        expect(String(body.error.hint)).toContain('#5040');
+        expect(String(body.error.hint)).toContain('execution is reachable only on the far side of the policy chain');
     });
 
     it('passes the request coordinates through untouched', async () => {
@@ -229,7 +229,7 @@ describe('the policy chain runs between the match and the answer', () => {
         expect(answer?.status).toBe(501);
         const hint = String((answer!.body as { error: { hint: unknown } }).error.hint);
         expect(hint).toContain('enforced');
-        expect(hint).toContain('#5040');
+        expect(hint).toContain('supplies it together with the policy context');
     });
 
     it('never puts the cacheTtlSeconds header on the 501 — but the verdict still carries it', async () => {

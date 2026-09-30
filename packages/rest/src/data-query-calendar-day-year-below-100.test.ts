@@ -33,6 +33,17 @@
  * `data-temporal-write-real-day-iso.test.ts` gives: `@objectstack/driver-memory`
  * has no binding in this package. The helper's own pins, every year edge and
  * the impossible days included, are `packages/spec/src/data/calendar-day.test.ts`.
+ *
+ * ## [#20280] A `datetime` begins at year 1000
+ *
+ * MySQL documents its `DATETIME` from year 1000 only, and reads one stored in
+ * 0001..0099 back a century late, so a `datetime` in 0001..0999 is refused at
+ * the public door now, as a written value and as a comparand: the rows and the
+ * bounds of the table above are a 400 there. The whole-day reading is pinned
+ * at the floor's first day instead (`1000-01-01`), beside the 2026 control,
+ * and the card's bounds on `0050-01-01` are pinned as the refusal they are
+ * now. The helper's two-digit-year pins stay in `calendar-day.test.ts`, where
+ * a `date`'s years 0001..0099 still reach it.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -53,22 +64,32 @@ const LEDGER = {
   },
 };
 
-/** id · the instant written through the door. */
+/**
+ * id · the instant written through the door. [#20280] The card's rows sat in
+ * year 0050; a `datetime` there is refused now, so the day measured is the
+ * floor's first, `1000-01-01`, with the day before it out of reach.
+ */
 const ROWS: ReadonlyArray<readonly [string, string]> = [
-  ['y49', '0049-12-31T10:00:00.000Z'],
-  ['y50', '0050-01-01T10:00:00.000Z'], // the card's row
-  ['y50_last', '0050-01-01T23:59:59.999Z'], // the day's last millisecond
-  ['y50_next', '0050-01-02T00:00:00.000Z'], // the next day's first instant: out
+  ['y1000', '1000-01-01T10:00:00.000Z'],
+  ['y1000_last', '1000-01-01T23:59:59.999Z'], // the day's last millisecond
+  ['y1000_next', '1000-01-02T00:00:00.000Z'], // the next day's first instant: out
   ['c26', '2026-07-15T14:00:00.000Z'], // the card's control row
   ['c26_next', '2026-07-16T00:00:00.000Z'],
 ];
 
 /** `where` on `opened_at` · the ids it answers, sorted. */
 const QUERIES: ReadonlyArray<readonly [string, Record<string, unknown>, readonly string[]]> = [
-  ["$lte '0050-01-01'", { $lte: '0050-01-01' }, ['y49', 'y50', 'y50_last']],
-  ["$between max '0050-01-01'", { $between: ['0050-01-01', '0050-01-01'] }, ['y50', 'y50_last']],
-  ["$lte '2026-07-15' (control)", { $lte: '2026-07-15' }, ['c26', 'y49', 'y50', 'y50_last', 'y50_next']],
+  ["$lte '1000-01-01'", { $lte: '1000-01-01' }, ['y1000', 'y1000_last']],
+  ["$between max '1000-01-01'", { $between: ['1000-01-01', '1000-01-01'] }, ['y1000', 'y1000_last']],
+  ["$lte '2026-07-15' (control)", { $lte: '2026-07-15' }, ['c26', 'y1000', 'y1000_last', 'y1000_next']],
   ["$between max '2026-07-15' (control)", { $between: ['2026-07-15', '2026-07-15'] }, ['c26']],
+];
+
+/** [#20280] The card's bounds, and its row as a written value: refused now — a `datetime` begins at 1000. */
+const REFUSED_BOUNDS: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
+  ["$lte '0050-01-01'", { $lte: '0050-01-01' }],
+  ["$between max '0050-01-01'", { $between: ['0050-01-01', '0050-01-01'] }],
+  ["$lte '0999-12-31'", { $lte: '0999-12-31' }],
 ];
 
 interface Cell {
@@ -108,7 +129,7 @@ const originalTz = process.env.TZ;
 for (const cell of CELLS) {
   const config = cell.config();
   describe.skipIf(!config)(
-    `[#20550] a bare-day upper bound on a datetime includes the whole day in years 0001..0099, at the public door — ${cell.label}${config ? '' : ` (skipped: set ${cell.env} to run this cell)`}`,
+    `[#20550] a bare-day upper bound on a datetime includes the whole day, at the floor and in 2026, and [#20280] a bound in 0001..0999 is refused, at the public door — ${cell.label}${config ? '' : ` (skipped: set ${cell.env} to run this cell)`}`,
     () => {
       let engine: ObjectQL;
       let driver: any;
@@ -165,11 +186,22 @@ for (const cell of CELLS) {
         expect(stored).toEqual(Object.fromEntries(ROWS));
       });
 
-      it('$lte and the $between maximum on 0050-01-01 include that whole day, and not the next midnight — as the 2026 control does', async () => {
+      it('$lte and the $between maximum on 1000-01-01 include that whole day, and not the next midnight — as the 2026 control does', async () => {
         // Every reading first, then one comparison, so a red run shows all four cells.
         const got: Record<string, string[]> = {};
         for (const [name, bound] of QUERIES) got[name] = await idsWhere(bound);
         expect(got).toEqual(Object.fromEntries(QUERIES.map(([name, , want]) => [name, want])));
+      });
+
+      it('[#20280] a bound in 0001..0999 is 400 INVALID_FILTER, and the card\'s row is 400 VALIDATION_FAILED — a datetime begins at 1000', async () => {
+        for (const [name, bound] of REFUSED_BOUNDS) {
+          const res = await call('POST', '/api/v1/data/:object/query', { object: OBJECT }, { where: { opened_at: bound } });
+          expect(res.status, `${name}: ${JSON.stringify(res.body)}`).toBe(400);
+          expect(res.body.code, name).toBe('INVALID_FILTER');
+        }
+        const created = await call('POST', '/api/v1/data/:object', { object: OBJECT }, { id: 'y50', memo: 'm', opened_at: '0050-01-01T10:00:00.000Z' });
+        expect(created.status, JSON.stringify(created.body)).toBe(400);
+        expect(created.body.fields.map((x: any) => [x.field, x.code])).toEqual([['opened_at', 'invalid_date']]);
       });
     },
   );

@@ -624,3 +624,147 @@ describe('#4271 / #13657 an undeclared field written by an L2 body — one answe
     }, 30000);
   });
 });
+
+// ─── [#20805] A DECLARED field no store has a column for: `formula` ────────
+
+/**
+ * [#20805] The same split, one field class over — and closed the same way, by
+ * the engine, in front of both families.
+ *
+ * A `formula` field is DECLARED, so neither half of the declared-field door
+ * above sees it; it is VIRTUAL (computed on read), so no driver has a column
+ * for it. A full read returns the key, so every record written back carries
+ * it. Measured on `main` 5bed1f6caf through these two families, before the
+ * computed-field door existed:
+ *
+ *   SQL          the key entered the statement and the WHOLE write failed —
+ *                `SqliteError` "table … has no column named doubled", no
+ *                `status`, no `field`, on insert (every context) and update;
+ *   schemaless   the key was PERSISTED as a shadow column nothing reads, with
+ *                no `droppedFields`.
+ *
+ * Now the engine strips the value on every write path, in every context, and
+ * reports it under `computed` — never `readonly`, and never a refusal. The
+ * recording-driver pins (batch, `insertMany`, multi, strict, the hooks' view)
+ * are `packages/objectql/src/engine-formula-write-strip.test.ts`; this block
+ * holds the claim this file exists for — ONE answer on both families.
+ * PostgreSQL is not a cell: no CI job provisions one for this package.
+ */
+const FORMULA_OBJECT = {
+  name: 'fx_proj',
+  fields: {
+    n: { type: 'number', name: 'n' },
+    title: { type: 'text', name: 'title' },
+    doubled: { type: 'formula', name: 'doubled', expression: 'record.n * 2' },
+    note: { type: 'text', name: 'note', readonly: true },
+  },
+};
+
+describe('#20805 a caller-supplied formula value — stripped and reported as computed, on both families', () => {
+  let engine: ObjectQL | null = null;
+  let dir: string | null = null;
+  let noise: ExpectedReadRefusalCapture | null = null;
+
+  afterEach(async () => {
+    try { await engine?.destroy(); } catch { /* noop */ }
+    engine = null;
+    if (dir) { rmSync(dir, { recursive: true, force: true }); dir = null; }
+    // The same PIN the block above asserts, for the same `sys_organization`
+    // read on the SQL half (withheld where it fires, required nowhere).
+    expect(noise?.silentChannels([]) ?? ['no capture was installed']).toEqual([]);
+    noise = null;
+  });
+
+  async function bootFormula(family: 'sql' | 'memory'): Promise<{ e: ObjectQL; driver: any }> {
+    let driver: any;
+    if (family === 'sql') {
+      dir = mkdtempSync(join(tmpdir(), 'os-20805-'));
+      driver = new SqlDriver({
+        client: 'better-sqlite3',
+        connection: { filename: join(dir, 'data.sqlite') },
+        useNullAsDefault: true,
+      });
+      noise = captureExpectedReadRefusals([ABSENT_TENANCY_TABLE]);
+      noise.captureDriver(driver);
+      await driver.initObjects([FORMULA_OBJECT]); // a REAL table: no `doubled` column
+    } else {
+      noise = captureExpectedReadRefusals([]);
+      driver = new InMemoryDriver();
+    }
+    engine = new ObjectQL();
+    noise.captureEngine(engine);
+    engine.registerDriver(driver, true);
+    await engine.init();
+    engine.registry.registerObject(FORMULA_OBJECT as any);
+    return { e: engine, driver };
+  }
+
+  /** The row as the DRIVER holds it — below the engine's read-side formula hydration. */
+  const stored = async (driver: any, id: unknown) => (await driver.find('fx_proj', rowById(id)))[0];
+
+  const COMPUTED = { object: 'fx_proj', fields: ['doubled'], reason: 'computed' };
+
+  it.each([['SQL (better-sqlite3, real table)', 'sql'], ['schemaless (memory)', 'memory']] as const)(
+    '%s: insert and update answer success, report computed, and store no such key',
+    async (_label, family) => {
+      const { e, driver } = await bootFormula(family);
+
+      const onInsert: unknown[] = [];
+      const row = await e.insert('fx_proj', { n: 1, title: 'a', doubled: 5 }, { onFieldsDropped: (ev) => onInsert.push(ev) });
+      expect(onInsert).toEqual([COMPUTED]);
+      expect(await stored(driver, row.id)).not.toHaveProperty('doubled');
+      expect(await stored(driver, row.id)).toMatchObject({ n: 1, title: 'a' });
+
+      const onUpdate: unknown[] = [];
+      await e.update('fx_proj', { id: row.id, n: 4, doubled: 99 }, { onFieldsDropped: (ev) => onUpdate.push(ev) });
+      expect(onUpdate).toEqual([COMPUTED]);
+      expect(await stored(driver, row.id)).not.toHaveProperty('doubled');
+      // The writable field beside it DID land, and the formula answers from it.
+      expect(await stored(driver, row.id)).toMatchObject({ n: 4 });
+      expect(((await e.find('fx_proj', rowById(row.id)))[0] as any).doubled).toBe(8);
+
+      // Every context: a system writer has no column to land in either.
+      const onSystem: unknown[] = [];
+      const sys = await e.insert('fx_proj', { n: 2, doubled: 7 }, { context: { isSystem: true }, onFieldsDropped: (ev: unknown) => onSystem.push(ev) } as any);
+      expect(onSystem).toEqual([COMPUTED]);
+      expect(await stored(driver, sys.id)).not.toHaveProperty('doubled');
+    },
+    30000,
+  );
+
+  it.each([['SQL (better-sqlite3, real table)', 'sql'], ['schemaless (memory)', 'memory']] as const)(
+    '%s: engine.validate strips and reports the same, and refuses an unknown key as insert does',
+    async (_label, family) => {
+      const { e } = await bootFormula(family);
+
+      const onValidate: unknown[] = [];
+      const verdict = await e.validate('fx_proj', { n: 1, doubled: 5 }, { onFieldsDropped: (ev) => onValidate.push(ev) });
+      expect(verdict.valid).toBe(true);
+      expect(onValidate).toEqual([COMPUTED]);
+
+      const onValidateUnknown: any = await e.validate('fx_proj', { n: 1, nope: 5 }).catch((x: unknown) => x);
+      const onInsertUnknown: any = await e.insert('fx_proj', { n: 1, nope: 5 } as any).catch((x: unknown) => x);
+      for (const err of [onValidateUnknown, onInsertUnknown]) {
+        expect(err?.code).toBe('INVALID_FIELD');
+        expect(err?.status).toBe(400);
+        expect(err?.field).toBe('nope');
+      }
+    },
+    30000,
+  );
+
+  it.each([['SQL (better-sqlite3, real table)', 'sql'], ['schemaless (memory)', 'memory']] as const)(
+    '%s: controls — a static readonly key is still stripped under readonly, a writable field still writes',
+    async (_label, family) => {
+      const { e, driver } = await bootFormula(family);
+
+      const events: unknown[] = [];
+      const row = await e.insert('fx_proj', { n: 3, title: 'kept', note: 'forged' }, { onFieldsDropped: (ev) => events.push(ev) });
+      expect(events).toEqual([{ object: 'fx_proj', fields: ['note'], reason: 'readonly' }]);
+      const held = await stored(driver, row.id);
+      expect(held).toMatchObject({ n: 3, title: 'kept' });
+      expect(held?.note ?? null).toBeNull();
+    },
+    30000,
+  );
+});

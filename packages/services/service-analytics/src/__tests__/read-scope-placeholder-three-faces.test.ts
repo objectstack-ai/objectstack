@@ -482,8 +482,11 @@ describe('[#20075] `compileScopedFilterToSql` — the public export', () => {
   const UNCHANGED: Array<{ scope: unknown; sql: string; params: unknown[] }> = [
     { scope: { owner: 'u_me' }, sql: '"deal"."owner" = ?', params: ['u_me'] },
     {
+      // [ADR-0053 D-D1, amended — #5930 step 3] The shared lowering's NULL
+      // escape now wraps this compiler's own: the same rows, with or without
+      // a context — which is what this row is about.
       scope: { owner: { $ne: 'u_me' } },
-      sql: '("deal"."owner" IS NULL OR "deal"."owner" <> ?)',
+      sql: '(("deal"."owner" IS NULL OR ("deal"."owner" IS NULL OR "deal"."owner" <> ?)))',
       params: ['u_me'],
     },
     { scope: { region: { $in: ['emea', 'amer'] } }, sql: '"deal"."region" IN (?, ?)', params: ['emea', 'amer'] },
@@ -505,7 +508,7 @@ describe('[#20075] `compileScopedFilterToSql` — the public export', () => {
 
   it('with a context, a placeholder binds its resolved value', () => {
     expect(compile({ owner: { $ne: '{current_user_id}' } }, { context: MEMBER })).toEqual({
-      sql: '("deal"."owner" IS NULL OR "deal"."owner" <> ?)',
+      sql: '(("deal"."owner" IS NULL OR ("deal"."owner" IS NULL OR "deal"."owner" <> ?)))',
       params: ['u_me'],
     });
   });

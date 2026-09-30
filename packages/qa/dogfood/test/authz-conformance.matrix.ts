@@ -25,7 +25,7 @@
 // dispatcher domain files.
 //
 // The population comes from `packages/rest/src/rest-route-ledger.ts` (83 rows
-// / 18 families) and `packages/runtime/src/route-ledger.ts` (81 rows / 21
+// / 18 families) and `packages/runtime/src/route-ledger.ts` (82 rows / 21
 // domains) because those two are enumerated from a RUNNING server and guarded
 // in both directions by their own conformance tests — so a new family or
 // domain cannot be silently absent from them, and therefore cannot be silently
@@ -93,7 +93,7 @@
 // silencing that particular red costs an enforcement site rather than a
 // `covers` append on a row that records an absence.
 //
-// [#8711] That completeness is over ROUTES, not over primitives: a primitive
+// [commit 2ce1eb41b] That completeness is over ROUTES, not over primitives: a primitive
 // enforced by a predicate inside an existing resolver adds no entry point, so
 // it can be neither UNCLASSIFIED nor STALE. Measured against the rows below:
 // 44 of 51 carry no `covers` key at all (7 rows, 15 keys, every one an
@@ -241,7 +241,7 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     covers: ['actions:domains/actions.ts:anonymous-gate', 'dispatcher-domain:route-ledger.ts:/actions'],
     note: 'A `type: \'script\'` action body runs `isSystem: true` (elevated), so an ungated POST was an anonymous privilege-escalating WRITE, not merely an information leak — #5519 measured `POST /actions/showcase_task/showcase_mark_done/:id` answering 200 with the update applied. Internal dispatch is unaffected: this handler is a pure HTTP seam (the MCP `run_action` bridge enters through action-execution.invokeBusinessAction, declarative endpoints through the transport fallback seam with their own `authRequired` gate), so `authRequired: false` public endpoints stay public.' },
   { id: 'anonymous-deny-automation', summary: 'anonymous-deny on the automation/flow surface (#2567 surface 3 / #5519)', state: 'enforced',
-    enforcement: 'runtime/domains/automation.ts handleAutomationRequest — shouldDenyAnonymous DOMAIN-WIDE at the top, and deliberately BEFORE the isServiceServeable probe so the 401/501 difference cannot be used to fingerprint whether a deployment mounts automation; per-route capability predicates run after this floor — `manage_metadata` for the four gated flow writes (create `POST /` / update `PUT /:name` / deregister `DELETE /:name`, #10145, plus enablement `POST /:name/toggle` since the #10243 ruling of 2026-08-23, which measured that the enabled bit is not a ROW and so reaches every organization on the deployment), all selected by the ONE `isFlowAuthoringWrite` predicate, fail-closed by construction (an absent executionContext, an absent `systemPermissions` or an empty one all refuse) and answering 403 `PERMISSION_DENIED`, with only engine `isSystem` bypassing; the run-state reads (#7900) and `resume` (#3801 / #5561) carry their own separate per-route predicates, and the execution doors (trigger / execute) sit outside all of them — including `POST /trigger/:name` for a flow literally NAMED `toggle`, which the toggle arm deliberately excludes so a name cannot cost a member its run door',
+    enforcement: 'runtime/domains/automation.ts handleAutomationRequest — shouldDenyAnonymous DOMAIN-WIDE at the top, and deliberately BEFORE the isServiceServeable probe so the 401/501 difference cannot be used to fingerprint whether a deployment mounts automation; per-route capability predicates run after this floor — `manage_metadata` for the five gated flow writes (create `POST /` / update `PUT /:name` / deregister `DELETE /:name`, #10145, plus enablement `POST /:name/toggle` since the #10243 ruling of 2026-08-23, which measured that the enabled bit is not a ROW and so reaches every organization on the deployment, plus the ADR-0126 §7.1 clone `POST /:name/clone`, which registers flow metadata at environment scope exactly as create does), all selected by the ONE `isFlowAuthoringWrite` predicate, fail-closed by construction (an absent executionContext, an absent `systemPermissions` or an empty one all refuse) and answering 403 `PERMISSION_DENIED`, with only engine `isSystem` bypassing; the run-state reads (#7900) and `resume` (#3801 / #5561) carry their own separate per-route predicates, and the execution doors (trigger / execute) sit outside all of them — including `POST /trigger/:name` for a flow literally NAMED `toggle`, which the toggle arm deliberately excludes so a name cannot cost a member its run door',
     proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
     // [2026-08-31] Ledger granularity for the same DOMAIN-WIDE gate named
     // above — the property the note already relies on ("gating the DOMAIN
@@ -390,12 +390,12 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   // mass-revoked) and the 0/1 storage shape the primary driver returns is
   // judged as well as a literal `false`.
   //
-  // [#8711] Both rows carry NO `covers`, and that is a statement about the
+  // [commit 60ade586e] Both rows carry NO `covers`, and that is a statement about the
   // RATCHET, not an omission: `discover()` enumerates HTTP entry points from a
   // curated per-file probe table, and a predicate inside an existing resolver
   // adds no entry point — so neither flag could ever have surfaced as
   // UNCLASSIFIED during the whole period it was inert. These two rows restore
-  // the ledger's stated invariant. [Resolved — maintainer ruling on #8711,
+  // the ledger's stated invariant. [Resolved — maintainer ruling (commit 2ce1eb41b),
   // 2026-08-15] The invariant's advertised SCOPE is narrowed to what the
   // ratchet can check, not the ratchet widened to reach in-resolver
   // predicates like this one — widening was measured unachievable in general
@@ -408,7 +408,7 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     enforcement: 'core/security/resolve-authz-context.ts step 6a — isRowActive gates BOTH halves, and only both hold it: (i) only ACTIVE position ids collect their `sys_position_permission_set` linkage, so a deactivated position carries no bound set; (ii) the deactivated NAME is dropped from `grants.positions`, because resolvePermissionSetsForContext requests positions as permission-set NAMES and a name left standing resolves the same grant one layer down',
     note: 'Only a name whose `sys_position` row is EXPLICITLY deactivated is dropped — a name with no row at all (`org_owner`, a membership-derived role, the built-in `everyone` audience anchor) has no flag to read and is untouched. Deliberately NOT a blanket revocation of the sets themselves: a set held via BOTH a deactivated position AND a direct user grant still resolves, since the direct grant is a different grant (resolve-authz-context.test.ts pins exactly that case). Symmetrically, the WRITE gates and blast-radius reads in plugin-security (assertAudienceAnchorBindingGate, setsBoundToPosition, the delegated-admin surfaces) stay UNFILTERED on purpose — dropping a deactivated row there would make a refused binding permitted, narrow a delegate\'s boundary, and make a deactivated position unmanageable. Unit-proven in core/security/resolve-authz-context.test.ts (a deactivated position stops granting its sets; an active one still grants; an absent column grants; the 0/1 shape deactivates; deactivating ONE position leaves the others granting) + core/security/row-active.test.ts. Not HIGH_RISK for the same reason as `permission-set-active`.' },
 
-  // ── ADR-0091 D1/D2 — grant validity windows (#8811) ───────────────────
+  // ── ADR-0091 D1/D2 — grant validity windows (commit d6e793507) ────────
   //
   // The sibling of the `active` switch above, and enforced at the same seam
   // for the same stated reason: a grant that is supposed to lapse on a date,

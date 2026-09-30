@@ -75,7 +75,8 @@ describe('matchesFilterCondition — temporal conformance on a native-writer pos
     // identically and must answer identically.
     const bound = new Date('2026-07-28T00:00:00.000Z');
     const got = TEMPORAL_ROWS.filter((r) => matchesFilterCondition(r, { at: { $gte: bound } } as any)).map((r) => r.id);
-    expect(got).toEqual(['c_open', 'd_mid', 'e_late', 'f_next', 'g_eom']);
+    // `z_last` (9999-12-31, #20600) is after the bound like `f_next` and `g_eom`.
+    expect(got).toEqual(['c_open', 'd_mid', 'e_late', 'f_next', 'g_eom', 'z_last']);
   });
 });
 

@@ -58,6 +58,7 @@ import type { NodeExecutor, SuspendedRun, SuspendedRunStore, FlowTrigger } from 
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
 import { registerScreenNodes } from './builtin/screen-nodes.js';
+import { withLoaderSetFromPull } from './loader-set.test-support.js';
 
 // ── fixtures ───────────────────────────────────────────────────────────────
 
@@ -421,10 +422,11 @@ describe('#6499 sites 5–8 — plugin-supplied code seams, all #4632 FUNCTIONAL
     });
 
     it("site 8: deactivateFlowTrigger — the trigger's thrown stop() rides meta", async () => {
-        const engine = new AutomationEngine(jsonLogger());
+        const engine = withLoaderSetFromPull(new AutomationEngine(jsonLogger()));
         const trigger: FlowTrigger = { type: 'record_change', start() {}, stop() { throw new Error(MULTILINE_DRIVER); } };
         engine.registerTrigger(trigger);
-        engine.registerFlow('rc_unbind', triggeredFlow('rc_unbind'));
+        // [#20726] Unbound through the toggle, which switches packaged flows only.
+        engine.registerFlow('rc_unbind', { ...triggeredFlow('rc_unbind'), _packageId: 'crm' });
 
         const streams = await captureBoth(async () => { await engine.toggleFlow('rc_unbind', false); });
 

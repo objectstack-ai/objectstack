@@ -327,7 +327,7 @@ export async function ensureViewDefinitionActiveIndex(
             logger,
             `[metadata-protocol] could not create '${VIEW_ACTIVE_INDEX_NAME}' on ` +
             `"${VIEW_DEFINITION_TABLE}" after the probe succeeded — the table may currently have NO ` +
-            `unique index on (${viewActiveIndexKeyParts().join(', ')}). Restart to retry (#5839).`,
+            `unique index on (${viewActiveIndexKeyParts().join(', ')}). Restart to retry.`,
             detail,
         );
         return { status: 'failed', detail };
@@ -378,9 +378,9 @@ function reportDegradation(
             `'${VIEW_ACTIVE_INDEX_NAME}' on "${VIEW_DEFINITION_TABLE}" stays UNRESTRICTED and NULL-distinct ` +
             `over (${columns}), the bare-composite degradation of ADR-0120 D3. The system keeps looking ` +
             `healthy while two consequences hold on this dialect: an archived view keeps occupying its ` +
-            `name slot (#5839), and two same-name ACTIVE shared views (owner NULL) or environment-level ` +
-            `views (organization_id NULL) can still coexist even though the platform states they cannot ` +
-            `(#6417). MySQL/MariaDB has no partial indexes, so there is no in-dialect fix: run this ` +
+            `name slot, and two same-name ACTIVE shared views (owner NULL) or environment-level ` +
+            `views (organization_id NULL) can still coexist even though the platform states they cannot. ` +
+            `MySQL/MariaDB has no partial indexes, so there is no in-dialect fix: run this ` +
             `platform on SQLite/PostgreSQL for the guarantee, and meanwhile watch for duplicates with: ` +
             `${buildDuplicateProbeSql()}`,
             detail,
@@ -402,7 +402,7 @@ function reportDegradation(
             `existing rows violate (${keyParts}) among state='active'. The previous index is left in ` +
             `place, so (${columns}) is enforced only as far as it was before; the NULL-safe key is NOT ` +
             `enforced until the duplicates are resolved. List them with: ${buildDuplicateProbeSql()} — or ` +
-            `run "os migrate duplicates" — then restart (ADR-0120 D4, #6417, #8725).`,
+            `run "os migrate duplicates" — then restart (ADR-0120 D4).`,
             detail,
         );
         return;
@@ -416,8 +416,7 @@ function reportDegradation(
         logger,
         `[metadata-protocol] could not rebuild '${VIEW_ACTIVE_INDEX_NAME}' on "${VIEW_DEFINITION_TABLE}" as ` +
         `the active-row NULL-safe index; the existing index is unchanged, so two same-name ACTIVE shared ` +
-        `views can still coexist while everything else looks healthy. Fix the cause below and restart ` +
-        `(#5839 / #6417).`,
+        `views can still coexist while everything else looks healthy. Fix the cause below and restart.`,
         detail,
     );
 }

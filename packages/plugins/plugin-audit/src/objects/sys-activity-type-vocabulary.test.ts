@@ -24,7 +24,7 @@ import { SysActivity } from './index.js';
  * shows both halves, against a control that proves the measurement can fail.
  * This file is the DECLARATIVE half: the writer census, written as literals.
  *
- * ## 2026-08-24 — the #11507 ruling, and what this census now inventories
+ * ## 2026-08-24 — the open-vocabulary ruling (commit 88b9d749a), and what this census now inventories
  *
  * The paragraph above described the state of the code; the maintainer then
  * ruled what it MEANS (direction 4): `sys_activity.type` is an OPEN,
@@ -88,7 +88,7 @@ import { SysActivity } from './index.js';
  *
  * That mirror is unguarded in both directions — objectui pins its key set
  * against a hardcoded literal rather than against this declaration, so an
- * addition here does not reach it. Filed as #8852; deliberately NOT asserted
+ * addition here does not reach it. Commit 51bb277ef recorded it; deliberately NOT asserted
  * here, since this package cannot import objectui. Per objectstack-ai/objectui#5840
  * that map has since been widened past the declaration to cover values a shipped
  * producer measurably writes, so the two key sets are no longer set-equal —

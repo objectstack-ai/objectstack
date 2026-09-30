@@ -114,6 +114,8 @@
     "ElementRepeaterPropsSchema": "ui/ElementRepeaterProps",
     "ElementTextInputPropsSchema": "ui/ElementTextInputProps",
     "ElementTextPropsSchema": "ui/ElementTextProps",
+    "EmptyState": "ui/EmptyState",
+    "EmptyStateSchema": "ui/EmptyState",
     "ExpressionBindableTextKey": "ui/ExpressionBindableTextKey",
     "ExpressionBindableTextKeySchema": "ui/ExpressionBindableTextKey",
     "FormButtonConfig": "ui/FormButtonConfig",

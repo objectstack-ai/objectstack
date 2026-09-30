@@ -25,6 +25,8 @@ export {
 } from './write-response-internal-fields.js';
 export { createMetadataProtocolPlugin, assembleMetadataProtocol, shouldRunPlatformMigrations } from './plugin.js';
 export type { MetadataProtocolPluginOptions, AssembleMetadataProtocolOptions } from './plugin.js';
+// [#20312] The service key a host registers its SDUI component manifest under, read by the save door per publish.
+export { SDUI_MANIFEST_SERVICE } from './runtime-authoring-gate.js';
 // [#6710] The declared authoring channel — the explicit expression of ADR-0005's
 // "package author's own bootstrap channel", replacing the `environmentId ===
 // undefined` proxy the #4463 gate used to key its activation off.

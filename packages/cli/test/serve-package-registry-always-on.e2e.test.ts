@@ -128,7 +128,7 @@ function bootServe(dir: string, port: string, db: string): Promise<LiveServe> {
     const child = spawn(TSX, [CLI, 'serve', 'objectstack.config.ts', '-p', port, '--dev'], {
       cwd: dir,
       stdio: ['pipe', 'pipe', 'pipe'],
-      // `childEnv`, never a bare `...process.env` — see its header (#11267).
+      // `childEnv`, never a bare `...process.env` — see its header (commit 1ddda1d00).
       env: childEnv({
         NO_COLOR: '1',
         OS_DATABASE_URL: db,

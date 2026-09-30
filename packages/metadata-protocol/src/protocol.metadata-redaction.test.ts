@@ -50,6 +50,9 @@ import {
     hasMetadataRedactor,
     redactMetadataItem,
 } from './index.js';
+// [#20611] Not on the package entry — the gate's half of the carry-forward,
+// consumed inside this package only.
+import { redactedPathsCarriedForward } from './metadata-redaction.js';
 
 interface Row {
     id: string;
@@ -739,15 +742,23 @@ describe('#20552 — first save of a registry-only (code-authored) flow keeps it
 // onto a node the next read serves whole. The save door runs the carry-forward
 // after every authoring gate, so no node-config check stood in the way there.
 
-/** The served body of the seeded flow, relocated: the old start node's kind changed, a new start node added. */
-function relocate(served: any) {
+/**
+ * The served body of the seeded flow, relocated: the old start node's kind
+ * changed, a new start node added. [#20611] `secret` is what the author types on
+ * the NEW start node — omitted, it carries none, and the flow is an `api` flow
+ * whose start node holds no secret, which the runtime authoring gate refuses.
+ */
+function relocate(served: any, secret?: string) {
     const [finish, begin] = served.nodes;
     return {
         ...served,
         nodes: [
             finish,
             { ...begin, type: 'assignment', label: 'Was the start node', config: {} },
-            { id: 'begin_v2', type: 'start', label: 'On Webhook', config: { triggerType: 'api', hookId: 'intake' } },
+            {
+                id: 'begin_v2', type: 'start', label: 'On Webhook',
+                config: { triggerType: 'api', hookId: 'intake', ...(secret !== undefined ? { secret } : {}) },
+            },
         ],
         edges: [{ id: 'e1', source: 'begin_v2', target: 'finish' }],
     };
@@ -773,15 +784,47 @@ describe('#20590 — a relocating round trip never carries a credential into a s
         const served: any = (await protocol.getMetaItem({ type: 'flow', name: 'inbound_hook' })).item;
         const { _diagnostics: _d, ...editable } = served;
         void _d;
-        await protocol.saveMetaItem({ type: 'flow', name: 'inbound_hook', item: relocate(editable) });
+        // [#20611] The new start node carries the author's own secret, so the
+        // flow is one the runtime authoring gate admits and the save reaches
+        // the carry-forward this test is about; the secretless relocation is
+        // the refusal pinned next.
+        await protocol.saveMetaItem({ type: 'flow', name: 'inbound_hook', item: relocate(editable, ROTATED) });
 
         const next: any = await protocol.getMetaItem({ type: 'flow', name: 'inbound_hook' });
         expect(next.item.nodes.map((n: any) => n.id)).toEqual(['finish', 'begin', 'begin_v2']);
         expect(allStrings(next)).not.toContain(FLOW_SECRET);
+        expect(allStrings(next)).not.toContain(ROTATED);
         const list: any = await protocol.getMetaItems({ type: 'flow' });
         expect(allStrings(list)).not.toContain(FLOW_SECRET);
-        // Nothing was grafted at rest either: the relocated node holds no credential.
-        expect(allStrings(storedFlowBody(rows))).not.toContain(FLOW_SECRET);
+        // Nothing was grafted at rest either: the relocated node holds no
+        // credential, and the new start node holds only what the author typed.
+        const atRest = storedFlowBody(rows);
+        expect(allStrings(atRest)).not.toContain(FLOW_SECRET);
+        expect(atRest.nodes.find((n: any) => n.id === 'begin').config).toEqual({});
+        expect(startNodeOf(atRest).config.secret).toBe(ROTATED);
+    });
+
+    it('[#20611] the secretless relocation is REFUSED at the save door — the stored secret is on a node that is no longer a start node', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedFlowRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const before = storedFlowBody(rows);
+
+        const served: any = (await protocol.getMetaItem({ type: 'flow', name: 'inbound_hook' })).item;
+        const { _diagnostics: _d, ...editable } = served;
+        void _d;
+        const err: any = await protocol
+            .saveMetaItem({ type: 'flow', name: 'inbound_hook', item: relocate(editable) })
+            .catch((e: unknown) => e);
+
+        // The carry-forward would drop the stored secret (#20590 position 3),
+        // so nothing is restored at the new start node: absent and not stored.
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(err.issues.map((i: any) => [i.rule, i.path])).toEqual([
+            ['flow-api-trigger-secret-missing', 'flows[0].nodes[2].config.secret'],
+        ]);
+        // Nothing landed: the row at rest is the seeded one, secret and all.
+        expect(storedFlowBody(rows)).toEqual(before);
     });
 });
 
@@ -1173,5 +1216,151 @@ describe('#20590 round 2 — the relocation counts nodes, not every object carry
         expect(out.nodes[2].config.branches[0].nodes.find((n: any) => n.id === 'call').config).toEqual({});
         // The unambiguous ones are unaffected.
         expect(calloutOf(out, 'per_row').config.signingSecret).toBe(SIGNING);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// #20611 — the runtime authoring gate reads the redaction context
+// ---------------------------------------------------------------------------
+//
+// `flow-api-trigger-secret-missing` runs at the runtime publish gate, and the
+// gate judges a `/meta` save BEFORE the carry-forward restores the secret the
+// read withheld — on purpose, so no gate handles a restored credential. The
+// gate is handed the POSITIONS that restore fills instead: withheld and stored
+// is present, absent and not stored is missing. #20552's two round-trip pins
+// above ("GET → edit → PUT keeps the stored secret…" and "the served body saved
+// straight back…") stay green with the rule live; the refusals below are what
+// prove it is live at this door in this harness, so those greens are verdicts
+// and not a gate that ran nothing.
+
+/** A brand-new `api` flow: nothing at rest, nothing in the registry. */
+function freshInboundFlow(config: Record<string, unknown> = { triggerType: 'api', hookId: 'intake' }) {
+    const flow: any = storedInboundFlow();
+    flow.name = 'fresh_hook';
+    flow.nodes[1].config = config;
+    return flow;
+}
+
+const flowRowsNamed = (rows: Map<string, Row>, name: string) =>
+    Array.from(rows.values()).filter((r) => r.type === 'flow' && r.name === name);
+
+describe('#20611 — the runtime authoring gate reads a withheld-and-stored secret as present', () => {
+    beforeEach(() => registerMetadataTypeRedactor('flow', flowStandInRedactor));
+
+    it('refuses a secretless NEW api flow at /meta with the rule id, stores nothing — and passes the signed round trip in the same harness', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedFlowRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const err: any = await protocol
+            .saveMetaItem({ type: 'flow', name: 'fresh_hook', item: freshInboundFlow() })
+            .catch((e: unknown) => e);
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(err.issues.map((i: any) => [i.rule, i.path])).toEqual([
+            ['flow-api-trigger-secret-missing', 'flows[0].nodes[1].config.secret'],
+        ]);
+        expect(err.rulesRun).toContain('validateFlowApiTriggerSecret');
+        expect(flowRowsNamed(rows, 'fresh_hook')).toEqual([]);
+
+        // Same door, same gate: the seeded signed flow's served body, saved
+        // straight back, reaches the gate with no secret and is admitted,
+        // because its stored secret is restored at that position.
+        const served: any = (await protocol.getMetaItem({ type: 'flow', name: 'inbound_hook' })).item;
+        const { _diagnostics: _d, ...editable } = served;
+        void _d;
+        expect(startNodeOf(editable).config.secret).toBeUndefined();
+        await expect(
+            protocol.saveMetaItem({ type: 'flow', name: 'inbound_hook', item: { ...editable, label: 'Edited' } }),
+        ).resolves.toMatchObject({ success: true });
+        expect(startNodeOf(storedFlowBody(rows)).config.secret).toBe(FLOW_SECRET);
+
+        // …and the new flow is admitted once its author gives it a secret.
+        await expect(
+            protocol.saveMetaItem({
+                type: 'flow',
+                name: 'fresh_hook',
+                item: freshInboundFlow({ triggerType: 'api', hookId: 'intake', secret: ROTATED }),
+            }),
+        ).resolves.toMatchObject({ success: true });
+    });
+
+    it('the draft door is not a bypass: a secretless api draft saves, and its PUBLISH is refused with no active row', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        await protocol.saveMetaItem({ type: 'flow', name: 'fresh_hook', mode: 'draft', item: freshInboundFlow() });
+        expect(flowRowsNamed(rows, 'fresh_hook').map((r) => r.state)).toEqual(['draft']);
+
+        const err: any = await protocol.publishMetaItem({ type: 'flow', name: 'fresh_hook' }).catch((e: unknown) => e);
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(err.issues.map((i: any) => i.rule)).toEqual(['flow-api-trigger-secret-missing']);
+        expect(flowRowsNamed(rows, 'fresh_hook').map((r) => r.state)).toEqual(['draft']);
+    });
+
+    it('absent and not stored is missing: the round trip of a stored api flow that never had a secret is refused, the row untouched', async () => {
+        const { engine, rows } = makeStubEngine();
+        const where = { type: 'flow', name: 'inbound_hook', organization_id: null, package_id: null, state: 'active' };
+        const unsigned: any = storedInboundFlow();
+        delete unsigned.nodes[1].config.secret;
+        rows.set(keyOf(where), { id: 'r_unsigned', ...where, metadata: JSON.stringify(unsigned), checksum: hashSpec(unsigned), version: 1 } as Row);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const served: any = (await protocol.getMetaItem({ type: 'flow', name: 'inbound_hook' })).item;
+        const { _diagnostics: _d, ...editable } = served;
+        void _d;
+        const err: any = await protocol
+            .saveMetaItem({ type: 'flow', name: 'inbound_hook', item: { ...editable, label: 'Edited' } })
+            .catch((e: unknown) => e);
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(err.issues.map((i: any) => [i.rule, i.path])).toEqual([
+            ['flow-api-trigger-secret-missing', 'flows[0].nodes[1].config.secret'],
+        ]);
+        expect(storedFlowBody(rows)).toEqual(unsigned);
+    });
+
+    it('an explicit blank secret is the author`s word, not a withheld one: refused, and the stored secret stays at rest', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedFlowRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const served: any = (await protocol.getMetaItem({ type: 'flow', name: 'inbound_hook' })).item;
+        const { _diagnostics: _d, ...cleared } = served;
+        void _d;
+        startNodeOf(cleared).config.secret = '';
+        const err: any = await protocol
+            .saveMetaItem({ type: 'flow', name: 'inbound_hook', item: cleared })
+            .catch((e: unknown) => e);
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(err.issues.map((i: any) => i.rule)).toEqual(['flow-api-trigger-secret-missing']);
+        expect(startNodeOf(storedFlowBody(rows)).config.secret).toBe(FLOW_SECRET);
+    });
+
+    it('redactedPathsCarriedForward names exactly the positions carryForwardRedactedValues fills, in the INCOMING body', () => {
+        const stored = storedInboundFlow();
+        const served: any = redactMetadataItem('flow', stored);
+        const changedPaths = (incoming: any) => {
+            const out: any = carryForwardRedactedValues('flow', incoming, stored);
+            return out.nodes.flatMap((n: any, i: number) =>
+                n.config?.secret !== incoming.nodes[i]?.config?.secret ? [`nodes.${i}.config.secret`] : [],
+            );
+        };
+        const cases: Array<[string, any]> = [
+            ['served, as is', served],
+            ['reordered — the start node moves to index 0', { ...served, nodes: [served.nodes[1], served.nodes[0]] }],
+            ['rotated — the author`s word', { ...served, nodes: [served.nodes[0], { ...served.nodes[1], config: { ...served.nodes[1].config, secret: ROTATED } }] }],
+            ['relocated — the old start node is an assignment now', relocate(served)],
+        ];
+        const expected: Record<string, string[]> = {
+            'served, as is': ['nodes.1.config.secret'],
+            'reordered — the start node moves to index 0': ['nodes.0.config.secret'],
+            'rotated — the author`s word': [],
+            'relocated — the old start node is an assignment now': [],
+        };
+        for (const [label, incoming] of cases) {
+            expect(redactedPathsCarriedForward('flow', incoming, stored), label).toEqual(expected[label]);
+            expect(changedPaths(incoming), label).toEqual(expected[label]);
+        }
+        // No redactor, no positions.
+        expect(redactedPathsCarriedForward('view', { name: 'v' }, { name: 'v', secret: 'x' })).toEqual([]);
     });
 });

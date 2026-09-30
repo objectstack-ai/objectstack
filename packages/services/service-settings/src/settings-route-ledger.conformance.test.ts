@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Settings route-ledger conformance (#17062) — the guard every OTHER
+ * Settings route-ledger conformance (the issue behind commit 50b6f17d4) — the guard every OTHER
  * `*-route-ledger.ts` in the tree pairs with a `*-route-ledger.conformance.test.ts`,
  * missing here since the ledger itself landed at #7526.
  *

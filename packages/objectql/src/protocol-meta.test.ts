@@ -583,10 +583,14 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 expect(mockEngine.insert).toHaveBeenCalled();
             });
 
-            it('preserves Studio-only auxiliary fields verbatim (not stripped)', async () => {
-                // isPinned / isDefault / sortOrder are not in ListViewSchema;
-                // we must NOT replace the persisted document with parsed.data,
-                // or these fields would be silently dropped on every save.
+            it('[#20051] stores the console\'s declared round-trip keys, and drops the `objectName` alias', async () => {
+                // Re-judged at stage (iv) of #20051: was "preserves Studio-only
+                // auxiliary fields verbatim". A saved view now stores the parsed
+                // value of every key its body carried. `isPinned` / `isDefault` /
+                // `sortOrder` survive because the list overlay DECLARES them
+                // (`VIEW_CONSOLE_ROUND_TRIP_KEYS`); `objectName` is the
+                // console's alias of `object`, which the member does not
+                // declare, so it is dropped and `object` carries the binding.
                 const itemWithExtras = {
                     ...validView,
                     isPinned: true,
@@ -603,10 +607,10 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
 
                 const insertCall = mockEngine.insert.mock.calls[0];
                 const persisted = JSON.parse(insertCall[1].metadata);
-                expect(persisted.isPinned).toBe(true);
-                expect(persisted.isDefault).toBe(false);
-                expect(persisted.sortOrder).toBe(5);
-                expect(persisted.objectName).toBe('lead');
+                const { objectName: _alias, ...declared } = itemWithExtras;
+                expect(persisted).toEqual(declared);
+                expect(persisted).not.toHaveProperty('objectName');
+                expect(persisted.object).toBe('lead');
             });
 
             it('rejects an invalid view (container with a listView missing `columns`) with 422', async () => {

@@ -27,7 +27,7 @@
  * label/description/icon. `sqlite-wasm` is deliberately absent: it is
  * constructible and has a config contract, but it exists for CI and
  * no-native-build environments rather than as something an admin picks here.
- * `turso` is absent for the same reason since #6345 gave it a contract: it is a
+ * `turso` is absent for the same reason since commit e2798fab7 gave it a contract: it is a
  * full builtin now, but it additionally needs an optional package installed next
  * to the server, which is not a thing a dropdown can arrange.
  */
@@ -79,7 +79,7 @@ const CURATED: ReadonlyArray<{
     icon: 'database',
   },
   {
-    // `mongodb` since #6345 — the canonical driver id was renamed to the
+    // `mongodb` since commit e2798fab7 — the canonical driver id was renamed to the
     // spelling both boot hosts and `@objectstack/driver-mongodb` already used.
     // This `id` is what Studio writes into `datasource.driver`, so rows written
     // before the rename carry `mongo`; the ADR-0087 conversion

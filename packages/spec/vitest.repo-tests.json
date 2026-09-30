@@ -1,6 +1,7 @@
 [
   "scripts/build-schemas-check-mode.test.ts",
   "scripts/category-title.test.ts",
+  "scripts/conversions-major18-merge.test.ts",
   "scripts/count-shards-merge.test.ts",
   "scripts/def-key-collisions.test.ts",
   "scripts/dist-freshness-adoption.test.ts",
@@ -28,6 +29,7 @@
   "src/api/rest-api-config-dead-keys-retirement.test.ts",
   "src/data/api-methods-batch-conformance.test.ts",
   "src/data/cube-member-inner-name-retirement.test.ts",
+  "src/data/cube-refresh-key-retirement.test.ts",
   "src/data/currency-mode-family-closure.pin.test.ts",
   "src/identity/position-delegatable-enforcer.pin.test.ts",
   "src/integration/connector-connection-timeout-retirement.test.ts",
@@ -40,6 +42,7 @@
   "src/system/constants/platform-object-names.test.ts",
   "src/system/email-template-floor-locale-parity.pin.test.ts",
   "src/ui/action-requires-confirmation-docblock.pin.test.ts",
+  "src/ui/page-header-breadcrumb-retirement.test.ts",
   "src/ui/view-item-owner-hidden-retirement.test.ts",
   "src/ui/view-list-tabs-retirement.test.ts"
 ]

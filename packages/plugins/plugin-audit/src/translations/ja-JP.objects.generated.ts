@@ -39,7 +39,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         }
       },
       user_id: {
-        label: "操作者",
+        label: "ユーザー",
         help: "アクションを実行したユーザー（システム操作の場合は null）"
       },
       actor: {
@@ -175,8 +175,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "アクティビティターゲットへのオプションのディープリンク"
       },
       environment_id: {
-        label: "プロジェクト",
-        help: "プロジェクトコンテキスト（マルチプロジェクトデプロイメント）"
+        label: "環境",
+        help: "環境コンテキスト（マルチ環境デプロイメント）"
       },
       metadata: {
         label: "メタデータ",

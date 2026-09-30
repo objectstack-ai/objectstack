@@ -41,7 +41,7 @@ import { DatasetSchema, type Dataset } from '@objectstack/spec/ui';
 import type { AnalyticsQuery, StrategyContext } from '@objectstack/spec/contracts';
 import { declaredRefusalMessage, resolveThrownHttpError, serverFaultProvenance } from '@objectstack/types';
 
-import { normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
+import { normalizeAnalyticsFilterTree, NO_DATETIME_COLUMNS } from '../strategies/filter-normalizer.js';
 import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
 import { evaluateAnalyticsQueryOverRows } from '../preview-evaluator.js';
@@ -88,7 +88,7 @@ const REFUSED_COMPARANDS: Array<[string, unknown]> = [
   ['a Date', new Date('2026-01-01T00:00:00.000Z')],
 ];
 
-const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where } as never);
+const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where } as never, NO_DATETIME_COLUMNS);
 
 function refusalOf(run: () => unknown): Refusal {
   let out: unknown;
@@ -448,9 +448,12 @@ describe('[#20068] ⛔ no widening by analogy — the case-exact family keeps it
 
   it('the `where` door still compiles each of them with an empty comparand', () => {
     for (const op of SIBLINGS) {
-      const node = tree({ name: { [op]: '' } }) as { kind: string; children?: unknown[]; operator?: string };
-      // `$notContains` is NULL-safe (#5298), so it wraps its leaf in an `or`.
-      const leaf = node.kind === 'or' ? (node.children as Array<{ operator: string }>)[1] : node;
+      type Node = { kind: string; children?: Node[]; operator?: string };
+      // `$notContains` is NULL-safe (#5298), so it wraps its leaf in an `or` —
+      // [ADR-0053 D-D1, amended — #5930 step 3] twice now, the shared
+      // lowering's escape around this face's own: descend to the operator leaf.
+      let leaf = tree({ name: { [op]: '' } }) as Node;
+      while (leaf.kind === 'or') leaf = leaf.children![1];
       expect(leaf, op).toMatchObject({ operator: CUBE_OP[op], values: [''] });
     }
   });

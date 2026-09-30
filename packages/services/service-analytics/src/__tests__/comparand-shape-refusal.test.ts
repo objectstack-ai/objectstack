@@ -87,7 +87,7 @@
 import { describe, it, expect } from 'vitest';
 import type { FilterCondition } from '@objectstack/spec/data';
 
-import { normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
+import { normalizeAnalyticsFilterTree, NO_DATETIME_COLUMNS } from '../strategies/filter-normalizer.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
 import {
   isBindableComparand,
@@ -108,7 +108,7 @@ function refusalOf(run: () => unknown): WireBearingError {
   throw new Error('expected the compiler to refuse this filter, but it returned');
 }
 
-const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where } as any);
+const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where } as any, NO_DATETIME_COLUMNS);
 const scope = (where: unknown) => compileScopedFilterToSql(where as FilterCondition, 'person');
 
 // ── The analytics `where` door ───────────────────────────────────────────────

@@ -716,7 +716,12 @@ export interface IAutomationService {
     getFlow?(name: string): Promise<FlowParsed | null>;
 
     /**
-     * Enable or disable a flow
+     * Enable or disable a PACKAGED flow — one a code package ships — by
+     * recording the installation's choice in the activation ledger
+     * (ADR-0126 §7.2). A flow authored in the deployment is not this switch's:
+     * the automation service refuses it with `RESOURCE_CONFLICT` / 409 and
+     * changes nothing. That flow's switch is its own `status` (`'obsolete'` /
+     * `'active'`), published through {@link registerFlow}.
      * @param name - Flow name (snake_case)
      * @param enabled - Whether to enable (true) or disable (false)
      */

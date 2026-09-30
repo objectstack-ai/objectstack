@@ -7,14 +7,14 @@
  * tests — see the comment above `rewriteProjectIdentity`) purely so the
  * padding math has somewhere to be unit-tested without spawning a subprocess.
  *
- * #10325: the banner used to hardcode `v6.x` — eleven majors stale — rather
+ * Until commit cec9d239d the banner hardcoded `v6.x` — eleven majors stale — rather
  * than reading the version it already had a working reader for
  * (`readCliVersion()` in index.ts, already used by `.version()`). The naive
  * fix of dropping the real version string into the old literal would have
  * reintroduced the same defect class one line later: the box's borders are a
  * fixed run of `═` computed for a 4-character `v6.x`, and `v17.1.0` (7 chars)
  * would push the right border out of alignment without recomputing the pad
- * (the sibling bug in #10322, one function away in the same file — a box
+ * (the sibling bug commit 8d21f7a76 fixed, one function away in the same file — a box
  * hand-kerned for `npm` broken by the one-character-longer `pnpm`).
  */
 

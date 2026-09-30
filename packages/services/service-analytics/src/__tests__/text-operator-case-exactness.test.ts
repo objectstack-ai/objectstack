@@ -293,8 +293,10 @@ describe('[#15684] the compiled TEXT, per dialect', () => {
       .toEqual({ sql: 'instr("t"."name", ?) > 0', params: ['acme'] });
     // `$notContains` keeps the read scope's NULL-safe wrapper around the
     // negated construct — the polarity moved, the #5298 rule did not.
+    // [ADR-0053 D-D1, amended — #5930 step 3] …inside the shared lowering's own
+    // escape, which now reaches this compiler first.
     expect(compileScopedFilterToSql({ name: { $notContains: 'acme' } } as FilterCondition, 't', { dialect: 'sqlite' }))
-      .toEqual({ sql: '("t"."name" IS NULL OR NOT (instr("t"."name", ?) > 0))', params: ['acme'] });
+      .toEqual({ sql: '(("t"."name" IS NULL OR ("t"."name" IS NULL OR NOT (instr("t"."name", ?) > 0))))', params: ['acme'] });
     const starts = await nativeSql({ name: { $startsWith: 'ACME' } }, 'sqlite');
     expect(starts.sql).toContain('WHERE name GLOB $1');
     expect(starts.params).toEqual(['ACME*']);

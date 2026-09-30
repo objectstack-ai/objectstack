@@ -65,8 +65,7 @@ import path from 'node:path';
 
 import {
   ProbeError,
-  describeCandidates,
-  pickProbe,
+  chooseProbes,
   readBundle,
   readSpecBlob,
   writeStamp,
@@ -110,8 +109,15 @@ try {
   fail(error.message);
 }
 
-const freshWitness = pickProbe(describeCandidates(injectedBlob), vendoredBlob);
-const staleDetector = pickProbe(describeCandidates(vendoredBlob), injectedBlob);
+// Chosen with the bundle in view (objectstack#20646): the witness is injected-only
+// text this bundle carries, and the stale leg is judged over EVERY published-only
+// description, not the one that sorts first — see chooseProbes for why the old
+// alphabetical pick read text from entries the console never imports.
+const { freshWitness, freshPresent, freshCounts, staleDetector, stalePresent, staleCounts } = chooseProbes({
+  injectedBlob,
+  vendoredBlob,
+  bundle,
+});
 
 /** Record what this build proved, for check:console-injection to replay. */
 function stamp(skew) {
@@ -140,14 +146,13 @@ if (!freshWitness && !staleDetector) {
   process.exit(0);
 }
 
-const freshPresent = freshWitness ? bundle.includes(freshWitness) : null;
-const stalePresent = staleDetector ? bundle.includes(staleDetector) : null;
-
 // Neither probe anywhere in the bundle means the spec is not in this build at
 // all — the check cannot speak to an injection it cannot see.
 if (freshPresent !== true && stalePresent !== true) {
   console.error('✗ Neither spec appears in the built console — no @objectstack/spec');
   console.error('  content matched. The injection is UNVERIFIED by this check.');
+  console.error(`    injected-only descriptions in the bundle: ${freshCounts.inBundle} of ${freshCounts.pool}`);
+  console.error(`    published-only descriptions in the bundle: ${staleCounts.inBundle} of ${staleCounts.pool}`);
   process.exit(2);
 }
 
@@ -157,7 +162,8 @@ if (stalePresent === true) {
   console.error('  key this framework declared after the last spec publish is unreachable');
   console.error('  in the Studio designer — the defect objectstack#8134 exists to end.');
   console.error('');
-  console.error('  Text found in the bundle that ONLY the vendored spec has:');
+  console.error(`  Text found in the bundle that ONLY the vendored spec has (${staleCounts.inBundle} of`);
+  console.error(`  ${staleCounts.pool} published-only descriptions), the first of them:`);
   console.error(`    "${staleDetector}"`);
   if (freshPresent === true) {
     console.error('');
@@ -178,6 +184,10 @@ if (freshPresent !== true) {
 
 console.log("✓ Console bundle carries THIS tree's @objectstack/spec, and only it.");
 console.log(`    present (injected only): "${freshWitness}"`);
-if (staleDetector) console.log(`    absent  (vendored only): "${staleDetector}"`);
+console.log(`      — ${freshCounts.inBundle} of ${freshCounts.pool} injected-only descriptions are in the bundle`);
+if (staleDetector) {
+  console.log(`    absent  (vendored only): "${staleDetector}"`);
+  console.log(`      — and all ${staleCounts.pool} published-only descriptions are absent`);
+}
 stamp(true);
 process.exit(0);

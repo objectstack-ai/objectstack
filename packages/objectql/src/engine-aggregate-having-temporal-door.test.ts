@@ -200,7 +200,14 @@ describe('[#20263] having — a comparand its column cannot read is refused befo
     // base this `$lt` kept no group — the extended text sorts below every year.
     ['an extended-year ISO string on min(datetime), in the year class\'s words',
       () => ({ first_opened: { $lt: '+010000-01-01T00:00:00.000Z' } }), { opened_at: { $lt: '+010000-01-01T00:00:00.000Z' } },
-      ["`having` on 'first_opened' (min(opened_at), a datetime column)", 'outside the years 0001 to 9999', 'keep the wrong groups']],
+      ["`having` on 'first_opened' (min(opened_at), a datetime column)", 'outside the years 1000 to 9999', 'keep the wrong groups']],
+    // [#20280] A datetime before year 1000, MySQL's documented `DATETIME`
+    // floor, is the year class now too, in its own words: it sorts as the
+    // instant it names, so the message claims no misorder. Kept every group at
+    // the base (the read control below said "inside the range").
+    ['[#20280] the first instant of year 1 on min(datetime), before the datetime floor',
+      () => ({ first_opened: { $gt: '0001-01-01T00:00:00.000Z' } }), { opened_at: { $gt: '0001-01-01T00:00:00.000Z' } },
+      ["`having` on 'first_opened' (min(opened_at), a datetime column)", 'outside the years 1000 to 9999', 'Before year 1000']],
     ['the number for year 0 on max(date) — [#20264] year 0 joins the refused years',
       () => ({ last_placed: { $gt: Date.parse('0000-06-15T00:00:00.000Z') } }), { placed_on: { $gt: Date.parse('0000-06-15T00:00:00.000Z') } },
       ['outside the years 0001 to 9999']],
@@ -305,6 +312,8 @@ describe('[#20263] having — one predicate: refused exactly when @objectstack/c
   const VALUES: readonly unknown[] = [
     'not-a-date', '2026-02-01', '2026-02-01T10:00:00.000Z', '2026-02-01 10:00', '+010000-01-01T00:00:00.000Z',
     '10:00', '10:00:00', '25:00', 'last_30_days', '1769940000000', '{today}', '{not_a_token}', '', '   ',
+    // [#20280] Read on a date and a time column, refused on a datetime one.
+    '0500-07-15T10:00:00.000Z', Date.parse('0500-07-15T10:00:00.000Z'),
     1769940000000, Y10000, -62198755200000, new Date(1769940000000), new Date(Y10000), null, true,
   ];
   for (const [kind, column, field] of COLUMNS) {
@@ -337,8 +346,10 @@ describe('[#20263] having — what the door leaves alone answers exactly as befo
     ['a 2026 instant on min(datetime)', { first_opened: { $gt: '2026-02-01T00:00:00.000Z' } }, ['c2', 'c3', 'c4']],
     ['a bare day as the upper bound of min(datetime)', { first_opened: { $lte: '2026-02-01' } }, ['c1', 'c2']],
     // [#20264] An extended-year instant on min(datetime) is refused now (see
-    // the REFUSED table); the first instant of year 1 is read, as before.
-    ['the first instant of year 1 on min(datetime) — inside the range', { first_opened: { $gt: '0001-01-01T00:00:00.000Z' } }, ['c1', 'c2', 'c3', 'c4']],
+    // the REFUSED table); [#20280] so is the first instant of year 1, and the
+    // floor's edge, year 1000, is read — as is year 1 on a date column.
+    ['[#20280] the first instant of year 1000 on min(datetime) — the floor\'s edge', { first_opened: { $gt: '1000-01-01T00:00:00.000Z' } }, ['c1', 'c2', 'c3', 'c4']],
+    ['[#20280] year 1 on max(date) — a date keeps 0001..9999', { last_placed: { $gt: '0001-01-01' } }, ['c1', 'c2', 'c3', 'c4']],
     ['a wall clock on max(time)', { last_slot: { $gte: '12:00' } }, ['c2', 'c3', 'c4']],
     ['[#20480] the same wall clock as a 2026 instant on max(time) — the control', { last_slot: { $gte: '2026-01-01T12:00:00Z' } }, ['c2', 'c3', 'c4']],
     ['[#20480] the same wall clock as a 2026 epoch-ms number on max(time)', { last_slot: { $gte: Date.parse('2026-01-01T12:00:00Z') } }, ['c2', 'c3', 'c4']],

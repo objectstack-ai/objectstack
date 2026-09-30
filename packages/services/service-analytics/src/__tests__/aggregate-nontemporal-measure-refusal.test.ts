@@ -7,7 +7,7 @@
  *
  * ## What this card found, driven before anything was written
  *
- * #16778 landed the compile leg of the director ruling (decision batch #59:
+ * Commit 357f4992b landed the compile leg of the director ruling (decision batch #59:
  * one compatibility table in `@objectstack/spec`, two refusal legs) SCOPED to
  * temporal source fields. The residual was "every other non-temporal pair the
  * table refuses", and the dispatch required it be driven rather than read,
@@ -23,7 +23,7 @@
  *
  * The control is what makes the 107 a reading of the tree rather than of a
  * blind harness: the SAME service, door and `sourceFieldMeta` hook sees the
- * three pairs #16778 enforces refused, with no statement emitted.
+ * three pairs commit 357f4992b enforces refused, with no statement emitted.
  *
  * ## Why the scope is an AGGREGATE class and not "the rest of the table"
  *
@@ -84,7 +84,7 @@ const FIELD_TYPES: Record<string, string> = {
   embedding: 'vector',
   // refused for `sum` only — a rate does not add (`isIncoherentAggregate`)
   win_rate: 'percent',
-  // the temporal class #16778 already enforced, kept as the continuity control
+  // the temporal class commit 357f4992b already enforced, kept as the continuity control
   submitted_at: 'datetime',
   // accepted controls
   cycle_days: 'number',
@@ -176,7 +176,7 @@ describe('#16099 — the pairs this leg refuses are the TABLE\'s, not this packa
       }
     }
     expect(refusedByTable).toBe(155);
-    expect(temporal).toBe(6);          // #16778's — `sum`/`avg` over the temporal class
+    expect(temporal).toBe(6);          // commit 357f4992b's — `sum`/`avg` over the temporal class
     expect(deriving).toBe(75);         // #16099's — `sum`/`avg` over everything else
     expect(selecting).toBe(74);        // #17560's — `min`/`max`, 42 string + 32 non-string
     expect(temporal + deriving + selecting).toBe(refusedByTable);

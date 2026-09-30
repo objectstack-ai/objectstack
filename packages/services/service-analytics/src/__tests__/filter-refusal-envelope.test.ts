@@ -40,7 +40,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
+import { normalizeAnalyticsFilterTree, NO_DATETIME_COLUMNS } from '../strategies/filter-normalizer.js';
 
 /** The ADR-0112 fields a refusal must carry. */
 interface FilterRefusal extends Error {
@@ -51,7 +51,7 @@ interface FilterRefusal extends Error {
 /** Run the normalizer over a `where` and return the error it threw, if any. */
 function refusalFor(where: unknown): FilterRefusal | undefined {
   try {
-    normalizeAnalyticsFilterTree({ where });
+    normalizeAnalyticsFilterTree({ where }, NO_DATETIME_COLUMNS);
     return undefined;
   } catch (e) {
     return e as FilterRefusal;
@@ -282,12 +282,12 @@ describe('[#5352] the refusal SET is unchanged — only the error shape moved', 
   for (const c of ACCEPTED) {
     it(`still ACCEPTS (and compiles identically): ${c.name}`, () => {
       expect(refusalFor(c.where), `${c.name} was refused — the refusal set moved`).toBeUndefined();
-      expect(normalizeAnalyticsFilterTree({ where: c.where })).toEqual(c.tree);
+      expect(normalizeAnalyticsFilterTree({ where: c.where }, NO_DATETIME_COLUMNS)).toEqual(c.tree);
     });
   }
 
   it('carries no `where` at all → no constraint, no error', () => {
-    expect(normalizeAnalyticsFilterTree({})).toBeNull();
+    expect(normalizeAnalyticsFilterTree({}, NO_DATETIME_COLUMNS)).toBeNull();
   });
 });
 

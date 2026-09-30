@@ -20,7 +20,7 @@
 // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
 // removal ships on the 17.x line (launch-window convention: accept-set
 // narrowings ride minor releases) and the prescription lives at the major
-// boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+// boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
 // `MetricSchema` is `strictObject`, so the route is strict deletion + a
 // `guidance` entry carrying the prescription (no retiredKey tombstone — the
 // key is out of the walked shape entirely). Sources are rewritten by the D2

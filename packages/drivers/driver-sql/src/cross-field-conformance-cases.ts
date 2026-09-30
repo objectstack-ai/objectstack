@@ -189,7 +189,7 @@ export const CROSS_FIELD_CASES: readonly CrossFieldCase[] = [
     name: '$not of a cross-field $gt returns exactly the rows $gt does not',
     filter: { $not: { amount: { $gt: { $field: 'budget' } } } },
     expected: ['2', '3', '4', '5', '6'],
-    note: '#5146 made `$not` NULL-safe by totalising its leaves; a cross-field leaf is total by construction, so the negation is the exact complement — including the NULL rows the JS evaluator returns.',
+    note: '`$not` is NULL-safe because each of its leaves is totalised (TRUE or FALSE, never NULL), as the JS evaluator reads it; a cross-field leaf is total by construction, so the negation is the exact complement — including the NULL rows the JS evaluator returns.',
   },
   {
     name: '$not of a cross-field $eq returns exactly the rows $eq does not',
@@ -235,7 +235,7 @@ export const CROSS_FIELD_CASES: readonly CrossFieldCase[] = [
       },
     },
     expected: ['2', '4', '5'],
-    note: 'The complement of {1} ∪ {3,6}. A guard hoisted to the top of the `$not` instead of sitting on each leaf re-admits rows here — the failure #5146 wrote its rewrite to avoid.',
+    note: 'The complement of {1} ∪ {3,6}. A guard hoisted to the top of the `$not` instead of sitting on each leaf re-admits rows here — the failure that totalising each leaf, rather than guarding the whole `$not`, exists to avoid.',
   },
   {
     name: 'a cross-field comparison nested two combinators deep',
@@ -314,7 +314,7 @@ export const CROSS_FIELD_AUTHORED_CASES: readonly CrossFieldAuthoredCase[] = [
     authored: ['amount', '>', { $field: 'budget' }],
     loweredTo: { amount: { $gt: { $field: 'budget' } } },
     expected: ['1'],
-    note: 'Untouched by #7597 and asserted anyway: if this moves, the harness moved rather than the lowering.',
+    note: 'Untouched by the fix that lowers the `=` spelling of a field reference to `$eq`, and asserted anyway: if this moves, the harness moved rather than the lowering.',
   },
 
   // ── The sugar's own structures, carrying a reference leaf ────────────────
@@ -393,7 +393,7 @@ export const CROSS_FIELD_REFUSALS: readonly CrossFieldRefusalCase[] = [
     name: 'an undeclared column is refused at compile time',
     filter: { amount: { $gt: { $field: 'no_such_column' } } },
     diagnosticIncludes: ['not a declared field'],
-    note: 'The `$field` value lands in a SQL IDENTIFIER position. cloud#1051: letting it through unchecked is dismantling the guard rail — and a compile-time refusal is what makes AI-authored metadata wrong at authoring time rather than in the database.',
+    note: 'The `$field` value lands in a SQL IDENTIFIER position, and letting it through unchecked would dismantle the guard rail that only a declared column reaches SQL — and a compile-time refusal is what makes AI-authored metadata wrong at authoring time rather than in the database.',
   },
   {
     name: 'an undeclared TARGET field is refused too',
@@ -446,7 +446,7 @@ export const CROSS_FIELD_REFUSALS: readonly CrossFieldRefusalCase[] = [
     name: 'a multi-valued (JSON) column is refused as the referent',
     filter: { amount: { $gt: { $field: 'tags' } } },
     diagnosticIncludes: ['no scalar stored'],
-    note: 'A JSON column holds a serialized array; SQL comparison operators have no element-wise reading of it, and #7398 already refuses the scalar operators on such a column for a value comparand.',
+    note: 'A JSON column holds a serialized array; SQL comparison operators have no element-wise reading of it, and the scalar operators are already refused on such a column for a value comparand, because they compare the whole serialized text.',
   },
   {
     name: 'a formula (virtual) column is refused as the referent',
@@ -479,7 +479,7 @@ export const CROSS_FIELD_REFUSALS: readonly CrossFieldRefusalCase[] = [
     name: 'a $field member of an $in list is refused',
     filter: { amount: { $in: [{ $field: 'budget' }, 1] } },
     diagnosticIncludes: ['index 0'],
-    note: 'Before #5041 this did not even crash: it compiled, ran, and returned ZERO ROWS. The index is named because it is the only thing distinguishing the bad member from its legitimate neighbours.',
+    note: 'Before this driver compiled `$field` comparands and refused the positions it cannot compile, this did not even crash: it compiled, ran, and returned ZERO ROWS. The index is named because it is the only thing distinguishing the bad member from its legitimate neighbours.',
   },
   {
     name: 'a $field member of a $nin list is refused',

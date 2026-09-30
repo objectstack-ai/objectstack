@@ -26,7 +26,7 @@ import { describe, expect, it } from 'vitest';
 // of this package's (file, verb) pairs sat in the gate's DEBT ledger until
 // #5619 sank the two predicates into a package both sides already depend on.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
-import { applyMetaMigrations } from '@objectstack/spec';
+import { applyMetaMigrations } from '@objectstack/spec/migrations';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import {
     DECISION_MODE_REVIEW_CONVERSION_ID,

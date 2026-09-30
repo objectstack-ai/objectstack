@@ -110,9 +110,9 @@ beforeAll(async () => {
   // The artifact is written the way `objectstack build` writes one — the same
   // `normalizeStackInput` → `lowerCallables` → `ObjectStackDefinitionSchema`
   // pipeline `packages/cli/src/commands/compile.ts` runs, reusing those exact
-  // functions rather than re-deriving them (#6293).
+  // functions rather than re-deriving them (commit c39a911ae).
   //
-  // Until #6293 this line was `JSON.stringify(stack)` minus `functions`, and
+  // Until commit c39a911ae this line was `JSON.stringify(stack)` minus `functions`, and
   // the omission was deliberate and declared (#4976) because the substitute
   // could not carry them: `JSON.stringify` drops a bare callable KEY AND ALL
   // and reduces a declared one (`{ handler: fn, effect }`) to the headless husk
@@ -155,7 +155,7 @@ afterAll(async () => {
 });
 
 // ============================================================================
-// 0. The artifact this boot ingests is the shape the build writes (#6293)
+// 0. The artifact this boot ingests is the shape the build writes (commit c39a911ae)
 // ============================================================================
 
 describe('[#6293] the stand-in artifact carries what a built one carries', () => {

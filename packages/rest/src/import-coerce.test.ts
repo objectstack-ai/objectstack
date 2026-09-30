@@ -103,7 +103,7 @@ describe('parseDateCell', () => {
  * [#20534] A text cell is read only in ISO 8601, the export's own
  * `YYYY-MM-DD HH:mm:ss` or a year-first date (`2026/7/15`, `2026/7/15 9:00`,
  * by the maintainer ruling on the card), on a calendar day that exists;
- * everything else is refused (`undefined`, so the row's `invalid_date`), never rolled over, never
+ * everything else is refused (`undefined`, so the row's `invalid_date`, a `time` cell's `invalid_time`), never rolled over, never
  * read in the host's zone and never read month-first. A `date`'s year keeps
  * four digits. Every case runs under two host zones that disagree by twelve
  * hours, and must answer the same under both — the host-zone reading this

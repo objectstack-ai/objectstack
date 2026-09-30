@@ -22,6 +22,7 @@
     "./integration",
     "./kernel",
     "./marketplace",
+    "./migrations",
     "./qa",
     "./security",
     "./shared",

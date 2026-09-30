@@ -1575,6 +1575,30 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                     }
                 });
 
+                // [#20676] ADR-0126 §7.1 — the clone door, the sanctioned way
+                // to customize a packaged flow whose base is locked. The
+                // domain arm (`domains/automation.ts`, `manage_metadata`-gated
+                // through `isFlowAuthoringWrite`) has existed since #12156, but
+                // nothing mounted it here, so every clone — from the API and
+                // from Setup's Clone dialog — answered the transport's 404
+                // before `dispatch()` ran, while the arm's unit test stayed
+                // green because it calls the handler directly. Pinned over
+                // HTTP in `qa/dogfood/test/automation-flow-clone-door.dogfood.test.ts`.
+                //
+                // Same shape as `/:name/toggle` and registered after
+                // `trigger/:name`, so `POST /automation/trigger/clone` keeps
+                // reaching the legacy execution door for a flow literally
+                // named `clone` — and either mount rebuilds the identical
+                // dispatch path, which the domain answers `trigger` first.
+                server!.post(`${base}/automation/:name/clone`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/clone`, req.body, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+
                 server!.get(`${base}/automation/:name/runs`, async (req: any, res: any) => {
                     try {
                         const result = await dispatcher.dispatch('GET', `/automation/${req.params.name}/runs`, undefined, req.query, { request: req });

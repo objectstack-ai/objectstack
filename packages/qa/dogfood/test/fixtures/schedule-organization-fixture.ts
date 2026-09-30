@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// Fixture for the #16659 acting-organization pins: two `schedule` flows that
+// Fixture for commit ecdfc9411's acting-organization pins: two `schedule` flows that
 // differ in EXACTLY ONE key — the `organization` declaration on the start node
 // — so the pins' red/green is attributable to that key and to nothing else.
 //
@@ -12,7 +12,7 @@
 /**
  * Object the tick touches, so a run has a data write of its own to land.
  *
- * `due_date` is what the `time_relative` sweep selects on (#16659 F2). It is a
+ * `due_date` is what the `time_relative` sweep selects on (commit ecdfc9411, F2). It is a
  * `datetime` rather than a `date` deliberately: the window the trigger computes
  * is a pair of ISO-8601 instants, and comparing them against a column the
  * driver truncates to `YYYY-MM-DD` puts a per-driver truncation rule between
@@ -115,7 +115,7 @@ export function organizationLessScheduleFlow(recipientId: string): unknown {
 }
 
 /**
- * [#16659 F2] The `time_relative` twin: a sweep that declares its acting
+ * [commit ecdfc9411, F2] The `time_relative` twin: a sweep that declares its acting
  * organization, selects `sched_org_target` rows whose `due_date` falls in the
  * next week, and — once per matched record — notifies and writes.
  *

@@ -8,9 +8,11 @@ export const entry: SemanticMigration = {
   // `Metric.filters[]` item, but `Metric.filters` was REMOVED outright later
   // in this same unpublished major (retired-key entry `data/Metric:filters`,
   // conversion `metric-filters-removed`), so this entry no longer names a
-  // surface an 18.x author can reach.
+  // surface an 18.x author can reach. The same holds for the cube's
+  // `refreshKey` block, which batch D closed and #20637 then retired whole
+  // (conversion `cube-refresh-key-removed`).
   surface: 'analytics cube definitions (`defineCube` / `defineStack({ analyticsCubes })`: the '
-    + 'cube, its `refreshKey`, each metric, each dimension, each '
+    + 'cube, each metric, each dimension, each '
     + 'join) and the `/analytics/query` body\'s nested `timeDimensions[]` items — undeclared keys',
   replacement: 'the declared key the rejection names. Every rejection carries the surface, the '
     + 'offending key and a rename suggestion (`title` → `label` on a metric/dimension, `label` → '
@@ -29,12 +31,13 @@ export const entry: SemanticMigration = {
     + 'top-level strictness does not recurse — `timeDimensions: [{ dimension, granuarity: '
     + '\'day\' }]` rode through the strict wrapper with the typo stripped, bucketing the whole '
     + 'range as one group under an ordinary 200. Undeclared keys on all eight sites are now '
-    + 'refused at parse time with a prescriptive message. (One of the eight — the nested metric '
-    + '`filters[]` item — was itself removed later in this major, because nothing ever read it: '
-    + '`metric-filters-removed`.)',
+    + 'refused at parse time with a prescriptive message. (Two of the eight were themselves '
+    + 'removed later in this major, because nothing ever read them: the nested metric '
+    + '`filters[]` item, by `metric-filters-removed`, and the cube\'s `refreshKey` block, by '
+    + '`cube-refresh-key-removed`.)',
   acceptanceCriteria:
     'Every cube in `defineStack({ analyticsCubes })` / `defineCube` parses with only declared '
-    + 'keys at every level (cube, refreshKey, measures, dimensions, joins); '
+    + 'keys at every level (cube, measures, dimensions, joins); '
     + 'every `/analytics/query` body\'s `timeDimensions[]` items carry only '
     + '`dimension`/`granularity`/`dateRange`. Declared keys parse byte-identically to before.',
 };

@@ -72,12 +72,17 @@
  * Its cells stay unasserted here, now for the ruling's own reason — ⛔「不单独修
  * matcher(死代码)」— and no ordering-vs-null semantics is defined anywhere,
  * so nothing here says what either face would have answered.
+ *
+ * [#5930 step 4, ruling D6] The reference matcher had no production caller and
+ * is RETIRED. Every cell above had converged — both faces gave the literal row
+ * set each case states — so the file keeps its name and its expectations and
+ * holds the LIVE path alone; the matcher-only comparisons (a null value against
+ * an absent key, `$between` against its own two bounds) are asked of `find()`.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 import { InMemoryDriver } from './memory-driver.js';
-import { match } from './memory-matcher.js';
 
 const sorted = (ids: string[]): string[] => [...ids].sort();
 
@@ -148,24 +153,27 @@ async function liveIds(driver: InMemoryDriver, where: unknown): Promise<string[]
   return sorted((out as Array<Record<string, unknown>>).map((r) => String(r.id)));
 }
 
-/** The REFERENCE face: the record-at-a-time matcher. */
-const matcherIds = (rows: Array<Record<string, unknown>>, where: unknown): string[] =>
-  sorted(rows.filter((row) => match(row, where)).map((row) => String(row.id)));
+/**
+ * The live path over a fresh table holding `rows` — for the cells that ask one
+ * row, or both readings of "no value", a question the fixtures above answer
+ * only together. What the retired matcher's record-at-a-time `matcherIds` was
+ * asked, now asked of `find()`.
+ */
+async function freshIds(rows: Array<Record<string, unknown>>, where: unknown): Promise<string[]> {
+  const driver = await driverFor(rows);
+  try {
+    return await liveIds(driver, where);
+  } finally {
+    await driver.disconnect();
+  }
+}
 
 /**
- * Every cell asserts the row set on BOTH faces, in one call, so a repair that
- * moves one of them cannot pass. The expected set is written out literally —
- * comparing the two faces to each other alone would be satisfied by both being
- * wrong together.
+ * Every cell asserts the literal row set on the live path. (It asserted the same
+ * set on the retired reference matcher too, until #5930 step 4.)
  */
-async function bothFaces(
-  driver: InMemoryDriver,
-  rows: Array<Record<string, unknown>>,
-  where: unknown,
-  expected: string[],
-): Promise<void> {
+async function livePath(driver: InMemoryDriver, where: unknown, expected: string[]): Promise<void> {
   expect({ face: 'live', ids: await liveIds(driver, where) }).toEqual({ face: 'live', ids: expected });
-  expect({ face: 'matcher', ids: matcherIds(rows, where) }).toEqual({ face: 'matcher', ids: expected });
 }
 
 describe('[#13494] `$eq: null` is the null predicate on BOTH readings of "no value"', () => {
@@ -173,36 +181,36 @@ describe('[#13494] `$eq: null` is the null predicate on BOTH readings of "no val
     // Was `[]` on the matcher against `['3']` live: `$eq` was not on the
     // pre-switch guard's allowlist, so an absent key short-circuited to "no
     // match" before the arm ran. #5332 ruled `$eq: null` IS the null predicate.
-    await bothFaces(missing, MISSING_ROWS, { name: { $eq: null } }, ['3']);
+    await livePath(missing, { name: { $eq: null } }, ['3']);
   });
 
   it('a stored null matches it too — the reading that always worked', async () => {
-    await bothFaces(nulled, NULLED_ROWS, { name: { $eq: null } }, ['3']);
+    await livePath(nulled, { name: { $eq: null } }, ['3']);
   });
 
   it('`$eq: null` now answers exactly what `$null: true` answers, on both readings', async () => {
     // The anchor #5332 aligned every other surface to. Before the repair these
     // two spellings of one predicate differed on the MISSING reading alone.
-    for (const [driver, rows] of [[missing, MISSING_ROWS], [nulled, NULLED_ROWS]] as const) {
-      const viaNull = matcherIds(rows, { name: { $null: true } });
-      const viaEq = matcherIds(rows, { name: { $eq: null } });
+    for (const driver of [missing, nulled]) {
+      const viaNull = await liveIds(driver, { name: { $null: true } });
+      const viaEq = await liveIds(driver, { name: { $eq: null } });
       expect(viaEq).toEqual(viaNull);
       expect(viaEq).toEqual(['3']);
     }
   });
 
   it('`$ne: null` is unmoved — it was already on the allowlist, and was already right', async () => {
-    await bothFaces(missing, MISSING_ROWS, { name: { $ne: null } }, ['1']);
-    await bothFaces(nulled, NULLED_ROWS, { name: { $ne: null } }, ['1']);
+    await livePath(missing, { name: { $ne: null } }, ['1']);
+    await livePath(nulled, { name: { $ne: null } }, ['1']);
   });
 
   it('a REAL comparand keeps the answer it had on a missing key', async () => {
     // The guard exemption moved the no-value cells and only those: the arm
     // reaches the same verdict the guard did (`undefined != 'a'` is true).
-    await bothFaces(missing, MISSING_ROWS, { name: { $eq: 'a' } }, ['1']);
-    await bothFaces(missing, MISSING_ROWS, { name: { $eq: '' } }, []);
-    await bothFaces(missing, MISSING_ROWS, { name: { $eq: false } }, []);
-    await bothFaces(nulled, NULLED_ROWS, { name: { $eq: 'a' } }, ['1']);
+    await livePath(missing, { name: { $eq: 'a' } }, ['1']);
+    await livePath(missing, { name: { $eq: '' } }, []);
+    await livePath(missing, { name: { $eq: false } }, []);
+    await livePath(nulled, { name: { $eq: 'a' } }, ['1']);
   });
 });
 
@@ -210,34 +218,34 @@ describe('[#13495] a `$between` bound that is null no longer stops bounding', ()
   it('`[null, null]` does not match the VALUED row', async () => {
     // Was `['1','3']` on the matcher against `['3']` live: `'a' < null` and
     // `'a' > null` are BOTH false, so the exclusion test excluded nothing.
-    await bothFaces(nulled, NULLED_ROWS, { name: { $between: [null, null] } }, ['3']);
+    await livePath(nulled, { name: { $between: [null, null] } }, ['3']);
   });
 
   it('`[null, null]` on the MISSING reading selects nothing, on both faces', async () => {
-    await bothFaces(missing, MISSING_ROWS, { name: { $between: [null, null] } }, []);
+    await livePath(missing, { name: { $between: [null, null] } }, []);
   });
 
   it('a HALF-null bound is the same defect and the same repair', async () => {
     // Neither card named these: #13495 measured `[null, null]` only. A range
     // with one real end and one absent end is not a meaningful range, and both
     // faces now select nothing rather than everything.
-    await bothFaces(nulled, NULLED_ROWS, { name: { $between: [null, 'z'] } }, []);
-    await bothFaces(nulled, NULLED_ROWS, { name: { $between: ['a', null] } }, []);
-    await bothFaces(missing, MISSING_ROWS, { name: { $between: [null, 'z'] } }, []);
-    await bothFaces(missing, MISSING_ROWS, { name: { $between: ['a', null] } }, []);
+    await livePath(nulled, { name: { $between: [null, 'z'] } }, []);
+    await livePath(nulled, { name: { $between: ['a', null] } }, []);
+    await livePath(missing, { name: { $between: [null, 'z'] } }, []);
+    await livePath(missing, { name: { $between: ['a', null] } }, []);
   });
 
   it('a null bound over a NUMERIC column does not match the zero row', async () => {
     // `0 >= null` is `true` — null coerces to 0 — so the numeric column is
     // where a comparison-only repair silently keeps the defect.
-    await bothFaces(numeric, NUMERIC_ROWS, { n: { $between: [null, null] } }, ['3']);
+    await livePath(numeric, { n: { $between: [null, null] } }, ['3']);
   });
 });
 
 describe('[#13549] a null VALUE is not inside a well-formed bounded range', () => {
   it("the card's cell: a bounded `$between` excludes the null-valued row", async () => {
     // Was `['1','2','4']` on the matcher against `['1','2']` live.
-    await bothFaces(sweep, SWEEP_ROWS, { v: { $between: ['2026-07-01', '2026-07-15'] } }, ['1', '2']);
+    await livePath(sweep, { v: { $between: ['2026-07-01', '2026-07-15'] } }, ['1', '2']);
   });
 
   it('the two readings of "no value" now agree with EACH OTHER', async () => {
@@ -245,8 +253,8 @@ describe('[#13549] a null VALUE is not inside a well-formed bounded range', () =
     // matched the range while the same absence spelled as a missing key did
     // not, because only the second met the pre-switch guard.
     const bounded = { v: { $between: ['2026-07-01', '2026-07-28'] } };
-    const withNullValue = matcherIds([{ id: 'x', v: null }], bounded);
-    const withMissingKey = matcherIds([{ id: 'x' }], bounded);
+    const withNullValue = await freshIds([{ id: 'x', v: null }], bounded);
+    const withMissingKey = await freshIds([{ id: 'x' }], bounded);
     expect(withNullValue).toEqual(withMissingKey);
     expect(withNullValue).toEqual([]);
   });
@@ -257,34 +265,34 @@ describe('[#13549] a null VALUE is not inside a well-formed bounded range', () =
     // so `null >= -1 && null <= 1` is true and the null-valued row stays
     // inside the range. Comparability is decided before the comparison, and
     // this cell is what holds that to the code.
-    await bothFaces(numeric, NUMERIC_ROWS, { n: { $between: [-1, 1] } }, ['2']);
-    await bothFaces(numeric, NUMERIC_ROWS, { n: { $between: [0, 10] } }, ['1', '2']);
+    await livePath(numeric, { n: { $between: [-1, 1] } }, ['2']);
+    await livePath(numeric, { n: { $between: [0, 10] } }, ['1', '2']);
   });
 });
 
 describe('[#13494/#13495/#13549] the ordinary vocabulary is untouched', () => {
   it('a well-formed range over valued rows still selects the range', async () => {
-    await bothFaces(sweep, SWEEP_ROWS, { v: { $between: ['2026-07-01', '2026-07-28'] } }, ['1', '2', '3']);
-    await bothFaces(numeric, NUMERIC_ROWS, { n: { $between: [1, 9] } }, ['1']);
+    await livePath(sweep, { v: { $between: ['2026-07-01', '2026-07-28'] } }, ['1', '2', '3']);
+    await livePath(numeric, { n: { $between: [1, 9] } }, ['1']);
   });
 
   it('a range that excludes every valued row still selects nothing', async () => {
-    await bothFaces(sweep, SWEEP_ROWS, { v: { $between: ['2026-09-01', '2026-09-30'] } }, []);
+    await livePath(sweep, { v: { $between: ['2026-09-01', '2026-09-30'] } }, []);
   });
 
   it('the range boundaries stay CLOSED on both ends', async () => {
     // `$between` is `$gte min` AND `$lte max` — what the live path compiles it
     // to. An off-by-one in the repair would show up here first.
-    await bothFaces(sweep, SWEEP_ROWS, { v: { $between: ['2026-07-01', '2026-07-01'] } }, ['1']);
-    await bothFaces(numeric, NUMERIC_ROWS, { n: { $between: [5, 5] } }, ['1']);
-    await bothFaces(numeric, NUMERIC_ROWS, { n: { $between: [0, 0] } }, ['2']);
+    await livePath(sweep, { v: { $between: ['2026-07-01', '2026-07-01'] } }, ['1']);
+    await livePath(numeric, { n: { $between: [5, 5] } }, ['1']);
+    await livePath(numeric, { n: { $between: [0, 0] } }, ['2']);
   });
 
   it('`$null` and `$exists` are unmoved on both readings', async () => {
-    await bothFaces(missing, MISSING_ROWS, { name: { $null: true } }, ['3']);
-    await bothFaces(nulled, NULLED_ROWS, { name: { $null: true } }, ['3']);
-    await bothFaces(missing, MISSING_ROWS, { name: { $exists: true } }, ['1']);
-    await bothFaces(nulled, NULLED_ROWS, { name: { $exists: true } }, ['1']);
+    await livePath(missing, { name: { $null: true } }, ['3']);
+    await livePath(nulled, { name: { $null: true } }, ['3']);
+    await livePath(missing, { name: { $exists: true } }, ['1']);
+    await livePath(nulled, { name: { $exists: true } }, ['1']);
   });
 });
 
@@ -293,10 +301,10 @@ describe('[#13553] a no-value row is not inside `$gt` / `$gte` / `$lt` / `$lte`'
     // Was `['1','2','3']` / `['2','3']` on the matcher against `['1','2']` /
     // `['2']` live. Row 3 (`n: null`) was answered greater than -1 AND less
     // than 1 at the same time, because `null` coerces to `0`.
-    await bothFaces(numeric, NUMERIC_ROWS, { n: { $gte: -1 } }, ['1', '2']);
-    await bothFaces(numeric, NUMERIC_ROWS, { n: { $gt: -1 } }, ['1', '2']);
-    await bothFaces(numeric, NUMERIC_ROWS, { n: { $lte: 1 } }, ['2']);
-    await bothFaces(numeric, NUMERIC_ROWS, { n: { $lt: 1 } }, ['2']);
+    await livePath(numeric, { n: { $gte: -1 } }, ['1', '2']);
+    await livePath(numeric, { n: { $gt: -1 } }, ['1', '2']);
+    await livePath(numeric, { n: { $lte: 1 } }, ['2']);
+    await livePath(numeric, { n: { $lt: 1 } }, ['2']);
   });
 
   it('THE DISCRIMINATOR — the row storing `0` stays IN, on every arm', async () => {
@@ -305,10 +313,10 @@ describe('[#13553] a no-value row is not inside `$gt` / `$gte` / `$lt` / `$lte`'
     // that `null` coerces to `0` — would drop this row too and still turn the
     // four cells above green, because they happen not to distinguish them.
     // Here they do: the no-value row leaves and the zero row stays.
-    await bothFaces(numeric, NUMERIC_ROWS, { n: { $gte: 0 } }, ['1', '2']);
-    await bothFaces(numeric, NUMERIC_ROWS, { n: { $lte: 0 } }, ['2']);
-    await bothFaces(numeric, NUMERIC_ROWS, { n: { $gte: -0.5 } }, ['1', '2']);
-    await bothFaces(numeric, NUMERIC_ROWS, { n: { $lt: 0.5 } }, ['2']);
+    await livePath(numeric, { n: { $gte: 0 } }, ['1', '2']);
+    await livePath(numeric, { n: { $lte: 0 } }, ['2']);
+    await livePath(numeric, { n: { $gte: -0.5 } }, ['1', '2']);
+    await livePath(numeric, { n: { $lt: 0.5 } }, ['2']);
   });
 
   it('the two readings of "no value" agree with EACH OTHER on all four arms', async () => {
@@ -318,8 +326,8 @@ describe('[#13553] a no-value row is not inside `$gt` / `$gte` / `$lt` / `$lte`'
     // one answer the ruling gives — EXCLUDE.
     for (const op of ['$gt', '$gte', '$lt', '$lte'] as const) {
       const bounded = { n: { [op]: 0 } };
-      const withNullValue = matcherIds([{ id: 'x', n: null }], bounded);
-      const withMissingKey = matcherIds([{ id: 'x' }], bounded);
+      const withNullValue = await freshIds([{ id: 'x', n: null }], bounded);
+      const withMissingKey = await freshIds([{ id: 'x' }], bounded);
       expect({ op, ids: withNullValue }).toEqual({ op, ids: withMissingKey });
       expect({ op, ids: withNullValue }).toEqual({ op, ids: [] });
     }
@@ -332,29 +340,29 @@ describe('[#13553] a no-value row is not inside `$gt` / `$gte` / `$lt` / `$lte`'
     // row 3 — `$between` excluded the null-valued row while `$gte`/`$lte`
     // admitted it. One face, two answers, one query.
     for (const [min, max] of [[-1, 1], [0, 10], [-5, 5]] as const) {
-      const viaBetween = matcherIds(NUMERIC_ROWS, { n: { $between: [min, max] } });
-      const viaBounds = matcherIds(NUMERIC_ROWS, { n: { $gte: min, $lte: max } });
+      const viaBetween = await liveIds(numeric, { n: { $between: [min, max] } });
+      const viaBounds = await liveIds(numeric, { n: { $gte: min, $lte: max } });
       expect({ min, max, ids: viaBetween }).toEqual({ min, max, ids: viaBounds });
     }
-    await bothFaces(numeric, NUMERIC_ROWS, { n: { $gte: -1, $lte: 1 } }, ['2']);
-    await bothFaces(numeric, NUMERIC_ROWS, { n: { $between: [-1, 1] } }, ['2']);
+    await livePath(numeric, { n: { $gte: -1, $lte: 1 } }, ['2']);
+    await livePath(numeric, { n: { $between: [-1, 1] } }, ['2']);
   });
 
   it('the VALUED rows keep every answer they had — the repair moved no-value cells only', async () => {
-    await bothFaces(numeric, NUMERIC_ROWS, { n: { $gt: 0 } }, ['1']);
-    await bothFaces(numeric, NUMERIC_ROWS, { n: { $gt: 5 } }, []);
-    await bothFaces(numeric, NUMERIC_ROWS, { n: { $lt: 0 } }, []);
-    await bothFaces(numeric, NUMERIC_ROWS, { n: { $gte: 5 } }, ['1']);
+    await livePath(numeric, { n: { $gt: 0 } }, ['1']);
+    await livePath(numeric, { n: { $gt: 5 } }, []);
+    await livePath(numeric, { n: { $lt: 0 } }, []);
+    await livePath(numeric, { n: { $gte: 5 } }, ['1']);
   });
 
   it('the STRING fixture is unmoved — it agreed before, and still does', async () => {
     // These four cells are why three cards passed over the defect: on strings
     // the comparison against a null is false in both directions already. They
     // are asserted so the repair is measured NOT to have moved them.
-    await bothFaces(sweep, SWEEP_ROWS, { v: { $gte: '2026-07-01' } }, ['1', '2', '3']);
-    await bothFaces(sweep, SWEEP_ROWS, { v: { $gt: '2026-07-01' } }, ['2', '3']);
-    await bothFaces(sweep, SWEEP_ROWS, { v: { $lte: '2026-07-15' } }, ['1', '2']);
-    await bothFaces(sweep, SWEEP_ROWS, { v: { $lt: '2026-07-15' } }, ['1']);
+    await livePath(sweep, { v: { $gte: '2026-07-01' } }, ['1', '2', '3']);
+    await livePath(sweep, { v: { $gt: '2026-07-01' } }, ['2', '3']);
+    await livePath(sweep, { v: { $lte: '2026-07-15' } }, ['1', '2']);
+    await livePath(sweep, { v: { $lt: '2026-07-15' } }, ['1']);
   });
 
   it('⛔ `$between` is NOT in the ordering set — its degenerate cell is unmoved', async () => {
@@ -362,7 +370,7 @@ describe('[#13553] a no-value row is not inside `$gt` / `$gte` / `$lt` / `$lte`'
     // OPPOSITE one: the range whose both ends are no value selects the
     // no-value rows (#13495). Adding `$between` to the guarded set would
     // return false before `valueWithinRange` ran and silently move this cell.
-    await bothFaces(numeric, NUMERIC_ROWS, { n: { $between: [null, null] } }, ['3']);
-    await bothFaces(nulled, NULLED_ROWS, { name: { $between: [null, null] } }, ['3']);
+    await livePath(numeric, { n: { $between: [null, null] } }, ['3']);
+    await livePath(nulled, { name: { $between: [null, null] } }, ['3']);
   });
 });

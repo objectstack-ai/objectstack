@@ -446,6 +446,35 @@ export function findInertDeclaredConnectors(
 }
 
 /**
+ * [#20761, ADR-0126 §7.2 / §7.3] The engine's reader over THE LOADER'S SET:
+ * which package ships a flow name, asked of the metadata protocol's
+ * `packagedArtifactOwner` — the answer its locked-base verdict reads, drawn
+ * from the entries the artifact loader registered. ⛔ No second set is kept
+ * here, and nothing is read off a definition.
+ *
+ * Resolved at QUESTION time, never at boot: the protocol service may register
+ * after this plugin's `init()`, and a registry read turned into a recorded
+ * "not there" would be the startup-registry verdict AGENTS.md forbids. A
+ * composition with no protocol — or one whose protocol brings no such reader —
+ * holds no flow a managed package loaded as far as this engine can know, so
+ * the answer is "none": the §7.3 guards then protect nothing and the
+ * activation door refuses every flow, which fails closed rather than trusting
+ * a definition's own stamps.
+ */
+export function packagedFlowReader(ctx: Pick<PluginContext, 'getService'>): (name: string) => string | undefined {
+    return (name) => {
+        let protocol: { packagedArtifactOwner?: (request: { type: string; name: string }) => string | undefined } | undefined;
+        try {
+            protocol = ctx.getService('protocol');
+        } catch {
+            return undefined;
+        }
+        if (typeof protocol?.packagedArtifactOwner !== 'function') return undefined;
+        return protocol.packagedArtifactOwner({ type: 'flow', name });
+    };
+}
+
+/**
  * AutomationServicePlugin — Core engine plugin
  *
  * Responsibilities:
@@ -616,6 +645,12 @@ export class AutomationServicePlugin implements Plugin {
 
         // Register as global service — other plugins access via ctx.getService('automation')
         ctx.registerService('automation', this.engine);
+
+        // [#20761, ADR-0126 §7.2 / §7.3] Which flows are PACKAGED is the
+        // loader's set, read through the metadata protocol — the same answer
+        // its locked-base verdict reads — never the stamps on a definition.
+        // See `packagedFlowReader`.
+        this.engine.setPackagedFlowSource(packagedFlowReader(ctx));
 
         // [#20552] Every metadata read exit withholds the inbound hook's secret
         // from a served flow from here on — the `flow` entry of the per-type
@@ -982,7 +1017,13 @@ export class AutomationServicePlugin implements Plugin {
             // resolveFlowPrecedence applies the ADR-0005 direction — runtime
             // overlay wins over the packaged artifact — and warns per colliding
             // name, which is the artifact-vs-DB warning ADR-0048 §3.4 routes to.
-            const resolved = resolveFlowPrecedence(flows, ctx.logger);
+            // [#20864, ADR-0126 §7.3] Which contender IS the packaged artifact
+            // is the loader's set, asked through the engine's own
+            // `packagedFlowOwner` (the `packagedFlowReader` attached in
+            // `init()`), so precedence and every other classification the
+            // engine makes read one source — never the stamps on the bodies.
+            const engine = this.engine;
+            const resolved = resolveFlowPrecedence(flows, ctx.logger, (name) => engine.packagedFlowOwner(name));
             const shadowedNames = resolved.filter((entry) => entry.shadowing).length;
             let registered = 0;
             for (const entry of resolved) {
@@ -2054,10 +2095,13 @@ export class AutomationServicePlugin implements Plugin {
 
         // Tear down flows that were synced from a prior artifact but are gone
         // now, so their triggers/jobs (e.g. a scheduled job) stop firing.
+        // [#20725] Through `withdrawFlow`, not the `unregisterFlow` door: the
+        // artifact dropped them, which ADR-0126 §7.3's removal guard does not
+        // judge — see `AutomationEngine.withdrawFlow` for why.
         for (const prev of this.syncedFlowNames) {
             if (!freshNames.has(prev)) {
                 try {
-                    this.engine.unregisterFlow(prev);
+                    this.engine.withdrawFlow(prev);
                 } catch {
                     /* best-effort */
                 }

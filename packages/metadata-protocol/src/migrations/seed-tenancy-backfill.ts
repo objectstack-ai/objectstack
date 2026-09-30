@@ -1001,7 +1001,13 @@ export const SEED_TENANCY_MIGRATION_ID = 'seed-tenancy-backfill';
  */
 export interface SeedTenancyLedger {
   getObject(name: string): unknown;
-  find(object: string, options: Record<string, unknown>): Promise<Array<Record<string, unknown>>>;
+  /**
+   * The receipt's one read: its own row by primary key, through the engine's
+   * single-row route (#20648). ⛔ Not `find` with `limit: 1` — the SQL driver
+   * reads that as page one of a walk and, on a table it has not registered,
+   * warns that the walk is not deterministic, a false alarm for a key lookup.
+   */
+  findOne(object: string, options: Record<string, unknown>): Promise<Record<string, unknown> | null>;
   insert(object: string, data: Record<string, unknown>, options?: Record<string, unknown>): Promise<unknown>;
   update(object: string, data: Record<string, unknown>, options: Record<string, unknown>): Promise<unknown>;
 }
@@ -1018,7 +1024,7 @@ export interface SeedTenancyLedger {
  */
 export function resolveSeedTenancyLedger(engine: unknown): SeedTenancyLedger | undefined {
   const candidate = engine as any;
-  for (const method of ['getObject', 'find', 'insert', 'update']) {
+  for (const method of ['getObject', 'findOne', 'insert', 'update']) {
     if (typeof candidate?.[method] !== 'function') return undefined;
   }
   return candidate as SeedTenancyLedger;
@@ -1051,7 +1057,8 @@ export function resolveSeedTenancyLedger(engine: unknown): SeedTenancyLedger | u
  * Verified by enumeration rather than assumed: every consumer of this ledger
  * (`ObjectQL.readMigrationFlagVerified`, `recordObservedDeviation`,
  * `retractCreationAttestation`, and `platform-objects`' `readDataMigrationFlag`)
- * reads `where: { id }, limit: 1`. There is no bulk or aggregate read of
+ * reads one row by `where: { id }` through the engine's `findOne` (#20648).
+ * There is no bulk or aggregate read of
  * `sys_migration` anywhere in the repo, so no reading of these fields under a
  * NEW id can reach another id's gate.
  *
@@ -1098,9 +1105,8 @@ async function persistSeedTenancyReceiptRow(
   flag: DataMigrationFlag,
 ): Promise<'inserted' | 'updated'> {
   const context = { isSystem: true };
-  const rows = await ledger.find(DATA_MIGRATION_FLAG_OBJECT, {
+  const existing = await ledger.findOne(DATA_MIGRATION_FLAG_OBJECT, {
     where: { id: flag.id },
-    limit: 1,
     context,
   });
   const row: Record<string, unknown> = { ...flag, updated_at: flag.last_run_at };
@@ -1110,7 +1116,7 @@ async function persistSeedTenancyReceiptRow(
   // probe finds nothing and later boots return `no-split` — but a run that could
   // only stamp some objects leaves a split behind, and the next boot's row
   // should describe the LATEST attempt.
-  if (rows?.[0]?.id === flag.id) {
+  if (existing?.id === flag.id) {
     await ledger.update(DATA_MIGRATION_FLAG_OBJECT, row, { context });
     return 'updated';
   }
@@ -1141,7 +1147,7 @@ export async function recordSeedTenancyReceipt(
 ): Promise<void> {
   const ledger = seam?.ledger;
   const notRecorded =
-    `[metadata-protocol] the seed/API tenancy repair (#8686) ran and rewrote stored rows, but this ` +
+    `[metadata-protocol] the seed/API tenancy repair ran and rewrote stored rows, but this ` +
     `deployment has NO durable record that it did`;
   if (!ledger) {
     // Functional absence, not a durability failure: this host is not an engine
@@ -1149,7 +1155,7 @@ export async function recordSeedTenancyReceipt(
     // `warn` per AGENTS.md — the system is visibly smaller, not silently lying.
     logger?.warn?.(
       `${notRecorded} — no engine was resolved beside the raw-SQL seam, so ${DATA_MIGRATION_FLAG_OBJECT} ` +
-        `could not be written. Capture this boot's log before restarting (#9451).`,
+        `could not be written. Capture this boot's log before restarting.`,
     );
     return;
   }
@@ -1158,7 +1164,7 @@ export async function recordSeedTenancyReceipt(
       logger?.warn?.(
         `${notRecorded} — ${DATA_MIGRATION_FLAG_OBJECT} is not registered on this kernel, so the ` +
           `deployment ledger does not exist here. Compose PlatformObjectsPlugin (it carries the ledger ` +
-          `every served kernel gets) or capture this boot's log before restarting (#9451).`,
+          `every served kernel gets) or capture this boot's log before restarting.`,
       );
       return;
     }
@@ -1166,7 +1172,7 @@ export async function recordSeedTenancyReceipt(
     const outcome = await persistSeedTenancyReceiptRow(ledger, flag);
     logger?.info?.(
       `[metadata-protocol] seed/API tenancy repair recorded in ${DATA_MIGRATION_FLAG_OBJECT} ` +
-        `(id '${SEED_TENANCY_MIGRATION_ID}', ${outcome}) — the run survives this process (#9451).`,
+        `(id '${SEED_TENANCY_MIGRATION_ID}', ${outcome}) — the run survives this process.`,
       { id: SEED_TENANCY_MIGRATION_ID, outcome, details: flag.details },
     );
   } catch (e: unknown) {
@@ -1178,7 +1184,7 @@ export async function recordSeedTenancyReceipt(
       `Nothing else reports it: capture this boot's log NOW, before the container is replaced. Fix: make ` +
       `${DATA_MIGRATION_FLAG_OBJECT} writable on this deployment (it is provisioned by ` +
       `PlatformObjectsPlugin) and verify with ` +
-      `SELECT * FROM ${DATA_MIGRATION_FLAG_OBJECT} WHERE id = '${SEED_TENANCY_MIGRATION_ID}' (#9451).`;
+      `SELECT * FROM ${DATA_MIGRATION_FLAG_OBJECT} WHERE id = '${SEED_TENANCY_MIGRATION_ID}'.`;
     if (logger?.error) logger.error(message, e instanceof Error ? e : new Error(detail));
     else logger?.warn?.(message, { error: detail });
   }
@@ -1285,7 +1291,7 @@ export async function backfillSeedTenancy(
   if (postureEnforcesWall(resolveTenancyPosture())) {
     logger?.warn?.(
       `[metadata-protocol] seed/API tenancy split detected on a MULTI-ORGANIZATION install — ` +
-        `backfill skipped (#8686). Affected: ${affected}. ` +
+        `backfill skipped. Affected: ${affected}. ` +
         `Seed rows carry ${ORGANIZATION_FIELD} = NULL while API rows carry a real organization, so each ` +
         `object runs two autonumber counters and can mint the same "unique" identifier twice — the ` +
         `partitioned unique index (COALESCE(${ORGANIZATION_FIELD}, '${GLOBAL_TENANT}'), <field>) does not ` +
@@ -1363,7 +1369,7 @@ export async function backfillSeedTenancy(
   if (organizationIds.length === 0 && organizationProbeError === undefined) {
     logger?.info?.(
       `[metadata-protocol] seed/API tenancy split detected on an install with no organization yet — ` +
-        `nothing to adopt, and nothing at risk (#8686). Affected: ${affected}. ` +
+        `nothing to adopt, and nothing at risk. Affected: ${affected}. ` +
         `${ORGANIZATION_TABLE} is empty, so each of these objects runs exactly ONE counter (its ` +
         `'${GLOBAL_TENANT}' row) and no "unique" identifier can be minted twice while there is only ` +
         `one partition. No operator action: this self-heals at the first sign-up, when the ` +
@@ -1378,7 +1384,7 @@ export async function backfillSeedTenancy(
   if (organizationIds.length !== 1) {
     logger?.warn?.(
       `[metadata-protocol] seed/API tenancy split detected but the target organization is not ` +
-        `derivable — backfill skipped (#8686). Affected: ${affected}. ` +
+        `derivable — backfill skipped. Affected: ${affected}. ` +
         `The install reports tenancy posture 'single' but holds ${organizationIds.length} rows in ` +
         `${ORGANIZATION_TABLE} (exactly 1 is required to adopt one without guessing). Until this is ` +
         `resolved these objects run two autonumber counters and can mint the same "unique" identifier ` +
@@ -1393,7 +1399,7 @@ export async function backfillSeedTenancy(
             `NOTE: the ${ORGANIZATION_TABLE} probe FAILED` +
             (organizationProbeError === '' ? '' : ` (${organizationProbeError})`) +
             `, so the count above is "unknown", not a measured zero — an unreadable probe is ` +
-            `reported here rather than through the benign no-organization-yet path (#9261). `) +
+            `reported here rather than through the benign no-organization-yet path. `) +
         SNAPSHOT_CAVEAT,
       // `organizationProbeError` is `undefined` — and so serializes AWAY — when
       // the probe answered; a probe that failed carries its text, `''` and all.
@@ -1425,7 +1431,7 @@ export async function backfillSeedTenancy(
     } catch (e) {
       logger?.warn?.(
         `[metadata-protocol] could not list already-minted duplicates for ${split.object}.${split.field} ` +
-          `(#8686) — the backfill continues; verify manually with: ` +
+          `— the backfill continues; verify manually with: ` +
           `${buildCollisionProbeSql(split.object, split.field, client)}`,
         { error: operatorFacingErrorText(e) },
       );
@@ -1450,7 +1456,7 @@ export async function backfillSeedTenancy(
     } catch (e) {
       stampFailures.push(object);
       logger?.warn?.(
-        `[metadata-protocol] seed tenancy backfill could not stamp ${object} (#8686) — its rows keep ` +
+        `[metadata-protocol] seed tenancy backfill could not stamp ${object} — its rows keep ` +
           `${ORGANIZATION_FIELD} = NULL and the counter merge below is SKIPPED for it, so the split ` +
           `survives and the next boot retries. Nothing was lost; nothing was repaired for this object.`,
         { error: operatorFacingErrorText(e) },
@@ -1484,7 +1490,7 @@ export async function backfillSeedTenancy(
     } catch (e) {
       logger?.warn?.(
         `[metadata-protocol] seed tenancy backfill could not merge the counter for ` +
-          `${split.object}.${split.field} (#8686) — the '${GLOBAL_TENANT}' counter is left in ` +
+          `${split.object}.${split.field} — the '${GLOBAL_TENANT}' counter is left in ` +
           `place, so the high-water mark is intact and the next boot retries the repair`,
         { error: operatorFacingErrorText(e) },
       );
@@ -1493,8 +1499,8 @@ export async function backfillSeedTenancy(
 
   if (objectsStamped > 0) {
     logger?.info?.(
-      `[metadata-protocol] seed/API tenancy split repaired for ${objectsStamped} object(s) ` +
-        `(#8686): untenanted seed rows adopted organization ${organizationId} and the ` +
+      `[metadata-protocol] seed/API tenancy split repaired for ${objectsStamped} object(s): ` +
+        `untenanted seed rows adopted organization ${organizationId} and the ` +
         `'${GLOBAL_TENANT}' counter was merged into the organization-scoped one` +
         (collisions.length > 0
           ? `. ${collisions.length} row(s) could NOT be adopted because their identifier is already ` +
@@ -1511,7 +1517,7 @@ export async function backfillSeedTenancy(
     // will NOT rewrite, so an operator has to decide what happens to them.
     logger?.warn?.(
       `[metadata-protocol] ${collisions.length} business identifier(s) were already minted TWICE before ` +
-        `this repair (#8686) — reported, NOT renumbered. These values each exist on both a seeded row and ` +
+        `this repair — reported, NOT renumbered. These values each exist on both a seeded row and ` +
         `an API-created row: ` +
         collisions.map((c) => `${c.object}.${c.field}=${c.value} (${c.rows} rows)`).join(', ') +
         `. The platform does not renumber them: a record number that has already appeared on a document, ` +

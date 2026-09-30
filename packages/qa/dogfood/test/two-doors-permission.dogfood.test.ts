@@ -13,7 +13,7 @@
 //        edit into an env-scope ADR-0005 overlay" direction was RETIRED on
 //        2026-08-09 — see ADR-0094 D5-R): a data-plane edit of a
 //        package-managed, ARTIFACT-BACKED row is REFUSED with 403
-//        `not_overridable` and no overlay is minted — #6483 rolled
+//        `not_overridable` and no overlay is minted — commit ee58392e1 rolled
 //        `permission` back to `allowOrgOverride: false`, and ADR-0086 names
 //        the supported channel instead: edit the package and re-publish.
 //        A "delete" through this door still degrades to a RESET — a packaged
@@ -78,9 +78,9 @@ describe('two-doors permission separation (ADR-0086 P2)', () => {
     });
   });
 
-  // ── 块2 — admin door: artifact-backed rows now REFUSE the overlay (#6483) ─
+  // ── 块2 — admin door: artifact-backed rows now REFUSE the overlay (commit ee58392e1) ─
   it('块2: an admin edit of a package-managed set is refused — no env overlay is minted (#6483)', async () => {
-    // Pre-#6483 this edit became an env-scope overlay (ADR-0094's 2026-07-14
+    // Before commit ee58392e1 this edit became an env-scope overlay (ADR-0094's 2026-07-14
     // direction). `permission` has since rolled back to
     // `allowOrgOverride: false` (ADR-0005 security row: "Authorization
     // correctness; overlays would create silent privilege drift"), so the
@@ -105,13 +105,13 @@ describe('two-doors permission separation (ADR-0086 P2)', () => {
   });
 
   it('块2: "deleting" the package set through the env door still RESETS to the shipped declaration', async () => {
-    // (#6483: with the edit above refused there is no overlay to lift, but
+    // (commit ee58392e1: with the edit above refused there is no overlay to lift, but
     // the invariant is unchanged and still pinned: the env door can never
     // remove a packaged definition — delete degrades to reset.)
     const before = await findSet('showcase_contributor');
     const res = await stack.apiAs(adminToken, 'DELETE', `/data/sys_permission_set/${before.id}`);
     expect(res.status).toBeLessThan(300);
-    // [#19306] The status cannot tell this reset apart from a real deletion —
+    // [commit f9e16d856] The status cannot tell this reset apart from a real deletion —
     // the whole envelope used to be byte-identical to one, so every assertion
     // below stayed green while the door told the caller the set was gone.
     // `success: false` is the one field that says the record is still here,
@@ -127,14 +127,14 @@ describe('two-doors permission separation (ADR-0086 P2)', () => {
   });
 
   it('块2: the admin door CAN still edit an env-authored set (isolates the gate to artifact-backed rows)', async () => {
-    // The specimen was `member_default` until #6483: its record is env-owned
+    // The specimen was `member_default` until commit ee58392e1: its record is env-owned
     // (`managed_by` ≠ 'package'), but its METADATA identity is a platform
     // artifact (`defaultPermissionSets`), so with `permission` rolled back
     // to `allowOrgOverride: false` the write-through's `saveMetaItem` now
     // refuses to overlay it — the record's provenance column was never what
     // the gate reads. A truly env-AUTHORED set (created through the data
     // door, definition living only in `sys_metadata`) rides the
-    // `allowRuntimeCreate` tier, which #6483 deliberately left open — that
+    // `allowRuntimeCreate` tier, which commit ee58392e1 deliberately left open — that
     // is the boundary this case isolates.
     const NAME = 'twodoors_env_authored';
     const created = await stack.apiAs(adminToken, 'POST', '/data/sys_permission_set', {

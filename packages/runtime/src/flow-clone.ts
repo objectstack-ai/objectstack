@@ -64,9 +64,16 @@
  * literal list here — an envelope key added to the spec is stripped by this
  * module the day it lands, with no edit and no second list to drift.
  *
- * ⚠️ This is the one place the implementation reads more into ADR-0126 than the
- * card spelled out; it is flagged on the PR for the reviewer. Everything else
- * below is the ADR verbatim.
+ * [#20761] What was once the one place this module read more into ADR-0126
+ * than its card spelled out is now the rule itself: a flow written through an
+ * authoring door is tenant-authored, and the one authoring rule every door asks
+ * (`tenantAuthoredWriteRefusal` in `@objectstack/metadata-protocol`) refuses a
+ * definition whose stamps claim a package for a name no package ships — so a
+ * copy that carried the base's envelope would be refused, not saved. The clone
+ * door asks that rule of the copy this module builds and then saves it as an
+ * ordinary tenant row. Pinned in `domains/automation-flow-clone.test.ts` (the
+ * envelope drop) and `domains/automation-tenant-authored-write.test.ts` (the
+ * rule and the save).
  *
  * ## 3. REFERENCES ARE NOT RE-POINTED
  *
@@ -147,14 +154,24 @@ export const FLOW_CLONE_DROPPED_KEYS: readonly string[] = Object.freeze([
  *     record-change flow and walks away has two flows running on one trigger,
  *     and the only thing standing between them and that surprise is this
  *     sentence.
+ *
+ * [#20726, ADR-0126 §7.2] The off-switch it names is the CLONE's own: its
+ * `status`, published through `PUT /:name`. A clone carries no package
+ * envelope (see {@link FLOW_CLONE_DROPPED_KEYS}), so it is a flow authored in
+ * this deployment, and the activation toggle — which switches packaged flows
+ * only — refuses it. That holds whatever the clone was copied from: the clone
+ * door takes any registered flow as its source, packaged or not, so the
+ * notice makes no claim about the source's provenance.
  */
 export const FLOW_CLONE_NOTICE =
     'References are not re-pointed: this clone calls exactly what the original called '
     + '(subflows, actions and objects are unchanged). It is created with status `draft`, '
     + 'which is a lifecycle label and NOT an off-switch — a cloned record-change or schedule '
     + 'flow is bound to its trigger and will run alongside the flow it was copied from. '
-    + 'Disable it (`POST /api/v1/automation/<name>/toggle` with `{"enabled": false}`) if that '
-    + 'is not what you want.';
+    + 'If that is not what you want, switch the clone off through its own status: send its '
+    + 'complete definition with `status: \'obsolete\'` to `PUT /api/v1/automation/<name>`. '
+    + 'The activation toggle (`POST /api/v1/automation/<name>/toggle`) switches packaged flows '
+    + 'only and refuses the clone.';
 
 /** ADR-0112 envelope for the same-name refusal: a status AND a code. */
 export const FLOW_CLONE_NAME_TAKEN_STATUS = 409;

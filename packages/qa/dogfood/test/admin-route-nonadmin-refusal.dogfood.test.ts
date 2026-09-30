@@ -76,7 +76,7 @@
 //     gate verdict and not a payload the server rejects for everyone.
 //
 //   `shaded-vendor-gate` (1 route: `remove-user`) — the two halves belong to
-//     DIFFERENT layers, which is why it is neither of its neighbours. #11477
+//     DIFFERENT layers, which is why it is neither of its neighbours. Commit 6dd3e6968
 //     gave the route the raw-mount shading `ban-user` already had, so an
 //     ObjectStack gate answers the refusal (member 403 PERMISSION_DENIED, anon
 //     401 UNAUTHENTICATED) — but the mount DELEGATES rather than
@@ -88,7 +88,7 @@
 //     The both-sides contrast is therefore not a 2xx but a DIFFERENCE: the
 //     member and the admin hear two different refusals, which is what proves
 //     the member's 403 is an authorization verdict and not a blanket refusal.
-//     The bucket also carries the #11477 negative — a member must never again
+//     The bucket also carries commit 6dd3e6968's negative — a member must never again
 //     see the break-glass guard's `409 LAST_LOCAL_CREDENTIAL`, which before the
 //     shading was answered ahead of every authorization layer and VARIED WITH
 //     THE TARGET, disclosing per-record state to a caller entitled to none.
@@ -336,7 +336,7 @@ function expectationsFor(targetUserId: string): Record<string, RouteExpectation>
       body: { userId: targetUserId },
     },
 
-    // ── #11477 — shaded for ORDERING, still admitted by the vendor ─────────
+    // ── Commit 6dd3e6968 — shaded for ORDERING, still admitted by the vendor ─
     //
     // The only member of its bucket, and the bucket exists because this route
     // genuinely has a third shape rather than because the other two did not
@@ -345,7 +345,7 @@ function expectationsFor(targetUserId: string): Record<string, RouteExpectation>
     // owned by different layers:
     //
     //   refusal   → ObjectStack's gate (403 PERMISSION_DENIED), because the
-    //               mount answers first. That is #11477's whole point: the
+    //               mount answers first. That is commit 6dd3e6968's whole point: the
     //               break-glass `hooks.before` guard used to answer an
     //               authenticated non-admin BEFORE any authorization ran, and
     //               its 409 differed per target — a per-record disclosure.
@@ -634,7 +634,7 @@ describe('#9482 C9: every derived /admin/ route refuses a non-admin', () => {
   }, 600_000);
 
   it('the shaded vendor route refuses a non-admin from the ObjectStack gate, before the break-glass guard', async () => {
-    // #11477. The both-sides contrast here is NOT a 2xx — it is that the two
+    // Commit 6dd3e6968. The both-sides contrast here is NOT a 2xx — it is that the two
     // callers hear DIFFERENT refusals. A member is turned away by ObjectStack's
     // gate (`PERMISSION_DENIED`) and a platform admin gets past it only to be
     // turned away by the vendor's (`YOU_ARE_NOT_ALLOWED_*`, #9969). Two
@@ -653,7 +653,7 @@ describe('#9482 C9: every derived /admin/ route refuses a non-admin', () => {
       expect(member.status, `${route} member: ${member.body}`).toBe(403);
       expect(member.code, `${route} member code: ${member.body}`).toBe('PERMISSION_DENIED');
 
-      // ⛔ The load-bearing negative. Before #11477 the break-glass
+      // ⛔ The load-bearing negative. Before commit 6dd3e6968 the break-glass
       // `hooks.before` guard answered an authenticated non-admin ahead of every
       // authorization layer, and its answer varied with the TARGET — a
       // per-record disclosure to a caller entitled to nothing. A member must
@@ -720,7 +720,7 @@ describe('#9482 C9: every derived /admin/ route refuses a non-admin', () => {
       // transaction, so this route answers the authorization question like
       // every other member of the bucket and needs no exception.
       //
-      // ⚠️ #11477 moved `remove-user` OUT of this bucket entirely — its raw
+      // ⚠️ Commit 6dd3e6968 moved `remove-user` OUT of this bucket entirely — its raw
       // mount now answers a member from ObjectStack's gate
       // (`403 PERMISSION_DENIED`) before better-auth is reached at all, so the
       // vendor-vocabulary rule below no longer describes it. It lives in

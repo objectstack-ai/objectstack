@@ -398,9 +398,10 @@ export function normalizeFilterOperator(op: unknown): string {
 // (`components/src/custom/filter-builder.tsx:228`, re-stamped on read-back at
 // `plugin-view/src/config/view-config-utils.ts:146`/`:160`) and the sort builder
 // (`components/src/custom/sort-builder.tsx:68`/`:94`) both stamp
-// `id: crypto.randomUUID()` on every row they render. `saveMetaItem` validates
-// the PUT body and persists the AUTHORED body verbatim, so those ids reach the
-// wire and the store.
+// `id: crypto.randomUUID()` on every row they render, so those ids reach the
+// wire. [#20051] They no longer reach the store: `saveMetaItem` stores the
+// parsed value of every key a body carries, and the ids are removed before the
+// parse.
 //
 // ⚠️ Why a `.strip()` on the wire member cannot do this job — the #4001 批 18 /
 // #5114 finding, and the reason this vocabulary exists at all: **`.strip()` does
@@ -487,8 +488,10 @@ function stripRowDecorations(value: unknown, isRow: boolean, depth: number): unk
  * authoring doors keep rejecting the key by name, which is the whole point of
  * the split.
  *
- * Nothing is lost at rest: `saveMetaItem` persists the ORIGINAL body, so the
- * console still reads its own ids back.
+ * [#20051] The ids do not reach the store: `saveMetaItem` stores the parsed
+ * body, and this runs before the parse. Nothing the console needs is lost, as
+ * {@link VIEW_CONSOLE_ROUND_TRIP_KEYS} records: the builders mint a fresh id
+ * for a row that has none.
  *
  * Returns the SAME reference when there is nothing to strip, so the common path
  * allocates nothing. Non-object inputs pass through — the schema owns those.
@@ -903,8 +906,8 @@ function foldAuthoredViewFilterOperator(op: ViewFilterOperator): string {
  * (`components/src/custom/filter-builder.tsx:228`; stamped again when a stored
  * filter is read back into the builder —
  * `plugin-view/src/config/view-config-utils.ts:146`/`:160`). `saveMetaItem`
- * validates the PUT body and then persists the AUTHORED body verbatim, so that
- * `id` is on the wire and in the store. Closed *without* a wire route, this
+ * validated the PUT body and then persisted the AUTHORED body verbatim (until
+ * #20051), so that `id` was on the wire and in the store. Closed *without* a wire route, this
  * shape turned every filter write carrying one into a 422 — measured on all
  * three paths, including the flattened personalization overlay that is the body
  * the console actually PUTs.
@@ -1631,10 +1634,10 @@ export const UserFilterFieldSchema = lazySchema(() => strictObject({
  * `:742`); its own `UserFiltersSchema` declared the key. The spec's did not —
  * and the difference between the two shapes was *exactly* that one key.
  *
- * That gap was not inert, because the metadata write path does NOT persist
- * `parsed.data`: `saveMetaItem` validates with `safeParse` and then stores the
- * ORIGINAL body verbatim, precisely so Studio-only auxiliary keys survive
- * (`metadata-protocol/src/protocol.ts`, "Validation policy"). So an authored
+ * That gap was not inert, because the metadata write path did NOT persist
+ * `parsed.data` then: `saveMetaItem` validated with `safeParse` and stored the
+ * ORIGINAL body verbatim, precisely so Studio-only auxiliary keys survived
+ * (a `view` stores its parsed body since #20051). So an authored
  * `allowAddTab` was stripped only from the parse RESULT, which is discarded —
  * the stored document kept it and the renderer read it. **The capability
  * worked.** Closing the shape without declaring the key would have converted a
@@ -1718,6 +1721,56 @@ export const AddRecordConfigSchema = lazySchema(() => strictObject({
   mode: z.enum(['inline', 'form', 'modal']).default('inline').describe('How to add a new record'),
   formView: z.string().optional().describe('Named form view to use when mode is "form" or "modal"'),
 }).describe('Add record entry point configuration'));
+
+/**
+ * The one answer an empty state gives to an author reaching for a call to
+ * action inside it. Written for EVERY door that carries
+ * {@link EmptyStateSchema}, the `VIEW_ROW_BOUND_GUIDANCE` way: the add-record
+ * entry point is a list view's own `addRecord` block, and the `object-grid`
+ * page block declares no authorable one at all, so a sentence pointing at
+ * "this list view" would be a wrong answer on the grid.
+ */
+const EMPTY_STATE_ACTION_GUIDANCE =
+  'The empty state renders text only — a `title`, a `message` and an `icon`. An "add record" '
+  + 'entry point is not part of it: on a list view, configure it in that view\'s own `addRecord` block.';
+
+/**
+ * Empty State — what a record list draws in place of rows when it has none to
+ * show: a heading, a line of text and an icon.
+ *
+ * [#20694] ONE declaration for every door that carries it, taken BY REFERENCE —
+ * the list view's `emptyState` below and the `object-grid` page block's
+ * (`ComponentPropsMap['object-grid'].emptyState`, `component.zod.ts`), the
+ * `GroupingConfigSchema` precedent (#20831). It was an inline shape on the list
+ * view until the grid's renderer started reading the same key; a second copy of
+ * the shape for the grid would be a second thing to drift, and objectui's own
+ * mirror of the grid's key follows this one, not the other way round.
+ *
+ * The extraction left the list view's accept set unchanged: a 28-value parse
+ * corpus over its four doors (`ListViewSchema`, `ObjectListViewSchema`,
+ * `ViewSchema.list`, the flattened overlay arm of `ViewMetadataSchema`) reads
+ * the same success, parsed data, issue codes and paths before and after. The
+ * one deliberate text change is {@link EMPTY_STATE_ACTION_GUIDANCE}, which now
+ * reads true on both doors.
+ */
+export const EmptyStateSchema = lazySchema(() => strictObject({
+  surface: 'this empty state',
+  history: VIEW_HISTORY,
+  // `description`/`text`/`subtitle` are the words the neighbouring empty-state
+  // vocabularies use for the secondary line; here it is `message`.
+  aliases: { description: 'message', text: 'message', subtitle: 'message', heading: 'title', label: 'title', image: 'icon' },
+  // An author wiring a CTA into the empty state is reaching for the add-record
+  // entry point, which is a separate block where one exists at all.
+  guidance: {
+    action: EMPTY_STATE_ACTION_GUIDANCE,
+    button: EMPTY_STATE_ACTION_GUIDANCE,
+  },
+}, {
+  title: I18nLabelSchema.optional().describe('Heading of the empty state'),
+  message: I18nLabelSchema.optional().describe('Line of text below the heading'),
+  icon: z.string().optional()
+    .describe('Icon name drawn above the heading; a name that resolves to no icon draws the default empty-state glyph'),
+}));
 
 /**
  * Kanban Settings
@@ -2060,14 +2113,21 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * byte-identical (only docblocks around it were reworded);
  * `LIST_VIEW_LOCAL_OVERRIDES` `741` -> `809`, still without `map`; and the two
  * `getMapConfig` lines `404` -> `409` and `409` -> `414`, byte-identical. The
- * `ListView.tsx` anchors did not move. Each anchor quotes the line it was read at,
+ * `ListView.tsx` anchors did not move. RE-READ again at pin `db11afd49` on
+ * 2026-09-29: that bump redded three anchors, and each MOVED with the block it
+ * opens byte-identical — `case 'map':` `2043` -> `2280` (the whole arm),
+ * `ObjectMapConfigSchema` `1835` -> `2037` and `LIST_VIEW_LOCAL_OVERRIDES` `809`
+ * -> `944` (the whole list, still without `map`); the `ListView.tsx` and
+ * `ObjectMap.tsx` anchors did not move. ⚠️ One CONTENT change rides on the
+ * `ObjectMapConfigSchema` move, spelled beside it below: objectui#5157 closed
+ * that declaration with `.strict()`. Each anchor quotes the line it was read at,
  * so the next pin bump reds instead of rotting
  * (`check:objectui-pin-citations`):
  *
  * - **The block this face feeds is FLATTENED, not forwarded.** `ListView`
  *   (`packages/plugin-list/src/ListView.tsx:146` first line
  *   `function resolveListMapConfig(schema: { map?: unknown; options?: { map?: unknown } }): Record<string, unknown> {`)
- *   and `ObjectView` (`packages/plugin-view/src/ObjectView.tsx:2043` first line
+ *   and `ObjectView` (`packages/plugin-view/src/ObjectView.tsx:2280` first line
  *   `case 'map':`) copy it through a HAND-LISTED whitelist
  *   (`packages/plugin-list/src/ListView.tsx:85` first line
  *   `export const FLAT_MAP_CONFIG_SPELLING = {`) — ⚠️ re-read at the new pin:
@@ -2079,10 +2139,15 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  *   there, but by a whitelist and in SILENCE: no parse, no warning, no
  *   diagnostic of any kind.
  * - **The renderer's own zod schema does not close the set.**
- *   `packages/types/src/zod/objectql.zod.ts:1835` first line
- *   `export const ObjectMapConfigSchema = z.object({` — a plain `z.object`,
+ *   `packages/types/src/zod/objectql.zod.ts:2037` first line
+ *   `export const ObjectMapConfigSchema = z.object({` — a plain `z.object` at `dd3f7e1be`,
  *   NOT strict, so an undeclared key parses clean there: zero issues, no
- *   warning. `getMapConfig` consults that `safeParse`
+ *   warning. ⚠️ At `db11afd49` the declaration is closed with `.strict()`
+ *   (objectui#5157): the `safeParse` below now FAILS on an undeclared key and
+ *   `getMapConfig` `console.warn`s it by name, and `objectui validate` refuses
+ *   the node with an `unrecognized_keys` issue at `map` — the flatten whitelist
+ *   above still drops the key in silence, and the spread below still returns the
+ *   authored block. `getMapConfig` consults that `safeParse`
  *   (`packages/plugin-map/src/ObjectMap.tsx:409` first line
  *   `const result = ObjectMapConfigSchema.safeParse(config);`) only to decide
  *   whether to `console.warn`, then returns a spread of the AUTHORED block
@@ -2093,9 +2158,11 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  *
  * ⛔ So relaxing this block to `passthrough` would hand the extra key to no
  * checker at all: it dies in the whitelist without a word, and the one schema
- * that could have reported it is open and warn-only. And this parse is the only
+ * that could have reported it was open and warn-only when this was measured (at
+ * `db11afd49` it is closed by `.strict()` and still warn-only). And this parse is
+ * the only
  * place an author is told ANYWHERE: `map` is not in objectui's
- * `LIST_VIEW_LOCAL_OVERRIDES` (`packages/types/src/zod/objectql.zod.ts:809`
+ * `LIST_VIEW_LOCAL_OVERRIDES` (`packages/types/src/zod/objectql.zod.ts:944`
  * first line `const LIST_VIEW_LOCAL_OVERRIDES = [`), so objectui's own
  * `ListViewSchema` imports THIS block by reference and the document check on
  * that side is this same schema. The two key sets MIRROR each other, key for
@@ -2597,8 +2664,8 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
    * normalizeViewMetadata persists on a console column-sort PUT"*, and `id` is
    * a UI row identity objectui stamps per row
    * (`components/src/custom/sort-builder.tsx:68`, `:94` —
-   * `crypto.randomUUID()`), persisted verbatim because `saveMetaItem` stores the
-   * original body. **`.strip()` on a wire member could not rescue it** — it
+   * `crypto.randomUUID()`), persisted verbatim because `saveMetaItem` stored the
+   * original body (until #20051). **`.strip()` on a wire member could not rescue it** — it
    * re-opens the TOP level only, and this is a nested block reached through that
    * member. See {@link stripViewConsoleDecorations}, which removes the
    * decoration on the wire door instead, at every depth.
@@ -2858,24 +2925,11 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   /** Advanced: Allow Printing (Airtable Interface parity) */
   allowPrinting: z.boolean().optional().describe('Allow users to print the view'),
 
-  /** Empty State */
-  emptyState: strictObject({
-    surface: 'this empty state',
-    history: VIEW_HISTORY,
-    // `description`/`text`/`subtitle` are the words the neighbouring empty-state
-    // vocabularies use for the secondary line; here it is `message`.
-    aliases: { description: 'message', text: 'message', subtitle: 'message', heading: 'title', label: 'title', image: 'icon' },
-    // The add-record entry point is a real, separate block on this same view —
-    // an author wiring a CTA into the empty state is reaching for it.
-    guidance: {
-      action: 'The empty state renders text only. Configure the "add record" entry point in the `addRecord` block on this list view.',
-      button: 'The empty state renders text only. Configure the "add record" entry point in the `addRecord` block on this list view.',
-    },
-  }, {
-    title: I18nLabelSchema.optional(),
-    message: I18nLabelSchema.optional(),
-    icon: z.string().optional(),
-  }).optional().describe('Empty state configuration when no records found'),
+  /**
+   * Empty State — {@link EmptyStateSchema} by reference (#20694), the same
+   * declaration the `object-grid` page block carries.
+   */
+  emptyState: EmptyStateSchema.optional().describe('Empty state configuration when no records found'),
 
   /** ARIA accessibility attributes */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes for the list view'),
@@ -3286,7 +3340,11 @@ const FormFieldBaseSchema = lazySchema(() => {
    * inside the `53ded82bf7...87af769e9` range, so the widest-tier-only
    * under-span this block used to record (#17328: one cell of two at
    * 720px) no longer reproduces at the pin this repo builds against
-   * (`.objectui-sha` = `dd3f7e1be`, re-read 2026-09-28: `form.tsx` changed on
+   * (`.objectui-sha` = `db11afd49`, re-read 2026-09-29: `form.tsx` changed in
+   * comment citations and one further comment line (`:2454`) and `autoLayout.ts`
+   * in comment citations only, so `spanLadderFor` `:204-231`, its call site
+   * `:2848`, `resolveColSpan` `:154` and `WIDE_FIELD_TYPES` `:58-69` did not move
+   * and read the same. At `dd3f7e1be`, re-read 2026-09-28: `form.tsx` changed on
    * this hop — 66 insertions, 5 deletions: the named clear-on-hide notice,
    * objectui#8070, a cascade clear that writes `null`, objectui#10291, and
    * objectui `1dae95a41` re-citing objectui#9244 as `bd0995738` in two
@@ -3300,7 +3358,7 @@ const FormFieldBaseSchema = lazySchema(() => {
    * had changed only in its registration's input list, objectui#9910's
    * `children` slot; at `62597c588` it was byte-identical to `87af769e9`).
    */
-  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `dd3f7e1be356`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
+  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `db11afd4967c`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
 
   /** Custom widget override — only needed when auto-inference is insufficient */
   widget: z.string().optional().describe('Custom widget/component name (overrides type-based inference)'),
@@ -5077,8 +5135,9 @@ type ViewItemWireArmShape<K extends 'list' | 'form', C extends z.ZodTypeAny> = {
  *  - **Not `.strict()`**: the console owns the internals of this per-user
  *    state (objectui's `gridNonAuthorKeys` ruling, 2026-08-18), so a future
  *    console key here must not 422 against an older server. The two known
- *    keys are typed; unknown inner keys parse (and `saveMetaItem` stores the
- *    original body verbatim anyway).
+ *    keys are typed; unknown inner keys parse. [#20051] They are not stored:
+ *    the save keeps only the keys the schema declares, so a new console key
+ *    is declared here before the console relies on reading it back.
  *  - **Not exported, not on {@link ListViewSchema}**: exporting would mint a
  *    protocol def / authorable-surface entries, and declaring it on the
  *    authoring shape would bless hand-authoring a payload the product writes
@@ -5184,8 +5243,8 @@ const VIEW_SWITCHER_VISIBILITY_GROUPS = ['private', 'team', 'organization', 'pub
  * stored-view readers at the `.objectui-sha` pin and ran the console's write
  * bodies through {@link ViewMetadataSchema}. Before this declaration the list
  * overlay's `.strip()` dropped `isPinned` and `sortOrder` from the parse, and
- * both members dropped `visibility`: `saveMetaItem` stores the request body
- * verbatim (ADR-0005 appendix (c)), so the keys lived in the store and nowhere
+ * both members dropped `visibility`: `saveMetaItem` stored the request body
+ * verbatim then (ADR-0005 appendix (c)), so the keys lived in the store and nowhere
  * in the contract.
  *
  * None of the three is per-user. A stored `view` row is environment metadata
@@ -5222,12 +5281,31 @@ function viewSwitcherRowStateFields() {
 }
 
 /**
+ * [#20051] The refusal the ViewItem wire member gives a top-level `options` bag.
+ *
+ * A record's view body lives under `config`, and `config` declares each
+ * per-kind block (`kanban`, `calendar`, `timeline`, …) itself, so `config.KIND`
+ * is the record's one spelling. The legacy `options.KIND` bag belongs to the
+ * FLATTENED list overlay, where it is judged key by key and objectui pins it;
+ * on a record the member's top-level `.strip()` used to drop it from the parse
+ * unread while the save stored it, and one console reader (the interface page)
+ * rendered it while the object page did not. No console write puts it on a
+ * record. Declared ABOVE {@link viewItemWireFields}, its first reader, for the
+ * `OS_EAGER_SCHEMAS=1` TDZ reason given on {@link VIEW_SWITCHER_VISIBILITY_GROUPS}.
+ */
+const VIEW_ITEM_OPTIONS_REFUSED =
+  'A view item record carries no top-level `options` bag: its view body lives under `config`, and `config` '
+  + 'declares each per-kind block itself. Move each `options.KIND` block to `config.KIND` (for example '
+  + '`options.kanban` to `config.kanban`), or remove `options`.';
+
+/**
  * Auxiliary Studio round-trip keys, given an explicit DECLARED home on the wire
  * variant (#5074) instead of living implicitly on "the member nobody closed".
  *
  * The console writes them through the `view` metadata API and reads them back;
- * `saveMetaItem` persists the body verbatim, so they are on the wire and in the
- * store. They are deliberately declared HERE and not on {@link ViewItemSchema}:
+ * [#20051] the save stores the parsed value of every key a body carries, so a
+ * key is kept in the store only because it is declared here. They are
+ * deliberately declared HERE and not on {@link ViewItemSchema}:
  * an author who writes `isPinned` in a `*.view.ts` gets a named rejection
  * pointing at `order`, while the console's own PUT parses. [#20456] The
  * switcher's three keys come from {@link viewSwitcherRowStateFields}, the one
@@ -5244,6 +5322,17 @@ function viewItemWireFields() {
     // shape where `.strip()` used to let it ride through unchecked.
     columnState: ViewColumnStateSchema.optional()
       .describe('Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view\'s row, which has no per-user scope — not authored)'),
+    // [#20051] Pinned ABSENT, refused by name — see
+    // {@link VIEW_ITEM_OPTIONS_REFUSED}. `z.never()` rather than the form
+    // overlay's `z.undefined()` ({@link FORM_OVERLAY_OPTIONS_REFUSED}): this
+    // member is published on its own as `ViewItemWire.json`, and `never` has a
+    // JSON Schema form (`not: {}`) where `undefined` has none.
+    options: z.never({ error: () => VIEW_ITEM_OPTIONS_REFUSED }).optional()
+      .describe(
+        'Refused: a view item record carries no top-level `options` bag. Its per-kind blocks live under '
+        + '`config` (`config.kanban`, `config.timeline`, …); the legacy `options.KIND` bag belongs to the '
+        + 'flattened list overlay only.',
+      ),
   };
 }
 
@@ -5328,9 +5417,9 @@ export function defineViewItem(config: z.input<typeof ViewItemSchema>): ViewItem
 //      record/container can never be rescued by this lenient branch.
 //
 // Auxiliary Studio round-trip keys (`isPinned`, `sortOrder`, …) ride along on
-// the shapes Studio actually round-trips, matching the "persist the payload
-// verbatim" contract in `saveMetaItem` (it validates but stores the original
-// item). ⚠️ [#5074] The line that used to stand here said "all four members
+// the shapes Studio actually round-trips, DECLARED there, because the save
+// stores the parsed value of every key a body carries and nothing else
+// ([#20051]; it stored the original item until then). ⚠️ [#5074] The line that used to stand here said "all four members
 // strip-parse (no `.strict()`)". It was true when written, then half-false and
 // half-load-bearing (批 18 measured it), and is now replaced by the split. As
 // it stands, measured:
@@ -5359,12 +5448,12 @@ export function defineViewItem(config: z.input<typeof ViewItemSchema>): ViewItem
 // below existed: member 4 both `.strip()`s AND declares no required key
 // (`FormViewSchema.type` even carries a `'simple'` default), so it matched
 // ANY object. `{ nope: 1 }` did not merely pass — it passed as a *view*,
-// reduced to `{ type: 'simple' }`, and `saveMetaItem` (which persists the
+// reduced to `{ type: 'simple' }`, and `saveMetaItem` (which then persisted the
 // ORIGINAL body, not the parse output) wrote `{"nope":1,"name":"…"}` into
 // `sys_metadata` as an ACTIVE view overlay. The read path then re-parsed the
 // same body through the same schema and badged it `_diagnostics.valid: true`
 // (#5598), so Studio agreed. `view` was the one common overlay type whose
-// declared write-path spec gate (ADR-0005 §Validation) could be bypassed by
+// declared write-path spec gate (ADR-0005 appendix (c)) could be bypassed by
 // an arbitrary body — Prime Directive #10's "declared ≠ enforced", one layer
 // above the object schemas #4001 closed: at union-MEMBER SELECTION, not at
 // any single member. The fix is a precondition, NOT a strictness flip on the
@@ -6093,8 +6182,8 @@ function formOverlayColumnsField(): z.ZodOptional<z.ZodNumber> {
  * `.strip()` is load-bearing, not leftover. `.extend()` INHERITS strictness, so
  * closing `ListViewSchema` for authoring (#4001) silently made this overlay
  * strict too — and this member exists precisely to carry Studio's auxiliary
- * round-trip keys (`isPinned`, `sortOrder`, …) that `saveMetaItem` persists
- * verbatim. Strict here is a 422 on a shape the platform itself writes. The
+ * round-trip keys (`isPinned`, `sortOrder`, …), which the save keeps because
+ * they are declared. Strict here is a 422 on a shape the platform itself writes. The
  * ledger names this as the trap to watch while batching: a response-side
  * extension of an authoring schema must strip back, or an upstream field
  * addition becomes a crash.
@@ -7128,6 +7217,12 @@ export type RowHeight = z.input<typeof RowHeightSchema>;
 export type GroupingConfig = z.input<typeof GroupingConfigSchema>;
 /** Post-parse shape of {@link GroupingConfig} — defaults applied, transforms run (ADR-0122). */
 export type GroupingConfigParsed = z.infer<typeof GroupingConfigSchema>;
+/**
+ * Authoring shape of {@link EmptyStateSchema} — no default or transform in its
+ * tree, so it has no `EmptyStateParsed` (ADR-0122; pinned isomorphic in
+ * `type-alias-convention.pin.test.ts`).
+ */
+export type EmptyState = z.input<typeof EmptyStateSchema>;
 export type GalleryConfig = z.input<typeof GalleryConfigSchema>;
 /** Post-parse shape of {@link GalleryConfig} — defaults applied, transforms run (ADR-0122). */
 export type GalleryConfigParsed = z.infer<typeof GalleryConfigSchema>;

@@ -1,8 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#14080] Ruling point 4's NEGATIVE pin, matcher side: a refused null
- * ORDERING comparand cannot reach this package's reference matcher.
+ * [#14080] Ruling point 4's NEGATIVE pin, evaluator side: a refused null
+ * ORDERING comparand cannot reach this package's evaluator (the reference
+ * matcher when this was written, `InMemoryDriver.find` since its retirement).
  *
  * # What was ruled (2026-09-01, option A)
  *
@@ -33,7 +34,7 @@
  * before any row is consulted. The engine half (every verb, driver-call
  * witness) is pinned in `@objectstack/objectql`'s
  * `engine-filter-array-lowering.test.ts`; the wire/protocol face runs the same
- * `parseFilterAST`. `match()` and `InMemoryDriver.find()` remain plain library
+ * `parseFilterAST`. `InMemoryDriver.find()` (and `match()`, until retired) remain plain library
  * functions — a caller that skips the compile face meets only this package's
  * own `assertFilterConditionShape`, which is deliberately NOT extended to the
  * null-ordering rule (⛔ 不做跨后端对齐工程). Same boundary as every #5869
@@ -43,7 +44,7 @@
 import { describe, it, expect } from 'vitest';
 import { parseFilterAST } from '@objectstack/spec/data';
 
-import { match } from './memory-matcher.js';
+import { InMemoryDriver } from './memory-driver.js';
 
 type Refusal = Error & { code?: string; status?: number };
 
@@ -64,25 +65,36 @@ const MISSING_ROWS: Array<Record<string, unknown>> = [
 ];
 
 /**
- * The direct-caller pipeline: compile first, evaluate second. The refusal has
- * to land in step one — if compile returns, the matcher HAS been reached and
- * the pin below fails on the sentinel rather than on a missing throw.
+ * The direct-caller pipeline, exactly as the module note describes it: compile
+ * first, evaluate second. The refusal has to land in step one — if compile
+ * returns, the driver HAS been reached and the pin below fails on the sentinel
+ * rather than on a missing throw.
+ *
+ * [#5930 step 4, ruling D6] Step two was the reference matcher's `match()`,
+ * which had no production caller and is retired; it is `InMemoryDriver.find`
+ * now — the evaluator a direct caller of this package actually reaches.
  */
-function compileThenMatch(rows: Array<Record<string, unknown>>, where: unknown): string[] {
+async function compileThenFind(rows: Array<Record<string, unknown>>, where: unknown): Promise<string[]> {
   const condition = parseFilterAST(where);
-  return rows.filter((row) => match(row, condition)).map((row) => String(row.id));
+  const driver = new InMemoryDriver({ persistence: false });
+  await driver.connect();
+  for (const row of rows) await driver.create('t', { ...row });
+  const found = new Set(
+    ((await driver.find('t', { where: condition } as never)) as Array<Record<string, unknown>>).map((r) => String(r.id)),
+  );
+  return rows.map((row) => String(row.id)).filter((id) => found.has(id));
 }
 
-const refusalOf = (run: () => unknown): Refusal => {
+const refusalOf = async (run: () => Promise<unknown>): Promise<Refusal> => {
   try {
-    run();
+    await run();
   } catch (e) {
     return e as Refusal;
   }
   throw new Error('expected the compile face to refuse this filter, but it returned');
 };
 
-describe('[#14080] a refused null ordering comparand cannot reach the matcher (ruled 2026-09-01)', () => {
+describe('[#14080] a refused null ordering comparand cannot reach the driver (ruled 2026-09-01)', () => {
   it.each([
     ['$gt: null', { n: { $gt: null } }],
     ['$gte: null', { n: { $gte: null } }],
@@ -90,33 +102,33 @@ describe('[#14080] a refused null ordering comparand cannot reach the matcher (r
     ['$lte: null', { n: { $lte: null } }],
     ['lowered array form, ">="', [['n', '>=', null]]],
     ['lowered array form, "before"', [['n', 'before', null]]],
-  ])('%s aborts at the compile face on BOTH readings of "no value"', (_label, where) => {
+  ])('%s aborts at the compile face on BOTH readings of "no value"', async (_label, where) => {
     // Record-independent by construction — the compile face never sees a row —
     // so the two readings that split the faces (the card's table) cannot even
     // be posed. Driving both anyway is the point of the pin: neither fixture
     // gets an answer, so there is no divergence left to observe.
     for (const rows of [NULLED_ROWS, MISSING_ROWS]) {
-      const err = refusalOf(() => compileThenMatch(rows, where));
+      const err = await refusalOf(() => compileThenFind(rows, where));
       expect(err.code, _label).toBe('INVALID_FILTER');
       expect(err.status, _label).toBe(400);
     }
   });
 
-  it('the pipeline itself is real — a legal ordering comparand compiles and the matcher answers', () => {
+  it('the pipeline itself is real — a legal ordering comparand compiles and the driver answers', async () => {
     // Positive control: without it, the refusals above would also "pass" if
-    // compileThenMatch were broken outright. `0` is the discriminator the
+    // compileThenFind were broken outright. `0` is the discriminator the
     // numeric fixture exists for — a VALUE, kept in, on every arm.
-    expect(compileThenMatch(NULLED_ROWS, { n: { $gt: 0 } })).toEqual(['1']);
-    expect(compileThenMatch(NULLED_ROWS, { n: { $gte: 0 } })).toEqual(['1', '2']);
-    expect(compileThenMatch(MISSING_ROWS, { n: { $lt: 5 } })).toEqual(['2']);
-    expect(compileThenMatch(MISSING_ROWS, [['n', '<=', 0]])).toEqual(['2']);
+    expect(await compileThenFind(NULLED_ROWS, { n: { $gt: 0 } })).toEqual(['1']);
+    expect(await compileThenFind(NULLED_ROWS, { n: { $gte: 0 } })).toEqual(['1', '2']);
+    expect(await compileThenFind(MISSING_ROWS, { n: { $lt: 5 } })).toEqual(['2']);
+    expect(await compileThenFind(MISSING_ROWS, [['n', '<=', 0]])).toEqual(['2']);
   });
 
-  it('the null PREDICATE still passes the same face — the refusal is ordering-shaped, not null-shaped', () => {
+  it('the null PREDICATE still passes the same face — the refusal is ordering-shaped, not null-shaped', async () => {
     // `$eq: null` IS the null predicate on both readings (#13494) and is the
     // spelling the refusal prescribes; the carve-out must not catch it.
-    expect(compileThenMatch(NULLED_ROWS, { n: { $eq: null } })).toEqual(['3']);
-    expect(compileThenMatch(MISSING_ROWS, { n: { $eq: null } })).toEqual(['4']);
-    expect(compileThenMatch(NULLED_ROWS, { n: { $ne: null } })).toEqual(['1', '2']);
+    expect(await compileThenFind(NULLED_ROWS, { n: { $eq: null } })).toEqual(['3']);
+    expect(await compileThenFind(MISSING_ROWS, { n: { $eq: null } })).toEqual(['4']);
+    expect(await compileThenFind(NULLED_ROWS, { n: { $ne: null } })).toEqual(['1', '2']);
   });
 });

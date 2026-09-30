@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #12209 — a custom-SQL measure is refused loudly on the ObjectQL path, and
+ * Commit 017130a09 — a custom-SQL measure is refused loudly on the ObjectQL path, and
  * BOTH strategies are pinned from one fixture so neither can hide the other.
  *
  * #4157 was fixed on one strategy of two: `NativeSQLStrategy` learned to emit
@@ -42,7 +42,7 @@
  *
  * ## Dissolution verification, direction predicted BEFORE running
  *
- * Restoring the accepting behaviour (deleting the #12209 arm in
+ * Restoring the accepting behaviour (deleting the arm commit 017130a09 added in
  * `ObjectQLStrategy.resolveMeasureAggregation`) must turn the ObjectQL-profile
  * REFUSAL cases red in the ordinary direction: each asserts the ADR-0112
  * envelope (`code`/`status`), the measure's own name in `member` and message,
@@ -163,7 +163,7 @@ async function run(query: unknown, profile: 'objectql' | 'native') {
   return { rows, error, sqls, calls };
 }
 
-/** The one wire shape every #12209 refusal must have (ADR-0112 / #5716). */
+/** The one wire shape every custom-SQL refusal (commit 017130a09) must have (ADR-0112 / #5716). */
 function expectCustomSqlRefusal(
   r: { error?: Refusal; sqls: string[]; calls: unknown[] },
   member: string,

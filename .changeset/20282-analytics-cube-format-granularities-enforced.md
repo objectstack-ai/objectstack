@@ -1,0 +1,26 @@
+---
+'@objectstack/spec': minor
+'@objectstack/service-analytics': minor
+---
+
+An authored analytics cube's measure `format` and time-dimension `granularities` now take effect on the analytics query doors, the way a compiled dataset's always have (#20282).
+
+Clause-②: yes (narrowing)
+
+<!-- adr-0087: registered analytics-cube-single-granularity-default-enforced -->
+
+**BREAKING**: this narrows what `POST /api/v1/analytics/query` and `POST /api/v1/analytics/sql` answer for one class of request. When an authored cube's time dimension declares exactly one granularity, a query that groups by that dimension without stating a granularity is now bucketed at the declared one. The raw-SQL path declines every bucketed query, so such a query now runs on the engine aggregate path, which answers `400 INVALID_FIELD` for every member it cannot evaluate: a custom-SQL measure (a measure of type `number`, `string` or `boolean` whose `sql` is an expression); and, on a cube whose members resolve through its `joins`, a measure or a `where` field over a joined object, a `timeDimensions` entry over a joined object (bucketed or a `dateRange` window, so grouping by a one-granularity time dimension over a joined object is refused too), a dimension that traverses more than one relationship, and an `avg` or `count_distinct` measure beside any dimension over a joined object. The raw-SQL path answers every one of these, with one group per distinct timestamp; each is now refused, exactly as it already was when the caller stated that granularity by hand. On a host that overrides `queryCapabilities` to offer raw SQL with no engine aggregate bridge (the plugin's default wires both), no strategy remains for a bucketed query, so every newly bucketed query, a plain `count` included, now answers "No strategy can handle query" instead of grouping raw timestamps. The remedy: run such a query without grouping by that dimension, or, if the dimension is not meant to have one default bucket, declare the granularities it offers as a list of two or more (or omit the key); on a raw-SQL-only host, add the engine aggregate bridge. It ships as `minor` under the launch-window convention; the widening half is two authored keys taking effect.
+
+Until this change both keys were read on the compiled-dataset path only. One cube shape has three producers — cubes authored with `defineCube()` / `defineStack({ analyticsCubes })`, cubes the dataset compiler mints, and cubes inferred for an ad-hoc query — and only a compiled dataset's cube reached the two readers:
+
+- **`measures.<metric>.format`** reached a caller as `fields[].format` only because the dataset door copies it from the DATASET measure. An authored cube has no dataset, so `POST /api/v1/analytics/query` described its measure columns with `name` and `type` alone. Now every measure column a query names carries the `format` its cube measure declares, whichever strategy answered, and a column that declares none carries no `format` key at all. `GET /api/v1/analytics/meta` is unchanged: its projection stays `name`, `type` and `title`, and a client reads `format` off the query result's `fields[]`, as the Data API page already says. The value is relayed verbatim; the vocabulary `fields[].format` documents is a numeral pattern such as `"$0,0.00"` or `"0.0%"`.
+- **`dimensions.<dimension>.granularities`** was the default bucket only for a compiled dataset, which the dataset executor filled in before querying. An authored cube's time dimension grouped raw timestamps whatever it declared. Now `query()` and the `generateSql()` dry run read it the same way, through the one rule both paths share: a single-entry list is the dimension's default bucket for a query that groups by it; a granularity the query states always wins, and one the list does not name is not refused (the dataset path compares against no list either); a list of two or more states no default; and a `timeDimensions` entry that carries only a `dateRange` for a dimension the query does not group stays a filter.
+
+What to expect after upgrading:
+
+- **A cube measure that declares `format`** now carries it on `POST /api/v1/analytics/query` results. A client that formats amounts from `fields[].format` starts formatting that column.
+- **A cube time dimension that declares one granularity** (`granularities: ['month']`) is now bucketed by it when a query groups by it without stating one: one row per month where there was one row per timestamp. Name another granularity in the query's `timeDimensions` to bucket differently.
+- **A cube time dimension that declares several, or none**, behaves exactly as before.
+- **Compiled datasets** (`POST /api/v1/analytics/dataset/query`) answer exactly as before: the value read off their cube is the one the dataset door already used.
+
+In `@objectstack/spec`, `MetricSchema.format` and `DimensionSchema.granularities` now carry descriptions that state what the analytics service does with them (the metric's example values move from the names "currency" / "percent" to numeral patterns, the vocabulary the `fields[].format` slot documents), and the liveness ledger rows `analytics_cube.measures.format` and `analytics_cube.dimensions.granularities` move from `dead` to `live`, citing the new readers.

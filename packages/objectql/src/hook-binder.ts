@@ -205,7 +205,7 @@ export function bindHooksToEngine(
         result.skipped += 1;
         const reason =
           'hook target names no object — an empty `object` is refused rather than widened to '
-          + "the wildcard '*' (#4001). Name the object(s), or write `object: '*'` if firing on "
+          + "the wildcard '*'. Name the object(s), or write `object: '*'` if firing on "
           + 'every object is the intent.';
         result.errors.push({ hook: hook.name, reason });
         if (opts.strict) {

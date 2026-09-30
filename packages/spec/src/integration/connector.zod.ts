@@ -1141,7 +1141,7 @@ const ConnectorBaseSchema = lazySchema(() => z.object({
 
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   //
-  // [#6362, split out of #6245] Declared for the reason `webhook.zod.ts` and
+  // [commit b5404f496, the connector half #6245 left] Declared for the reason `webhook.zod.ts` and
   // `sharing.zod.ts` state for their own spreads: BOTH metadata load paths call
   // `applyProtection` on EVERY type, so a package-loaded connector already
   // carries these keys by the time anything re-parses it — and `/meta/connector`

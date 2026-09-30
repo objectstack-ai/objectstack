@@ -109,7 +109,7 @@ export const SysAutomationRun = ObjectSchema.create({
     // measured 31 of 31 rows org-less on a walled HotCRM SaaS boot — each row
     // naming a `trigger_object` / `trigger_record_id` that DOES belong to a
     // specific customer. Subject-first is what `sys_audit_log`'s writer
-    // already did (#8707 honouring #8287's ruling); three platform side
+    // already did (commit 1408fe385 honouring #8287's ruling); three platform side
     // tables, one answer now. A trigger with no record (a plain scheduled
     // sweep has no ONE subject) keeps the acting-context fallback — NULL there
     // stays NULL: fabricating an acting organization stays vetoed (Option C).

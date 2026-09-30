@@ -77,7 +77,7 @@ function fakeDataEngine(rows: Row[], knownObjects: string[] = ['contracts']) {
 }
 
 /**
- * [#16659] A fake ObjectQL surface that HONOURS `context.tenantId`, so the
+ * [commit ecdfc9411] A fake ObjectQL surface that HONOURS `context.tenantId`, so the
  * differential control can put matching rows in two organizations and observe
  * which ones come back.
  *
@@ -134,7 +134,7 @@ function silentLogger(): TriggerLogger {
 const NOW = () => new Date('2026-07-18T12:00:00.000Z');
 
 /**
- * [#16659] The organization every fixture binding declares. Named rather than
+ * [commit ecdfc9411] The organization every fixture binding declares. Named rather than
  * inlined because it is now asserted from two directions — the sweep's query
  * scope and the launched run's identity — and a literal repeated at both ends
  * of that pair can drift into agreeing with itself.
@@ -146,7 +146,7 @@ function binding(timeRelative: unknown, overrides: Partial<FlowTriggerBinding> =
         flowName: 'renewal_alert',
         object: 'contracts',
         config: { timeRelative },
-        // [#16659] see the schedule trigger's fixture note.
+        // [commit ecdfc9411] see the schedule trigger's fixture note.
         organization: TEST_ORG,
         ...overrides,
     };
@@ -275,7 +275,7 @@ describe('TimeRelativeTrigger', () => {
         expect(seen[0]).toMatchObject({ object: 'contracts', event: 'time_relative' });
         expect(seen[0].record).toBe(seen[0].params);
         // The sweep queries as a system op (sees all rows, RLS-bypassing) AND
-        // inside its declared organization. [#16659] This assertion used to
+        // inside its declared organization. [commit ecdfc9411] This assertion used to
         // read `{ isSystem: true }` and it was pinning the defect: `isSystem`
         // is AUTHORIZATION and `tenantId` is TENANCY, and a sweep carrying only
         // the first selects across every tenant while its runs act as one.
@@ -791,7 +791,7 @@ describe('TimeRelativeTriggerPlugin', () => {
     });
 });
 
-// ─── The acting-organization refusal (#16659) ───────────────────────
+// ─── The acting-organization refusal (commit ecdfc9411) ─────────────
 //
 // The time-relative sweep is NOT the weaker case for carrying an organization,
 // it is the stronger one: it runs ELEVATED on purpose (`isSystem` — a
@@ -859,7 +859,7 @@ describe('TimeRelativeTrigger — the acting-organization refusal (#16659)', () 
         expect(job.jobs.size).toBe(0);
     });
 
-    // ── the SELECTION half (#16659, F2) ───────────────────────────────────
+    // ── the SELECTION half (commit ecdfc9411, F2) ─────────────────────────
     //
     // Declaring an organization bounded the RUN and left the QUERY unbounded,
     // so a sweep declared for A matched rows in every tenant and launched runs
@@ -985,7 +985,7 @@ describe('TimeRelativeTrigger — the acting-organization refusal (#16659)', () 
     });
 
     it('a store that CANNOT honour the scope is reported at `error`, never answered unscoped', async () => {
-        // `driver-memory` refuses any call handed a tenant scope (#16589). A
+        // `driver-memory` refuses any call handed a tenant scope (commit 555a89cbd). A
         // sweep required to stay inside one organization, talking to a store
         // that cannot keep it there, must be LOUD — "selected nothing this
         // tick" and "cannot select at all" are different facts.
@@ -1368,7 +1368,7 @@ describe('TimeRelativeTrigger — switched ON under `group` (#18378)', () => {
     it('a DECLARED organization still outranks the record — declaring narrows, it does not widen', async () => {
         // A declaration bounds SELECTION as well as identity, so honouring the
         // record over it would silently widen a flow the author scoped — the
-        // #16659 defect. Declaration wins, and the sweep sees one plant only.
+        // defect commit ecdfc9411 fixed. Declaration wins, and the sweep sees one plant only.
         const job = fakeJobService();
         const base = tenantScopedDataEngine(twoPlants());
         const engine = {

@@ -469,7 +469,7 @@ export function installReadAuditWriter(
    */
   const persistReadAuditRows = async (rows: Record<string, unknown>[]): Promise<void> => {
     // TWO context keys, for two different layers. ⛔ Neither substitutes for
-    // the other, and dropping either one breaks a different thing (#16829).
+    // the other, and dropping either one breaks a different thing (commit 8d4690b8f).
     //
     //   - `isSystem` → the READONLY STRIP. `sys_audit_log` exposes only
     //     `get`/`list` on the API and every field is `readonly: true`, so a
@@ -611,7 +611,7 @@ export function installReadAuditWriter(
       // on `persistReadAuditRows`'s write. ⛔ Read that call site before
       // touching this field: the two are one mechanism split over two places.
       //
-      // ⚠️ [#16829] This comment used to name `isSystem` as that mechanism, on
+      // ⚠️ [commit 8d4690b8f] This comment used to name `isSystem` as that mechanism, on
       // the authority of `engine-audit-anchor-write.test.ts`'s "a system-context
       // write is still exempt". Both halves were wrong, and the citation is why
       // nobody re-checked them:

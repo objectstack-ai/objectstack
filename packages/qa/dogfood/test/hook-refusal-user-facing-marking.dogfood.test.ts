@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#9934] The producer-side user-facing marking, end-to-end through the real
+// [commit 79c46da90] The producer-side user-facing marking, end-to-end through the real
 // stack — the producer half of the objectui#5210 ruling (maintainer,
 // 2026-08-19, option 1: producer-side opt-in).
 //
@@ -86,7 +86,7 @@ const ufmStack = defineStack({
     {
       // A sandboxed L2 BODY hook — the metadata-app authoring surface the
       // marking exists for. Its marking must survive the QuickJS boundary
-      // (the #9934 side-channel) and ride the sandbox-unwrap envelope.
+      // (the side-channel commit 79c46da90 added) and ride the sandbox-unwrap envelope.
       name: 'ufm_ref_guard',
       object: 'ufm_task',
       events: ['beforeDelete'],

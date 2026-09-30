@@ -103,6 +103,10 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     invalid_date: '{{label}} must be a valid date (ISO-8601)',
     invalid_datetime: '{{label}} must be a valid datetime (ISO-8601)',
     invalid_time: '{{label}} must be a valid time (HH:MM or HH:MM:SS)',
+    // `invalid_time`'s second sentence: a time of day written with a `Z` or an
+    // offset. A `time` field is a zone-less wall clock, so the sentence says
+    // what to do instead.
+    invalid_time_zoned: '{{label}} is a time of day with no time zone: drop the Z or offset (HH:MM or HH:MM:SS), or use a datetime field for an instant',
     invalid_option: '{{label}} must be one of: {{allowed}}',
     reference_not_found: '{{label}}: no {{target}} record has id "{{value}}"',
     invalid_option_value: '{{label}}: "{{value}}" is not one of: {{allowed}}',
@@ -149,6 +153,7 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     invalid_date: '{{label}}必须是有效的日期(ISO-8601)',
     invalid_datetime: '{{label}}必须是有效的日期时间(ISO-8601)',
     invalid_time: '{{label}}必须是有效的时间(HH:MM 或 HH:MM:SS)',
+    invalid_time_zoned: '{{label}}是不带时区的时刻:请去掉 Z 或时区偏移(HH:MM 或 HH:MM:SS),表示时间点请改用日期时间字段',
     invalid_option: '{{label}}必须是以下值之一:{{allowed}}',
     reference_not_found: '{{label}}:不存在 id 为“{{value}}”的{{target}}记录',
     invalid_option_value: '{{label}}:“{{value}}”不在允许的取值范围内:{{allowed}}',
@@ -188,6 +193,7 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     invalid_date: '{{label}}は有効な日付(ISO-8601)を入力してください',
     invalid_datetime: '{{label}}は有効な日時(ISO-8601)を入力してください',
     invalid_time: '{{label}}は有効な時刻(HH:MM または HH:MM:SS)を入力してください',
+    invalid_time_zoned: '{{label}}はタイムゾーンを持たない時刻です。Z やオフセットを外す(HH:MM または HH:MM:SS)か、時点を表すには日時フィールドを使ってください',
     invalid_option: '{{label}}は次のいずれかを指定してください:{{allowed}}',
     reference_not_found: '{{label}}:id が「{{value}}」の{{target}}レコードは存在しません',
     invalid_option_value: '{{label}}:「{{value}}」は指定できません(指定可能:{{allowed}})',
@@ -227,6 +233,7 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     invalid_date: '{{label}} debe ser una fecha válida (ISO-8601)',
     invalid_datetime: '{{label}} debe ser una fecha y hora válidas (ISO-8601)',
     invalid_time: '{{label}} debe ser una hora válida (HH:MM o HH:MM:SS)',
+    invalid_time_zoned: '{{label}} es una hora del día sin zona horaria: quite la Z o el desfase (HH:MM o HH:MM:SS), o use un campo de fecha y hora para un instante',
     invalid_option: '{{label}} debe ser uno de: {{allowed}}',
     reference_not_found: '{{label}}: ningún registro de {{target}} tiene el id «{{value}}»',
     invalid_option_value: '{{label}}: «{{value}}» no es uno de: {{allowed}}',

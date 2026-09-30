@@ -945,7 +945,7 @@ function undeclaredAggregateFunctionError(func: string): Error {
     `Declared functions: ${DECLARED_AGGREGATE_FUNCTIONS.join(', ')} ` +
     `(@objectstack/spec AggregationFunction). Fix the "function" key of the aggregations[] ` +
     `entry — the Query Protocol has no such function, so this is a query no backend can run, ` +
-    `not a gap in this one (#5907).`,
+    `not a gap in this one.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.INVALID_QUERY;
   err.status = 400;
@@ -984,7 +984,7 @@ function uncompilableAggregateFunctionError(func: string): Error {
     `correctly and @objectstack/spec AggregationFunction declares it — this is a capability gap ` +
     `in the backend, not a mistake in the query, which is why it answers NOT_IMPLEMENTED/501 ` +
     `rather than a 400. Aggregate with a function this backend compiles; whether the declaration ` +
-    `itself should stand is ADR-0049's enforce-or-remove question (#5907).`,
+    `itself should stand is ADR-0049's enforce-or-remove question.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
@@ -1011,7 +1011,7 @@ function refuseDistinctAggregateWithoutField(func: string): never {
   const err = new Error(
     `Aggregate function "${func}" needs a "field" — there is nothing to deduplicate. ` +
     `COUNT(*) counts rows and is the spelling that takes no field; a distinct count has to name ` +
-    `the column whose values are deduplicated. Add "field" to the aggregations[] entry (#6409).`,
+    `the column whose values are deduplicated. Add "field" to the aggregations[] entry.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.INVALID_QUERY;
   err.status = 400;
@@ -1068,7 +1068,7 @@ function refusePerAggregationFilter(alias: string): never {
     `Per-aggregation \`filter\` on "${alias}" is not supported by this backend (Turso remote transport). ` +
     `The query is spelled correctly and @objectstack/spec AggregationNodeSchema declares the key — ` +
     `this backend compiles no conditional-aggregate (SQL FILTER (WHERE …) / CASE WHEN) expression ` +
-    `for it, so it is refused rather than silently aggregating the UNFILTERED rows (#10413), which ` +
+    `for it, so it is refused rather than silently aggregating the UNFILTERED rows, which ` +
     `is why it answers NOT_IMPLEMENTED/501 rather than a 400. \`engine.aggregate\` lowers filtered ` +
     `aggregations in memory for every driver without native support — route the query through the ` +
     `engine, or drop the \`filter\` key.`,
@@ -1105,7 +1105,7 @@ function refuseDateBucketedGroupBy(granularity: string): never {
     `a capability gap in the backend, not a mistake in the query, which is why it answers ` +
     `NOT_IMPLEMENTED/501 rather than a 400. A driver publishes the granularities it buckets ` +
     `natively as \`supports.queryDateGranularity\`; the engine reads that record and buckets ` +
-    `in memory for every granularity absent from it, which is always correct (#6212).`,
+    `in memory for every granularity absent from it, which is always correct.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
@@ -3853,8 +3853,8 @@ export class RemoteTransport {
         `(with driver-sql, driver-sqlite-wasm and Turso local) compiled IS NULL (anything but false), ` +
         `driver-memory's query path and driver-mongodb compiled IS NOT NULL (anything but true), and ` +
         `driver-memory's matcher dropped the constraint entirely. Note "false" the STRING is truthy, ` +
-        `so it landed on the side opposite the false it was written to mean ` +
-        `(objectstack#5347, objectstack#5368, #1116).`,
+        `so it landed on the side opposite the false it was written to mean. Every driver now ` +
+        `refuses it, so one filter no longer gets a different answer per backend.`,
     );
   }
 
@@ -3946,12 +3946,12 @@ export class RemoteTransport {
       `[RemoteTransport] Operator "$exists" on field "${field}" requires a boolean comparand (true or ` +
         `false). Received ${shown} (${preview(value)}) at '${object}.${field}'.$exists. ` +
         `@objectstack/spec FieldOperatorsSchema declares $exists as a boolean. It is refused rather ` +
-        `than coerced for the same reason $null is (objectstack#5347): a non-boolean lands on ` +
+        `than coerced for the same reason $null is: a non-boolean lands on ` +
         `whichever side the backend's two-branch conditional happens to default to, and those ` +
         `defaults point in OPPOSITE directions — this transport's \`=== false\` test compiled ` +
         `IS NOT NULL for anything but false, a \`=== true\` test compiles IS NULL for anything but ` +
         `true. Note "false" the STRING is truthy, so it landed on the side opposite the false it was ` +
-        `written to mean (objectstack#5369, objectstack#5903).`,
+        `written to mean.`,
     );
   }
 
@@ -4156,7 +4156,7 @@ export class RemoteTransport {
         subtree,
         `[RemoteTransport] $between on ${target} must be lowered to $gte/$lte before it reaches the ` +
           `transport — TursoDriver.toRemoteFieldSpec does that so the calendar-day upper-bound rule is ` +
-          `applied exactly once (#1003). Refusing rather than compiling a second, rule-free range.`,
+          `applied exactly once. Refusing rather than compiling a second, rule-free range.`,
       );
     }
     // [#20020, the #8220 contract] The two arms below name the target and the
@@ -4182,7 +4182,7 @@ export class RemoteTransport {
       subtree,
       `[RemoteTransport] Unsupported filter operator "${op}" on ${target} in remote mode. Supported: ` +
         `${SUPPORTED_FILTER_OPERATORS.join(', ')}. Refusing rather than compiling it to an equality — a ` +
-        `silent degradation is indistinguishable from "no rows matched" (#1004).`,
+        `silent degradation is indistinguishable from "no rows matched".`,
     );
   }
 
@@ -4239,7 +4239,7 @@ export class RemoteTransport {
         subtree,
         `${shared}. "${key}" IS a field operator, one level down: write ` +
           `{ <field>: { "${key}": <value> } } — e.g. { stage: { "${key}": … } } — rather than putting ` +
-          `it at the condition level (objectstack#5769, objectstack#5348).`,
+          `it at the condition level.`,
       );
     }
     return this.withheldRefusal(
@@ -4247,8 +4247,7 @@ export class RemoteTransport {
       subtree,
       `${shared}. The Filter Protocol declares no "${key}" at any level; on a read it cost an empty ` +
         `page, and on deleteMany/updateMany the predicate is constantly false or constantly true ` +
-        `depending on which side of the comparison the literal lands (objectstack#5769, ` +
-        `objectstack#5348).`,
+        `depending on which side of the comparison the literal lands.`,
     );
   }
 
@@ -4291,7 +4290,7 @@ export class RemoteTransport {
         `filter conditions, but received ${shown} (${preview(value)}). @objectstack/spec ` +
         `FilterConditionSchema declares "${key}" as FilterCondition[]. Refusing rather than falling ` +
         `through to the field path, which read '${key}' as a COLUMN NAME and compiled a predicate ` +
-        `against a column that cannot exist (objectstack#5769).`,
+        `against a column that cannot exist.`,
     );
   }
 
@@ -4439,7 +4438,7 @@ export class RemoteTransport {
         `because the backends disagreed: driver-sql handed it to knex and got a bare "Undefined ` +
         `binding(s)" Error carrying no code, while Turso's remote transport compiled it to IS NULL ` +
         `— so \`{ owner_id: ctx.user?.id }\` with a missing id silently matched every env-wide row ` +
-        `instead of failing (#6050).`,
+        `instead of failing.`,
     );
   }
 
@@ -4490,12 +4489,12 @@ export class RemoteTransport {
           `FilterConditionSchema declares \`$not: FilterConditionSchema\`). Refusing rather than ` +
           `reading '${branch}' as a COLUMN NAME — that is the bug this branch exists to close: it ` +
           `compiled a predicate against a column that cannot exist, and named it as a field of ` +
-          `'${object}' when it complained (#1051, #1076). A negation of "no condition" is written ` +
+          `'${object}' when it complained. A negation of "no condition" is written ` +
           `\`{ $not: {} }\`, which matches zero rows.`
         : `Every element of ${branch} must be a plain object of conditions (spec ` +
           `FilterConditionSchema). Refusing rather than skipping it — a dropped element leaves ` +
-          `valid SQL that answers a DIFFERENT question: narrower in $or, wider in $and (#1004, ` +
-          `#1058, #1066, #1073). An intentionally unconstrained branch is written \`{}\`.`;
+          `valid SQL that answers a DIFFERENT question: narrower in $or, wider in $and. An ` +
+          `intentionally unconstrained branch is written \`{}\`.`;
     // [#20039, the #8220 contract] The position, the kind and the preview are
     // the predicate's (a policy's literal, measured) — and so is which of the
     // three combinators it sat under, since the requirement sentence names it.
@@ -4562,8 +4561,8 @@ export class RemoteTransport {
       `[RemoteTransport] where on '${object}' is ${describeValue(filters)}, not a filter condition: ` +
         `${preview(filters)}. ${requirement} Refusing rather than compiling it to NO WHERE clause — ` +
         `a filter that vanishes WIDENS the statement to the whole table, so a read returns exactly ` +
-        `the rows the filter was written to exclude and deleteMany/updateMany touch every row ` +
-        `(#1004, #1058, #1066, #1073, #1075). "No filter" is written \`{}\`, or by omitting \`where\`.`,
+        `the rows the filter was written to exclude and deleteMany/updateMany touch every row. ` +
+        `"No filter" is written \`{}\`, or by omitting \`where\`.`,
     );
   }
 
@@ -4601,7 +4600,7 @@ export class RemoteTransport {
         `(${SUPPORTED_FILTER_OPERATORS.join(', ')}); to compare against a value, write the value ` +
         `itself. Refusing rather than dropping the condition — a predicate that vanishes WIDENS the ` +
         `statement to the whole table, so the caller gets back exactly the rows the filter was ` +
-        `written to exclude (#1004, #1058, #1066).`,
+        `written to exclude.`,
     );
   }
 
@@ -4687,9 +4686,9 @@ export class RemoteTransport {
           `compares a column against another column instead of against a value. The query DSL ` +
           `declares this form (spec FieldReferenceSchema) but no executor compiles it, so it is ` +
           `refused here rather than bound as the marker's JSON text — which is valid SQL that ` +
-          `matches nothing (#1058). Compare against a literal, or select both columns and compare ` +
+          `matches nothing. Compare against a literal, or select both columns and compare ` +
           `after retrieval. The columns and the operator this filter used are withheld from the ` +
-          `message (#7929); the full diagnostic is in the server log.`,
+          `message; the full diagnostic is in the server log.`,
         diagnostic,
         value,
         `${diagnostic} No executor compiles this form in remote mode — compare against a ` +
@@ -4712,14 +4711,14 @@ export class RemoteTransport {
       `transport cannot bind. A comparison value must be ` +
       `${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE}. Refusing rather than binding its JSON text ` +
       `— that compiles to valid SQL matching zero rows, which is indistinguishable from ` +
-      `"no rows matched" (#1004, #1058).`;
+      `"no rows matched".`;
     this.diagnosticSink?.(diagnostic);
     return withheldInvalidFilterError(
       `[RemoteTransport] A filter comparand in this query is a value this transport cannot bind. ` +
         `A comparison value must be ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE}. Refusing rather ` +
         `than binding its JSON text — that compiles to valid SQL matching zero rows, which is ` +
-        `indistinguishable from "no rows matched" (#1004, #1058). The field, the operator and the ` +
-        `value this filter used are withheld from the message (#8197); the full diagnostic is in ` +
+        `indistinguishable from "no rows matched". The field, the operator and the ` +
+        `value this filter used are withheld from the message; the full diagnostic is in ` +
         `the server log.`,
       diagnostic,
       value,

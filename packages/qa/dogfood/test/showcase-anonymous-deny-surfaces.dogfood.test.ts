@@ -23,7 +23,7 @@
 // half — a guest / previewMode boot writes an `@anon` metadata seed, so does the
 // server refuse an anonymous WRITE? — and no artifact in this repo answered it
 // end-to-end. The mutating routes are now driven here as real HTTP (six when
-// #11373 measured; five since #12176 D3 retired the compound save — see the
+// #11373 measured; five since commit 7986d973f (D3) retired the compound save — see the
 // retired-door case beside the table). The reading is recorded in full at the
 // door table below; the short version is that the umbrella already refused all
 // of them, so #11373 is a measurement plus its pin, not a fix.
@@ -128,7 +128,7 @@ interface MetaWriteDoor {
  * The five mutating `/meta` routes `registerMetadataEndpoints` composes.
  *
  * There were six when #11373 measured: `PUT /meta/:type/:section/:name` (the
- * compound save) was retired by #12176 D3 — the item-name grammar (#12194)
+ * compound save) was retired by commit 7986d973f (D3) — the item-name grammar (commit 311433f6b)
  * refuses every slash-bearing name, so the arity addressed only names that can
  * no longer exist. A retired door cannot sit in this table: the registered-door
  * anti-vacuity leg below asserts `.not.toBe(404)`, which is exactly what a
@@ -148,7 +148,7 @@ const META_WRITE_DOORS: readonly MetaWriteDoor[] = [
   { seam: 'POST /meta/:type/:name/rollback', method: 'POST', path: `/meta/object/${META_PROBE_OBJECT}/rollback`, body: { toVersion: 1 } },
 ];
 
-/** The retired compound-save spelling (#12176 D3) — routed nowhere, for anyone. */
+/** The retired compound-save spelling (commit 7986d973f, D3) — routed nowhere, for anyone. */
 const RETIRED_COMPOUND_PATH = `/meta/object/views/${META_PROBE_VIEW}`;
 
 // ── #5632 — the TWO declared anonymous-401 envelopes, as executable rules ───
@@ -289,7 +289,7 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
       //  method, same body, one process, one second apart: a session changes
       //  the answer, so the refusal is the auth floor and not the door being
       //  broken. (Deliberately not `.toBe(403)`. A member's exact status is the
-      //  capability gate's business — #8919's proof owns that, and pinning it
+      //  capability gate's business — commit b5378550e's proof owns that, and pinning it
       //  here would make this file red for another proof's reasons. Measured
       //  today it is 403 FORBIDDEN `manage_metadata` on all six.)
       //

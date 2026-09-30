@@ -59,7 +59,8 @@ describe('AnalyticsService.queryDataset', () => {
       executeRawSql: async () => { throw new Error('SELECT COUNT(*) FROM "opportunity" - no such table: opportunity'); },
     });
     const result = await svc.queryDataset(dataset, { dimensions: ['region'], measures: ['revenue'] }, { tenantId: 'org_A' } as ExecutionContext);
-    expect(result).toEqual({ rows: [], fields: [], totals: [] });
+    // No rows — and, like every dataset answer, the base object (#20644).
+    expect(result).toEqual({ rows: [], fields: [], totals: [], object: 'opportunity' });
   });
 
   it('still throws on a non-missing-source error (real query bugs surface)', async () => {
@@ -282,8 +283,10 @@ describe('AnalyticsService.queryDataset', () => {
     const result = await svc.queryDataset(dated, { dimensions: ['closed'], measures: ['revenue'] }, { tenantId: 'org_A' } as ExecutionContext) as any;
     // No drillable (non-date) dimension → no drill metadata at all.
     expect(result.dimensionFields).toBeUndefined();
-    expect(result.object).toBeUndefined();
     expect(result.drillRawRows).toBeUndefined();
+    // `object` is not drill metadata: it names the answer's subject, and every
+    // dataset answer carries it whether or not a dimension is drillable (#20644).
+    expect(result.object).toBe('opportunity');
     // …and, absent a `dateGranularity`, no RANGE sidecar either (it's not a bucket).
     expect(result.drillRanges).toBeUndefined();
   });

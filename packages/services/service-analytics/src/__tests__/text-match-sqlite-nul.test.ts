@@ -305,9 +305,11 @@ describe('[#20025] the compiled constructs, per shape', () => {
   it('`$contains` / `$notContains` / `$icontains` take instr() and bind the comparand raw', async () => {
     expect(scope({ v: { $contains: 'a*b' } } as FilterCondition))
       .toEqual({ sql: 'instr("t"."v", ?) > 0', params: ['a*b'] });
-    // The #5298 NULL-safe wrapper composes around the negated construct unchanged.
+    // The #5298 NULL-safe wrapper composes around the negated construct unchanged
+    // — [ADR-0053 D-D1, amended — #5930 step 3] inside the shared lowering's own
+    // escape, which now reaches this compiler first.
     expect(scope({ v: { $notContains: 'a*b' } } as FilterCondition))
-      .toEqual({ sql: '("t"."v" IS NULL OR NOT (instr("t"."v", ?) > 0))', params: ['a*b'] });
+      .toEqual({ sql: '(("t"."v" IS NULL OR ("t"."v" IS NULL OR NOT (instr("t"."v", ?) > 0))))', params: ['a*b'] });
     expect(scope({ v: { $icontains: 'A*b' } } as FilterCondition))
       .toEqual({ sql: 'instr(lower("t"."v"), lower(?)) > 0', params: ['A*b'] });
     const n = await native({ v: { $contains: 'a*b' } } as FilterCondition);

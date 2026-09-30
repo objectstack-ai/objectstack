@@ -122,6 +122,8 @@ const DROPPED_REASON_LABEL: Record<DroppedFieldsEvent['reason'], string> = {
     // until it is worded, which is how the flow author keeps getting a true
     // sentence instead of a fall-through label. Keep it exhaustive.
     primary_key: "the field is the object's primary key and the value sent is not an identifier — the row(s) are identified by the id argument or the filter, so writing it would have overwritten their primary key (pass a scalar id, or put an id set in the filter)",
+    // [#20805]
+    computed: 'the field is a computed formula — its value is computed each time the record is read, so there is nothing to write (leave it out of the fields map)',
 };
 
 function droppedFieldsWarning(nodeType: string, e: DroppedFieldsEvent): string {
@@ -412,7 +414,7 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                         metrics: { acted: 1 },
                     };
                 } catch (err) {
-                    // #14419 — `engine.insert` (#14095) raises `DuplicateRecordError`
+                    // Commit c5a7448d5 — `engine.insert` (#14095) raises `DuplicateRecordError`
                     // for a unique-constraint violation, carrying the ADR-0112
                     // `code: 'DUPLICATE_RECORD'` this executor used to throw away by
                     // folding every failure into one opaque string. Surfacing it here
@@ -436,9 +438,9 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                     // dependency here via `@objectstack/spec`).
                     //
                     // Deliberately narrow to THIS verb: `update_record` / `delete_record`
-                    // collapse identically, but `engine.update` still leaks the raw
-                    // driver error (#14390, not yet fixed) — those node results have
-                    // nothing structured to surface yet, so they are untouched here.
+                    // collapse identically; `engine.update` gained the same `DUPLICATE_RECORD`
+                    // envelope for a unique violation (commit 9d7f7259f), but those node results
+                    // are untouched here — this repair was scoped to `create_record` alone.
                     const rawCode =
                         err && typeof err === 'object' && 'code' in err
                             ? (err as { code?: unknown }).code

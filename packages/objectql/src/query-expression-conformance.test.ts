@@ -1221,17 +1221,42 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
     // unjudged — the ruling's carve-out, pinned as a control below.
     // ─────────────────────────────────────────────────────────────
 
-    it('CONTROL — the nested-relation OBJECT form still passes both doors: the refusal targets the dotted-STRING spelling alone', async () => {
-        // `{ project_id: { name: 'x' } }` is a legitimate nested-relation
-        // condition whose inner keys belong to ANOTHER object — the exact
-        // shape the collectors refuse to descend into. If this control goes
-        // red, the verdict has started judging comparand VALUES, which is a
-        // different (and wrong) gate.
-        await expect(protocol.findData({
+    it('CONTROL — the nested-relation OBJECT form is not the dotted verdict\'s at either door: the refusal targets the dotted-STRING spelling alone', async () => {
+        // `{ project_id: { name: 'x' } }` is a nested-relation condition whose
+        // inner keys belong to ANOTHER object — the exact shape the collectors
+        // refuse to descend into. If this control answers the dotted verdict's
+        // INVALID_FIELD, that verdict has started judging comparand VALUES,
+        // which is a different (and wrong) gate. [#20745] The engine refused
+        // the form itself for a while — no driver served it. [#20802] It is
+        // SERVED now: the engine reads the related object with the condition
+        // and hands the driver `$in` on its ids, so both doors answer the rows
+        // the undotted `{ project_id: 'p1' }` control answers.
+        const byFk: any = await protocol.findData({ object: 'showcase_task', query: { where: { project_id: 'p1' } } });
+        const wanted = byFk.records.map((r: any) => r.id).sort();
+        expect(wanted).toHaveLength(5);
+        const viaProtocol: any = await protocol.findData({
             object: 'showcase_task', query: { where: { project_id: { name: 'Apollo' } } },
-        })).resolves.toMatchObject({ records: expect.any(Array) });
-        await expect(engine.find('showcase_task', { where: { project_id: { name: 'Apollo' } } }))
-            .resolves.toEqual(expect.any(Array));
+        });
+        expect(viaProtocol.records.map((r: any) => r.id).sort()).toEqual(wanted);
+        const viaEngine = await engine.find('showcase_task', { where: { project_id: { name: 'Apollo' } } });
+        expect(viaEngine.map((r: any) => r.id).sort()).toEqual(wanted);
+        const none = await engine.find('showcase_task', { where: { project_id: { name: 'Gemini' } } });
+        expect(none).toEqual([]);
+    });
+
+    it('[#20802] both doors\' dotted relation refusals name the SAME served nested route', async () => {
+        const ingressErr: any = await protocol
+            .findData({ object: 'showcase_task', query: { where: { 'project_id.name': 'Apollo' } } })
+            .then(() => null, (e: unknown) => e);
+        const engineErr: any = await engine
+            .find('showcase_task', { where: { 'project_id.name': 'Apollo' } })
+            .then(() => null, (e: unknown) => e);
+        const route = 'nest the condition beneath the relation field: { "project_id": { "name": VALUE } }';
+        expect(String(ingressErr?.message)).toContain(route);
+        expect(String(engineErr?.message)).toContain(route);
+        // The claim this change made false is gone from both doors.
+        expect(String(ingressErr?.message)).not.toContain('a filter reaches only columns');
+        expect(String(engineErr?.message)).not.toContain('a filter reaches only columns');
     });
 
     it('⛔ CONTROL — the structured/JSON head stays UNJUDGED at both doors: the ruled carve-out', async () => {

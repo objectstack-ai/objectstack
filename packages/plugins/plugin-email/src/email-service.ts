@@ -739,7 +739,7 @@ export class EmailService implements IEmailService {
       ...(input.relatedObject ? { related_object: input.relatedObject } : {}),
       ...(input.relatedId ? { related_id: input.relatedId } : {}),
       ...(input.sentBy ? { sent_by: input.sentBy } : {}),
-      // #11741 — pass-through ONLY. This writer runs under a constant system
+      // Commit b706af987 — pass-through ONLY. This writer runs under a constant system
       // context, so the input's organization is the one fact it may stamp:
       // no resolution, no default, no fabrication (a wrong organization_id is
       // worse than a null). Absent ⇒ the column stays unwritten.
@@ -1436,7 +1436,7 @@ export class EmailService implements IEmailService {
       ...(input.relatedObject ? { relatedObject: input.relatedObject } : {}),
       ...(input.relatedId ? { relatedId: input.relatedId } : {}),
       ...(input.sentBy ? { sentBy: input.sentBy } : {}),
-      // #11741 — sendTemplate is itself a producer of send(): forward the
+      // Commit b706af987 — sendTemplate is itself a producer of send(): forward the
       // caller's organization so the sys_email row it persists is stamped.
       ...(input.organizationId ? { organizationId: input.organizationId } : {}),
     };

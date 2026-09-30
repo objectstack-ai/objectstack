@@ -26,7 +26,7 @@ import {
 } from '@objectstack/spec/automation';
 // [#7135] The full `resolveAuthzContext` envelope — what
 // `IApprovalService.openNodeRequest` declares for its context parameter since
-// #6523 (the #6206 ruling: no per-site subset contracts).
+// commit aa4b90d9a (the full-envelope ruling: no per-site subset contracts).
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { ApprovalService } from './approval-service.js';
 import { registerApprovalReviseNode } from './approval-revise-node.js';

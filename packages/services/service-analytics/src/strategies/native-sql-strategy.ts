@@ -4,6 +4,7 @@ import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contract
 import type { Cube } from '@objectstack/spec/data';
 import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext } from './types.js';
 import {
+  declaredDatetimeLowering,
   lowerAnalyticsWhere,
   normalizeAnalyticsFilterTree,
   toSqlBindValue,
@@ -18,7 +19,7 @@ import { declaredValueShapeResolver, whereEmptyLeafSql } from '../empty-operator
 import { datasetInvalidError, invalidMemberError } from '../dataset-refusal.js';
 import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
-import { nextUtcCalendarDay, resolveAnalyticsDateRangeString } from '@objectstack/core';
+import { nextUtcCalendarDay, resolveAnalyticsDateRangeString, isUnboundedAbove } from '@objectstack/core';
 import { explicitDateRangeWindow } from '../date-range-array-arm.js';
 
 /**
@@ -108,7 +109,7 @@ export const CONDITIONAL_AGGREGATE_SQL_KEYS = Object.keys(CONDITIONAL_AGGREGATE_
  * two sets partition `AggregationMetricType`, so a new member fails a test
  * instead of picking a default.
  *
- * [#12209] `ObjectQLStrategy.resolveMeasureAggregation` keys its refusal arm on
+ * [commit 017130a09] `ObjectQLStrategy.resolveMeasureAggregation` keys its refusal arm on
  * this same set — the engine aggregate AST cannot carry a raw SQL expression,
  * so the ObjectQL path REFUSES exactly what this strategy emits verbatim. One
  * set, two strategies, so the partition cannot fork per path.
@@ -437,6 +438,15 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // dataset, which is why an inferred or manifest cube compiles unchanged.
     const datasetScope = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!);
 
+    // [ADR-0053 D-D1, amended — #5930 step 3] The column-type reader the `where`
+    // door's shared lowering applies at every filter position below — the
+    // measure filters, the `where` and the dataset's own scope (item 7): a
+    // member is `datetime` when the column it binds against is declared so,
+    // asked of the SAME target `compileFilterNode` coerces for. This face's own
+    // bare-day copy (`buildFilterClause`'s `lte` arm) stays until its deletion
+    // card, and is idempotent on the lowered bound.
+    const lowering = declaredDatetimeLowering(ctx, (member) => this.resolveStorageTarget(cube, member, tableName));
+
     // Build SELECT for measures
     if (query.measures && query.measures.length > 0) {
       for (const measure of query.measures) {
@@ -449,7 +459,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
         const measureFilter = datasetScope?.measureFilters?.[measure];
         const predicate = measureFilter
           ? this.compileFilterNode(
-              normalizeAnalyticsFilterTree({ where: measureFilter }),
+              normalizeAnalyticsFilterTree({ where: measureFilter }, lowering),
               cube,
               tableName,
               joins,
@@ -467,7 +477,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // used to be dropped instead of compiled.
     const whereClauses: string[] = [];
     const filterSql = this.compileFilterNode(
-      normalizeAnalyticsFilterTree(query),
+      normalizeAnalyticsFilterTree(query, lowering),
       cube,
       tableName,
       joins,
@@ -484,7 +494,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // predicate with itself selects the same rows.
     if (datasetScope?.filter) {
       const scopeSql = this.compileFilterNode(
-        normalizeAnalyticsFilterTree({ where: datasetScope.filter }),
+        normalizeAnalyticsFilterTree({ where: datasetScope.filter }, lowering),
         cube,
         tableName,
         joins,
@@ -513,7 +523,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
             : resolveAnalyticsDateRangeString(td.dateRange, { timezone: query.timezone });
           const range = resolved
             ? ([resolved.start, resolved.end] as [string, string])
-            // [#17124] An oddly-sized array is REFUSED, by the one
+            // [commit 86c505286] An oddly-sized array is REFUSED, by the one
             // `explicitDateRangeWindow` every face in this package calls. ⛔ What
             // this replaced was a silent `if (range.length === 2)` DROP: a
             // one-element array emitted no time clause at all, so the query read
@@ -543,13 +553,20 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
           // `[a, b]` a CALLER wrote keeps the inclusive reading it has always
           // had — the #16179 separation, on this side too.
           const nextDay = resolved ? null : nextUtcCalendarDay(range[1]);
-          const upperExclusive = resolved ? resolved.endExclusive : nextDay != null;
           params.push(this.coerceTemporal(ctx, td2, range[0]));
           const lower = `${column} >= $${params.length}`;
-          params.push(this.coerceTemporal(ctx, td2, nextDay ?? range[1]));
-          whereClauses.push(
-            `(${lower} AND ${column} ${upperExclusive ? '<' : '<='} $${params.length})`,
-          );
+          // [#20600] A bare end on the last supported day has no next day to
+          // stop before: every value is inside it, so the window keeps its
+          // start alone.
+          if (isUnboundedAbove(nextDay)) {
+            whereClauses.push(`(${lower})`);
+          } else {
+            const upperExclusive = resolved ? resolved.endExclusive : nextDay != null;
+            params.push(this.coerceTemporal(ctx, td2, nextDay ?? range[1]));
+            whereClauses.push(
+              `(${lower} AND ${column} ${upperExclusive ? '<' : '<='} $${params.length})`,
+            );
+          }
         }
       }
     }
@@ -1235,6 +1252,10 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // Equivalent to `<=` for a `date` column, so no column-type lookup needed.
     if (operator === 'lte') {
       const nextDay = nextUtcCalendarDay(values[0]);
+      // [#20600] On the last supported day there is no next day: every value is
+      // inside the bound, so what `lte` still asks is a value — the `set` arm's
+      // `IS NOT NULL`.
+      if (isUnboundedAbove(nextDay)) return `${rawCol} IS NOT NULL`;
       if (nextDay != null) {
         params.push(this.coerceTemporal(ctx, target, nextDay));
         return `${this.temporalColumn(ctx, target, rawCol)} < $${params.length}`;

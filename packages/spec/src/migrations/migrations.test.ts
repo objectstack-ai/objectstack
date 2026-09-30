@@ -72,6 +72,56 @@ describe('migration chain (ADR-0087 D3)', () => {
       }
     });
 
+    // `SemanticMigration.conversionIds` is the join between an applied edit and
+    // the entry that judges it, keyed on `MigrationApplication.conversionId`.
+    // An id the chain never replays at or before the entry's hop can never meet
+    // an applied edit, so the link would silently pair nothing: a typo, a
+    // conversion of a later major, or one whose step fell below the floor.
+    it('every `conversionIds` link on a semantic entry names a registered conversion that its own step or an earlier one replays', () => {
+      const dangling: string[] = [];
+      let links = 0;
+      for (const major of MIGRATION_MAJORS) {
+        const replayed = new Set(
+          MIGRATION_MAJORS.filter((m) => m <= major).flatMap((m) => MIGRATIONS_BY_MAJOR[m]!.conversionIds),
+        );
+        for (const s of MIGRATIONS_BY_MAJOR[major]!.semantic) {
+          for (const id of s.conversionIds ?? []) {
+            links++;
+            if (!CONVERSION_IDS.has(id)) {
+              dangling.push(`protocol ${major}: ${s.id} → ${id} (no registered conversion has this id)`);
+            } else if (!replayed.has(id)) {
+              dangling.push(`protocol ${major}: ${s.id} → ${id} (registered, but no step at or below ${major} replays it)`);
+            }
+          }
+        }
+      }
+      expect(
+        dangling,
+        `semantic entry link(s) that can pair with no applied edit: ${dangling.join(', ')}. `
+          + 'Remedy: correct the id in the entry file under `entries/semantic/` to the D2 conversion whose '
+          + 'applied edits the entry judges, one graduated into the entry\'s own step or an earlier one, '
+          + 'then `gen:migration-registry`; or drop the id if the entry judges no edit of that conversion.',
+      ).toEqual([]);
+      // Anti-vacuity: at least one link exists, so the loop above read something.
+      expect(links).toBeGreaterThan(0);
+    });
+
+    it('the decision-mode pair joins end to end: the chain carries the link onto the TODO, and it names the applied edits', () => {
+      const JUDGE = 'flow-decision-edge-branching-first-match';
+      const CONVERSION = 'flow-decision-mode-inclusive-explicit';
+      const conversion = ALL_CONVERSIONS.find((c) => c.id === CONVERSION)!;
+      expect(conversion.toMajor).toBe(18);
+
+      const result = applyMetaMigrations(conversion.fixture.before, 17, 18);
+      const todo = result.todos.find((t) => t.id === JUDGE);
+      expect(todo?.conversionIds).toEqual([CONVERSION]);
+
+      // The join a printer makes: the applied edits whose `conversionId` the TODO names.
+      const judged = result.applied.filter((a) => todo!.conversionIds!.includes(a.conversionId));
+      expect(judged.length).toBeGreaterThan(0);
+      expect(new Set(judged.map((a) => a.conversionId))).toEqual(new Set([CONVERSION]));
+    });
+
     it('a graduated conversion belongs to the step for its own major', () => {
       for (const [majorStr, step] of Object.entries(MIGRATIONS_BY_MAJOR)) {
         const major = Number(majorStr);

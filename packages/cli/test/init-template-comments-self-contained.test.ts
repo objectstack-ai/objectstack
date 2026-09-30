@@ -13,7 +13,7 @@
 // identifiers — `ADR-0087` and `ADR-0090 D1` — addressed to a reader with
 // this monorepo open. A project scaffolded by `os init` ships no
 // `docs/adr/`, so the identifier named something the reader could not look
-// up. This is the same defect class #10324 fixed in `create-objectstack`'s
+// up. This is the same defect class commit ecd06f613 fixed in `create-objectstack`'s
 // bundled template *files*; this is the OTHER scaffolder, which renders its
 // templates as in-source string literals instead.
 //
@@ -45,7 +45,7 @@
 //
 // `init.ts` also carries its own ordinary source comments that legitimately
 // cite ADRs and issue numbers (e.g. the `printCreatedFilesSummary` doc
-// comment cites #10499) — those never ship, because they live outside the
+// comment cites commit 6d441e41f) — those never ship, because they live outside the
 // `configContent` / `srcFiles` functions the command actually writes to
 // disk. `create.ts` is the same: its `run()` body cites `packages/plugins`
 // as a destination directory, which ships nowhere. A pin that grepped
@@ -78,7 +78,7 @@
 // canonical-origin docs URL in the rendered output against the docs content
 // tree the way Fumadocs routes it. The candidate-route logic is restated
 // here rather than imported from check-published-readme-links' own module
-// (which owns the canonical-origin constant), for the same reason #10324's
+// (which owns the canonical-origin constant), for the same reason commit ecd06f613's
 // version does: an import would widen this suite's declared cross-package
 // read radius to buy six lines.
 //
@@ -88,9 +88,9 @@
 // `starter-comments-self-contained.test.ts` vocabulary, restated rather than
 // imported — same reason as the candidate-route logic above. Restating buys
 // the narrow read radius and costs the guarantee that the two stay equal, and
-// they did NOT: #11022 added a fifth pattern to that file and this one kept
+// they did NOT: commit 21756b325 added a fifth pattern to that file and this one kept
 // four, so the same defect class had two different answers depending on which
-// scaffolder shipped it. #15150 backfills that fifth pattern here and adds a
+// scaffolder shipped it. Commit cc986c913 backfills that fifth pattern here and adds a
 // sixth to BOTH files in one change.
 //
 // Both additions are pure regression guardrails: measured on the rendered
@@ -215,7 +215,7 @@ function renderAll(): Rendered[] {
 
 /**
  * References a reader who has only their own scaffolded project cannot
- * follow. Reused verbatim from #10324's
+ * follow. Reused verbatim from commit ecd06f613's
  * `starter-comments-self-contained.test.ts` — same defect class, same
  * vocabulary — spelled to match the identifier, not any particular
  * sentence, so the prose around it stays free to change.
@@ -223,14 +223,14 @@ function renderAll(): Rendered[] {
  * "Verbatim" is an obligation, not a description of how it got here: a
  * pattern added to either file belongs in both, or this package's scaffolders
  * and that one's answer the same question differently. See the file header
- * for the drift #15150 repaired.
+ * for the drift commit cc986c913 repaired.
  */
 const MONOREPO_ONLY = [
   { label: 'an ADR identifier', re: /\bADR-\d{3,4}\b/ },
   { label: 'a bare issue number', re: /(^|[^\w/])#\d{3,6}\b/ },
   { label: 'a repo build-script path', re: /\bscripts\/[\w.-]+\.(?:mjs|mts|cjs|ts|js)\b/ },
   { label: 'a monorepo package path', re: /\bpackages\/[a-z0-9][\w-]*\//i },
-  // #11022, backfilled here by #15150: `create-objectstack`'s
+  // Commit 21756b325, backfilled here by commit cc986c913: `create-objectstack`'s
   // `blank/README.md` named "the ObjectStack framework repo" as the home of
   // `skills/`, unlinked — a reader with only their own scaffolded project has
   // no way to reach it. The four patterns above are syntactic identifiers (an
@@ -249,7 +249,7 @@ const MONOREPO_ONLY = [
   // the emitters write to disk, so it does not see it and must not be
   // "fixed" to.
   { label: 'a reference to the ObjectStack repo as an unlinked location', re: /\bObjectStack (?:framework )?(?:mono)?repo\b/i },
-  // #15150: the five patterns above are all spelled ABSOLUTELY — a repo-rooted
+  // Commit cc986c913: the five patterns above are all spelled ABSOLUTELY — a repo-rooted
   // path, an identifier, or a name. This one is the same class of unfollowable
   // reference written RELATIVELY, as a path that climbs out of the project the
   // reader actually has. `os create` shipped exactly that,
@@ -259,7 +259,7 @@ const MONOREPO_ONLY = [
   // reported it as a PASSING row.
   //
   // Anchored on `../`, deliberately NOT on `./`, and deliberately not on the
-  // depth judgement #15150 proposed (`check:cross-package-test-inputs`-style
+  // depth judgement commit cc986c913's card proposed (`check:cross-package-test-inputs`-style
   // "the shallowest point a path reaches"). What makes the bare anchor sound
   // is a property of THIS population rather than of `../`: the population is
   // the DEFAULT placement only. `create.ts` renders per `ScaffoldPlacement`,

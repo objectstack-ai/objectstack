@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// #11846 — `kernel/PreviewModeConfig` (the six-key preview/demo config block:
+// Commit 0c2334f6c — `kernel/PreviewModeConfig` (the six-key preview/demo config block:
 // `autoLogin` default true, `simulatedRole` default 'admin',
 // `simulatedUserName`, `readOnly`, `expiresInSeconds`, `bannerMessage`). Its
 // only carrier key, `KernelContext.previewMode`, is tombstoned in this same
@@ -15,6 +15,6 @@
 // never implemented by any layer; preview DEPLOYMENTS belong to the
 // deployment layer, whose `OS_PREVIEW_MODE` is routing-only and stays. If a
 // preview experience becomes a product capability it re-declares fresh, with
-// the production-posture hard-refusal as the first-landed half (#11846 ruling
+// the production-posture hard-refusal as the first-landed half (commit 0c2334f6c's ruling
 // record).
 export const entry = 'kernel/PreviewModeConfig';

@@ -231,6 +231,30 @@ describe('Security Service Contract', () => {
     await expect(nothingDisclosable.getMetadataReadableFields?.('deal', { userId: 'u1' })).resolves.toEqual([]);
   });
 
+  it('getWritableFields is OPTIONAL — absence degrades to getReadableFields, and the two answers differ', async () => {
+    const withoutIt: ISecurityService = makeService({ getReadableFields: async () => ['id', 'name', 'locked'] });
+    expect(typeof withoutIt.getWritableFields).toBe('undefined');
+    const mustNotCompileWithoutAGuard = () =>
+      // @ts-expect-error possibly undefined — a consumer must feature-detect first
+      withoutIt.getWritableFields('deal', { userId: 'u1' });
+    expect(typeof mustNotCompileWithoutAGuard).toBe('function');
+
+    // A field the caller reads but may not edit is in the read projection and
+    // not in the write one — which is why a fallback must be stated.
+    const withIt = makeService({
+      getReadableFields: async () => ['id', 'name', 'locked'],
+      getWritableFields: async (_object, context) => (context?.isSystem ? ['id', 'name', 'locked'] : ['name']),
+    });
+    await expect(withIt.getWritableFields?.('deal', { userId: 'u1' })).resolves.toEqual(['name']);
+    await expect(withIt.getWritableFields?.('deal', { isSystem: true })).resolves.toEqual(['id', 'name', 'locked']);
+
+    // The same two empty answers as the read side.
+    await expect(makeService({ getWritableFields: async () => undefined }).getWritableFields?.('deal', {}))
+      .resolves.toBeUndefined();
+    await expect(makeService({ getWritableFields: async () => [] }).getWritableFields?.('deal', {}))
+      .resolves.toEqual([]);
+  });
+
   it('[#7616] resolvePermissionSetsForContext is OPTIONAL — absence keeps the consumer on its own resolution (compile-time)', () => {
     // THE structural pin behind "a consumer must keep its local resolution as
     // the fallback until a floor version carrying this method can be assumed".

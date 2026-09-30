@@ -39,7 +39,7 @@ export type FileReadVerdict = 'allow' | 'deny' | 'unauthenticated';
  * session with no active organization resolves to `undefined` rather than to a
  * guess.
  *
- * ⚠️ Since #13178 the same value also travels on this door's `updateFile` /
+ * ⚠️ Since commit f087c376f the same value also travels on this door's `updateFile` /
  * `updateSession` calls, where it does something DIFFERENT — it scopes the
  * statement instead of stamping a column, so a row belonging to another
  * organization is no longer reachable (see `StorageWriteContext`). Two
@@ -196,9 +196,9 @@ export function registerStorageRoutes(
     } catch (err) {
       // [#15999, ruling item 3] An UNREADABLE authorization store is an outage,
       // not a verdict. `buildFileReadAuthorizer` already re-raises the brand
-      // rather than returning `'deny'` (#13279) — and until now this `catch`
+      // rather than returning `'deny'` (commit 6a180e42d) — and until now this `catch`
       // absorbed that re-raise one frame up and rendered it as this gate's own
-      // `403`, which is precisely the confusion #13279 exists to prevent: an
+      // `403`, which is precisely the confusion commit 6a180e42d was made to prevent: an
       // outage answered as a capability denial, indistinguishable on the wire
       // from a genuine refusal.
       //
@@ -452,7 +452,7 @@ export function registerStorageRoutes(
   // ---------------------------------------------------------------------------
   httpServer.post(`${basePath}/upload/complete`, async (req: IHttpRequest, res: IHttpResponse) => {
     try {
-      // [#13178] Bound, not discarded: this handler already resolved the
+      // [commit f087c376f] Bound, not discarded: this handler already resolved the
       // session and threw the value away, which is what left the commit
       // statement unscoped and raising `[tenant-audit]`.
       const session = await requireUploadSession(req, res);
@@ -592,7 +592,7 @@ export function registerStorageRoutes(
   // ---------------------------------------------------------------------------
   httpServer.put(`${basePath}/upload/chunked/:uploadId/chunk/:chunkIndex`, async (req: IHttpRequest, res: IHttpResponse) => {
     try {
-      // [#13178] Bound rather than discarded — see the commit door above.
+      // [commit f087c376f] Bound rather than discarded — see the commit door above.
       // Named `authSession` because `session` below is the sys_upload_session
       // ROW; these are two different things and the handler needs both.
       const authSession = await requireUploadSession(req, res);
@@ -680,7 +680,7 @@ export function registerStorageRoutes(
   // ---------------------------------------------------------------------------
   httpServer.post(`${basePath}/upload/chunked/:uploadId/complete`, async (req: IHttpRequest, res: IHttpResponse) => {
     try {
-      // [#13178] Bound rather than discarded — see the commit door above.
+      // [commit f087c376f] Bound rather than discarded — see the commit door above.
       const authSession = await requireUploadSession(req, res);
       if (authSession === false) return;
       const writeContext: StorageWriteContext = { organizationId: authSession?.organizationId };
@@ -750,7 +750,7 @@ export function registerStorageRoutes(
   // ---------------------------------------------------------------------------
   httpServer.get(`${basePath}/upload/chunked/:uploadId/progress`, async (req: IHttpRequest, res: IHttpResponse) => {
     try {
-      // [#13178] Bound rather than discarded — the progress door can WRITE
+      // [commit f087c376f] Bound rather than discarded — the progress door can WRITE
       // (`expireIfPastDeadline` statuses the row `expired`), so it owes the
       // same context the other two write doors do.
       const authSession = await requireUploadSession(req, res);

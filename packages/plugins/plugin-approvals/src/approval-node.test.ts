@@ -459,7 +459,7 @@ describe('openNodeRequest — organization attribution (cloud#1395, #10101)', ()
   });
 
   it('⛔ pins the sys_api_key divergence: stamps the DECLARED active_organization_id, and never treats an ADR-0066 org FK as the stamp', async () => {
-    // The credential table (#8287/#8778): unwalled by necessity, rows still
+    // The credential table (#8287, commit 7901b2dd2): unwalled by necessity, rows still
     // ABOUT one organization under `tenancy.organizationField` — limb 0 wins
     // over the disabled-tenancy opt-out.
     const apiKey = makeFakeEngine({

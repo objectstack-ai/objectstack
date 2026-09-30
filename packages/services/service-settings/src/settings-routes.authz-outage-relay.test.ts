@@ -9,7 +9,7 @@
  *
  * `SettingsServicePlugin`'s `verifiedContextFromRequest` re-raises
  * `AuthzStoreUnavailableError` rather than returning an enforced-but-empty
- * context the routes would read as a denial (#13279). But it is called as
+ * context the routes would read as a denial (commit 6a180e42d). But it is called as
  * `await ctxOf(req)` from INSIDE each route's own `try`, so the brand was
  * caught here and re-encoded: `message` survived, `code` and `status` did not —
  * and those are the two a client branches on.

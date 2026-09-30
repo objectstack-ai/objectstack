@@ -52,12 +52,18 @@
  * ⚠️ One level only, measured rather than reasoned: mingo does not descend into
  * a NESTED array, so neither does this face — `[['a']]` does not match `'a'` on
  * either face, and that row is in the fixture to hold it.
+ *
+ * [#5930 step 4, ruling D6] The reference matcher had no production caller and
+ * is RETIRED; this file keeps its name and holds the LIVE path alone. The
+ * matrix's cases were already asserted on the live path, case by case; the
+ * matcher's own assertions — the card's three rows, the OR-over-elements
+ * property and `$ne`'s per-row complement — are asked of `find()` now, a row at
+ * a time, because they are statements about the one arm both faces shared.
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
 
 import { InMemoryDriver } from './memory-driver.js';
-import { match } from './memory-matcher.js';
 
 const TABLE = 'array_value_equality';
 
@@ -141,11 +147,20 @@ const CASES: ReadonlyArray<{
 
 const sorted = (ids: readonly string[]): string[] => [...ids].sort((x, y) => x.localeCompare(y));
 
-/** The reference face: `memory-matcher.ts`, one record at a time. */
-const referenceIds = (where: Record<string, unknown>): string[] =>
-  sorted(ROWS.filter((r) => match(r, where)).map((r) => String(r.id)));
+/**
+ * Does the LIVE path select one row storing `tags`? — the matcher's
+ * `match({ tags }, where)`, asked of `find()` over a table holding that row
+ * alone.
+ */
+async function liveRowMatches(tags: unknown, where: Record<string, unknown>): Promise<boolean> {
+  const one = new InMemoryDriver({ persistence: false });
+  await one.connect();
+  await one.syncSchema(TABLE, { fields: { id: { type: 'text', name: 'id' }, tags: { type: 'text', name: 'tags' } } } as never);
+  await one.create(TABLE, { id: 'row', tags });
+  return ((await one.find(TABLE, { where } as never)) as unknown[]).length === 1;
+}
 
-describe('[#16838] a scalar comparand against a stored array — both faces, one process', () => {
+describe('[#16838] a scalar comparand against a stored array — the live path, one process', () => {
   let driver: InMemoryDriver;
   /** The live face: `InMemoryDriver.find`, through `normalizeFilterCondition` and mingo. */
   let liveIds: (where: Record<string, unknown>) => Promise<string[]>;
@@ -179,28 +194,30 @@ describe('[#16838] a scalar comparand against a stored array — both faces, one
     it(`${c.name} — the LIVE query path`, async () => {
       expect(await liveIds(c.where)).toEqual(sorted(c.expected));
     });
-
-    it(`${c.name} — the REFERENCE matcher`, () => {
-      expect(referenceIds(c.where)).toEqual(sorted(c.expected));
-    });
   }
 
-  it('both faces answer the whole matrix identically', async () => {
-    for (const c of CASES) {
-      expect(await liveIds(c.where), `${c.name}: the live query path and the reference matcher disagree`)
-        .toEqual(referenceIds(c.where));
-    }
+  /**
+   * This was "both faces answer the whole matrix identically" — the live path
+   * against the reference matcher. With the matcher retired (#5930 step 4) the
+   * whole matrix is held, in one assertion, to the expectations both faces were
+   * written against, so it survives the per-case loop above being edited.
+   */
+  it('the live path answers the whole matrix as written', async () => {
+    const got: Record<string, string[]> = {};
+    for (const c of CASES) got[c.name] = await liveIds(c.where);
+    expect(got).toEqual(Object.fromEntries(CASES.map((c) => [c.name, sorted(c.expected)])));
   });
 
   /**
-   * The card's three rows, spelled exactly as it measured them — `match()`
-   * directly, one row, one filter — so the numbers in the card and the numbers
-   * here can be compared without reading the fixture above.
+   * The card's three rows, spelled as it measured them — one row, one filter —
+   * so the numbers in the card and the numbers here can be compared without
+   * reading the fixture above. The card measured them on the reference matcher
+   * (`match()`, retired); they are asked of the live path here.
    */
-  it("the card's own three rows, on the reference matcher", () => {
-    expect(match({ tags: ['a', 'b'] }, { tags: 'a' })).toBe(true); //   was false — the missing membership
-    expect(match({ tags: ['a', 'b'] }, { tags: 'a,b' })).toBe(false); // was true  — the false positive
-    expect(match({ tags: ['a'] }, { tags: 'a' })).toBe(true); //        the firing control, unmoved
+  it("the card's own three rows, one row at a time", async () => {
+    expect(await liveRowMatches(['a', 'b'], { tags: 'a' })).toBe(true); //   was false on the matcher — the missing membership
+    expect(await liveRowMatches(['a', 'b'], { tags: 'a,b' })).toBe(false); // was true on the matcher — the false positive
+    expect(await liveRowMatches(['a'], { tags: 'a' })).toBe(true); //        the firing control, unmoved
   });
 
   /**
@@ -209,7 +226,7 @@ describe('[#16838] a scalar comparand against a stored array — both faces, one
    * reintroduces any whole-array conversion breaks this for every case at once,
    * not only for the two the card happened to measure.
    */
-  it('a stored array answers the OR of the answers its ELEMENTS would give', () => {
+  it('a stored array answers the OR of the answers its ELEMENTS would give', async () => {
     for (const c of CASES) {
       if (c.polarity !== 'equality') continue;
       for (const row of ROWS) {
@@ -217,8 +234,11 @@ describe('[#16838] a scalar comparand against a stored array — both faces, one
         if (!Array.isArray(stored)) continue;
         // One level only: an element that is itself an array is not descended
         // into, on either face.
-        const elementwise = stored.some((element) => !Array.isArray(element) && match({ tags: element }, c.where));
-        expect(match(row, c.where), `${c.name} / ${String(row.id)}: not the OR over its elements`)
+        let elementwise = false;
+        for (const element of stored) {
+          if (!Array.isArray(element) && (await liveRowMatches(element, c.where))) elementwise = true;
+        }
+        expect(await liveRowMatches(stored, c.where), `${c.name} / ${String(row.id)}: not the OR over its elements`)
           .toBe(elementwise);
       }
     }
@@ -231,19 +251,18 @@ describe('[#16838] a scalar comparand against a stored array — both faces, one
    * fixed one direction only would leave a stored array both matching and not
    * matching the same comparand.
    */
-  it('$ne is the per-row complement of $eq, arrays included', () => {
+  it('$ne is the per-row complement of $eq, arrays included', async () => {
+    const all = sorted(ROWS.map((r) => String(r.id)));
     for (const comparand of ['a', 'b', 'z', 'a,b', null]) {
-      for (const row of ROWS) {
-        expect(
-          match(row, { tags: { $ne: comparand } }),
-          `${String(row.id)} / ${JSON.stringify(comparand)}: $ne is not the complement of $eq`,
-        ).toBe(!match(row, { tags: { $eq: comparand } }));
-      }
+      const eq = await liveIds({ tags: { $eq: comparand } });
+      const ne = await liveIds({ tags: { $ne: comparand } });
+      expect(ne, `${JSON.stringify(comparand)}: $ne is not the per-row complement of $eq`)
+        .toEqual(all.filter((id) => !eq.includes(id)));
     }
   });
 
-  it('a NESTED array is not descended into — one level, on both faces', async () => {
-    expect(match({ tags: [['a']] }, { tags: 'a' })).toBe(false);
+  it('a NESTED array is not descended into — one level', async () => {
+    expect(await liveRowMatches([['a']], { tags: 'a' })).toBe(false);
     expect(await liveIds({ tags: 'a' })).not.toContain('array-nested');
   });
 });

@@ -110,7 +110,6 @@ describe('#4001 batch D — the doors the cube family is reachable through', () 
       ...CUBE,
       title: 'Probe',
       joins: { other: { name: 'other' } },
-      refreshKey: { every: '1 hour', sql: 'SELECT max(updated_at)' },
       public: true,
     });
     accept(AnalyticsQuerySchema, {
@@ -134,8 +133,17 @@ describe('#4001 batch D — closed sites reject unknown keys where they live', (
     expect(reject(CubeSchema, { ...CUBE, publik: true })).toContain('publik');
   });
 
-  it('`Cube.refreshKey` — one level below an already-closed parent', () => {
-    expect(reject(CubeSchema, { ...CUBE, refreshKey: { every: '1 hour', sqll: 'x' } })).toContain('sqll');
+  // Batch D also closed the nested `Cube.refreshKey` block ("this cube
+  // refreshKey block"), pinned here as `{ every, sqll }` → rejection naming
+  // `sqll`. #20637 retired `refreshKey` whole (ADR-0049 enforce-or-remove:
+  // nothing read `every` or `sql`, and no analytics result is cached), so the
+  // nested surface no longer exists — the batch-D verdict for it is SUPERSEDED,
+  // not reopened. The key itself now rejects with the retirement prescription,
+  // whatever it holds (the full pin set is `cube-refresh-key-retirement.test.ts`):
+  it('`Cube.refreshKey` — REMOVED; the key rejects with the prescription, not as a bare unknown', () => {
+    expect(reject(CubeSchema, { ...CUBE, refreshKey: { every: '1 hour', sqll: 'x' } })).toContain(
+      '`analytics_cube.refreshKey` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove)',
+    );
   });
 
   it('`Metric` — through the cube `measures` record', () => {

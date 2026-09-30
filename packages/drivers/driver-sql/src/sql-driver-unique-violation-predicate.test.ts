@@ -196,7 +196,7 @@ describe('syncDeclaredIndexes unique-violation discriminator (#6543)', () => {
     expect(errors[0]).toMatch(/cannot create NULL-safe unique index/);
     expect(errors[0]).toMatch(/uniq_product_organization_id_code/);
     expect(errors[0]).toMatch(/NOT enforced/);
-    expect(errors[0]).toMatch(/#5030/);
+    expect(errors[0]).toMatch(/NULL-distinct/);
     expect(errors[0]).toMatch(/ADR-0120 D4/);
   });
 
@@ -205,7 +205,7 @@ describe('syncDeclaredIndexes unique-violation discriminator (#6543)', () => {
 
     await expect(sync([NULL_SAFE_INDEX])).resolves.toBeUndefined();
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatch(/#5030/);
+    expect(errors[0]).toMatch(/NULL-distinct/);
   });
 
   it('reads the violation through a driver `cause` wrapper', async () => {
@@ -215,7 +215,7 @@ describe('syncDeclaredIndexes unique-violation discriminator (#6543)', () => {
 
     await expect(sync([NULL_SAFE_INDEX])).resolves.toBeUndefined();
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatch(/#5030/);
+    expect(errors[0]).toMatch(/NULL-distinct/);
   });
 
   // ── Nothing the old regex caught may be narrowed ──────────────────────────
@@ -229,7 +229,7 @@ describe('syncDeclaredIndexes unique-violation discriminator (#6543)', () => {
 
     await expect(sync([NULL_SAFE_INDEX])).resolves.toBeUndefined();
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatch(/#5030/);
+    expect(errors[0]).toMatch(/NULL-distinct/);
   });
 
   // ── The site's own business logic, untouched by the migration ─────────────
@@ -286,7 +286,7 @@ describe('syncDeclaredIndexes unique-violation discriminator (#6543)', () => {
     expect(errors[0]).toMatch(/× 2 rows/);
     // ⛔ And it does not borrow the NULL-safe arm's story: no earlier index
     // admitted these rows, so #5030 is not what happened here.
-    expect(errors[0]).not.toMatch(/#5030/);
+    expect(errors[0]).not.toMatch(/NULL-distinct/);
     expect(errors[0]).not.toMatch(/NULL-safe/);
   });
 

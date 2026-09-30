@@ -577,7 +577,7 @@ export async function bootStack(
     // booted multi-tenant off a hoisted copy — and the RLS posture a fixture
     // then asserted against depended on the launcher.
     //
-    // #10943: the undeclared FALLBACK is this package's own resolution only if
+    // Commit 46d34ab7c: the undeclared FALLBACK is this package's own resolution only if
     // this package supplies it. A bare `import()` written inside
     // `@objectstack/types` resolves against THAT package — which declares
     // `@objectstack/spec` and nothing else — so the helper's documented

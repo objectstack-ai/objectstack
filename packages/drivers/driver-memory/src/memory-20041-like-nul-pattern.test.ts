@@ -20,12 +20,15 @@
  * - the `$`-spelling on the live query path (`assertFieldConstraintShape`);
  * - the QueryAST `comparison` spelling (`convertConditionToMongo`'s `like` /
  *   `ilike` arm), which has its own dangling-escape refusal;
- * - the reference matcher `match()`, through the same shape gate.
+ * - the shape gate itself (`assertFilterConditionShape`, `filter-refusal.ts`),
+ *   called directly. It was the reference matcher's door; [#5930 step 4, ruling
+ *   D6] that matcher is retired, and its refusal assertions are held on the
+ *   gate it ran, which the live query path runs too.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { InMemoryDriver } from './memory-driver.js';
-import { match } from './memory-matcher.js';
+import { assertFilterConditionShape } from './filter-refusal.js';
 
 interface WireBearingError extends Error {
   code?: string;
@@ -81,13 +84,14 @@ describe('[#20041] driver-memory — a $like / $ilike pattern holding U+0000 is 
     return err;
   };
 
-  const matcherRefusalOf = (where: unknown): WireBearingError => {
+  /** The shared shape gate, called directly — the door the retired reference matcher ran. */
+  const gateRefusalOf = (where: unknown): WireBearingError => {
     try {
-      match({ v: 'ab' }, where);
+      assertFilterConditionShape(where, 'filter');
     } catch (e) {
       return e as WireBearingError;
     }
-    throw new Error(`expected the matcher to refuse ${JSON.stringify(where)}, but it answered`);
+    throw new Error(`expected the shape gate to refuse ${JSON.stringify(where)}, but it passed`);
   };
 
   const expectEnvelope = (err: WireBearingError, located: string) => {
@@ -120,8 +124,8 @@ describe('[#20041] driver-memory — a $like / $ilike pattern holding U+0000 is 
       );
     });
 
-    it(`${op} ${shown}: the reference matcher refuses it rather than answering`, () => {
-      expectEnvelope(matcherRefusalOf({ v: { [op]: pattern } }), `Operator "${op}" on field "v" at filter.v.${op}`);
+    it(`${op} ${shown}: the shape gate refuses it rather than passing it on (the retired matcher's door)`, () => {
+      expectEnvelope(gateRefusalOf({ v: { [op]: pattern } }), `Operator "${op}" on field "v" at filter.v.${op}`);
     });
   }
 
@@ -130,7 +134,7 @@ describe('[#20041] driver-memory — a $like / $ilike pattern holding U+0000 is 
       for (const err of [
         await refusalOf({ v: { $like: pattern } }),
         await refusalOf({ type: 'comparison', field: 'v', operator: 'like', value: pattern }),
-        matcherRefusalOf({ v: { $like: pattern } }),
+        gateRefusalOf({ v: { $like: pattern } }),
       ]) {
         expect(err.code).toBe('INVALID_FILTER');
         expect(err.status).toBe(400);
@@ -141,12 +145,14 @@ describe('[#20041] driver-memory — a $like / $ilike pattern holding U+0000 is 
   });
 
   for (const c of CONTROLS) {
-    it(`control: ${JSON.stringify(c.where)} (no U+0000) answers the same rows on the query path and the matcher`, async () => {
+    // [#5930 step 4] The retired matcher's half of this control asserted the
+    // same `expected` rows — `@objectstack/formula`'s answer, the oracle both
+    // halves were held to — so the control keeps that oracle on the live path.
+    it(`control: ${JSON.stringify(c.where)} (no U+0000) answers formula's rows on the query path`, async () => {
       const queried = (await driver.find(TABLE, { where: c.where as never }))
         .map((r: Record<string, unknown>) => String(r.label))
         .sort();
-      const matched = ROWS.filter((r) => match(r, c.where)).map((r) => r.label).sort();
-      expect({ queried, matched }).toEqual({ queried: [...c.expected], matched: [...c.expected] });
+      expect(queried).toEqual([...c.expected]);
     });
   }
 });

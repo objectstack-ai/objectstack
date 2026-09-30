@@ -812,13 +812,21 @@ function lookupBulkActionText(
  * Reference identity is load-bearing rather than tidy: `translateView` uses it
  * to decide whether to rebuild `config` at all, so a view with no bulk
  * translations comes back with its config object untouched.
+ *
+ * `packagedConfig` is the `config` of the view's packaged base (`undefined`
+ * when no base was supplied, `{}` when the base carries none): each def and
+ * each param is found in it by the `name` the bundle addresses it by
+ * ({@link packagedPart}), and a string that diverged from its packaged
+ * counterpart is authored and keeps its value (#20731, see
+ * {@link translateView}).
  */
 function translateBulkActionDefs(
   defs: unknown,
   bundle: TranslationBundle | undefined,
   objectName: string,
   viewKey: string,
-  opts?: ResolveOptions,
+  opts: ResolveOptions | undefined,
+  packagedConfig: Record<string, unknown> | undefined,
 ): unknown {
   if (!Array.isArray(defs) || !bundle) return defs;
   let changed = false;
@@ -828,12 +836,21 @@ function translateBulkActionDefs(
       return raw;
     }
     const defName = def.name;
-    const text = (pick: (node: NonNullable<ReturnType<typeof lookupBulkActionNode>>) => unknown) =>
-      lookupBulkActionText(bundle, objectName, viewKey, defName, pick, opts);
+    const packagedDef = packagedPart(packagedConfig, 'bulkActionDefs', (candidate) => candidate.name === defName);
+    // The catalog's string for `attr`, unless the authored value diverged from
+    // `packaged`'s — then `undefined`, which leaves the authored value in place.
+    const text = (
+      packaged: Record<string, unknown> | undefined,
+      attr: string,
+      authored: unknown,
+      pick: (node: NonNullable<ReturnType<typeof lookupBulkActionNode>>) => unknown,
+    ) => valueOverridesPackagedBase(packaged, attr, authored)
+      ? undefined
+      : lookupBulkActionText(bundle, objectName, viewKey, defName, pick, opts);
 
-    const label = text((n) => n.label);
-    const confirmText = text((n) => n.confirmText);
-    const confirmLabel = text((n) => n.confirmLabel);
+    const label = text(packagedDef, 'label', def.label, (n) => n.label);
+    const confirmText = text(packagedDef, 'confirmText', def.confirmText, (n) => n.confirmText);
+    const confirmLabel = text(packagedDef, 'confirmLabel', def.confirmLabel, (n) => n.confirmLabel);
 
     let params = def.params;
     if (Array.isArray(def.params)) {
@@ -843,9 +860,10 @@ function translateBulkActionDefs(
           return param;
         }
         const paramName = param.name;
-        const pLabel = text((n) => n.params?.[paramName]?.label);
-        const pHelp = text((n) => n.params?.[paramName]?.help);
-        const pPlaceholder = text((n) => n.params?.[paramName]?.placeholder);
+        const packagedParam = packagedPart(packagedDef, 'params', (candidate) => candidate.name === paramName);
+        const pLabel = text(packagedParam, 'label', param.label, (n) => n.params?.[paramName]?.label);
+        const pHelp = text(packagedParam, 'help', param.help, (n) => n.params?.[paramName]?.help);
+        const pPlaceholder = text(packagedParam, 'placeholder', param.placeholder, (n) => n.params?.[paramName]?.placeholder);
         if (pLabel === undefined && pHelp === undefined && pPlaceholder === undefined) return param;
         paramsChanged = true;
         return {
@@ -902,24 +920,61 @@ function translateBulkActionDefs(
  * `expandViewContainer` put the whole `ListViewSchema` under `config`. The
  * object is rebuilt only when a def actually gained a translation, so a view
  * with none comes back with the very same `config` reference.
+ *
+ * ## [#20731] The catalog LOSES to an explicit override — ADR-0029 D9.2a
+ *
+ * The catalog (`objects.<object>._views.<viewKey>`) is the packaged
+ * translation of the PACKAGED view. Consulting it first overwrote every
+ * string authored on top of that view — measured: an org overlay on the
+ * showcase's packaged `showcase_task.in_progress` (ADR-0126 Regime O, "yours
+ * to edit directly") changed its label to `In Progress (edited-20680)`, the
+ * metadata protocol's item and list reads both served the edit, an `en`
+ * reader got it, and a `zh-CN` reader — admin or member, item or list — got
+ * `进行中`, the catalog's translation of the label the package shipped.
+ *
+ * So every string here follows the rule {@link translateDashboard} and
+ * {@link translateObject} follow, by the same comparison
+ * ({@link valueOverridesPackagedBase}; ⛔ never a second one): the catalog
+ * applies only while the served value still equals the one in
+ * {@link TranslateDocumentOptions.packagedBase}, which the serving layer
+ * supplies — the packaged view before any tenant overlay,
+ * `getPackagedViewBase` on the metadata protocol, looked up by the served
+ * view's registry identity (the qualified `<object>.<viewKey>` name, never the
+ * bare key the catalog uses, which another object's view may share). The view
+ * `label` and `description` are judged against the base's; each bulk-action
+ * def's `label` / `confirmText` / `confirmLabel` and each of its params'
+ * `label` / `help` / `placeholder` against the def and param the base carries
+ * under the same `name` — the key the bundle addresses them by — and a def or
+ * param the base does not carry was authored after the fact and counts as
+ * diverged. No base supplied is the pre-#20731 behaviour, unchanged: the
+ * catalog applies.
  */
 export function translateView<T extends ViewLike>(
   view: T,
   bundle: TranslationBundle | undefined,
-  opts?: ResolveOptions,
+  opts?: TranslateDocumentOptions,
 ): T {
-  const label = resolveViewLabel(bundle, view, opts);
-  const description = resolveViewDescription(bundle, view, opts);
+  const base = asRecord(opts?.packagedBase);
+  const label = valueOverridesPackagedBase(base, 'label', view.label)
+    ? (view.label as string)
+    : resolveViewLabel(bundle, view, opts);
+  const description = valueOverridesPackagedBase(base, 'description', view.description)
+    ? view.description
+    : resolveViewDescription(bundle, view, opts);
 
   let config = view.config;
   const objectName = viewObjectName(view);
   if (config && typeof config === 'object' && bundle && objectName) {
+    // The base's own `config` — `{}` when the base is known but carries none,
+    // so every def on the served view then counts as authored.
+    const packagedConfig = base === undefined ? undefined : asRecord(base.config) ?? {};
     const defs = translateBulkActionDefs(
       config.bulkActionDefs,
       bundle,
       objectName,
       viewTranslationKey(view, objectName),
       opts,
+      packagedConfig,
     );
     if (defs !== config.bulkActionDefs) config = { ...config, bulkActionDefs: defs };
   }
@@ -1003,6 +1058,7 @@ const METADATA_DOCUMENT_TRANSLATORS: Record<
   // `@objectstack/rest` reads the derived set.
   dataset: translateDataset,
   page: translatePage,
+  picklist: translatePicklist,
 };
 
 /**
@@ -1227,24 +1283,78 @@ function lookupGlobalFilterOption(
   return undefined;
 }
 
+/** A plain (non-array) object, or `undefined`. */
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/** A global-filter option value the bundle can address (`String(value)`). */
+function isOptionValue(value: unknown): value is string | number | boolean {
+  return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
+}
+
+/**
+ * [#20680] The packaged counterpart of one addressable part of a translated
+ * document — a dashboard's widget, global filter or filter option; a view's
+ * bulk-action def or its param (#20731) — found in `parent[key]` (an array) by
+ * the key the bundle addresses it by.
+ *
+ * Three answers, and the difference between the first two is the point:
+ *
+ *  - `undefined` when `parent` is unknown — no packaged base was supplied, so
+ *    nothing may be inferred and the catalog keeps applying
+ *    ({@link valueOverridesPackagedBase} answers `false` for it);
+ *  - `{}` when the base IS known but carries no such part — the part was
+ *    authored after the fact (a widget the tenant added), so every string on
+ *    it counts as diverged, as a scalar the packaged object never declared
+ *    does under #8284;
+ *  - the packaged part itself otherwise.
+ *
+ * One finder for both translators ({@link translateDashboard},
+ * {@link translateView}), as there is one comparison behind them.
+ */
+function packagedPart(
+  parent: Record<string, unknown> | undefined,
+  key: 'widgets' | 'globalFilters' | 'options' | 'bulkActionDefs' | 'params',
+  matches: (candidate: Record<string, any>) => boolean,
+): Record<string, unknown> | undefined {
+  if (parent === undefined) return undefined;
+  const list = parent[key];
+  if (!Array.isArray(list)) return {};
+  for (const candidate of list) {
+    const record = asRecord(candidate);
+    if (record !== undefined && matches(record)) return record;
+  }
+  return {};
+}
+
 /**
  * Overlay `dashboards.<name>.globalFilters.<key>.{label,options.<value>}`
  * onto one authored filter (#16772). Returns the input object itself when
  * nothing resolved, so `translateDashboard` can tell "untouched" from
  * "rebuilt" by identity and leave `globalFilters` off the copy when no filter
  * moved.
+ *
+ * `packagedFilter` is the same filter in the dashboard's packaged base
+ * ({@link packagedPart}); a label that diverged from it is authored
+ * and keeps its value (#20680, see {@link translateDashboard}).
  */
 function translateGlobalFilter(
   filter: GlobalFilterLike,
   bundle: TranslationBundle,
   dashboardName: string,
-  opts?: ResolveOptions,
+  opts: ResolveOptions | undefined,
+  packagedFilter: Record<string, unknown> | undefined,
 ): GlobalFilterLike {
   const key = globalFilterKey(filter);
   if (key === undefined) return filter;
 
   let next = filter;
-  const label = lookupGlobalFilterLabel(bundle, dashboardName, key, opts);
+  const label = valueOverridesPackagedBase(packagedFilter, 'label', filter.label)
+    ? undefined
+    : lookupGlobalFilterLabel(bundle, dashboardName, key, opts);
   if (label !== undefined) next = { ...next, label };
 
   if (Array.isArray(filter.options)) {
@@ -1257,6 +1367,12 @@ function translateGlobalFilter(
       // is the one spelling every value has; `null`/`undefined`/objects have
       // no such spelling and are left alone.
       if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') return option;
+      const packagedOption = packagedPart(
+        packagedFilter,
+        'options',
+        (candidate) => isOptionValue(candidate.value) && String(candidate.value) === String(value),
+      );
+      if (valueOverridesPackagedBase(packagedOption, 'label', option.label)) return option;
       const translated = lookupGlobalFilterOption(bundle, dashboardName, key, String(value), opts);
       if (translated === undefined) return option;
       changed = true;
@@ -1319,25 +1435,64 @@ function lookupWidgetAttr(
  * a string. Only filters the bundle actually addresses are rebuilt, and
  * `globalFilters` is left off the copy entirely when none moved, so a
  * dashboard without filters gains no invented key.
+ *
+ * ## [#20680] The catalog LOSES to an explicit override — ADR-0029 D9.2a
+ *
+ * The catalog is keyed by dashboard name and widget id, and it is the
+ * packaged translation of the PACKAGED declaration. Consulting it first
+ * overwrote every string authored on top of that declaration — measured: an
+ * org overlay on the platform's own `system_overview` (ADR-0126 Regime O,
+ * "yours to edit directly") published `200`, `?layers=true` showed it as
+ * effective, the metadata protocol's item and list reads both returned it,
+ * and the `/meta` item and list doors — the list is what the console draws
+ * the board from — kept serving the shipped widget title, because
+ * `platform-objects` ships an `en` bundle whose `widgets.<id>.title` repeats
+ * it. A dashboard whose bundle carries no widget titles (the showcase
+ * control) served the same overlay correctly.
+ *
+ * So every translatable string here follows the one sentence ADR-0029 D9.2a
+ * records for both object layers — *an explicit override beats a packaged
+ * default* — by the same comparison #8284 was ruled on: the catalog applies
+ * only while the served value still equals the one in
+ * {@link TranslateDocumentOptions.packagedBase}, which the serving layer
+ * supplies (the packaged dashboard declaration, before any tenant overlay —
+ * `getPackagedDashboardBase` on the metadata protocol). Each string is judged
+ * against ITS packaged counterpart, found by the key the bundle addresses it
+ * by (widget `id`, filter key, option `value`), so an edited widget title
+ * leaves every other widget translated; a widget, filter or option the base
+ * does not carry was authored after the fact and counts as diverged (the
+ * object rule's "a base that declares no such scalar"). No base supplied is
+ * the pre-#20680 behaviour, unchanged: the catalog applies.
  */
 export function translateDashboard<T extends DashboardLike>(
   doc: T,
   bundle: TranslationBundle | undefined,
-  opts?: ResolveOptions,
+  opts?: TranslateDocumentOptions,
 ): T {
   if (!doc || typeof doc !== 'object') return doc;
   const name = doc.name;
   if (!name || !bundle) return doc;
 
-  const label = lookupDashboardAttr(bundle, name, 'label', opts) ?? doc.label;
-  const description = lookupDashboardAttr(bundle, name, 'description', opts) ?? doc.description;
+  const base = asRecord(opts?.packagedBase);
+  const label = valueOverridesPackagedBase(base, 'label', doc.label)
+    ? doc.label
+    : lookupDashboardAttr(bundle, name, 'label', opts) ?? doc.label;
+  const description = valueOverridesPackagedBase(base, 'description', doc.description)
+    ? doc.description
+    : lookupDashboardAttr(bundle, name, 'description', opts) ?? doc.description;
 
   let globalFilters: GlobalFilterLike[] | undefined;
   if (Array.isArray(doc.globalFilters)) {
     let changed = false;
     const rebuilt = doc.globalFilters.map((filter) => {
       if (!filter || typeof filter !== 'object') return filter;
-      const next = translateGlobalFilter(filter, bundle, name, opts);
+      const key = globalFilterKey(filter);
+      const packagedFilter = packagedPart(
+        base,
+        'globalFilters',
+        (candidate) => key !== undefined && globalFilterKey(candidate) === key,
+      );
+      const next = translateGlobalFilter(filter, bundle, name, opts, packagedFilter);
       if (next !== filter) changed = true;
       return next;
     });
@@ -1348,11 +1503,24 @@ export function translateDashboard<T extends DashboardLike>(
     ? doc.widgets.map((w) => {
         if (!w || typeof w !== 'object' || typeof w.id !== 'string') return w;
         const next: WidgetLike = { ...w };
-        const title = lookupWidgetAttr(bundle, name, w.id, 'title', opts);
+        const packagedWidget = packagedPart(base, 'widgets', (candidate) => candidate.id === w.id);
+        const title = valueOverridesPackagedBase(packagedWidget, 'title', w.title)
+          ? undefined
+          : lookupWidgetAttr(bundle, name, w.id, 'title', opts);
         if (title) next.title = title;
-        const desc = lookupWidgetAttr(bundle, name, w.id, 'description', opts);
+        const desc = valueOverridesPackagedBase(packagedWidget, 'description', w.description)
+          ? undefined
+          : lookupWidgetAttr(bundle, name, w.id, 'description', opts);
         if (desc) next.description = desc;
-        const subCaption = lookupWidgetAttr(bundle, name, w.id, 'subCaption', opts);
+        // The sub-caption's packaged counterpart is the packaged widget's own
+        // `options` bag — `{}` when that widget declared none, so an authored
+        // sub-caption on it still counts as diverged.
+        const packagedOptions = packagedWidget === undefined
+          ? undefined
+          : asRecord(packagedWidget.options) ?? {};
+        const subCaption = valueOverridesPackagedBase(packagedOptions, 'description', w.options?.description)
+          ? undefined
+          : lookupWidgetAttr(bundle, name, w.id, 'subCaption', opts);
         if (subCaption) next.options = { ...w.options, description: subCaption };
         return next;
       })
@@ -2534,6 +2702,21 @@ export function scalarOverridesPackagedBase(
   key: 'label' | 'pluralLabel' | 'description',
   value: unknown,
 ): boolean {
+  return valueOverridesPackagedBase(base, key, value);
+}
+
+/**
+ * [#20680] The ONE comparison behind {@link scalarOverridesPackagedBase},
+ * keyed by any attribute name — the exported predicate's key union names the
+ * object scalars its two callers ask about, and the dashboard translator
+ * ({@link translateDashboard}) asks the same question of `title`, which that
+ * union does not carry; the view translator ({@link translateView}, #20731)
+ * asks it of a bulk-action def's `confirmText` and its params' `help`. One
+ * implementation, so the three conservative edges documented on the exported
+ * predicate hold for every caller alike; ⛔ never a second copy of the
+ * comparison.
+ */
+function valueOverridesPackagedBase(base: unknown, key: string, value: unknown): boolean {
   if (!base || typeof base !== 'object') return false;
   if (typeof value !== 'string' || value.length === 0) return false;
   return (base as Record<string, unknown>)[key] !== value;
@@ -2616,9 +2799,16 @@ export function translateObject<T extends ObjectLike>(
     const translatedHelp = lookupObjectFieldAttr(bundle, objectName, name, 'help', opts);
     if (translatedHelp) next.help = translatedHelp;
     if (Array.isArray(def.options)) {
+      // A picklist-bound field is served with its list's options resolved
+      // onto it (`PicklistServedFieldSchema`), and INHERITS the list's option
+      // labels (`picklists.<name>.options.<value>`); a field-level entry, when
+      // one exists, is the more specific and wins.
+      const picklist = typeof def.picklist === 'string' ? def.picklist : undefined;
       next.options = def.options.map((opt) => {
         if (!opt || typeof opt !== 'object' || opt.value === undefined) return opt;
-        const translated = lookupObjectFieldOption(bundle, objectName, name, opt.value, opts);
+        const translated =
+          lookupObjectFieldOption(bundle, objectName, name, opt.value, opts) ??
+          (picklist !== undefined ? lookupPicklistOption(bundle, picklist, opt.value, opts) : undefined);
         return translated ? { ...opt, label: translated } : opt;
       });
     }
@@ -2660,6 +2850,82 @@ export function translateObject<T extends ObjectLike>(
     ...(description !== undefined ? { description } : {}),
     ...(fields !== undefined ? { fields } : {}),
     ...(actions !== undefined ? { actions } : {}),
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Picklist resolvers (label / options) — `picklists.<name>`
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Minimal picklist metadata shape consumed by `translatePicklist`. */
+export interface PicklistLike {
+  name: string;
+  label?: string;
+  options?: Array<{ label?: string; value: string | number | boolean; [key: string]: unknown }>;
+  [key: string]: unknown;
+}
+
+function lookupPicklistLabel(
+  bundle: TranslationBundle | undefined,
+  picklistName: string,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.picklists?.[picklistName]?.label;
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+function lookupPicklistOption(
+  bundle: TranslationBundle | undefined,
+  picklistName: string,
+  optionValue: string | number | boolean,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  const key = String(optionValue);
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.picklists?.[picklistName]?.options?.[key];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Apply the active locale to a picklist metadata document — its `label`
+ * against `picklists.<name>.label`, and each option's `label` against
+ * `picklists.<name>.options.<value>`. The same option labels are what every
+ * referencing field inherits in {@link translateObject}, so the list is
+ * translated once. The input document is not mutated; a key the bundle does
+ * not carry leaves the authored value in place.
+ */
+export function translatePicklist<T extends PicklistLike>(
+  doc: T,
+  bundle: TranslationBundle | undefined,
+  opts?: TranslateDocumentOptions,
+): T {
+  if (!doc || typeof doc !== 'object' || typeof doc.name !== 'string' || !bundle) return doc;
+  const picklistName = doc.name;
+  const label = lookupPicklistLabel(bundle, picklistName, opts);
+  let options = doc.options;
+  if (Array.isArray(doc.options)) {
+    let changed = false;
+    const next = doc.options.map((opt) => {
+      if (!opt || typeof opt !== 'object' || opt.value === undefined) return opt;
+      const translated = lookupPicklistOption(bundle, picklistName, opt.value, opts);
+      if (!translated) return opt;
+      changed = true;
+      return { ...opt, label: translated };
+    });
+    if (changed) options = next;
+  }
+  if (label === undefined && options === doc.options) return doc;
+  return {
+    ...doc,
+    ...(label !== undefined ? { label } : {}),
+    ...(options !== doc.options ? { options } : {}),
   };
 }
 

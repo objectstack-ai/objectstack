@@ -55,6 +55,7 @@ import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
 import {
   normalizeAnalyticsFilterTree,
   toSqlBindValue,
+  NO_DATETIME_COLUMNS,
 } from '../strategies/filter-normalizer.js';
 import { AnalyticsService } from '../analytics-service.js';
 
@@ -163,7 +164,7 @@ const CASES: Array<{
 describe('[#5526] a leaf carries the author comparand ITSELF', () => {
   for (const c of CASES) {
     it(`${c.name} → leaf ${JSON.stringify(c.leaf)}`, () => {
-      const node = normalizeAnalyticsFilterTree({ where: { code: { $eq: c.value } } });
+      const node = normalizeAnalyticsFilterTree({ where: { code: { $eq: c.value } } }, NO_DATETIME_COLUMNS);
       expect(node?.kind).toBe('leaf');
       // Exact set, not "contains": the leaf carries one comparand and it is the
       // author's.
@@ -173,7 +174,7 @@ describe('[#5526] a leaf carries the author comparand ITSELF', () => {
 
   it('the leaf value is the SAME REFERENCE for a non-primitive, i.e. nothing re-encoded it', () => {
     const when = new Date('2026-03-04T05:06:07.000Z');
-    const node = normalizeAnalyticsFilterTree({ where: { closed: { $gte: when } } }) as
+    const node = normalizeAnalyticsFilterTree({ where: { closed: { $gte: when } } }, NO_DATETIME_COLUMNS) as
       | { kind: 'leaf'; values: unknown[] }
       | null;
     expect(node?.values[0]).toBe(when);
@@ -239,7 +240,7 @@ describe('[#5526] the SQL bind form converts only what a driver cannot bind', ()
     // shared comparand-TYPE face, which the door runs before any leaf is built
     // (#7872, 2026-08-12: 「refuses everything else loudly at the compile
     // face」), in its sentence and at its path — the FilterArray spelling's.
-    const refusal = (): unknown => normalizeAnalyticsFilterTree({ where: { code: { $eq: undefined } } });
+    const refusal = (): unknown => normalizeAnalyticsFilterTree({ where: { code: { $eq: undefined } } }, NO_DATETIME_COLUMNS);
     expect(refusal).toThrowError(/^Filter comparand at where\.code\.\$eq is undefined\./);
     // Still the module's one envelope (#5352), so the REST face answers 400.
     try {
@@ -252,7 +253,7 @@ describe('[#5526] the SQL bind form converts only what a driver cannot bind', ()
     // The neighbouring `null` comparand keeps compiling, and to the null
     // PREDICATE rather than a value comparison (#5332) — the row that proves the
     // refusal did not widen to `== null`.
-    expect(normalizeAnalyticsFilterTree({ where: { code: { $eq: null } } })).toEqual({
+    expect(normalizeAnalyticsFilterTree({ where: { code: { $eq: null } } }, NO_DATETIME_COLUMNS)).toEqual({
       kind: 'leaf', member: 'code', operator: 'notSet', values: [],
     });
   });
@@ -523,7 +524,7 @@ describe('[#5526] the LIKE family stringifies at the emitter, on all three emitt
   };
   /** The operand the engine receives, via the private converter. */
   const engineOperand = (where: FilterCondition): unknown => {
-    const node = normalizeAnalyticsFilterTree({ where }) as {
+    const node = normalizeAnalyticsFilterTree({ where }, NO_DATETIME_COLUMNS) as {
       operator: string;
       values: unknown[];
     };

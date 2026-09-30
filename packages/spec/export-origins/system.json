@@ -476,6 +476,7 @@
     "PageComponentLike": "src/system/i18n-resolver.ts#PageComponentLike (interface)",
     "PageLike": "src/system/i18n-resolver.ts#PageLike (interface)",
     "PageRegionLike": "src/system/i18n-resolver.ts#PageRegionLike (interface)",
+    "PicklistLike": "src/system/i18n-resolver.ts#PicklistLike (interface)",
     "Plan": "src/system/license.zod.ts#Plan (type)",
     "PlanParsed": "src/system/license.zod.ts#PlanParsed (type)",
     "PlanSchema": "src/system/license.zod.ts#PlanSchema (const)",
@@ -811,6 +812,7 @@
     "translateMetadataDocument": "src/system/i18n-resolver.ts#translateMetadataDocument (function)",
     "translateObject": "src/system/i18n-resolver.ts#translateObject (function)",
     "translatePage": "src/system/i18n-resolver.ts#translatePage (function)",
+    "translatePicklist": "src/system/i18n-resolver.ts#translatePicklist (function)",
     "translateView": "src/system/i18n-resolver.ts#translateView (function)",
     "validationMessageTranslationKey": "src/system/validation-message.ts#validationMessageTranslationKey (function)",
     "walkAddressedPageComponents": "src/system/i18n-resolver.ts#walkAddressedPageComponents (function)"

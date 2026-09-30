@@ -114,7 +114,7 @@ import {
 // the spec and shared by every JS evaluation face — so a `check` evaluated here
 // and the same predicate compiled to SQL by `read-scope-sql.ts` fold the same
 // domain.
-import { nextUtcCalendarDay, utcInstantMs, asciiCaseInsensitiveContains } from '@objectstack/spec/data';
+import { nextUtcCalendarDay, utcInstantMs, asciiCaseInsensitiveContains, isUnboundedAbove } from '@objectstack/spec/data';
 // [#7536] `$like`/`$ilike`'s pattern language, likewise defined once in the
 // spec: this face evaluates the pattern in JS, `driver-sql` compiles the same
 // one to `LIKE`/`GLOB`, and a translation written twice would agree on the day
@@ -850,10 +850,20 @@ function assertComparableReference(
  * `YYYY-MM-DD` value, so no field-type lookup is needed — which matters here,
  * because this evaluator sees a bare record and has no schema to consult.
  * A full-ISO or non-string bound keeps exact-instant semantics.
+ *
+ * [#20600] `9999-12-31`, the last supported day, has no next day to compare
+ * against (`UNBOUNDED_ABOVE`): every instant the platform stores is on or
+ * before it, so a value that denotes an instant ({@link utcInstantMs}) is
+ * inside the bound, and any other value keeps the comparison as written — no
+ * schema here says it is temporal, and the check must not admit a value the
+ * operands do not justify. The five-digit `'10000-01-01'` this compared
+ * against before sorted below every `'2026-…'` value, so the bound DENIED
+ * every write it should have admitted.
  */
 function lteBound(actual: unknown, bound: unknown): boolean {
   if (bound == null) return false;
   const nextDay = nextUtcCalendarDay(bound);
+  if (isUnboundedAbove(nextDay)) return utcInstantMs(actual) !== null || order(actual, bound, (a, b) => a <= b);
   if (nextDay != null) return order(actual, nextDay, (a, b) => a < b);
   return order(actual, bound, (a, b) => a <= b);
 }

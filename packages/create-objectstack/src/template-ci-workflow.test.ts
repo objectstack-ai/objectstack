@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack contributors. Apache-2.0 license.
 //
-// The bundled template's own CI workflow (#16330).
+// The bundled template's own CI workflow (commit 4998efa71).
 //
 // The scaffolder already creates a `.github/` directory at runtime — for one
 // file, `copilot-instructions.md` — while the template's gates (`validate`,

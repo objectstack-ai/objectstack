@@ -41,7 +41,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { FILTER_OPERATORS, LOGICAL_OPERATORS, type Cube, type FilterCondition } from '@objectstack/spec/data';
 import type { AnalyticsQuery, StrategyContext } from '@objectstack/spec/contracts';
 
-import { collectFilterLeaves, normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
+import { collectFilterLeaves, normalizeAnalyticsFilterTree, NO_DATETIME_COLUMNS } from '../strategies/filter-normalizer.js';
 import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
 import type { DatasetScope } from '../strategies/types.js';
@@ -330,7 +330,7 @@ describe('[#20098] the catch-all is untouched', () => {
       { f: { $exists: true } }, { f: { $exists: false } }, { f: null } as unknown as FilterCondition, { f: 'x' },
     ];
     for (const where of samples) {
-      for (const leaf of collectFilterLeaves(normalizeAnalyticsFilterTree({ where } as never))) {
+      for (const leaf of collectFilterLeaves(normalizeAnalyticsFilterTree({ where } as never, NO_DATETIME_COLUMNS))) {
         emitted.add(leaf.operator);
         expect(() => convert(leaf.operator, leaf.values), `${JSON.stringify(where)} → ${leaf.operator}`).not.toThrow();
       }

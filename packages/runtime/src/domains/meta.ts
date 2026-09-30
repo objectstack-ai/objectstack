@@ -11,7 +11,7 @@
 import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
 } from '@objectstack/core';
-// [#10503] `canonicalMetaUrlType` is the FOLD this transport was missing.
+// [commit 67ceb9aef] `canonicalMetaUrlType` is the FOLD this transport was missing.
 // See the two call sites below for what each one was deciding raw.
 import { canonicalMetaUrlType, pluralToSingular } from '@objectstack/spec/shared';
 import { CoreServiceName } from '@objectstack/spec/system';
@@ -100,7 +100,7 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
  * ("real services with no written contract, so they keep today's `any` rather
  * than being given a shape here that nothing verifies"). The `any` is honest
  * about the SLOT. What it also did, silently, was hand every request literal
- * downstream of it an unchecked call target: the #11006 series' end state —
+ * downstream of it an unchecked call target: the end state of commit cccbe51bf's ruled pattern —
  * "an undeclared key in a request literal is a compile error" — stopped one
  * seam short here, so a misspelt or undeclared key in these literals compiled,
  * and so did a misspelt VERB.
@@ -113,7 +113,7 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
  * probes below exist to deny — and it would have to answer for the three verbs
  * in the second group, which no contract declares at all. So the narrowing
  * happens at the consumer, once, exactly as `domains/packages.ts` (#13598) and
- * `domains/mcp.ts` (#8726) narrow the same slot for their own seams.
+ * `domains/mcp.ts` (commit e783e163d) narrow the same slot for their own seams.
  *
  * ## ⛔ Every member is OPTIONAL, and the runtime probes STAY
  *
@@ -197,7 +197,7 @@ function mayReadPendingDrafts(caller: unknown): boolean {
 }
 
 /**
- * [#8848] The methods `/metadata/:type/:name` actually serves — the single
+ * [commit 4fc4a3c0b] The methods `/metadata/:type/:name` actually serves — the single
  * source for both the `Allow` header and the refusal message, so the two
  * cannot drift apart.
  *
@@ -816,7 +816,7 @@ async function answerMetaLayered(
 }
 
 /**
- * Percent-decode the `:name` path segment. [#12195]
+ * Percent-decode the `:name` path segment. [commit 7986d973f]
  *
  * This dispatcher splits the RAW path (`path.split('/')`) and, unlike the
  * `packages/rest` Hono routes, nothing decodes its parameters for it —
@@ -824,11 +824,11 @@ async function answerMetaLayered(
  * hands to `dispatch()`, returns `/meta/lead/views%2Fall_leads` verbatim while
  * `c.req.param('name')` on the same request yields `views/all_leads`.
  *
- * That difference is load-bearing here. Until #12195 the compound fold
+ * That difference is load-bearing here. Until commit 7986d973f the compound fold
  * (`parts.slice(1).join('/')`) is what let a slash-bearing name be addressed
  * on this transport at all — unencoded, across segments. Retiring the fold
  * without decoding would leave a pre-grammar residue row addressable through
- * `packages/rest` and NOT through the dispatcher, breaking #12194's landed
+ * `packages/rest` and NOT through the dispatcher, breaking commit 311433f6b's landed
  * acceptance criterion that "reads and `deleteMetaItem` still answer for
  * pre-grammar residue rows, so any stored junk name remains listable and
  * clearable". Decoding makes ONE spelling — percent-encoded, the spelling the
@@ -1043,11 +1043,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
 
     // GET /metadata/:type/:name/published → get published version
     //
-    // [#12195] EXACTLY three segments, and no fold. This used to be
+    // [commit 7986d973f] EXACTLY three segments, and no fold. This used to be
     // `parts.length >= 3` with `parts.slice(1, -1).join('/')`, which re-joined
     // every middle segment into one slash-bearing key so
     // `lead/views/all_leads/published` resolved as name `views/all_leads`.
-    // Stage 1 (#12194) refuses every slash-bearing name at the publish door,
+    // Stage 1 (commit 311433f6b) refuses every slash-bearing name at the publish door,
     // so that fold could only ever address a name that can no longer be
     // written.
     if (parts.length === 3 && parts[2] === 'published' && (!method || method === 'GET')) {
@@ -1140,7 +1140,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
 
         const metadataService = await deps.getService(_context, CoreServiceName.enum.metadata);
         if (metadataService && typeof (metadataService as any).getPublished === 'function') {
-            // [#10503] FOLDED — the smaller second site of the same class,
+            // [commit 67ceb9aef] FOLDED — the smaller second site of the same class,
             // dispatcher edition (the REST twin folds at the same point). The
             // layered consult above folds internally at the protocol boundary;
             // this fallback reads the code/package registry, which stores
@@ -1156,7 +1156,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         if (metaSvc && typeof (metaSvc as any).getPublished === 'function') {
             let fallbackData: unknown;
             try {
-                // [#10503] Same fold — this slot reads the same canonical store.
+                // [commit 67ceb9aef] Same fold — this slot reads the same canonical store.
                 fallbackData = await (metaSvc as any).getPublished(canonicalMetaUrlType(type), name);
             } catch { /* fall through */ }
             if (fallbackData !== undefined) return servePublished(fallbackData);
@@ -1164,13 +1164,13 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         return { handled: true, response: deps.error('Not found', 404) };
     }
 
-    // /metadata/:type/:name — EXACTLY two segments. [#12195]
+    // /metadata/:type/:name — EXACTLY two segments. [commit 7986d973f]
     //
     // This used to be `parts.length >= 2` with `parts.slice(1).join('/')`: every
     // segment after the type was re-joined into one slash-bearing lookup key,
     // so `/metadata/lead/views/all_leads` resolved as name `views/all_leads`.
     // That fold WAS compound-name addressing on this transport, and stage 1
-    // (#12194) made every name it could reach unwritable at the publish door.
+    // (commit 311433f6b) made every name it could reach unwritable at the publish door.
     //
     // ⚠️ The `>=` also swallowed three-segment paths that were never compound
     // names at all — `/metadata/object/foo/references` folded to name
@@ -1244,10 +1244,10 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             // partition, never env-wide and never another org's. The active
             // organization is resolved HERE, once, and reused by the write
             // threading below — authorization and scope read one value (the
-            // single-resolution shape the REST doors carry, #8919). Resolving
+            // single-resolution shape the REST doors carry, commit b5378550e). Resolving
             // it is a session read, not a protocol probe: the 403-vs-501
             // discipline above is untouched.
-            // [#10503] Folded at the boundary, once — the verdict and the
+            // [commit 67ceb9aef] Folded at the boundary, once — the verdict and the
             // scope decision below must read the same spelling.
             const canonicalType = canonicalMetaUrlType(type);
             // [#20408] The caller's VETTED organization — the `tenantId`
@@ -1305,8 +1305,8 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // capability gate above already made — scope and
                     // authorization read the same value by construction.
                     //
-                    // [#10503] The segment is FOLDED before the scope decision
-                    // — the correction #10340 landed for the REST `/meta`
+                    // [commit 67ceb9aef] The segment is FOLDED before the scope decision
+                    // — the correction commit 26f3588fb landed for the REST `/meta`
                     // doors, arriving on the second transport. This branch read
                     // the RAW `parts[0]`, while `protocol.saveMetaItem` below
                     // folds the same string through `canonicalizeMetaRequestType`
@@ -1334,7 +1334,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     const organizationId = organizationIdForMetaWrite(
                         canonicalType, activeOrganizationId,
                     );
-                    // [#10888] Server-stated face: this branch answers through
+                    // [commit d806081dd] Server-stated face: this branch answers through
                     // `deps.errorFromThrown`, which carries the refusal's
                     // `issues[]` in `details` (see the `details.issues` pin in
                     // `http-dispatcher.test.ts`), so `saveMetaItem`'s 422 renders
@@ -1395,7 +1395,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             return { handled: true, response: deps.error('Save not supported', 501) };
         }
 
-        // [#8848] The read `try` below is this block's default answer, and it
+        // [commit 4fc4a3c0b] The read `try` below is this block's default answer, and it
         // used to carry NO method guard at all: every verb that is not `PUT`
         // fell into it and was served the ordinary metadata READ.
         //
@@ -1971,9 +1971,9 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         return { handled: true, response: deps.success({ types: ['object', 'app', 'plugin'] }) };
     }
 
-    // [#12195] A LOCATED refusal, not a bare `{ handled: false }`.
+    // [commit 7986d973f] A LOCATED refusal, not a bare `{ handled: false }`.
     //
-    // This tail was unreachable until this card: the branches above covered
+    // This tail was unreachable until that commit: the branches above covered
     // zero segments, one segment, and — through the compound fold — every path
     // with two or MORE. Retiring the fold makes it reachable for the first
     // time, and what reaches it is a `/meta` path with no route: three or more

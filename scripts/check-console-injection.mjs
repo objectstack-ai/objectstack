@@ -196,11 +196,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '7d. The producer cannot emit that stamp in the first place. writeStamp is': 2,
   '8. A build that found no skew records it, and this gate says so honestly.': 3,
   '12. ROUND TRIP against the real assert script: whatever it stamps, this gate': 2,
+  '13. THE BLIND SPOT (objectstack#20646): the build-time derivation must choose': 6,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 10;
+const SELF_TEST_BATTERY_FLOOR = 11;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -847,6 +848,68 @@ function selfTest() {
       failures.push('assert script did not write the injection stamp');
     } else {
       expect('round trip: this gate accepts the stamp the assert script wrote', evaluate({ distDir: dist, specDir: injected }).code, 0);
+    }
+  }
+
+  // 13. THE BLIND SPOT (objectstack#20646): the build-time derivation must choose
+  //     its probes with the bundle in view. A spec package publishes entries a
+  //     console never imports, and the alphabetically first unique description
+  //     can sit in one of them — on the fresh side that read a WORKING injection
+  //     as "neither spec appears", on the stale side it let a console built from
+  //     the PUBLISHED spec pass. Each fixture below puts the first unique
+  //     candidate where the bundle does not carry it, and runs the real assert
+  //     script against it.
+  battery('13. THE BLIND SPOT (objectstack#20646): the build-time derivation must choose');
+  {
+    const assert = path.join(ROOT, 'scripts', 'assert-console-spec-injection.mjs');
+    const runAssert = (injected, vendored, dist) =>
+      spawnSync(
+        process.execPath,
+        [assert, '--injected', injected, '--vendored', vendored, '--assets', path.join(dist, 'assets')],
+        { encoding: 'utf8' },
+      );
+    const SHARED = 'Shared text in both specs for the blind-spot fixtures';
+    // Both sort before FRESH and STALE, so the old first-candidate pick chose them.
+    const UNBUNDLED_FRESH = 'A description only an injected entry the console never imports carries';
+    const UNBUNDLED_STALE = 'A description only a published entry the console never imports carries';
+
+    // Fresh side: the first injected-only candidate is not in the bundle, a later
+    // one is. The injection worked, so the check must pass on the one it carries.
+    const freshInjected = makeSpecPkg(path.join(root, 'bs-fresh-injected'), [UNBUNDLED_FRESH, FRESH, SHARED]);
+    const freshVendored = makeSpecPkg(path.join(root, 'bs-fresh-vendored'), [STALE, SHARED]);
+    const freshDist = makeDist(path.join(root, 'bs-fresh-dist'), `console(${JSON.stringify(FRESH)})`, undefined);
+    const fresh = runAssert(freshInjected, freshVendored, freshDist);
+    expect('a witness the bundle carries verifies, whatever sorts first', fresh.status, 0);
+    const freshStamp = fs.existsSync(path.join(freshDist, STAMP_BASENAME)) ? readStamp(freshDist) : null;
+    expect('the stamp records the witness the bundle carries', freshStamp?.packages?.[0]?.freshWitness, FRESH);
+    expect('and this gate replays that stamp green', evaluate({ distDir: freshDist, specDir: freshInjected }).code, 0);
+
+    // Stale side: the first published-only candidate is not in the bundle, a
+    // later one IS. The console carries the published spec, so the check must
+    // fail — the old single pick read the absent one and passed.
+    const staleInjected = makeSpecPkg(path.join(root, 'bs-stale-injected'), [FRESH, SHARED]);
+    const staleVendored = makeSpecPkg(path.join(root, 'bs-stale-vendored'), [UNBUNDLED_STALE, STALE, SHARED]);
+    const staleDist = makeDist(
+      path.join(root, 'bs-stale-dist'),
+      `console(${JSON.stringify(FRESH)});console(${JSON.stringify(STALE)})`,
+      undefined,
+    );
+    const stale = runAssert(staleInjected, staleVendored, staleDist);
+    expect('any published-only description in the bundle fails the build', stale.status, 1);
+    checked += 1;
+    if (!stale.stderr.includes('still carries the PUBLISHED') || !stale.stderr.includes(STALE)) {
+      failures.push('the stale-side failure must say the published spec is bundled and name the text it found');
+    }
+    expect('a failing build writes no stamp', fs.existsSync(path.join(staleDist, STAMP_BASENAME)), false);
+
+    // Neither: the bundle carries no unique text from either spec. Still exit 2 —
+    // choosing from the bundle must never turn "unverified" into a pass.
+    const neitherDist = makeDist(path.join(root, 'bs-neither-dist'), `console(${JSON.stringify(SHARED)})`, undefined);
+    const neither = runAssert(freshInjected, freshVendored, neitherDist);
+    expect('neither spec in the bundle stays inconclusive', neither.status, 2);
+    checked += 1;
+    if (!neither.stderr.includes('Neither spec appears')) {
+      failures.push('the neither-found verdict must still say that neither spec appears');
     }
   }
 

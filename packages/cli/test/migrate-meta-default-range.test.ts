@@ -51,7 +51,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MIGRATIONS_BY_MAJOR, MIGRATION_MAJORS, MIGRATION_SUPPORT_FLOOR } from '@objectstack/spec';
+import { MIGRATIONS_BY_MAJOR, MIGRATION_MAJORS, MIGRATION_SUPPORT_FLOOR } from '@objectstack/spec/migrations';
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import { childEnv } from './helpers/serve-process.js';
 

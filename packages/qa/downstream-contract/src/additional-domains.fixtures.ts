@@ -8,7 +8,7 @@
 // README.
 //
 // The annotations moved from `XInput` to the BARE name in protocol 17
-// (ADR-0122 phase 2, #6083) and that is not an exception to the freeze — it is
+// (ADR-0122 phase 2, commit 53068c130) and that is not an exception to the freeze — it is
 // the freeze working. These fixtures pin the AUTHOR state; phase 2 moved the
 // author state onto the bare name and retired `XInput` as a synonym of it, so
 // keeping `XInput` here was not an option and switching to it was not a choice.
@@ -130,7 +130,7 @@ export const DcMapping: Mapping = {
   fieldMapping: [{ source: 'Name', target: 'name', transform: 'none' }],
 };
 
-// `DcTheme` left with `ThemeSchema` (#10485, ADR-0049 — the theme authoring
+// `DcTheme` left with `ThemeSchema` (commit 35ad101bc, ADR-0049 — the theme authoring
 // surface is retired; the freeze pins author state against a LIVE surface, and
 // this one no longer exists).
 

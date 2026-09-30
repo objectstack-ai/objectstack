@@ -61,6 +61,7 @@ import { ToolSchema } from './ai/tool.zod';
 // Data Protocol (additional)
 import { HookSchema } from './data/hook.zod';
 import { MappingSchema } from './data/mapping.zod';
+import { PicklistSchema, PicklistExtensionSchema } from './data/picklist.zod';
 import { CubeSchema } from './data/analytics.zod';
 
 // Automation Protocol (additional)
@@ -335,6 +336,27 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
    * ```
    */
   objectExtensions: z.array(ObjectExtensionSchema).optional().describe('Extensions to objects owned by other packages'),
+
+  /**
+   * Shared option lists (`data/picklist.zod.ts`): one list of select options
+   * that fields on any object reference by name — `Field.select({ picklist:
+   * 'industry' })` — instead of each field copying an `options` array.
+   */
+  picklists: z.array(PicklistSchema).optional().describe('Shared option lists that select fields reference by name'),
+
+  /**
+   * Picklist Extensions: options to ADD to picklists owned by other packages —
+   * the `objectExtensions` idiom, additive only.
+   *
+   * @example
+   * ```ts
+   * picklistExtensions: [{
+   *   extend: 'industry',
+   *   options: [{ label: 'Healthcare', value: 'healthcare' }],
+   * }]
+   * ```
+   */
+  picklistExtensions: z.array(PicklistExtensionSchema).optional().describe('Options added to picklists owned by other packages (additive only)'),
 
   /** 
    * ObjectUI: User Interface Layer 
@@ -1008,6 +1030,8 @@ export const COMPOSE_KEY_DISPOSITIONS = Object.freeze({
   datasourceMapping: 'concat',
   translations: 'concat',
   objectExtensions: 'concat',
+  picklists: 'concat',
+  picklistExtensions: 'concat',
   apps: 'concat',
   views: 'concat',
   // [#5320] Machine-assembled channel (never authorable — the schema types it

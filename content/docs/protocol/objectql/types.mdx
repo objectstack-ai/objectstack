@@ -465,9 +465,11 @@ business_hours_start:
 
 **Storage format:** `HH:MM:SS`, gaining a `.fff` millisecond suffix **only** when
 the milliseconds are non-zero (`14:30:00`, but `14:30:00.100`). Input accepts
-`HH:MM` or `HH:MM:SS` (with an optional fractional part and `Z`/offset); `14:30`
-is completed to `14:30:00`, so one wall clock can never split into several stored
-values. A `Date`, an epoch, or a full timestamp folds to its **UTC** time-of-day.
+`HH:MM` or `HH:MM:SS`, with an optional fractional part and no zone: `14:30Z` or
+`14:30+08:00` is refused with `invalid_time` (drop the suffix, or use a `datetime`
+field for an instant). `14:30` is completed to `14:30:00`, so one wall clock can
+never split into several stored values. A `Date` or a full ISO 8601 timestamp with
+a four-digit year folds to its **UTC** time-of-day; an epoch number is refused.
 A `time` is a wall-clock value, not an instant: it is validated as a time-of-day,
 not parsed as a date.
 

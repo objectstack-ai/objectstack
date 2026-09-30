@@ -330,7 +330,7 @@ describe('#15788 — one interpolator, not a second template engine', () => {
         'first={record.tags.0}',
         // Context token, resolved from `AutomationContext`, not from variables.
         'by {$User.Id}',
-        // The CEL-mirrored numeric stdlib (#11060) — nothing a naive
+        // The CEL-mirrored numeric stdlib (commit 815585513) — nothing a naive
         // substitution implements.
         'score {round(record.score)}',
         // Unresolvable embedded token renders as the empty string, not the

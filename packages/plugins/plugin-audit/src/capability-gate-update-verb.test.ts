@@ -10,7 +10,7 @@
  * *move* an existing one onto it, and a `sys_comment` could be re-threaded
  * into a feeds-disabled object's thread. The access kits authorize the
  * re-point (`comment-access-hooks.ts` since #4630,
- * `attachment-access-hooks.ts` since #10091) — those are ACCESS checks, and
+ * `attachment-access-hooks.ts` since commit da891e0ef) — those are ACCESS checks, and
  * the capability half was never asked on the update verb.
  *
  * This file runs against a REAL `ObjectQL` (a stub driver underneath), not the

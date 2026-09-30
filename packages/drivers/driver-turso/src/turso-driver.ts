@@ -38,6 +38,7 @@ import {
 import { StandardErrorCode } from '@objectstack/spec/api';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import type { DriverOptions, FilterCondition } from '@objectstack/spec/data';
+import { UNBOUNDED_ABOVE, isUnboundedAbove, type UnboundedAbove } from '@objectstack/spec/data';
 import type { Client } from '@libsql/client';
 import { RemoteTransport } from './remote-transport.js';
 import {
@@ -316,7 +317,8 @@ function refuseRemoteAutonumber(object: string, fields: string[], path: string):
     `which is why it answers NOT_IMPLEMENTED/501 rather than a 400. Use the local or ` +
     `embedded-replica transport for objects that carry record numbers, or supply the value ` +
     `explicitly (a seed replay or \`preserveAudit\` import keeps its own numbers and is written ` +
-    `unchanged). Until this change the same call RESOLVED and wrote NULL into the slot (#6944).`,
+    `unchanged). It is refused rather than resolved, because resolving would write NULL into the ` +
+    `slot and persist the row without its record number.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
@@ -2356,8 +2358,8 @@ export class TursoDriver extends SqlDriver {
       `not generate record numbers, so an upsert that matches no existing row inserts one without ` +
       `it — the row is persisted, its record number is not, and nothing else reports this. Supply ` +
       `the value explicitly on this path (a seed replay or import keeps its own numbers and is ` +
-      `written unchanged), or use the local / embedded-replica transport, which do issue them ` +
-      `(#7099).`,
+      `written unchanged), or use the local / embedded-replica transport, which do issue ` +
+      `them.`,
       { object, fields: unfilled, id: row.id, path },
     );
   }
@@ -2627,12 +2629,21 @@ export class TursoDriver extends SqlDriver {
             break;
           }
           out.$gte = this.temporalFilterValue(object, field, raw[0]);
-          Object.assign(out, this.toRemoteUpperBound(object, field, '$lte', raw[1]));
+          // [#20600] A max on the last supported day bounds nothing: the range
+          // keeps its minimum alone.
+          const upper = this.toRemoteUpperBound(object, field, '$lte', raw[1]);
+          if (!isUnboundedAbove(upper)) Object.assign(out, upper);
           break;
         }
-        case '$lte':
-          Object.assign(out, this.toRemoteUpperBound(object, field, op, raw));
+        case '$lte': {
+          // [#20600] `$lte` on the last supported day has no bound to send; what
+          // it still asks is that the column has a value, which the transport's
+          // `$null: false` arm spells `IS NOT NULL` — the reading local mode's
+          // emitter gives the same rewrite.
+          const upper = this.toRemoteUpperBound(object, field, op, raw);
+          Object.assign(out, isUnboundedAbove(upper) ? { $null: false } : upper);
           break;
+        }
         case '$in':
         case '$nin':
           out[op] = Array.isArray(raw)
@@ -2667,15 +2678,18 @@ export class TursoDriver extends SqlDriver {
    *
    * `calendarDayUpperBoundRewrite` is the inherited authority for that rule and
    * already scopes itself to `datetime`, so `date`/`time` columns compile
-   * byte-identically to before.
+   * byte-identically to before. [#20600] `UNBOUNDED_ABOVE` — the last
+   * supported day, whose whole-day bound bounds nothing — is handed back for
+   * the caller to compile no upper bound.
    */
   private toRemoteUpperBound(
     object: string,
     field: string,
     op: string,
     raw: unknown,
-  ): Record<string, unknown> {
+  ): Record<string, unknown> | UnboundedAbove {
     const rewritten = this.calendarDayUpperBoundRewrite(object, field, op, raw);
+    if (isUnboundedAbove(rewritten)) return UNBOUNDED_ABOVE;
     if (rewritten) return { [rewritten.op]: rewritten.value };
     return { [op]: this.temporalFilterValue(object, field, raw) };
   }

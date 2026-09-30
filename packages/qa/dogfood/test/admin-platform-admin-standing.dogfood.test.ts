@@ -30,7 +30,7 @@
 //     hand-roll better-auth's signed-cookie contract with
 //     `/admin/stop-impersonating` and silently detach the #8243 bearer-rotation
 //     hook. It is a better-auth PLUGIN endpoint with only the authorization
-//     predicate replaced, and since #11686 that predicate is the consolidated
+//     predicate replaced, and since commit 7131f12bf that predicate is the consolidated
 //     authority `hasPlatformAdminStanding`. `has-permission` (#11900, ruled
 //     2026-08-25) is a third shape: a permission QUERY, raw-mounted WITHOUT
 //     the refusing judge — the platform admin's query is answered from the
@@ -59,7 +59,7 @@
 //         then folds back into `positions[]`. A working "Set Platform Role"
 //         button would be a supported, gated, one-user-at-a-time channel for
 //         resurrecting the dual identity representation the 2026-08-18 Option-3
-//         veto killed. So the maintainer retired the CONSOLE ACTION (PR #11530)
+//         veto killed. So the maintainer retired the CONSOLE ACTION (commit 033a34c7c)
 //         and left the vendor ROUTE mounted and vendor-gated, byte for byte.
 //
 // ⛔ THEREFORE: a `403` from any of those eight is the system working. Do not

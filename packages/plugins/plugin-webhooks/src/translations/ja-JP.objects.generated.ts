@@ -18,7 +18,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_webhook: {
     label: "ウェブフック",
     pluralLabel: "ウェブフック",
-    description: "送信 HTTP Webhook サブスクリプション。defineWebhook() またはスタジオエディタで作成し、HTTP コネクタプラグインが実行します。",
+    description: "送信 HTTP Webhook サブスクリプション。コードでは defineStack({ webhooks }) / defineWebhook() で宣言する（起動時に行として実体化）か、スタジオエディタで直接作成します。Webhook 自動エンキューアが共有 HTTP アウトボックスへディスパッチします。",
     fields: {
       id: {
         label: "Webhook ID"
@@ -69,7 +69,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       definition_json: {
         label: "定義",
-        help: "シリアライズされた Webhook JSON（@objectstack/spec/automation/webhook 参照）— ヘッダー/認証/リトライ/ペイロード設定を含む"
+        help: "シリアライズされた Webhook JSON（@objectstack/spec/automation/webhook 参照）— タイムアウトなど、作成されたエンベロープの残りの設定。認証情報はここには保存されません。署名シークレットは暗号化された `signing_secret` フィールドに、カスタムヘッダーは暗号化された `headers_secret` フィールドに保存されます。"
       },
       headers_secret: {
         label: "カスタムヘッダー",

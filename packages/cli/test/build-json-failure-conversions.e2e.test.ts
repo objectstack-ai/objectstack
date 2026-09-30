@@ -15,7 +15,7 @@
  * to appear exactly ONCE — the payload now carries the notice, and the terminal
  * gains no second stderr line for it.
  *
- * #12125 — `os build --json`'s FAILURE payloads dropped the `conversions` field
+ * The defect commit 79cf692b0 fixed — `os build --json`'s FAILURE payloads dropped the `conversions` field
  * the run had ALREADY COMPUTED, on all nine of its failure exits.
  *
  * The same "computed, then dropped on a failure exit" shape as the `warnings`
@@ -523,7 +523,7 @@ describe('#12125 — the contract is exhaustive over `compile.ts`, not just over
     // The one integer left, and it rots only in the direction that has to be
     // reviewed anyway: exits being REMOVED. Ten is the population the ruling in
     // this file's header was made over — nine failure exits plus the terminal
-    // success payload, the count `#12285` pinned on the day it landed — not a
+    // success payload, the count commit 79cf692b0 pinned on the day it landed — not a
     // count of today. (Today is eleven: the tenth FAILURE exit is ADR-0130 D4's
     // per-package author-time rule leg, #14439, a multi-package artifact
     // running the same rule table once per package. It arrived after the ruling

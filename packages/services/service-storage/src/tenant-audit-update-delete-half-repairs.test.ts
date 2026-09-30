@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// #13178 — the four HALF-REPAIRS: the `update` / `delete` siblings of the two
+// Commit f087c376f — the four HALF-REPAIRS: the `update` / `delete` siblings of the two
 // inserts #12745 and #12928 repaired.
 //
 // ## What was half-repaired

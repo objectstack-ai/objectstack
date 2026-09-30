@@ -281,14 +281,20 @@ describe('[#6387] the polarity table moved WITH the emitter (#5146 / #5298)', ()
     // `$nin` makes the constraint non-total, so `nullGuardForFieldSpec` has to
     // consult the table; `$null: true` says a NULL row DOES satisfy it, so the
     // leaf is guarded with `IS NULL OR (…)`.
+    // [ADR-0053 D-D1, amended — #5930 step 3] The shared lowering, at this
+    // compiler's entry, reads the same table and lays the same `allowNull`
+    // guard on first (outer); this compiler's own copy then adds its own
+    // (inner). Same predicate, until the copy's deletion card.
     expect(sql({ $not: { d: { $null: true, $nin: ['x'] } } })).toBe(
-      'NOT ((("t"."d" IS NULL OR ("t"."d" IS NULL AND ("t"."d" IS NULL OR "t"."d" NOT IN (?))))))',
+      'NOT ((("t"."d" IS NULL OR (("t"."d" IS NULL OR ("t"."d" IS NULL AND ("t"."d" IS NULL OR "t"."d" NOT IN (?))))))))',
     );
   });
 
   it('requireValue polarity: a NULL column does NOT satisfy $null: false', () => {
+    // [ADR-0053 D-D1, amended — #5930 step 3] The shared lowering's
+    // `requireValue` guard, then this compiler's own — see the row above.
     expect(sql({ $not: { d: { $null: false, $nin: ['x'] } } })).toBe(
-      'NOT (("t"."d" IS NOT NULL AND ("t"."d" IS NOT NULL AND ("t"."d" IS NULL OR "t"."d" NOT IN (?)))))',
+      'NOT (("t"."d" IS NOT NULL AND ("t"."d" IS NOT NULL AND ("t"."d" IS NOT NULL AND ("t"."d" IS NULL OR "t"."d" NOT IN (?))))))',
     );
   });
 

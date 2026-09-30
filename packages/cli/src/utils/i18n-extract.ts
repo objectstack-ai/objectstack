@@ -96,6 +96,8 @@
  *   datasets.<dataset>.label / .description
  *   datasets.<dataset>.dimensions.<dim>.label
  *   datasets.<dataset>.measures.<measure>.label
+ *   picklists.<picklist>.label
+ *   picklists.<picklist>.options.<value>   (a `picklistExtensions` entry's options too)
  *   pages.<page>.label / .description
  *   pages.<page>.title / .subtitle   (from the page's `page:header` component)
  *   pages.<page>.components.<id>.<key>  (per-component copy, #6080)
@@ -202,6 +204,7 @@ export interface ExpectedEntry {
     | 'dashboard'
     | 'widget'
     | 'dataset'
+    | 'picklist'
     | 'page'
     | 'flow'
     | 'metadataType'
@@ -1392,6 +1395,9 @@ export function collectExpectedEntries(
   // ── Analytics datasets (`datasets.<name>.…`) ─────────────────────
   walkDatasets(config, out);
 
+  // ── Shared option lists (`picklists.<name>.…`) ────────────────────
+  walkPicklists(config, out);
+
   // ── Pages + their `page:header` copy ──────────────────────────────
   const pages: any[] = Array.isArray(config?.pages) ? config.pages : [];
   for (const page of pages) {
@@ -1574,6 +1580,58 @@ function walkDatasets(config: any, out: ExpectedEntry[]): void {
         pushOptional(out, ['datasets', name, group, memberName, 'label'], member.label, 'dataset');
       }
     }
+  }
+}
+
+// ─── Shared option lists (`picklists.<name>.…`) ────────────────────────
+
+/**
+ * Emit the picklist copy surface:
+ *
+ *   picklists.<name>.label
+ *   picklists.<name>.options.<value>
+ *
+ * A picklist is translated ONCE: every field that references it inherits the
+ * option labels (`translateObject`), so the keys live under the list and not
+ * under each field. A picklist-bound field declares no `options` of its own,
+ * so the field walk above emits nothing for it — this walk is the only
+ * producer of those keys. A `picklistExtensions` entry adds options to a list
+ * another package owns, and they are served as that list's options, so their
+ * labels are keyed under the extended list's name.
+ *
+ * Both labels are plain strings at the authoring site, so `pushEntry` — with
+ * the #8543 derived rule a field option follows: an option whose label is
+ * absent or equals its own machine value is seeded from the value and never
+ * demanded as a translation.
+ */
+function walkPicklists(config: any, out: ExpectedEntry[]): void {
+  const walkOptions = (name: string, options: unknown): void => {
+    if (!Array.isArray(options)) return;
+    for (const option of options) {
+      if (!option || typeof option !== 'object' || typeof option.value !== 'string') continue;
+      const path = ['picklists', name, 'options', option.value];
+      const authored = inlineText(option.label);
+      if (authored !== undefined && authored !== option.value) {
+        pushEntry(out, path, authored, 'picklist');
+      } else {
+        pushDerived(out, path, option.value, inlineLocaleMap(option.label) ? option.label : undefined, 'picklist');
+      }
+    }
+  };
+  const picklists: any[] = Array.isArray(config?.picklists) ? config.picklists : [];
+  for (const picklist of picklists) {
+    if (!picklist || typeof picklist !== 'object') continue;
+    const name = picklist.name;
+    if (typeof name !== 'string' || name.length === 0) continue;
+    pushEntry(out, ['picklists', name, 'label'], picklist.label, 'picklist');
+    walkOptions(name, picklist.options);
+  }
+  const extensions: any[] = Array.isArray(config?.picklistExtensions) ? config.picklistExtensions : [];
+  for (const extension of extensions) {
+    if (!extension || typeof extension !== 'object') continue;
+    const name = extension.extend;
+    if (typeof name !== 'string' || name.length === 0) continue;
+    walkOptions(name, extension.options);
   }
 }
 

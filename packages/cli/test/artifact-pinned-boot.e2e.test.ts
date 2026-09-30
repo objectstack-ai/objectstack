@@ -126,7 +126,7 @@ function runServe(env: Record<string, string>, opts: { migrateAndExit?: boolean 
                 // `childEnv`, not a bare `...process.env`: the vitest worker
                 // exports `TEST=true`, and better-auth 1.7.1 reads it directly
                 // to switch its own origin/CSRF validation OFF in the child —
-                // see `helpers/serve-process.ts` for the measurement (#11267).
+                // see `helpers/serve-process.ts` for the measurement (commit 1ddda1d00).
                 // This boot exits at `kernel:ready` (`OS_MIGRATE_AND_EXIT`) and
                 // never answers a request, so nothing here CHANGES; it is the
                 // hygiene half, so the next assertion added to this file starts

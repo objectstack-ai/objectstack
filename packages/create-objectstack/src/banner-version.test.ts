@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack contributors. Apache-2.0 license.
 //
-// Pins #10325: the startup banner (`◆ Create ObjectStack …`) names the
+// Pins commit cec9d239d's fix: the startup banner (`◆ Create ObjectStack …`) names the
 // version `create-objectstack`'s own package.json actually declares, not a
 // hardcoded literal — the banner had said `v6.x` for eleven majors, the
 // first line of output a newcomer ever sees.
@@ -14,7 +14,7 @@
 //   2. The three box lines still render to EQUAL display width with the
 //      borders aligned, computed from PLAIN, ANSI-stripped text — a test
 //      that only greps for the version string would still pass with the
-//      right border pushed out of alignment (the #10322 defect class, one
+//      right border pushed out of alignment (the defect class commit 8d21f7a76 fixed, one
 //      function away in the same file: a box hand-kerned for one string
 //      length, broken by a longer one).
 //
