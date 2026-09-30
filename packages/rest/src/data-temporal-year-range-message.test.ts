@@ -23,10 +23,12 @@
  * `"…" is not a valid datetime` for a cell — beside the years' edges, which
  * are written.
  *
- * Measured on the base (`bee75cebe`) through these doors: every refused
- * value below answered with its ISO sentence ("Opened must be a valid datetime
- * (ISO-8601)", "Placed must be a valid date (ISO-8601)"), and the import cell
- * `+010000-01-01` with `Placed: "+010000-01-01" is not a valid date`.
+ * Measured with this change's two selections ablated, which leaves the
+ * sentence keys of the base (`bee75cebe`) and their unchanged templates: every
+ * refused value below answered with its ISO sentence ("Opened must be a valid
+ * datetime (ISO-8601)", "Placed must be a valid date (ISO-8601)"), at the write
+ * door and on an import row it refused, and the import's reader refused the
+ * cell `+010000-01-01` as `"+010000-01-01" is not a valid date`.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
