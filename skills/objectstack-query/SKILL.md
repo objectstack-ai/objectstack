@@ -23,7 +23,7 @@ metadata:
 | Surface | Shape | Legal option keys |
 |:--|:--|:--|
 | engine `find` / `findOne` | `engine.find('task', {…}, { context })` | `context`, `where`, `fields`, `orderBy`, `limit`, `offset`, `search`, `searchFields`, `expand` — **plus** the six driver passthrough keys `transaction`, `tenantId`, `tenantIds`, `timezone`, `bypassTenantAudit`, `preserveAudit` |
-| engine `aggregate` | `engine.aggregate('deal', {…})` | `context`, `where`, `groupBy`, `aggregations`, `having`, `timezone` |
+| engine `aggregate` | `engine.aggregate('deal', {…})` | `context`, `where`, `groupBy`, `aggregations`, `having`, `timezone`, `search`, `searchFields` — the two search keys filter the input rows **before** grouping, AND-ed with `where`, exactly as on `find` |
 | engine `count` | `engine.count('task', {…})` | `context`, `where` |
 | protocol / REST | `findData({ object: 'task', query: {…} })` | `object` sits OUTSIDE the query |
 | nested `expand` value | a `QueryAST` — `{ object, fields, where }` | (see **Expand**) |
