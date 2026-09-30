@@ -810,7 +810,9 @@ export async function backfillRemoteCanonicalColumns(
       );
     } else if (report.rowsConverted || report.epochTextRowsConverted) {
       logger?.info?.(
-        `[driver-turso] canonicalised remote ${column.kind} storage (#5770) for ${where}`,
+        `[driver-turso] canonicalised remote ${column.kind} storage for ${where}: the converted ` +
+        `rows now hold the one canonical text form, and the column drops the unindexable ` +
+        `read-side repair only once a pass finds nothing left to convert`,
         {
           rowsConverted: report.rowsConverted,
           epochTextRowsConverted: report.epochTextRowsConverted,
@@ -833,8 +835,8 @@ export async function backfillRemoteCanonicalColumns(
     if (report.unresolvedEpochTextRows > 0) {
       logger?.warn(
         `[driver-turso] ${report.unresolvedEpochTextRows} row(s) in ${where} hold digits-only ` +
-        `text outside the interpretable epoch-millisecond band and were left untouched ` +
-        `(cloud#1005 后果 B, unresolvable remainder)`,
+        `text outside the interpretable epoch-millisecond band and were left untouched: a value ` +
+        `that cannot be read as an instant is counted and reported, never guessed at`,
         { table: column.table, field: column.field },
       );
     }

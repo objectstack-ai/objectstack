@@ -2358,8 +2358,8 @@ export class TursoDriver extends SqlDriver {
       `not generate record numbers, so an upsert that matches no existing row inserts one without ` +
       `it — the row is persisted, its record number is not, and nothing else reports this. Supply ` +
       `the value explicitly on this path (a seed replay or import keeps its own numbers and is ` +
-      `written unchanged), or use the local / embedded-replica transport, which do issue them ` +
-      `(#7099).`,
+      `written unchanged), or use the local / embedded-replica transport, which do issue ` +
+      `them.`,
       { object, fields: unfilled, id: row.id, path },
     );
   }

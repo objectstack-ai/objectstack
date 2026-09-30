@@ -112,13 +112,6 @@
  "packages/drivers/driver-mongodb/src/test-mongod.ts": {
   "#5517": 3
  },
- "packages/drivers/driver-turso/src/remote-canonical-backfill.ts": {
-  "#1005": 1,
-  "#5770": 1
- },
- "packages/drivers/driver-turso/src/turso-driver.ts": {
-  "#7099": 1
- },
  "packages/formula/src/matches-filter.ts": {
   "#5240": 1
  },
