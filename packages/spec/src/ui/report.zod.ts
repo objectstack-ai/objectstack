@@ -462,11 +462,11 @@ export const ReportSchema = lazySchema(() => strictObject({
 
   /**
    * Visualization — an embedded chart plotted from the bound dataset
-   * (`xAxis` names a dimension, `yAxis` a measure) above the report's table.
+   * (`xAxis` names a dimension, `yAxis` a measure) above the report's table,
+   * or below it for a `matrix` report with `columns`.
    *
-   * Refused on a `joined` report (#20161): a joined report draws each block
-   * as a table and never reads `chart`, and a block has no `chart` key — so a
-   * chart there parsed and plotted nothing.
+   * Refused on a `joined` report (#20161), which draws each block as a table
+   * and never reads `chart`; a block has no `chart` key.
    */
   chart: ReportChartSchema.optional().describe('Embedded chart configuration (refused on a joined report, which draws tables only)'),
 

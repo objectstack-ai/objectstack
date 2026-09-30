@@ -339,8 +339,8 @@ describe('sys_view_definition active-row uniqueness (#5839) on a NULL-safe key (
         const note = String(logger.error.mock.calls[0]![0]);
         expect(note).toContain('UNRESTRICTED and NULL-distinct');
         expect(note).toContain('keeps looking healthy');
-        expect(note).toContain('#5839');
-        expect(note).toContain('#6417');
+        expect(note).toContain('an archived view keeps occupying its name slot');
+        expect(note).toContain('two same-name ACTIVE shared views (owner NULL)');
         // The fix, and the query that surfaces the duplicates meanwhile.
         expect(note).toContain('SQLite/PostgreSQL');
         expect(note).toContain(buildDuplicateProbeSql());

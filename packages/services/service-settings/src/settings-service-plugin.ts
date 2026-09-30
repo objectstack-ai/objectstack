@@ -304,7 +304,7 @@ export class SettingsServicePlugin implements Plugin {
             enforced: true,
           };
         } catch (err) {
-          // [#13279] An unreachable permission store is an outage, not a
+          // [commit 6a180e42d] An unreachable permission store is an outage, not a
           // caller with no permissions — re-raise it rather than returning an
           // enforced-but-empty context the routes read as a denial.
           if (isAuthzStoreUnavailableError(err)) throw err;

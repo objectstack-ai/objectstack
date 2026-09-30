@@ -1799,6 +1799,90 @@ function undeclaredWriteFieldErrors(
 }
 
 /**
+ * [#20805] The computed-field door: take every caller-supplied key that names a
+ * declared `formula` field out of a write payload, and say which keys went.
+ *
+ * ## Why a strip
+ *
+ * A `formula` field is virtual. The engine computes it on every read
+ * ({@link applyFormulaPlan}) and no driver has a column for it
+ * (`driver-sql`'s `createColumn` emits none), so a full read returns the key
+ * and a record written back carries it — the ordinary round trip of a form
+ * save, a flow's `update_record`, or `GET` then `PUT`. Before this door the key
+ * reached the driver and the driver decided, so the answer split by family:
+ * SQL refused the whole statement with its own text (`table … has no column
+ * named …`, no status, no field) and the schemaless family stored the value as
+ * a shadow column nothing reads. {@link undeclaredWriteFieldErrors} cannot see
+ * it: the field IS declared.
+ *
+ * The platform already has one answer for a declared field a caller cannot
+ * write — strip the value, complete the write, report the strip through
+ * `onFieldsDropped` (`DroppedFieldsEventSchema`: "stripping is legitimate
+ * semantics, not an error") — and a computed field takes it, under its own
+ * `reason`, `computed`. ⛔ Never `readonly`, which it is not: the static
+ * `readonly` strip exempts `isSystem`, and this one runs in EVERY context
+ * because the value has nowhere to land for any caller. ⛔ Never a refusal
+ * either: a `400` would make `formula` the one caller-read-only type that
+ * refuses where `readonly`, `readonlyWhen` and the primary key strip, and it
+ * would refuse every round trip of every object that declares one.
+ *
+ * ## Where it runs
+ *
+ * Beside the declared-field door, as the first act of each write verb's body
+ * and of {@link ObjectQL.validate} over the same rows: before the defaults, the
+ * hooks and every other strip. So a hook is never handed a value that will not
+ * be stored (the #16344 invariant), a `formula` field also declared
+ * `readonly: true` is reported once, as `computed`, and the preview strips
+ * exactly what the write strips. The REPORT is the verb's own report site,
+ * beside the other strips' (`insertDrops` on insert, `reportDroppedFields` at
+ * the confluence on update) — so `strictReadonlyWrites`, whose coverage is
+ * derived from what `onFieldsDropped` reports, refuses a computed drop too.
+ *
+ * ⛔ Keyed on `type === 'formula'` literally — the test the read path's
+ * projection and `driver-sql`'s `fieldHasColumn` use. `summary` is NOT here: a
+ * roll-up HAS a column, and a caller-supplied value is persisted (measured on
+ * #20805, SQLite and memory) — a separate question, not this door's.
+ *
+ * Pure: the caller's objects are never mutated. A row keeps its reference when
+ * nothing was taken, else it is a shallow copy without the keys.
+ *
+ * @param refused the declared-field door's per-row verdicts, index-aligned: a
+ *   row that door refused is left exactly as it is and counts toward nothing.
+ * @returns the rows as the strip leaves them (index-aligned with the input) and
+ *   the union of the keys it took, in first-seen order — one report per call,
+ *   the shape every insert-side strip already reports in.
+ */
+function stripComputedWriteFields(
+  schema: { fields?: unknown } | undefined,
+  rows: readonly unknown[],
+  refused?: readonly unknown[],
+): { rows: unknown[]; dropped: string[] } {
+  const out = rows.slice();
+  const dropped: string[] = [];
+  const fields = schema?.fields;
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return { rows: out, dropped };
+  const computed = Object.entries(fields as Record<string, { type?: unknown } | null | undefined>)
+    .filter(([, def]) => def?.type === 'formula')
+    .map(([name]) => name);
+  if (computed.length === 0) return { rows: out, dropped };
+  for (let i = 0; i < out.length; i++) {
+    if (refused?.[i] !== undefined) continue;
+    const row = out[i];
+    if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+    // Own-property, never `in` — the same reason `stripReadonlyFields` gives.
+    const taken = computed.filter((name) => Object.prototype.hasOwnProperty.call(row, name));
+    if (taken.length === 0) continue;
+    const copy: Record<string, unknown> = { ...(row as Record<string, unknown>) };
+    for (const name of taken) {
+      delete copy[name];
+      if (!dropped.includes(name)) dropped.push(name);
+    }
+    out[i] = copy;
+  }
+  return { rows: out, dropped };
+}
+
+/**
  * Evaluate formula virtual fields against the raw rows a driver handed back —
  * the read path (`find` / `findOne`) and, since #5504, the write path's
  * response hydration.
@@ -11756,6 +11840,81 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#20805] The create path's static-`readonly` strip of ONE row, together
+   * with the re-default of every key it takes — the door as `insert()` runs it,
+   * lifted out so that {@link ObjectQL.validate} runs the same door over its
+   * preview rows instead of a copy of it (one function per door). `insert()`
+   * owns everything around it: the `isSystem` gate, the per-call
+   * `insertDropped` union, the `preserveAudit`-ignored WARN and partial-mode
+   * culling; `validate()` passes no logger, because a preview writes nothing
+   * and a strip line would say otherwise.
+   *
+   * The field's `defaultValue` is RE-DERIVED for every key the strip took,
+   * which is #3043's stated contract and a guarantee in its own right: a forged
+   * `approval_status` becomes `draft` — the enforced initial state — never
+   * NULL, so a stripped forgery cannot leave a row in a state the object's own
+   * rules (`requiredWhen`, the state machine) were written to exclude. The
+   * deleted ingress copy got this for free by running BEFORE
+   * `applyFieldDefaults`; a strip that runs after the hooks has to ask. Asked
+   * over the STRIPPED row, so a `defaultValue` expression reads the payload it
+   * will really be stored beside, and copied back key by key:
+   * `applyFieldDefaults` also fills every OTHER absent field, and a hook that
+   * deliberately wrote `null` must keep its null (the first defaults pass,
+   * ahead of the hooks, is the one that owns those keys).
+   *
+   * [#20082] A re-derived `can` default takes the write's map too — from the
+   * same resolution, so this asks nothing new unless it is the first pass to
+   * need it. Scoped to the TAKEN keys: those are the only defaults this pass
+   * keeps, so no other field's default can make it ask, or fail.
+   *
+   * @returns the row as the strip leaves it (the SAME reference when nothing
+   *   was taken) and the keys taken, in the row's key order. When the
+   *   re-default's permission resolution fails, `error` carries it and `row`
+   *   is the row as it arrived: the caller decides whether that fails the
+   *   write or culls the row, and the taken keys are still reported.
+   */
+  private async staticReadonlyCreateStrip(
+    object: string,
+    readonlySubject: NonNullable<ReturnType<typeof staticReadonlyInsertSubject>>,
+    row: Record<string, unknown>,
+    supplied: Readonly<Record<string, unknown>>,
+    context: ExecutionContext | undefined,
+    pass: {
+      logger: Parameters<typeof stripReadonlyFields>[3];
+      strictReadonlyWrites: boolean;
+      hookWrittenKeys: ReadonlySet<string> | undefined;
+      nowSnap: Date;
+      permissionResolution: PermissionResolution | undefined;
+    },
+  ): Promise<{ row: Record<string, unknown>; taken: string[]; error?: unknown }> {
+    const stripped = stripReadonlyFields(
+      readonlySubject as any, row, supplied, pass.logger,
+      {
+        strictReadonlyWrites: pass.strictReadonlyWrites,
+        hookWrittenKeys: pass.hookWrittenKeys,
+        verb: 'insert',
+      },
+    ) as Record<string, unknown>;
+    if (stripped === row) return { row, taken: [] };
+    const taken = Object.keys(row).filter((k) => !(k in stripped));
+    if (taken.length > 0) {
+      let redefaultPermissions: EvalPermissions | undefined;
+      try {
+        redefaultPermissions = (await this.resolveDefaultPermissions(
+          object, [stripped], context, pass.permissionResolution, taken,
+        ))(stripped);
+      } catch (err) {
+        return { row, taken, error: err };
+      }
+      const redefaulted = this.applyFieldDefaults(object, stripped, context, pass.nowSnap, redefaultPermissions);
+      for (const k of taken) {
+        if (redefaulted[k] !== undefined) stripped[k] = redefaulted[k];
+      }
+    }
+    return { row: stripped, taken };
+  }
+
+  /**
    * Insert one record or an array of records.
    *
    * At-least-once hook semantics (framework#3152): when this call is driven by
@@ -11792,6 +11951,9 @@ export class ObjectQL implements IObjectQLEngine {
   // ingress copy it pointed external callers at is deleted: there is one
   // create-side enforcement point, and it is this one. Any FURTHER strip added
   // here must feed `insertDropped` (or wire both members at its own site) too.
+  // [#20805] The computed-field door is the third, and reports at the same
+  // site under its own `computed` reason (`insertDrops`) — in every context,
+  // `isSystem` included, since a `formula` value has no column to land in.
   /**
    * Validate-only (#6037, #4633 ruling D) — run the write path's own verdict
    * over candidate rows and report it, WITHOUT persisting anything.
@@ -11806,6 +11968,18 @@ export class ObjectQL implements IObjectQLEngine {
    * point is that agreement is guaranteed **by construction**: this method
    * calls the same `validateRecord` and `evaluateValidationRules`, with the
    * same options, that `insert()` calls a few hundred lines below.
+   *
+   * ## The write's doors run here too (#20805)
+   *
+   * A verdict on a payload the write never stores is not the write's verdict.
+   * So before judging, this runs the write's own doors, by the same functions
+   * (one function per door, ⛔ no copy here): the declared-field door (an
+   * undeclared key is THROWN as `INVALID_FIELD` / 400 naming the field, exactly
+   * as `insert()` throws it — it used to be answered `valid: true`), the
+   * computed-field door (a `formula` value is stripped, every context), and the
+   * caller-write strips (`isSystem`-gated). What the write would drop is
+   * reported through `options.onFieldsDropped`, the listener the write reports
+   * through.
    *
    * ## ADR-0104 posture — the whole reason B was rejected
    *
@@ -11846,7 +12020,18 @@ export class ObjectQL implements IObjectQLEngine {
   async validate(
     object: string,
     data: Record<string, unknown> | Record<string, unknown>[],
-    options?: { mode?: 'insert' | 'update'; context?: ExecutionContext },
+    options?: {
+      mode?: 'insert' | 'update';
+      context?: ExecutionContext;
+      /**
+       * [#20805] The write's own strip listener: called once per `reason` for
+       * the fields the write WOULD drop from these rows — the same events, in
+       * the same shape, that `insert` / `update` report through
+       * `WriteObservabilityOptions.onFieldsDropped`. A listener that throws is
+       * logged and ignored, as on the write.
+       */
+      onFieldsDropped?: WriteObservabilityOptions['onFieldsDropped'];
+    },
   ): Promise<ValidateDataResponse> {
     object = this.resolveObjectName(object);
     const mode = options?.mode ?? 'insert';
@@ -11880,10 +12065,34 @@ export class ObjectQL implements IObjectQLEngine {
     // or a blank on a required field with a `defaultValue` would preview
     // `required` while the write takes the default. [#20309] Likewise a
     // numeric string on a number field is its number here, as on the write.
-    const rawRows = normalizeNumericStringValues(
+    const submittedRows = normalizeNumericStringValues(
       schemaForValidation,
       normalizeBlankTypedValues(schemaForValidation, Array.isArray(data) ? data : [data]),
     );
+    // [#20805] THE WRITE'S DOORS, run here by the same functions and in the
+    // write's order, so a dry run predicts what the write will do rather than
+    // judging a payload the write never stores:
+    //  1. the declared-field door (`undeclaredWriteFieldErrors`) — an
+    //     undeclared key is refused exactly as `insert()` / `update()` refuse
+    //     it: thrown, `INVALID_FIELD` / 400, naming the field. It used to be
+    //     answered `valid: true` here while the write refused the row.
+    //  2. the computed-field door (`stripComputedWriteFields`) — a `formula`
+    //     value is taken out and reported under `computed`, in every context.
+    //  3. the caller-write strips (below, after the defaults, where the write
+    //     runs them) — reported under `readonly`.
+    // Reported through `options.onFieldsDropped`, the listener the write
+    // reports through.
+    const refusal = undeclaredWriteFieldErrors(
+      object,
+      schemaForValidation as { fields?: unknown } | undefined,
+      submittedRows,
+    ).find((e) => e !== undefined);
+    if (refusal) throw refusal;
+    const computedStrip = stripComputedWriteFields(
+      schemaForValidation as { fields?: unknown } | undefined,
+      submittedRows,
+    );
+    const rawRows = computedStrip.rows as Record<string, unknown>[];
     const nowSnapshot = new Date();
     // [#20082] The preview's ONE permission resolution, shared by its CEL
     // defaults and its option gates below, exactly as the write shares one. A
@@ -11898,7 +12107,81 @@ export class ObjectQL implements IObjectQLEngine {
           object,
           this.applyFieldDefaults(object, row, options?.context, nowSnapshot, defaultPermissionsFor(row)),
         ) as Record<string, unknown>)
-      : rawRows;
+      : rawRows.slice();
+
+    // [#20805] 3. The caller-write strips, over the defaulted rows with the
+    // caller's rows as `supplied` — where the write runs them (after the
+    // defaults; the write's hooks, which this preview does not run, sit in
+    // between) and under the write's `isSystem` gate. The same functions:
+    // on `insert`, `stripRuntimeOwnedFields` and then
+    // `staticReadonlyCreateStrip` (the static `readonly` strip with its
+    // re-default); on `update`, `stripReadonlyFields`, which covers both on
+    // that verb. No logger: a preview writes nothing, and a strip line says
+    // the value was not stored.
+    //
+    // ⚠️ An `update`-mode preview has no bound row, so a supplied `id` is read
+    // as the address the write binds — every update door folds the target id
+    // into the payload (`updateData`) — and is never judged as a payload key
+    // (#8093, ADDRESSING IS NOT PAYLOAD). `readonlyWhen` and the primary-key
+    // strip are not run: both judge a prior record or a dispatch this
+    // operation does not have (the named limits below).
+    const readonlyDropped: string[] = [];
+    const collectTaken = (before: Record<string, unknown>, after: Record<string, unknown>): void => {
+      for (const k of Object.keys(before)) {
+        if (!(k in after) && !readonlyDropped.includes(k)) readonlyDropped.push(k);
+      }
+    };
+    if (!options?.context?.isSystem) {
+      const preserveAudit = options?.context?.preserveAudit === true;
+      if (mode === 'insert') {
+        for (let i = 0; i < rows.length; i++) {
+          const stripped = stripRuntimeOwnedFields(
+            schemaForValidation as any, rows[i], rawRows[i] ?? {}, undefined, { preserveAudit },
+          ) as Record<string, unknown>;
+          if (stripped === rows[i]) continue;
+          collectTaken(rows[i]!, stripped);
+          rows[i] = stripped;
+        }
+        const readonlySubject = staticReadonlyInsertSubject(schemaForValidation as any);
+        if (readonlySubject) {
+          for (let i = 0; i < rows.length; i++) {
+            const pass = await this.staticReadonlyCreateStrip(
+              object, readonlySubject, rows[i]!, rawRows[i] ?? {}, options?.context,
+              { logger: undefined, strictReadonlyWrites: false, hookWrittenKeys: undefined, nowSnap: nowSnapshot, permissionResolution },
+            );
+            for (const k of pass.taken) if (!readonlyDropped.includes(k)) readonlyDropped.push(k);
+            // The write fails on this resolution failure outside partial mode;
+            // a preview has no partial mode, so it fails the same way.
+            if (pass.error !== undefined) throw pass.error;
+            rows[i] = pass.row;
+          }
+        }
+      } else {
+        for (let i = 0; i < rows.length; i++) {
+          const supplied: Record<string, unknown> = { ...(rawRows[i] ?? {}) };
+          delete supplied.id;
+          const stripped = stripReadonlyFields(
+            schemaForValidation as any, rows[i], supplied, undefined, { preserveAudit },
+          ) as Record<string, unknown>;
+          if (stripped === rows[i]) continue;
+          collectTaken(rows[i]!, stripped);
+          rows[i] = stripped;
+        }
+      }
+    }
+    const onFieldsDropped = options?.onFieldsDropped;
+    if (typeof onFieldsDropped === 'function') {
+      const drops: DroppedFieldsEvent[] = [];
+      if (computedStrip.dropped.length > 0) drops.push({ object, fields: computedStrip.dropped, reason: 'computed' });
+      if (readonlyDropped.length > 0) drops.push({ object, fields: readonlyDropped, reason: 'readonly' });
+      for (const drop of drops) {
+        try {
+          onFieldsDropped(drop);
+        } catch (err) {
+          this.logger.warn('onFieldsDropped listener threw — ignored', { object, error: err });
+        }
+      }
+    }
 
     // Resolved once for the whole set, exactly as the write path resolves them
     // once per batch — this is the "same posture as the real write" guarantee.
@@ -11921,28 +12204,27 @@ export class ObjectQL implements IObjectQLEngine {
     // real update path reads the prior row and does resolve it; closing the
     // preview's half needs a read this operation's "nothing is executed"
     // contract does not make.
-    // ⚠️ Second named limit, the mirror of the first: a reference field the
-    // author declared static `readonly` is STRIPPED from the caller's payload
-    // inside `insert()`'s executor (`stripRuntimeOwnedFields`), so the real
-    // write resolves no related row for it and a traversing rule refuses there.
-    // Nothing is stripped here: the preview resolves the caller's own
-    // foreign key and answers the rule against an id the write path never
-    // carries, so the preview's verdict is not the write's for that
-    // declaration. Running the strip here would make them agree and is a
-    // behaviour change on the preview's payload, so it is named, not done.
+    // [#20805] The second named limit that used to sit here is CLOSED: a
+    // reference field the author declared static `readonly` is stripped from a
+    // non-system caller's payload by the write, so the write resolves no
+    // related row for it — and since the caller-write strips run above, the
+    // preview's `rows` have lost it too, and a traversing rule answers the
+    // same way on both.
     // ⛔ Behind the caller's own create/update gate — see
     // {@link registerWriteGateProbe}. A caller the probe refuses gets NO
     // elevated read: `related` stays unresolved, and a traversing rule then
     // refuses, which is the fail-closed direction and is honest about what it
     // did not evaluate.
-    // ⛔ `rawRows`, not `rows`: the gate's field-level arm judges WHICH FIELDS
-    // THE CALLER WROTE, and `rows` has already been through
+    // ⛔ `submittedRows`, not `rows`: the gate's field-level arm judges WHICH
+    // FIELDS THE CALLER WROTE, and `rows` has already been through the strips,
     // `applyFieldDefaults` / `initializeSummaryFields` above. Handing it the
     // defaulted image would offer the plugin keys the caller never sent — the
     // exact reading the middleware avoids by gating on `opCtx.data`, which is
     // the raw payload (defaults are resolved inside the executor, under it).
+    // [#20805] Nor the stripped `rawRows`: the middleware runs BEFORE the
+    // write's computed-field door, so it judges the caller's keys as sent.
     const mayWrite = this._writeGateProbe
-      ? await this._writeGateProbe(object, mode, options?.context, rawRows).catch(() => false)
+      ? await this._writeGateProbe(object, mode, options?.context, submittedRows).catch(() => false)
       : true;
     const previewRelatedForRow = mayWrite
       ? await this.resolvePredicateRelated(schemaForValidation, rows, options?.context)
@@ -12103,6 +12385,22 @@ export class ObjectQL implements IObjectQLEngine {
       if (!partialRowMode) {
         const refusal = undeclaredPerRow.find((e) => e !== undefined);
         if (refusal) throw refusal;
+      }
+      // [#20805] The computed-field door, beside the declared-field door and
+      // over the rows it did not refuse — see `stripComputedWriteFields`. In
+      // EVERY context: unlike the strips further down, no `isSystem` gate,
+      // because a `formula` value has no column to land in for any caller.
+      // Everything below reads `opCtx.data`, so it is replaced here and the
+      // snapshot, the defaults and the hooks all see the payload that will be
+      // stored. Reported at `insertDrops`, beside the other strips.
+      const computedStrip = stripComputedWriteFields(
+        this._registry.getObject(object) as { fields?: unknown } | undefined,
+        isBatch ? (opCtx.data as unknown[]) : [opCtx.data],
+        undeclaredPerRow,
+      );
+      const computedDropped = computedStrip.dropped;
+      if (computedDropped.length > 0) {
+        opCtx.data = (isBatch ? computedStrip.rows : computedStrip.rows[0]) as any;
       }
       // [#4441] The RAW caller payload per row — before `applyFieldDefaults`
       // resolves any `defaultValue` / `current_user` token and before the
@@ -12479,59 +12777,30 @@ export class ObjectQL implements IObjectQLEngine {
           const preserveAuditIgnored: string[] = [];
           for (let i = 0; i < rows.length; i++) {
             if (rowErrors[i] !== undefined) continue;
-            const stripped = stripReadonlyFields(
-              readonlySubject as any, rows[i], suppliedPerRow[i] ?? {}, this.logger,
+            // [#20805] One door, two callers: `validate()` runs this same
+            // method over its preview rows — see `staticReadonlyCreateStrip`.
+            const pass = await this.staticReadonlyCreateStrip(
+              object, readonlySubject, rows[i], suppliedPerRow[i] ?? {}, opCtx.context,
               {
+                logger: this.logger,
                 strictReadonlyWrites: options?.strictReadonlyWrites === true,
                 hookWrittenKeys: rowHookWrittenKeys[i],
-                verb: 'insert',
+                nowSnap,
+                permissionResolution,
               },
-            ) as Record<string, unknown>;
-            if (stripped === rows[i]) continue;
-            const takenFromRow: string[] = [];
-            for (const k of Object.keys(rows[i])) {
-              if (k in stripped) continue;
-              takenFromRow.push(k);
+            );
+            if (pass.row === rows[i] && pass.taken.length === 0) continue;
+            for (const k of pass.taken) {
               if (!insertDropped.includes(k)) insertDropped.push(k);
               if (preserveAudit && !preserveAuditIgnored.includes(k)) preserveAuditIgnored.push(k);
             }
-            // The field's `defaultValue` is RE-DERIVED for every key this
-            // pass took, which is #3043's stated contract and a guarantee in
-            // its own right: a forged `approval_status` becomes `draft` — the
-            // enforced initial state — never NULL, so a stripped forgery
-            // cannot leave a row in a state the object's own rules
-            // (`requiredWhen`, the state machine) were written to exclude.
-            // The deleted ingress copy got this for free by running BEFORE
-            // `applyFieldDefaults`; a strip that runs after the hooks has to
-            // ask. Asked over the STRIPPED row, so a `defaultValue`
-            // expression reads the payload it will really be stored beside,
-            // and copied back key by key: `applyFieldDefaults` also fills
-            // every OTHER absent field, and a hook that deliberately wrote
-            // `null` must keep its null (the first defaults pass, ahead of
-            // the hooks, is the one that owns those keys).
-            if (takenFromRow.length > 0) {
-              // [#20082] A re-derived `can` default takes the write's map too —
-              // from the same resolution, so this asks nothing new unless it is
-              // the first pass to need it. Scoped to the TAKEN keys: those are
-              // the only defaults this pass keeps, so no other field's default
-              // can make it ask, or fail.
-              let redefaultPermissions: EvalPermissions | undefined;
-              try {
-                redefaultPermissions = (await this.resolveDefaultPermissions(
-                  object, [stripped], opCtx.context, permissionResolution, takenFromRow,
-                ))(stripped);
-              } catch (err) {
-                if (!partialRowMode) throw err;
-                rowErrors[i] = err;
-                continue;
-              }
-              const redefaulted = this.applyFieldDefaults(object, stripped, opCtx.context, nowSnap, redefaultPermissions);
-              for (const k of takenFromRow) {
-                if (redefaulted[k] !== undefined) stripped[k] = redefaulted[k];
-              }
+            if (pass.error !== undefined) {
+              if (!partialRowMode) throw pass.error;
+              rowErrors[i] = pass.error;
+              continue;
             }
-            rows[i] = stripped;
-            rowHookContexts[i].input.data = stripped;
+            rows[i] = pass.row;
+            rowHookContexts[i].input.data = pass.row;
           }
           // One line per CALL, not per row, and only when the exemption was
           // ASKED FOR and something was actually removed. Per CALL because a
@@ -12695,29 +12964,43 @@ export class ObjectQL implements IObjectQLEngine {
         // refuses exactly what the strip would have taken. A value the strip
         // does not take is not rejected either, so an `isSystem` write and a
         // `preserveAudit` historical import stay accepted under strict — they
-        // never reach this branch at all.
+        // never reach this branch on a read-only value. ([#20805] A `formula`
+        // value does reach it in every context: the computed strip takes it
+        // from an `isSystem` write too, so strict refuses it there as well.)
         //
         // Reported under the existing `readonly` reason: from the caller's side
         // an implicitly read-only field is dropped for exactly the reason a
         // declared one is, and inventing a parallel reason code would fork the
         // vocabulary (`packages/spec`) for a distinction no consumer acts on.
-        if (insertDropped.length > 0) {
-          const drop: DroppedFieldsEvent = { object, fields: insertDropped, reason: 'readonly' };
+        //
+        // [#20805] The computed-field door's strip reports HERE too, under its
+        // own `computed` reason — it is no lock, and it runs in every context,
+        // so `readonly` would lie about it. One event per reason, in the order
+        // the strips ran; a payload with no `formula` key reports exactly what
+        // it did before.
+        const insertDrops: DroppedFieldsEvent[] = [];
+        if (computedDropped.length > 0) insertDrops.push({ object, fields: computedDropped, reason: 'computed' });
+        if (insertDropped.length > 0) insertDrops.push({ object, fields: insertDropped, reason: 'readonly' });
+        if (insertDrops.length > 0) {
           if (options?.strictReadonlyWrites === true) {
             // Before the driver write and before validation — nothing is
             // written, and "you sent a runtime-owned field" should not depend on
             // whether some other field also failed a business rule (#5126's
             // ordering on the update path, mirrored).
-            throw new ReadonlyFieldRejectedError(object, insertDropped, [drop], 'insert');
+            throw new ReadonlyFieldRejectedError(
+              object, [...new Set(insertDrops.flatMap((d) => d.fields))], insertDrops, 'insert',
+            );
           }
           if (typeof options?.onFieldsDropped === 'function') {
             // Under strict the listener deliberately does NOT fire (above):
             // `DroppedFieldsEvent` is contracted as "dropped, and the write
             // completed without them", and a refused write did not complete.
-            try {
-              options.onFieldsDropped(drop);
-            } catch (err) {
-              this.logger.warn('onFieldsDropped listener threw — ignored', { object, error: err });
+            for (const drop of insertDrops) {
+              try {
+                options.onFieldsDropped(drop);
+              } catch (err) {
+                this.logger.warn('onFieldsDropped listener threw — ignored', { object, error: err });
+              }
             }
           }
         }
@@ -13352,6 +13635,24 @@ export class ObjectQL implements IObjectQLEngine {
        )[0];
        if (undeclared) throw undeclared;
 
+       // [#20805] The computed-field door — the insert path's, same function,
+       // and placed by the same rule: right after the declared-field door, in
+       // EVERY context (no `isSystem` gate: a `formula` value has no column to
+       // land in for any caller), before the read-only hide pass, the hook
+       // recording and the hooks — so a hook is handed the payload that will
+       // be stored, and a formula field also declared `readonly: true` is
+       // reported once, as `computed`. `suppliedValues` (and so
+       // `ctx.submitted`) keeps the caller's submission AS SENT; only the
+       // payload loses the key. Reported at the confluence below, beside the
+       // other strips' reports, so the listener never fires for a write the
+       // post-hook door then refuses.
+       const preComputedPayload = opCtx.data as Record<string, unknown> | null | undefined;
+       const computedStripUpdate = stripComputedWriteFields(
+         updateSchema as { fields?: unknown } | undefined,
+         [preComputedPayload],
+       );
+       if (computedStripUpdate.dropped.length > 0) opCtx.data = computedStripUpdate.rows[0] as any;
+
        // ── [#16344] HIDE caller-forged read-only values from the hooks ──────
        //
        // The invariant, in the maintainer-confirmed ruling's words:「交给生命
@@ -13911,6 +14212,14 @@ export class ObjectQL implements IObjectQLEngine {
          [hookContext.input.data],
        )[0];
        if (postHookUndeclaredUpdate) throw postHookUndeclaredUpdate;
+
+       // [#20805] The computed-field door's report — its strip ran at the
+       // pre-hook door above. Here, at the confluence, because this is the
+       // first point both branches share after the post-hook door, and the
+       // other strips report below it: under `strictReadonlyWrites` the drop
+       // joins `strictDrops`, which each branch's `assertNoStrictDrops()`
+       // refuses before any driver call.
+       reportDroppedFields(preComputedPayload, computedStripUpdate.rows[0] as Record<string, unknown> | null | undefined, 'computed');
 
        hookContext.input.options = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
 

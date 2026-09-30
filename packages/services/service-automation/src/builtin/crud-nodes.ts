@@ -122,6 +122,8 @@ const DROPPED_REASON_LABEL: Record<DroppedFieldsEvent['reason'], string> = {
     // until it is worded, which is how the flow author keeps getting a true
     // sentence instead of a fall-through label. Keep it exhaustive.
     primary_key: "the field is the object's primary key and the value sent is not an identifier — the row(s) are identified by the id argument or the filter, so writing it would have overwritten their primary key (pass a scalar id, or put an id set in the filter)",
+    // [#20805]
+    computed: 'the field is a computed formula — its value is computed each time the record is read, so there is nothing to write (leave it out of the fields map)',
 };
 
 function droppedFieldsWarning(nodeType: string, e: DroppedFieldsEvent): string {

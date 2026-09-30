@@ -18,7 +18,8 @@ import type { DroppedFieldsEvent } from '@objectstack/spec/data';
  * static `readonly` (#2948), a TRUE `readonlyWhen` predicate (#3042), the
  * implicitly-readonly runtime-owned types (#5503), and the `primary_key` strip
  * of a payload `id` the update dispatch ruled is not an identifier (#6437); on
- * INSERT the runtime-owned ones and, since the 2026-09-03 ruling (#14147)
+ * both verbs, in every context, the `computed` strip of a `formula` value
+ * (#20805); on INSERT the runtime-owned ones and, since the 2026-09-03 ruling (#14147)
  * superseded the create-side exemption #3413 had granted, static `readonly`
  * too — judged over `staticReadonlyInsertSubject`, which leaves a
  * `sys_`-prefixed object, and one in a PLATFORM-INTERNAL `managedBy` bucket, to
@@ -81,6 +82,11 @@ const REASON_PHRASE: Record<DroppedFieldsEvent['reason'], string> = {
   primary_key:
     'the primary key, carrying a value the engine has already ruled is not an identifier — ' +
     "writing it would have overwritten the targeted row(s)' primary-key column",
+  // [#20805] NOT in READONLY_CLASS_REASONS: `isSystem` does not exempt it,
+  // because no driver has a column for the value to land in.
+  computed:
+    'a computed `formula` field — the engine computes it on every read, so no driver has a ' +
+    'column for a written value',
 };
 
 /**
@@ -144,6 +150,14 @@ function buildRefusalMessage(
 
   // At least one drop is NOT a read-only lock, so the union cannot be described
   // as read-only and `isSystem` is not a blanket remedy. Name each reason.
+  //
+  // [#20805] The `computed` remedy is spoken ONLY when a `computed` drop is
+  // present, so a payload without one reads the pre-#20805 text byte for byte
+  // (the rule above: adding a class moves no existing message).
+  const computedRemedy = drops.some((d) => d.reason === 'computed')
+    ? `for 'computed', leave the formula field out of the payload — the engine computes it ` +
+      `on every read, and isSystem does not exempt it; `
+    : '';
   return (
     head +
     `${fields.length} caller-supplied field(s) ` +
@@ -155,7 +169,7 @@ function buildRefusalMessage(
     `statically 'readonly' columns (that exempts NEITHER a TRUE 'readonlyWhen' predicate ` +
     `NOR the primary-key strip — both apply to every API-boundary caller, isSystem included; ` +
     `a 'readonlyWhen' value DERIVED by a beforeUpdate hook is not a caller write and is never ` +
-    `stripped); for ` +
+    `stripped); ${computedRemedy}for ` +
     `'primary_key', pass a SCALAR id to update ONE row (\`update(object, { id, ...fields })\` ` +
     `or \`{ where: { id } }\`), or put the id set in \`where\` to SELECT rows ` +
     `(\`{ where: { id: { $in: [...] } }, multi: true }\`). ` +

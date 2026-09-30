@@ -1032,6 +1032,20 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'can be owed for it (ADR-0112 D6).',
     },
     {
+        code: 'invalid_time',
+        file: 'packages/rest/src/import-coerce.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'import-coerce\'s `coerceError(meta, field, code: FieldErrorCode, …)` builds the per-cell ' +
+            '`FieldCoerceError` an import row reports. Its `code` parameter is typed `code: FieldErrorCode`, ' +
+            'so the value is a member of the closed ADR-0114 D2 catalog by construction; \'invalid_time\' is ' +
+            'one of them — a refused `time` cell takes the code the write door gives the same value. It ' +
+            'reaches `ApiError.details.fields[].code`, never `error.code`, so no ledger row can be owed for ' +
+            'it (ADR-0112 D6).',
+    },
+    {
         code: 'invalid_number',
         file: 'packages/rest/src/import-coerce.ts',
         shape: 'objlithelper',

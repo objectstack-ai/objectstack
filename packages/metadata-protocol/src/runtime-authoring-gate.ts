@@ -329,7 +329,8 @@ export function findPlatformScheduleOrgGaps(args: {
             hint:
                 `Declare the owning organization on this node: `
                 + `config.fields.${ORGANIZATION_FIELD}. An author-supplied value always wins over the `
-                + `engine's fill (#6153), so this is the one place the answer can come from for a `
+                + `engine's fill, and the engine fills only an organization the run resolved — so this is `
+                + `the one place the answer can come from for a `
                 + `scheduled run. A NULL ${ORGANIZATION_FIELD} is not merely untidy: an `
                 + `(${ORGANIZATION_FIELD}, …) unique index does not constrain across NULL and org-scoped `
                 + `queries never see the row. Alternatively, publish this flow into an organization, or `

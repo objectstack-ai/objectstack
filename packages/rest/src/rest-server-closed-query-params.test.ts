@@ -254,7 +254,7 @@ describe('#7606 §1 — GET /data/:object/:id refuses what it would have dropped
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 2. GET /data/:object/export — closed set of ten, one of them invisible
+// 2. GET /data/:object/export — closed set of eleven, one of them invisible
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('#7606 §2 — GET /data/:object/export', () => {
@@ -352,10 +352,16 @@ describe('#7606 §2 — GET /data/:object/export', () => {
             page: '500',
             header: 'true',
             format: 'csv',
+            // [#18386] `template=true` switches the door to the xlsx import
+            // template, which refuses a csv format beside it (a DIFFERENT 400
+            // from recognition), so this one name is sent without the csv
+            // baseline below.
+            template: 'true',
         };
         for (const name of DATA_EXPORT_PARAMS) {
             const { exportRows } = boot();
-            const answer = await exportRows({ format: 'csv', [name]: validValue[name] ?? 'title' });
+            const baseline = name === 'template' ? {} : { format: 'csv' };
+            const answer = await exportRows({ ...baseline, [name]: validValue[name] ?? 'title' });
             expect(
                 answer.status,
                 `"${name}" is declared supported but was refused: `

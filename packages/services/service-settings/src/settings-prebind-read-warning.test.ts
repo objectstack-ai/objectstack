@@ -14,7 +14,7 @@
  * specifier's declared `default`, with `source: 'default'` and `locked: false`,
  * and no diagnostic of any kind, while the operator's saved row is never read.
  *
- * The write half (#10159 / PR #10251) could REFUSE, because an in-window write
+ * The write half (commit 1ec36b730, PR #10251) could REFUSE, because an in-window write
  * has no correct outcome. A read does: a setting with genuinely no persisted row
  * must answer the manifest default, and doing so at boot is ordinary. So the
  * fix here is not a refusal — it is that the residual stops being silent.
@@ -299,7 +299,7 @@ describe('a settings read inside the pre-bind window warns', () => {
     expect(reader.engineBoundAtReady).toBe(false);
     // THE DEFECT, still observable: the read answered with the manifest default
     // (`log`) while `sys_setting` held `twilio`. The fix does NOT change this —
-    // that is deliberate (#10159's fix left reads open on purpose) — so this
+    // that is deliberate (commit 1ec36b730 left reads open on purpose) — so this
     // assertion is the reason the warning has to exist at all.
     expect(reader.readAtReady).toBe('resolved:"log"');
 

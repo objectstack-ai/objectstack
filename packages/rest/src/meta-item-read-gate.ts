@@ -1882,20 +1882,61 @@ export function metaTranslateOptions(
 }
 
 /**
- * [#8284] The packaged (code-layer) base declaration of an OBJECT, for
- * `translateObject`'s `packagedBase` — `undefined` on every uncertainty, which
- * the spec-side rule reads as "no baseline known". Feature-detected on the
- * protocol (`getPackagedObjectBase` is a server-only extension).
- * `RestServer.packagedObjectBase`, whose docblock carries the rule, delegates
- * here.
+ * [#8284 · #20730] Which protocol accessor answers the packaged (code-layer)
+ * base of each metadata type — the ONE table {@link packagedObjectBaseOf}
+ * reads, and the one membership test that decides whether a translation
+ * resolves the protocol at all. A type absent here has no packaged base the
+ * serving layer can hand the translator, and its catalog applies unchanged.
+ *
+ * The rule the base feeds is ADR-0029 D9.2a's — an explicit override beats a
+ * packaged default, decided by comparison against the PACKAGED declaration
+ * (`@objectstack/spec/system` owns the comparison; this table only hands it
+ * the value it cannot see). The rows, one per protocol accessor:
+ *
+ *  - `object` — a code `objectExtensions` scalar or a tenant rename folds onto
+ *    the owner's declaration (`getPackagedObjectBase`, pre-fold);
+ *  - `dashboard` and `view` — ADR-0126 Regime O: a packaged item is
+ *    overlay-editable, and a published org overlay is what every read serves
+ *    (`getPackagedDashboardBase`, `getPackagedViewBase`). A view is looked up
+ *    by the served item's registry name, the qualified `<object>.<viewKey>` —
+ *    never the bare key the catalog addresses it by under its object.
+ *
+ * A translatable type without a row (`action`, `app`, `dataset`, `page`) is
+ * ADR-0126 tier B — a write against its packaged item answers
+ * `NOT_OVERRIDABLE`, so no org overlay of a packaged item exists for it —
+ * and the protocol has no packaged-base accessor for it.
+ *
+ * ⛔ One table, never a second resolver beside it: a type that gains a
+ * packaged-base accessor on the protocol adds its row here.
+ */
+const PACKAGED_BASE_ACCESSORS: ReadonlyMap<string, string> = new Map<string, string>([
+    ['object', 'getPackagedObjectBase'],
+    ['dashboard', 'getPackagedDashboardBase'],
+    ['view', 'getPackagedViewBase'],
+]);
+
+/**
+ * [#8284 · #20730] The packaged (code-layer) base declaration of one served
+ * metadata document, for `translateMetadataDocument`'s `packagedBase` — the
+ * per-type resolver over {@link PACKAGED_BASE_ACCESSORS}: an `object` answers
+ * `getPackagedObjectBase(name)`, a `dashboard` `getPackagedDashboardBase(name)`
+ * and a `view` `getPackagedViewBase(name)`.
+ *
+ * `undefined` on every uncertainty — a type with no row, an empty name, a
+ * protocol without the accessor (they are server-only extensions, so
+ * feature-detected), an accessor that throws — which the spec-side rule reads
+ * as "no baseline known" and answers with the catalog, as before the base
+ * existed. `RestServer.packagedObjectBase`, whose docblock carries the object
+ * rule, delegates here.
  */
 export function packagedObjectBaseOf(protocol: unknown, type: string, name: unknown): unknown {
-    if (type !== 'object') return undefined;
+    const accessor = PACKAGED_BASE_ACCESSORS.get(type);
+    if (accessor === undefined) return undefined;
     if (typeof name !== 'string' || name === '') return undefined;
     const p: any = protocol;
-    if (!p || typeof p.getPackagedObjectBase !== 'function') return undefined;
+    if (!p || typeof p[accessor] !== 'function') return undefined;
     try {
-        return p.getPackagedObjectBase(name);
+        return p[accessor](name);
     } catch {
         return undefined;
     }
@@ -1905,7 +1946,10 @@ export function packagedObjectBaseOf(protocol: unknown, type: string, name: unkn
 export interface MetaListTranslationSources {
     /** This request's i18n service, or `undefined` when the deployment has none. */
     resolveI18nService(): Promise<unknown>;
-    /** This request's protocol, for the packaged object base; `undefined` when unreachable. */
+    /**
+     * This request's protocol, for the packaged base of an object, dashboard
+     * or view ({@link packagedObjectBaseOf}); `undefined` when unreachable.
+     */
     resolveProtocol(): Promise<unknown>;
     /**
      * This request's locale ({@link metaRequestLocale} over the transport's own
@@ -1945,9 +1989,11 @@ export async function translateMetaList(
     const locale = sources.requestLocale(i18n);
     if (!locale) return items;
     const { translateMetadataDocument } = await import('@objectstack/spec/system');
-    // [#8284] One protocol resolution for the whole page; the lookup itself is
-    // a synchronous in-memory registry read per element.
-    const p = metaType === 'object' ? await sources.resolveProtocol() : undefined;
+    // [#8284 · #20730] One protocol resolution for the whole page, for every
+    // type with a packaged base (object, dashboard, view); the lookup itself is
+    // a synchronous in-memory registry read per element, by that element's own
+    // registry name — a view's qualified `<object>.<viewKey>`.
+    const p = PACKAGED_BASE_ACCESSORS.has(metaType) ? await sources.resolveProtocol() : undefined;
     // `getMetaItems` elements are metadata documents (the list envelope is the
     // OUTER `{ type, items }`), so every element translates directly (#5563).
     const translated = arr.map((item) => translateMetadataDocument(metaType, item, bundle, {
@@ -1967,8 +2013,9 @@ export async function translateMetaList(
  * Takes the DOCUMENT, never the `getMetaItem` envelope (#5563): nav and field
  * labels live on the document. A missing bundle is not a bail-out (the
  * built-in fallbacks still apply); no locale is. The i18n service is resolved
- * only for a translatable type, and the protocol only for an `object` (#8284,
- * the packaged base).
+ * only for a translatable type, and the protocol only for a type with a
+ * packaged base — an object, a dashboard or a view (#8284, #20730:
+ * {@link packagedObjectBaseOf}).
  *
  * Moved here, unchanged, from `RestServer.translateMetaItem` (which now
  * delegates), so the runtime dispatcher's item read translates with the same
@@ -1986,7 +2033,7 @@ export async function translateMetaDocument(
     const locale = sources.requestLocale(i18n);
     if (!locale) return document;
     const { translateMetadataDocument } = await import('@objectstack/spec/system');
-    const packagedBase = metaType === 'object'
+    const packagedBase = PACKAGED_BASE_ACCESSORS.has(metaType)
         ? packagedObjectBaseOf(await sources.resolveProtocol(), metaType, (document as any)?.name)
         : undefined;
     return translateMetadataDocument(metaType, document as any, bundle, {

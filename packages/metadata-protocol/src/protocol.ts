@@ -2565,7 +2565,7 @@ function clientFacingRowFailureText(err: unknown, fallback: string): string {
         if (typeof declared === 'string' && declared.length > 0) return declared;
     }
     console.warn(
-        '[Protocol] Withheld a caught error\'s text from a batch row (#8502): the producer declared no '
+        '[Protocol] Withheld a caught error\'s text from a batch row: the producer declared no '
         + 'client-facing refusal (no 4xx status or statusCode, and not the VALIDATION_FAILED shape), so its '
         + 'sentence must not be quoted back on response data. The row says: '
         + `"${fallback}" — cause (withheld from the response):`,
@@ -9604,7 +9604,7 @@ export class ObjectStackProtocolImplementation implements
                 warnedNoRegistryForDataGate = true;
                 console.warn(
                     '[Protocol] engine exposes no schema registry — the data-plane object-existence '
-                    + 'gate (#3770) is INACTIVE for this process; unregistered object names reach the '
+                    + 'gate is INACTIVE for this process; unregistered object names reach the '
                     + 'driver as raw table names.',
                 );
             }
@@ -10308,7 +10308,7 @@ export class ObjectStackProtocolImplementation implements
                 `'${param}' entry #${badShape + 1} on object '${object}' is not a field name.`
                 + (retiredForm
                     ? ' The nested-select object form `{ field, fields, alias }` was removed in '
-                      + '@objectstack/spec 17 (#4196) — no engine or driver ever read it.'
+                      + '@objectstack/spec 17 — no engine or driver ever read it.'
                     : '')
                 // [#7532] The dotted-path half of this prescription is GONE.
                 // It pointed at a spelling this same gate now refuses — and
@@ -13320,7 +13320,7 @@ export class ObjectStackProtocolImplementation implements
         this.assertObjectRegistered(request.object); // [#3770]
         const engineInsertMany = (this.engine as any)?.insertMany;
         if (typeof engineInsertMany !== 'function') {
-            throw new Error('insertManyData requires an engine with insertMany (framework#3172)');
+            throw new Error('insertManyData requires an engine with insertMany: the partial-success batch insert, which reports an outcome per row so a bad row neither fails the whole batch nor makes the good rows run their beforeInsert hooks twice');
         }
         // [#5503/#14147] The engine's events are collected WHOLE and merged —
         // the same handling `createManyData` gives them, and for the reason
@@ -14077,7 +14077,7 @@ export class ObjectStackProtocolImplementation implements
             + `overlay"). An operator may set OS_METADATA_WRITABLE=${singular} to grant a runtime escape hatch, `
             + `but note the row still will not survive a restart — the hatch unlocks the write, not the read, `
             + `and boot logs every such row it walks past. `
-            + `See docs/adr/0005-metadata-customization-overlay.md and #6190.`
+            + `See docs/adr/0005-metadata-customization-overlay.md.`
         );
         err.code = 'NOT_OVERRIDABLE';
         err.status = 403;
@@ -15264,7 +15264,7 @@ export class ObjectStackProtocolImplementation implements
                 + `the non-canonical metadata type '${type}' (canonical: '${canonicalType}'). The registry `
                 + `holds exactly one plain key per (type, name) and every reader addresses it through the `
                 + `'/meta' boundary, which folds — an entry minted under '${type}' is a second namespace no `
-                + `canonical read, listing or declaration lookup can reach (#4432). Fold the type at the `
+                + `canonical read, listing or declaration lookup can reach. Fold the type at the `
                 + `producer (canonicalMetaType), not here; see this method's header for why the mint door `
                 + `refuses instead of folding.`,
             );
@@ -16039,8 +16039,8 @@ export class ObjectStackProtocolImplementation implements
         if (await this.metaTypeNamespaceExists(unrecognised.type)) return;
         const err = new Error(
             `'${unrecognised.type}' is not a metadata type. The platform declares `
-            + `no such type, and since #8586 retired 'additionalTypes' a plugin cannot declare one `
-            + `either — so this write would mint a sys_metadata namespace under `
+            + `no such type, and a plugin cannot declare one either: 'additionalTypes' was retired because `
+            + `nothing ever read it — so this write would mint a sys_metadata namespace under `
             + `type='${unrecognised.type}' that nothing reads and nothing serves. Address a real `
             + `metadata type; GET /api/v1/meta/types lists the ones this deployment carries.`,
         );
@@ -18598,7 +18598,7 @@ export class ObjectStackProtocolImplementation implements
         console.warn(
             `[Protocol] publishPackageDrafts: this overlay repository declares no 'get', so the batch's own `
             + `pending drafts cannot be read (first reached at ${type}/${name}). Author-time validation falls `
-            + `back to the LIVE declarations only — the pre-#10377 closure — so a draft that references a `
+            + `back to the LIVE declarations only, without this batch's own drafts in the closure, so a draft that references a `
             + `sibling drafted in the SAME batch may be refused as unresolved. Nothing is published unchecked: `
             + `the gate still runs, with strictly less resolution context.`,
         );
@@ -18817,11 +18817,11 @@ export class ObjectStackProtocolImplementation implements
                 error: `Draft '${d.type}/${d.name}' is stored under the non-canonical metadata type `
                     + `'${d.type}'; the canonical type for this item is '${canonical}'. Publishing it would `
                     + `mint an ACTIVE row in a second namespace that no registry read and no compliance `
-                    + `query on '${canonical}' can see (#7894 closed this namespace at the '/meta' URL door; `
+                    + `query on '${canonical}' can see (the '/meta' URL door now folds a type to its canonical spelling before it writes; `
                     + `this row predates that). Re-author the item under '${canonical}' `
                     + `(PUT /meta/${canonical}/${d.name}) and drop the '${d.type}' row. Note that `
                     + `POST /meta/_migrate-stored does NOT rewrite a stored type spelling — it canonicalizes `
-                    + `bodies, and reports rows of this class as 'skipped' with that same reason (#8957).`,
+                    + `bodies, and reports rows of this class as 'skipped' with that same reason.`,
                 code: 'STORED_TYPE_NOT_CANONICAL',
                 organizationId: d.organizationId ?? null,
             });
@@ -21023,13 +21023,13 @@ export class ObjectStackProtocolImplementation implements
                         + `metadata type '${it.type}'; the canonical type for this item is `
                         + `'${canonical}'. Restoring it would write the pre-commit body back into a `
                         + `second namespace that no registry read and no compliance query on `
-                        + `'${canonical}' can see (#7894 closed this namespace at the '/meta' URL `
-                        + `door; this row predates that), and the registry refuses to serve it `
+                        + `'${canonical}' can see (the '/meta' URL door now folds a type to its canonical `
+                        + `spelling before it writes; this row predates that), and the registry refuses to serve it `
                         + `(REGISTRY_TYPE_NOT_CANONICAL), so the restored body would reach no reader. `
                         + `Re-author the item under '${canonical}' (PUT /meta/${canonical}/${it.name}) `
                         + `and drop the '${it.type}' row. Note that POST /meta/_migrate-stored does NOT `
                         + `rewrite a stored type spelling — it canonicalizes bodies, and reports rows `
-                        + `of this class as 'skipped' with that same reason (#8957).`,
+                        + `of this class as 'skipped' with that same reason.`,
                     code: 'STORED_TYPE_NOT_CANONICAL',
                 });
                 continue;
@@ -23003,11 +23003,11 @@ export class ObjectStackProtocolImplementation implements
                 `A 'flow' listed here will NOT bind its triggers in this process (the kernel:ready binder ` +
                 `reads flows env-wide) — it fired until the last restart and stops now. ` +
                 (reportedUndeclared
-                    ? `Types marked [plugin-registered] have no metadata-type registry entry, so the #6190 `
+                    ? `Types marked [plugin-registered] have no metadata-type registry entry, so the declared-types-only `
                     + `org-scope write refusal does NOT cover them: rows of those types can still be written `
                     + `org-scoped, and will be listed here again after every restart until the author stops. `
                     : '') +
-                `Re-save the item env-wide (no active organization), or delete the row. See #6190 / #6992 / ADR-0005.`,
+                `Re-save the item env-wide (no active organization), or delete the row. See ADR-0005.`,
             );
         } catch {
             // Diagnostics never break boot — see the TSDoc. Deliberately not

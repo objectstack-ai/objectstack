@@ -643,7 +643,7 @@
 // `node_modules` exclusion: an exact-path list matches nothing it does not name.
 import { defineConfig } from 'vitest/config';
 import path from 'path';
-import { parseCLI } from 'vitest/node';
+import { parseCLI, type TestUserConfig } from 'vitest/node';
 import {
   runFilterPreflight,
   runProjectCliOverridePreflight,
@@ -709,6 +709,35 @@ runProjectCliOverridePreflight({
   packageName: '@objectstack/cli',
   parse: parseCLI,
 });
+
+// #19278 — THE FILE-LEVEL SLICE ARRIVES AS AN ENV VAR, NOT AS A PASSTHROUGH.
+// `scripts/partition-test-shards.mjs` slices this package (`FILE_SHARDED_PACKAGES`),
+// and Test Core runs each slice as `OS_TEST_SHARD=k/n turbo run test`. The
+// value reaches vitest HERE because vitest 4.1.11 reads no shard variable of its
+// own (no `VITEST_SHARD`: the variables it reads are enumerable in its dist),
+// and it reaches this process at all only because `turbo.json` declares
+// `OS_TEST_SHARD` in this package's `test` task `env` — which is also what
+// puts the slice in the task hash. Unset (every local run, the whole-package
+// leg, the nightly) it is `undefined`, and the run is unsharded as before; a
+// `--shard` on the command line still wins, because vitest merges the CLI
+// options OVER this block.
+//
+// Why a passthrough (`-- --shard=k/n`) is no longer the carrier: turbo folds a
+// run-level passthrough into the hash of every task in the run, so the slice
+// leg had to be `--only`, and `--only` drops the `build` closure out of the
+// test's hash — a slice could replay across the very upstream change that put
+// it in the affected set. An env declared on the task reaches only the task.
+//
+// ⚠️ Typed against vitest's CLI-options type (`TestUserConfig`), spread rather
+// than written as a literal key: vitest declares `shard` on its CLI options and
+// NOT on `InlineConfig`, the type of this `test` block (a literal `shard:` is
+// TS2769 here: "'shard' does not exist in type 'InlineConfig'"), yet it
+// resolves the two as one object (`deepMerge(configDefaults, test, cliOptions)`)
+// — measured on 4.1.11, it honours this key, projects included. The
+// partitioner's `--self-test` fails when a sliced package's config stops
+// reading the variable — it looks for the read in code position, so the read
+// lives at its use site in the `test` block below, not in a helper binding
+// that could outlive the spread.
 
 export default defineConfig({
   resolve: {
@@ -784,6 +813,9 @@ export default defineConfig({
     ],
   },
   test: {
+    // The file-level slice, when Test Core runs one (#19278) — see the section
+    // above `export default` for why it is spread and typed this way.
+    ...({ shard: process.env.OS_TEST_SHARD } satisfies Pick<TestUserConfig, 'shard'>),
     // A late console.* must not redden a green suite (#10374): vitest's worker
     // forwards console output over RPC and discards the promise, and a write
     // landing after teardown's rpcDone() snapshot is rejected into an unhandled

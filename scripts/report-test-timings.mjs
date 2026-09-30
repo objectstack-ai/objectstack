@@ -113,8 +113,10 @@
  * - `samplesFromSummary` reads the `test` task only, so a package that also
  *   has a `test:repo` task contributes its `test` seconds here. That is the
  *   like-for-like comparison the pinned weights were measured in.
- * - A SLICED package appears on two shards with a `--shard=k/n` passthrough,
- *   and each shard sees a PART. Parts are summed, and a package is labelled
+ * - A SLICED package appears on two shards, each running one `k/n` PART --
+ *   carried in `OS_TEST_SHARD` on Test Core (#19278; the summary holds its
+ *   sha256, resolved by `samplesFromSummary`), as a `--shard=k/n` passthrough
+ *   on the nightly tiers. Parts are summed, and a package is labelled
  *   `slice k/n` and marked incomplete until every part is present. ⛔ A part's
  *   seconds are never printed as the package's total.
  * - The pinned weights in `scripts/test-shard-timings.json` are READ ONLY
@@ -263,9 +265,11 @@ export function parseFileTimings(rawText) {
 /**
  * Read every `.turbo/runs/*.json` in `dir`. A shard runs its whole-package leg
  * and each file-level slice as SEPARATE turbo invocations, so there is more
- * than one summary per shard and their task sets differ (the slice leg runs
- * with `--only`). Unreadable files become a stated problem, never a throw:
- * this tool must not be able to fail the job it reports on.
+ * than one summary per shard and their task sets differ (the slice leg carries
+ * its slice in `OS_TEST_SHARD` and no passthrough, so it plans its own build
+ * closure beside the one test). Unreadable files -- a slice digest
+ * `samplesFromSummary` cannot resolve included -- become a stated problem,
+ * never a throw: this tool must not be able to fail the job it reports on.
  */
 export function readSummaries(dir) {
   const packages = new Map();

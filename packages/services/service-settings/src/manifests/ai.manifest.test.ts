@@ -274,7 +274,7 @@ describe('aiSettingsManifest — embedder section', () => {
 });
 
 /**
- * #11318 — the live-call hint an operator reads under "Test connection" in
+ * The card behind commit 99ccbb9c8: the live-call hint an operator reads under "Test connection" in
  * Settings -> AI must carry the edition boundary the platform's own capability
  * roster already records. `PLATFORM_CAPABILITY_PROVIDERS.ai` declares
  * `edition: 'cloud'` ("no installable version in the open edition"), while the
@@ -336,7 +336,7 @@ describe('aiTestActionHandler — live-call hint carries the cloud boundary (#11
   // `@objectstack/embedder-openai`, which IS built in this repo (8 path hits
   // under `git ls-tree -r --name-only HEAD | grep -cF /embedder-openai/`, against
   // 0 for `/service-ai/`), so that instruction is followable as written and stays
-  // a plain mount line. Asserted here, deliberately not edited — #11318 fences
+  // a plain mount line. Asserted here, deliberately not edited — commit 99ccbb9c8 fences
   // this site out by name.
   it('leaves the embedder hint a plain mount line — its package IS built here', async () => {
     const r = await runTestEmbedder({ embedder_provider: 'openai', embedder_api_key: 'sk-test' });
