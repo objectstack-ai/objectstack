@@ -69,10 +69,10 @@ export function acceptsChildren(comp: Pick<ManifestComponent, 'inputs'>): boolea
  *    that name. Where one does, the declared input wins, its `type-mismatch`
  *    check included, and the generated JSX types take the declared type too.
  */
-type SduiBasePropScope = 'every-node' | 'where-undeclared';
+export type SduiBasePropScope = 'every-node' | 'where-undeclared';
 
 /** One entry of {@link SDUI_BASE_PROPS}. */
-interface SduiBaseProp {
+export interface SduiBaseProp {
   /** The `BaseSchema` member (`@object-ui/types`). */
   readonly name: string;
   readonly scope: SduiBasePropScope;
@@ -132,16 +132,16 @@ interface SduiBaseProp {
  *
  * LOCKSTEP: the list, its scopes and the two Sets below are the port of
  * objectui's `SDUI_BASE_PROPS` (objectui#11008, #11044, pin `db11afd4967c`).
- * Unlike objectui's, this copy is module-local and has ONE consumer,
- * {@link validateTree}: objectstack's `codegen.ts` emits no base-props
- * interface, so the "BOTH of its consumers" sentence above describes objectui.
+ * Both consumers are ported too: {@link validateTree} and `codegen.ts`'s
+ * `SduiBaseProps`. The list is exported for `codegen.ts` only; `index.ts` does
+ * not re-export it.
  *
  * `children` IS here: the key is legal on every node, so it never draws
  * `unknown-prop` and its declared `slot` input is never type-checked. Whether
  * a given component RENDERS it is the containment question below, answered by
  * {@link acceptsChildren} from the declared input.
  */
-const SDUI_BASE_PROPS: readonly SduiBaseProp[] = Object.freeze([
+export const SDUI_BASE_PROPS: readonly SduiBaseProp[] = Object.freeze([
   { name: 'type', scope: 'every-node', tsType: null },
   { name: 'id', scope: 'every-node', tsType: 'string' },
   { name: 'className', scope: 'every-node', tsType: 'string' },

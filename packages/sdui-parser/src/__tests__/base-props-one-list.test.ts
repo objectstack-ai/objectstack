@@ -13,7 +13,8 @@
  * the five newly-`every-node` keys, so no declared type check moves.
  */
 import { describe, expect, it } from 'vitest';
-import { manifestFromConfigs, validateTree } from '../index.js';
+import { generateDts, manifestFromConfigs, validateTree } from '../index.js';
+import { SDUI_BASE_PROPS } from '../validate.js';
 import type { Manifest, SchemaElement } from '../types.js';
 
 const manifest: Manifest = manifestFromConfigs([
@@ -26,9 +27,12 @@ const codes = (node: SchemaElement): string[] =>
   validateTree(node, manifest).diagnostics.map((d) => d.code);
 
 const EVERY_NODE = [
-  'type', 'id', 'className', 'style', 'visible', 'visibleWhen', 'visibleOn', 'hidden',
+  'id', 'className', 'style', 'visible', 'visibleWhen', 'visibleOn', 'hidden',
   'hiddenOn', 'disabled', 'disabledOn', 'bind', 'testId', 'children',
 ];
+// `type` is the one `every-node` entry with no attribute form: on a node it
+// IS the tag, so a node cannot carry it without being the component under test.
+// It is pinned through the list below, not through `validateTree`.
 const WHERE_UNDECLARED = ['name', 'label', 'description', 'placeholder', 'data', 'ariaLabel'];
 
 describe('base props — one list, two scopes (objectui#11008, #11044)', () => {
@@ -47,7 +51,34 @@ describe('base props — one list, two scopes (objectui#11008, #11044)', () => {
     expect(validateTree({ type: 'labelled', label: 'ok' } as SchemaElement, manifest).diagnostics).toEqual([]);
   });
 
+  it('the list is the 20 entries, `type` alone having no attribute type', () => {
+    expect(SDUI_BASE_PROPS.map((p) => p.name)).toEqual(['type', ...EVERY_NODE, ...WHERE_UNDECLARED]);
+    expect(SDUI_BASE_PROPS.filter((p) => p.tsType === null).map((p) => p.name)).toEqual(['type']);
+    expect(SDUI_BASE_PROPS.filter((p) => p.scope === 'every-node').map((p) => p.name)).toEqual(['type', ...EVERY_NODE]);
+  });
+
   it('a non-base key is still unknown', () => {
     expect(codes({ type: 'leaf', nonsense: 1 } as SchemaElement)).toEqual(['unknown-prop']);
+  });
+});
+
+describe('generateDts — `SduiBaseProps` is emitted from the same list', () => {
+  const dts = generateDts(manifest);
+  const emitted = /export interface SduiBaseProps \{\n([\s\S]*?)\n\}/.exec(dts)?.[1].split('\n') ?? [];
+
+  it('carries every list entry that has an attribute type, in list order, and nothing else', () => {
+    expect(emitted).toEqual(
+      SDUI_BASE_PROPS.filter((p) => p.tsType !== null).map((p) => `  ${p.name}?: ${p.tsType};`),
+    );
+    expect(emitted).toContain('  bind?: string;');
+    expect(emitted).toContain('  hidden?: boolean;');
+  });
+
+  it('a component extends the whole base when it declares no base attribute', () => {
+    expect(dts).toContain('export interface LeafProps extends SduiBaseProps {');
+  });
+
+  it('a component that declares a base attribute Omits exactly that one from the base', () => {
+    expect(dts).toContain('export interface LabelledProps extends Omit<SduiBaseProps, "label"> {\n  label?: string;\n}');
   });
 });
