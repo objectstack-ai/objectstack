@@ -3836,7 +3836,11 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * same record for the metric tile.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `db11afd49`; re-derived at that pin 2026-09-29 —
+   * (`.objectui-sha` = `e420df310`; re-derived at that pin 2026-09-30 —
+   * `plugin-dashboard/src/index.tsx`, `ObjectMetricWidget.tsx`,
+   * `MetricWidget.tsx`, `MetricCard.tsx` and `lazy-icon.tsx` are all
+   * byte-identical to `db11afd49`, so every anchor below holds unmoved and was
+   * re-read in place. At `db11afd49` (2026-09-29)
    * `MetricWidget.tsx` and `lazy-icon.tsx` are byte-identical to `dd3f7e1be`;
    * `ObjectMetricWidget.tsx` changed in one comment line (`:321`), so `:230` and
    * `:595` did not move; `plugin-dashboard/src/index.tsx` gained the
@@ -3960,7 +3964,13 @@ export type ObjectMetricPropsParsed = z.infer<typeof ObjectMetricPropsSchema>;
  * DESIGNER's spelling with
  * zero read points (#7973 class) — aliased to the `groupBy` the board reads.
  * `limit` (#16503) was measured later, at the pin this repo builds against
- * (`.objectui-sha` = `db11afd49`; re-measured there 2026-09-29 —
+ * (`.objectui-sha` = `e420df310`; re-measured there 2026-09-30 —
+ * `ObjectKanban.tsx` changed on this hop, +40/-13: objectui#9853 renamed the
+ * default `DEFAULT_KANBAN_LIMIT` to `DEFAULT_KANBAN_FETCH_BATCH_SIZE`, still
+ * 100, on the anchor line itself, and objectui#11234 mounts an internal
+ * `KanbanBoardCore` board. So the anchor was re-READ and MOVED `712` -> `722`,
+ * now `$top: resolveRowLimit(schema.limit, DEFAULT_KANBAN_FETCH_BATCH_SIZE)`:
+ * the same lowering under a renamed default. At `db11afd49` (2026-09-29)
  * `ObjectKanban.tsx` changed in one comment line only (`:1367`), so the anchor
  * did not move and was re-read in place. At `dd3f7e1be` (2026-09-28)
  * `ObjectKanban.tsx` changed on this hop, +44/-8 (objectui#10572's
@@ -3981,7 +3991,7 @@ export type ObjectMetricPropsParsed = z.infer<typeof ObjectMetricPropsSchema>;
  * having put a refusal in front of it — a contract-refused row cap is dropped
  * and reported at `:554` instead of being sent. The pinned fact is unchanged:
  * `schema.limit` still lowers into the query's top-level `$top`):
- * `ObjectKanban.tsx:712`, the `$top` of the
+ * `ObjectKanban.tsx:722`, the `$top` of the
  * board's one query — its docblock below carries the four-face record.
  */
 export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
@@ -4022,8 +4032,24 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * Row cap (#16503 — the spec half of objectui#8172; decision batch #68,
    * 2026-09-07, option A: the contract declares the capability that already
    * ships, is documented and is in use). Measured at the objectui pin this
-   * repo builds against (`.objectui-sha` = `db11afd49`; re-measured there
-   * 2026-09-29 — `plugin-kanban.mdx`, `plugin-kanban/src/types.ts` and
+   * repo builds against (`.objectui-sha` = `e420df310`; re-measured there
+   * 2026-09-30 — `plugin-kanban/src/types.ts` (still no row-cap member),
+   * `ElementDataSourceGate.tsx` and `element-data-source.ts` are
+   * byte-identical to `db11afd49`, so `:218-220`, `:437-456` and `:241-245` did
+   * not move; `ObjectKanban.tsx` changed (+40/-13) and its query CHANGED ONE
+   * MEMBER: objectui#9853 renamed the default `DEFAULT_KANBAN_LIMIT` to
+   * `DEFAULT_KANBAN_FETCH_BATCH_SIZE` (still `100`, now documented as the
+   * board's fetch batch, not a page size), so `$top` reads
+   * `resolveRowLimit(schema.limit, DEFAULT_KANBAN_FETCH_BATCH_SIZE)`, and the
+   * query MOVED `705-715` -> `715-725`, the default `:88` -> `:97` and the
+   * `queryFilter` resolution `:574-575` -> `:584-585`, while the import at
+   * `:10` did not move; `plugin-kanban/src/index.tsx` lost the Quick Add
+   * plumbing above the mapping (objectui#8285, objectui#11234), which MOVED
+   * byte-identical `506-510` -> `487-491`; `objectql.ts` MOVED the member
+   * `4302` -> `4430` byte-identical, still inside `ObjectKanbanSchema`; and
+   * `plugin-kanban.mdx` changed around, not in, the `limit: 250` snippet and
+   * its Properties row. At `db11afd49`, re-measured there 2026-09-29 —
+   * `plugin-kanban.mdx`, `plugin-kanban/src/types.ts` and
    * `ElementDataSourceGate.tsx` are byte-identical to `dd3f7e1be`,
    * `plugin-kanban/src/index.tsx` too, `ObjectKanban.tsx` and
    * `element-data-source.ts` changed in comment lines only and none of their
@@ -4067,20 +4093,21 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * faces agree
    * while this map refused the key by name: the board's one query is
    * `dataSource.find(objectName, { $filter: queryFilter, $orderby: …, $top:
-   * resolveRowLimit(schema.limit, DEFAULT_KANBAN_LIMIT) })`
-   * (`plugin-kanban/src/ObjectKanban.tsx:705-715`, where `queryFilter` is
-   * `schema.filter` with its context tokens resolved at `:574-575` —
+   * resolveRowLimit(schema.limit, DEFAULT_KANBAN_FETCH_BATCH_SIZE) })`
+   * (`plugin-kanban/src/ObjectKanban.tsx:715-725`, where `queryFilter` is
+   * `schema.filter` with its context tokens resolved at `:584-585` —
    * objectui#10666; at `f8a9d0fb0` the member read `schema.filter` verbatim —
-   * the default `100` at `:88` — a REAL top-level `$top` since objectui#4025;
+   * the default `100` at `:97`, named `DEFAULT_KANBAN_LIMIT` until
+   * objectui#9853 — a REAL top-level `$top` since objectui#4025;
    * before that the cap sat under a `options` key no adapter read, and the
    * bare `??` became `resolveRowLimit` in objectui#9925, which drops and
    * reports a cap the contract refuses instead of sending it),
    * `OBJECT_KANBAN_DATA_SOURCE` maps `limit: 'limit'`
-   * (`plugin-kanban/src/index.tsx:506-510`), the type the board reads `schema`
+   * (`plugin-kanban/src/index.tsx:487-491`), the type the board reads `schema`
    * through is `ObjectKanbanSchema` — ⚠️ `KanbanSchema` was RETIRED on this hop
    * (maintainer ruling 2026-09-09) and `plugin-kanban/src/types.ts` no longer
    * declares the member at all — imported at `ObjectKanban.tsx:10` and
-   * declaring `limit?: number` at `packages/types/src/objectql.ts:4302`,
+   * declaring `limit?: number` at `packages/types/src/objectql.ts:4430`,
    * and `content/docs/plugins/plugin-kanban.mdx`
    * teaches it with a typed snippet (`limit: 250`) plus a Properties row. So
    * an author following the published docs wrote a node the save gate
@@ -4173,8 +4200,19 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * React-host `kanban-ui` block).
    *
    * Measured at the objectui pin this repo builds against
-   * (`.objectui-sha` = `db11afd49`; re-measured there 2026-09-29 —
-   * `KanbanImpl.tsx` and `plugin-kanban/src/index.tsx` are byte-identical to
+   * (`.objectui-sha` = `e420df310`; re-measured there 2026-09-30 —
+   * `KanbanImpl.tsx` is byte-identical to `db11afd49`, so `:621` and `:634` did
+   * not move and were re-read in place. objectui's own half of this retirement
+   * landed on this hop and changed the PATH, not the verdict: objectui#8285
+   * stopped forwarding `quickAdd`, and objectui#11234 retired
+   * `ObjectKanbanSchema.onQuickAdd` and has `ObjectKanban` render an internal
+   * `KanbanBoardCore` that reads neither key off `schema`
+   * (`KanbanBoardCore.tsx:78`). So the spread MOVED `1614` -> `1641` with its
+   * line byte-identical but now feeds `KanbanBoardCore`, and the pass-through
+   * below sits only in the exported `KanbanRenderer`, MOVED `357-358` ->
+   * `345-346`, which `ObjectKanban` no longer mounts. At `db11afd49`
+   * (2026-09-29) `KanbanImpl.tsx` and `plugin-kanban/src/index.tsx` are
+   * byte-identical to
    * `dd3f7e1be` and `ObjectKanban.tsx` changed in one comment line (`:1367`), so
    * `:1614`, `:357-358`, `:621` and `:634` did not move and were re-read in
    * place. At `dd3f7e1be` (2026-09-28)
@@ -4194,17 +4232,19 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * `313` -> `363`. All
    * three files were byte-identical across the hop onto `62597c588`, and all
    * four anchors were re-READ at `87af769e9` 2026-09-20, where each MOVED with
-   * its cited text byte-identical): the board
-   * forwards the key —
-   * `ObjectKanban.tsx:1614` spreads the authored bag into `KanbanRenderer`,
+   * its cited text byte-identical): through `db11afd49` the board
+   * forwarded the key —
+   * `ObjectKanban.tsx:1614` there spread the authored bag into `KanbanRenderer`,
    * which passes
    * `quickAdd={schema.quickAdd}` and `onQuickAdd={schema.onQuickAdd}`
-   * (`plugin-kanban/src/index.tsx:357-358`) — but the affordance is gated on
+   * (`plugin-kanban/src/index.tsx:357-358` there, `:345-346` at this pin) — but the affordance is gated on
    * BOTH (`KanbanImpl.tsx:621` and `:634`), and `onQuickAdd` is a
    * host-supplied FUNCTION that JSON cannot carry and no producer puts on an
    * `object-kanban` node. `ObjectKanban.tsx` names neither half of the pair
-   * (0 occurrences each, against 11 for the sibling `onCardClick` in the same
-   * file — re-counted at this pin, at `f8a9d0fb0` and at `62597c588`; this record said 6, which the identical
+   * in code (0 occurrences each, against 11 for the sibling `onCardClick` in the same
+   * file — re-counted at `db11afd49`, at `f8a9d0fb0` and at `62597c588`; at this
+   * pin 2 each, all four inside the two objectui#11234 comments that record
+   * the cut, and still 11 for `onCardClick`; this record said 6, which the identical
    * file at `87af769e9` does not reproduce either, so the control was
    * miscounted rather than moved, and the verdict rests on the 0). So the gate was permanently false and authoring the key was a
    * parse-clean no-op — the accepted-and-dropped class.
@@ -4219,7 +4259,12 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    *
    * The control itself is NOT withdrawn from the platform: it stays on
    * `kanban-ui`, the block a React host renders directly and can hand the
-   * runtime function to. Sources are stripped by the D2 conversion
+   * runtime function to. ⚠️ Re-read at `e420df310`: objectui retired the
+   * schema-only `kanban-ui` registration long before this pin (objectui#8257;
+   * 0 registrations at `dd3f7e1be`, `db11afd49` and this pin), and the pair
+   * now lives on the exported `KanbanRenderer` React component a host mounts
+   * directly (`plugin-kanban/src/index.tsx:345-346`), not on any block a
+   * document can name. Sources are stripped by the D2 conversion
    * `object-kanban-quick-add-removed` (a pure lossless delete — the key never
    * had an effect to preserve).
    */
