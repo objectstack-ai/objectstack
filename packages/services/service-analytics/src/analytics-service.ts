@@ -89,53 +89,6 @@ import { invalidMemberError } from './dataset-refusal.js';
 import { ACCEPTED_SQL_DIALECTS, isUnrecognisedSqlDialectAnswer, type AcceptedSqlDialect } from './text-match-sql.js';
 
 /**
- * Analytics result augmented with drill-through metadata (ADR-0021 D2; see
- * queryDataset). Carried alongside `rows` so the host can drill a clicked bucket
- * back to the underlying records without the renderer knowing field mappings.
- *
- * The object those records belong to is not part of this augmentation: it is
- * the contract's own `AnalyticsResult.object`, which every dataset answer
- * carries, drillable or not (#20644).
- */
-type AnalyticsResultWithDrill = AnalyticsResult & {
-  /** Selected drillable dimension NAME → underlying object FIELD name. */
-  dimensionFields?: Record<string, string>;
-  /**
-   * RAW grouped values per row, aligned to `rows` by index — each a map of
-   * drillable dimension NAME → stored value (BEFORE label resolution rewrote
-   * `rows[i][dim]` to the display label). The exact-match drill filter is built
-   * from these, never from the display labels.
-   */
-  drillRawRows?: Array<Record<string, unknown>>;
-  /**
-   * RAW grouped values for the totals/subtotal rows (#3214), the totals-side
-   * companion to `drillRawRows`: `drillRawTotals[i]` aligns to `result.totals[i]`
-   * and `drillRawTotals[i][j]` to `result.totals[i].rows[j]`. Each map holds that
-   * grouping's DRILLABLE dimension NAME → stored value, snapshotted in the SAME
-   * pre-label-resolution pass (the totals loop below overwrites a subtotal row's
-   * dimension value with its display label just like the data rows). Restricted
-   * to the drillable dims present in the grouping, so the grand-total grouping
-   * (`[]`) contributes an empty map per row — which keeps the index alignment
-   * intact and correctly drills the whole (unfiltered) object.
-   */
-  drillRawTotals?: Array<Array<Record<string, unknown>>>;
-  /**
-   * #1752 — half-open date-range drill scope per row, the RANGE companion to
-   * `drillRawRows` (which handles equality dims). A time-bucketed date
-   * dimension (`dateGranularity`) groups a SPAN of records into one bucket
-   * ("2026-Q2"), so its drill needs `[gte, lt)`, not equality — the humanized
-   * bucket can't be exact-matched (which is why date dims are excluded from
-   * `dimensionFields`/`drillRawRows`). Aligned to `rows` by index; each entry
-   * maps a drillable date-dimension NAME → `{ field, gte, lt }` with `gte`
-   * inclusive and `lt` exclusive (bounds as `YYYY-MM-DD`). Present only for
-   * buckets whose boundaries are unambiguous — a `datetime` field under a
-   * non-UTC reference timezone is omitted (host drills an unscoped superset)
-   * until instant-boundary support lands.
-   */
-  drillRanges?: Array<Record<string, { field: string; gte: string; lt: string }>>;
-};
-
-/**
  * [#5717] Does this error carry an ADR-0112 envelope — i.e. did its PRODUCER
  * already classify it?
  *
@@ -1967,10 +1920,10 @@ export class AnalyticsService implements IAnalyticsService {
     // exact-matched against the stored timestamp, so they are not drillable.
     const drillDims = selectedDims.filter((d) => !!d.field && d.type !== 'date');
     if (drillDims.length && result.rows.length) {
-      (result as AnalyticsResultWithDrill).dimensionFields = Object.fromEntries(
+      result.dimensionFields = Object.fromEntries(
         drillDims.map((d) => [d.name, d.field as string]),
       );
-      (result as AnalyticsResultWithDrill).drillRawRows = result.rows.map((row) => {
+      result.drillRawRows = result.rows.map((row) => {
         const raw: Record<string, unknown> = {};
         for (const d of drillDims) raw[d.name] = row[d.name];
         return raw;
@@ -1982,7 +1935,7 @@ export class AnalyticsService implements IAnalyticsService {
       // groups by (the grand-total grouping `[]` keeps empty maps, so a subtotal
       // drill filters by the stored value while the grand total drills unfiltered).
       if (result.totals?.length) {
-        (result as AnalyticsResultWithDrill).drillRawTotals = result.totals.map((total) => {
+        result.drillRawTotals = result.totals.map((total) => {
           const groupingDims = drillDims.filter((d) => total.dimensions.includes(d.name));
           return total.rows.map((row) => {
             const raw: Record<string, unknown> = {};
@@ -2031,7 +1984,7 @@ export class AnalyticsService implements IAnalyticsService {
     if (rangeDims.length && result.rows.length) {
       const bound = (ymd: string, instant: boolean): string =>
         instant ? new Date(zonedDateStartToUtcMs(ymd, rangeTz)).toISOString() : ymd;
-      (result as AnalyticsResultWithDrill).drillRanges = result.rows.map((row) => {
+      result.drillRanges = result.rows.map((row) => {
         const ranges: Record<string, { field: string; gte: string; lt: string }> = {};
         for (const { d, granularity, instant } of rangeDims) {
           // A row in the empty bucket carries `null` here (#3839) and yields no
