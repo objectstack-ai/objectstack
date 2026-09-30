@@ -2,7 +2,6 @@
 
 import { z } from 'zod';
 import { ConnectorAuthConfigSchema, ConnectorInstanceAuthSchema } from '../shared/connector-auth.zod';
-import { FieldMappingSchema as BaseFieldMappingSchema } from '../shared/mapping.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { acceptRetiredDefaultResidue, retiredKey } from '../shared/retired-key';
 
@@ -10,8 +9,8 @@ import { acceptRetiredDefaultResidue, retiredKey } from '../shared/retired-key';
  * Connector Protocol - LEVEL 3: Enterprise Connector
  * 
  * Defines the standard connector specification for external system integration.
- * Connectors enable ObjectStack to sync data with SaaS apps, databases, file storage,
- * and message queues through a unified protocol.
+ * Connectors enable ObjectStack to call SaaS apps, databases, file storage and
+ * message queues through a unified protocol.
  * 
  * **Positioning in the sync/integration layering** — this file is now the ONLY
  * layer. Both layers above it were retired under ADR-0049 for the same measured
@@ -19,16 +18,15 @@ import { acceptRetiredDefaultResidue, retiredKey } from '../shared/retired-key';
  * (`automation/sync.zod.ts`) in #4738, and L2 "ETL Pipeline"
  * (`automation/etl.zod.ts`) in #6414. See
  * `packages/spec/docs/SYNC_ARCHITECTURE.md`:
- * - **Enterprise Connector** (THIS FILE) - System integrators - Full SAP integration; connector-attached sync via `syncConfig`
+ * - **Enterprise Connector** (THIS FILE) - System integrators - Full SAP integration
  * 
  * **SCOPE: Most comprehensive integration layer.**
- * Includes authentication, field mapping, bidirectional sync, retry policies,
- * and complete lifecycle management.
+ * Includes authentication, actions, retry policies and lifecycle management.
  *
- * This protocol supports multiple authentication strategies, bidirectional sync,
- * field mapping, and an executed retry policy. It declares no health probe, no
- * circuit breaker, no authored status, no webhooks and no triggers of its own —
- * see "What this layer does NOT provide" below.
+ * This protocol supports multiple authentication strategies and an executed
+ * retry policy. It declares no health probe, no circuit breaker, no authored
+ * status, no webhooks, no triggers and no sync of its own — see "What this
+ * layer does NOT provide" below.
  *
  * ## What this layer does NOT provide
  *
@@ -90,19 +88,15 @@ import { acceptRetiredDefaultResidue, retiredKey } from '../shared/retired-key';
  * `connectionTimeoutMs`" and "REMOVED: outbound rate limiting" blocks in
  * `integration/connector.zod.ts`, and `packages/spec/docs/SYNC_ARCHITECTURE.md`.
  *
- * **Field mapping does not transform values.** This header used to offer "field
- * mapping and transformations"; only the first half was ever true.
- * `ConnectorFieldMappingSchema` extends the base mapping with exactly three keys —
- * `dataType`, `required` and `syncMode`. `FieldMapping.transform` was removed in
- * `@objectstack/spec` 17.0.0 (#5552, ADR-0049), and the whole `FieldMappingTransform`
- * union went with it (`constant` / `cast` / `lookup` / `javascript` / `map`) — **no
- * runtime ever executed any of the five**. An L3 connector mapping moves a value from
- * `source` to `target`; it does not compute one. **Value conversion belongs on a
- * surface that runs it:** the import mapping's own `mapping.fieldMapping[].transform`
- * (`data/mapping.zod.ts` — a string enum,
- * `none`/`constant`/`map`/`split`/`join`/`lookup`, with its settings in `params`),
- * applied row by row by the REST import path — or an ETL transformation step
- * (L2 above). Already authored the retired key? `os migrate meta --from 16` lists the mechanical edits for existing sources — the key itself is removed.
+ * **There is no connector-attached sync and no connector field mapping.**
+ * `syncConfig` and `fieldMappings` were removed in `@objectstack/spec` 17
+ * (ADR-0049 enforce-or-remove): no engine ever ran a sync or moved a value
+ * through a connector field mapping. A sync is defined on its TARGET — a
+ * `mapping` (`data/mapping.zod.ts`) whose `connectorSource` names the
+ * connector it pulls from, with a `job` for the cadence; per-field value
+ * conversion is that mapping's `fieldMapping[].transform`, applied row by row
+ * by the REST import path. The "REMOVED: connector-attached sync" section
+ * below records the measurement.
  *
  * ## Runtime contract — descriptor vs. registered connector (#2612)
  *
@@ -132,8 +126,7 @@ import { acceptRetiredDefaultResidue, retiredKey } from '../shared/retired-key';
  * **Use Enterprise Connector when:**
  * - Building enterprise-grade connectors (e.g., Salesforce, SAP, Oracle)
  * - Complex OAuth2/SAML authentication required
- * - Bidirectional sync with field mapping (`dataType` / `syncMode` per field — it moves values, it does not transform them)
- * - Full CRUD operations and data synchronization
+ * - Full CRUD operations through the connector's actions
  * - Need comprehensive retry strategies and error handling
  *
  * **Examples:**
@@ -171,179 +164,87 @@ import { acceptRetiredDefaultResidue, retiredKey } from '../shared/retired-key';
 // Use ConnectorAuthConfigSchema from shared/connector-auth.zod.ts
 // ============================================================================
 
-// ============================================================================
-// Field Mapping Schema
-// Uses the canonical field mapping protocol from shared/mapping.zod.ts
-// Extended with connector-specific features
-// ============================================================================
-
-/**
- * Connector Field Mapping Configuration
- *
- * Extends the base field mapping ({@link BaseFieldMappingSchema}, declared in
- * `shared/mapping.zod.ts`) with connector-specific features like bidirectional
- * sync modes and data type mapping.
- *
- * Renamed from `FieldMappingSchema` / `FieldMapping` (#4703, ADR-0112 D9a):
- * THREE entry points published that name for three declarations — `./shared`
- * (this schema's base, 4 keys), `./integration` (this one, 7 keys) and
- * `./data` (`ImportFieldMappingSchema`, a CSV/table column mapping that is not
- * a connector mapping at all). Which type an importer got depended only on the
- * import path — the #4411 trap. Prefixing the domain-specific sides keeps the
- * base name for the base, matching `ConnectorErrorCategory` and
- * `ConnectorRetryStrategy` in this same file (`ConnectorRateLimitConfig`,
- * #4684, was the fourth until its whole shape was retired in #4911), and
- * `ExternalFieldMappingSchema` in `data/external-lookup.zod.ts` — which
- * extended the same base and, precisely because it carried a domain prefix,
- * never entered the dual-source baseline (the external-lookup family was
- * itself retired whole in #8075 — ADR-0049, zero consumers).
- */
 import { lazySchema } from '../shared/lazy-schema';
-export const ConnectorFieldMappingSchema = lazySchema(() => BaseFieldMappingSchema.extend({
-  /**
-   * Data type mapping (connector-specific)
-   */
-  dataType: z.enum([
-    'string',
-    'number',
-    'boolean',
-    'date',
-    'datetime',
-    'json',
-    'array',
-  ]).optional().describe('Target data type'),
-  
-  /**
-   * Is this field required?
-   */
-  required: z.boolean().default(false).describe('Field is required'),
-  
-  /**
-   * Bidirectional sync mode (connector-specific)
-   */
-  syncMode: z.enum([
-    'read_only',      // Only sync from external to ObjectStack
-    'write_only',     // Only sync from ObjectStack to external
-    'bidirectional',  // Sync both ways
-  ]).default('bidirectional').describe('Sync mode'),
-}));
-
-export type ConnectorFieldMapping = z.input<typeof ConnectorFieldMappingSchema>;
-/** Post-parse shape of {@link ConnectorFieldMapping} — defaults applied, transforms run (ADR-0122). */
-export type ConnectorFieldMappingParsed = z.infer<typeof ConnectorFieldMappingSchema>;
 
 // ============================================================================
-// Data Synchronization Configuration
+// REMOVED: connector-attached sync — `syncConfig` and `fieldMappings`
+// (ADR-0049 enforce-or-remove; ADR-0087 D2/D3)
 // ============================================================================
+//
+// `DataSyncConfigSchema` (`strategy`, `direction`, `realtimeSync`,
+// `timestampField`, `conflictResolution`, `batchSize`, `deleteMode`,
+// `filters`), its `SyncStrategySchema` and `ConnectorConflictResolutionSchema`
+// enums, and `ConnectorFieldMappingSchema` (the shared base `FieldMapping`
+// extended with `dataType`, `required` and `syncMode`) used to live here,
+// authorable only through `ConnectorSchema.syncConfig` and
+// `ConnectorSchema.fieldMappings`. Fourteen keys, and NOTHING executed any of
+// them. Measured on `origin/main` before the removal: outside `packages/spec`
+// the word `syncConfig` appeared only in two comments and `fieldMappings` not
+// at all; the automation service's declared-connector item and its
+// re-materialization fingerprint carry neither key, and the def a provider
+// registers is the provider's own, so neither ever reached the connector
+// registry; and no engine ran a strategy, a direction, a batch, a watermark, a
+// conflict policy or a delete policy. The defaults read as configured policy
+// and did nothing: `latest_wins` resolved no conflict, and `soft_delete` named
+// a mode the platform does not have — every delete is a hard delete.
+//
+// The capability is mainstream, so it was ruled ENFORCE rather than RETIRE —
+// but not on the connector. Every mainstream platform binds a sync definition
+// to its TARGET (the table it writes), never to the connection it reads
+// through, and the target side already had a live, executed half: the
+// `mapping` type's `targetObject`, `fieldMapping`, `mode` and `upsertKey`,
+// which the REST import path runs row by row with upsert-by-match-key. So the
+// definition moved there: `mapping.connectorSource` (`data/mapping.zod.ts`)
+// names the connector a mapping pulls from, and the cadence is a `job` — the
+// 2026-09-10 ruling that deleted `syncConfig.schedule` stands, and no schedule
+// key returns to the connector. The policy values with no runtime
+// (`deleteMode`, `conflictResolution`) have no counterpart on the binding:
+// version 1 is a one-way pull, full or timestamp-incremental.
+//
+// `ConnectorSchema` is NOT `.strict()`, so a plain delete would be a silent
+// strip (ADR-0104): both keys are `retiredKey()` tombstones on
+// `ConnectorBaseSchema` below, inherited by `DeclarativeConnectorEntrySchema`.
+// The four defs leave whole (`RETIRED_DEFS_BY_MAJOR[18]`), because an exported
+// value schema with no carrier reads as a capability. Registered as
+// `integration/Connector:{syncConfig,fieldMappings}` and
+// `integration/DeclarativeConnectorEntry:{syncConfig,fieldMappings}` in
+// `RETIRED_KEYS_BY_MAJOR[18]`; authored sources and stored rows are rewritten
+// by the D2 conversion `connector-sync-keys-removed`, which STRIPS both keys
+// and never writes a `mapping` (a mapping that is pulled would START writes
+// that never happened), and the family's judgement lives in the D3 entry
+// `connector-sync-keys-retired`. The `integration/ConnectorFieldMapping:transform`
+// registration of the earlier `transform` retirement stays as its record.
 
 /**
- * Sync Strategy Schema
+ * The prescription an author meets when they write `syncConfig` on a
+ * connector — in `tsc` (the key's input type is `never`) and at parse (this
+ * string is the issue message).
  */
-export const SyncStrategySchema = lazySchema(() => z.enum([
-  'full',           // Full refresh (delete all and re-import)
-  'incremental',    // Only sync changes since last sync
-  'upsert',         // Insert new, update existing
-  'append_only',    // Only insert new records
-]).describe('Synchronization strategy'));
-
-export type SyncStrategy = z.input<typeof SyncStrategySchema>;
+const SYNC_CONFIG_RETIRED =
+  '`connector.syncConfig` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
+  + 'no engine ever ran a connector-attached sync: nothing read `strategy`, `direction`, '
+  + '`realtimeSync`, `timestampField`, `conflictResolution`, `batchSize`, `deleteMode` or '
+  + '`filters`, so the `latest_wins` and `soft_delete` defaults resolved and deleted nothing. '
+  + 'Delete the key; the `DataSyncConfig` shape leaves with it. A sync is defined on its TARGET: '
+  + 'a `mapping` (`targetObject`, `fieldMapping`, `mode`, `upsertKey`) whose `connectorSource` '
+  + 'names the `rest` or `openapi` connector it pulls from, the read action and an optional '
+  + 'timestamp `watermark`, with a `job` for the cadence. That binding is declared but its pull is '
+  + 'not executed yet, and authoring it warns until it is. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
 /**
- * Connector Conflict Resolution Strategy
- *
- * Renamed from `ConflictResolution` (#4738, ADR-0112 D9a — the C9/C12
- * prefixing lineage): that bare name was published by three entry points for
- * three different declarations (#4411 trap). The connector-sync strategy takes
- * the domain prefix; the bare `ConflictResolution` went to
- * `@objectstack/spec/ui` (offline client/server sync — a different concept with
- * a disjoint vocabulary). #4988 then retired `ui/offline.zod.ts` whole under
- * ADR-0049, so the bare name is now published by nobody. This name STAYS as it
- * is: it is the connector vocabulary's real name, and un-renaming it to reclaim
- * a freed word would be a second breaking change for no gain.
- * The enum VALUES here are unchanged — authored `syncConfig.conflictResolution`
- * metadata parses byte-for-byte the same. Note `@objectstack/spec/api` also
- * exports `ConflictResolutionStrategy` (route conflicts) — a fourth, distinct
- * name; unrelated to this rename.
+ * The prescription an author meets when they write `fieldMappings` on a
+ * connector. It points at the TARGET-side field map, which the REST import
+ * path executes.
  */
-export const ConnectorConflictResolutionSchema = lazySchema(() => z.enum([
-  'source_wins',    // External system data takes precedence
-  'target_wins',    // ObjectStack data takes precedence
-  'latest_wins',    // Most recently modified wins
-  'manual',         // Flag for manual resolution
-]).describe('Conflict resolution strategy'));
-
-export type ConnectorConflictResolution = z.input<typeof ConnectorConflictResolutionSchema>;
-
-/**
- * Data Synchronization Configuration
- */
-export const DataSyncConfigSchema = lazySchema(() => z.object({
-  /**
-   * Sync strategy
-   */
-  strategy: SyncStrategySchema.optional().default('incremental'),
-  
-  /**
-   * Sync direction
-   */
-  direction: z.enum([
-    'import',         // External → ObjectStack
-    'export',         // ObjectStack → External
-    'bidirectional',  // Both ways
-  ]).optional().default('import').describe('Sync direction'),
-  
-  /*
-   * `syncConfig.schedule` was DELETED here in @objectstack/spec 17 (ADR-0049
-   * enforce-or-remove, #16320). The cron slot on connector-attached sync was
-   * declared, parsed into the `{ dialect: 'cron', source }` envelope and read by
-   * nothing: `syncConfig` has no reader outside `packages/spec`, no engine schedules
-   * a connector sync, and `@objectstack/formula`'s cronEngine has zero consumers
-   * outside its own package. Deleted outright — no `retiredKey()` tombstone, no D2
-   * conversion, no D3 semantic entry (maintainer ruling 2026-09-10 on the retirement
-   * PR). `realtimeSync` is unchanged; sync on a cadence is a `job`
-   * (`Job.schedule.expression`, the one cron slot the platform evaluates) whose
-   * handler drives the connector.
-   */
-  
-  /**
-   * Enable real-time sync via webhooks
-   */
-  realtimeSync: z.boolean().optional().default(false).describe('Enable real-time sync'),
-  
-  /**
-   * Field to track last sync timestamp
-   */
-  timestampField: z.string().optional().describe('Field to track last modification time'),
-  
-  /**
-   * Conflict resolution strategy
-   */
-  conflictResolution: ConnectorConflictResolutionSchema.optional().default('latest_wins'),
-  
-  /**
-   * Batch size for bulk operations
-   */
-  batchSize: z.number().min(1).max(10000).optional().default(1000).describe('Records per batch'),
-  
-  /**
-   * Delete handling
-   */
-  deleteMode: z.enum([
-    'hard_delete',    // Permanently delete
-    'soft_delete',    // Mark as deleted
-    'ignore',         // Don't sync deletions
-  ]).optional().default('soft_delete').describe('Delete handling mode'),
-  
-  /**
-   * Filter criteria for selective sync
-   */
-  filters: z.record(z.string(), z.unknown()).optional().describe('Filter criteria for selective sync'),
-}));
-
-export type DataSyncConfig = z.input<typeof DataSyncConfigSchema>;
-/** Post-parse shape of {@link DataSyncConfig} — defaults applied, transforms run (ADR-0122). */
-export type DataSyncConfigParsed = z.infer<typeof DataSyncConfigSchema>;
-
+const FIELD_MAPPINGS_RETIRED =
+  '`connector.fieldMappings` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
+  + 'no engine ever moved a value through a connector field mapping: nothing read `source`, '
+  + '`target`, `defaultValue`, `dataType`, `required` or `syncMode`. Delete the key; the '
+  + '`ConnectorFieldMapping` shape leaves with it. Map fields on the sync\'s TARGET instead: a '
+  + '`mapping`\'s `fieldMapping` (`source` → `target`, with a `transform` the import path '
+  + 'executes), which its `connectorSource` pulls through. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 // ============================================================================
 // REMOVED: the connector-nested webhook shape (ADR-0049 enforce-or-remove)
 // ============================================================================
@@ -1020,18 +921,25 @@ const ConnectorBaseSchema = lazySchema(() => z.object({
    * parse. See "REMOVED: `triggers`" above.
    */
   triggers: retiredKey(TRIGGERS_RETIRED),
-  
+
   /**
-   * Data synchronization configuration
+   * `syncConfig` — RETIRED (ADR-0049 enforce-or-remove). No engine ever ran a
+   * connector-attached sync; a sync is defined on its TARGET, a `mapping`
+   * whose `connectorSource` names this connector, and a `job` sets its
+   * cadence. `ConnectorSchema` is NOT `.strict()`, so a plain delete would be
+   * a silent strip (ADR-0104); the tombstone makes the removal audible in
+   * `tsc` and at parse. See "REMOVED: connector-attached sync" above.
    */
-  syncConfig: DataSyncConfigSchema.optional().describe('Data sync configuration'),
-  
-  
+  syncConfig: retiredKey(SYNC_CONFIG_RETIRED),
+
   /**
-   * Field mappings
+   * `fieldMappings` — RETIRED (ADR-0049 enforce-or-remove), with `syncConfig`:
+   * nothing moved a value through it. The target-side field map is
+   * `mapping.fieldMapping`. Tombstoned rather than deleted (non-strict
+   * schema, ADR-0104). See "REMOVED: connector-attached sync" above.
    */
-  fieldMappings: z.array(ConnectorFieldMappingSchema).optional().describe('Field mapping rules'),
-  
+  fieldMappings: retiredKey(FIELD_MAPPINGS_RETIRED),
+
   /**
    * `webhooks` — RETIRED (ADR-0049 enforce-or-remove). A webhook nested in a
    * connector was never registered as a `webhook` item, so it was never

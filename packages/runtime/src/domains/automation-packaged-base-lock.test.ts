@@ -89,6 +89,14 @@ interface Harness {
     toggleFlow: ReturnType<typeof vi.fn>;
     /** The definition the ENGINE holds — read from the store, never a response. */
     held: (name: string) => unknown;
+    /**
+     * [#20862] Stand in the store behind the protocol's save and delete. The
+     * definition doors now save through this protocol (and the removal door
+     * deletes through it), and this harness's engine has no store; what the
+     * store does is pinned in `automation-authoring-doors-durable.test.ts`, so
+     * a case that reaches it here stands it in, as the clone case below does.
+     */
+    standInStore: () => void;
 }
 
 /**
@@ -138,6 +146,10 @@ function boot(
         protocol,
         registerFlow, unregisterFlow, toggleFlow,
         held: (name: string) => flows.get(name),
+        standInStore: () => {
+            vi.spyOn(protocol, 'saveMetaItem').mockResolvedValue({ success: true } as never);
+            vi.spyOn(protocol, 'deleteMetaItem').mockResolvedValue({ success: true } as never);
+        },
     };
 }
 
@@ -235,6 +247,7 @@ describe('a PACKAGED flow — the base is locked at both /automation definition 
         expect(h.held(PACKAGED)).toBe(before);
 
         // Control: a name no code package ships is created exactly as before.
+        h.standInStore();
         const created = await h.dispatcher.handleAutomation(
             '', 'POST', definitionOf('brand_new_flow', 'New'), AUTHOR(), undefined,
         );
@@ -287,6 +300,7 @@ describe('a PACKAGED flow — the base is locked at both /automation definition 
 describe('what the lock leaves open', () => {
     it('the customer\'s own flow (no code package ships it) is updated and removed as before', async () => {
         const h = boot();
+        h.standInStore();
 
         const put = await h.dispatcher.handleAutomation(
             `/${CUSTOMER}`, 'PUT', definitionOf(CUSTOMER, 'Edited'), AUTHOR(), undefined,
@@ -301,6 +315,7 @@ describe('what the lock leaves open', () => {
 
     it('a registry item with no package provenance, and a tenant-authored one bound to a package, are not locked', async () => {
         const h = boot({ environmentId: 'env_1' });
+        h.standInStore();
         for (const name of [RUNTIME_ROW, TENANT_BOUND]) {
             const put = await h.dispatcher.handleAutomation(
                 `/${name}`, 'PUT', definitionOf(name, 'Edited'), AUTHOR(), undefined,
@@ -341,6 +356,7 @@ describe('what the lock leaves open', () => {
         process.env.OS_METADATA_WRITABLE = 'flow';
         ObjectStackProtocolImplementation.resetEnvWritableCache();
         const h = boot();
+        h.standInStore();
 
         const { response } = await h.dispatcher.handleAutomation(
             `/${PACKAGED}`, 'PUT', definitionOf(PACKAGED, 'Operator edit'), AUTHOR(), undefined,

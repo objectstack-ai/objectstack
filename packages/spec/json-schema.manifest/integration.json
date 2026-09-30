@@ -5,8 +5,6 @@
     "integration/Connector",
     "integration/ConnectorAction",
     "integration/ConnectorActionEffect",
-    "integration/ConnectorConflictResolution",
-    "integration/ConnectorFieldMapping",
     "integration/ConnectorInstanceAPIKeyAuth",
     "integration/ConnectorInstanceAuth",
     "integration/ConnectorInstanceBasicAuth",
@@ -14,9 +12,7 @@
     "integration/ConnectorInstanceNoAuth",
     "integration/ConnectorRetryStrategy",
     "integration/ConnectorType",
-    "integration/DataSyncConfig",
     "integration/DeclarativeConnectorEntry",
-    "integration/RetryConfig",
-    "integration/SyncStrategy"
+    "integration/RetryConfig"
   ]
 }

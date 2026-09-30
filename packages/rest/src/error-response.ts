@@ -1249,9 +1249,9 @@ function structuredCodeAnswer(
     // [#4134] Unknown field named by a READ — the protocol's list normalizer
     // refusing to lower a query parameter that matches no field into an
     // implicit filter that could only ever match zero rows. Emitted in the SAME
-    // envelope as the driver-string branch below (which catches the write-path
-    // form of the identical mistake), so one condition has one wire shape no
-    // matter which layer noticed it. Must precede the generic 4xx passthrough,
+    // envelope as the driver-string branch below (which classifies a driver's
+    // missing-column text, and since #20701 says so rather than "Unknown
+    // field"), so one wire shape serves both. Must precede the generic 4xx passthrough,
     // which would ship the message but drop `field`.
     // [commit 6d178a408] `!isSandboxOrigin`: the same clause as the arm above, and here
     // it carries the sentence reason TOO — this arm really does ship
@@ -1772,6 +1772,18 @@ function classifyDataError(error: any, object?: string): { status: number; body:
     // a legal missing-TABLE phrase as a substring, and `service-analytics` and
     // `metadata` each had to repair the same superstring hole. Same regex as
     // before, same position last in the chain — only its owner moved.
+    //
+    // [#20701] The sentence says what the DATABASE said — the table has no
+    // such column — and never "Unknown field". This branch sees only the
+    // driver's text, not the object's field map, while the engine's
+    // declared-field door refuses an undeclared write key before any driver
+    // runs, in its own words, and the read doors gate undeclared filter names
+    // the same way. So a request that gets this far usually names a field the
+    // object DECLARES whose column is missing: metadata and the physical
+    // schema have drifted, and "Unknown field" sent the author hunting for a
+    // typo in a correct declaration. (A formula column was the common case;
+    // the engine strips that value now, reason `computed`.) `code`, `status`,
+    // `field` and `object` are unchanged.
     const unknownColumn =
         /has no column named\s+["'`]?([a-z0-9_]+)/i.exec(raw)?.[1] ??
         /no such column:\s*["'`]?([a-z0-9_.]+)/i.exec(raw)?.[1] ??
@@ -1783,8 +1795,10 @@ function classifyDataError(error: any, object?: string): { status: number; body:
             status: 400,
             body: {
                 error: field
-                    ? `Unknown field '${field}'${object ? ` on object '${object}'` : ''}`
-                    : 'Request references a field that does not exist',
+                    ? `The database table${object ? ` of object '${object}'` : ''} has no column for field '${field}'. `
+                        + `If the object declares '${field}', its database schema has drifted from the metadata: `
+                        + `run 'os migrate' to reconcile.`
+                    : 'The request references a column the database table does not have.',
                 code: 'INVALID_FIELD',
                 ...(field ? { field } : {}),
                 ...(object ? { object } : {}),

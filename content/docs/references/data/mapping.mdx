@@ -49,6 +49,7 @@ const result = ImportFieldMappingSchema.parse(data);
 | **fieldMapping** | `{ source: string \| string[]; target: string \| string[]; transform: Enum<'none' \| 'constant' \| 'lookup' \| 'split' \| 'join' \| 'javascript' \| 'map'>; params?: object }[]` | ✅ |  |
 | **mode** | `Enum<'insert' \| 'update' \| 'upsert'>` | optional (default: `"insert"`) |  |
 | **upsertKey** | `string[]` | optional | Fields to match for upsert (e.g. email) |
+| **connectorSource** | `{ connector: string; action: string; input?: Record<string, any>; recordsPath?: string; … }` | optional | Pull binding: the rest/openapi connector this mapping pulls rows from (one-way, full or timestamp-incremental; a `job` sets the cadence). Declared; the pull is not executed yet |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
@@ -65,6 +66,16 @@ const result = ImportFieldMappingSchema.parse(data);
 | **target** | `string \| string[]` | ✅ | Target object field(s); a declared part of a compound field is written field.part (e.g. mailing_address.street), and the parts one row maps are assembled into that field's value |
 | **transform** | `Enum<'none' \| 'constant' \| 'lookup' \| 'split' \| 'join' \| 'javascript' \| 'map'>` | optional (default: `"none"`) |  |
 | **params** | `{ value?: any; valueMap?: Record<string, any>; separator?: string }` | optional |  |
+
+### Nested Shape: `Mapping.connectorSource`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **connector** | `string` | ✅ | Name of the connector instance the rows are pulled from — a `connectors[]` entry whose `provider` is `rest` or `openapi` (version 1) |
+| **action** | `string` | ✅ | Key of the connector action that reads the records: `request` on a `rest` connector, an operation key on an `openapi` connector |
+| **input** | `Record<string, any>` | optional | Fixed input passed to the action on every pull (e.g. `{ method: 'GET', path: '/contacts' }` for `rest`) |
+| **recordsPath** | `string` | optional | Dot path, within the action's result, to the array of records (e.g. `body.results`); omitted ⇒ the result's `body` is the array |
+| **watermark** | `{ field: string; param: string }` | optional | Timestamp-incremental pull; omitted ⇒ every pull reads the full set |
 
 
 ---

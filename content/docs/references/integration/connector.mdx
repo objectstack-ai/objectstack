@@ -9,8 +9,8 @@ description: "Defines the standard connector specification for external system i
 Connector Protocol - LEVEL 3: Enterprise Connector
 
 Defines the standard connector specification for external system integration.
-Connectors enable ObjectStack to sync data with SaaS apps, databases, file storage,
-and message queues through a unified protocol.
+Connectors enable ObjectStack to call SaaS apps, databases, file storage and
+message queues through a unified protocol.
 
 **Positioning in the sync/integration layering** — this file is now the ONLY
 layer. Both layers above it were retired under ADR-0049 for the same measured
@@ -18,16 +18,15 @@ reason, that no engine ever executed them: L1 "Simple Sync"
 (`automation/sync.zod.ts`) in #4738, and L2 "ETL Pipeline"
 (`automation/etl.zod.ts`) in #6414. See
 `packages/spec/docs/SYNC_ARCHITECTURE.md`:
-- **Enterprise Connector** (THIS FILE) - System integrators - Full SAP integration; connector-attached sync via `syncConfig`
+- **Enterprise Connector** (THIS FILE) - System integrators - Full SAP integration
 
 **SCOPE: Most comprehensive integration layer.**
-Includes authentication, field mapping, bidirectional sync, retry policies,
-and complete lifecycle management.
+Includes authentication, actions, retry policies and lifecycle management.
 
-This protocol supports multiple authentication strategies, bidirectional sync,
-field mapping, and an executed retry policy. It declares no health probe, no
-circuit breaker, no authored status, no webhooks and no triggers of its own —
-see "What this layer does NOT provide" below.
+This protocol supports multiple authentication strategies and an executed
+retry policy. It declares no health probe, no circuit breaker, no authored
+status, no webhooks, no triggers and no sync of its own — see "What this
+layer does NOT provide" below.
 
 ## What this layer does NOT provide
 
@@ -89,19 +88,15 @@ removal reasoning is recorded at each removal site: the "REMOVED:
 `connectionTimeoutMs`" and "REMOVED: outbound rate limiting" blocks in
 `integration/connector.zod.ts`, and `packages/spec/docs/SYNC_ARCHITECTURE.md`.
 
-**Field mapping does not transform values.** This header used to offer "field
-mapping and transformations"; only the first half was ever true.
-`ConnectorFieldMappingSchema` extends the base mapping with exactly three keys —
-`dataType`, `required` and `syncMode`. `FieldMapping.transform` was removed in
-`@objectstack/spec` 17.0.0 (#5552, ADR-0049), and the whole `FieldMappingTransform`
-union went with it (`constant` / `cast` / `lookup` / `javascript` / `map`) — **no
-runtime ever executed any of the five**. An L3 connector mapping moves a value from
-`source` to `target`; it does not compute one. **Value conversion belongs on a
-surface that runs it:** the import mapping's own `mapping.fieldMapping[].transform`
-(`data/mapping.zod.ts` — a string enum,
-`none`/`constant`/`map`/`split`/`join`/`lookup`, with its settings in `params`),
-applied row by row by the REST import path — or an ETL transformation step
-(L2 above). Already authored the retired key? `os migrate meta --from 16` lists the mechanical edits for existing sources — the key itself is removed.
+**There is no connector-attached sync and no connector field mapping.**
+`syncConfig` and `fieldMappings` were removed in `@objectstack/spec` 17
+(ADR-0049 enforce-or-remove): no engine ever ran a sync or moved a value
+through a connector field mapping. A sync is defined on its TARGET — a
+`mapping` (`data/mapping.zod.ts`) whose `connectorSource` names the
+connector it pulls from, with a `job` for the cadence; per-field value
+conversion is that mapping's `fieldMapping[].transform`, applied row by row
+by the REST import path. The "REMOVED: connector-attached sync" section
+below records the measurement.
 
 ## Runtime contract — descriptor vs. registered connector (#2612)
 
@@ -131,8 +126,7 @@ Authentication is now imported from the canonical `auth/config.zod.ts`.
 **Use Enterprise Connector when:**
 - Building enterprise-grade connectors (e.g., Salesforce, SAP, Oracle)
 - Complex OAuth2/SAML authentication required
-- Bidirectional sync with field mapping (`dataType` / `syncMode` per field — it moves values, it does not transform them)
-- Full CRUD operations and data synchronization
+- Full CRUD operations through the connector's actions
 - Need comprehensive retry strategies and error handling
 
 **Examples:**
@@ -171,8 +165,8 @@ an exception for itself.)
 ## TypeScript Usage
 
 ```typescript
-import { ConnectorSchema, ConnectorActionSchema, ConnectorActionEffectSchema, ConnectorConflictResolutionSchema, ConnectorFieldMappingSchema, ConnectorInstanceAPIKeyAuthSchema, ConnectorInstanceAuthSchema, ConnectorInstanceBasicAuthSchema, ConnectorInstanceBearerAuthSchema, ConnectorInstanceNoAuthSchema, ConnectorRetryStrategySchema, ConnectorTypeSchema, DataSyncConfigSchema, DeclarativeConnectorEntrySchema, RetryConfigSchema, SyncStrategySchema } from '@objectstack/spec/integration';
-import type { Connector, ConnectorAction, ConnectorActionEffect, ConnectorConflictResolution, ConnectorFieldMapping, ConnectorInstanceAPIKeyAuth, ConnectorInstanceAuth, ConnectorInstanceBasicAuth, ConnectorInstanceBearerAuth, ConnectorInstanceNoAuth, ConnectorRetryStrategy, ConnectorType, DataSyncConfig, DeclarativeConnectorEntry, RetryConfig, SyncStrategy } from '@objectstack/spec/integration';
+import { ConnectorSchema, ConnectorActionSchema, ConnectorActionEffectSchema, ConnectorInstanceAPIKeyAuthSchema, ConnectorInstanceAuthSchema, ConnectorInstanceBasicAuthSchema, ConnectorInstanceBearerAuthSchema, ConnectorInstanceNoAuthSchema, ConnectorRetryStrategySchema, ConnectorTypeSchema, DeclarativeConnectorEntrySchema, RetryConfigSchema } from '@objectstack/spec/integration';
+import type { Connector, ConnectorAction, ConnectorActionEffect, ConnectorInstanceAPIKeyAuth, ConnectorInstanceAuth, ConnectorInstanceBasicAuth, ConnectorInstanceBearerAuth, ConnectorInstanceNoAuth, ConnectorRetryStrategy, ConnectorType, DeclarativeConnectorEntry, RetryConfig } from '@objectstack/spec/integration';
 
 // Validate data
 const result = ConnectorSchema.parse(data);
@@ -197,8 +191,8 @@ const result = ConnectorSchema.parse(data);
 | **auth** | `{ type: 'none' } \| { type: 'bearer'; credentialRef: string } \| { type: 'api-key'; credentialRef: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; credentialRef: string }` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
 | **actions** | `{ key: string; label: string; description?: string; inputSchema?: Record<string, any>; … }[]` | optional |  |
 | **triggers** | `never` | optional | [REMOVED] `connector.triggers` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — a connector trigger never started anything: `AutomationEngine.registerConnector` registers a connector's actions only, no polling loop read `intervalSeconds` (or the `interval` spelling it was renamed from), and no receiver was driven by a `webhook` trigger. Delete the key; the `ConnectorTrigger` shape leaves with it. To start work from an external system, write a flow that calls the connector's action in a `connector_action` node: for an external event, an `api` flow that the event's sender calls; for a scheduled pull, a `schedule` flow. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
-| **syncConfig** | `{ strategy: Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>; direction: Enum<'import' \| 'export' \| 'bidirectional'>; realtimeSync: boolean; timestampField?: string; … }` | optional | Data sync configuration |
-| **fieldMappings** | `{ source: string; target: string; defaultValue?: any; dataType?: Enum<'string' \| 'number' \| 'boolean' \| 'date' \| 'datetime' \| 'json' \| 'array'>; … }[]` | optional | Field mapping rules |
+| **syncConfig** | `never` | optional | [REMOVED] `connector.syncConfig` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — no engine ever ran a connector-attached sync: nothing read `strategy`, `direction`, `realtimeSync`, `timestampField`, `conflictResolution`, `batchSize`, `deleteMode` or `filters`, so the `latest_wins` and `soft_delete` defaults resolved and deleted nothing. Delete the key; the `DataSyncConfig` shape leaves with it. A sync is defined on its TARGET: a `mapping` (`targetObject`, `fieldMapping`, `mode`, `upsertKey`) whose `connectorSource` names the `rest` or `openapi` connector it pulls from, the read action and an optional timestamp `watermark`, with a `job` for the cadence. That binding is declared but its pull is not executed yet, and authoring it warns until it is. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
+| **fieldMappings** | `never` | optional | [REMOVED] `connector.fieldMappings` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — no engine ever moved a value through a connector field mapping: nothing read `source`, `target`, `defaultValue`, `dataType`, `required` or `syncMode`. Delete the key; the `ConnectorFieldMapping` shape leaves with it. Map fields on the sync's TARGET instead: a `mapping`'s `fieldMapping` (`source` → `target`, with a `transform` the import path executes), which its `connectorSource` pulls through. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **webhooks** | `never` | optional | [REMOVED] `connector.webhooks` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — a webhook nested inside a connector was never registered as a `webhook` item, so it was never materialized into `sys_webhook` and never delivered, and nothing emits the connector events its `events` list could name (`sync.completed`, `auth.expired` and the rest). Delete the key; the nested shape leaves with it (`WebhookConfig`, `WebhookEvent`, `WebhookSignatureAlgorithm`). To have a webhook actually sent, declare it in the stack's top-level `webhooks:` collection, which is materialized into `sys_webhook` and delivered on record events — note that doing so STARTS deliveries this connector never made. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **rateLimitConfig** | `never` | optional | [REMOVED] `connector.rateLimitConfig` was removed in @objectstack/spec 17.0.0 (ADR-0049 D2) — the entire shape is gone, not just this key: `ConnectorRateLimitConfig` and its `RateLimitStrategy` enum were removed with it, because no outbound rate-limiting engine ever existed. The platform's only token bucket (runtime `security/rate-limit.ts`) throttles INBOUND requests to us; nothing throttled the calls a connector makes out, so every knob here was inert while reading like a configured cap. Delete the key. Do NOT substitute `shared` `RateLimitConfig` — that is the inbound limiter and would cap the wrong direction; until an outbound throttle exists, rate-limit at the connector provider or upstream gateway. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **retryConfig** | `{ strategy: Enum<'exponential_backoff' \| 'linear_backoff' \| 'fixed_delay' \| 'no_retry'>; maxAttempts: number; initialDelayMs: number; maxDelayMs: number; … }` | optional | Retry configuration |
@@ -290,31 +284,6 @@ const result = ConnectorSchema.parse(data);
 | **outputSchema** | `Record<string, any>` | optional | Output schema (JSON Schema) |
 | **effect** | `Enum<'read' \| 'write'>` | optional | What the action does upstream: 'read' never mutates (reports acted:0); 'write' does (a successful dispatch reports acted:1). Omit when the effect is not knowable — the step is then reported as unmeasured, not as zero |
 
-### Nested Shape: `Connector.syncConfig`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **strategy** | `Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>` | optional (default: `"incremental"`) | Synchronization strategy |
-| **direction** | `Enum<'import' \| 'export' \| 'bidirectional'>` | optional (default: `"import"`) | Sync direction |
-| **realtimeSync** | `boolean` | optional (default: `false`) | Enable real-time sync |
-| **timestampField** | `string` | optional | Field to track last modification time |
-| **conflictResolution** | `Enum<'source_wins' \| 'target_wins' \| 'latest_wins' \| 'manual'>` | optional (default: `"latest_wins"`) | Conflict resolution strategy |
-| **batchSize** | `number` | optional (default: `1000`) | Records per batch |
-| **deleteMode** | `Enum<'hard_delete' \| 'soft_delete' \| 'ignore'>` | optional (default: `"soft_delete"`) | Delete handling mode |
-| **filters** | `Record<string, any>` | optional | Filter criteria for selective sync |
-
-### Nested Shape: `Connector.fieldMappings[number]`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **source** | `string` | ✅ | Source field name |
-| **target** | `string` | ✅ | Target field name |
-| **transform** | `never` | optional | [REMOVED] `FieldMapping.transform` — authored as `connector.fieldMappings[].transform` and `externalLookup.fieldMappings[].transform` — was removed in @objectstack/spec 17.0.0 (ADR-0049), and the whole `FieldMappingTransform` union went with it (`constant` / `cast` / `lookup` / `javascript` / `map`) — no runtime ever executed any of the five, and the `javascript` member advertised `dialect: "js"`, a dialect retired. Delete the key. The transform pipeline that IS enforced is the import mapping's: `mapping.fieldMapping[].transform` (a string enum — `none`/`constant`/`map`/`split`/`join`/`lookup` — with its settings in `params`), applied by the REST import path, which rejects `javascript` with a 400 rather than pretending to run it. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
-| **defaultValue** | `any` | optional | Default if source is null/undefined |
-| **dataType** | `Enum<'string' \| 'number' \| 'boolean' \| 'date' \| 'datetime' \| 'json' \| 'array'>` | optional | Target data type |
-| **required** | `boolean` | optional (default: `false`) | Field is required |
-| **syncMode** | `Enum<'read_only' \| 'write_only' \| 'bidirectional'>` | optional (default: `"bidirectional"`) | Sync mode |
-
 ### Nested Shape: `Connector.retryConfig`
 
 | Property | Type | Required | Description |
@@ -355,37 +324,6 @@ What the action does upstream: 'read' never mutates (reports acted:0); 'write' d
 
 * `read`
 * `write`
-
-
----
-
-## ConnectorConflictResolution
-
-Conflict resolution strategy
-
-### Allowed Values
-
-* `source_wins`
-* `target_wins`
-* `latest_wins`
-* `manual`
-
-
----
-
-## ConnectorFieldMapping
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **source** | `string` | ✅ | Source field name |
-| **target** | `string` | ✅ | Target field name |
-| **transform** | `never` | optional | [REMOVED] `FieldMapping.transform` — authored as `connector.fieldMappings[].transform` and `externalLookup.fieldMappings[].transform` — was removed in @objectstack/spec 17.0.0 (ADR-0049), and the whole `FieldMappingTransform` union went with it (`constant` / `cast` / `lookup` / `javascript` / `map`) — no runtime ever executed any of the five, and the `javascript` member advertised `dialect: "js"`, a dialect retired. Delete the key. The transform pipeline that IS enforced is the import mapping's: `mapping.fieldMapping[].transform` (a string enum — `none`/`constant`/`map`/`split`/`join`/`lookup` — with its settings in `params`), applied by the REST import path, which rejects `javascript` with a 400 rather than pretending to run it. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
-| **defaultValue** | `any` | optional | Default if source is null/undefined |
-| **dataType** | `Enum<'string' \| 'number' \| 'boolean' \| 'date' \| 'datetime' \| 'json' \| 'array'>` | optional | Target data type |
-| **required** | `boolean` | optional (default: `false`) | Field is required |
-| **syncMode** | `Enum<'read_only' \| 'write_only' \| 'bidirectional'>` | optional (default: `"bidirectional"`) | Sync mode |
 
 
 ---
@@ -533,24 +471,6 @@ Connector type
 
 ---
 
-## DataSyncConfig
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **strategy** | `Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>` | optional (default: `"incremental"`) | Synchronization strategy |
-| **direction** | `Enum<'import' \| 'export' \| 'bidirectional'>` | optional (default: `"import"`) | Sync direction |
-| **realtimeSync** | `boolean` | optional (default: `false`) | Enable real-time sync |
-| **timestampField** | `string` | optional | Field to track last modification time |
-| **conflictResolution** | `Enum<'source_wins' \| 'target_wins' \| 'latest_wins' \| 'manual'>` | optional (default: `"latest_wins"`) | Conflict resolution strategy |
-| **batchSize** | `number` | optional (default: `1000`) | Records per batch |
-| **deleteMode** | `Enum<'hard_delete' \| 'soft_delete' \| 'ignore'>` | optional (default: `"soft_delete"`) | Delete handling mode |
-| **filters** | `Record<string, any>` | optional | Filter criteria for selective sync |
-
-
----
-
 ## DeclarativeConnectorEntry
 
 ### Properties
@@ -568,8 +488,8 @@ Connector type
 | **auth** | `{ type: 'none' } \| { type: 'bearer'; credentialRef: string } \| { type: 'api-key'; credentialRef: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; credentialRef: string }` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved at boot), never inline secrets. Requires `provider` (ADR-0097). |
 | **actions** | `{ key: string; label: string; description?: string; inputSchema?: Record<string, any>; … }[]` | optional |  |
 | **triggers** | `never` | optional | [REMOVED] `connector.triggers` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — a connector trigger never started anything: `AutomationEngine.registerConnector` registers a connector's actions only, no polling loop read `intervalSeconds` (or the `interval` spelling it was renamed from), and no receiver was driven by a `webhook` trigger. Delete the key; the `ConnectorTrigger` shape leaves with it. To start work from an external system, write a flow that calls the connector's action in a `connector_action` node: for an external event, an `api` flow that the event's sender calls; for a scheduled pull, a `schedule` flow. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
-| **syncConfig** | `{ strategy: Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>; direction: Enum<'import' \| 'export' \| 'bidirectional'>; realtimeSync: boolean; timestampField?: string; … }` | optional | Data sync configuration |
-| **fieldMappings** | `{ source: string; target: string; defaultValue?: any; dataType?: Enum<'string' \| 'number' \| 'boolean' \| 'date' \| 'datetime' \| 'json' \| 'array'>; … }[]` | optional | Field mapping rules |
+| **syncConfig** | `never` | optional | [REMOVED] `connector.syncConfig` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — no engine ever ran a connector-attached sync: nothing read `strategy`, `direction`, `realtimeSync`, `timestampField`, `conflictResolution`, `batchSize`, `deleteMode` or `filters`, so the `latest_wins` and `soft_delete` defaults resolved and deleted nothing. Delete the key; the `DataSyncConfig` shape leaves with it. A sync is defined on its TARGET: a `mapping` (`targetObject`, `fieldMapping`, `mode`, `upsertKey`) whose `connectorSource` names the `rest` or `openapi` connector it pulls from, the read action and an optional timestamp `watermark`, with a `job` for the cadence. That binding is declared but its pull is not executed yet, and authoring it warns until it is. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
+| **fieldMappings** | `never` | optional | [REMOVED] `connector.fieldMappings` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — no engine ever moved a value through a connector field mapping: nothing read `source`, `target`, `defaultValue`, `dataType`, `required` or `syncMode`. Delete the key; the `ConnectorFieldMapping` shape leaves with it. Map fields on the sync's TARGET instead: a `mapping`'s `fieldMapping` (`source` → `target`, with a `transform` the import path executes), which its `connectorSource` pulls through. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **webhooks** | `never` | optional | [REMOVED] `connector.webhooks` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — a webhook nested inside a connector was never registered as a `webhook` item, so it was never materialized into `sys_webhook` and never delivered, and nothing emits the connector events its `events` list could name (`sync.completed`, `auth.expired` and the rest). Delete the key; the nested shape leaves with it (`WebhookConfig`, `WebhookEvent`, `WebhookSignatureAlgorithm`). To have a webhook actually sent, declare it in the stack's top-level `webhooks:` collection, which is materialized into `sys_webhook` and delivered on record events — note that doing so STARTS deliveries this connector never made. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **rateLimitConfig** | `never` | optional | [REMOVED] `connector.rateLimitConfig` was removed in @objectstack/spec 17.0.0 (ADR-0049 D2) — the entire shape is gone, not just this key: `ConnectorRateLimitConfig` and its `RateLimitStrategy` enum were removed with it, because no outbound rate-limiting engine ever existed. The platform's only token bucket (runtime `security/rate-limit.ts`) throttles INBOUND requests to us; nothing throttled the calls a connector makes out, so every knob here was inert while reading like a configured cap. Delete the key. Do NOT substitute `shared` `RateLimitConfig` — that is the inbound limiter and would cap the wrong direction; until an outbound throttle exists, rate-limit at the connector provider or upstream gateway. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **retryConfig** | `{ strategy: Enum<'exponential_backoff' \| 'linear_backoff' \| 'fixed_delay' \| 'no_retry'>; maxAttempts: number; initialDelayMs: number; maxDelayMs: number; … }` | optional | Retry configuration |
@@ -661,31 +581,6 @@ Connector type
 | **outputSchema** | `Record<string, any>` | optional | Output schema (JSON Schema) |
 | **effect** | `Enum<'read' \| 'write'>` | optional | What the action does upstream: 'read' never mutates (reports acted:0); 'write' does (a successful dispatch reports acted:1). Omit when the effect is not knowable — the step is then reported as unmeasured, not as zero |
 
-### Nested Shape: `DeclarativeConnectorEntry.syncConfig`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **strategy** | `Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>` | optional (default: `"incremental"`) | Synchronization strategy |
-| **direction** | `Enum<'import' \| 'export' \| 'bidirectional'>` | optional (default: `"import"`) | Sync direction |
-| **realtimeSync** | `boolean` | optional (default: `false`) | Enable real-time sync |
-| **timestampField** | `string` | optional | Field to track last modification time |
-| **conflictResolution** | `Enum<'source_wins' \| 'target_wins' \| 'latest_wins' \| 'manual'>` | optional (default: `"latest_wins"`) | Conflict resolution strategy |
-| **batchSize** | `number` | optional (default: `1000`) | Records per batch |
-| **deleteMode** | `Enum<'hard_delete' \| 'soft_delete' \| 'ignore'>` | optional (default: `"soft_delete"`) | Delete handling mode |
-| **filters** | `Record<string, any>` | optional | Filter criteria for selective sync |
-
-### Nested Shape: `DeclarativeConnectorEntry.fieldMappings[number]`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **source** | `string` | ✅ | Source field name |
-| **target** | `string` | ✅ | Target field name |
-| **transform** | `never` | optional | [REMOVED] `FieldMapping.transform` — authored as `connector.fieldMappings[].transform` and `externalLookup.fieldMappings[].transform` — was removed in @objectstack/spec 17.0.0 (ADR-0049), and the whole `FieldMappingTransform` union went with it (`constant` / `cast` / `lookup` / `javascript` / `map`) — no runtime ever executed any of the five, and the `javascript` member advertised `dialect: "js"`, a dialect retired. Delete the key. The transform pipeline that IS enforced is the import mapping's: `mapping.fieldMapping[].transform` (a string enum — `none`/`constant`/`map`/`split`/`join`/`lookup` — with its settings in `params`), applied by the REST import path, which rejects `javascript` with a 400 rather than pretending to run it. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
-| **defaultValue** | `any` | optional | Default if source is null/undefined |
-| **dataType** | `Enum<'string' \| 'number' \| 'boolean' \| 'date' \| 'datetime' \| 'json' \| 'array'>` | optional | Target data type |
-| **required** | `boolean` | optional (default: `false`) | Field is required |
-| **syncMode** | `Enum<'read_only' \| 'write_only' \| 'bidirectional'>` | optional (default: `"bidirectional"`) | Sync mode |
-
 ### Nested Shape: `DeclarativeConnectorEntry.retryConfig`
 
 | Property | Type | Required | Description |
@@ -716,20 +611,6 @@ Connector type
 | **retryableStatusCodes** | `number[]` | optional (default: `[408,429,500,502,503,504]`) | HTTP status codes to retry |
 | **retryOnNetworkError** | `boolean` | optional (default: `true`) | Retry on network errors |
 | **jitter** | `boolean` | optional (default: `true`) | Add jitter to retry delays |
-
-
----
-
-## SyncStrategy
-
-Synchronization strategy
-
-### Allowed Values
-
-* `full`
-* `incremental`
-* `upsert`
-* `append_only`
 
 
 ---

@@ -6,10 +6,8 @@ import type { ZodTypeAny } from 'zod';
 import { CONVERSIONS_BY_MAJOR } from './conversions/registry';
 import {
   ConnectorSchema,
-  DataSyncConfigSchema,
   DeclarativeConnectorEntrySchema,
   type Connector,
-  type DataSyncConfig,
 } from './integration/connector.zod';
 import { getMetadataTypeSchema } from './kernel/metadata-type-schemas';
 import { MIGRATIONS_BY_MAJOR, RETIRED_DEFS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from './migrations/registry';
@@ -74,6 +72,21 @@ import {
 // hold — no key-level registration was ever made for the three positions, and
 // each enclosing def is now a `RETIRED_DEFS_BY_MAJOR[18]` entry. The four
 // positions on live schemas are pinned exactly as before.
+//
+// ─── Protocol 18: `DataSyncConfig.schedule` joined them ───────────────────────
+//
+// The connector's whole `syncConfig` block was retired later in the same major
+// (ADR-0049 — no engine ever ran a connector-attached sync; the definition
+// moved to the target `mapping`'s `connectorSource`, with a `job` for the
+// cadence). `DataSyncConfig` left whole, so its `schedule` position moved from
+// the strip pins to `LEFT_WITH_THEIR_DEFS`. The 直接删 ruling on the KEY stands
+// — still no key-level registration, conversion or D3 names `schedule` — but
+// the manifest-reachable path is now LOUDER than the strip it replaced: the
+// `syncConfig` CONTAINER is a `retiredKey()` tombstone, so a stack still
+// carrying a cadence there meets a refusal whose prescription names the `job`,
+// and the container's own D2 (`connector-sync-keys-removed`) strips it whole,
+// `schedule` included, without naming it. The last describe block of the
+// connector half below pins that.
 
 const CRON = '0 6 * * MON';
 /** The envelope the old schema normalized the bare string into — dropped just the same. */
@@ -82,7 +95,7 @@ const CRON_ENVELOPE = { dialect: 'cron', source: CRON };
 // ── Well-formed fixtures: every required key, none of the deleted ones ──────
 
 const SYNC_WELL_FORMED = { strategy: 'incremental' as const, direction: 'bidirectional' as const, batchSize: 500 };
-const CONNECTOR_WELL_FORMED = { name: 'sap_erp', label: 'SAP ERP', type: 'saas' as const, syncConfig: SYNC_WELL_FORMED };
+const CONNECTOR_WELL_FORMED = { name: 'sap_erp', label: 'SAP ERP', type: 'saas' as const };
 // [#17157] was `strategy: 'scheduled'` — that enum member was itself retired one card
 // later, in this same major, precisely because the cron key stripped below was its
 // only referent. A fixture must be well-formed under the CURRENT schema, so it now
@@ -123,18 +136,12 @@ const LEFT_WITH_THEIR_DEFS = [
   { registered: 'api/ScheduledExport:schedule.cronExpression', def: 'api/ScheduledExport' },
   { registered: 'api/ScheduleExportRequest:schedule.cronExpression', def: 'api/ScheduleExportRequest' },
   { registered: 'automation/ScheduleState:cronExpression', def: 'automation/ScheduleState' },
+  // Protocol 18: the connector's `syncConfig` retired whole (ADR-0049).
+  { registered: 'integration/DataSyncConfig:schedule', def: 'integration/DataSyncConfig' },
 ] as const;
 
-/** The four positions whose schemas are still published. */
+/** The three positions whose schemas are still published. */
 const SITES: DeletedSite[] = [
-  {
-    registered: 'integration/DataSyncConfig:schedule',
-    qualified: 'connector.syncConfig.schedule',
-    schema: DataSyncConfigSchema,
-    wellFormed: SYNC_WELL_FORMED,
-    authored: { ...SYNC_WELL_FORMED, schedule: CRON },
-    keyPath: ['schedule'],
-  },
   {
     registered: 'system/CacheWarmup:schedule',
     qualified: 'CacheWarmup.schedule',
@@ -163,22 +170,9 @@ const SITES: DeletedSite[] = [
 
 /** The same deletions seen through the shapes that nest them. */
 const CARRIERS: Array<Pick<DeletedSite, 'qualified' | 'schema' | 'wellFormed' | 'authored' | 'keyPath'> & { via: string }> = [
-  {
-    via: 'Connector.syncConfig',
-    qualified: 'connector.syncConfig.schedule',
-    schema: ConnectorSchema,
-    wellFormed: CONNECTOR_WELL_FORMED,
-    authored: { ...CONNECTOR_WELL_FORMED, syncConfig: { ...SYNC_WELL_FORMED, schedule: CRON } },
-    keyPath: ['syncConfig', 'schedule'],
-  },
-  {
-    via: 'DeclarativeConnectorEntry.syncConfig (the `/meta/connector` write door inherits it)',
-    qualified: 'connector.syncConfig.schedule',
-    schema: DeclarativeConnectorEntrySchema,
-    wellFormed: CONNECTOR_WELL_FORMED,
-    authored: { ...CONNECTOR_WELL_FORMED, syncConfig: { ...SYNC_WELL_FORMED, schedule: CRON } },
-    keyPath: ['syncConfig', 'schedule'],
-  },
+  // (`Connector.syncConfig` and `DeclarativeConnectorEntry.syncConfig` stood
+  // here until protocol 18 retired the container: they no longer strip the key,
+  // they REFUSE the block — pinned in the connector describe block below.)
   {
     via: 'DisasterRecoveryPlan.backup',
     qualified: 'BackupConfig.schedule',
@@ -214,7 +208,7 @@ function readAt(doc: unknown, keyPath: (string | number)[]): { block: Record<str
   return { block: at as Record<string, unknown>, leaf: String(keyPath[keyPath.length - 1]) };
 }
 
-describe('[#16320] the four surviving cron-typed positions no longer exist on their schemas', () => {
+describe('[#16320] the three surviving cron-typed positions no longer exist on their schemas', () => {
   for (const site of SITES) {
     it(`\`${site.qualified}\` is gone — an authored value is accepted and STRIPPED, never materialized`, () => {
       const parsed = site.schema.safeParse(site.authored);
@@ -237,8 +231,8 @@ describe('[#16320] the four surviving cron-typed positions no longer exist on th
       return found!;
     };
     const envelopeSites: Array<[DeletedSite, unknown]> = [
-      [site('connector.syncConfig.schedule'), { ...SYNC_WELL_FORMED, schedule: CRON_ENVELOPE }],
       [site('CacheWarmup.schedule'), { ...WARMUP_WELL_FORMED, schedule: CRON_ENVELOPE }],
+      [site('BackupConfig.schedule'), { ...BACKUP_WELL_FORMED, schedule: CRON_ENVELOPE }],
     ];
     for (const [site, authored] of envelopeSites) {
       const parsed = site.schema.safeParse(authored);
@@ -262,65 +256,50 @@ describe('[#16320] the four surviving cron-typed positions no longer exist on th
   }
 
   it('the surviving keys still materialize — the absences above are the deletions, not a dead parse', () => {
-    expect(DataSyncConfigSchema.parse(SYNC_WELL_FORMED).realtimeSync).toBe(false);
     expect(CacheWarmupSchema.parse(WARMUP_WELL_FORMED).concurrency).toBe(10);
     expect(BackupConfigSchema.parse(BACKUP_WELL_FORMED).verifyAfterBackup).toBe(true);
   });
 });
 
 describe('[#16320] the one manifest-reachable position — what an upgrading stack actually gets', () => {
-  it('`/meta/connector` (the registry-bound door) accepts the key and strips it', () => {
-    // The registry lookup is the real `/meta` entry point — a future rebinding
-    // that pointed `connector` at some third shape would pass the carrier pins
-    // above and still behave differently in production.
-    const schema = getMetadataTypeSchema('connector');
-    expect(schema, 'no schema bound for `connector`').toBeDefined();
-    const parsed = schema!.safeParse({ ...CONNECTOR_WELL_FORMED, syncConfig: { ...SYNC_WELL_FORMED, schedule: CRON } });
-    expect(parsed.success).toBe(true);
-    if (!parsed.success) return;
-    expect((parsed.data as { syncConfig: Record<string, unknown> }).syncConfig).not.toHaveProperty('schedule');
-    expect((parsed.data as { syncConfig: Record<string, unknown> }).syncConfig.batchSize).toBe(500);
-  });
+  // ⚠️ REWRITTEN IN PROTOCOL 18, and the direction of every assertion here
+  // INVERTED. These pins used to record the 直接删 consequence — the key
+  // accepted and silently stripped from `syncConfig`. The connector's
+  // `syncConfig` container has since been retired whole (ADR-0049), as a
+  // `retiredKey()` tombstone: a stack still carrying a cadence there is now
+  // REFUSED at the container, and the prescription names the `job` that owns a
+  // cadence. Louder than the strip, on every door the strip used to reach.
+  const WITH_CADENCE = { ...CONNECTOR_WELL_FORMED, syncConfig: { ...SYNC_WELL_FORMED, schedule: CRON } };
 
-  it('`stack.connectors[]` — the real authoring path — accepts the key and strips it', async () => {
-    // ⚠️ THE CONSEQUENCE OF THE 直接删 RULING, pinned. `DataSyncConfig.schedule`
-    // is the only one of the seven a stack manifest reaches (`stack.zod.ts`
-    // `connectors[]` → `connector.zod.ts` `syncConfig` → `schedule`). With no
-    // tombstone the manifest still LOADS and the cadence the author wrote is
-    // dropped — the ADR-0104 silent-strip shape at the PARSE, accepted
-    // deliberately by the ruling.
-    //
-    // ⛔ Silent at the parse is not silent to the author, and the module
-    // docblock carries the measurement: on this exact path `os validate` prints
-    // `connectors.<name>.syncConfig.schedule: 'schedule' is not a declared
-    // connector key, so its value is dropped at load.`, `os build` prints it
-    // under its undeclared-keys block, and `os validate --strict` EXITS 1 on it.
-    // This assertion is about `ObjectStackSchema` alone; it does not measure —
-    // and must not be quoted as — what the CLI tells the author.
+  it('`Connector`, `/meta/connector` (the registry-bound door) and `stack.connectors[]` refuse the container, naming the `job`', async () => {
+    const door = getMetadataTypeSchema('connector');
+    expect(door, 'no schema bound for `connector`').toBeDefined();
     const { ObjectStackSchema } = await import('./stack.zod');
-    const parsed = ObjectStackSchema.safeParse({
-      connectors: [{ ...CONNECTOR_WELL_FORMED, syncConfig: { ...SYNC_WELL_FORMED, schedule: CRON } }],
-    });
-    expect(parsed.success).toBe(true);
-    if (!parsed.success) return;
-    const connectors = (parsed.data as { connectors: Array<{ syncConfig: Record<string, unknown> }> }).connectors;
-    expect(connectors[0]!.syncConfig).not.toHaveProperty('schedule');
-    expect(connectors[0]!.syncConfig.strategy).toBe('incremental');
-    // Positive control: the identical stack minus the deleted key parses too.
+    for (const [label, result, at] of [
+      ['Connector', ConnectorSchema.safeParse(WITH_CADENCE), 'syncConfig'],
+      ['DeclarativeConnectorEntry', DeclarativeConnectorEntrySchema.safeParse(WITH_CADENCE), 'syncConfig'],
+      ['/meta/connector', door!.safeParse(WITH_CADENCE), 'syncConfig'],
+      ['stack.connectors[]', ObjectStackSchema.safeParse({ connectors: [WITH_CADENCE] }), 'connectors.0.syncConfig'],
+    ] as const) {
+      expect(result.success, `${label} must refuse the retired container`).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === at);
+      expect(issue, `${label}: the refusal must name the container`).toBeDefined();
+      expect(issue!.message).toMatch(/^`connector\.syncConfig` was removed/);
+      expect(issue!.message).toContain('`job`');
+    }
+    // Positive control: the identical connector minus the container parses on
+    // every door, so each refusal above is the container's alone.
+    expect(ConnectorSchema.safeParse(CONNECTOR_WELL_FORMED).success).toBe(true);
+    expect(door!.safeParse(CONNECTOR_WELL_FORMED).success).toBe(true);
     expect(ObjectStackSchema.safeParse({ connectors: [CONNECTOR_WELL_FORMED] }).success).toBe(true);
   });
 });
 
-describe('[#16320] the tsc channel: the four surviving keys are not in their input types', () => {
+describe('[#16320] the tsc channel: the deleted keys are not in their input types', () => {
   it('fails tsc at every authoring site', () => {
-    const sync: DataSyncConfig = {
-      ...SYNC_WELL_FORMED,
-      // @ts-expect-error — `schedule` was deleted.
-      schedule: CRON,
-    };
     const connector: Connector = {
       ...CONNECTOR_WELL_FORMED,
-      // @ts-expect-error — the deletion reaches through the carrier.
+      // @ts-expect-error — protocol 18 retired the whole container: `syncConfig` is a `retiredKey()` tombstone.
       syncConfig: { ...SYNC_WELL_FORMED, schedule: CRON },
     };
     const warmup: CacheWarmup = {
@@ -346,9 +325,10 @@ describe('[#16320] the tsc channel: the four surviving keys are not in their inp
     // tsc is the assertion above. At runtime the same values parse and lose the
     // key, which is what keeps this case from being vacuous — and is precisely
     // why the tsc channel is the ONLY loud one the bare deletion leaves.
+    // The connector literal is the one exception since protocol 18: its
+    // container is refused at runtime too, so tsc and parse agree.
+    expect(ConnectorSchema.safeParse(connector).success).toBe(false);
     for (const [schema, value, keyPath] of [
-      [DataSyncConfigSchema, sync, ['schedule']],
-      [ConnectorSchema, connector, ['syncConfig', 'schedule']],
       [CacheWarmupSchema, warmup, ['schedule']],
       [DistributedCacheConfigSchema, cache, ['warmup', 'schedule']],
       [BackupConfigSchema, backup, ['schedule']],
@@ -364,13 +344,13 @@ describe('[#16320] the tsc channel: the four surviving keys are not in their inp
 });
 
 describe('[#16320] 直接删 — the ADR-0087 surfaces carry NOTHING for these seven', () => {
-  it('[#17158] the three positions that left with their defs are covered at DEF grain, not key grain', () => {
+  it('[#17158] the four positions that left with their defs are covered at DEF grain, not key grain', () => {
     const retiredDefs18 = new Set(RETIRED_DEFS_BY_MAJOR[18] ?? []);
     for (const gone of LEFT_WITH_THEIR_DEFS) {
       expect(retiredDefs18.has(gone.def), `${gone.def} must be a RETIRED_DEFS_BY_MAJOR[18] entry`).toBe(true);
     }
     // Dark control — a def that was never retired reads absent.
-    expect(retiredDefs18.has('integration/DataSyncConfig')).toBe(false);
+    expect(retiredDefs18.has('integration/RetryConfig')).toBe(false);
   });
 
   const registered = new Set(Object.values(RETIRED_KEYS_BY_MAJOR).flatMap((keys) => [...keys]));

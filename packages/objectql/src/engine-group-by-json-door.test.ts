@@ -27,9 +27,9 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
-import { FieldType, STRUCTURED_JSON_TYPES, type EngineAggregateOptions } from '@objectstack/spec/data';
+import { FieldType, STRUCTURED_JSON_TYPES, isMultiValueField, type EngineAggregateOptions } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
-import { assertGroupByNamesNoStructuredJsonField } from './group-by-structured-json-door.js';
+import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
 
 const OBJECT = 'group_by_json_probe';
 
@@ -50,7 +50,7 @@ const PROBE = {
   fields: {
     title: { name: 'title', type: 'text' },
     amount: { name: 'amount', type: 'number' },
-    tags: { name: 'tags', type: 'select', multiple: true, options: [{ label: 'A', value: 'a' }] },
+    status: { name: 'status', type: 'select', options: [{ label: 'A', value: 'a' }] },
     photo: { name: 'photo', type: 'image' },
     ...Object.fromEntries(JSONS.map(([name, type]) => [name, { name, type }])),
   },
@@ -142,8 +142,11 @@ describe('[#20783] a groupBy on a structured-JSON field, at the engine\'s aggreg
     expect(reads).toHaveLength(0);
   });
 
-  it('CONTROL a text, number, multi-value select, file or undeclared groupBy reaches the driver, never this refusal', async () => {
-    for (const field of ['title', 'amount', 'tags', 'photo', 'not_declared']) {
+  it('CONTROL a text, number, single-value select, file or undeclared groupBy reaches the driver, never this refusal', async () => {
+    // [#20808] The multi-value select this control named is refused now (the
+    // second class, `engine-json-stored-group-distinct-door.test.ts`); a
+    // single-value select is the scalar control in its place.
+    for (const field of ['title', 'amount', 'status', 'photo', 'not_declared']) {
       const before = reads.length;
       const out = await engine.aggregate(OBJECT, { groupBy: [field], aggregations: COUNT }).then(
         () => null,
@@ -170,23 +173,27 @@ describe('[#20783] a groupBy on a structured-JSON field, at the engine\'s aggreg
     expect(reads).toHaveLength(0);
   });
 
-  it('GUARD the judged types are exactly the spec\'s STRUCTURED_JSON_TYPES, over every FieldType', () => {
+  it('GUARD the judged types are exactly the spec\'s STRUCTURED_JSON_TYPES plus the multi-value ones, over every FieldType', () => {
+    // [#20808] The inherently-multi option types (`multiselect`, `checkboxes`,
+    // `tags`) are refused without `multiple` — `isMultiValueField` answers for
+    // them by type; the flagged multi-capable types are this guard's twin in
+    // the #20808 suite.
     for (const type of FieldType.options) {
       const thrown = (() => {
         try {
-          assertGroupByNamesNoStructuredJsonField(OBJECT, { fields: { f: { type } } }, ['f']);
+          assertGroupByNamesNoJsonStoredField(OBJECT, { fields: { f: { type } } }, ['f']);
           return null;
         } catch (e) {
           return e as Thrown;
         }
       })();
       expect(thrown === null ? null : envelopeOf(thrown), type)
-        .toEqual(STRUCTURED_JSON_TYPES.has(type) ? ENVELOPE : null);
+        .toEqual(STRUCTURED_JSON_TYPES.has(type) || isMultiValueField({ type }) ? ENVELOPE : null);
     }
   });
 
   it('GUARD no verdict without a field map, for an undeclared name, or for an entry that names no field', () => {
-    const judge = (schema: unknown, groupBy: unknown) => () => assertGroupByNamesNoStructuredJsonField(OBJECT, schema, groupBy);
+    const judge = (schema: unknown, groupBy: unknown) => () => assertGroupByNamesNoJsonStoredField(OBJECT, schema, groupBy);
     expect(judge(undefined, ['meta'])).not.toThrow();
     expect(judge({}, ['meta'])).not.toThrow();
     expect(judge(PROBE, ['nope', { field: 'nope' }, { dateGranularity: 'month' }, 7, null])).not.toThrow();

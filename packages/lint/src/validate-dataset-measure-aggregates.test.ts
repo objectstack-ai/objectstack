@@ -165,12 +165,27 @@ describe('measure-aggregate-field-type-refused — stays silent on every pair th
     }
   });
 
-  it('accepts count and count_distinct over every declared FieldType', () => {
+  it('accepts count over every declared FieldType', () => {
     for (const fieldType of FieldType.options) {
-      for (const aggregate of ['count', 'count_distinct']) {
-        expect(findings(stackWith(aggregate, fieldType)), `${aggregate}(${fieldType})`).toEqual([]);
-      }
+      expect(findings(stackWith('count', fieldType)), `count(${fieldType})`).toEqual([]);
     }
+  });
+
+  // [#20808] `count_distinct` over a JSON-stored type left the table's row: no
+  // two backends compare those values for equality alike (the in-memory driver
+  // counted equal documents apart, SQLite compared serialized text, PostgreSQL
+  // answered 500). Every other declared type stays accepted.
+  it('accepts count_distinct over every declared FieldType except the JSON-stored ones, which it refuses', () => {
+    const jsonStored = ['json', 'composite', 'repeater', 'record', 'location', 'address', 'vector', 'multiselect', 'checkboxes', 'tags'];
+    for (const fieldType of FieldType.options) {
+      const found = findings(stackWith('count_distinct', fieldType));
+      expect(found.length, `count_distinct(${fieldType})`).toBe(jsonStored.includes(fieldType) ? 1 : 0);
+    }
+    const [issue] = findings(stackWith('count_distinct', 'json'));
+    expect(issue.rule).toBe(RULE);
+    // The way out names `count`, and no sentence says count_distinct accepts every type.
+    expect(issue.hint).toContain('accepts: count.');
+    expect(issue.hint).not.toMatch(/count_distinct` accept every type/);
   });
 });
 

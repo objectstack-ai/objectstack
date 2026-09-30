@@ -34,6 +34,7 @@
   "src/identity/position-delegatable-enforcer.pin.test.ts",
   "src/integration/connector-connection-timeout-retirement.test.ts",
   "src/integration/connector-resilience-keys-retirement.test.ts",
+  "src/integration/connector-sync-retirement.test.ts",
   "src/integration/connector-triggers-retirement.test.ts",
   "src/qa/requires-plugins-retirement.test.ts",
   "src/security/rls-tags-retirement.test.ts",

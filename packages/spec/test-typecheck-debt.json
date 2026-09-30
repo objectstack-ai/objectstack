@@ -140,8 +140,7 @@
       "TS6133: 'BasicAuthSchema' is declared but its value is never read.": 1,
       "TS6133: 'BearerAuthSchema' is declared but its value is never read.": 1,
       "TS6133: 'ConnectorTypeSchema' is declared but its value is never read.": 1,
-      "TS6133: 'NoAuthSchema' is declared but its value is never read.": 1,
-      "TS6133: 'SyncStrategySchema' is declared but its value is never read.": 1
+      "TS6133: 'NoAuthSchema' is declared but its value is never read.": 1
     },
     "src/kernel/cluster.test.ts": {
       "TS6133: 'ServiceClusterScopeSchema' is declared but its value is never read.": 1,

@@ -215,11 +215,22 @@ function aggregateToMetricType(m: DatasetMeasure): Metric['type'] {
  *   the ORDER — collation-dependent for text on every backend, and absent
  *   altogether where the storage form has no ordering operator (`min(jsonb)`
  *   does not exist on PostgreSQL).
+ * - [#20808] `count_distinct` COMPARES the stored values for equality, and
+ *   reaches this sentence only over a JSON-stored field (the table's
+ *   `count_distinct` row refuses the structured-JSON and multi-option types):
+ *   the in-memory driver counted equal documents apart, SQLite compared the
+ *   serialized text, and PostgreSQL has no equality operator for `json`.
  *
- * `count` / `count_distinct` accept every type and never reach this sentence.
+ * `count` accepts every type and never reaches this sentence.
  */
 const DIVERGENCE_BY_AGGREGATE = (aggregate: string, fieldType: string): string =>
-  aggregate === 'min' || aggregate === 'max'
+  aggregate === 'count_distinct'
+    ? `"${aggregate}" COMPARES the stored values for equality, so over a \`${fieldType}\` column `
+      + 'the answer is decided by how each backend compares a JSON-stored value rather than by '
+      + 'the data — one counts every row apart, one compares the serialized text, another has no '
+      + 'equality for the type and fails at query time — and one dataset would mean two things '
+      + 'on two deployments. '
+  : aggregate === 'min' || aggregate === 'max'
     ? `"${aggregate}" SELECTS one of the stored values, so over a \`${fieldType}\` column the `
       + 'answer is decided by the ORDER the SQL dialect happens to impose rather than by the '
       + 'data — string order is collation-dependent, and some storage forms have no ordering '
@@ -244,19 +255,28 @@ const DIVERGENCE_BY_AGGREGATE = (aggregate: string, fieldType: string): string =
  * wants. [#17560] The selecting sentence is the third: an author who wrote
  * `min` over a text column wanted a FIRST ROW, and a sort delivers that in one
  * declared order instead of asking each backend for its own smallest value.
+ * [#20808] The distinct sentence is the fourth: `count_distinct` over a
+ * JSON-stored field has no value every backend compares alike, so the author
+ * counts rows, or counts distinct a scalar field holding the part they meant.
+ * The other two non-temporal sentences no longer say `count_distinct` accepts
+ * every type: since #20808 it accepts every type but the JSON-stored ones.
  */
 const REMEDY_BY_SOURCE_CLASS = (fieldType: string, aggregate: string): string =>
   TEMPORAL_SOURCE_FIELD_TYPES.has(fieldType)
     ? 'For a temporal field, `min`/`max` return a real instant; a DURATION has to be '
       + 'stored as a number (a computed "days open" field) and aggregated as one.'
+    : aggregate === 'count_distinct'
+      ? 'For a JSON-stored field, `count` counts the rows; a distinct count has to be taken '
+        + 'over a field that stores one scalar value, so store the part you count in a field '
+        + 'of its own and `count_distinct` that field.'
     : aggregate === 'min' || aggregate === 'max'
-      ? 'For a field with no backend-independent order, `count`/`count_distinct` accept every '
-        + 'type because they read neither arithmetic nor order off the value; a "first" or '
-        + '"last" record is a SORT on the record list, which orders once in a declared '
+      ? 'For a field with no backend-independent order, `count` accepts every type because it '
+        + 'reads no value, and `count_distinct` every type but the JSON-stored ones; a "first" '
+        + 'or "last" record is a SORT on the record list, which orders once in a declared '
         + 'direction, not an aggregate that asks every backend for its own smallest value.'
-      : 'For a non-numeric field, `count`/`count_distinct` accept every type because they '
-        + 'read no arithmetic off the value; a quantity that should be added up has to be '
-        + 'stored as a numeric field and aggregated as one.';
+      : 'For a non-numeric field, `count` accepts every type because it reads no value, and '
+        + '`count_distinct` every type but the JSON-stored ones; a quantity that should be '
+        + 'added up has to be stored as a numeric field and aggregated as one.';
 
 /**
  * [#16737 / #16099 / #17560] Refuse a measure whose AGGREGATE cannot meaningfully

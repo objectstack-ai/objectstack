@@ -1550,6 +1550,137 @@ async function refuseUnauthoredFlowWrite(
     return { handled: true, response: deps.errorFromThrown(refusal) };
 }
 
+/** The engine methods {@link registerAndSaveFlow} drives. */
+type FlowRegistrationService =
+    Required<Pick<IAutomationService, 'registerFlow'>> & Pick<IAutomationService, 'unregisterFlow' | 'getFlow'>;
+
+/**
+ * Put the engine back where it was before this request touched `name`: the
+ * definition it held re-registered, or — when it held none — the name
+ * withdrawn. The one undo every definition door here shares, so a write the
+ * store refused leaves no registration of its own behind, and a refused update
+ * does not take the flow it was updating down with it.
+ */
+function restoreFlowRegistration(automationService: FlowRegistrationService, name: string, held: unknown): void {
+    if (held) automationService.registerFlow(name, held);
+    else automationService.unregisterFlow?.(name);
+}
+
+/**
+ * [#20862, #20761, ADR-0126 §2, ADR-0131 D6] THE ONE PERSISTENCE PATH for this
+ * domain's definition writes — `POST /`, `PUT /:name` and the copy
+ * `POST /:name/clone` writes: register the definition in the engine, then save
+ * it as a tenant row through the metadata protocol's own `saveMetaItem`.
+ *
+ * Registered in the engine alone, a definition was a process-local fact: the
+ * next boot binds flows from the stored metadata, so a flow created here was
+ * gone after a restart, and an update to a flow stored through `/meta` was
+ * overwritten by the stored definition — a `200` for a change the platform
+ * did not keep, while the same act through `/meta` was durable.
+ *
+ *  - **One save, the metadata door's.** `saveMetaItem` env-wide — no
+ *    organization (a flow has no per-org channel) and no package — so the row
+ *    is an ordinary tenant row the boot binds, `/meta` reads back, and the
+ *    same authoring rule and publish gates judge. No second persistence path.
+ *    The default save mode is the live one (`active`), which is what the
+ *    engine registration already is: a draft row would leave the engine
+ *    running a flow the next boot does not bind.
+ *  - **Engine first, store second.** The engine's registration is the
+ *    stricter validation (strict parse, cycles, regions, node config keys,
+ *    predicates), so a definition it refuses is never stored; that refusal is
+ *    answered as a 400 by {@link flowDefinitionRefusal}.
+ *  - **A save that fails undoes the registration** and relays the store's own
+ *    failure, so no answer reports a write that will not survive: a new name
+ *    is withdrawn, and a name the engine already held gets that definition
+ *    back ({@link restoreFlowRegistration}).
+ *  - **The protocol is resolved before anything is registered**, loudly, so a
+ *    slot that fails to resolve cannot leave a registered-but-unsaved flow.
+ *    A composition with no metadata store to save into keeps the engine-only
+ *    registration it always had — there is nothing to persist into.
+ *
+ * What is saved is the definition as the caller's door built it — never the
+ * engine's parsed copy, whose materialized schema defaults would freeze on
+ * disk (the save canonicalizes it the way it does every `/meta` flow write).
+ */
+async function registerAndSaveFlow(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    automationService: FlowRegistrationService,
+    name: string,
+    definition: unknown,
+): Promise<{ registered: unknown } | { refused: HttpDispatcherResult }> {
+    const store: Partial<Pick<ObjectStackProtocolImplementation, 'saveMetaItem'>> | undefined =
+        await deps.resolveServiceOrLoud(context, 'protocol');
+    const held = typeof automationService.getFlow === 'function' ? await automationService.getFlow(name) : null;
+    let registered: unknown;
+    try {
+        registered = automationService.registerFlow(name, definition);
+    } catch (e) {
+        return {
+            refused: { handled: true, response: deps.errorFromThrown(flowDefinitionRefusal(e), VALIDATION_FAILED_STATUS) },
+        };
+    }
+    if (typeof store?.saveMetaItem === 'function') {
+        try {
+            await store.saveMetaItem({ type: FLOW_METADATA_TYPE, name, item: definition });
+        } catch (e) {
+            restoreFlowRegistration(automationService, name, held);
+            return { refused: { handled: true, response: deps.errorFromThrown(e) } };
+        }
+    }
+    return { registered };
+}
+
+/** The engine methods {@link unregisterAndDeleteFlow} drives. */
+type FlowRemovalService =
+    Required<Pick<IAutomationService, 'unregisterFlow'>> & Pick<IAutomationService, 'registerFlow' | 'getFlow'>;
+
+/**
+ * [#20862] The removal half of {@link registerAndSaveFlow}, for
+ * `DELETE /:name`: unregister the flow in the engine, then delete its tenant
+ * row through the metadata protocol's own `deleteMetaItem`, env-wide.
+ *
+ * Needed because the create door now saves: a flow created and then removed
+ * here would otherwise keep its row, and the next boot would bind it again —
+ * a `200 {deleted: true}` for a removal the platform does not keep, the same
+ * defect in the other direction. The same order and the same undo as the
+ * write path:
+ *
+ *  - **Engine first.** The engine's own refusal (ADR-0126 §7.3's
+ *    `DELETE_RESTRICTED`, a packaged subflow a packaged caller still reaches)
+ *    is raised before the store is touched, so a refused removal deletes
+ *    nothing.
+ *  - **A name with no row is not a failure** — `deleteMetaItem` answers it as
+ *    "nothing to delete" (a flow registered before its door saved, or in a
+ *    composition with no store).
+ *  - **A delete that fails puts the definition back** in the engine and
+ *    relays the store's own failure, so no answer reports a removal that will
+ *    not survive. A composition with no metadata store keeps the engine-only
+ *    removal it always had.
+ *
+ * Returns the failure to answer, or nothing when the removal landed.
+ */
+async function unregisterAndDeleteFlow(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    automationService: FlowRemovalService,
+    name: string,
+): Promise<HttpDispatcherResult | undefined> {
+    const store: Partial<Pick<ObjectStackProtocolImplementation, 'deleteMetaItem'>> | undefined =
+        await deps.resolveServiceOrLoud(context, 'protocol');
+    const held = typeof automationService.getFlow === 'function' ? await automationService.getFlow(name) : null;
+    automationService.unregisterFlow(name);
+    if (typeof store?.deleteMetaItem === 'function') {
+        try {
+            await store.deleteMetaItem({ type: FLOW_METADATA_TYPE, name });
+        } catch (e) {
+            if (held) automationService.registerFlow?.(name, held);
+            return { handled: true, response: deps.errorFromThrown(e) };
+        }
+    }
+    return undefined;
+}
+
 /**
  * [#9378] The ONE mapper both trigger doors answer through — `POST
  * /:name/trigger` and the legacy `POST /trigger/:name`, which
@@ -2298,16 +2429,13 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
             // [#20552] Creating onto a name the engine already holds is an
             // overwrite, so the round-trip rule applies here as on `PUT /:name`.
             const definition = await keepStoredFlowCredentials(automationService, body.name, body);
-            let registered;
-            try {
-                registered = automationService.registerFlow(body.name, definition);
-            } catch (e) {
-                return {
-                    handled: true,
-                    response: deps.errorFromThrown(flowDefinitionRefusal(e), VALIDATION_FAILED_STATUS),
-                };
-            }
-            return { handled: true, response: deps.success(servedFlowDefinition(registered)) };
+            // [#20862] Registered AND saved as a tenant row, so the flow this
+            // answers `200` for survives a restart — see `registerAndSaveFlow`.
+            const written = await registerAndSaveFlow(
+                deps, context, automationService as FlowRegistrationService, body.name, definition,
+            );
+            if ('refused' in written) return written.refused;
+            return { handled: true, response: deps.success(servedFlowDefinition(written.registered)) };
         }
     }
 
@@ -2591,49 +2719,28 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // asks admits it — and would refuse it, loudly, if the base's
                 // provenance ever rode across. Asked before the engine is
                 // called, like every other definition write here. The
-                // metadata protocol is resolved HERE, before anything is
-                // registered, so a slot that fails to resolve cannot leave a
+                // metadata protocol is resolved before anything is registered
+                // (by the rule here, and again by `registerAndSaveFlow` below),
+                // so a slot that fails to resolve cannot leave a
                 // registered-but-unsaved clone behind.
                 const authored = await refuseUnauthoredFlowWrite(deps, context, targetName, clone);
                 if (authored) return authored;
-                const store: Partial<Pick<ObjectStackProtocolImplementation, 'saveMetaItem'>> | undefined =
-                    await deps.resolveServiceOrLoud(context, 'protocol');
-                // Engine verdicts are answered as a 400, not rethrown — the
-                // create arm's reasoning (`flowDefinitionRefusal`) applies
-                // verbatim, and it matters more here: a clone that the engine
-                // refuses must not leave a half-registered flow behind, and it
-                // must not read as a server fault when the source definition is
-                // simply one this deployment can no longer register.
-                try {
-                    automationService.registerFlow(targetName, clone);
-                } catch (e) {
-                    return {
-                        handled: true,
-                        response: deps.errorFromThrown(flowDefinitionRefusal(e), VALIDATION_FAILED_STATUS),
-                    };
-                }
                 // [#20761, ADR-0126 §7.1] …and SAVED as a tenant row. Registered
                 // in the engine alone the clone was a process-local fact: the
-                // metadata door read its name as absent, and the next boot —
-                // which binds flows from the stored metadata — did not know it,
-                // so the copy an administrator made to customize a locked flow
-                // vanished at the first restart. It is written through the
-                // metadata protocol's own save, env-wide (a flow has no per-org
-                // channel), so it lands as an ordinary `sys_metadata` row the
-                // boot hydrates, `/meta` reads back, and the same authoring rule
-                // judges. Engine first, store second: the engine's registration
-                // is the stricter validation, and a save that then fails
-                // withdraws the registration, so the answer never reports a
-                // clone that will not survive. A composition with no metadata
-                // store to save into keeps the engine-only clone it always had.
-                if (typeof store?.saveMetaItem === 'function') {
-                    try {
-                        await store.saveMetaItem({ type: FLOW_METADATA_TYPE, name: targetName, item: clone });
-                    } catch (e) {
-                        automationService.unregisterFlow?.(targetName);
-                        return { handled: true, response: deps.errorFromThrown(e) };
-                    }
-                }
+                // metadata door read its name as absent, and the next boot did
+                // not know it, so the copy an administrator made to customize a
+                // locked flow vanished at the first restart. [#20862] Through the
+                // one persistence path the create and update doors share —
+                // `registerAndSaveFlow` — so the three cannot drift. Engine
+                // verdicts are answered as a 400 there, not rethrown, which
+                // matters most here: a clone the engine refuses must not read as
+                // a server fault when the source definition is simply one this
+                // deployment can no longer register. The target name is new (the
+                // collision probe above), so a save that fails withdraws it.
+                const written = await registerAndSaveFlow(
+                    deps, context, automationService as FlowRegistrationService, targetName, clone,
+                );
+                if ('refused' in written) return written.refused;
                 // ⛔ NO ANCESTRY on the way out either (ADR-0126 amendment
                 // ruling 2, §9): the response names the flow that was created
                 // and says nothing about what it was copied from. There is no
@@ -3237,16 +3344,15 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // [#20552] A body that round-trips the served (projected) form
                 // keeps the secret the engine holds; an explicit one replaces it.
                 const toRegister = await keepStoredFlowCredentials(automationService, name, definition);
-                let registered;
-                try {
-                    registered = automationService.registerFlow(name, toRegister);
-                } catch (e) {
-                    return {
-                        handled: true,
-                        response: deps.errorFromThrown(flowDefinitionRefusal(e), VALIDATION_FAILED_STATUS),
-                    };
-                }
-                return { handled: true, response: deps.success(servedFlowDefinition(registered)) };
+                // [#20862] Registered AND saved as a tenant row, so the update
+                // survives a restart instead of losing to the stored
+                // definition; a save that fails puts back the definition the
+                // engine held — see `registerAndSaveFlow`.
+                const written = await registerAndSaveFlow(
+                    deps, context, automationService as FlowRegistrationService, name, toRegister,
+                );
+                if ('refused' in written) return written.refused;
+                return { handled: true, response: deps.success(servedFlowDefinition(written.registered)) };
             }
         }
 
@@ -3257,7 +3363,13 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // packaged base — refused before the engine is asked.
                 const locked = await refusePackagedFlowBaseChange(deps, context, name, 'delete');
                 if (locked) return locked;
-                automationService.unregisterFlow(name);
+                // [#20862] …and removed from the store as well as the engine,
+                // so a flow the create door now saves does not come back at
+                // the next boot — see `unregisterAndDeleteFlow`.
+                const failed = await unregisterAndDeleteFlow(
+                    deps, context, automationService as FlowRemovalService, name,
+                );
+                if (failed) return failed;
                 return { handled: true, response: deps.success({ name, deleted: true }) };
             }
         }

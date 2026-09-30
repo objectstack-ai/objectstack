@@ -5190,6 +5190,27 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'converted, because the whole block it lived in is now removed.',
   },
   {
+    id: 'connector-sync-keys-retired',
+    order: 52,
+    text:
+      'It also retires connector-attached sync from the connector (ADR-0049, the ENFORCE route by '
+      + 'ruling): `connector.syncConfig` — `strategy`, `direction`, `realtimeSync`, '
+      + '`timestampField`, `conflictResolution`, `batchSize`, `deleteMode`, `filters` — and '
+      + '`connector.fieldMappings` — `source`, `target`, `defaultValue`, `dataType`, `required`, '
+      + '`syncMode` — fourteen keys no engine ever executed, whose `latest_wins` and `soft_delete` '
+      + 'defaults read as configured policy and did nothing. The capability is mainstream, so the '
+      + 'definition moves rather than lapses: every mainstream platform binds a sync to its '
+      + 'TARGET, so a `mapping` gains `connectorSource`, the `rest` / `openapi` connector it pulls '
+      + 'from, the read action and an optional timestamp `watermark`, and a `job` sets the cadence '
+      + '(no schedule key returns to the connector). That binding is declared in this step and '
+      + 'executed in a later one. Both connector keys are retiredKey tombstones on '
+      + '`ConnectorBaseSchema`, registered under both carrier defs; `DataSyncConfig`, '
+      + '`SyncStrategy`, `ConnectorConflictResolution` and `ConnectorFieldMapping` leave whole; '
+      + 'and the D2 conversion `connector-sync-keys-removed` strips both keys from `connectors[]` '
+      + 'and stored rows as a pure lossless delete — never writing a `mapping`, which would start '
+      + 'writes that never happened.',
+  },
+  {
     id: 'connector-triggers-retired',
     order: 48,
     text:
@@ -8032,6 +8053,54 @@ const step18: MigrationStep = {
         + 'probe or breaker the author relied on is provided by the connector provider or a gateway '
         + 'and observed tripping against a failing upstream.',
     },
+    // ADR-0049 — the D3 entry of the connector-attached sync family:
+    // `connector.syncConfig` (the `DataSyncConfig` block) and
+    // `connector.fieldMappings` (the `ConnectorFieldMapping` list), fourteen keys
+    // no engine ever executed, retired from the connector as one batch because the
+    // sync definition MOVED to its target (the ruled ENFORCE route: a `mapping`
+    // whose `connectorSource` names the connector, with a `job` for the cadence).
+    // One D3 entry per retirement family, even when D2 is lossless (ruling B on
+    // #17152): the D2 conversion `connector-sync-keys-removed` repairs the data,
+    // and this entry carries what only the author can judge — above all, that the
+    // conversion never writes the replacement `mapping`, because a pulled mapping
+    // would START writes that never happened.
+    {
+      id: 'connector-sync-keys-retired',
+      surface: 'connector.syncConfig (strategy / direction / realtimeSync / timestampField / '
+        + 'conflictResolution / batchSize / deleteMode / filters) and connector.fieldMappings[] '
+        + '(source / target / defaultValue / dataType / required / syncMode), on a connector and on a '
+        + 'stack connectors[] entry',
+      replacement: 'A sync is defined on its TARGET: a `mapping` (`targetObject`, `fieldMapping`, '
+        + '`mode`, `upsertKey`) whose `connectorSource` names the `rest` or `openapi` connector '
+        + 'instance it pulls from (`connector`), the action that reads the records (`action`, with a '
+        + 'fixed `input` and a `recordsPath`) and, for a timestamp-incremental pull, a `watermark` '
+        + '(`field` on the record, `param` on the request); a `job` sets the cadence. Declared in this '
+        + 'protocol step and not yet executed — authoring it warns until the pull executor reads it.',
+      reason: 'The D2 conversion `connector-sync-keys-removed` deletes `syncConfig` and '
+        + '`fieldMappings` from every connector, stack entry and stored connector row, one notice per '
+        + 'key, and the delete is lossless: no engine ever ran a connector-attached sync or moved a '
+        + 'value through a connector field mapping, so nothing the upgrade removes was ever happening. '
+        + 'Three judgements remain. First, any part of the deployment designed around a connector '
+        + 'sync running has never been running, so the author decides which syncs should now exist '
+        + 'as target-side mappings; the conversion STRIPS the keys and never writes a `mapping`, '
+        + 'because a mapping that is pulled STARTS writes into a table that never received them — '
+        + 'its target object, match key and cadence are the author\'s. Second, the retired block '
+        + 'named a direction, a conflict policy and a delete policy that no runtime applied — every '
+        + 'delete is a hard delete, and `latest_wins` resolved nothing — and the pull that replaces '
+        + 'it is one-way (external to local) and writes only through the mapping\'s `mode` and '
+        + '`upsertKey`: an author who relied on `export`, `bidirectional`, `soft_delete` or a conflict '
+        + 'policy decides what to do without them. Third, a connector field map moved values '
+        + 'nowhere; carrying its `source` → `target` pairs into `mapping.fieldMapping` makes them '
+        + 'real for the first time, including any `defaultValue`, which the import mapping spells as '
+        + 'a `constant` transform, and `required`, which the target field declares.',
+      acceptanceCriteria: 'No connector and no stack connector entry carries `syncConfig` or '
+        + '`fieldMappings`; the parse refuses either key with its prescription, and no code imports '
+        + 'DataSyncConfig, SyncStrategy, ConnectorConflictResolution or ConnectorFieldMapping or '
+        + 'their schemas. Every connector registers and dispatches its actions exactly as it did '
+        + 'before the upgrade. Each sync the author still wants is a `mapping` whose '
+        + '`connectorSource` names a `rest` or `openapi` connector instance, validated at authoring, '
+        + 'with a `job` chosen for its cadence.',
+    },
     // ADR-0049 enforce-or-remove — the D3 entry of the connector triggers family:
     // `connector.triggers`, the whole `ConnectorTrigger` array, retired as one
     // batch by ruling (ADR-0041 unchanged: connector-event triggers stay in its
@@ -8726,7 +8795,11 @@ const step18: MigrationStep = {
         + 'The non-temporal `sum` / `avg` rows followed in a later change, which registered NO '
         + 'entry of its own — it declared `not-required (already-registered '
         + 'dataset-measure-aggregate-field-type-refused)` against THIS id — so its widening '
-        + 'rides this entry\'s prescription rather than a separate one. The `min` / `max` rows '
+        + 'rides this entry\'s prescription rather than a separate one. The `count_distinct` '
+        + 'row\'s JSON-stored types (`json`, `composite`, `repeater`, `record`, `location`, '
+        + '`address`, `vector`, `multiselect`, `checkboxes`, `tags`) left the table in a third '
+        + 'change, which likewise registered no entry and rides this one: no two backends compare '
+        + 'those values for equality alike, so `count` is the aggregate that stays. The `min` / `max` rows '
         + 'over every class the table refuses are the second entry, '
         + '`dataset-measure-selecting-aggregate-field-type-refused`. ⇒ Read BOTH when '
         + 'migrating; there is no third',
@@ -8770,7 +8843,8 @@ const step18: MigrationStep = {
         + 'further: a measure over a field of any other class was not judged by the leg this '
         + 'entry was registered for. It is covered all the same — by this entry\'s own '
         + 'prescription, widened by a later change (which registered `not-required` against this '
-        + 'id rather than an entry of its own) to `sum` / `avg` over every field class; and by '
+        + 'id rather than an entry of its own) to `sum` / `avg` over every field class, and by a '
+        + 'third, the same way, to `count_distinct` over the JSON-stored types; and by '
         + '`dataset-measure-selecting-aggregate-field-type-refused` for `min` / '
         + '`max`. ⛔ There is no third entry to look for. At protocol major 18 as a whole, '
         + 'every refused pair in `AGGREGATE_FIELD_TYPE_COMPATIBILITY` is refused at the '
@@ -8803,8 +8877,10 @@ const step18: MigrationStep = {
         + 'text value" in a way every backend agrees on, so no transform can preserve the '
         + 'answer. The three routes an author actually has, per intent: '
         + '① the measure was COUNTING in disguise ("how many distinct owners") ⇒ '
-        + '`count` / `count_distinct`, which accept every type because they read neither '
-        + 'arithmetic nor order off the value; '
+        + '`count`, which accepts every type because it reads no value, or `count_distinct`, '
+        + 'which accepts every type but the JSON-stored ones (the structured-JSON types and '
+        + '`multiselect` / `checkboxes` / `tags`, whose values no two backends compare for '
+        + 'equality alike); '
         + '② the measure wanted a FIRST or LAST RECORD ("the earliest-titled task") ⇒ that is '
         + 'a SORT on a list or report, which orders once in a declared direction, not an '
         + 'aggregate that asks each backend for its own smallest value; '
@@ -20161,6 +20237,15 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #12497 / #13823 grading).
     'integration/Connector:errorMapping',
+    // The second key of the connector-attached sync family (see
+    // `18.integration__Connector__syncConfig.ts` for the retirement record):
+    // `ConnectorSchema.fieldMappings`, whose six live keys (`source`, `target`,
+    // `defaultValue`, `dataType`, `required`, `syncMode`) no engine ever read —
+    // the word appeared nowhere outside `packages/spec`. The target-side field map
+    // is `mapping.fieldMapping`, which the REST import path executes. The orphaned
+    // `integration/ConnectorFieldMapping` leaves via `RETIRED_DEFS_BY_MAJOR[18]`;
+    // the same D2 conversion strips the key.
+    'integration/Connector:fieldMappings',
     // ADR-0049 enforce-or-remove on `ConnectorSchema.health` — the connector
     // resilience family (one batch with `status` and the nested `webhooks`), retired
     // by the maintainer's criterion for a declared-but-unenforced family: does the
@@ -20224,6 +20309,29 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // refusal. Sources and stored rows are rewritten by the D2 conversion
     // `connector-resilience-keys-removed`.
     'integration/Connector:status',
+    // ADR-0049 on `ConnectorSchema.syncConfig` — connector-attached sync, ruled
+    // ENFORCE on the maintainer's criterion for a declared-but-unenforced family
+    // (the mainstream has the capability) with the definition MOVED to the target
+    // side: a `mapping` whose `connectorSource` names the connector it pulls from,
+    // with a `job` for the cadence. The eight `DataSyncConfig` keys (`strategy`,
+    // `direction`, `realtimeSync`, `timestampField`, `conflictResolution`,
+    // `batchSize`, `deleteMode`, `filters`) were read by NOTHING. Measured on
+    // `origin/main` before the removal: outside `packages/spec` the word
+    // `syncConfig` appeared only in two comments; the automation service's
+    // declared-connector item and its re-materialization fingerprint carry
+    // neither sync key, and the def a provider registers is the provider's own,
+    // so the key never reached the connector registry — while `retryConfig`, the
+    // lit control on the same def, is read by the connector fetch policy.
+    //
+    // Tombstoned with `retiredKey()` (non-strict schema, ADR-0104); the orphaned
+    // `integration/DataSyncConfig`, `integration/SyncStrategy` and
+    // `integration/ConnectorConflictResolution` leave via
+    // `RETIRED_DEFS_BY_MAJOR[18]`. The key carried no default of its own, so no
+    // retired-default residue is owed. Sources and stored rows are rewritten by
+    // the D2 conversion `connector-sync-keys-removed`, which STRIPS the key and
+    // never writes a `mapping` — that is the author's decision, carried by the D3
+    // entry `connector-sync-keys-retired`.
+    'integration/Connector:syncConfig',
     // ADR-0049 enforce-or-remove on `ConnectorSchema.triggers` — the connector
     // triggers family, ruled RETIRE on the maintainer's criterion for a
     // declared-but-unenforced family, with ADR-0041 left as it is (connector-event
@@ -20332,6 +20440,10 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `${defKey}:${name}` membership per def, never by radiating from a neighbour.
     // See `18.integration__Connector__errorMapping.ts` for the retirement record.
     'integration/DeclarativeConnectorEntry:errorMapping',
+    // The same `fieldMappings` tombstone seen through the second carrier — the
+    // shape `stack.connectors[]` and the `PUT /meta/connector/:name` door parse.
+    // See `18.integration__Connector__syncConfig.ts` for the retirement record.
+    'integration/DeclarativeConnectorEntry:fieldMappings',
     // The same `health` tombstone seen through the second carrier.
     // `DeclarativeConnectorEntrySchema` and `ConnectorSchema` are SIBLINGS: each
     // wraps the shared private `ConnectorBaseSchema` in the retired-default residue
@@ -20350,6 +20462,11 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // tombstone, two registered keys, EXACT per-def membership (gate (b)). See
     // `18.integration__Connector__status.ts` for the retirement record.
     'integration/DeclarativeConnectorEntry:status',
+    // The same `syncConfig` tombstone seen through the second carrier — the shape
+    // `stack.connectors[]` and the `PUT /meta/connector/:name` door parse. One
+    // tombstone, two registered keys, EXACT per-def membership (gate (b)). See
+    // `18.integration__Connector__syncConfig.ts` for the retirement record.
+    'integration/DeclarativeConnectorEntry:syncConfig',
     // The same `triggers` tombstone seen through the second carrier — the shape
     // `stack.connectors[]` and the `PUT /meta/connector/:name` door parse, where the
     // provider-bound refusal the tombstone replaced used to live. One tombstone, two
@@ -23817,6 +23934,14 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // deliberately exempts. See `retired-keys/18.integration__Connector__health.ts`
     // for the retirement record.
     'integration/CircuitBreakerConfig',
+    // `integration/ConnectorConflictResolution` (`source_wins` / `target_wins` /
+    // `latest_wins` / `manual`) was the value vocabulary of
+    // `syncConfig.conflictResolution` alone, and leaves with it. Its default,
+    // `latest_wins`, read as a configured policy and resolved nothing; the pull
+    // binding that replaces the family claims no conflict policy (version 1 writes
+    // through the mapping's `mode` / `upsertKey`). See
+    // `retired-keys/18.integration__Connector__syncConfig.ts`.
+    'integration/ConnectorConflictResolution',
     // Commit 13c48c2a5 — `integration/ConnectorErrorCategory` (the 8-value connector-side
     // error category enum) left with its two carriers: `ErrorMappingRule.targetCategory`
     // and `ErrorMappingConfig.defaultCategory`, both retired in this same major
@@ -23830,6 +23955,14 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `retired-keys/18.integration__Connector__errorMapping.ts` for the retirement
     // record.
     'integration/ConnectorErrorCategory',
+    // `integration/ConnectorFieldMapping` (the shared base `FieldMapping` extended
+    // with `dataType`, `required` and `syncMode`) leaves with its only carrier,
+    // `ConnectorSchema.fieldMappings`, tombstoned in this same major under
+    // ADR-0049. Nothing moved a value through it; the target-side field map is
+    // `mapping.fieldMapping`. The `integration/ConnectorFieldMapping:transform`
+    // retired-key row of the earlier `transform` retirement stays as its record.
+    // See `retired-keys/18.integration__Connector__fieldMappings.ts`.
+    'integration/ConnectorFieldMapping',
     // `integration/ConnectorHealth` (`healthCheck`, `circuitBreaker`) leaves with its
     // only carrier, `ConnectorSchema.health`, tombstoned in this same major under
     // ADR-0049 enforce-or-remove (`RETIRED_KEYS_BY_MAJOR[18]`). Nothing outside the
@@ -23855,6 +23988,15 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `retired-keys/18.integration__Connector__triggers.ts` for the retirement
     // record.
     'integration/ConnectorTrigger',
+    // `integration/DataSyncConfig` (`strategy`, `direction`, `realtimeSync`,
+    // `timestampField`, `conflictResolution`, `batchSize`, `deleteMode`,
+    // `filters`) leaves with its only carrier, `ConnectorSchema.syncConfig`,
+    // tombstoned in this same major under ADR-0049. No engine ever ran a
+    // connector-attached sync; a sync is defined on its target `mapping`
+    // (`connectorSource`), with a `job` for the cadence. See
+    // `retired-keys/18.integration__Connector__syncConfig.ts` for the retirement
+    // record.
+    'integration/DataSyncConfig',
     // Commit 13c48c2a5 — `integration/ErrorMappingConfig` (`rules`, `defaultCategory`,
     // `unmappedBehavior`, `logUnmapped`) leaves with its only carrier:
     // `ConnectorSchema.errorMapping`, tombstoned in this same major under ADR-0049
@@ -23888,6 +24030,12 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // is no residue window on the carrier. See
     // `retired-keys/18.integration__Connector__health.ts` for the retirement record.
     'integration/HealthCheckConfig',
+    // `integration/SyncStrategy` (`full` / `incremental` / `upsert` /
+    // `append_only`) was the value vocabulary of `syncConfig.strategy` alone, and
+    // leaves with it. On the target-side binding, full vs incremental is whether
+    // `connectorSource.watermark` is set, and upsert is the mapping's own `mode`.
+    // See `retired-keys/18.integration__Connector__syncConfig.ts`.
+    'integration/SyncStrategy',
     // `integration/WebhookConfig` — the canonical `webhook` shape `.extend()`ed with
     // `events` and `signatureAlgorithm` — leaves with its only carrier,
     // `ConnectorSchema.webhooks`, tombstoned in this same major under ADR-0049

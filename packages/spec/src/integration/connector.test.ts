@@ -1,14 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import {
-  // Field Mapping
-  ConnectorFieldMappingSchema,
-  
-  // Data Sync
-  DataSyncConfigSchema,
-  SyncStrategySchema,
-  ConnectorConflictResolutionSchema,
-  
+  // (Connector-attached sync — `DataSyncConfigSchema`, `SyncStrategySchema`,
+  // `ConnectorConflictResolutionSchema` and `ConnectorFieldMappingSchema` — was
+  // retired with `connector.syncConfig` / `connector.fieldMappings`, ADR-0049;
+  // the definition moved to the target `mapping`'s `connectorSource`.
+  // `connector-sync-retirement.test.ts` pins the refusal and the absence.)
+
   // (The connector-nested webhook shape — `WebhookConfigSchema` /
   // `WebhookEventSchema` — was retired with `connector.webhooks`, ADR-0049;
   // `connector-resilience-keys-retirement.test.ts` pins its absence.)
@@ -36,8 +34,6 @@ import {
 
   // Types
   type Connector,
-  type ConnectorFieldMapping,
-  type DataSyncConfig,
 
   // The `/meta/connector/:name` door's schema (#6245) — `ConnectorSchema` plus
   // the ADR-0097 cross-field rules. The envelope pins below drive BOTH, because
@@ -180,101 +176,13 @@ describe('ConnectorAuthConfigSchema (Authentication)', () => {
 });
 
 // ============================================================================
-// Field Mapping Tests
+// Field Mapping / Data Sync Configuration Tests — RETIRED
 // ============================================================================
-
-describe('ConnectorFieldMappingSchema', () => {
-  it('should accept valid field mapping', () => {
-    const mapping: ConnectorFieldMapping = {
-      source: 'firstName',
-      target: 'first_name',
-      dataType: 'string',
-      syncMode: 'bidirectional',
-    };
-    
-    expect(() => ConnectorFieldMappingSchema.parse(mapping)).not.toThrow();
-  });
-  
-  // Was `should accept field with transformation`, asserting this exact literal
-  // parsed and came back as `type: 'javascript'`. Replaced rather than
-  // re-spelled: #5552 retired the key and the whole union behind it, so there is
-  // no other member to move the fixture to. Its `value.toUpperCase()` is also
-  // the string that got the bug filed — `ExpressionInputSchema` wrapped it as
-  // `dialect: 'cel'`, where that method does not exist.
-  it('[#5552] rejects a field transformation — the key and its union are retired', () => {
-    const result = ConnectorFieldMappingSchema.safeParse({
-      source: 'name',
-      target: 'full_name',
-      transform: { type: 'javascript', expression: 'value.toUpperCase()' },
-    });
-
-    expect(result.success).toBe(false);
-    expect(result.error!.issues[0]!.path.join('.')).toBe('transform');
-    expect(result.error!.issues[0]!.message).toMatch(/removed in @objectstack\/spec 17\.0\.0/s);
-  });
-  
-  it('should use default values', () => {
-    const mapping = {
-      source: 'field1',
-      target: 'field_1',
-    };
-    
-    const parsed = ConnectorFieldMappingSchema.parse(mapping);
-    expect(parsed.required).toBe(false);
-    expect(parsed.syncMode).toBe('bidirectional');
-  });
-});
-
-// ============================================================================
-// Data Sync Configuration Tests
-// ============================================================================
-
-describe('DataSyncConfigSchema', () => {
-  it('should accept valid sync configuration', () => {
-    const config: DataSyncConfig = {
-      strategy: 'incremental',
-      direction: 'bidirectional',
-      // `schedule` was deleted outright (#16320) — the strip is pinned in
-      // `cron-typed-positions-retirement.test.ts`.
-      realtimeSync: true,
-      conflictResolution: 'latest_wins',
-      batchSize: 1000,
-      deleteMode: 'soft_delete',
-    };
-    
-    expect(() => DataSyncConfigSchema.parse(config)).not.toThrow();
-  });
-  
-  it('should use default values', () => {
-    const config = {};
-    
-    const parsed = DataSyncConfigSchema.parse(config);
-    expect(parsed.strategy).toBe('incremental');
-    expect(parsed.direction).toBe('import');
-    expect(parsed.realtimeSync).toBe(false);
-    expect(parsed.conflictResolution).toBe('latest_wins');
-    expect(parsed.batchSize).toBe(1000);
-    expect(parsed.deleteMode).toBe('soft_delete');
-  });
-  
-  it('should validate batch size range', () => {
-    expect(() => DataSyncConfigSchema.parse({ batchSize: 0 })).toThrow();
-    expect(() => DataSyncConfigSchema.parse({ batchSize: 10001 })).toThrow();
-    expect(() => DataSyncConfigSchema.parse({ batchSize: 500 })).not.toThrow();
-  });
-
-  it('resolves conflicts with the CONNECTOR vocabulary, unchanged by the #4738 rename', () => {
-    // `ConflictResolution` → `ConnectorConflictResolution` renamed the TS
-    // export only; the authored value domain is byte-for-byte the same.
-    (['source_wins', 'target_wins', 'latest_wins', 'manual'] as const).forEach((v) => {
-      expect(() => ConnectorConflictResolutionSchema.parse(v)).not.toThrow();
-    });
-    // The retired automation-side vocabulary was disjoint precisely where it
-    // mattered — these values were never part of the connector strategy:
-    expect(() => ConnectorConflictResolutionSchema.parse('destination_wins')).toThrow();
-    expect(() => ConnectorConflictResolutionSchema.parse('merge')).toThrow();
-  });
-});
+// (`ConnectorFieldMappingSchema` and `DataSyncConfigSchema` tests lived here
+// until connector-attached sync was retired from the connector under ADR-0049 —
+// no engine ever ran a sync or moved a value through a connector field mapping.
+// The retirement is pinned in `connector-sync-retirement.test.ts`; the
+// target-side binding in `data/mapping-connector-source.test.ts`.)
 
 // ============================================================================
 // Webhook Configuration Tests — RETIRED
@@ -424,16 +332,8 @@ describe('ConnectorSchema', () => {
         authorizationUrl: 'https://auth.example.com/authorize',
         tokenUrl: 'https://auth.example.com/token',
       },
-      syncConfig: {
-        strategy: 'incremental',
-        direction: 'bidirectional',
-      },
-      fieldMappings: [
-        {
-          source: 'id',
-          target: 'external_id',
-        },
-      ],
+      // `syncConfig` and `fieldMappings` were authored here until ADR-0049
+      // retired them (`connector-sync-retirement.test.ts`).
       // `webhooks` and `status` were authored here until ADR-0049 retired them
       // with `health` (`connector-resilience-keys-retirement.test.ts`).
       // `rateLimitConfig` was authored here until #4911 retired it.
@@ -448,7 +348,7 @@ describe('ConnectorSchema', () => {
     
     const parsed = ConnectorSchema.parse(connector);
     expect(parsed.description).toBe('A comprehensive connector');
-    expect(parsed.fieldMappings).toHaveLength(1);
+    expect(parsed.retryConfig?.maxAttempts).toBe(3);
     expect(parsed.metadata?.version).toBe('1.0');
   });
 });
@@ -684,16 +584,23 @@ describe('[#4911] `./integration` no longer publishes an outbound rate-limit sha
 // The `./data` side is not a spelling variant of anything. The tests below pin
 // the three incompatibilities, because they are the ARGUMENT for the rename and
 // the thing a future "let's just unify these" has to defeat.
+//
+// ⚠️ Protocol 18 retired the `./integration` side whole, with
+// `connector.fieldMappings` (ADR-0049 — nothing ever moved a value through a
+// connector field mapping; `connector-sync-retirement.test.ts`). Two
+// declarations remain, and the pins below now hold the base against the import
+// mapping alone — plus the fact that the connector name is GONE rather than
+// folded into either survivor.
 describe('[#4703] FieldMapping no longer names three declarations', () => {
   it('each entry exposes exactly one field-mapping name, and not the others’', async () => {
     const integrationEntry = await import('./index');
     const dataEntry = await import('../data/index');
     const sharedEntry = await import('../shared/index');
 
-    expect(integrationEntry.ConnectorFieldMappingSchema).toBeDefined();
+    // The connector side left whole in protocol 18 (ADR-0049).
+    expect('ConnectorFieldMappingSchema' in integrationEntry).toBe(false);
     expect(dataEntry.ImportFieldMappingSchema).toBeDefined();
-    // The base keeps the bare name — it is the incumbent, and two other defs
-    // extend it.
+    // The base keeps the bare name — it is the incumbent.
     expect(sharedEntry.FieldMappingSchema).toBeDefined();
 
     // No compatibility alias on either renamed side. Re-exporting the old name
@@ -706,7 +613,6 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
 
   it('./shared keeps the base declaration byte-for-byte', async () => {
     const sharedEntry = await import('../shared/index');
-    const integrationEntry = await import('./index');
 
     // Three live keys since #5552 retired `transform`: `source`/`target`
     // required, `defaultValue` optional.
@@ -721,12 +627,6 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
       target: 'first_name',
       defaultValue: '',
     });
-
-    // And it is a DIFFERENT object from the connector superset that extends it
-    // — `.extend()` builds a new schema, which is why both were in the baseline.
-    expect(integrationEntry.ConnectorFieldMappingSchema).not.toBe(
-      sharedEntry.FieldMappingSchema,
-    );
   });
 
   // ── Difference 1: `transform` is the same key name meaning opposite things.
@@ -739,23 +639,18 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
   //    prescription" versus "runs on every imported row", which is the loudest
   //    the distinction has ever been, and the reason a snippet copied across
   //    these domains can no longer half-work.
-  it('`transform` is retired on shared/integration and live on ./data', async () => {
+  it('`transform` is retired on ./shared and live on ./data', async () => {
     const dataEntry = await import('../data/index');
     const sharedEntry = await import('../shared/index');
-    const integrationEntry = await import('./index');
 
     const unionForm = { type: 'cast' as const, targetType: 'string' as const };
 
-    // shared / integration: the object form is refused BY NAME, with the #5552
-    // prescription — not stripped, and not a generic "unrecognized key".
-    for (const schema of [
-      sharedEntry.FieldMappingSchema,
-      integrationEntry.ConnectorFieldMappingSchema,
-    ]) {
-      const result = schema.safeParse({ source: 'a', target: 'b', transform: unionForm });
-      expect(result.success).toBe(false);
-      expect(result.error!.issues.some((i) => /FieldMappingTransform/.test(i.message))).toBe(true);
-    }
+    // shared: the object form is refused BY NAME, with the #5552 prescription —
+    // not stripped, and not a generic "unrecognized key". (The integration
+    // extender carried the same tombstone until it left whole in protocol 18.)
+    const result = sharedEntry.FieldMappingSchema.safeParse({ source: 'a', target: 'b', transform: unionForm });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.some((i) => /FieldMappingTransform/.test(i.message))).toBe(true);
     // The enum form does not get in either — retired is retired, whatever the
     // value's shape.
     expect(
@@ -787,10 +682,9 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
 
   // ── Difference 2: cardinality. An import may compose one target field from
   //    several source columns; a connector mapping is 1:1.
-  it('./data accepts arrays for source/target where the other two take a single string', async () => {
+  it('./data accepts arrays for source/target where the base takes a single string', async () => {
     const dataEntry = await import('../data/index');
     const sharedEntry = await import('../shared/index');
-    const integrationEntry = await import('./index');
 
     const composed = { source: ['first_name', 'last_name'], target: 'full_name' };
 
@@ -805,17 +699,15 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
     ).toEqual(['first_name', 'last_name']);
 
     expect(sharedEntry.FieldMappingSchema.safeParse(composed).success).toBe(false);
-    expect(integrationEntry.ConnectorFieldMappingSchema.safeParse(composed).success).toBe(false);
   });
 
   // ── Difference 3: OPPOSITE failure modes for an unknown key. This is what
   //    made one shared name actively dangerous: the same typo is a hard error
   //    on one side and a silent no-op on the other (ADR-0104's silent-strip
   //    class), so a snippet moved between domains "works" and does nothing.
-  it('an unknown key THROWS on ./data and is silently stripped by the other two', async () => {
+  it('an unknown key THROWS on ./data and is silently stripped by the base', async () => {
     const dataEntry = await import('../data/index');
     const sharedEntry = await import('../shared/index');
-    const integrationEntry = await import('./index');
 
     // `strictObject` (#4001) — rejects, and prescribes the canonical spelling.
     const rejected = dataEntry.ImportFieldMappingSchema.safeParse({
@@ -826,19 +718,12 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
     expect(rejected.success).toBe(false);
     expect(JSON.stringify(rejected.error?.issues)).toContain('source');
 
-    // Plain `z.object` on the other two — the foreign key vanishes and the
-    // parse reports success. Pinned, not fixed: it is correct behaviour for a
+    // Plain `z.object` on the base — the foreign key vanishes and the parse
+    // reports success. Pinned, not fixed: it is correct behaviour for a
     // non-strict schema. The defect was the shared NAME.
     expect(
       sharedEntry.FieldMappingSchema.parse({ source: 'a', target: 'b', syncMode: 'read_only' }),
     ).toEqual({ source: 'a', target: 'b' });
-    expect(
-      integrationEntry.ConnectorFieldMappingSchema.parse({
-        source: 'a',
-        target: 'b',
-        params: { separator: ' ' }, // a `./data` key, meaningless here
-      }),
-    ).toEqual({ source: 'a', target: 'b', required: false, syncMode: 'bidirectional' });
   });
 
   // The load-bearing one, and the reason this block exists at all: `FieldMapping`
@@ -864,10 +749,11 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
     }
 
 
-    // Each renamed name resolves into its own domain's file…
+    // The connector side left whole in protocol 18 (ADR-0049)…
     for (const name of ['ConnectorFieldMapping', 'ConnectorFieldMappingSchema']) {
-      expect(originFileOf('./integration', name), name).toBe('src/integration/connector.zod.ts');
+      expect(integration.get(name), `${name} must be gone from ./integration`).toBeUndefined();
     }
+    // …the import side resolves into its own domain's file…
     for (const name of ['ImportFieldMapping', 'ImportFieldMappingSchema']) {
       expect(originFileOf('./data', name), name).toBe('src/data/mapping.zod.ts');
     }
@@ -1287,7 +1173,9 @@ describe('[#14676] integration/ErrorMappingConfig + ErrorMappingRule + Connector
       // (`ConnectorHealthSchema` stood here as a survivor until `connector.health`
       // was itself retired, ADR-0049 — `connector-resilience-keys-retirement.test.ts`.)
       'RetryConfigSchema',
-      'ConnectorFieldMappingSchema',
+      // (`ConnectorFieldMappingSchema` stood here as a survivor until
+      // `connector.fieldMappings` was itself retired, ADR-0049 —
+      // `connector-sync-retirement.test.ts`.)
     ]) {
       expect(integrationNames, `${name} must SURVIVE this retirement`).toContain(name);
     }

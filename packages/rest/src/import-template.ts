@@ -83,6 +83,9 @@ export interface TemplateFieldDef {
   system?: unknown;
   required?: unknown;
   defaultValue?: unknown;
+  /** Read for the option marked `default: true` — see {@link templateInsertDefault}. */
+  options?: unknown;
+  multiple?: unknown;
   min?: unknown;
   max?: unknown;
 }
@@ -199,14 +202,82 @@ export async function resolveTemplateProjection(
   return { source: 'unanswered' };
 }
 
+// ── the required mark ───────────────────────────────────────────────
+//
+// The `*` and the instructions' "a row that leaves one of them blank is
+// refused" are a claim about the engine's INSERT, so they are judged the way
+// the insert judges: `ObjectQL.applyFieldDefaults` fills a blank field from its
+// default first, and only then does `validateRecord` run `required`.
+//
+// That default is read here by a MIRROR of the engine's rule, not by a call
+// into it: `resolveOptionDefault` and `applyFieldDefaults` are private members
+// of the `ObjectQL` class, and `@objectstack/objectql` is only a
+// devDependency of this package, never a runtime one. So the mirror is held
+// to the engine by `import-template-route.test.ts`, which imports a blank cell
+// of every shape below through the real import door and requires the engine's
+// verdict and this module's `*` to agree.
+
 /**
- * Whether a column is marked required (`*`) in the template: a row that leaves
- * it blank is refused. A `required` field that declares a `defaultValue` is
- * NOT marked — the engine fills the default before it checks, so a blank cell
- * there is accepted.
+ * The default the engine applies on INSERT to a field the row leaves blank, as
+ * DECLARED — or `undefined` when the field declares none. The mirror of
+ * `ObjectQL.applyFieldDefaults` and its option fallback `resolveOptionDefault`
+ * (`packages/objectql/src/engine.ts`):
+ *
+ *  - `defaultValue` wins whenever it is not `null`/`undefined` — the engine's
+ *    presence test is `defaultValue == null`, so `''` is a real default and
+ *    `null` is none. A token or expression default is returned as declared;
+ *    the engine evaluates it at insert time.
+ *  - Otherwise the option marked `default: true` — the canonical spelling
+ *    only, on any field type that carries `options`, an option without a
+ *    `value` skipped. A multi-valued field takes every marked value as an
+ *    array; a single-valued one takes the first marked.
+ */
+export function templateInsertDefault(def: TemplateFieldDef | undefined): unknown {
+  if (!def) return undefined;
+  if (def.defaultValue != null) return def.defaultValue;
+  if (!Array.isArray(def.options)) return undefined;
+  const marked: unknown[] = [];
+  for (const o of def.options) {
+    if (!o || typeof o !== 'object') continue;
+    if ((o as { default?: unknown }).default !== true) continue;
+    const value = (o as { value?: unknown }).value;
+    if (value === undefined || value === null) continue;
+    marked.push(value);
+  }
+  if (marked.length === 0) return undefined;
+  const multi = isMultiValueField({
+    type: typeof def.type === 'string' ? def.type : '',
+    multiple: def.multiple === true,
+  });
+  return multi ? marked : marked[0];
+}
+
+/**
+ * The emptiness `required` refuses: `null`, a blank string, and — on a
+ * multi-valued field — an empty array (the engine's `isEmptyForRequired`).
+ */
+function isEmptyForRequired(def: TemplateFieldDef, value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (typeof value === 'string') return value.trim() === '';
+  return Array.isArray(value)
+    && value.length === 0
+    && isMultiValueField({ type: typeof def.type === 'string' ? def.type : '', multiple: def.multiple === true });
+}
+
+/**
+ * Whether a column is marked required (`*`) in the template: exactly when an
+ * insert that leaves it blank is refused. So a `required` field is NOT marked
+ * when the engine fills it from a default ({@link templateInsertDefault}:
+ * `defaultValue`, or the option marked `default: true`), nor when the insert
+ * never runs `required` on it (`system`, `readonly` and `autonumber` fields —
+ * reachable here only through an explicit `?fields=`). A default the required
+ * check itself counts as empty (`''`, or `[]` on a multi-valued field) fills
+ * nothing, so its field stays marked.
  */
 export function isTemplateRequired(def: TemplateFieldDef | undefined): boolean {
-  return def?.required === true && def.defaultValue === undefined;
+  if (def?.required !== true) return false;
+  if (def.system === true || def.readonly === true || def.type === 'autonumber') return false;
+  return isEmptyForRequired(def, templateInsertDefault(def));
 }
 
 // ── request reading ─────────────────────────────────────────────────
@@ -585,6 +656,15 @@ export function describeTemplateColumns(
  */
 export const TEMPLATE_VALIDATED_ROWS = 50_000;
 
+/**
+ * The longest error title and error message Excel's own data-validation dialog
+ * lets an author type. A dropdown's title (the column header) and message (the
+ * "How to fill it" text) are cut to fit, so the workbook never carries a value
+ * that editor could not have written.
+ */
+export const TEMPLATE_VALIDATION_ERROR_TITLE_MAX = 32;
+export const TEMPLATE_VALIDATION_ERROR_MAX = 255;
+
 /** The data validation a worksheet cell carries, read off exceljs' own `Cell` type. */
 type TemplateDataValidation = ReturnType<Worksheet['getCell']>['dataValidation'];
 
@@ -701,8 +781,8 @@ export async function buildImportTemplateWorkbook(
       // `warning`, not `stop`: the reader also takes an option's code and
       // every boolean token, so a value outside the list may still be right.
       errorStyle: 'warning',
-      errorTitle: c.header,
-      error: c.howToFill.slice(0, 255),
+      errorTitle: c.header.slice(0, TEMPLATE_VALIDATION_ERROR_TITLE_MAX),
+      error: c.howToFill.slice(0, TEMPLATE_VALIDATION_ERROR_MAX),
     });
     listColumn += 1;
   });

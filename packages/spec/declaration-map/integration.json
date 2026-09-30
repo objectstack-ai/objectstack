@@ -7,10 +7,6 @@
     "ConnectorActionEffect": "integration/ConnectorActionEffect",
     "ConnectorActionEffectSchema": "integration/ConnectorActionEffect",
     "ConnectorActionSchema": "integration/ConnectorAction",
-    "ConnectorConflictResolution": "integration/ConnectorConflictResolution",
-    "ConnectorConflictResolutionSchema": "integration/ConnectorConflictResolution",
-    "ConnectorFieldMapping": "integration/ConnectorFieldMapping",
-    "ConnectorFieldMappingSchema": "integration/ConnectorFieldMapping",
     "ConnectorInstanceAPIKeyAuth": "integration/ConnectorInstanceAPIKeyAuth",
     "ConnectorInstanceAPIKeyAuthSchema": "integration/ConnectorInstanceAPIKeyAuth",
     "ConnectorInstanceAuth": "integration/ConnectorInstanceAuth",
@@ -26,14 +22,10 @@
     "ConnectorSchema": "integration/Connector",
     "ConnectorType": "integration/ConnectorType",
     "ConnectorTypeSchema": "integration/ConnectorType",
-    "DataSyncConfig": "integration/DataSyncConfig",
-    "DataSyncConfigSchema": "integration/DataSyncConfig",
     "DeclarativeConnectorEntry": "integration/DeclarativeConnectorEntry",
     "DeclarativeConnectorEntrySchema": "integration/DeclarativeConnectorEntry",
     "RetryConfig": "integration/RetryConfig",
-    "RetryConfigSchema": "integration/RetryConfig",
-    "SyncStrategy": "integration/SyncStrategy",
-    "SyncStrategySchema": "integration/SyncStrategy"
+    "RetryConfigSchema": "integration/RetryConfig"
   },
   "collisions": []
 }
