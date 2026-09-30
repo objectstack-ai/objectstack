@@ -13,8 +13,8 @@
 //                   entries this is shaped on: `client-delete-result-success`,
 //                   `client-meta-reset-result-reset`,
 //                   `client-envelope-convergence-analytics-automation`)
-//   family          objectstack-ai/objectstack#14312 (the `oauth.*` binding card
-//                   whose ruling fenced this method out, PR #15445)
+//   family          commit e944fdb24 (the `oauth.*` binding, which fenced this
+//                   method out as a behaviour change, PR #15445)
 //   pins            `packages/client/src/oauth-applications-delete.test.ts`,
 //                   `packages/client/src/return-type-precision.test.ts`
 //   vendor          `StrictEndpoint<'/oauth2/delete-client', ..., void>` in

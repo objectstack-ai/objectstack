@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+// Commit be21955ba — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
 // block (triage graded 2026-08-21; cloud leg measured clean 2026-08-24). One
-// of NINE members tombstoned together: #10627 measured exactly ONE non-test
+// of NINE members tombstoned together: that commit's census measured exactly ONE non-test
 // read of `manifest.contributes` monorepo-wide (engine.ts, member `kinds`),
 // with controls, re-verified across objectstack + objectui + cloud at claim
 // time. `events` in particular was decorative twice over: its only in-repo

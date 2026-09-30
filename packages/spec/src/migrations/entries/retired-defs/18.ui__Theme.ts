@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// #10485 — `ui/theme.zod.ts` `ThemeSchema`, retired whole with its
+// Commit 35ad101bc — `ui/theme.zod.ts` `ThemeSchema`, retired whole with its
 // `defineStack({ themes })` carrier key (ADR-0049 enforce-or-remove;
 // maintainer ruling 2026-08-21, disposition B: 退役授权面 — `app.branding`
 // stays the one colour surface; objectui's ThemeEngine/ThemeContext and their
@@ -16,5 +16,5 @@
 // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
 // removal ships on the 17.x line (launch-window convention: accept-set
 // narrowings ride minor releases) and the prescription lives at the major
-// boundary where `migrate meta` users look (the #8586 / #8715 precedent).
+// boundary where `migrate meta` users look (the #8586 / commit 2c86fe3ea precedent).
 export const entry = 'ui/Theme';

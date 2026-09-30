@@ -16,7 +16,7 @@
 // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
 // removal ships on the 17.x line (launch-window convention: accept-set
 // narrowings ride minor releases) and the prescription lives at the major
-// boundary where `migrate meta` users look (the #8495 / PR #8666 precedent,
+// boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666,
 // as `data/Metric:filters` before it). Tombstoned with `retiredKey()` in
 // `ObjectGridPropsSchema` (the surface baseline line carries `[RETIRED]`);
 // sources are rewritten by the D2 conversion `object-grid-default-sort-removed`

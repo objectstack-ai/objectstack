@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// #10724 — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
+// Commit be21955ba — ADR-0049 enforce-or-remove on the plugin manifest's `contributes`
 // block; one of NINE members tombstoned together. Census, registration major,
 // and the why-no-D2-conversion reasoning are recorded once in the sibling
 // entry `kernel/Manifest:contributes.events` (this family) and in

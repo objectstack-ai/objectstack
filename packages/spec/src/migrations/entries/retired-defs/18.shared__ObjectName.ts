@@ -11,6 +11,6 @@
 // five surfaces' real validators as the contract of record). No authored
 // document ever embedded a branded value, so no tombstone and no D2
 // conversion — this table plus the D3 semantic entry
-// `branded-identifier-schemas-retired` are the declaration (the #8715
+// `branded-identifier-schemas-retired` are the declaration (commit 2c86fe3ea's
 // route-3 shape).
 export const entry = 'shared/ObjectName';

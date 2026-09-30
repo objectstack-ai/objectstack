@@ -82,7 +82,7 @@ into the registry; the run of `//` comments immediately above `export const entr
   sentence once here and once there. This tree's one code/prose separator masks
   **comments** and leaves **string literals** intact on purpose, so to every scan built
   on it a quoted example is code — which is how prose in `packages/spec` turns
-  **another package's** test red. Measured on #14526: the new entry named four retired
+  **another package's** test red. Measured while landing commit db16b9424: the new entry named four retired
   call sites in their call spelling — the method with its opening parenthesis —
   `packages/client/src/envelope-caller-census.test.ts` counted 46 against the 28 it
   pins (nine mentions, each counted twice) and `Test Core` went red; respelling them

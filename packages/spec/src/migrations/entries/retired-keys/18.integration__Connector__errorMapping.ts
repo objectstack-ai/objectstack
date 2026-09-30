@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// #14676 — ADR-0049 enforce-or-remove on `ConnectorSchema.errorMapping` (triage
+// Commit 13c48c2a5 — ADR-0049 enforce-or-remove on `ConnectorSchema.errorMapping` (triage
 // ruling 2026-09-02: removal via the `spec-property-retirement` playbook; the
 // split condition — a downstream consumer in objectui or a customer stack —
 // measured empty at objectui `0d8fd7c`, hotcrm not measurable). The key carried
