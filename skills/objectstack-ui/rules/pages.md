@@ -47,7 +47,7 @@ which contain components.
 
 | `type`               | Use |
 |:---------------------|:----|
-| `page:header`        | Title + subtitle + breadcrumb + `actions: string[]` (action ids) |
+| `page:header`        | Title + subtitle + `actions: string[]` (action ids) |
 | `page:card`          | Bordered/un-bordered card with `children: Component[]` (plus an optional `footer: Component[]` slot) |
 | `flex`               | Generic styleable box (`properties.children`) — the workhorse for custom layout; style via `responsiveStyles` (see Styling below) |
 | `element:text`       | Text node — `properties.content`; style via `responsiveStyles` |
@@ -86,7 +86,6 @@ export const LeadDetailPage = definePage({
           properties: {
             title: '{first_name} {last_name}',
             subtitle: '{company}',
-            breadcrumb: true,
             actions: ['convert_lead'],   // ids of `lead`'s actions
           },
         },
