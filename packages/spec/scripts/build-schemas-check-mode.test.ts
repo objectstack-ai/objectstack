@@ -1013,10 +1013,13 @@ const DELETED_LEAF_COLLIDER = `data/Object:${DELETED_LEAF_COLLIDER_LEAF} [RETIRE
 const DELETED_UNREACHABLE = 'api/SessionResponse:zzOverCollected4650';
 /** #17356's pin. A def whose ONLY root is an UNREGISTERED KIND — `connector`,
  *  bound in `UNREGISTERED_KIND_SCHEMAS` by #6245 and deliberately absent from
- *  `listMetadataTypeSchemaTypes()`. `integration/DataSyncConfig` sits two hops
- *  from that root (`connector.syncConfig`, unwrapped once through `optional`),
+ *  `listMetadataTypeSchemaTypes()`. `integration/RetryConfig` sits two hops
+ *  from that root (`connector.retryConfig`, unwrapped once through `optional`),
  *  and `stack.connectors[]` / `PUT /api/v1/meta/connector/:name` both parse a
- *  real metadata document through it.
+ *  real metadata document through it. (The def was `integration/DataSyncConfig`,
+ *  the measured specimen below, until protocol 18 retired it whole with
+ *  `connector.syncConfig` — ADR-0049; `RetryConfig` is the connector's other
+ *  open block on the same root at the same depth.)
  *
  *  Until #17356 the gate built its roots from `listMetadataTypeSchemaTypes()`
  *  alone, so this def read `null` and check (c) proof 2 WAIVED a bare deletion
@@ -1030,7 +1033,7 @@ const DELETED_UNREACHABLE = 'api/SessionResponse:zzOverCollected4650';
  *  ever sees a key the build STOPPED emitting, and the def is judged by its
  *  DEF half (`key.slice(0, key.indexOf(':'))`), so a synthetic leaf under the
  *  real def runs the identical code path as the real deletion did. */
-const DELETED_VIA_UNREGISTERED_KIND_DEF = 'integration/DataSyncConfig';
+const DELETED_VIA_UNREGISTERED_KIND_DEF = 'integration/RetryConfig';
 const DELETED_VIA_UNREGISTERED_KIND = `${DELETED_VIA_UNREGISTERED_KIND_DEF}:zzOnlyRootIsAnUnregisteredKind17356`;
 /** The unregistered kind that def's only root lives in. */
 const UNREGISTERED_KIND_ROOT = 'connector';
@@ -1047,10 +1050,12 @@ const DELETED_AGED = `data/Object:${DELETED_AGED_LEAF} [RETIRED]`;
 /** Base key under a def RENAMED_DEFS moved: carried, so never a deletion.
  *  Was `integration/RateLimitConfig:maxRequests` until #4911 retired that def
  *  outright and its rename entry was absorbed (a rename whose target stops
- *  being emitted cannot stay in the table). Re-pointed at the #4703 rename,
- *  which carries 7 keys — an ENUM rename (0 keys carried) would make this
- *  fixture vacuous. */
-const DELETED_BY_RENAME_SOURCE_DEF = 'integration/FieldMapping';
+ *  being emitted cannot stay in the table), then `integration/FieldMapping`
+ *  (the #4703 connector rename, 7 keys) until protocol 18 retired its target
+ *  whole with `connector.fieldMappings` the same way. Re-pointed at the #4703
+ *  import-side rename, which carries 4 keys — an ENUM rename (0 keys carried)
+ *  would make this fixture vacuous. */
+const DELETED_BY_RENAME_SOURCE_DEF = 'data/FieldMapping';
 const DELETED_BY_RENAME = `${DELETED_BY_RENAME_SOURCE_DEF}:source`;
 /** The SAME property under the rename's TARGET def. The committed surface is the
  *  post-rename snapshot, so it records this one and not `DELETED_BY_RENAME`; an
@@ -1074,14 +1079,18 @@ const DELETED_GUIDANCE_ROUTE = `${GUIDANCE_ROUTE_DEF}:${GUIDANCE_ROUTE_LEAF}`;
 /** The dark control, and the reason proof 4 is not a blanket waiver: the SAME def
  *  — same reachability, same closed door — with a key nothing prescribes for. */
 const DELETED_GUIDANCE_UNNAMED = `${GUIDANCE_ROUTE_DEF}:zzNotPrescribed18301`;
-/** The key a maintainer ruling (2026-09-10, #16320) retired while DELIBERATELY
- *  withholding the tombstone. `DataSyncConfigSchema` is a plain `z.object`, not a
- *  `strictObject`, so nothing declares a prescription for it and proof 4 has no
- *  route to it — which is what keeps this card an ADDED proof rather than a
- *  reversal of that ruling. If someone later writes a `guidance` entry for
- *  `schedule`, this assertion flips, and it SHOULD: the retirement would have
- *  become audible, which is a real change and not a test to relax. */
-const WITHHELD_TOMBSTONE = 'integration/DataSyncConfig:schedule';
+/** The SHAPE of a maintainer ruling (2026-09-10, #16320) that retired a key while
+ *  DELIBERATELY withholding the tombstone: a bare deletion from a reachable def
+ *  that is a plain `z.object`, not a `strictObject`, so nothing declares a
+ *  prescription for it and proof 4 has no route to it — which is what keeps this
+ *  card an ADDED proof rather than a reversal of that ruling. The ruling's own
+ *  key, `integration/DataSyncConfig:schedule`, was this fixture until protocol 18
+ *  retired `DataSyncConfig` whole (ADR-0049), after which a line under it rides
+ *  the vanished-def proof instead and would pin nothing here. So the fixture
+ *  keeps the ruling's shape — the same `schedule` leaf on the connector's other
+ *  open block, same root, same depth. If someone later writes a `guidance` entry
+ *  that reaches it, this assertion flips, and it SHOULD. */
+const WITHHELD_TOMBSTONE = 'integration/RetryConfig:schedule';
 /** How `strictUnknownKeyError` renders a prescription: one bullet line. The
  *  guard below reads it as a lit/dark PAIR, never alone — a shape that rejects
  *  everything and prescribes for nothing passes a one-legged rejection test. */
@@ -1426,7 +1435,8 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       // The defect: `computeSurfaceReachability()` built its roots from
       // `listMetadataTypeSchemaTypes()`, which per #6245 deliberately does not
       // enumerate `UNREGISTERED_KIND_SCHEMAS`. `connector` lives there, so the
-      // BFS never started from it, `integration/DataSyncConfig` read `null`,
+      // BFS never started from it, `integration/DataSyncConfig` (then this
+      // fixture's def; `integration/RetryConfig` since protocol 18) read `null`,
       // and a bare deletion of one of its baseline lines was waived as
       // over-collection — for a def `stack.connectors[]` parses on every boot.
       // The gate now enumerates its own reachability root union; the KIND
@@ -1890,7 +1900,7 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
     { timeout: SPAWN_TIMEOUT_MS },
     () => {
       // The cost this guard can impose, pinned: the target def is populated in
-      // the base (six other keys survive the filter below), and the carried
+      // the base (three other keys survive the filter below), and the carried
       // property name is not one of them. `Map.set` collapses only entries that
       // are the SAME key, so this merge writes every key exactly once and loses
       // nothing. Refusing a populated target as such would redden most of the

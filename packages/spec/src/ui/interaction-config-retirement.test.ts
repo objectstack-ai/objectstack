@@ -214,9 +214,11 @@ describe('[#4988] ui/ interaction config family retirement', () => {
       expect('ConflictResolution' in ns).toBe(false);
       expect('ConflictResolutionSchema' in ns).toBe(false);
     }
-    // The connector vocabulary itself is untouched, byte for byte.
-    expect('ConnectorConflictResolutionSchema' in integration).toBe(true);
-    expect(() => integration.ConnectorConflictResolutionSchema.parse('target_wins')).not.toThrow();
+    // The connector vocabulary left too — with `connector.syncConfig`, in
+    // protocol 18 (ADR-0049) — and was NOT handed the freed bare name on its
+    // way out. Anti-vacuity: the integration namespace still resolves.
+    expect('ConnectorConflictResolutionSchema' in integration).toBe(false);
+    expect('ConnectorSchema' in integration).toBe(true);
     // And the FOURTH relative — `./api`'s route-merge policy — keeps its own
     // distinct name and is unaffected by any of this.
     const api = await import('../api/index');
