@@ -2027,7 +2027,7 @@ export class SysMetadataRepository implements MetadataRepository {
         `[SysMetadataRepository] Could not read \`${this.historyTable}\` to determine the next ` +
           `\`${counter}\` (${subject}) — the metadata write is being ABORTED and the enclosing ` +
           `transaction rolled back, so nothing is committed and the caller sees the failure. ` +
-          `Before #4867 this path answered \`${counter} = 1\` instead: against a table that ` +
+          `This path used to answer \`${counter} = 1\` instead, taking a failed read for an empty table: against a table that ` +
           `already has rows that number COLLIDES with an existing row, while the insert SUCCEEDS ` +
           `and not one line is logged — leaving version ordering untrustworthy and rollback ` +
           `targets ambiguous (a rollback can then resolve to a different record's same-numbered ` +

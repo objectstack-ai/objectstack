@@ -393,7 +393,7 @@ describe('[#8502] section 4 — the operator half: withheld, not discarded', () 
 
         expect(warn).toHaveBeenCalledTimes(1);
         const [line, cause] = warn.mock.calls[0];
-        expect(line).toContain('#8502');
+        expect(line).toContain('must not be quoted back on response data');
         expect(line).toContain('withheld from the response');
         // The ORIGINAL error object, not a re-spelling of it, so a log reader
         // gets the stack too.

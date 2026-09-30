@@ -2565,7 +2565,7 @@ function clientFacingRowFailureText(err: unknown, fallback: string): string {
         if (typeof declared === 'string' && declared.length > 0) return declared;
     }
     console.warn(
-        '[Protocol] Withheld a caught error\'s text from a batch row (#8502): the producer declared no '
+        '[Protocol] Withheld a caught error\'s text from a batch row: the producer declared no '
         + 'client-facing refusal (no 4xx status or statusCode, and not the VALIDATION_FAILED shape), so its '
         + 'sentence must not be quoted back on response data. The row says: '
         + `"${fallback}" — cause (withheld from the response):`,
@@ -9604,7 +9604,7 @@ export class ObjectStackProtocolImplementation implements
                 warnedNoRegistryForDataGate = true;
                 console.warn(
                     '[Protocol] engine exposes no schema registry — the data-plane object-existence '
-                    + 'gate (#3770) is INACTIVE for this process; unregistered object names reach the '
+                    + 'gate is INACTIVE for this process; unregistered object names reach the '
                     + 'driver as raw table names.',
                 );
             }
@@ -18448,7 +18448,7 @@ export class ObjectStackProtocolImplementation implements
         console.warn(
             `[Protocol] publishPackageDrafts: this overlay repository declares no 'get', so the batch's own `
             + `pending drafts cannot be read (first reached at ${type}/${name}). Author-time validation falls `
-            + `back to the LIVE declarations only — the pre-#10377 closure — so a draft that references a `
+            + `back to the LIVE declarations only, without this batch's own drafts in the closure, so a draft that references a `
             + `sibling drafted in the SAME batch may be refused as unresolved. Nothing is published unchecked: `
             + `the gate still runs, with strictly less resolution context.`,
         );
@@ -22858,11 +22858,11 @@ export class ObjectStackProtocolImplementation implements
                 `A 'flow' listed here will NOT bind its triggers in this process (the kernel:ready binder ` +
                 `reads flows env-wide) — it fired until the last restart and stops now. ` +
                 (reportedUndeclared
-                    ? `Types marked [plugin-registered] have no metadata-type registry entry, so the #6190 `
+                    ? `Types marked [plugin-registered] have no metadata-type registry entry, so the declared-types-only `
                     + `org-scope write refusal does NOT cover them: rows of those types can still be written `
                     + `org-scoped, and will be listed here again after every restart until the author stops. `
                     : '') +
-                `Re-save the item env-wide (no active organization), or delete the row. See #6190 / #6992 / ADR-0005.`,
+                `Re-save the item env-wide (no active organization), or delete the row. See ADR-0005.`,
             );
         } catch {
             // Diagnostics never break boot — see the TSDoc. Deliberately not

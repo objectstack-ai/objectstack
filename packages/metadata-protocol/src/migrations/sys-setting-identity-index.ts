@@ -534,7 +534,7 @@ export async function ensureSysSettingIdentityIndex(
             logger,
             `[metadata-protocol] could not create '${SYS_SETTING_IDENTITY_INDEX_NAME}' on ` +
             `"${SYS_SETTING_TABLE}" after the probe succeeded — the table may currently have NO unique ` +
-            `index on (${sysSettingIdentityKeyParts().join(', ')}). Restart to retry (#8629).`,
+            `index on (${sysSettingIdentityKeyParts().join(', ')}). Restart to retry.`,
             detail,
         );
         return { status: 'failed', detail };
@@ -592,7 +592,7 @@ function reportDegradation(
             `over (${columns}). The system keeps looking healthy while the declared row identity is void on ` +
             `every row that is not scope='user' — user_id is NULL there — so two tenant-scope rows for one ` +
             `(namespace, key) in ONE organization, or two platform defaults on the global layer, can coexist ` +
-            `and SettingsService has no defined answer for which one wins (#8629). MySQL/MariaDB before ` +
+            `and SettingsService has no defined answer for which one wins. MySQL/MariaDB before ` +
             `8.0.13 has no functional key parts, so there is no in-dialect fix: run this platform on ` +
             `SQLite/PostgreSQL for the guarantee, and meanwhile watch for duplicates with this MySQL ` +
             `statement: ${buildSysSettingDuplicateProbeSqlMysql()}`,
@@ -615,7 +615,7 @@ function reportDegradation(
             `enforced until the duplicates are resolved: settings rows are admin-authored configuration, so ` +
             `no row is discarded automatically and this migration will keep refusing until an operator ` +
             `decides which row survives. List them with: ${duplicateQuery} — or run "os migrate duplicates" — ` +
-            `then restart (ADR-0120 D4, #8629).`,
+            `then restart (ADR-0120 D4).`,
             detail,
         );
         return;
@@ -631,7 +631,7 @@ function reportDegradation(
         `[metadata-protocol] could not rebuild '${SYS_SETTING_IDENTITY_INDEX_NAME}' on ` +
         `"${SYS_SETTING_TABLE}" as the NULL-safe row-identity index; the existing index is unchanged, so ` +
         `duplicate tenant-scope and global-scope settings rows can still be created while everything else ` +
-        `looks healthy. Fix the cause below and restart (#8629).`,
+        `looks healthy. Fix the cause below and restart.`,
         detail,
     );
 }
