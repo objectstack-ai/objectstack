@@ -2,7 +2,7 @@
 
 /**
  * The `unit` / `integration` tier predicate for this package's suite, and the
- * DERIVATION of the integration population from it (#13504, #14554).
+ * DERIVATION of the integration population from it (commit 44813ba57, #14554).
  *
  * `vitest.config.ts` imports `integrationTestFiles()` and hands the result
  * straight to the two projects; `test/vitest-tiers-partition.test.ts` imports
@@ -64,7 +64,7 @@
  *   INTEGRATION = SPAWN ∨ KERNEL.
  *
  * ⛔ THE PREDICATE IS WHAT A FILE DOES, NOT WHAT IT IS CALLED — the `.e2e`
- * name and the behaviour disagree on 5 files here, and the ACCEPT on #13504
+ * name and the behaviour disagree on 5 files here, and the ACCEPT on commit 44813ba57's card
  * measured 18 of 220 disagreeing under the name-and-text census this replaced.
  *
  * Value imports only: `import type { … } from '@objectstack/driver-sql'` loads
