@@ -27,9 +27,9 @@
  * `getPackage`, what it returns for an installed package (the read the `/meta`
  * write path resolves a base against); `registerItem` is recorded, and a
  * refused save must never reach it. The engine double serves only `findOne`
- * over `sys_metadata` rows (and records `insert` / `update`, which a refused
- * save must never reach either). `@objectstack/objectql` cannot be imported
- * here: it depends on this package.
+ * over `sys_metadata` rows (and records `insert`, which a refused save must
+ * never reach either). `@objectstack/objectql` cannot be imported here: it
+ * depends on this package.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
@@ -75,7 +75,6 @@ interface StoredRow { type: string; name: string; package_id: string | null }
 function protocolWith(opts: { rows?: StoredRow[]; findOne?: () => Promise<unknown>; environmentId?: string } = {}) {
     const rows = opts.rows ?? [];
     const insert = vi.fn(async () => ({ id: 'never' }));
-    const update = vi.fn(async () => ({ id: 'never' }));
     const registerItem = vi.fn();
     const engine = {
         registry: {
@@ -89,10 +88,9 @@ function protocolWith(opts: { rows?: StoredRow[]; findOne?: () => Promise<unknow
             return rows.find((r) => Object.entries(query.where).every(([k, v]) => (r as any)[k] === v)) ?? null;
         }),
         insert,
-        update,
     };
     const protocol = new ObjectStackProtocolImplementation(engine as never, () => new Map(), opts.environmentId);
-    return { protocol, insert, update, registerItem };
+    return { protocol, insert, registerItem };
 }
 
 const shape = (e: any) => (e ? { code: e.code, status: e.status } : null);
@@ -255,7 +253,7 @@ describe('a flow saved naming, as its base, a package no installed package holds
     it('saveMetaItem throws it before anything is written or registered — published or drafted, on both topologies', async () => {
         for (const environmentId of [undefined, 'env_1']) {
             for (const mode of [undefined, 'draft'] as const) {
-                const { protocol, insert, update, registerItem } = protocolWith({ environmentId });
+                const { protocol, insert, registerItem } = protocolWith({ environmentId });
                 const thrown: any = await protocol.saveMetaItem({
                     type: 'flow', name: 'orphan_flow', item: flowBody('orphan_flow'), packageId: ORPHAN,
                     ...(mode ? { mode } : {}),
@@ -263,7 +261,6 @@ describe('a flow saved naming, as its base, a package no installed package holds
 
                 expect(shape(thrown), JSON.stringify({ environmentId, mode })).toEqual({ code: 'WRITABLE_PACKAGE_REQUIRED', status: 422 });
                 expect(insert).not.toHaveBeenCalled();
-                expect(update).not.toHaveBeenCalled();
                 expect(registerItem).not.toHaveBeenCalled();
             }
         }
