@@ -121,6 +121,25 @@ Derived from the changesets objectui declared over the range — 89 releasing of
 - _(no changeset)_ fix(console): drop the two optimizeDeps.include entries the dev server cannot resolve (objectui#10865) (#10938) (objectui `51401e63c`)
 - _(no changeset)_ docs(agents): port objectstack's model-free commit-trailer rule into the multi-agent section (objectui#9441) (#10922) (objectui `af2221d45`)
 
-<!-- adr-0087: TODO — the pin bump cannot answer this; a human must (objectstack#6494) -->
+<!-- adr-0087: not-required (no-migration-prescription)
+     This diff moves `.objectui-sha` and the artefacts that travel with it (this console
+     changeset, `sdui.manifest.json` + `scripts/sdui-manifest.record.json`, the re-recorded
+     `packages/sdui-parser/objectui-lockstep.json`, and the re-measured pin citations in
+     `packages/spec/src`). It adds, removes or renames no ObjectStack-authorable key: no Zod
+     schema, no spec declaration and no stored `sys_metadata` shape moves in it, so
+     `objectstack migrate meta` has nothing here to rewrite, and this body carries no
+     FROM/TO prescription of its own.
+     The pin-citation re-measure changes text only: source comments, one `.describe()`
+     sentence (`FormField.span`) and the description text of six semantic migration
+     entries, with the generated `migrations/registry.ts` and reference page that project
+     them. It adds, removes or renames no key, and moves no default, enum member or export.
+     The 6 declared-breaking entries listed above are objectui's OWN package surfaces
+     (`@object-ui/types`, `@object-ui/core` and `@object-ui/plugin-dashboard`), each already
+     carrying its upstream record. Where one of them mirrors an ObjectStack-authorable key,
+     the ledger entry belongs to the `packages/spec` PR that lands the mirror, never to the
+     pin bump, whose diff contains no such key.
+     Scope of the claim, stated rather than implied: it is a claim about THIS diff, not
+     a per-entry re-measurement of the 6 upstream declared-breaking entries.
+-->
 
 objectui range: `dd3f7e1be356...db11afd4967c`
