@@ -14262,9 +14262,7 @@ export class ObjectStackProtocolImplementation implements
      * @returns the refusal to relay, or `null` when the `/meta` door would not
      *          refuse this write or removal on the locked-base ground.
      */
-    packagedBaseRefusal(
-        request: { type: string; name: string; operation: 'save' | 'delete'; packageId?: string | null },
-    ): Error | null {
+    packagedBaseRefusal(request: { type: string; name: string; operation: 'save' | 'delete'; packageId?: string | null }): Error | null {
         // [#9009] Folded HERE, at the producer of the verdict, so a caller that
         // arrives with a plural spelling cannot address around the lock.
         const folded = canonicalizeMetaRequestType(request);
@@ -14361,9 +14359,7 @@ export class ObjectStackProtocolImplementation implements
      * @returns the refusal to relay verbatim, or `null` when the write may
      *          proceed on these grounds.
      */
-    async tenantAuthoredWriteRefusal(
-        request: { type: string; name: string; item: unknown; packageId?: string | null },
-    ): Promise<Error | null> {
+    async tenantAuthoredWriteRefusal(request: { type: string; name: string; item: unknown; packageId?: string | null }): Promise<Error | null> {
         const folded = canonicalizeMetaRequestType(request);
         const singular = PLURAL_TO_SINGULAR[folded.type] ?? folded.type;
         if (singular !== 'flow') return null;
