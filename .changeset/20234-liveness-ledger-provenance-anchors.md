@@ -2,7 +2,7 @@
 '@objectstack/spec': patch
 ---
 
-The `manifest`, `dataset` and `permission` liveness ledgers cite the commit that decided each note instead of a tracker number that no longer resolves
+The `manifest`, `dataset` and `permission` liveness ledgers cite the commit that decided each note, or say the decision in words, instead of a tracker number that no longer resolves
 
 Clause-②: no
 
