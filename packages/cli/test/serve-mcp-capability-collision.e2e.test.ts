@@ -81,7 +81,7 @@ const HERE = resolve(fileURLToPath(import.meta.url), '..');
  * PRICE, stated because it is real. This file is now a verdict about BUILD
  * STATE as well as about the source in the checkout, which is the trade
  * `scripts/check-test-source-alias.mjs` argues against for in-process imports.
- * `turbo.json` declares `@objectstack/cli#test` `dependsOn: ["build"]` (#11268)
+ * `turbo.json` declares `@objectstack/cli#test` `dependsOn: ["build"]` (commit 918988ad3)
  * so CI always builds `dist/` first; `requireBuiltCli()` — hoisted into
  * `helpers/serve-process.ts` by #12539, with the reason it refuses supplied
  * from HERE (`RUN_JS_RESOLVES_FROM_DIST`) because it is true of this
@@ -161,7 +161,7 @@ function boot(env: Record<string, string | undefined>, waitFor: RegExp): Promise
       // `childEnv`, not a bare `...process.env`: the vitest worker exports
       // `TEST=true`, which better-auth 1.7.1 reads directly and answers by
       // switching its own origin/CSRF validation OFF in the child — see
-      // `helpers/serve-process.ts` for the measurement (#11267). This file
+      // `helpers/serve-process.ts` for the measurement (commit 1ddda1d00). This file
       // signs in for real, so it is a child that actually reaches that code.
       env: childEnv({
         NO_COLOR: '1',

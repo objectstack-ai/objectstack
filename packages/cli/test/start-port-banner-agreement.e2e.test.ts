@@ -131,7 +131,7 @@ function bootStart(
   return new Promise((resolveBoot, rejectBoot) => {
     const child = spawn(entry.exec, [...entry.argv, 'start', ...args], {
       cwd: workdir,
-      // `childEnv`, never a bare `...process.env` — see its header (#11267).
+      // `childEnv`, never a bare `...process.env` — see its header (commit 1ddda1d00).
       // `NODE_ENV: undefined` is required by the built entrypoint (#11464):
       // `development`/`test` sends oclif's command lookup back to `src/`.
       env: childEnv({

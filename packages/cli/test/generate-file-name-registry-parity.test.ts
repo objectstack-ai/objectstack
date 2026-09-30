@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * PIN (#11071) — a generated file's NAME matches the pattern the registry
+ * PIN (commit 50fb191dc) — a generated file's NAME matches the pattern the registry
  * declares for its type.
  *
  * ## Why the property and not six string comparisons

@@ -9,7 +9,7 @@
  * (`start.ts:347`). `os serve` runs IN-PROCESS, so there is no child env to
  * default; the equivalent has to mutate `process.env.NODE_ENV` itself, early
  * enough that every `NODE_ENV !== 'production'` gate downstream — starting
- * with plugin-auth's localhost trusted-origin CSRF substitution (#10366) —
+ * with plugin-auth's localhost trusted-origin CSRF substitution (commit bbe643c08) —
  * observes the default rather than the raw unset value.
  *
  * WHY THIS FILE SPAWNS THE REAL, BUILT CLI (`bin/run.js`, not
@@ -387,14 +387,14 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
       // which NODE_ENV state this call is probing.
       OS_AUTH_SECRET: 'e2e-node-env-default-probe-secret-not-for-real-use',
       // EXACTLY the argument the line above makes, for the sibling gate that
-      // #11267 exposed. The unset-`NODE_ENV` leg is — by this file's whole
+      // commit 1ddda1d00 exposed. The unset-`NODE_ENV` leg is — by this file's whole
       // design — a PRODUCTION boot, and `LocalCryptoProvider` refuses to start
       // in production without a stable key rather than mint one that would
       // make every `sys_secret` value undecryptable after a restart. That
       // refusal is a boot failure, not a signal about the origin gate this
       // file measures, so the key is supplied explicitly.
       //
-      // ⚠️ It was NOT needed before #11267 — and that is the finding, not an
+      // ⚠️ It was NOT needed before commit 1ddda1d00 — and that is the finding, not an
       // inconvenience. What follows is quoted in the PAST TENSE on purpose:
       // the code it quotes is GONE. `detectMode` used to read
       // `if (env.VITEST || env.NODE_ENV === 'test') return 'test'`, so while
@@ -431,7 +431,7 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
       // `serve.ts`'s own gate and stays green with the fix reverted, which is
       // exactly the vacuity this card's anti-vacuity section warns against,
       // one layer further down than the one it names. This file used to unset
-      // `TEST` by hand right here; #11267 moved that into `childEnv()` so
+      // `TEST` by hand right here; commit 1ddda1d00 moved that into `childEnv()` so
       // every spawner in this directory gets it without having to know, and
       // widened it to the whole `VITEST*` family. The behaviour of this
       // fixture is unchanged — `childEnv()` removes a superset of what the

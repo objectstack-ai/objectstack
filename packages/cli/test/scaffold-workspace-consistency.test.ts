@@ -2,7 +2,7 @@
 //
 // scaffold-workspace-consistency — the two scaffold paths render a
 // `pnpm-workspace.yaml` into a new user's project independently, and this file
-// is the only thing that can fail when they disagree (#10499).
+// is the only thing that can fail when they disagree (commit 6d441e41f).
 //
 // ── The shape of the defect ─────────────────────────────────────────────────
 //
@@ -21,7 +21,7 @@
 // one of the two scaffold paths went on shipping the pre-fix shape for months
 // — found by a first-run audit (#10405), not by a gate. The measured pnpm
 // boundary was corrected in the renderer by that fix and NOT in the template,
-// which is the second instance of the same class (#10498): a user on pnpm
+// which is the second instance of the same class (fixed by commit 6d441e41f): a user on pnpm
 // 10.28 was told by the file inside their own project that their pnpm cannot
 // read the key it is in fact reading, while the sibling scaffold path said the
 // opposite.
@@ -54,10 +54,10 @@
 //
 // ── `peerDependencyRules`, and why it is compared here NOW ──────────────────
 //
-// This limb was deliberately absent while #10931 was open: that card was the
+// This limb was deliberately absent while commit afe1c4e0a's card was open: that card was the
 // ruling on WHICH peer skews the scaffold should declare, and a limb written
 // before it would have either duplicated the card or pre-empted its answer.
-// #10931 is answered (the four `@better-auth/utils` declarations landed with
+// Commit afe1c4e0a answered it (the four `@better-auth/utils` declarations landed with
 // it), so the reservation is discharged and the drift risk is what remains —
 // and it is the same two-producer risk the rest of this file exists for. The
 // peer block is, if anything, the more fragile of the two: build approvals are

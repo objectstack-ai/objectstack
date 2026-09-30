@@ -37,7 +37,7 @@
  * serve-process.ts` on purpose: that helper always runs the child WITH `cwd` set
  * to the app, which is the one shape this file must not use. What IS borrowed
  * from it is everything orthogonal to the directory the child starts in:
- * `childEnv()` (#11267) — this file boots the real stack, better-auth included,
+ * `childEnv()` (commit 1ddda1d00) — this file boots the real stack, better-auth included,
  * which reads `TEST` directly — plus `randomPort()`, `portContentionError()`
  * (#12441) and `portDriftError()` (#12525, wired here by #12548), because a port
  * draw is not a property of the CWD either and this file used to carry its own
@@ -295,7 +295,7 @@ function frameworkClusterEsmEntry(): string {
       manifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
     } catch { /* not a package root, or unreadable — keep climbing */ }
     if (manifest?.name === CLUSTER) {
-      // [#13112] The `import` condition is EITHER the ESM target itself or a
+      // [commit e7191ce71] The `import` condition is EITHER the ESM target itself or a
       // nested conditions object carrying it under `default` (the
       // per-condition `types` shape). Both spellings ship in this repo, so the
       // entry is read through the nesting; the refusal below still fires when

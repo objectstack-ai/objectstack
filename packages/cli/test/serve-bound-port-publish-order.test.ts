@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #13193 / #13158 — the pin for the ORDER `os serve` publishes its bound port in.
+ * Commit faff497fd / #13158 — the pin for the ORDER `os serve` publishes its bound port in.
  *
  * ## What broke, and why it read as a flake for a day
  *

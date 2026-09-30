@@ -3,7 +3,7 @@
 /**
  * A BUILT checkout, made to answer like an unbuilt one for `@objectstack/spec`
  * and nothing else — the environment `run-dev-unbuilt-workspace.e2e.test.ts`
- * needs and CI cannot otherwise have (#12964).
+ * needs and CI cannot otherwise have (commit e6fd1caf7).
  *
  * Loaded with `node --import`, so it is in place before `@oclif/core` walks the
  * command directory. It is a `resolve` hook and NOT a file operation on purpose:

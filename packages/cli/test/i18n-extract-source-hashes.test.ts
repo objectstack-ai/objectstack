@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// `os i18n extract --source-hashes` — the provenance companion (#11671,
+// `os i18n extract --source-hashes` — the provenance companion (commit 09b4f4e4e,
 // maintainer ruling #12069 Option A).
 //
 // The RULE itself lives in `@objectstack/platform-objects/apps`

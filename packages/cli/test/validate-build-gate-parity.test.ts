@@ -303,7 +303,7 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
     'cleanupOldRuntimeBundles',
     'warningsSoFar',
   ],
-  // [#17080] Reads a fact about the TOOLCHAIN, not about the input. The
+  // [commit 8b4890343] Reads a fact about the TOOLCHAIN, not about the input. The
   // ADR-0087 D4 `release` section is computed at publish time from the two
   // tarballs and shipped inside the installed `@objectstack/spec`; this reader
   // opens that file and counts its entries. It takes nothing from the stack, so
@@ -377,7 +377,7 @@ const UTILS_DIR = join(__dirname, '..', 'src', 'utils');
 
 /**
  * The three authoring commands, as one list. Named once so a rule below cannot
- * quietly cover a subset of the class it describes — the #12297 failure the
+ * quietly cover a subset of the class it describes — the failure commit 9fd45a952 closed, which the
  * sink guard at the bottom of this file records.
  */
 const AUTHORING_COMMANDS: readonly string[] = ['compile.ts', 'validate.ts', 'lint.ts'];
@@ -1073,7 +1073,7 @@ describe('os validate is the read-only superset of os build (#3782, #4409)', () 
    * before the conversion retires and their metadata stops loading, and five
    * conversions are live today.
    *
-   * ⭐ [#12297] `lint.ts` was MISSING FROM THIS LOOP, and that is why the gap
+   * ⭐ [commit 9fd45a952] `lint.ts` was MISSING FROM THIS LOOP, and that is why the gap
    * survived #11772: the loop named the two commands the card in hand was
    * about, so closing `os build` left `os lint` — the third command the #4409
    * registry holds to this same bar, and the one whose docblock above already
