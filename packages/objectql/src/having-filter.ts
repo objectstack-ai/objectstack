@@ -664,6 +664,36 @@ const NUMERIC_RESULT_FUNCTIONS: ReadonlySet<string> = new Set(['count', 'count_d
 const VALUE_RESULT_FUNCTIONS: ReadonlySet<string> = new Set(['min', 'max']);
 
 /**
+ * A declared field's `type`. `undefined` when the declaration cannot tell: no
+ * field map (a registry-less host), no such field, or no readable type.
+ */
+function declaredFieldType(
+  fields: Record<string, unknown> | undefined,
+  name: unknown,
+): string | undefined {
+  if (!fields || typeof fields !== 'object' || typeof name !== 'string') return undefined;
+  if (!Object.prototype.hasOwnProperty.call(fields, name)) return undefined;
+  const type = (fields[name] as { type?: unknown } | undefined)?.type;
+  return typeof type === 'string' ? type : undefined;
+}
+
+/**
+ * The class a declared type carries, by the spec's value-class sets.
+ * `undefined` when the type cannot tell: none, or a `formula`, whose type names
+ * no stored value class.
+ */
+function classOfDeclaredType(type: string | undefined): AggregatedColumnClass | undefined {
+  if (type === undefined || type === 'formula') return undefined;
+  if (CALENDAR_DATE_TYPES.has(type)) return 'date';
+  if (INSTANT_TYPES.has(type)) return 'datetime';
+  if (CLOCK_TIME_TYPES.has(type)) return 'time';
+  if (NUMERIC_VALUE_TYPES.has(type)) return 'numeric';
+  if (BOOLEAN_VALUE_TYPES.has(type)) return 'boolean';
+  // Everything else is read and compared as text, as `driver-sql` stores it.
+  return 'text';
+}
+
+/**
  * A declared field's class, by the spec's value-class sets. `undefined` when
  * the declaration cannot tell: no field map (a registry-less host), no such
  * field, or a `formula`, whose type names no stored value class.
@@ -672,17 +702,53 @@ function declaredFieldClass(
   fields: Record<string, unknown> | undefined,
   name: unknown,
 ): AggregatedColumnClass | undefined {
-  if (!fields || typeof fields !== 'object' || typeof name !== 'string') return undefined;
-  if (!Object.prototype.hasOwnProperty.call(fields, name)) return undefined;
-  const type = (fields[name] as { type?: unknown } | undefined)?.type;
-  if (typeof type !== 'string' || type === 'formula') return undefined;
-  if (CALENDAR_DATE_TYPES.has(type)) return 'date';
-  if (INSTANT_TYPES.has(type)) return 'datetime';
-  if (CLOCK_TIME_TYPES.has(type)) return 'time';
-  if (NUMERIC_VALUE_TYPES.has(type)) return 'numeric';
-  if (BOOLEAN_VALUE_TYPES.has(type)) return 'boolean';
-  // Everything else is read and compared as text, as `driver-sql` stores it.
-  return 'text';
+  return classOfDeclaredType(declaredFieldType(fields, name));
+}
+
+/**
+ * [#20546] Each aggregated column's TYPE, read statically off the query and
+ * the object's field declaration — the one reading {@link aggregatedRowColumnClasses}
+ * classes, kept whole for a rule that needs more than the class:
+ *
+ * - a groupBy projection carries its field's declared type; a `day` date
+ *   bucket is a `date` (its label is `YYYY-MM-DD`), and a coarser bucket a
+ *   `text` label;
+ * - `count` / `count_distinct` / `sum` / `avg` carry a `number`;
+ * - `min` / `max` carry the type of the field they read.
+ *
+ * `undefined` where the declaration cannot tell. The no-operator-object arm of
+ * the number-comparand door's walk reads it at `having`: the `text` class
+ * lumps a `json` or `lookup` groupBy in with a real text column, and only the
+ * type tells a column that holds scalar values from one that does not.
+ */
+export function aggregatedRowColumnTypes(
+  groupBy: unknown,
+  aggregations: unknown,
+  fields: Record<string, unknown> | undefined,
+): Map<string, string | undefined> {
+  const types = new Map<string, string | undefined>();
+  for (const g of Array.isArray(groupBy) ? groupBy : []) {
+    if (typeof g === 'string') {
+      types.set(g, declaredFieldType(fields, g));
+      continue;
+    }
+    const item = g as { alias?: unknown; field?: unknown; dateGranularity?: unknown } | null;
+    const name = item?.alias ?? item?.field;
+    if (typeof name !== 'string') continue;
+    const granularity = item?.dateGranularity;
+    types.set(name, granularity == null
+      ? declaredFieldType(fields, item?.field)
+      : granularity === 'day' ? 'date' : 'text');
+  }
+  for (const a of Array.isArray(aggregations) ? aggregations : []) {
+    const agg = a as { alias?: unknown; function?: unknown; field?: unknown } | null;
+    if (typeof agg?.alias !== 'string') continue;
+    const fn = String(agg.function);
+    types.set(agg.alias, NUMERIC_RESULT_FUNCTIONS.has(fn)
+      ? 'number'
+      : VALUE_RESULT_FUNCTIONS.has(fn) ? declaredFieldType(fields, agg.field) : undefined);
+  }
+  return types;
 }
 
 /**
@@ -700,6 +766,9 @@ function declaredFieldClass(
  * A column whose class the declaration cannot tell maps to `undefined`, and a
  * rule reading this map does not judge it — the fail-open direction the
  * engine's other declared-type doors take for a registry-less host.
+ *
+ * [#20546] Derived from {@link aggregatedRowColumnTypes}, so the class and
+ * the type of a column are one reading of the query, never two.
  */
 export function aggregatedRowColumnClasses(
   groupBy: unknown,
@@ -707,26 +776,8 @@ export function aggregatedRowColumnClasses(
   fields: Record<string, unknown> | undefined,
 ): Map<string, AggregatedColumnClass | undefined> {
   const classes = new Map<string, AggregatedColumnClass | undefined>();
-  for (const g of Array.isArray(groupBy) ? groupBy : []) {
-    if (typeof g === 'string') {
-      classes.set(g, declaredFieldClass(fields, g));
-      continue;
-    }
-    const item = g as { alias?: unknown; field?: unknown; dateGranularity?: unknown } | null;
-    const name = item?.alias ?? item?.field;
-    if (typeof name !== 'string') continue;
-    const granularity = item?.dateGranularity;
-    classes.set(name, granularity == null
-      ? declaredFieldClass(fields, item?.field)
-      : granularity === 'day' ? 'date' : 'text');
-  }
-  for (const a of Array.isArray(aggregations) ? aggregations : []) {
-    const agg = a as { alias?: unknown; function?: unknown; field?: unknown } | null;
-    if (typeof agg?.alias !== 'string') continue;
-    const fn = String(agg.function);
-    classes.set(agg.alias, NUMERIC_RESULT_FUNCTIONS.has(fn)
-      ? 'numeric'
-      : VALUE_RESULT_FUNCTIONS.has(fn) ? declaredFieldClass(fields, agg.field) : undefined);
+  for (const [column, type] of aggregatedRowColumnTypes(groupBy, aggregations, fields)) {
+    classes.set(column, classOfDeclaredType(type));
   }
   return classes;
 }
