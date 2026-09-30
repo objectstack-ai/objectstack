@@ -1382,12 +1382,13 @@
         "requires": [
           "a book with audience { permissionSet: SET } claiming one doc, an org book claiming another, and a book claiming none — all in ONE package, so the flat /docs/DOC permalink has to pick the CLAIMING book rather than the package's first book by label",
           "an app whose navigation carries one doc entry of each shape — { doc }, { book }, { book, doc } — over the gated and the open corpus",
-          "a session per persona, each signed in through the form in its own browser context; the member holding SET gets it through a sys_user_permission_set row",
+          "a session per persona, each signed in through the form in its own browser context; the member holding SET gets it through a sys_user_permission_set row (a stock set such as showcase_auditor serves as SET)",
           "a console bundle carrying objectui PR 11258 (menu pruning, direct-route refusal, claiming-book permalink) and PR 11241 (the doc editor)"
         ],
         "knownGaps": [
           "THE STOCK SHOWCASE CORPUS CARRIES NO { permissionSet } BOOK AND NO doc NAV ENTRY — verify first (GET /api/v1/meta/book, read each audience; GET /api/v1/meta/app?id=showcase_app, look for type:'doc'). The run authors the books, docs, permission set and nav entries at runtime and tears them down, as platform-core.docs-audience-gate allows; the audience is read off the stored row, so a runtime-authored book exercises the same resolver",
-          "FORK WINDOW: while .objectui-sha predates objectui PR 11241 / PR 11258, the vendored console renders the PRE-feature UI (no renderer pruning, 'Documentation not found' on a gated direct route) — a run against it fails for a reason that is not this item's. Drive a console built from an objectui revision carrying both (RUNNER.md's two honest options) and NAME that revision in the run record, beside the pin",
+          "FORK WINDOW: while .objectui-sha predates objectui PR 11241 / PR 11258, the vendored console carries the PRE-feature UI — at db11afd496 the console source holds no 'You do not have access to this documentation' heading and no renderer doc-target check (source read) — so a run against it fails for a reason that is not this item's. Drive a console built from an objectui revision carrying both (RUNNER.md's two honest options) and NAME that revision in the run record, beside the pin",
+          "FIXTURE RECIPE, measured on the first run: the showcase is invite_only, so members come from POST /api/v1/auth/admin/create-user (mustChangePassword false), not sign-up; the Studio doc editor refuses the read-only code package com.example.showcase with a loud 422 ('Pick or create a writable base (package) first'), so install a writable base first (POST /api/v1/packages with id, name, version, type 'app') and author every book, doc and the app into it with ?package=; the seeded admin holds no app-declared set, so once the gated book claims the doc the admin's own editor and /meta/app answer the audience refusal too — author the doc before the gated book, or read it back as the reader",
           "REPO OWNERSHIP (ADR-0054): the server half — /meta/app pruning, /meta/doc and /meta/book refusals — is objectstack's; the menu markup, the direct-route refusal page and the claiming-book permalink are objectui's. A locator or copy fix goes to objectui"
         ]
       },
@@ -1417,8 +1418,8 @@
         {
           "clause": "a page entry opens the page in the book that CLAIMS it — in a package with several books, not the package's first book by label; a book entry opens its first readable page with the book sidebar showing only the member's pruned subset",
           "oracle": "dom",
-          "verify": "the landed URL + the sidebar entries vs GET /api/v1/meta/book/BOOK/tree as that member",
-          "evidence": "final URL + the sidebar entries"
+          "verify": "the landed URL names the claiming book (/docs/BOOK/DOC); every book-sidebar entry appears in GET /api/v1/meta/book/BOOK/tree as that member — never wider — and a doc outside the member's audience is absent from the sidebar of a book they CAN open (the outsider on the open book). The portal resolves the synthetic Uncategorized group over the book's own package, so the sidebar may be narrower than the server tree's cross-package Uncategorized group; narrower is not a FAIL, wider is",
+          "evidence": "final URL + the sidebar entries per persona beside that member's tree"
         },
         {
           "clause": "the outsider gets a refusal on every shape's direct route: the heading \"You do not have access to this documentation\" with the server's reason, in place — never \"Documentation not found\" / \"is not installed\", never \"Failed to load documentation\", never a blank page. A name nothing carries still reads \"Documentation not found\"",
