@@ -580,6 +580,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "小数位",
         helpText: "小数部分位数"
       },
+      useGrouping: {
+        label: "Use Grouping",
+        helpText: "Digit grouping (thousands separators) in displayed values. Unset: the renderer decides; an untouched switch writes nothing, so it reads off even where the renderer groups. Off: never grouped, e.g. a year or an ID. On: always grouped."
+      },
       currencyConfig: {
         label: "货币配置",
         helpText: "此字段使用哪种货币。未设置时为 dynamic 模式。两种模式下存储的值都是一个纯数字。"

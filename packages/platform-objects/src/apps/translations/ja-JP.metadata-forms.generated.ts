@@ -580,6 +580,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "小数桁",
         helpText: "小数部の桁数"
       },
+      useGrouping: {
+        label: "Use Grouping",
+        helpText: "Digit grouping (thousands separators) in displayed values. Unset: the renderer decides; an untouched switch writes nothing, so it reads off even where the renderer groups. Off: never grouped, e.g. a year or an ID. On: always grouped."
+      },
       currencyConfig: {
         label: "通貨設定",
         helpText: "このフィールドの通貨。未設定の場合は dynamic モードです。どちらのモードでも、保存される値は単なる数値です。"
