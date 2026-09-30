@@ -99,13 +99,15 @@
 // lines, which the caller must treat as "nothing to run", NOT as "no filter":
 // a `turbo run test` with no --filter args runs the entire workspace.
 
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
 import { isEntrypoint } from './invoked-as.mjs';
+import { maskCommentsAndLiterals } from './js-comment-mask.mjs';
 import { samplesFromSummary } from './measure-test-shard-timings.mjs';
+import { workspacePackages } from './workspace-enumerator.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TIMINGS_PATH = path.join(REPO_ROOT, 'scripts', 'test-shard-timings.json');
@@ -188,7 +190,9 @@ export const MAX_MEASURED_OVER_PREDICTED = 1.5;
 // suite below package granularity.
 //
 // THIS IS THAT SPLIT, and it is the shape the Dogfood job has run since #4859:
-// vitest's own `--shard=k/n` passthrough applied to ONE named package. The
+// vitest's own `--shard=k/n` applied to ONE named package (carried to it in
+// `OS_TEST_SHARD` rather than as a passthrough since #19278 -- see SLICE_ENV
+// below; the argument that follows is about vitest's shard, not the carrier). The
 // objection this file records against passthrough is specific and it does not
 // reach here -- `--shard` on a package with fewer test files than the shard
 // count hard-fails on vitest 4, and `--passWithNoTests` converts that into
@@ -265,6 +269,109 @@ export function sliceCountFor(name, fileCount = null) {
     );
   }
   return n;
+}
+
+// ── A SLICE MUST REACH THE SUITE IT SLICES (#19278) ────────────────────────
+//
+// Test Core hands a slice to its package as `OS_TEST_SHARD=k/n` in the
+// environment of that slice's own turbo run -- no longer as a `-- --shard=k/n`
+// passthrough, which turbo folds into the hash of every task in the run and
+// which therefore needed `--only`, which in turn dropped the build closure out
+// of the test task's hash (#18671). Two halves must both hold for the value to
+// arrive, and missing either one is SILENT: the slice's run goes green having
+// run the WHOLE suite, on every shard that carries a slice, because vitest
+// never hears of a shard.
+//
+//   1. turbo.json declares it in the `env` of the package's `test` task. turbo
+//      2.10 runs in strict env mode and strips an undeclared variable before
+//      the task's shell sees it -- and the declaration is also what puts the
+//      slice into the task hash, so `1/2` and `2/2` never share a cache entry.
+//      A `<package>#test` entry REPLACES the generic `test` task for that
+//      package, so the declaration is read from the one that applies.
+//   2. the package's vitest config reads it into vitest's `shard`. vitest
+//      4.1.11 reads no shard variable of its own.
+//
+// ⛔ A SPELLING check, the check-tier-file-adoption idiom: it proves both halves
+// are wired, never that vitest honours them. That was measured on the change
+// that introduced the variable (the same small file set under unset / 1/2 /
+// 2/2: 6 files, then two disjoint 3s whose union is the 6). The read is looked
+// for in code position only -- comments and literals are masked first -- so a
+// config that merely MENTIONS the variable in prose does not satisfy it.
+export const SLICE_ENV = 'OS_TEST_SHARD';
+const SLICE_READ = new RegExp(`\\bshard\\s*:\\s*process\\.env\\.${SLICE_ENV}\\b`);
+const VITEST_CONFIG_NAMES = Object.freeze([
+  'vitest.config.ts',
+  'vitest.config.mts',
+  'vitest.config.cts',
+  'vitest.config.js',
+  'vitest.config.mjs',
+  'vitest.config.cjs',
+]);
+
+// The verdict for one sliced package, from what was read. Pure, so the
+// self-test pins every direction without a tree to break. Returns the
+// problems, empty when both halves are wired.
+export function judgeSliceWiring(name, { configFile, configSource, turbo, packageTurboJson = false }) {
+  const problems = [];
+  if (packageTurboJson) {
+    problems.push(
+      `${name}: carries its own turbo.json, whose task merge this check does not model -- ` +
+        'teach judgeSliceWiring() to read it before trusting a green here.'
+    );
+  }
+  const tasks = turbo?.tasks ?? {};
+  const own = `${name}#test`;
+  const where = Object.hasOwn(tasks, own) ? `turbo.json tasks["${own}"]` : 'turbo.json tasks.test';
+  const def = Object.hasOwn(tasks, own) ? tasks[own] : tasks.test;
+  if (!def) {
+    problems.push(`${name}: turbo.json defines no \`test\` task that applies to it.`);
+  } else if (!Array.isArray(def.env) || !def.env.includes(SLICE_ENV)) {
+    problems.push(
+      `${name}: ${where}.env does not declare ${SLICE_ENV}. turbo's strict env mode strips it ` +
+        'before vitest starts, so every slice of this package runs its WHOLE suite, green.'
+    );
+  }
+  if (configSource == null) {
+    problems.push(
+      `${name}: no vitest config (${VITEST_CONFIG_NAMES.join(' / ')}) to read ${SLICE_ENV} -- ` +
+        'vitest reads no shard variable itself, so every slice would run the WHOLE suite.'
+    );
+  } else if (!SLICE_READ.test(maskCommentsAndLiterals(configSource))) {
+    problems.push(
+      `${name}: ${configFile} never reads ${SLICE_ENV} into vitest's \`shard\` ` +
+        `(\`shard: process.env.${SLICE_ENV}\`, in code rather than a comment) -- every slice ` +
+        'of this package would run its WHOLE suite, green.'
+    );
+  }
+  return problems;
+}
+
+// Both halves, read from the tree, for every package FILE_SHARDED_PACKAGES
+// names. `judged` is returned beside the problems so a caller can tell "every
+// sliced package is wired" apart from "no package was looked at".
+export function sliceWiringProblems(root = REPO_ROOT, sliced = FILE_SHARDED_PACKAGES) {
+  const turbo = JSON.parse(readFileSync(path.join(root, 'turbo.json'), 'utf8'));
+  const dirOf = new Map(workspacePackages(root).map(({ dir, manifest }) => [manifest?.name, dir]));
+  const problems = [];
+  let judged = 0;
+  for (const name of Object.keys(sliced)) {
+    const dir = dirOf.get(name);
+    if (dir === undefined) {
+      problems.push(`${name}: named in FILE_SHARDED_PACKAGES, but no workspace package carries that name.`);
+      continue;
+    }
+    const file = VITEST_CONFIG_NAMES.find((f) => existsSync(path.join(root, dir, f)));
+    problems.push(
+      ...judgeSliceWiring(name, {
+        configFile: file ? `${dir}/${file}` : null,
+        configSource: file ? readFileSync(path.join(root, dir, file), 'utf8') : null,
+        turbo,
+        packageTurboJson: existsSync(path.join(root, dir, 'turbo.json')),
+      })
+    );
+    judged++;
+  }
+  return { problems, judged };
 }
 
 // Expand weighed packages into shard items, splitting a file-sharded package's
@@ -651,11 +758,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the balancing pins (#10472)': 21,
   'predicted-vs-measured drift (#16173)': 9,
   'file-level slice items (#16173)': 20,
+  'file-level slices reach vitest through OS_TEST_SHARD (#19278)': 9,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 9;
+const SELF_TEST_BATTERY_FLOOR = 10;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1355,6 +1463,93 @@ function selfTest() {
     }
   });
 
+  // -- A SLICE MUST REACH THE SUITE IT SLICES (#19278) --------------------
+  //
+  // The live tree first: every package this file can slice declares
+  // OS_TEST_SHARD on the `test` task that applies to it AND reads it into
+  // vitest's `shard`. Then the judge on synthetic inputs, each half removed in
+  // turn, so a judge that stopped looking at a half cannot stay green.
+  battery('file-level slices reach vitest through OS_TEST_SHARD (#19278)');
+
+  check(() => {
+    const { problems, judged } = sliceWiringProblems();
+    const expected = Object.keys(FILE_SHARDED_PACKAGES).length;
+    if (expected === 0 || judged !== expected) {
+      throw new Error(
+        `slice wiring: judged ${judged} of ${expected} sliced package(s) -- a check that looked at ` +
+          'nothing cannot vouch that every slice reaches vitest.'
+      );
+    }
+    if (problems.length > 0) {
+      throw new Error(`slice wiring, live tree:\n  - ${problems.join('\n  - ')}`);
+    }
+  });
+
+  const wiredConfig = 'const s = { shard: process.env.OS_TEST_SHARD };\nexport default { test: { ...s } };\n';
+  const genericOnly = { tasks: { test: { env: ['OS_TEST_TIERS', 'OS_TEST_SHARD'] } } };
+  const judge = (over) =>
+    judgeSliceWiring('@x/sliced', { configFile: 'x/vitest.config.ts', configSource: wiredConfig, turbo: genericOnly, ...over });
+
+  check(() => {
+    const p = judge({});
+    if (p.length !== 0) throw new Error(`slice wiring: a fully wired package was refused: ${p.join(' | ')}`);
+  });
+  check(() => {
+    const p = judge({ configSource: 'export default { test: {} };\n' });
+    if (!p.some((m) => m.includes('never reads OS_TEST_SHARD'))) {
+      throw new Error('slice wiring: a config that never reads the variable was accepted');
+    }
+  });
+  check(() => {
+    // Prose is not a read: the variable named only in a comment must not pass.
+    const p = judge({ configSource: '// shard: process.env.OS_TEST_SHARD\nexport default { test: {} };\n' });
+    if (!p.some((m) => m.includes('never reads OS_TEST_SHARD'))) {
+      throw new Error('slice wiring: a config naming the variable only in a comment was accepted');
+    }
+  });
+  check(() => {
+    const p = judge({ configSource: null, configFile: null });
+    if (!p.some((m) => m.includes('no vitest config'))) {
+      throw new Error('slice wiring: a package with no vitest config was accepted');
+    }
+  });
+  check(() => {
+    const p = judge({ turbo: { tasks: { test: { env: ['OS_TEST_TIERS'] } } } });
+    if (!p.some((m) => m.includes('tasks.test.env does not declare OS_TEST_SHARD'))) {
+      throw new Error('slice wiring: a generic `test` task without the variable was accepted');
+    }
+  });
+  check(() => {
+    // A `<package>#test` entry REPLACES the generic task: declaring the
+    // variable on the generic one does not reach a package that has its own.
+    const p = judge({
+      turbo: { tasks: { ...genericOnly.tasks, '@x/sliced#test': { env: ['OS_TEST_TIERS'] } } },
+    });
+    if (!p.some((m) => m.includes('tasks["@x/sliced#test"].env does not declare OS_TEST_SHARD'))) {
+      throw new Error('slice wiring: a package-specific `test` task without the variable was accepted');
+    }
+  });
+  check(() => {
+    const p = judge({
+      turbo: { tasks: { test: { env: [] }, '@x/sliced#test': { env: ['OS_TEST_SHARD'] } } },
+    });
+    if (p.length !== 0) {
+      throw new Error(`slice wiring: a package-specific task that declares it was refused: ${p.join(' | ')}`);
+    }
+  });
+  check(() => {
+    const p = judge({ packageTurboJson: true });
+    if (!p.some((m) => m.includes('carries its own turbo.json'))) {
+      throw new Error('slice wiring: a package-level turbo.json this check does not model was accepted');
+    }
+  });
+  check(() => {
+    const { problems, judged } = sliceWiringProblems(REPO_ROOT, { '@objectstack/no-such-package': 2 });
+    if (judged !== 0 || !problems.some((m) => m.includes('no workspace package carries that name'))) {
+      throw new Error('slice wiring: a sliced name with no workspace package was accepted');
+    }
+  });
+
   // -- The floor: every declared battery RAN, and ran its cases (#13489) ----
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -1446,7 +1641,8 @@ function checkDrift(argv) {
   const merged = new Map();
   // What the summaries say each package was RUN as. A shard that carries a
   // file-level slice writes two summaries -- one per turbo invocation -- and
-  // only the slice leg's tasks carry `--shard=k/n`, so this is per package and
+  // only the slice leg's tasks carry the slice (an `OS_TEST_SHARD` digest, or
+  // `--shard=k/n` on a passthrough run), so this is per package and
   // comes from the run rather than from FILE_SHARDED_PACKAGES. A package absent
   // here ran whole; that is a reading, not a default.
   const observedSlices = new Map();
