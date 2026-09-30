@@ -1,0 +1,7 @@
+{
+  "file": "packages/objectql/src/relation-filter-lowering.ts",
+  "adrs": [
+    "ADR-0053"
+  ],
+  "invariant": "ADR-0053 D-D1 (amended 2026-09-30) item 5: drivers receive the lowered filter. The nested-relation form `{ relation: { field: value } }` is lowered at the engine's `where` seam — between token resolution and the shared `lowerFilterCondition` — by reading the related object with the engine's own `find` under the CALLER's context, into `$in` (single-valued) or an `$or` of `$contains` per id (multi-valued); no driver ever sees the nested form and no driver is changed. The id set is bounded by `RELATION_FILTER_ID_CAP` and refused past it, never truncated. Reading the related object as the system, swallowing the related read's refusal, truncating the id set, or teaching a driver the nested form reverts the ruling that served it."
+}
