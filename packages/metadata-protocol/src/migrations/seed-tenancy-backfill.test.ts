@@ -761,7 +761,10 @@ describe('#9451 the seed-tenancy repair leaves a durable receipt', () => {
     const log = createLogger();
     const noLedger = {
       getObject: () => undefined,
-      findOne: async () => null,
+      findOne: async (object: string, opts?: any) => {
+        assertEngineFindOnePredicate(object, opts);
+        return null;
+      },
       insert: async () => { throw new Error('must not be called'); },
       update: async (_object: string, data: Record<string, unknown>, opts?: Record<string, unknown>) => {
         assertEngineUpdateDispatch(data as any, opts as any);
@@ -813,7 +816,10 @@ describe('#9451 the seed-tenancy repair leaves a durable receipt', () => {
     const engine = {
       driver: { execute: async () => [], config: { client: 'better-sqlite3' } },
       getObject: () => ({}),
-      findOne: async () => null,
+      findOne: async (object: string, opts?: any) => {
+        assertEngineFindOnePredicate(object, opts);
+        return null;
+      },
       insert: async () => ({}),
       update: async (_object: string, data: Record<string, unknown>, opts?: Record<string, unknown>) => {
         assertEngineUpdateDispatch(data as any, opts as any);
@@ -833,7 +839,10 @@ describe('#9451 the seed-tenancy repair leaves a durable receipt', () => {
         getObject: () => ({}),
         find: async () => [],
         insert: async () => ({}),
-        update: async () => ({}),
+        update: async (_object: string, data: Record<string, unknown>, opts?: Record<string, unknown>) => {
+          assertEngineUpdateDispatch(data as any, opts as any);
+          return {};
+        },
       }),
     ).toBeUndefined();
   });

@@ -123,8 +123,13 @@
     },
     {
       "file": "packages/metadata-protocol/src/migrations/seed-tenancy-backfill.test.ts",
-      "verb": "update",
+      "verb": "findOne",
       "pinned": 3
+    },
+    {
+      "file": "packages/metadata-protocol/src/migrations/seed-tenancy-backfill.test.ts",
+      "verb": "update",
+      "pinned": 4
     },
     {
       "file": "packages/metadata-protocol/src/protocol-14038-list-commits-created-at-iso.test.ts",
@@ -2233,12 +2238,27 @@
     },
     {
       "file": "packages/platform-objects/src/plugin.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/platform-objects/src/plugin.test.ts",
       "verb": "update",
       "pinned": 1
     },
     {
       "file": "packages/platform-objects/src/system/migration-flag.column-move.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/platform-objects/src/system/migration-flag.column-move.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/platform-objects/src/system/migration-flag.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {
@@ -4007,9 +4027,14 @@
       "pinned": 1
     },
     {
-      "file": "packages/services/service-storage/src/lax-deviation-reclamation-gate.test.ts",
+      "file": "packages/services/service-storage/src/files-to-references-migration.test.ts",
       "verb": "findOne",
       "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/lax-deviation-reclamation-gate.test.ts",
+      "verb": "findOne",
+      "pinned": 2
     },
     {
       "file": "packages/services/service-storage/src/lax-deviation-reclamation-gate.test.ts",
