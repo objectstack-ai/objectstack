@@ -27,14 +27,25 @@
  * helper directly for the structural cases a save cannot reach (a `groups` key
  * the schema KEEPS, a mismatched parsed tree), mirroring
  * `protocol.graft-normalized-operators.test.ts`.
+ *
+ * ## Since #20051's stage (iv): a `view` stores its parsed body
+ *
+ * A `view` no longer runs this graft on a verbatim body. `saveMetaItem` stores
+ * the parsed value of every key the body carried (`projectStorableViewBody`),
+ * which subsumes the fold, the operator graft beside it, and every other key
+ * move; the graft keeps serving the other types. The save-path blocks above
+ * therefore now pin the projection's behaviour on the same fixtures, and the
+ * pins that asserted the verbatim save were re-judged where they stand. The
+ * stage's own pins are the last three blocks, riding this file's pinned engine
+ * double for the reason the #20051 door-half block below gives.
  */
 import { describe, expect, it } from 'vitest';
-import { ViewMetadataSchema } from '@objectstack/spec/ui';
+import { ViewMetadataSchema, VIEW_CONSOLE_ROUND_TRIP_KEYS } from '@objectstack/spec/ui';
 import {
     assertEngineDeleteDispatch,
     assertEngineUpdateDispatch, assertEngineFindOnePredicate,
 } from '@objectstack/metadata-core';
-import { ObjectStackProtocolImplementation, graftFoldedFormSections } from './protocol.js';
+import { ObjectStackProtocolImplementation, graftFoldedFormSections, projectStorableViewBody } from './protocol.js';
 
 interface Row {
     id: string;
@@ -201,45 +212,63 @@ describe('#7134 the save path persists the folded `sections`, at every depth a f
         expect(body).not.toHaveProperty('groups');
     });
 
-    it('the fold and the Studio round-trip keys COEXIST on one save', async () => {
-        // The combined statement, and the reason a wholesale `parsed.data` swap
-        // was never an option: that swap would fold the key and strip
-        // `isPinned` / `isDefault` / `sortOrder`; persisting verbatim keeps them
-        // and folds nothing. Only the graft does both. Evidence, not a guard —
-        // the `sections` half goes red on revert.
+    it('[#20051] the fold and the form overlay\'s declared keys coexist on one save; its undeclared ones do not', async () => {
+        // Re-judged at stage (iv) of #20051, which stores a view's parsed
+        // body. The fold is stored, and so is `isDefault`, which the flattened
+        // FORM overlay declares. `isPinned` and `sortOrder` are the list
+        // switcher's row state: the form member declares neither and the
+        // console writes neither on a form row (`VIEW_CONSOLE_ROUND_TRIP_KEYS`
+        // maps no key to `formOverlay`), so the stored row drops both.
         const body = await storedViewBody(
             'contact_us',
             flatForm({ groups: [SECTION], isPinned: true, isDefault: false, sortOrder: 3 }),
         );
         expect(body.sections).toEqual([SECTION]);
         expect(body).not.toHaveProperty('groups');
-        expect({ isPinned: body.isPinned, isDefault: body.isDefault, sortOrder: body.sortOrder })
-            .toEqual({ isPinned: true, isDefault: false, sortOrder: 3 });
+        expect(body.isDefault).toBe(false);
+        expect(body).not.toHaveProperty('isPinned');
+        expect(body).not.toHaveProperty('sortOrder');
     });
 });
 
 describe('#7134 what the save path must NOT change', () => {
-    it('GUARD: Studio-only round-trip keys still survive the save', async () => {
-        // GUARD, green in BOTH directions — the reason `parsed.data` is
-        // discarded at all (ADR-0005 §Validation). It asserts ONLY the
-        // round-trip keys: a `sections` assertion here would be evidence for
-        // the fix wearing a guard's label, which is the mislabel this file's
-        // reverse-verification caught. The two claims are pinned together in
-        // the coexistence case above, where the combined statement belongs.
-        const body = await storedViewBody(
-            'contact_us',
-            flatForm({ groups: [SECTION], isPinned: true, isDefault: false, sortOrder: 3 }),
-        );
-        expect(body.isPinned).toBe(true);
-        expect(body.isDefault).toBe(false);
-        expect(body.sortOrder).toBe(3);
+    it('GUARD: the console\'s round-trip keys survive the save on the member that declares them', async () => {
+        // GUARD, green in BOTH directions: stored verbatim before #20051's stage
+        // (iv), stored because declared after it. Re-judged from a FORM overlay
+        // to the flat LIST overlay, the row these keys are written on
+        // (`VIEW_CONSOLE_ROUND_TRIP_KEYS`): every key that record maps to
+        // `listOverlay`, with a value the console writes.
+        const authored = {
+            name: 'crm_lead.all',
+            object: 'crm_lead',
+            viewKind: 'list',
+            sort: [{ field: 'name', order: 'asc' }],
+            isPinned: true,
+            isDefault: false,
+            sortOrder: 3,
+            visibility: 'team',
+            columnState: { order: ['name'], widths: { name: 180 } },
+            _isOverride: true,
+        };
+        expect(Object.keys(VIEW_CONSOLE_ROUND_TRIP_KEYS).filter(
+            (k) => (VIEW_CONSOLE_ROUND_TRIP_KEYS as Record<string, readonly string[]>)[k].includes('listOverlay'),
+        ).every((k) => k in authored)).toBe(true);
+        expect(await storedViewBody(authored.name, authored)).toEqual(authored);
     });
 
-    it('GUARD: a form authored with canonical `sections` is stored byte-identical', async () => {
-        // Also green in both directions: nothing folded, so nothing to graft.
+    it('[#20051] a form authored with canonical `sections` is stored as authored — no section default, no `sharing.enabled`, no undeclared key', async () => {
+        // Re-judged at stage (iv): was "stored byte-identical", with an
+        // `isPinned` the form member does not declare riding along. The parse
+        // adds `collapsible` / `collapsed` / `columns` to the section and
+        // `enabled: false` to `sharing`; ruling B stores none of them (ADR-0087's
+        // `storable` rule), and the undeclared `isPinned` is dropped.
         const authored = flatForm({ sections: [SECTION], isPinned: true });
+        const parsed = (ViewMetadataSchema as any).parse(authored);
+        expect(parsed.sections[0]).toMatchObject({ collapsible: false, collapsed: false, columns: 1 });
+        expect(parsed.sharing.enabled).toBe(false);
         const body = await storedViewBody('contact_us', authored);
-        expect(body).toEqual(authored);
+        const { isPinned: _dropped, ...declared } = authored;
+        expect(body).toEqual(declared);
     });
 
     it('GUARD: a LIST overlay is untouched — this walk is form-shaped only', async () => {
@@ -505,5 +534,229 @@ describe('#20186 the save door judges a flattened overlay by the member its view
         expect(await storedViewBody(form.name, form)).toEqual(form);
         const list = { ...LIST, columns: ['name'], sort: [{ field: 'name', order: 'asc' }] };
         expect(await storedViewBody(list.name, list)).toEqual(list);
+    });
+});
+
+/**
+ * [#20051] Stage (iv), ruling 甲 under letter B: a saved view stores the parsed
+ * value of every key its request body carried — undeclared keys dropped,
+ * schema defaults NOT materialised (ADR-0087's `storable` rule, the one flows
+ * follow). Driven through the REAL `saveMetaItem`, reading the stored row.
+ *
+ * The toolbar bodies are the console's own writes at the `.objectui-sha` pin,
+ * measured on the card (W1–W5): `buildPersistedViewBody`'s overlay branch plus
+ * the identity and marker `updateViewConfig` stamps, and a sort entry carrying
+ * the row id `ListView`'s header sort mints.
+ */
+describe('[#20051] stage (iv): a saved view stores the parsed value of every key its body carried', () => {
+    const OVERLAY_ID = { viewKind: 'list', object: 'crm_lead', name: 'crm_lead.all', _isOverride: true } as const;
+    const SORT_ROW_ID = '6f1c1e7a-0000-4000-8000-000000000001';
+    const TOOLBAR_SAVES: Array<[string, Record<string, unknown>]> = [
+        ['W1 sort', { sort: [{ id: SORT_ROW_ID, field: 'name', order: 'desc' }] }],
+        ['W2 density', { rowHeight: 'compact' }],
+        ['W3 hidden fields', { hiddenFields: ['status'] }],
+        ['W4 column state', { columnState: { order: ['status', 'name'], widths: { name: 180 } } }],
+        ['W5 inline edit', { inlineEdit: false }],
+    ];
+
+    it.each(TOOLBAR_SAVES)('%s: the stored row carries no `type` the author did not write', async (_label, patch) => {
+        const body = { ...patch, ...OVERLAY_ID };
+        // The default is real: the parse of this very body names a list type.
+        expect((ViewMetadataSchema as any).parse(body).type).toBe('grid');
+        const stored = await storedViewBody(body.name, body);
+        expect(stored).not.toHaveProperty('type');
+        // Everything the patch said is stored, and nothing else.
+        const expected = 'sort' in patch
+            ? { ...body, sort: [{ field: 'name', order: 'desc' }] }
+            : body;
+        expect(stored).toEqual(expected);
+    });
+
+    it('W1: a sort row id the console mints is not stored (`VIEW_CONSOLE_ROW_DECORATIONS`)', async () => {
+        const body = { ...TOOLBAR_SAVES[0][1], ...OVERLAY_ID };
+        const stored = await storedViewBody(body.name, body);
+        expect(stored.sort).toEqual([{ field: 'name', order: 'desc' }]);
+    });
+
+    it('an undeclared key is dropped: the saved-view toolbar toggle\'s `id` / `objectName`, and a form-only `layout`', async () => {
+        // W6b's shape: `buildPersistedViewBody`'s saved-view branch writes the
+        // whole tab back, and the tab carries `id` and `objectName`.
+        const declared = {
+            name: 'crm_lead.my_leads',
+            object: 'crm_lead',
+            viewKind: 'list',
+            label: 'My leads',
+            type: 'grid',
+            columns: ['name', 'status'],
+            data: { provider: 'object', object: 'crm_lead' },
+            isDefault: false,
+        };
+        const stored = await storedViewBody(declared.name, {
+            ...declared, id: 'crm_lead.my_leads', objectName: 'crm_lead', layout: 'diagonal',
+        });
+        expect(stored).toEqual(declared);
+    });
+
+    it('a declared key keeps its normalised value', async () => {
+        const stored = await storedViewBody('crm_lead.open', {
+            name: 'crm_lead.open',
+            object: 'crm_lead',
+            viewKind: 'list',
+            type: 'grid',
+            columns: ['name'],
+            exportOptions: ['csv'],
+            filter: [{ field: 'status', operator: 'notEquals', value: 'done' }],
+        });
+        expect(stored.exportOptions).toEqual({ formats: ['csv'] });
+        expect(stored.filter).toEqual([{ field: 'status', operator: 'not_equals', value: 'done' }]);
+    });
+
+    it('a key moved inside a moved key is stored under its canonical spelling, with no default beside it', async () => {
+        // Two levels of key move: `groups` → `sections`, and within each section
+        // and field `visibleOn` → `visibleWhen`. Neither graft covered the
+        // second; the projection finds both by re-parsing, so the stored row
+        // keeps the predicates and drops the section / field defaults.
+        const stored = await storedViewBody('contact_us', flatForm({
+            groups: [{
+                label: 'About you',
+                visibleOn: 'record.stage == "open"',
+                fields: ['name', { field: 'email', visibleOn: 'record.opted_in == true' }],
+            }],
+        }));
+        expect(stored).not.toHaveProperty('groups');
+        expect(stored.sections).toEqual([{
+            label: 'About you',
+            visibleWhen: { dialect: 'cel', source: 'record.stage == "open"' },
+            fields: ['name', { field: 'email', visibleWhen: { dialect: 'cel', source: 'record.opted_in == true' } }],
+        }]);
+        expect(stored.sharing).toEqual(SHARING);
+    });
+
+    it('the persisted body parses to exactly what the save parsed', async () => {
+        const bodies: Array<Record<string, unknown>> = [
+            ...TOOLBAR_SAVES.map(([, patch]) => ({ ...patch, ...OVERLAY_ID })),
+            flatForm({ groups: [SECTION], isPinned: true }),
+            {
+                name: 'lead.contact_us', object: 'lead', viewKind: 'form', label: 'Contact us',
+                config: { type: 'simple', data: DATA, sharing: SHARING, groups: [SECTION] },
+            },
+            {
+                name: 'lead_views',
+                list: { type: 'grid', data: DATA, columns: ['name'] },
+                formViews: { intake: { type: 'simple', data: DATA, groups: [SECTION] } },
+            },
+        ];
+        for (const body of bodies) {
+            const stored = await storedViewBody(body.name as string, body);
+            expect((ViewMetadataSchema as any).parse(stored), JSON.stringify(body))
+                .toEqual((ViewMetadataSchema as any).parse(body));
+        }
+    });
+});
+
+/**
+ * [#20051] Stage (iv), Q3: a top-level `options` bag on a ViewItem RECORD is
+ * refused by name, with the prescription to write `config.KIND`. Before, the
+ * record member's `.strip()` dropped it from the parse unread while the save
+ * stored it; with the parsed body stored it would vanish on a `200`.
+ */
+describe('[#20051] stage (iv): a ViewItem record\'s top-level `options` bag is refused by name', () => {
+    const RECORD = {
+        name: 'crm_lead.board',
+        object: 'crm_lead',
+        viewKind: 'list',
+        label: 'Board',
+        config: {
+            type: 'kanban',
+            data: { provider: 'object', object: 'crm_lead' },
+            columns: ['name'],
+            kanban: { groupByField: 'stage', columns: ['name'] },
+        },
+    };
+
+    async function refusedRecord(item: Record<string, unknown>) {
+        const { protocol, rows } = makeProtocol();
+        let err: any;
+        try {
+            await (protocol as any).saveMetaItem({ type: 'view', name: item.name as string, item });
+        } catch (e) { err = e; }
+        expect(err?.code).toBe('INVALID_METADATA');
+        expect(err?.status).toBe(422);
+        expect(Array.from(rows.values()).filter((r) => r.type === 'view')).toHaveLength(0);
+        const issue = (err.issues as Array<{ path: string; code?: string; message: string }>)
+            .find((i) => i.path === 'options');
+        expect(issue, JSON.stringify(err.issues)).toBeDefined();
+        return issue!;
+    }
+
+    it('on the list arm: 422 at `options`, naming the move to `config.KIND`', async () => {
+        const issue = await refusedRecord({ ...RECORD, options: { kanban: { groupByField: 'stage' } } });
+        expect(issue.message).toMatch(/^A view item record carries no top-level `options` bag/);
+        expect(issue.message).toContain('Move each `options.KIND` block to `config.KIND`');
+    });
+
+    it('on the form arm too', async () => {
+        const issue = await refusedRecord({
+            name: 'lead.contact_us', object: 'lead', viewKind: 'form', label: 'Contact us',
+            config: { type: 'simple', data: DATA, sections: [SECTION] },
+            options: { timeline: { titleField: 'name' } },
+        });
+        expect(issue.message).toMatch(/^A view item record carries no top-level `options` bag/);
+    });
+
+    it('control: the same record without the bag saves, and the row is the record', async () => {
+        expect(await storedViewBody(RECORD.name, RECORD)).toEqual(RECORD);
+    });
+});
+
+/**
+ * [#20051] Stage (iv) is gated on the `view` type. Every other type keeps its
+ * request body (with the two grafts), which a page shows: its parse turns a
+ * component's CEL string into an expression object and adds `properties: {}`,
+ * and neither reaches the row.
+ */
+describe('[#20051] stage (iv): the projection is view-only', () => {
+    it('a page is stored as sent, not as parsed', async () => {
+        const component = { type: 'record:details', visibleWhen: 'record.stage == "open"' };
+        const page = { name: 'lead_record', label: 'Lead', type: 'record', object: 'lead', regions: [{ name: 'main', components: [component] }] };
+        const { protocol, rows } = makeProtocol();
+        const result: any = await (protocol as any).saveMetaItem({ type: 'page', name: page.name, item: page });
+        expect(result.success, JSON.stringify(result)).toBe(true);
+        const row = Array.from(rows.values()).find((r) => r.type === 'page');
+        const stored = JSON.parse(row!.metadata);
+        expect(stored.regions[0].components[0]).toEqual(component);
+    });
+});
+
+describe('projectStorableViewBody — structural safety, no save involved', () => {
+    const accept = (body: unknown) => ({ ok: true as const, data: body });
+
+    it('stores the parsed value of an authored key, and no key the parse added when the re-parse re-adds it', () => {
+        const out = projectStorableViewBody(
+            { a: 'x' },
+            { a: 'X', d: 1 },
+            () => ({ ok: true, data: { a: 'X', d: 1 } }),
+        );
+        expect(out).toEqual({ body: { a: 'X' }, converged: true });
+    });
+
+    it('falls back to the whole parse output when a re-parse refuses the body', () => {
+        const parsed = { a: 'X', d: 1 };
+        expect(projectStorableViewBody({ a: 'x' }, parsed, () => ({ ok: false })))
+            .toEqual({ body: parsed, converged: false });
+    });
+
+    it('falls back when a round adds nothing and the re-parse still differs', () => {
+        // A re-parse that never reproduces `a` as parsed: no body of the
+        // authored keys meets the invariant, so the parse output is stored.
+        const parsed = { a: 'X' };
+        expect(projectStorableViewBody({ a: 'x' }, parsed, (body) => accept({ ...(body as object), a: 'Y' })))
+            .toEqual({ body: parsed, converged: false });
+    });
+
+    it('stores a value whose shape the parse changed, or an array whose length it changed, as parsed', () => {
+        const parsed = { e: { formats: ['csv'] }, l: [1] };
+        const out = projectStorableViewBody({ e: ['csv'], l: [1, 2] }, parsed, accept);
+        expect(out).toEqual({ body: parsed, converged: true });
     });
 });
