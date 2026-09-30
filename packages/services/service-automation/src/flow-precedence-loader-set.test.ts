@@ -82,11 +82,12 @@ describe('[#20864] boot-time precedence classifies by the loader\'s set, not by 
     it('the same two bodies rank by the set: only a held name puts a packaged contender in the shadowing record', () => {
         const held = resolveFlowPrecedence([loaderEntry(), tenantRow()], silent(), HOLDS_FLOW);
         expect(held).toHaveLength(1);
-        expect((held[0].definition as { label: string }).label).toBe('TENANT');
+        // [#20913, ADR-0126 §2] Inside a held name the loader's entry is armed.
+        expect((held[0].definition as { label: string }).label).toBe('LOADER');
         expect(held[0].shadowing).toEqual({
             name: FLOW,
-            armed: { source: 'runtime', packageId: 'app.ops' },
-            shadowed: [{ source: 'package', packageId: 'crm' }],
+            armed: { source: 'package', packageId: 'crm' },
+            shadowed: [{ source: 'runtime', packageId: 'app.ops' }],
         });
 
         const unheld = resolveFlowPrecedence([tenantRow(), loaderEntry()], silent(), HOLDS_NOTHING);
@@ -104,14 +105,14 @@ describe('[#20864] boot-time precedence classifies by the loader\'s set, not by 
         ]) {
             const logger = silent();
             const [winner] = resolveFlowPrecedence(listed, logger, HOLDS_FLOW);
-            expect((winner.definition as { label: string }).label).toBe('TENANT');
-            expect(winner.shadowing?.armed).toEqual({ source: 'runtime', packageId: 'app.ops' });
-            expect(winner.shadowing?.shadowed).toEqual([{ source: 'package', packageId: 'crm' }]);
+            expect((winner.definition as { label: string }).label).toBe('LOADER');
+            expect(winner.shadowing?.armed).toEqual({ source: 'package', packageId: 'crm' });
+            expect(winner.shadowing?.shadowed).toEqual([{ source: 'runtime', packageId: 'app.ops' }]);
 
             expect(logger.warn).toHaveBeenCalledTimes(1);
             const [message, meta] = logger.warn.mock.calls[0] as [string, { armed: FlowContender; shadowed: FlowContender[] }];
-            expect(message).toContain(`arming ${renderFlowContender({ source: 'runtime' })}`);
-            expect(message).toContain(renderFlowContender({ source: 'package', packageId: 'crm' }));
+            expect(message).toContain(`arming ${renderFlowContender({ source: 'package', packageId: 'crm' })}`);
+            expect(message).toContain(renderFlowContender({ source: 'runtime' }));
             expect(meta.armed).toEqual(winner.shadowing?.armed);
             expect(meta.shadowed).toEqual(winner.shadowing?.shadowed);
         }
@@ -194,7 +195,7 @@ async function boot(flows: unknown[], protocol?: Plugin) {
 }
 
 describe('[#20864] the boot pull hands precedence the engine\'s loader\'s-set reader', () => {
-    it('a held name: the shadowing receipt names the tenant row armed and the loader entry packaged', async () => {
+    it('a held name: the shadowing receipt names the loader entry armed and the tenant row shadowed', async () => {
         const owner = vi.fn((request: { type: string; name: string }) =>
             request.type === 'flow' && request.name === FLOW ? 'crm' : undefined,
         );
@@ -203,11 +204,11 @@ describe('[#20864] the boot pull hands precedence the engine\'s loader\'s-set re
             expect(engine.getShadowedFlows()).toEqual([
                 {
                     name: FLOW,
-                    armed: { source: 'runtime', packageId: 'app.ops' },
-                    shadowed: [{ source: 'package', packageId: 'crm' }],
+                    armed: { source: 'package', packageId: 'crm' },
+                    shadowed: [{ source: 'runtime', packageId: 'app.ops' }],
                 },
             ]);
-            expect(((await engine.getFlow(FLOW)) as { label?: string } | null)?.label).toBe('TENANT');
+            expect(((await engine.getFlow(FLOW)) as { label?: string } | null)?.label).toBe('LOADER');
             // One source: the pull asked the protocol for this flow, and the
             // engine's own reader gives the same answer.
             expect(owner).toHaveBeenCalledWith({ type: 'flow', name: FLOW });
