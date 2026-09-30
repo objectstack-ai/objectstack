@@ -589,3 +589,83 @@ describe('[#19289] validateFieldConsumers — a `user` field displays a field on
     expect(run).toThrow(/`reference` is an object/);
   });
 });
+
+/**
+ * [#20929] An inline grid column's `name` names a field of the CHILD object.
+ *
+ * `name` is a `LITERAL_KEYS` literal, so the general walk never read a column's
+ * `name`, and the recommended identity-only column (`{ name: 'qty' }`) says
+ * nothing else. `os validate` then warned that a field the grid draws was
+ * inert. The fix reads `name` at that one position, against the child object
+ * each carrier resolves. It does not drop `name` from the literals.
+ *
+ * One fixture carries every assertion. `inv` is the parent and `line` the
+ * child, related by `line.invoice`. On `line`, `qty` is named only by the grid
+ * column under test, and `memo` is named nowhere: `memo` is the control, still
+ * reported. The parent declares a `qty` of its own that nothing reads, so it is
+ * reported too. A column credited to the wrong object shows up as `inv.qty`
+ * going quiet while `line.qty` stays reported.
+ */
+describe('[#20929] validateFieldConsumers — an inline grid column names a field of the CHILD object', () => {
+  const data = { provider: 'object', object: 'inv' };
+  const columns = [{ name: 'qty' }];
+
+  const stack = (relationship: AnyRec, view: AnyRec = {}, extra: AnyRec = {}): AnyRec => ({
+    objects: [
+      { name: 'inv', fields: { name: { type: 'text' }, qty: { type: 'number' } } },
+      {
+        name: 'line',
+        fields: {
+          name: { type: 'text' },
+          invoice: { type: 'master_detail', reference: 'inv', ...relationship },
+          qty: { type: 'number' },
+          memo: { type: 'text' },
+        },
+      },
+    ],
+    views: [{ list: { type: 'grid', data, columns: [{ field: 'name' }] }, ...view }],
+    ...extra,
+  });
+
+  /** `object.field` → verdict, for every field the rule reports. */
+  const verdicts = (s: AnyRec): Record<string, string> =>
+    Object.fromEntries(validateFieldConsumers(s).map((f) => [`${f.object}.${f.field}`, f.verdict]));
+
+  /** The child's `qty` credited; the parent's `qty` and the control still reported. */
+  const CREDITED = { 'inv.qty': 'inert', 'line.memo': 'inert' };
+
+  it('baseline: with no grid anywhere, all three fields are reported inert', () => {
+    expect(verdicts(stack({}))).toEqual({ 'inv.qty': 'inert', 'line.qty': 'inert', 'line.memo': 'inert' });
+  });
+
+  it("a relationship field's `inlineColumns`: the child is the object that DECLARES the field, not the related one", () => {
+    expect(verdicts(stack({ inlineEdit: 'grid', inlineColumns: columns }))).toEqual(CREDITED);
+  });
+
+  it("a form view's `subforms[].columns`: the child is the entry's `childObject`, not the view's object", () => {
+    const form = { type: 'simple', data, subforms: [{ childObject: 'line', columns }] };
+    expect(verdicts(stack({}, { form }))).toEqual(CREDITED);
+  });
+
+  it("each `formViews` entry's `subforms[].columns`, the same way", () => {
+    const edit = { type: 'simple', data, subforms: [{ childObject: 'line', columns }] };
+    expect(verdicts(stack({}, { formViews: { edit } }))).toEqual(CREDITED);
+  });
+
+  it('`inlineColumns` on a field that does not set `inlineEdit` draws no grid: a carrier, listed for removal', () => {
+    const findings = validateFieldConsumers(stack({ inlineColumns: columns }));
+    expect(Object.fromEntries(findings.map((f) => [`${f.object}.${f.field}`, f.verdict]))).toEqual({
+      'inv.qty': 'inert',
+      'line.qty': 'carrier-only',
+      'line.memo': 'inert',
+    });
+    expect(findings.find((f) => f.object === 'line' && f.field === 'qty')?.carriers).toEqual([
+      'objects[1].fields.invoice.inlineColumns[0].name',
+    ]);
+  });
+
+  it('`name` anywhere else stays a literal: a dataset measure named like the field credits nothing', () => {
+    const datasets = [{ name: 'line_stats', object: 'line', measures: [{ name: 'qty', aggregate: 'count' }] }];
+    expect(verdicts(stack({}, {}, { datasets }))).toEqual({ 'inv.qty': 'inert', 'line.qty': 'inert', 'line.memo': 'inert' });
+  });
+});
