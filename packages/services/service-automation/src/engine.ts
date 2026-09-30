@@ -351,7 +351,7 @@ export interface NodeExecutionResult {
     output?: Record<string, unknown>;
     error?: string;
     /**
-     * #14419 — the platform's own classified failure code (ADR-0112
+     * Commit c5a7448d5 — the platform's own classified failure code (ADR-0112
      * `StandardErrorCode`, e.g. `DUPLICATE_RECORD`), when the executor chose
      * to surface one. `error` stays the human-readable sentence a run log or
      * a notification renders; `code` is what a `try_catch` catch region or a
@@ -359,7 +359,7 @@ export interface NodeExecutionResult {
      * "the row is already there" apart from "the store is down" or any other
      * reason the same string-shaped `error` could otherwise describe.
      * Optional, and deliberately narrow per executor rather than "any
-     * platform envelope, forwarded wholesale": `create_record` (#14419) is
+     * platform envelope, forwarded wholesale": `create_record` (commit c5a7448d5) is
      * the only executor that sets it today, and only for the one code its
      * repair was scoped to — `DUPLICATE_RECORD` — not any code a driver
      * error might someday carry unaudited. An executor that never classifies
@@ -526,7 +526,7 @@ export interface FlowTriggerBinding {
     /** schedule: cron/interval descriptor (parsed but not yet acted on here). */
     readonly schedule?: unknown;
     /**
-     * [#16659] schedule / time_relative: the ACTING ORGANIZATION the flow
+     * [commit ecdfc9411] schedule / time_relative: the ACTING ORGANIZATION the flow
      * declares on its start node (`config.organization`), resolved through
      * `@objectstack/spec`'s {@link resolveScheduleOrganization} so authoring,
      * this lift and the triggers cannot disagree about what counts as declared.
@@ -1399,7 +1399,7 @@ function isEngineVariable(name: string): boolean {
  *   ({@link ENGINE_BUILT_SIGNAL}) is exempt: `bubbleToParent` legitimately
  *   writes the handoff keys, and it is not reachable from a transport. The
  *   signal is never absent here — `resume` normalises a missing one to `{}`
- *   (#13648), which folds nothing and rejects nothing.
+ *   (commit 7307191db), which folds nothing and rejects nothing.
  */
 function applyResumeSignal(
     variables: Map<string, unknown>,
@@ -2109,14 +2109,14 @@ export interface FlowActivationRow {
 
 /**
  * [ADR-0126 §7.2] The durable off-switch for packaged flows — the mechanism
- * that REPLACES the process-local `flowEnabled` map #10243 measured leaking
+ * that REPLACES the process-local `flowEnabled` map commit 02b41232d measured leaking
  * across tenants.
  *
  * Backed by `sys_metadata_activation` in production (see
  * `ObjectStoreFlowActivationStore`), so a disabled packaged flow stays
  * disabled across a restart — the property the retired in-process map could
  * not have, and the one that made its "mitigating but not exculpating" cold
- * boot the only thing limiting the #10243 leak.
+ * boot the only thing limiting the leak commit 02b41232d measured.
  *
  * Absence of a row means the packaged default — ACTIVE — so an engine with no
  * store attached, or a store with no rows, behaves exactly as a stock boot
@@ -2312,7 +2312,7 @@ export class AutomationEngine implements IAutomationService {
      *
      * ## ⛔ This is NOT the retired `flowEnabled` map under a new name
      *
-     * That distinction is the whole point of #10243, so it is spelled out
+     * That distinction is the whole point of ADR-0126 §7.2, so it is spelled out
      * rather than left to a reader's charity. The retired map was the TRUTH:
      * `toggleFlow` wrote it and nothing else recorded the bit, so the
      * off-switch was a name-keyed, unscoped, process-local value that one
@@ -2328,7 +2328,7 @@ export class AutomationEngine implements IAutomationService {
      *   2. **The write door is gated.** Reaching `toggleFlow` from the wire
      *      goes through the automation domain's activation gate: in `group` /
      *      `isolated` postures the write requires the platform operator, so
-     *      the tenant-org-admin caller #10243 measured is refused before any
+     *      the tenant-org-admin caller commit 02b41232d measured is refused before any
      *      of this runs (ADR-0126 §5).
      *   3. **It survives a restart** — because the row does. The retired map's
      *      cold-boot amnesia was recorded as "mitigating but not exculpating";
@@ -3562,7 +3562,7 @@ export class AutomationEngine implements IAutomationService {
                                   ? config.objectName
                                   : undefined,
                         schedule: config.schedule,
-                        // [#16659] Lifted beside `schedule`, for the same
+                        // [commit ecdfc9411] Lifted beside `schedule`, for the same
                         // reason `schedule` is lifted: it is a BINDING fact the
                         // trigger acts on, not a config value it interprets.
                         // `config` still carries it verbatim below, so a
@@ -3578,7 +3578,7 @@ export class AutomationEngine implements IAutomationService {
             case 'schedule':
                 return {
                     triggerType: kind,
-                    // [#16659] `organization` rides beside `schedule`: the two
+                    // [commit ecdfc9411] `organization` rides beside `schedule`: the two
                     // together ARE a scheduled flow's binding — when it fires,
                     // and which organization it fires as.
                     binding: {
@@ -5221,7 +5221,7 @@ export class AutomationEngine implements IAutomationService {
      * ## What changed, and why the durable write is inside this method
      *
      * This used to set a process-local map and nothing else, which is the
-     * mechanism #10243 measured leaking across tenants. It now writes the
+     * mechanism commit 02b41232d measured leaking across tenants. It now writes the
      * `sys_metadata_activation` row FIRST and updates the in-process
      * projection only after that write returns. Putting the durable write here
      * — rather than in the HTTP route that calls it — is deliberate: this is
@@ -5298,7 +5298,7 @@ export class AutomationEngine implements IAutomationService {
             // Degrading to in-process is a legitimate mode for a host with no
             // ObjectQL — degrading to it while REPORTING durability is not
             // (the posture this package already takes for suspended runs).
-            // Note the #10243 leak is closed by the route's authority gate,
+            // Note the leak commit 02b41232d measured is closed by the route's authority gate,
             // not by durability, so this degraded mode is not that leak.
             this.logger.warn(
                 `[Automation] flow '${name}' ${enabled ? 'enabled' : 'disabled'} IN PROCESS ONLY — no activation ledger is ` +
@@ -6180,7 +6180,7 @@ export class AutomationEngine implements IAutomationService {
                 // failed write.
                 //
                 // ⚠️ The level is the precedent's (#16273, #15555) and is NOT
-                // a #13398-class raise: that ruling forbids raising a site to
+                // a raise under the published-sink ruling (commit e238c79f0): that ruling forbids raising a site to
                 // `error` where doing so means GROWING `error?` onto a
                 // published sink that lacks it, and this sink — `Logger` from
                 // `@objectstack/spec/contracts` — declares `error(message,
@@ -6377,7 +6377,7 @@ export class AutomationEngine implements IAutomationService {
                 // `recordLog` is in `DURABILITY_CRITICAL_CALLEES`.
                 //
                 // ⚠️ The level is the precedent's (#15555, #16273, #16274) and
-                // is NOT a #13398-class raise: that ruling forbids raising a
+                // is NOT a raise under the published-sink ruling (commit e238c79f0): that ruling forbids raising a
                 // site to `error` where doing so means GROWING `error?` onto a
                 // published sink that lacks it, and this sink — `Logger` from
                 // `@objectstack/spec/contracts` — declares `error(message,
@@ -6561,7 +6561,7 @@ export class AutomationEngine implements IAutomationService {
         const refusal = await this.refuseGatedResume(runId, signal);
         if (refusal) return refusal;
         // An ABSENT signal is an EMPTY caller submission, never an exemption
-        // (#13648). This is the in-process door, and `resume(runId)` used to
+        // (commit 7307191db). This is the in-process door, and `resume(runId)` used to
         // skip the screen contract that `resume(runId, {})` is held to:
         // `refuseInvalidScreenInput` short-circuited on a falsy signal — a
         // second, unnamed spelling of the exemption the engine already states
@@ -7069,7 +7069,7 @@ export class AutomationEngine implements IAutomationService {
     private async resumeInternal(
         runId: string,
         // Never `undefined` past the public door: `resume` normalises an
-        // absent caller signal to `{}` (#13648), and the engine's own
+        // absent caller signal to `{}` (commit 7307191db), and the engine's own
         // continuations (subflow delegation / up-bubble, `map` re-entry)
         // always hand over a built signal. Typed so, the chokepoints below
         // cannot grow a falsy-signal branch again.
@@ -7981,7 +7981,7 @@ export class AutomationEngine implements IAutomationService {
      *    `map` item handoff are the engine's own continuations; they carry
      *    author-named output variables, not a screen submission. This is the
      *    ONLY exemption, and it is spelled once: an absent signal is not a
-     *    case here — `resume` normalises it to `{}` (#13648) — because a bare
+     *    case here — `resume` normalises it to `{}` (commit 7307191db) — because a bare
      *    `if (!signal)` beside the flag was a second, unnamed spelling of the
      *    same exemption that let `resume(runId)` skip every `required` the
      *    author wrote.
@@ -10783,7 +10783,7 @@ export class AutomationEngine implements IAutomationService {
                 // {@link AutomationEngine.runRegion}), so EVERY thrown failure
                 // inside a region left `$error` naming an earlier, unrelated
                 // failure. The first reader that cared about `$error`'s freshness
-                // — `try_catch`'s `code` binding (#14419) — met it immediately
+                // — `try_catch`'s `code` binding (commit c5a7448d5) — met it immediately
                 // and bound a message and a code that came from two different
                 // failures: `{ code: 'DUPLICATE_RECORD', message: "Node 'mk'
                 // timed out after 20ms" }`, swallowed by a catch region reading
@@ -10893,7 +10893,7 @@ export class AutomationEngine implements IAutomationService {
                 }
 
                 // Write error output to variable context for downstream nodes.
-                // #14419 — carry the executor's classified `code` (when it set
+                // Commit c5a7448d5 — carry the executor's classified `code` (when it set
                 // one) alongside `message`, so a `fault` edge handler reading
                 // `{$error.code}` can branch on it; a `try_catch` region reads
                 // this same node-level `$error` before its OWN `errorVariable`
@@ -12317,7 +12317,7 @@ export class AutomationEngine implements IAutomationService {
             // and the same chokepoint discipline applies: one shape, both
             // attempt paths.
             //
-            // The reachable statements, the invariant and the #13398 reading
+            // The reachable statements, the invariant and the sink ruling's (commit e238c79f0) reading
             // are all stated at the `execute()` site; this is the same guard,
             // not a second design.
             let logged: ExecutionLogEntry | undefined;
@@ -12336,7 +12336,7 @@ export class AutomationEngine implements IAutomationService {
                 }, context);
             } catch (bookkeeping) {
                 // #4632 verdict: DURABILITY, so `error` — see the `execute()`
-                // site for why this is outside #13398's class. The message
+                // site for why this is outside the sink ruling's (commit e238c79f0) class. The message
                 // names the ATTEMPT, because the run id an operator finds in
                 // the Runs surfaces is this attempt's own and not the failed
                 // attempt's. Said ONCE per run, not once per failed write.
@@ -12475,7 +12475,7 @@ export class AutomationEngine implements IAutomationService {
             const durationMs = Date.now() - startTime;
             // [#17562] The SECOND initial-execution instance of the guard above
             // in `execute()` — this path's own failure arm, one per RETRY
-            // attempt. The reachable statements, the invariant and the #13398
+            // attempt. The reachable statements, the invariant and the sink ruling's (commit e238c79f0)
             // reading are all stated at the `execute()` site; this is the same
             // guard, not a second design.
             //
@@ -12507,7 +12507,7 @@ export class AutomationEngine implements IAutomationService {
             }, context);
             } catch (bookkeeping) {
                 // #4632 verdict: DURABILITY, so `error` — see the `execute()`
-                // site for why this is outside #13398's class and why a failure
+                // site for why this is outside the sink ruling's (commit e238c79f0) class and why a failure
                 // handed to the caller does not exempt it. The message names
                 // the ATTEMPT, because the run id an operator finds in the Runs
                 // surfaces is this attempt's own and not the first attempt's.

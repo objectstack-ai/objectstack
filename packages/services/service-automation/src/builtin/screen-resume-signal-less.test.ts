@@ -2,7 +2,7 @@
 
 /**
  * A signal-less `resume(runId)` is held to the suspended screen's declared
- * field contract exactly like a signal-carrying one (#13648).
+ * field contract exactly like a signal-carrying one (commit 7307191db).
  *
  * `refuseInvalidScreenInput` (#4477) used to open with `if (!signal) return
  * null;` — so `resume(runId, { variables: {} })` was refused with
@@ -301,7 +301,7 @@ describe("engine-built continuation stays exempt — the flag is the ONLY exempt
 
         const degraded = records.filter((r) => r.message.includes(DEGRADED_SENTENCE));
         expect(degraded).toHaveLength(1);
-        // The level does NOT move (#13398-class): this branch keeps `warn`.
+        // The level does NOT move (the published-sink ruling, commit e238c79f0): this branch keeps `warn`.
         expect(degraded[0].level).toBe('warn');
         expect(degraded[0].message).toContain(child.runId);
         expect(degraded[0].message).toContain(parentRunId);

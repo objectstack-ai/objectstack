@@ -711,7 +711,7 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       // inputs and same precedence as `serialize()` below, so a run's paused
       // row and its terminal row agree by construction.
       //
-      // [#16659] This used to end "a plain scheduled sweep has neither and
+      // [commit ecdfc9411] This used to end "a plain scheduled sweep has neither and
       // keeps NULL", and that stopped being true when a time-triggered flow
       // began declaring the organization it runs as: such a sweep now arrives
       // with `record.organizationId` set, so the second limb answers and the
@@ -948,7 +948,7 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
     // before this every run they produced persisted `organization_id = NULL`
     // while `trigger_object` / `trigger_record_id` on the very same row named
     // a record that DOES belong to a customer. It is the same subject-first
-    // precedence `sys_audit_log`'s writer already stamped with (#8707
+    // precedence `sys_audit_log`'s writer already stamped with (commit 1408fe385
     // honouring #8287's ruling) — three platform side tables, one answer now.
     //
     // The fallback still stands, and still matters: an object with no

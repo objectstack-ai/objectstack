@@ -88,6 +88,7 @@ import {
   uniqueViolationColumn,
   resolveTenancyPosture,
   declareTargetedTable,
+  isMissingTableError,
 } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import {
@@ -147,9 +148,33 @@ import {
 import { recoverUnencodedJsonText } from './unencoded-json-text.js';
 import knex, { Knex } from 'knex';
 import { nanoid } from 'nanoid';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { currentPerfTiming, perfNow, type PerfTiming } from '@objectstack/observability';
+
+/**
+ * [#20768] The async scope of a driver's own PRE-DDL question: the ADR-0104
+ * media-arm resolver that {@link SqlDriver.resolveFileColumnsMoved} asks at the
+ * start of the first `initObjects`, before this driver has created any table.
+ *
+ * The resolver the engine supplies answers by reading `sys_migration`. On the
+ * first boot of a new database that table does not exist yet, because this
+ * very schema pass is what creates it. The backend refuses the read, and the
+ * resolver answers "not moved", which is the correct answer for a store with
+ * no columns. So the refusal is the ordinary state of a new database, and not
+ * a `DATABASE_ERROR` to put in front of an operator.
+ *
+ * Only one question reads through this scope, and only
+ * {@link SqlDriver.backendStatementFault} consults it. ⛔ It demotes one class,
+ * a missing table, recognised by the shared `isMissingTableError`. Any other
+ * refusal inside the scope still warns, and so does a missing table outside it.
+ *
+ * Module-level rather than per instance: the read the question issues goes to
+ * whichever driver serves the ledger. On a multi-datasource composition that
+ * can be another instance of this class, and it is in the same async chain.
+ */
+const PRE_DDL_QUESTION_SCOPE = new AsyncLocalStorage<true>();
 
 /**
  * Default ID length for auto-generated IDs.
@@ -6114,6 +6139,13 @@ export class SqlDriver implements IDataDriver {
     warn: (msg: string, meta?: any) => void;
     info?: (msg: string, meta?: any) => void;
     /**
+     * [#20768] Below-warn channel for a refusal that is the ordinary state of
+     * the store, not a fault (see {@link SqlDriver.backendStatementFault}).
+     * The default sink has none, so such a line is dropped unless a host
+     * injects a logger that keeps `debug`.
+     */
+    debug?: (msg: string, meta?: any) => void;
+    /**
      * Durability-degradation channel (see AGENTS.md §Degradation log levels):
      * used when a constraint the metadata claims is enforced is NOT — e.g. a
      * NULL-safe unique that could not be (re)built (ADR-0120 D4). Falls back
@@ -10010,20 +10042,45 @@ export class SqlDriver implements IDataDriver {
 
     const detail = (error as { message?: unknown } | null | undefined)?.message;
     const code = (error as { code?: unknown } | null | undefined)?.code;
-    this.logger.warn(
-      `[sql-driver] DATABASE_ERROR — the backend refused a read on '${object}'` +
-        (typeof code === 'string' && code.length > 0 ? ` (${code})` : '') +
-        '. The dialect message below is kept server-side: it carries the compiled statement, ' +
-        'and on the dialects that inline them the bound literals too: ' +
-        `${typeof detail === 'string' ? detail : String(error)}`,
-    );
+    const dialectText = typeof detail === 'string' ? detail : String(error);
     // [#13438] The table the statement was compiled against, resolved the way
     // {@link SqlDriver.getBuilder} resolves it — a federated object's
     // `external.remoteName`, otherwise the object's own name — because every
     // read exit that reaches here built its statement through `getBuilder`.
     // Declared on the envelope for `isMissingTableError`; never in the message.
     const targetedTable = this.physicalTableByObject[object] ?? object;
-    return backendStatementFaultError(object, error, targetedTable);
+    const envelope = backendStatementFaultError(object, error, targetedTable);
+
+    // [#20768] One class leaves the warn channel, and only inside one scope: a
+    // table that does not exist yet, read while a driver asks its pre-DDL
+    // question (the ADR-0104 media-arm resolver, asked before the schema pass
+    // creates any table). On the first boot of a new database that read is
+    // `sys_migration`, and its refusal is the ordinary state of the store. The
+    // resolver hears the refusal and answers "not moved", as it always did.
+    //
+    // ⛔ Demoted, not deleted: the same dialect text goes to `debug`, which the
+    // default sink does not have. ⛔ Asked through the one shared predicate,
+    // over the envelope's DECLARED target, so a missing table named by some
+    // other relation (a view over a dropped table) is not this class. Every
+    // other refusal in the scope, and a missing table outside it, warns below.
+    if (PRE_DDL_QUESTION_SCOPE.getStore() === true && isMissingTableError(envelope, object)) {
+      this.logger.debug?.(
+        `[sql-driver] '${object}' does not exist yet: it was read while this driver asked its ` +
+          'pre-DDL question (the ADR-0104 media-arm resolver), before its schema pass created ' +
+          'any table. The refusal goes back to the resolver, which answers from it: ' +
+          dialectText,
+      );
+      return envelope;
+    }
+
+    this.logger.warn(
+      `[sql-driver] DATABASE_ERROR — the backend refused a read on '${object}'` +
+        (typeof code === 'string' && code.length > 0 ? ` (${code})` : '') +
+        '. The dialect message below is kept server-side: it carries the compiled statement, ' +
+        'and on the dialects that inline them the bound literals too: ' +
+        dialectText,
+    );
+    return envelope;
   }
 
   async count(object: string, query?: DriverQuery, options?: DriverOptions): Promise<number> {
@@ -19847,7 +19904,10 @@ export class SqlDriver implements IDataDriver {
     this.fileColumnsMovedAsked = true;
     this.fileColumnsMovedResolver = undefined;
     try {
-      this.fileColumnsMoved = (await resolver()) === true;
+      // [#20768] Asked inside the pre-DDL scope. On a new database the ledger
+      // the resolver reads does not exist yet, and that refusal is not a
+      // fault. The answer is unchanged — see {@link PRE_DDL_QUESTION_SCOPE}.
+      this.fileColumnsMoved = (await PRE_DDL_QUESTION_SCOPE.run(true, resolver)) === true;
     } catch {
       this.fileColumnsMoved = false;
     }

@@ -7,7 +7,7 @@
 // failures that child CONTAINED, and the fold `failed = Σ nodes[].failures`
 // therefore answers "what did this run cause", subflows included. Before it, a
 // parent whose child lost a row read `failed: 0` while `acted` had rolled up
-// all along — the misreading the run-level count exists to prevent (#13681),
+// all along — the misreading the run-level count exists to prevent (commit 18d816a50),
 // one level up.
 //
 // The measured target these tests drive is the card's, from #15617:
