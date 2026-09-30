@@ -37,18 +37,6 @@ allowlist that omits them and refuse — `Unsupported filter operator`,
 `INVALID_FILTER` / 400 — rather than approximating. A pattern ending in a lone
 unpaired backslash is refused by every face.
 
-## Implicit Equality (Shorthand)
-
-The most common filter — equality — has a shorthand:
-
-```typescript
-// ✅ Implicit equality (preferred for simple cases)
-where: { status: 'active' }
-
-// ✅ Explicit equality (same result)
-where: { status: { $eq: 'active' } }
-```
-
 ## Logical Operators
 
 ### AND (implicit)
@@ -90,28 +78,6 @@ where: {
 }
 ```
 
-### NOT
-
-```typescript
-// ✅ Exclude deleted records
-where: {
-  $not: { status: 'deleted' }
-}
-```
-
-### Combining Logical Operators
-
-```typescript
-// ✅ Active users who are admin OR have high score
-where: {
-  status: 'active',            // AND
-  $or: [
-    { role: 'admin' },
-    { score: { $gte: 90 } }
-  ]
-}
-```
-
 ## Field References
 
 > ✅ **Enforced.** `{ $field: '...' }` compares two columns of the same row.
@@ -129,27 +95,24 @@ Legal in a **comparison** position only. As an `$in` / `$nin` member or a
 `$between` endpoint it is refused at parse — no evaluation path resolves a
 reference there.
 
-## Nested Relation Filters
+## Relation Filters
 
-Filter by a related object's fields:
+A plain object with no `$` operator beneath a relation field (`lookup`,
+`master_detail`, `user`, `tree`) is refused, `INVALID_FILTER` / 400 on every
+driver: the column stores the related record's id, and no driver follows it into
+the related object. Filter the related object first, then `$in` its ids:
 
 ```typescript
-// ✅ Find orders where the customer is in the US
-where: {
-  customer: {
-    country: 'US'
-  }
-}
-
-// ✅ Deeper nesting
-where: {
-  customer: {
-    organization: {
-      industry: 'Technology'
-    }
-  }
-}
+// ❌ Refused: where: { customer: { country: 'US' } }
+// ✅ Orders whose customer is in the US
+const us = await engine.find('customer', { where: { country: 'US' }, fields: ['id'] });
+where: { customer: { $in: us.map((c) => c.id) } }
 ```
+
+On a `multiple: true` lookup match each id with `$contains` (an `$or` of those
+for several); the SQL driver refuses `$in` there. A parent by its children's
+fields is the same two steps reversed: query the child with the condition and
+`fields: [the lookup]`, then `{ id: { $in: … } }` on the parent.
 
 ## Common Mistakes
 
