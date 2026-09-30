@@ -30,7 +30,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { AutomationServicePlugin, type AutomationEngine } from '@objectstack/service-automation';
 import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 import { RecordChangeTriggerPlugin } from './plugin.js';
-// [#11081] `@objectstack/runtime`'s shared expected-noise capture. This import
+// [commit c28e4cfae] `@objectstack/runtime`'s shared expected-noise capture. This import
 // escapes the package on PURPOSE, so it is DECLARED rather than left for CI to
 // discover: `CROSS_PACKAGE_TEST_INPUTS` in
 // `scripts/check-cross-package-test-inputs.mjs` names the one file, and
@@ -65,7 +65,7 @@ type TestObjectQLEngine = IObjectQLEngine & {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * [#11081] The tables this file deliberately never provisions — and therefore
+ * [commit c28e4cfae] The tables this file deliberately never provisions — and therefore
  * the ONLY read refusals whose log frames may be withheld here.
  *
  * Every `it` below boots a kernel with no datasource, attaches sqlite late, and
@@ -196,11 +196,11 @@ const authzResolverObjects = [
   },
 ] as const;
 
-/** [#11081] Shared by every kernel this file boots; asserted once in `afterAll`. */
+/** [commit c28e4cfae] Shared by every kernel this file boots; asserted once in `afterAll`. */
 const noise = captureExpectedReadRefusals([...EXPECTED_ABSENT_PROBE_TABLES]);
 
 /**
- * [#11081] The PIN half. ⛔ Repairing a failure here means re-deriving the list
+ * [commit c28e4cfae] The PIN half. ⛔ Repairing a failure here means re-deriving the list
  * above or finding out why a probe stopped firing — NEVER deleting the channel:
  * a runtime read that silently stopped happening is exactly the finding this
  * assertion exists to make loud.
@@ -243,7 +243,7 @@ afterEach(async () => {
  */
 async function attachSqlite(objectql: any): Promise<any> {
   const driver = makeSqliteDriver();
-  // [#11081] Before `connect()` — i.e. before the driver runs any statement, the
+  // [commit c28e4cfae] Before `connect()` — i.e. before the driver runs any statement, the
   // discipline `captureExpectedReadRefusals` documents. `logger` is a protected
   // field with a `console` default, so the sink also RESTORES a loud channel:
   // an unexpected driver fault reaches the real console from here even though

@@ -720,6 +720,8 @@ function declaredFieldClass(
  * the number-comparand door's walk reads it at `having`: the `text` class
  * lumps a `json` or `lookup` groupBy in with a real text column, and only the
  * type tells a column that holds scalar values from one that does not.
+ * [#20745] The same type tells the arm's other two kinds apart — a relation
+ * column and a structured-JSON column — each refused in words of its own.
  */
 export function aggregatedRowColumnTypes(
   groupBy: unknown,

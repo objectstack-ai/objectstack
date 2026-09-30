@@ -5483,9 +5483,6 @@ export class ObjectStackClient {
           return this.unwrapResponse(res);
       },
 
-      /**
-       * Enable or disable a flow
-       */
       /* [#3563 PR-5] The three descriptor/status routes that had no SDK
        * expression — they back the Studio designer's pickers and badges. */
 
@@ -5525,6 +5522,17 @@ export class ObjectStackClient {
           return this.unwrapResponse(res);
       },
 
+      /**
+       * Enable or disable a PACKAGED flow — one a code package ships.
+       *
+       * [#20726, ADR-0126 §7.2] `POST /automation/:name/toggle` records the
+       * installation's choice in the packaged-metadata activation ledger, so
+       * it switches packaged flows only. A flow authored in the deployment is
+       * refused with 409 `RESOURCE_CONFLICT` and nothing changes. Its switch
+       * is its own `status`: send its complete definition through
+       * `automation.update(name, definition)` (`PUT /automation/:name`) with
+       * `status: 'obsolete'` to disarm it, or `status: 'active'` to arm it.
+       */
       toggle: async (name: string, enabled: boolean): Promise<{ name: string; enabled: boolean }> => {
           const route = this.getRoute('automation');
           const res = await this.fetch(`${this.baseUrl}${route}/${name}/toggle`, {

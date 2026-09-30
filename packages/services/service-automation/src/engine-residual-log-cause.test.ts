@@ -424,7 +424,8 @@ describe('#6499 sites 5–8 — plugin-supplied code seams, all #4632 FUNCTIONAL
         const engine = new AutomationEngine(jsonLogger());
         const trigger: FlowTrigger = { type: 'record_change', start() {}, stop() { throw new Error(MULTILINE_DRIVER); } };
         engine.registerTrigger(trigger);
-        engine.registerFlow('rc_unbind', triggeredFlow('rc_unbind'));
+        // [#20726] Unbound through the toggle, which switches packaged flows only.
+        engine.registerFlow('rc_unbind', { ...triggeredFlow('rc_unbind'), _packageId: 'crm' });
 
         const streams = await captureBoth(async () => { await engine.toggleFlow('rc_unbind', false); });
 

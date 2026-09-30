@@ -147,14 +147,24 @@ export const FLOW_CLONE_DROPPED_KEYS: readonly string[] = Object.freeze([
  *     record-change flow and walks away has two flows running on one trigger,
  *     and the only thing standing between them and that surprise is this
  *     sentence.
+ *
+ * [#20726, ADR-0126 §7.2] The off-switch it names is the CLONE's own: its
+ * `status`, published through `PUT /:name`. A clone carries no package
+ * envelope (see {@link FLOW_CLONE_DROPPED_KEYS}), so it is a flow authored in
+ * this deployment, and the activation toggle — which switches packaged flows
+ * only — refuses it. That holds whatever the clone was copied from: the clone
+ * door takes any registered flow as its source, packaged or not, so the
+ * notice makes no claim about the source's provenance.
  */
 export const FLOW_CLONE_NOTICE =
     'References are not re-pointed: this clone calls exactly what the original called '
     + '(subflows, actions and objects are unchanged). It is created with status `draft`, '
     + 'which is a lifecycle label and NOT an off-switch — a cloned record-change or schedule '
     + 'flow is bound to its trigger and will run alongside the flow it was copied from. '
-    + 'Disable it (`POST /api/v1/automation/<name>/toggle` with `{"enabled": false}`) if that '
-    + 'is not what you want.';
+    + 'If that is not what you want, switch the clone off through its own status: send its '
+    + 'complete definition with `status: \'obsolete\'` to `PUT /api/v1/automation/<name>`. '
+    + 'The activation toggle (`POST /api/v1/automation/<name>/toggle`) switches packaged flows '
+    + 'only and refuses the clone.';
 
 /** ADR-0112 envelope for the same-name refusal: a status AND a code. */
 export const FLOW_CLONE_NAME_TAKEN_STATUS = 409;

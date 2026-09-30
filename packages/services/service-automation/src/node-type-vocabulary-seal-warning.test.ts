@@ -144,7 +144,8 @@ describe('#4792 — a never-sealed node-type vocabulary announces itself at the 
     it('does not fire for an unknown or disabled flow name — the trigger is a real run', async () => {
         const lines: string[] = [];
         const engine = new AutomationEngine(loggerCapturing(lines));
-        engine.registerFlow('off', trivialFlow('off'));
+        // [#20726] Disabled through the toggle, which switches packaged flows only.
+        engine.registerFlow('off', { ...trivialFlow('off'), _packageId: 'crm' });
         await engine.toggleFlow('off', false);
 
         expect((await engine.execute('never_registered')).success).toBe(false);

@@ -829,20 +829,30 @@ describe('ADR-0126 §7.3 (enable direction) — re-enabling a packaged caller is
         await expect(engine.toggleFlow('head', true)).resolves.toBeUndefined();
     });
 
-    it('a NON-packaged caller is not guarded — a tenant\'s own flow is theirs to arm', async () => {
-        const { engine } = runnableEngine();
+    it('a NON-packaged caller is not guarded — a tenant\'s own flow is theirs to arm, through its status', async () => {
+        const { engine, triggers } = runnableEngine();
         engine.registerFlow('shared_step', packagedFlow('shared_step'));
         await engine.toggleFlow('shared_step', false);
-        engine.registerFlow('my_own_process', { ...caller('my_own_process', ['shared_step']), _packageId: undefined });
-        await engine.toggleFlow('my_own_process', false);
+        const own = (status: string) => ({ ...caller('my_own_process', ['shared_step']), _packageId: undefined, status });
+        engine.registerFlow('my_own_process', own('obsolete'));
 
-        await expect(engine.toggleFlow('my_own_process', true)).resolves.toBeUndefined();
+        // [#20726] This switch is not a customer flow's: it is refused for its
+        // provenance, before §7.3 is asked — so no subflow is named.
+        const thrown = await engine.toggleFlow('my_own_process', true).then(() => undefined, (e: unknown) => e);
+        expect(thrown).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+        expect((thrown as Error).message).not.toContain('shared_step');
+
+        // Its own switch arms it, onto the switched-off packaged subflow:
+        // §7.3 guards packaged callers only.
+        engine.registerFlow('my_own_process', own('active'));
+        expect(triggers.record_change.isBound('my_own_process')).toBe(true);
     });
 
     it('a NON-packaged subflow does not guard a packaged caller', async () => {
         const { engine } = runnableEngine();
-        engine.registerFlow('my_step', { ...packagedFlow('my_step'), _packageId: undefined });
-        await engine.toggleFlow('my_step', false);
+        // [#20726] Switched off through its own switch, its status — the
+        // toggle door refuses a flow no package ships.
+        engine.registerFlow('my_step', { ...packagedFlow('my_step'), _packageId: undefined, status: 'obsolete' });
         engine.registerFlow('vendor_process', caller('vendor_process', ['my_step']));
         await engine.toggleFlow('vendor_process', false);
 

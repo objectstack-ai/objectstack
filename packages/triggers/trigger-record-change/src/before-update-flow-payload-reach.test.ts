@@ -1,13 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#15356 measured, #14744 closed] PIN — a `record-before-update` flow reaches
+ * [#15356 measured, commit 4f85e4d11 closed] PIN — a `record-before-update` flow reaches
  * NO write shape into the BATCH PAYLOAD of a `multi: true` update.
  *
  * ## What changed about this file, and what did not
  *
  * It was written for #15356 as a MEASUREMENT and it answered NOT BOUNDED: one
- * shape (`S5`) reached the payload. #14744 then ruled the door closed —
+ * shape (`S5`) reached the payload. The option-A ruling (commit 4f85e4d11) then closed the door —
  * `buildContext` decouples the flow-facing roots from the engine's own objects
  * (`decoupleFromEngineState`) — and this file was adopted whole as the pin.
  * `S5`, `S5b` and the SQL replica were FLIPPED to their opposites in that same
@@ -19,19 +19,19 @@
  *
  * The two controls are why the negatives are readable, and BOTH must keep
  * firing: the positive control (a script hook that ASSIGNS the payload — the
- * #14744 residue shape — still lands the LAST dispatch's value on every row,
- * because #14744's fix is about aliasing and deliberately does not touch that
+ * residue shape commit 4f85e4d11 pins — still lands the LAST dispatch's value on every row,
+ * because commit 4f85e4d11 fixes aliasing and deliberately does not touch that
  * residue) and the #14099 armed control (divergent key sets are still refused
  * whole). If either stops firing, this file has stopped measuring.
  *
  * ## Why this file exists
  *
- * #14744's census found the in-repo population of same-key / per-row-VALUE
+ * The census in commit 03c1b0f6f found the in-repo population of same-key / per-row-VALUE
  * `beforeUpdate` payload rewrites is ZERO across 23 production registration
  * sites. One door that zero does not bound was named there but never driven:
  * `record-change-trigger.ts`'s `start()` binds `beforeUpdate` for the
  * `record-before-update` / `record-before-write` trigger types and hands the
- * write to USER-AUTHORED FLOW METADATA. The conclusion recorded on that card —
+ * write to USER-AUTHORED FLOW METADATA. The conclusion recorded in that census —
  * `buildContext` materialises a NEW record object by overlay rather than
  * handing the flow `ctx.input.data` by reference, so a flow cannot reach the
  * batch payload — was labelled by its own author a SOURCE READING, explicitly
@@ -44,7 +44,7 @@
  * write shape that mutated a nested value IN PLACE therefore wrote the batch
  * payload without ever assigning a top-level key. See `S5` below.
  *
- * ⭐ #14744 made the reading's sentence TRUE AS STATED rather than deleting it:
+ * ⭐ Commit 4f85e4d11 made the reading's sentence TRUE AS STATED rather than deleting it:
  * the overlay still materialises a new object, and `decoupleFromEngineState`
  * now makes that true of the object's CONTENTS too. The distinction is worth
  * keeping in front of the next reader — "a new object" and "reaches nothing"
@@ -84,7 +84,7 @@
  * ## Two controls, because a negative needs them
  *
  *  - `positive control` — a script `beforeUpdate` hook that DOES assign the
- *    payload (the #14744 pinned residue shape), in this same harness, showing
+ *    payload (the residue shape commit 4f85e4d11 pins), in this same harness, showing
  *    the last dispatch's value on every row. Without it firing, every "does not
  *    reach" below would be a claim about this harness, not about flows.
  *  - `#14099 armed control` — a hook writing DIVERGENT KEY SETS per row must
@@ -92,7 +92,7 @@
  *    measurement rather than an unarmed check.
  *
  * ⚠️ #15356 was a MEASUREMENT card: no guard, no write-shape change, no ADR.
- * #14744 carries the fix, and it is still not a write-shape change: ADR-0058
+ * Commit 4f85e4d11 carries the fix, and it is still not a write-shape change: ADR-0058
  * Addendum II D3 stands untouched — the engine does not split its own write,
  * one payload still serves N rows, and every per-row context is still handed
  * that one object (asserted in `S5`). What changed is only that the object a
@@ -203,7 +203,7 @@ function makeDriver(): any {
 
 /**
  * `residue` and `tags` are DECLARED fields on purpose: the engine's
- * declared-field door (#8738 pre-hook / #13657 post-hook) refuses a payload
+ * declared-field door (#8738 pre-hook / commit b003cf2e8 post-hook) refuses a payload
  * carrying an undeclared key, so a probe writing an undeclared name would be
  * measuring that refusal instead of the reach question.
  *
@@ -452,7 +452,7 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
 
     // The residue shape: a per-row-VALUE write of the SAME key on every row.
     // The key SET is identical across rows, so #14099's divergence refusal does
-    // not fire — that is precisely the blind spot #14744 is weighing.
+    // not fire — that is precisely the blind spot commit 4f85e4d11 left unguarded.
     const dispatched: string[] = [];
     stack.objectql.registerHook(
       'beforeUpdate',
@@ -639,7 +639,7 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
   /**
    * ⭐ S5 — THE PIN. This case was written on 2026-09-04 as a CHARACTERISATION
    * of the defect (the nested in-place mutation REACHED the payload, and both
-   * rows carried both dispatches' contributions). #14744 closed the door on the
+   * rows carried both dispatches' contributions). Commit 4f85e4d11 closed the door on the
    * same day by decoupling the flow-facing roots from the engine's own objects
    * (`decoupleFromEngineState`, called at the end of `buildContext`), and the
    * case was flipped in the same PR — the assertions below are the OPPOSITE of
@@ -683,7 +683,7 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
     expect(observed, 'the script function must have RUN, once per row').toHaveLength(2);
     // Row 2 does NOT see row 1's mutation: each dispatch is handed its own copy
     // of the nested value, so neither run can observe the other's write. Before
-    // #14744 the second reading was `["seed","REACHED-alpha"]`.
+    // commit 4f85e4d11 the second reading was `["seed","REACHED-alpha"]`.
     expect(observed[0]?.tagsAsSeen).toBe('["seed"]');
     expect(observed[1]?.tagsAsSeen).toBe('["seed"]');
     // Reference identity, measured across the same boundary the defect was
@@ -702,7 +702,7 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
 
     // ⭐ The persisted rows: the SET clause carries what the CALLER wrote, and
     // no row carries a value derived from the other row's pre-image. Before
-    // #14744 both rows read `['seed','REACHED-alpha','REACHED-beta']`.
+    // commit 4f85e4d11 both rows read `['seed','REACHED-alpha','REACHED-beta']`.
     expect(wrote, 'and the write still succeeds — this is not a refusal').toMatchObject({ ok: true });
     const rows = await rowsByTitle(stack.data, object);
     expect(rows.get('alpha')?.tags).toEqual(['seed']);
@@ -735,7 +735,7 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
     // ⚠️ THE BREAKING HALF, pinned deliberately. The aliasing was never
     // multi-specific: on a by-id write the same in-place mutation reached this
     // write's own payload and PERSISTED correctly (`['seed','REACHED']` before
-    // #14744), so it read as a working per-row write path rather than as
+    // commit 4f85e4d11), so it read as a working per-row write path rather than as
     // corruption. It is the same alias, so closing the door closes it here too,
     // and a stack author using it loses a write that used to land. That is why
     // the changeset carries a BREAKING banner: the alternative is `update_record`
@@ -802,7 +802,7 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
   }, 20000);
 
   /**
-   * ⭐ [#14744] THE CONTROL ON THE FIX'S SHAPE — why a COPY and not a FREEZE.
+   * ⭐ [commit 4f85e4d11] THE CONTROL ON THE FIX'S SHAPE — why a COPY and not a FREEZE.
    *
    * The ruling named deep-copy and freeze as alternatives. They are not
    * equivalent, and this case is the measurement that chose between them:
@@ -856,7 +856,7 @@ describe('[#15356] can a record-before-update flow reach a multi:true batch payl
 });
 
 /**
- * [#15356 measured it, #14744 closed it] S5 again, on the REAL SQL backend —
+ * [#15356 measured it, commit 4f85e4d11 closed it] S5 again, on the REAL SQL backend —
  * `@objectstack/driver-sql` over better-sqlite3 `:memory:`, built the canonical
  * way this package's `record-change-integration.test.ts` boots it.
  *
@@ -921,7 +921,7 @@ describe('[#15356/#14744] S5 on the real SQL driver — the mutation reaches no 
     console.log('[#15356] SQL rows:', JSON.stringify([...rows.values()].map((r) => ({ title: r.title, tags: r.tags }))));
     const alpha = rows.get('alpha')?.tags;
     const beta = rows.get('beta')?.tags;
-    // Before #14744 both read `['seed','REACHED-alpha','REACHED-beta']` — one
+    // Before commit 4f85e4d11 both read `['seed','REACHED-alpha','REACHED-beta']` — one
     // SET clause carrying both dispatches, including the value derived from the
     // other row's pre-image.
     expect(alpha).toEqual(['seed']);

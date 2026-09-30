@@ -1334,9 +1334,16 @@ describe('AutomationEngine - Execution History', () => {
         });
     });
 
+    /**
+     * [#20726, ADR-0126 §7.2] The toggle switches PACKAGED flows — a flow no
+     * package ships is refused, and its switch is its `status` — so every
+     * subject toggled below ships from a code package.
+     */
+    const packagedSimpleFlow = { ...simpleFlow, _packageId: 'crm' };
+
     describe('toggleFlow', () => {
         it('should disable a flow', async () => {
-            engine.registerFlow('test_flow', simpleFlow);
+            engine.registerFlow('test_flow', packagedSimpleFlow);
             await engine.toggleFlow('test_flow', false);
 
             const result = await engine.execute('test_flow');
@@ -1345,7 +1352,7 @@ describe('AutomationEngine - Execution History', () => {
         });
 
         it('should enable a disabled flow', async () => {
-            engine.registerFlow('test_flow', simpleFlow);
+            engine.registerFlow('test_flow', packagedSimpleFlow);
             await engine.toggleFlow('test_flow', false);
             await engine.toggleFlow('test_flow', true);
 
@@ -1485,11 +1492,11 @@ describe('AutomationEngine - Execution History', () => {
          * wall's stated prohibition.
          */
         it('keeps a ledger disable across unregister + re-register (§6 wall 3)', async () => {
-            engine.registerFlow('test_flow', simpleFlow);
+            engine.registerFlow('test_flow', packagedSimpleFlow);
             await engine.toggleFlow('test_flow', false);
             engine.unregisterFlow('test_flow');
 
-            engine.registerFlow('test_flow', simpleFlow);
+            engine.registerFlow('test_flow', packagedSimpleFlow);
 
             const result = await engine.execute('test_flow');
             expect(result.success).toBe(false);
@@ -2920,7 +2927,8 @@ describe('AutomationEngine - Flow Trigger Wiring', () => {
     it('stops/restarts the binding when the flow is disabled/re-enabled', async () => {
         const rec = recordingTrigger('record_change');
         engine.registerTrigger(rec.trigger);
-        engine.registerFlow('rc_flow', recordChangeFlow('rc_flow'));
+        // [#20726] The toggle switches packaged flows only.
+        engine.registerFlow('rc_flow', { ...recordChangeFlow('rc_flow'), _packageId: 'crm' });
 
         await engine.toggleFlow('rc_flow', false);
         expect(rec.stopped).toEqual(['rc_flow']);
@@ -3227,7 +3235,8 @@ describe('#9378 — execute() classifies terminal exits for the trigger transpor
         expect(missing.status).toBeUndefined();
 
         // 2. Registered but disabled.
-        engine.registerFlow('disabled_flow', failingFlow('disabled_flow'));
+        // [#20726] Disabled through the toggle, which switches packaged flows only.
+        engine.registerFlow('disabled_flow', { ...failingFlow('disabled_flow'), _packageId: 'crm' });
         await engine.toggleFlow('disabled_flow', false);
         const disabled = await engine.execute('disabled_flow');
         expect(disabled.success).toBe(false);
@@ -3264,7 +3273,8 @@ describe('#9378 — execute() classifies terminal exits for the trigger transpor
      * applied to one copy only is the shape a later reader mistakes for a rule.
      */
     it('says WHICH refusal a never-dispatched exit is — code, and still no status', async () => {
-        engine.registerFlow('disabled_coded', failingFlow('disabled_coded'));
+        // [#20726] Disabled through the toggle, which switches packaged flows only.
+        engine.registerFlow('disabled_coded', { ...failingFlow('disabled_coded'), _packageId: 'crm' });
         await engine.toggleFlow('disabled_coded', false);
         const disabled = await engine.execute('disabled_coded');
         expect(disabled.success).toBe(false);

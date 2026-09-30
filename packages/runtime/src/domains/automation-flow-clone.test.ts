@@ -456,7 +456,11 @@ describe('#12156 — the source, the notice, and the gate', () => {
         // `obsolete`/`invalid`, so a cloned record-change flow runs beside the
         // one it was copied from. Saying so is cheaper than the surprise.
         expect(notice).toMatch(/off-switch/i);
-        expect(notice).toContain('toggle');
+        // [#20726] And the off-switch it names is one the clone has: its own
+        // `status`, through its update door. A clone carries no package
+        // envelope, and the activation toggle switches packaged flows only.
+        expect(notice).toContain("status: 'obsolete'");
+        expect(notice).toContain('PUT /api/v1/automation/');
     });
 
     it('is an authoring write — a caller without `manage_metadata` is refused 403, nothing registered', async () => {

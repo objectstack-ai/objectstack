@@ -1026,6 +1026,9 @@ function lowerWhereFilterArray<T extends object | undefined>(
     // plain object with no `$` key where a scalar column's value belongs
     // (`{ amount: { a: 1 } }`) is refused `INVALID_FILTER` / 400. Memory
     // answered it with no rows (every row under `$not`), SQL with its own 400.
+    // [#20745] …and beneath a relation column (the nested-relation form no
+    // driver serves), a structured-JSON column (a whole-value match the
+    // drivers share no meaning for) and an undeclared `id`, in words per kind.
     const numeric = narrowNumberComparands(object, operation, schema, where);
     // [#7872] The comparand-type door, on the OBJECT form. `parseFilterAST`
     // runs the same walk on everything it lowers or passes through, but
@@ -16370,7 +16373,9 @@ export class ObjectQL implements IObjectQLEngine {
               // narrowed to its number, copy-on-write, before the in-memory
               // evaluator compares it. Rooted at this position. [#20546] Its
               // walk's no-operator-object arm too: `{ amount: { a: 1 } }` here
-              // counted no row, silently, on every driver.
+              // counted no row, silently, on every driver. [#20745] So did
+              // `{ owner: { region: 'NA' } }` beneath a lookup; a JSON object
+              // here is refused alike, one answer per filter at every position.
               const numeric = narrowNumberComparands(
                   object, 'aggregate', this._registry.getObject(object), aggFilter, `aggregations[${i}].filter`,
               );
@@ -16507,7 +16512,9 @@ export class ObjectQL implements IObjectQLEngine {
           // [#20546] The same walk's no-operator-object arm judges every column
           // whose TYPE holds scalar values (hence the types, beside the
           // classes): `{ total: { a: 1 } }` kept no group, silently, on every
-          // driver, where its `where` twin answered two ways.
+          // driver, where its `where` twin answered two ways. [#20745] A
+          // relation or JSON column's type is judged too (a lookup groupBy's
+          // nested-relation `having` kept no group on every driver).
           const numeric = narrowHavingNumberComparands(
               object, having, havingColumnClasses,
               aggregatedRowColumnTypes(query.groupBy, query.aggregations, declaredFields),

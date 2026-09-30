@@ -2,7 +2,7 @@
 
 /**
  * Decouple the flow-facing `record` / `previous` roots from the ENGINE-OWNED
- * objects they were overlaid from (#14744, measured by #15356).
+ * objects they were overlaid from (commit 4f85e4d11, measured by #15356).
  *
  * ## The leak this closes
  *
