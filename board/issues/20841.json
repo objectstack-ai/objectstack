@@ -1,0 +1,35 @@
+{
+  "number": 20841,
+  "kind": "issue",
+  "title": "spec(ai): BlueprintNavItemSchema.label says \"defaults to the target label/name\", but since 17.5.0 an absent nav label is inherited at render time; an expander that materializes the default freezes the name and loses rename inheritance",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T11:02:24Z",
+  "updated_at": "2026-09-30T12:53:16Z",
+  "closed_at": "2026-09-30T12:53:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20841",
+  "body": "Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) as the one residue of objectstack-ai/objectui#9882, closed today. ⛔ Not a claim, ⛔ not a dispatch. Graded here: `documentation` · `priority:p3` · `domain:spec` · `area:ai` · `pm:queue`.\n\n## What is left\n\n`packages/spec/src/ai/solution-blueprint.zod.ts:189` (read on `origin/main` today):\n\n```\nlabel: z.string().optional().describe('Nav entry label (defaults to the target label/name)'),\n```\n\n- **Since `@objectstack/spec` 17.5.0,** the runtime `NavigationItemSchema.label` is optional, with the declared meaning \"absent ⇒ the entry inherits its target's CURRENT label at render time; present ⇒ verbatim\". That is the maintainer's ruling A `5731297631` on objectstack-ai/objectui#9868, via #19049.\n- **Measured on the published 17.5.0 today:**\n  - a label-less runtime nav entry parses (`true`, with a labelled control `true`);\n  - a label-less blueprint nav item parses (`true`, keys `type`, `target`).\n- **So objectui#9882's trap is gone:** a blueprint omitting a label expands into a valid entry.\n- **What remains is the describe's word \"defaults\".** It reads as \"the expander writes the target's label\". An expander (cloud#2021's `apply_blueprint`, or an AI writing one) that follows it materializes the label. The entry then no longer follows a renamed target: the inheritance the ruling exists for is lost.\n\n## Direction\n\n- One describe sentence, matching the runtime field's own: absent ⇒ the entry inherits its target's current label at render time; present ⇒ verbatim. ⛔ An expander does not materialize it.\n- ⛔ No schema change: the key stays optional.\n- If `NavigationItemSchema.label`'s describe can be referenced rather than restated, reference it, so the two cannot drift.\n- Regenerate whatever the describe feeds (the JSON schema, the reference docs), in the same PR."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 20871,
+  "kind": "issue",
+  "title": "page requires, #20312 stage ③ (spec half): the liveness row flips to live, the describe and the docs state save + load, the lint reason and the ADR-0087 guide entry name the save door",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:spec",
+    "enhancement",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T13:54:28Z",
+  "updated_at": "2026-09-30T13:54:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20871",
+  "body": "Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) as the spec half of #20312's per-layer split. ⛔ Not a claim, ⛔ not a dispatch. Graded here: `enhancement` · `priority:p3` · `domain:spec` · `area:studio` · `pm:blocked`.\n\nBlocked-by: #20870\n\n## Scope (lands after the engine half, so every sentence is true when it ships)\n- `packages/spec/liveness/page.json`: the `requires` row flips to `live`, citing the save door (PR #20852) and the load report (#20870).\n- `packages/spec/src/ui/page.zod.ts`: the describe states what now happens, refused at save and reported at load.\n- `packages/lint/src/authoring-rules.ts`: the stale \"typescript/sucrase\" reason on `validateJsxPages` is corrected (`domain:spec` by the anchoring rule).\n- ADR-0087 upgrade guide: amend `ui-html-page-div-refused`'s reason to name the save door, or add a D3 semantic entry. Regenerate the registry with its generator.\n- **Docs** (`content/docs/**`, a `domain:devx` surface, declared cross-lane here): the \"validated at save and load\" sentence matches the describe. It is one sentence, so it rides this PR rather than a third child.\n\n## Pins\n- The liveness gate reads the row `live` with its cited readers.\n- The describe and docs sentences match (one grep pin, if the repo's doc-parity gate does not already cover it)."
+}

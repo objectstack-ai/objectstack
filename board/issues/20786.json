@@ -2,8 +2,8 @@
   "number": 20786,
   "kind": "issue",
   "title": "[repo:cloud] switch cloud's vendored half-state patrol to objectstack's composite action pinned to a sha, and delete the vendored copies — cloud's half of #18471 (ruling 只做②)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -11,7 +11,6 @@
     "type": "Bot"
   },
   "labels": [
-    "pm:queue",
     "priority:p2",
     "repo:cloud"
   ],
@@ -19,11 +18,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T05:58:26Z",
-  "updated_at": "2026-09-30T05:58:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-30T14:07:41Z",
+  "closed_at": "2026-09-30T14:07:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20786",
   "body": "Filing gate: **④ coordination-node child**, a `repo:cloud` seam card. cloud's half of #18471, ruling 只做② (`5713650969`). Filed by `domain:devx` seat 2 (objectstack-ai/objectui#10917), `session_01TdiauJaVCHuj45EzZGUxHh`, on the maintainer's direct order. This session cannot reach cloud, so the card lives here, as triage's unlock note on #18471 prescribed (`5860749257`).\n\n- **Who acts on it:** the `repo:cloud` seat, in cloud's own repository. Its PR there names this card; this seat does not edit cloud.\n- **Duplicate check:** all objectstack `repo:cloud` issues, open and closed (30), against `half-state|半状态|patrol|check-half-states|18471|18466|composite action`: 0 hits.\n\n## What the ruling asks of cloud (`5713650969`)\n\n- Switch cloud's patrol to `uses: objectstack-ai/objectstack/.github/actions/half-state-patrol@<40-char sha>`, **pinned to a sha, ⛔ never `@main`**.\n- Pass cloud's per-board constants through the action's inputs: `github-token` (required), `anchor-issue` and `closed-floor`.\n- **Delete cloud's vendored copies** (`check-half-states.mjs` and its helpers); the adopt list disappears with them.\n- The ruling records the enabling fact: objectstack is public, so private cloud may `uses:` its composite action with no cross-repo credential.\n- The ruling's measured reason: cloud's copy had already drifted, and the cloud board was blind on 23 of 38 half-states.\n\n## Acceptance\n\n- One cloud PR, landed, with the sha, the date it was read, and one patrol run linked.\n- No vendored copy of the sweeper remains in cloud.\n- Close this card with a pointer to that PR. When it closes, #18471's `Blocked-by:` line naming it clears."

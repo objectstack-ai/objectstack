@@ -2,8 +2,8 @@
   "number": 20798,
   "kind": "issue",
   "title": "ci(half-state-patrol): the composite action gains a declared opt-in for boards that run with no anchor issue (summary-only), default off — #20793 decision A",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:devx",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T07:06:43Z",
-  "updated_at": "2026-09-30T08:08:36Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-30T09:10:06Z",
+  "closed_at": "2026-09-30T09:10:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20798",
   "body": "Filing gate: **③ maintainer-directed.** This executes #20793 decision **A** (ruling record `5905998989`; the maintainer's verbatim answer \"A: opt-in action input (Recommended)\"). Filed by `domain:devx` seat 2 (objectstack-ai/objectui#10917), `session_01TdiauJaVCHuj45EzZGUxHh`, under the maintainer's direct order to handle #18471 (R4 marker objectstack-ai/objectui#10917 `5905019353`).\n\n- **Who acts on it:** `domain:devx` seat 2 (this session) claims and dispatches it in the same round.\n- **Duplicate check:** all objectstack `domain:devx` issues, open and closed (596), against `half-state|半状态|patrol|anchor`: no open card covers an anchor opt-in for the action. The decision card #20793 is closed.\n\n## What changes (`.github/actions/half-state-patrol/action.yml`)\n\n- **One new declared input**, default off, named by the implementer (for example `anchor-optional`).\n  - **On:** an empty `anchor-issue` gives a `::notice::`, exit 0, and the findings delivered to the run summary. This matches objectui#8740's supported configuration, and the notice names that setting.\n  - **Off** (the default): an empty anchor fails with `::error::` and exit 1, exactly as `action.yml:313-315` does today, so objectstack losing its own variable still fails loudly.\n  - A non-numeric `anchor-issue` fails in both modes.\n- **The pull_request path is unchanged:** it still skips the anchor steps.\n- The input's own description states the one consumer that pulls it (objectui, #20793) and why the default stays loud.\n- **Update in the same PR** whatever documents or pins the action's inputs: the action's header prose, any `scripts/pm/**` test that reads the input list, and objectstack's own caller (`.github/workflows/half-state-patrol.yml`), which keeps the default.\n\n## Acceptance\n\n- One objectstack PR, with `Clause-②: no` (CI wiring, no published contract).\n- The action's anchor step is exercised in all three modes: off + empty → exit 1; on + empty → notice and exit 0 with a summary line; non-numeric → exit 1 in both. Use the repo's own action or workflow tests where they exist, or a runnable probe named in the PR.\n- When this lands, objectstack-ai/objectui#11174's `Blocked-by:` line naming this card clears, and objectui switches with the opt-in on and its sha pinned per `5905360637` (objectstack `main`'s tip at implementation time)."

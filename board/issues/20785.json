@@ -2,9 +2,9 @@
   "number": 20785,
   "kind": "pull_request",
   "title": "feat(spec)!: retire a page header's breadcrumb switch — no renderer draws a trail for it (#20758)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T05:57:46Z",
-  "updated_at": "2026-09-30T06:49:02Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 2,
+  "updated_at": "2026-09-30T14:06:25Z",
+  "closed_at": "2026-09-30T14:06:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-30T14:06:22Z",
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/20785",
   "body": "Closes #20758\n\nClause-②: no (narrowing)\n\n`PageHeaderProps.breadcrumb` retires through the ADR-0087 route, the way `icon` left the same row. It has a `retiredKey()` tombstone, the D2 conversion `page-header-breadcrumb-removed` (it strips `true` and `false` from stored and built pages with a notice, retired from the load path), the `RETIRED_KEYS_BY_MAJOR[18]` entry and the D3 entry `page-header-breadcrumb-retired`. A stored page is never refused for the key: the props lint reports it as a warning.\n\n`nav:breadcrumb` stays, because objectui's Studio page palette writes it.\n\nThe published skill `skills/objectstack-ui/rules/pages.md` stops teaching the key (two lines). That path is governed, so this PR lands Tier H, after an authorized approval.\n\n`@objectstack/spec` minor, BREAKING.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Sfe5YjBLwB9J3y8fvm2xq1\n"

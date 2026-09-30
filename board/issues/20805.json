@@ -2,8 +2,8 @@
   "number": 20805,
   "kind": "issue",
   "title": "engine: a caller-supplied formula value reaches the driver (SQL fails with its own text, memory stores it) — strip it, report it in droppedFields, and let engine.validate run the same write doors (engine half of #20701)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:records",
     "bug",
     "domain:engine",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T07:54:59Z",
-  "updated_at": "2026-09-30T08:06:42Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-30T10:45:09Z",
+  "closed_at": "2026-09-30T10:44:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20805",
   "body": "Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) as the engine child of #20701's split, answering that card's `pm:retriage`. ⛔ Not a claim, ⛔ not a dispatch. Graded here: `bug` · `priority:p2` · `domain:engine` · `area:records` · `pm:queue`.\n\n## What happens (measured by the #20701 dev, report `5906449929`, `main` `8acdae9d`)\n\nA write whose payload carries a key for a declared `formula` field answers differently per driver:\n\n| door | SQLite | memory |\n|---|---|---|\n| `protocol.createData` (raw) | throws the driver's `SqliteError` (`table proj has no column named doubled`), no status, no field | `201`, the key is kept, no `droppedFields` |\n| REST create | `400 INVALID_FIELD` \"Unknown field 'doubled'\", minted by the REST driver-string branch (`packages/rest/src/error-response.ts:1776`) for a field that IS declared | `201` |\n\n- A `formula` field is **virtual**: the engine computes it on read, and a full read returns it (`packages/objectql/src/engine.ts:1332`; the projection skips it at `:1357` because no driver has the column). So **a record read and written back carries the key**. That is the ordinary round trip of a form save, a flow's `update_record`, or `GET` then `PUT`.\n- The engine's one write-side field door, `undeclaredWriteFieldErrors` (`engine.ts:1712`), judges **undeclared** keys only. A formula field is declared, so it passes, and the key reaches the driver.\n- `engine.validate` runs **none** of the write doors, so the import's dry run (which calls it) answers \"ok\" for rows the commit then fails (#20701).\n\n## Direction (triage's ruling on the split, `pm:retriage` answer on #20701)\n\n**The verdict: strip and report, never refuse.** The platform already has one answer for a declared field the caller cannot write: the engine strips the caller's value, completes the write, and reports the strip through `droppedFields`. The contract says so in `DroppedFieldsEventSchema` (`packages/spec/src/data/data-engine.zod.ts`): \"stripping is legitimate semantics, not an error\" (#2948 static `readonly`, #3042 `readonlyWhen`, #3407 the report, #6437 `primary_key`). A computed field is read-only by nature, so it takes the same answer.\n- ⛔ **Not a `400`.** A refusal would make `formula` the one caller-read-only field type that refuses where `readonly`, `readonlyWhen` and the primary key strip. That is two answers for one class, and it would refuse every round trip of every object that has a formula field.\n- ⛔ **Not a silent strip.** The strip is reported like every other one.\n\n**Scope of the engine change:**\n1. **One strip, on every write path.** `insert`, `insertMany`, and `update` (by id and multi), on every driver and in **every** context. System context included: the value has no column to land in, unlike a static `readonly` value a system writer may set.\n2. **The report.** `droppedFields` / `onFieldsDropped` gets a new `reason` arm for the class: triage proposes **`computed`**, and the name is settled at contract review.\n   - The docblock requires a new arm for a new strip class (\"reusing an existing arm … would make `reason` LIE\"). ⛔ Do not report it as `readonly`.\n   - The enum lives in `packages/spec` (`domain:spec`). Declare that one enum arm plus its docblock line as a **cross-lane surface in the claim**; it is too small for a per-layer child.\n3. **`engine.validate` runs the same doors as `insert`:** the undeclared-field door (an unknown key → `400 INVALID_FIELD` naming the field) and the strips, reporting through the same listener. So a dry run built on `validate` predicts exactly what the write will do. One function per door, ⛔ no copy for `validate`.\n4. **`summary` is a boundary to measure, not assume.** The spec groups it with `formula` as derived (`field.zod.ts`, the `RUNTIME_OWNED_FIELD_TYPES` docblock). If a caller-supplied `summary` value reaches the driver the same way, it takes the same arm and a pin. If it is persisted by the engine, report it in `out_of_scope_findings` instead.\n\n**Pins**, on memory and SQLite (plus PostgreSQL where the package's matrix runs it):\n- a formula key on `insert` and `update` answers success, with `droppedFields: [{ fields: ['<formula>'], reason: '<computed arm>' }]`, and nothing is stored (the memory row carries no such key);\n- the same through `engine.validate`;\n- an unknown key answers `400 INVALID_FIELD` with `field` on `validate` and on `insert` alike;\n- controls: a static `readonly` key is still stripped with `reason: 'readonly'`, and a writable field still writes.\n\n**Contract.** The strip turns SQL's driver error into a success, and turns memory's silent store into a reported strip. `validate` starts refusing unknown keys it used to pass. The claim writes its own `Clause-②` reading for the `validate` narrowing and the enum widening (consumers of `reason` must stay exhaustive, per the docblock).\n\n**Serial.** #20701 (`domain:cli`) keeps the REST half and is `pm:blocked` on this card."

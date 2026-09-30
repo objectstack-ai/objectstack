@@ -2,7 +2,7 @@
   "number": 20796,
   "kind": "pull_request",
   "title": "docs(skills): objectstack-automation calls the api flow secret required and routes explicit-only starts to autolaunched",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs-user-decision",
     "size/s",
     "skip-changeset"
   ],
@@ -22,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T06:59:21Z",
-  "updated_at": "2026-09-30T08:26:40Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-30T08:54:57Z",
+  "closed_at": "2026-09-30T08:52:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-30T08:52:16Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/20796",

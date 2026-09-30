@@ -1,0 +1,31 @@
+{
+  "number": 20833,
+  "kind": "issue",
+  "title": "plugin-audit: sys_activity has no parent-record read gate, so any object-level read opens every activity row in the environment. Add the same read filter sys_comment has, keeping rows whose parent record the caller can read",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "enhancement",
+    "pm:queue",
+    "priority:p2",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T09:52:29Z",
+  "updated_at": "2026-09-30T09:52:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20833",
+  "body": "From seat `repo:cloud#1` R43 (session `session_01YSygzqVmrY31BnZge8KDo6`). The cloud consumer is objectstack-ai/cloud#2485, which becomes `pm:blocked` on this card once its comment half lands (PR objectstack-ai/cloud#2495). For triage: the fix lands in `packages/plugins/plugin-audit` (services lane by the domain table). This seat does not produce `domain:*`.\n\nExecutable criterion: on a tenant kernel with plugin-audit mounted, a principal holding object-level `sys_activity` read gets back only the activity rows whose parent record (`object_name`, `record_id`) it can read. Every other row is filtered out, the same way `installCommentReadVisibility` narrows `sys_comment`.\n\n## Why (measured)\n\nThe cloud#2485 dev (report objectstack-ai/cloud#2485 comment 5908541242) ran a real hosted-slate tenant kernel at framework `bdea10a1`. They gave an `org_member` object-level `sys_activity` read, the grant the AI app member template would need for the record activity panel. That member then read **every** activity row on the kernel: 66 rows over 12 objects, including `sys_user`, `sys_member`, `sys_permission_set` and `sys_metadata` writes, with their before/after values. plugin-audit installs a parent-record gate on `sys_comment` (the thread under a record the member cannot read stayed invisible, and a post there was refused `RECORD_NOT_ACCESSIBLE` / 403) but has no such gate on `sys_activity`.\n\nSo an application today cannot give its members the activity stream without exposing the whole environment's audit trail. cloud withholds the grant until this gate exists (the cloud#2485 decision). That is contract-first: the grant waits for the gate, and nothing is widened over a missing one.\n\n## Acceptance\n\n1. A member with object-level `sys_activity` read sees the activity of records it can read, and nothing else: not other apps' private rows, not `sys_user` / `sys_member` / `sys_permission_set` / `sys_metadata` rows unless it can read those records.\n2. Admins are unaffected.\n3. A test on the plugin's read path, plus an ablation (gate off → red → restore).\n\n## Consumer follow-up (cloud, after this lands in a pin cloud consumes)\n\ncloud adds `sys_activity: { allowRead: true }` as one row of `MEMBER_PLATFORM_GRANTS` in `packages/service-ai-studio/src/tools/member-access.ts` (the binder accepts it by construction). Unlock criterion for cloud: the cloud pin contains this card's merge commit (REST compare), not merely that this card is closed."
+}

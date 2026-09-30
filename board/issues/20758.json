@@ -2,8 +2,8 @@
   "number": 20758,
   "kind": "issue",
   "title": "spec(ui): retire `PageHeaderProps.breadcrumb` (\"Show breadcrumb\", default true) — no renderer draws a trail and the console shell already draws one; the spec half of objectui#11166",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:records",
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-justin"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T02:53:23Z",
-  "updated_at": "2026-09-30T06:49:42Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-30T14:08:49Z",
+  "closed_at": "2026-09-30T14:08:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20758",
   "body": "Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) as the **spec half** of objectstack-ai/objectui#11166, per that card's first grade. ⛔ Not a claim, ⛔ not a dispatch. Graded here: `enhancement` · `priority:p3` · `domain:spec` · `area:records` · `pm:queue`.\n\n## What is declared, and what honours it\n\n- `packages/spec/src/ui/component.zod.ts` `PageHeaderProps` (`strictObject`, about `:450`) declares `breadcrumb: z.boolean().default(true).describe('Show breadcrumb')` (about `:518`).\n- objectui's `PageHeaderRenderer` (`packages/components/src/renderers/layout/containers.tsx`) reads the key and draws an **empty** `div[data-page-breadcrumb-slot]` in both layouts. No code fills it (measured by the objectui#3906 dev at objectui PR #11162's head, and confirmed by that PR's contract review).\n- The console already draws the navigation trail once, in the shell: `@object-ui/app-shell`'s `AppHeader` renders the breadcrumb path inside `/apps/:appName/*`.\n\n## Ruling (triage, under the standing rule #18900 A′④: 「有 ⇒ 补消费端;没有 ⇒ 退役」)\n\n**RETIRE.** The key has no consumer. The default-true slot has rendered empty on every page header without anyone missing a trail, and the trail it would draw is the shell's. So a renderer would duplicate the shell, not supply something missing.\n\n- **This card (spec):** retire `breadcrumb` from `PageHeaderProps` through the ADR-0087 route, the way `icon` was retired from the same row (ADR-0087 D2). An authored `breadcrumb` (true or false) on a stored or bundled page loads with the key stripped and the ADR-0087 notice. ⛔ It is never a hard refusal of an existing page. The generated artefacts, forms and docs the retirement playbook lists move in the same PR.\n- **The objectui half** (objectui#11166): the renderer stops reading the key and drops the empty slot. The docs stop showing the key. That half lands after this one reaches objectui's install face, or reads the key defensively until it does.\n- **Same family, measured by this card, not assumed:** the spec also declares a `nav:breadcrumb` component (`emptyProps`, about `:5311`), and objectui has no renderer for it (`git grep \"nav:breadcrumb\"` over objectui `packages/*/src`: 0 hits). The dev measures whether any producer writes it. With none, it retires under the same rule in the same PR. With one, the report names it and it stays.\n- **`Clause-②: yes`** (a key leaves a published `strictObject`). The ADR-0087 conversion keeps stored pages loading, and the changeset carries the BREAKING banner the playbook requires.\n- **Pins:**\n  - a page header authored with `breadcrumb: true` and one with `breadcrumb: false` both load, with the key stripped and the notice recorded;\n  - the ADR-0087 ledger row is present;\n  - a page header without the key is unchanged (the control).\n\n**If the maintainer wants a page-level trail after all** (for example on pages outside `/apps/*`, where the shell draws none), that is ENFORCE: a renderer in objectui plus a real trail source. Say so on this card and it is re-graded. The ruling above reflects no measured pull today.\n\nDedupe: this repo's issues were searched for `breadcrumb PageHeaderProps` (0 hits, as the objectui card also recorded) and `nav:breadcrumb` (0 open cards on it)."

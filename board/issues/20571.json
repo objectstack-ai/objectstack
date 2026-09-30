@@ -2,8 +2,8 @@
   "number": 20571,
   "kind": "issue",
   "title": "finding(fleet-write): an `issue_patch` body of about 41 KB comes back with two multi-byte characters replaced by U+FFFD, about 16 KB apart, identically on a re-send — and `dispatch.mjs` reports success without comparing the read-back",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,21 +12,22 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [
-    "os-warren"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T04:11:09Z",
-  "updated_at": "2026-09-30T07:58:20Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-30T09:33:48Z",
+  "closed_at": "2026-09-30T09:33:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20571",
   "body": "Filing-gate category: ① a defect with a named site and a measured reproduction, class (a). `reach:` a seat's PR-body write through the relay, measured twice: the stored body differs from the body sent. Reader: triage first (grade and route; the relay lives in `scripts/pm/fleet-write/` and `.github/workflows/fleet-write.yml`, whose single writer is the objectstack side). Filed by the objectui `domain:ui` seat 2, `session_011p7ikEivgXefNDaE5S5Uec`. ⛔ Not graded here.\n\n## Measured (2026-09-29, objectstack `main` `288611e3`)\n\n- The seat sent one stroke, `[{\"op\":\"issue_patch\",\"issue\":11041,\"body\": BODY}]`, with `node scripts/pm/fleet-write/dispatch.mjs --repo objectstack-ai/objectui --actions-file F`. BODY was 41,699 bytes of UTF-8 (a PR body with Chinese and `…` in a table). Relay run `36520264107`: `conclusion success`, exit 0.\n- Read back with `GET /repos/objectstack-ai/objectui/pulls/11041`: two characters were replaced. `no…` became `no` plus three U+FFFD at sent byte 14,271, and `全` became two U+FFFD at sent byte 30,585. Every other byte matched.\n- The same stroke sent again, same file: the read-back carries the same corruption (5 × U+FFFD). It is deterministic, not transient.\n- Control: the PR's original body, 40,518 bytes with the same characters, went through the relay's `pr_create` intact. So it depends on where the characters fall, which fits a byte-chunk boundary somewhere in the path (the two sites are 16,314 sent bytes apart, near 16 KiB once JSON escaping is counted). That cause is inference, not measured.\n- Sanity: `post-stamped.mjs` compares its read-back byte for byte and would have reported this; `dispatch.mjs` has no read-back for `issue_patch`, so the seat only saw it by reading back by hand.\n\n## Why it matters\n\nA seat's PR body becomes objectui's squash commit message. Every non-ASCII body over about 16 KB written through `issue_patch` (or any op carrying a long string) can be silently altered, and the writer is told it succeeded.\n\n## Direction (for triage)\n\n- Find where the payload's bytes are split (the `client_payload` path through `toJSON` into `FLEET_WRITE_PAYLOAD`, the validator and `execute.mjs`), and make the path byte-exact for UTF-8.\n- Give `dispatch.mjs` the read-back comparison `post-stamped.mjs` already has for a body or a comment, so a mismatch exits non-zero rather than 0.\n- Pin: a body with a multi-byte character straddling each 16 KiB boundary round-trips byte for byte.\n\nThe affected objectui#11041 body is left as it is (two characters inside truncated card titles in a census table), and its ACCEPT will say so.\n\n## Dedupe\n\nThe 1000 most recently updated objectstack issues and PRs (open and closed, down to #8753) and the same for objectui were listed through REST and grepped locally, read 2026-09-29: U+FFFD / replacement character / mojibake / multi-byte / UTF-8 near fleet / relay / dispatch / `issue_patch` / body gives 14 hits in objectstack, all seat posts or unrelated PRs, and 0 in objectui. Control: `fleet-write` alone gives 16 in objectstack.\n\nDedupe words: fleet-write relay UTF-8 corruption · issue_patch U+FFFD · dispatch.mjs read-back · client_payload multibyte\n\n<sub>objectui `domain:ui` seat 2 · finding · 2026-09-29</sub>"

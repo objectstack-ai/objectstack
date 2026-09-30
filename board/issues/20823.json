@@ -1,0 +1,35 @@
+{
+  "number": 20823,
+  "kind": "pull_request",
+  "title": "feat(spec): the `picklist` metadata kind — a shared option list select fields reference by name (#19518)",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "protocol:system",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T09:10:30Z",
+  "updated_at": "2026-09-30T14:14:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20823",
+  "body": "Part of #19518\n\nClause-②: yes\n\nThe spec layer of the shared picklist:\n- the `picklist` kind: registered, loads before `object`, package-owned;\n- `Field.select({ picklist })`, refused when `options` is also declared;\n- the served shape `PicklistServedFieldSchema`;\n- `picklistExtensions`;\n- the `picklists.NAME` translation face and its resolvers.\n\nTwo gates this PR must keep green are also carried here:\n- the published platform skill lists the two new top-level keys (`check:skill-top-level-keys`);\n- `os i18n extract` walks `picklists.NAME.{label, options.VALUE}` (`check:i18n-walk-parity`).\n\nEvery pin that enumerates registered kinds or `FieldSchema` keys moves with the kind. That includes `driver-sql`'s column-collision classification.\n\nResolving the reference at runtime is #19519. Until then the liveness ledger grades the new keys `planned`. Refusing a `select` / `radio` with neither `options` nor `picklist` is #20827 (ruled A, after this PR). The CLI compile / validate path is #20825. #19518 stays open for its Tier H docs PR: the NORTH-STAR line and the two `records-forms` checklist items.\n\n## 维护者速读\n\n**改了什么:** `skills/objectstack-platform/SKILL.md` 的顶层键清单加上 `picklists`、`picklistExtensions` 两个键(第 43 行起)。同一文件 CLI 小节的一句指路文字(第 453 行附近)删掉两处:\n- 已失真的「below」:Part 3 已由 `595621d35c` 拆到 `references/operations.md`,不在本页下方;\n- 与 cheat sheet 重复的「High-level」。\n\n**读数:** 整文件 489 行不变;token 5829 → 5827,上限 5833;技能包总行数 4396 不变。`check-governed-merges`:75 个路径中 1 个命中登记(`skills/**`),所以是 Tier H;共 1564 行改动，低于 5000。\n\n**为什么改:** 本 PR 给 stack 新增了这两个顶层键。必需门禁 `check:skill-top-level-keys` 要求技能页的清单与 schema 一致;页面上没列的键,AI 作者就不会写。\n\n**风险与回滚:** 只改文字，链接目标不变，作者需要的内容一处没删。回滚办法是 revert `4049ae31ba`,但若不同时去掉这两个 stack 键，该门禁会重新变红。\n\n**席位意见:** 建议批准。复核 PASS 后，席位在本 PR 上贴出记录。\n\n**你要做的:** 看 SKILL.md 的两处改动，然后给出授权的 APPROVED 审阅，由席位落地;也可以亲手合并。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Sfe5YjBLwB9J3y8fvm2xq1\n"
+}

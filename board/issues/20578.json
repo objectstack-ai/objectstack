@@ -2,8 +2,8 @@
   "number": 20578,
   "kind": "issue",
   "title": "sdui-parser (save gate): `bind` and `hidden` join `BASE_PROPS`, the port of objectui#11008, so the save gate stops calling two declared BaseSchema keys unknown",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T04:34:24Z",
-  "updated_at": "2026-09-30T08:02:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-30T09:51:34Z",
+  "closed_at": "2026-09-30T09:51:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 6,
   "locked": false,
