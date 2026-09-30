@@ -138,10 +138,9 @@ ratchet(#2978)会先开火,要求你**有意删除**对应的 manifest key;删�
 为 #4650
 路径 3(`def no longer emitted by this build`)。这串输出本身就是路线的证据,留在 PR 里。
 
-枚举值收窄既然对四张 ratchet 不可见,它的处方就只能挂在**枚举自己的 `error` map**
-上、按 `issue.input` 分派(`packages/spec/src/data/hook-body.zod.ts` 的
-`HookBodyCapability`,沿用 `object.managedBy: 'system'` 的先例)—— 三条路线里没有一条
-适用于「def 存活、只少一个值」。
+枚举值收窄既然对四张 ratchet 不可见,它的处方就只能挂在**枚举自己**上:用
+`enumWithRetiredValues()`(`shared/retired-key.ts`)声明退役值及其处方,⛔ 不再手写 `error` map ——
+三条路线里没有一条适用于「def 存活、只少一个值」。
 
 ### guidance 字符串怎么写
 
