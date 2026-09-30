@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// #14676 — the same tombstone seen through the second carrier.
+// Commit 13c48c2a5 — the same tombstone seen through the second carrier.
 // `DeclarativeConnectorEntrySchema` and `ConnectorSchema` both wrap the shared
 // private `ConnectorBaseSchema` in the retired-default residue stage, the entry
 // schema adding the ADR-0097 cross-field rules on the base before wrapping.

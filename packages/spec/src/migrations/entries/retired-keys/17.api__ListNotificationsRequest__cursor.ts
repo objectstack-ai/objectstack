@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// #6361 — the notification-inbox pagination key, tombstoned on BOTH halves
+// Commit 90bbf2510 — the notification-inbox pagination key, tombstoned on BOTH halves
 // of `GET /api/v1/notifications` because one capability is never half-
-// deleted (maintainer ruling 2026-08-07, ruled jointly with #6363). Two
+// deleted (maintainer ruling 2026-08-07, ruled jointly with the `unreadCount` fix, commit 17d095413). Two
 // keys, one prescription: `NOTIFICATIONS_CURSOR_REMOVED` in
 // `api/protocol.zod.ts` is the single string both rejection sites raise.
 //

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
-// executing the #14369 liveness census (15 `dead` rows across the `crud` /
+// Commit b3a63d32c — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
+// executing the liveness census commit a3d5724c8 recorded (15 `dead` rows across the `crud` /
 // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
 // outside `normalizeConfig` and the normalized-config type; objectui @d4c6a86
 // clean; cloud @9b6abe0f2fd5 clean STRUCTURALLY — cloud never authors a
@@ -22,5 +22,5 @@
 // `enable.apiMethods`); `basePath` per object would contradict the one
 // deployment-wide data base (`crud.dataPrefix`) the discovery document
 // advertises. Its three ledger child rows collapse into the one `overrides`
-// row. Closes #14365's question about `overrides.*.operations` — no record left.
+// row. Closes the `z.partialRecord` question (commit f60ab90ae) on `overrides.*.operations` — no record left.
 export const entry = 'api/RouteGenerationConfig:overrides';

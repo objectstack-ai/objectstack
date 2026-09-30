@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// #11332 — ADR-0049 enforce-or-remove on the plugin manifest's three dead
+// Commit dce5cd4f0 — ADR-0049 enforce-or-remove on the plugin manifest's three dead
 // top-level containers; census and registration major recorded once in the
 // sibling entry `kernel/Manifest:capabilities`, the why-no-D2-conversion
 // reasoning in `kernel/Manifest:loading` (the precedent); the D3 semantic

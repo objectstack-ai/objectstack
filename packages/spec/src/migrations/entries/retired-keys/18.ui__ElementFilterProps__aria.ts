@@ -16,7 +16,7 @@
 // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
 // tombstones ship on the 17.x line (launch-window convention: accept-set
 // narrowings ride minor releases) and the prescription lives at the major
-// boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+// boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
 // Sources are rewritten by the D2 conversion `element-filter-removed`, which
 // strips all six keys and leaves the bare node — which the parse then refuses
 // by name (`RETIRED_PAGE_COMPONENT_TYPES`), with the prescription to delete the

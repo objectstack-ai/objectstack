@@ -12,7 +12,7 @@
 // §5.2): only its own unit test and the #11925 negative guard, both updated
 // in the retiring PR. No carrier key, no authored document, so no tombstone
 // and no D2 conversion — this table plus the D3 semantic entry
-// `package-rollback-response-retired` ARE the declaration (the #8715 route-3
+// `package-rollback-response-retired` ARE the declaration (commit 2c86fe3ea's route-3
 // shape). The live route's true contract is
 // `RollbackToPackageCommitResponseSchema` (`api/package-lifecycle.zod.ts`),
 // authored in the same PR AFTER this retirement per the ruling's sequencing.
@@ -20,5 +20,5 @@
 // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
 // removal ships on the 17.x line (launch-window convention: accept-set
 // narrowings ride minor releases) and the prescription lives at the major
-// boundary where `migrate meta` users look (the #8586 / #8715 precedent).
+// boundary where `migrate meta` users look (the #8586 / commit 2c86fe3ea precedent).
 export const entry = 'api/PackageRollbackResponse';

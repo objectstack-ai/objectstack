@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// #11846 — ADR-0049 enforce-or-remove on the preview-mode block (maintainer
+// Commit 0c2334f6c — ADR-0049 enforce-or-remove on the preview-mode block (maintainer
 // ruling 2026-08-27, Option A: remove). The key was declared as an auth bypass
 // — its docstring promised auto-login as a simulated admin and named a
 // production guard "the runtime must enforce" — and NOTHING implemented any of
@@ -23,5 +23,5 @@
 // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
 // removal ships on the 17.x line (launch-window convention: accept-set
 // narrowings ride minor releases) and the prescription lives at the major
-// boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+// boundary where `migrate meta` users look (the precedent of commit 4bfe1a539, PR #8666).
 export const entry = 'kernel/KernelContext:previewMode';

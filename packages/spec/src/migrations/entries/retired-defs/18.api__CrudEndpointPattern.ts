@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-// #14691 — `api/CrudEndpointPattern` (the `{ method, path, summary, description }`
+// Commit b3a63d32c — `api/CrudEndpointPattern` (the `{ method, path, summary, description }`
 // value shape of `crud.patterns`) leaves with its carrier key: its ONLY consumer
 // was `CrudEndpointsConfigSchema.patterns`, tombstoned in the same change under
 // ADR-0049 enforce-or-remove, and an exported value schema with no consumer
