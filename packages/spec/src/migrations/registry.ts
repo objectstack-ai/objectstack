@@ -18013,9 +18013,13 @@ const step18: MigrationStep = {
         + 'flat shorthand — carries a positive integer. Well-formed values (`10`, `25`, `50`) '
         + 'parse byte-identically to before, a `pagination` bag carrying sibling keys parses '
         + 'and keeps them, and absence stays absence. A stored page whose `object-grid` node '
-        + 'carries `pageSize: 0` is refused on its next authoring-path save with a per-key '
-        + 'issue at `pagination.pageSize`; the author deletes the key or writes the page size '
-        + 'they meant.',
+        + 'carries `pagination: { pageSize: 0 }` still saves and loads — `properties` on a page '
+        + 'component is not parsed on the metadata save path — and the component-props gate '
+        + 'reports it as an advisory `component-props-invalid` finding at `pagination.pageSize` '
+        + 'on `os validate`, `os build` and `os lint`; a `pageSizeOptions` entry and the flat '
+        + '`pageSize` shorthand are reported the same way at their own paths. The author deletes '
+        + 'the key or writes the page size they meant, and `os validate` then reports no '
+        + '`component-props-invalid` finding for that node.',
     },
     {
       id: 'ui-react-list-view-binding-aliases-retired',
