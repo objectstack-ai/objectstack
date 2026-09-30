@@ -334,15 +334,21 @@ Implementation (`packages/metadata-protocol/src/protocol.ts`):
   carrying `path/message/code` for each Zod issue. REST layer
   (`packages/rest/src/rest-server.ts`) already propagates `status`
   and `code` to the response.
-- The persisted document is the **parsed body** (`parsed.data`) once every
-  round-trip key is declared. A key a client writes onto a stored row and
-  reads back after a reload is declared on the type's schema, with its
-  meaning, so the parse keeps it; a key nothing declares is not stored. The
-  canonical fields are type-checked, and the stored row is what the contract
-  says it is. ⚠️ **Ruled, not yet in force:** the storage switch is the
-  ruling's last stage and has not landed, so today `saveMetaItem` still
-  stores the request body (`request.item`). The note below records what is
-  declared and what remains.
+- The persisted document of a `view` is the parsed value of every key its
+  request body carried (`projectStorableViewBody`), not the whole parse
+  output: a key nothing declares is dropped, a declared key keeps its parsed,
+  normalised value, a moved key is stored under its canonical spelling
+  (`groups` → `sections`, `visibleOn` → `visibleWhen`), and a schema default
+  the author did not write is not stored — the rule
+  [ADR-0087's addendum 2026-08-01b](./0087-metadata-protocol-upgrade-contract.md#addendum-2026-08-01b--flows-reach-the-finish-line-too-4454)
+  records for a flow's `storable`. The stored row re-parses to exactly what
+  the save accepted. A key a client writes onto a stored `view` row and reads
+  back after a reload is declared on the type's schema, with its meaning, so
+  the parse keeps it. The canonical fields are type-checked, and the stored
+  row is what the contract says it is. Every other type still stores its
+  request body (`request.item`). In force since PR #20868 (`9905e61ca2`);
+  rows stored before it are not migrated. The notes below record what is
+  declared and what a `view` save stores.
 
   > **Amended (2026-09-30) — the persisted document is the parsed body once
   > every round-trip key is declared, and a stored `view` row's round-trip
