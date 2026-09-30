@@ -1060,8 +1060,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       # `actions: write` is the cancel (POST .../runs/{id}/cancel); it also
-      # covers the three reads (waiting runs, their jobs, their pending
-      # deployments). `contents: read` is the checkout of the script.
+      # covers the reads (both run lists, each named run, its jobs and its
+      # pending deployments). `contents: read` is the checkout of the script.
       actions: write
       contents: read
     steps:

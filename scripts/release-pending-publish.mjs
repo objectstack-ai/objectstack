@@ -67,8 +67,7 @@
  * itself and an unreachable registry cannot publish anything either.
  *
  * `sweep` -- the waiting-prompt half. Finds this workflow's `waiting` runs
- * (`collectWaitingRuns` says how, and why the server's status filter is never
- * the only reading), and CANCELS a run only when ALL of these hold:
+ * (`collectWaitingRuns`), and CANCELS a run only when ALL of these hold:
  *
  *   - it is not the calling run;
  *   - its event is `push` (a dispatch is a human's own act, and the D4 `force`
@@ -346,28 +345,22 @@ function expectOk(res, what) {
   return res.body;
 }
 
-/**
- * How far back the unfiltered read looks. GitHub fails a job that has waited 30
- * days at an environment, so no run created earlier is still waiting (unless it
- * was re-run; only the filtered read reaches that far). A shorter "publish
- * window" would have missed the 17.4.0 prompt, which waited 20 days.
- */
+// The unfiltered read's reach. GitHub fails a job after 30 days at an environment,
+// so no older run still waits (bar a re-run, which only the filter reaches); the
+// 17.4.0 prompt waited 20 days, so a shorter "publish window" would have missed it.
 export const WAITING_READ_BACK_DAYS = 30;
 /** The page cap: release.yml made 2,800 runs (28 pages) in the 30 days to 2026-09-30. */
 export const WAITING_READ_MAX_PAGES = 50;
 const PER_PAGE = 100;
 
 /**
- * Read every waiting run of one workflow into `judgeWaitingRuns`' shape. `http`
- * and `now` are injectable.
- *
- * Three readings, never one. The server's `?status=waiting` filter answered the
- * job token an empty list on both main pushes of 2026-09-29 (runs 36579512725,
- * 36579680181) while the same URL listed a waiting run to another reader, so
- * the unfiltered list is also read back `readBackDays` and `status` is selected
- * here; every run either list names is then read directly, and that read's
- * status is the one judged. A disagreement, or a list read that stopped short,
- * is returned in `anomalies` -- the caller prints each as a warning.
+ * Every waiting run of one workflow, in `judgeWaitingRuns`' shape; `http` and
+ * `now` are injectable. The `?status=waiting` filter answered the job token an
+ * empty list on 2026-09-29 (runs 36579512725, 36579680181) while it listed a
+ * waiting run to another reader, for a reason still unmeasured -- so the
+ * unfiltered list is read back too, each run the filter names or the list shows
+ * unfinished is read directly, and only that read's status is judged. A
+ * disagreement or a short list read lands in `anomalies`, printed as warnings.
  */
 export async function collectWaitingRuns({
   http,
@@ -382,7 +375,7 @@ export async function collectWaitingRuns({
   const filtered = { total: list.total_count, ids: list.workflow_runs.map((r) => String(r.id)) };
 
   const cutoff = now - readBackDays * 86_400_000;
-  const unfiltered = { days: readBackDays, runs: 0, pages: 0, oldest: null, stop: 'cap', ids: [] };
+  const unfiltered = { days: readBackDays, runs: 0, pages: 0, oldest: null, stop: 'cap', open: [] };
   const seen = new Set();
   while (unfiltered.pages < maxPages) {
     unfiltered.pages += 1;
@@ -396,7 +389,7 @@ export async function collectWaitingRuns({
       seen.add(String(r.id));
       unfiltered.runs += 1;
       unfiltered.oldest = r.created_at;
-      if (r.status === 'waiting') unfiltered.ids.push(String(r.id));
+      if (r.status !== 'completed') unfiltered.open.push({ id: String(r.id), status: r.status });
     }
     if (page.length < PER_PAGE) {
       unfiltered.stop = 'end';
@@ -420,13 +413,13 @@ export async function collectWaitingRuns({
   }
 
   const runs = [];
-  for (const id of new Set([...filtered.ids, ...unfiltered.ids])) {
+  for (const id of new Set([...filtered.ids, ...unfiltered.open.map((o) => o.id)])) {
     const r = expectOk(await http('GET', `/repos/${repo}/actions/runs/${id}`), `reading run ${id}`);
     const run = { id: r.id, event: r.event, status: r.status, headSha: r.head_sha, jobs: [], environments: [] };
     runs.push(run);
     if (r.status !== 'waiting') continue;
     if (!filtered.ids.includes(id)) {
-      anomalies.push(`the status=waiting filter omitted run ${id}, which the unfiltered list and a direct read both answer waiting.`);
+      anomalies.push(`the status=waiting filter omitted run ${id}, which a direct read answers waiting.`);
     }
     const jobs = expectOk(
       await http('GET', `/repos/${repo}/actions/runs/${id}/jobs?filter=latest&per_page=100`),
@@ -442,14 +435,14 @@ export async function collectWaitingRuns({
   return { runs, filtered, unfiltered, anomalies };
 }
 
-/** The readings a sweep verdict rests on, as one summary line -- printed on every run, "none waiting" included. */
+/** The readings behind a sweep verdict, as one summary line printed on every run. */
 export function describeReadings({ runs, filtered, unfiltered }) {
   const stop = { end: 'the whole list', bound: `the ${unfiltered.days}-day bound`, cap: 'CUT SHORT at the page cap' }[unfiltered.stop];
-  const direct = runs.map((r) => `${r.id} ${r.status}`).join(', ') || 'none (no list named a waiting run)';
+  const direct = runs.map((r) => `${r.id} ${r.status}`).join(', ') || 'none (no list named an unfinished run)';
   return (
     `- readings: \`?status=waiting\` total_count ${filtered.total}, listed [${filtered.ids.join(', ')}]; ` +
     `unfiltered ${unfiltered.runs} run(s) over ${unfiltered.pages} page(s) back to ${unfiltered.oldest ?? 'no run'} ` +
-    `(${stop}), waiting [${unfiltered.ids.join(', ')}]; direct: ${direct}`
+    `(${stop}), unfinished [${unfiltered.open.map((o) => `${o.id} ${o.status}`).join(', ')}]; direct: ${direct}`
   );
 }
 
@@ -536,7 +529,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'a shallow clone -> refused, never a graft-boundary answer': 1,
   'npm view -> present / absent / unknown': 5,
   'a waiting prompt -> cancelled only on the push lane, only when its version is on npm': 9,
-  'the waiting-runs read -> a run the status filter omits is still judged, and a short or contradictory read is flagged': 10,
+  'the waiting-runs read -> a run the status filter omits is still judged, and a short or contradictory read is flagged': 11,
   'an event with no release predicate -> refused': 1,
 });
 const SELF_TEST_BATTERY_FLOOR = 12;
@@ -800,9 +793,19 @@ async function selfTest() {
     pages: [filler(1000, 100, 1), [...filler(1100, 99, 20), listed(1199, 'completed', 31)], [listed(1200, 'waiting', 32)]],
   });
   check(
-    deep.read.unfiltered.stop === 'bound' && deep.read.unfiltered.pages === 2 &&
-      !deep.calls.some((c) => /page=3/.test(c)) && deep.read.anomalies.length === 0,
-    'the read stops at the page whose last run is older than the bound, and asks for no page past it',
+    deep.read.unfiltered.stop === 'bound' && deep.read.unfiltered.pages === 2 && !deep.calls.some((c) => /page=3/.test(c)) &&
+      !deep.calls.some((c) => /\/actions\/runs\/\d+$/.test(c)) && deep.read.anomalies.length === 0,
+    'the read stops at the page whose last run is older than the bound, asks for no page past it, and reads no completed run directly',
+  );
+
+  const mislisted = await readWith({
+    pages: [[listed(211, 'in_progress', 1)]],
+    direct: { 211: publishing(211, '1.1.0') },
+  });
+  check(
+    judgeWaitingRuns({ runs: mislisted.read.runs, currentRunId: 900, npmStateOf: npmOf(['1.1.0']) }).cancel.map((c) => c.id).join() === '211' &&
+      mislisted.read.anomalies.some((a) => /omitted run 211/.test(a)),
+    'a run the unfiltered list calls in_progress but a direct read answers waiting -> judged on the direct read (cancel), and flagged',
   );
 
   const old = await readWith({
