@@ -9603,7 +9603,7 @@ export class RestServer {
         //
         // A zero-row result still emits the header row when the column set is
         // authoritative (the security service's readable projection, or an explicit
-        // `fields=`), so an empty export doubles as an import template. Without a
+        // `fields=`). The import template is `template=true`, not this. Without a
         // projection it stays headerless, so FLS-hidden column names never leak.
         //
         // Streams the response so 50k-row exports do not buffer in memory; the

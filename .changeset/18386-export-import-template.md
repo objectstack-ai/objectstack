@@ -7,8 +7,8 @@ feat(rest): `GET /api/v1/data/:object/export?template=true` answers an xlsx impo
 Clause-②: yes (widening)
 
 The export door takes one more query parameter, `template`. `template=true`
-answers an `.xlsx` workbook with no data rows; `template=false`, or no
-`template` parameter, answers the export exactly as before, byte for byte.
+answers an `.xlsx` workbook with no data rows; `template=false` answers the export.
+Without a `template` parameter the export is exactly as before, byte for byte.
 
 - **Columns.** Every field of the object except
   those marked `system` or `readonly`, and `formula`, `summary` and
