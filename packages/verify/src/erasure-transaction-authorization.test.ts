@@ -160,11 +160,11 @@ describe('#10792 — the erasure route answers authorization on a pool max=1 dia
   it('a signed-in plain member gets the AUTHORIZATION refusal, not 401', async () => {
     const answer = await fire('POST', '/auth/admin/remove-user', { userId: targets[2] }, memberToken);
     expect(answer.status, `member remove-user: ${answer.status} ${answer.body}`).toBe(403);
-    // #11477 (maintainer-ruled option A): the route is now shaded by an
+    // Commit 6dd3e6968 (maintainer-ruled option A): the route is now shaded by an
     // ObjectStack raw mount whose gateAdmin runs BEFORE the break-glass guard,
     // so the refusal a plain member hears is the gate's target-independent
     // PERMISSION_DENIED — no longer the vendor's
-    // YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS, which the pre-#11477 route only
+    // YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS, which the route before that commit only
     // reached after the guard had already answered. This pin's intent is
     // unchanged: the member hears an AUTHORIZATION verdict, and asserting the
     // code (not just the status) keeps a 403 from some unrelated layer from
