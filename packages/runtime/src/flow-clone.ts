@@ -152,8 +152,9 @@ export const FLOW_CLONE_DROPPED_KEYS: readonly string[] = Object.freeze([
  * `status`, published through `PUT /:name`. A clone carries no package
  * envelope (see {@link FLOW_CLONE_DROPPED_KEYS}), so it is a flow authored in
  * this deployment, and the activation toggle — which switches packaged flows
- * only — refuses it. The toggle is named for the flow it was copied from,
- * which is the packaged one.
+ * only — refuses it. That holds whatever the clone was copied from: the clone
+ * door takes any registered flow as its source, packaged or not, so the
+ * notice makes no claim about the source's provenance.
  */
 export const FLOW_CLONE_NOTICE =
     'References are not re-pointed: this clone calls exactly what the original called '
@@ -163,7 +164,7 @@ export const FLOW_CLONE_NOTICE =
     + 'If that is not what you want, switch the clone off through its own status: send its '
     + 'complete definition with `status: \'obsolete\'` to `PUT /api/v1/automation/<name>`. '
     + 'The activation toggle (`POST /api/v1/automation/<name>/toggle`) switches packaged flows '
-    + 'only, such as the one it was copied from, and refuses the clone.';
+    + 'only and refuses the clone.';
 
 /** ADR-0112 envelope for the same-name refusal: a status AND a code. */
 export const FLOW_CLONE_NAME_TAKEN_STATUS = 409;
