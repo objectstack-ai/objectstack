@@ -2672,12 +2672,13 @@ function collectPermissionGrantObjectErrors(
  * {@link InlineGridColumnSchema}, and for no other.
  *
  * Read from the renderer, not decided here: objectui's `hydrateColumns`
- * (`packages/plugin-form/src/deriveMasterDetail.ts`, at the `.objectui-sha`
- * pin) leaves a column that declares a `type` alone and otherwise sets
- * `type: fieldTypeToColumnType(childField.type)`, whose only `currency` arm is
- * the `currency` field type. Today the column schema's one type-conditional
- * rule is the `currency` refusal of `scale`, so `currency` is the one row; a
- * new type-conditional rule on the column adds its row here.
+ * (`packages/plugin-form/src/deriveMasterDetail.ts`, read at the
+ * `.objectui-sha` pin `db11afd4967c`) leaves a column that declares a `type`
+ * alone and otherwise sets `type: fieldTypeToColumnType(childField.type)`,
+ * whose only `currency` arm is the `currency` field type. Today the column
+ * schema's one type-conditional rule is the `currency` refusal of `scale`, so
+ * `currency` is the one row; a new type-conditional rule on the column adds its
+ * row here, and `inline-grid-column-carriers.test.ts` reds until it does.
  */
 const HYDRATED_INLINE_COLUMN_TYPE: Readonly<Record<string, 'currency'>> = {
   currency: 'currency',
@@ -2711,9 +2712,8 @@ const hasOwnKey = (record: object, key: string): boolean => Object.prototype.has
  *   `formViews` entry) — a column names a field of the subform's
  *   `childObject`.
  *
- * Resolution is against the stack's own objects, like the view data-source
- * check in {@link validateCrossReferences}: a `childObject` this stack does not
- * declare, or a column naming no field of it, is not judged here — an
+ * Resolution is against the stack's own `objects`: a `childObject` this stack
+ * does not declare, or a column naming no field of it, is not judged here — an
  * unresolved column is not a wrong one, and the console's render-time report
  * stays the backstop for it.
  */

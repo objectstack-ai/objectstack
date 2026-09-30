@@ -355,7 +355,13 @@ describe('major 18 in the conversions registry — two retirements, no merge dri
       expect(placementFindings(side)).toEqual([]);
     }
     expect(sortFindings(retireAtListEnd(SOURCE, A, NEXT_ORDER))).not.toEqual([]);
+    // A's entry follows its neighbour's, so a neighbour placed by the rule is
+    // found too: its entry is now followed by A's, and A is defined elsewhere.
+    const neighbour = IDENTS[k - 1]!;
     expect(placementFindings(retireAtDefinitionsEnd(SOURCE, A, NEXT_ORDER))).toEqual([
+      ...(PLACED_BEFORE_THE_RULE.has(neighbour)
+        ? []
+        : [`${neighbour} is defined above ${IDENTS[k]}; define it directly above ${A}'s definition, the entry that follows it`]),
       `${A} is defined above nothing (it is the last conversion defined); define it directly above ${IDENTS[k]}'s `
         + 'definition, the entry that follows it',
     ]);

@@ -32,6 +32,8 @@
  */
 
 import {
+  SUPPORTED_TEMPORAL_YEARS,
+  isOutsideTemporalYearRange,
   isUninterpretableTemporalComparand,
   temporalStorageForm,
   zonedWallClockToUtcMs,
@@ -159,7 +161,8 @@ export interface FieldCoerceError {
  * label and quotes the offending cell — never the API field name (#3957).
  *
  * `code` stays the machine identity the importer's row report and its tests key
- * off; `messageKey` selects the sentence from the shared catalog.
+ * off; `messageKey` selects the sentence from the shared catalog, and `params`
+ * fills its words beyond the cell (#20846: a kind's supported years).
  */
 function coerceError(
   meta: ExportFieldMeta | undefined,
@@ -168,6 +171,7 @@ function coerceError(
   messageKey: string,
   value: unknown,
   ctx: CoerceContext,
+  params?: Record<string, unknown>,
 ): { error: FieldCoerceError } {
   const label = meta?.label?.trim() || field;
   return {
@@ -175,7 +179,7 @@ function coerceError(
       field,
       code,
       message: renderValidationMessage(
-        { messageKey, label, field, params: { value: String(value) } },
+        { messageKey, label, field, params: { ...(params ?? {}), value: String(value) } },
         { locale: ctx.locale, translate: ctx.translate },
       ),
     },
@@ -457,8 +461,9 @@ function utcClock(t: Date): string {
  * Returns `undefined` when the cell is not a recognisable date/time, and the
  * caller fails the row with the write door's code for the same cell:
  * `invalid_date` for a `date` / `datetime` (`import_invalid_date` /
- * `import_invalid_datetime`), `invalid_time` for a `time`
- * (`import_invalid_time`).
+ * `import_invalid_datetime`, or [#20846] the write door's range sentence for a
+ * cell in a year outside the kind's supported years — {@link outsideYears}),
+ * `invalid_time` for a `time` (`import_invalid_time`).
  *
  * ## Which text is read at all (#20534)
  *
@@ -571,6 +576,32 @@ export function parseDateCell(
   return utcClock(instant);
 }
 
+/**
+ * [#20846] The years a refused `date` / `datetime` cell's range sentence names,
+ * or `undefined` when the cell gets the import's own "is not a valid date"
+ * sentence. A cell whose year falls outside the kind's supported years — the
+ * one range, `@objectstack/core`'s `isOutsideTemporalYearRange`, asked of what
+ * `Date.parse` reads, as the write door asks it — is refused for its year,
+ * whatever its spelling: `10000-01-01` and `+010000-01-01` are no shape this
+ * reader takes, and "is not a valid date" sent their author to re-spell a
+ * value no spelling of year 10000 makes admissible. A cell this reader DOES
+ * take in such a year (`0500-07-15T10:00:00Z` for a `datetime`, `0000-06-15`)
+ * passes here and meets the write door, which names the same years in the same
+ * words: one sentence per kind for both doors of one import.
+ *
+ * The years are core's `SUPPORTED_TEMPORAL_YEARS`, spelled with four digits,
+ * never a copy of the numbers. A number (an Excel serial, epoch
+ * milliseconds) is never a temporal cell, whatever year it names, and keeps
+ * the plain sentence, as the write door keeps it for a number.
+ */
+function outsideYears(raw: unknown, kind: 'date' | 'datetime'): { firstYear: string; lastYear: string } | undefined {
+  const value = typeof raw === 'string' ? raw.trim() : raw;
+  const readable = value instanceof Date || (typeof value === 'string' && !Number.isNaN(Date.parse(value)));
+  if (!readable || !isOutsideTemporalYearRange(value, kind)) return undefined;
+  const { first, last } = SUPPORTED_TEMPORAL_YEARS[kind];
+  return { firstYear: String(first).padStart(4, '0'), lastYear: String(last).padStart(4, '0') };
+}
+
 // ── options (select / multiselect) ─────────────────────────────────
 
 /**
@@ -644,9 +675,14 @@ export async function coerceFieldValue(
     if (d === undefined) {
       // [#20722] The write door's code for the same cell — `invalid_time` for a
       // `time`, `invalid_date` for a `date` / `datetime` — and three sentences.
+      // [#20846] Five: a cell in a year outside a `date`'s or a `datetime`'s
+      // supported years takes the write door's range sentence for its kind.
       const code = t === 'time' ? 'invalid_time' : 'invalid_date';
-      const key = t === 'datetime' ? 'import_invalid_datetime' : t === 'time' ? 'import_invalid_time' : 'import_invalid_date';
-      return coerceError(meta, field, code, key, raw, ctx);
+      const years = t === 'time' ? undefined : outsideYears(raw, t);
+      const key = years
+        ? (t === 'datetime' ? 'invalid_datetime_range' : 'invalid_date_range')
+        : t === 'datetime' ? 'import_invalid_datetime' : t === 'time' ? 'import_invalid_time' : 'import_invalid_date';
+      return coerceError(meta, field, code, key, raw, ctx, years);
     }
     return { value: d };
   }
