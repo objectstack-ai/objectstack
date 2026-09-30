@@ -373,7 +373,7 @@ describe('templates survive npm packing', () => {
     expect(rules).toContain('.env');
   });
 
-  // The first dot-DIRECTORY the template has ever carried (#16330). The set
+  // The first dot-DIRECTORY the template has ever carried (commit 4998efa71). The set
   // comparison above already covers it, but it names nothing: a strip of
   // `.github` would read there as "some file went missing". Naming the path
   // literally, the way the .dockerignore case below does, is what makes the
@@ -495,7 +495,7 @@ describe('blank template pnpm build approvals (#3119)', () => {
 
 // A brand-new scaffold's very first `pnpm install` reported two unmet peers —
 // on the one screen where a newcomer is deciding whether this project is solid,
-// with nothing they did to cause it and nothing they can do about it (#10326).
+// with nothing they did to cause it and nothing they can do about it (until commit 675ab574e).
 // Both are third-party ranges we cannot edit, so the declaration is pnpm's
 // scoped `allowedVersions`, and it has to travel INSIDE the scaffold: a
 // `peerDependencyRules` block in this repo's own pnpm-workspace.yaml would not
