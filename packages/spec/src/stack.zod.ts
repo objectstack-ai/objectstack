@@ -26,6 +26,7 @@ import { lintUnknownAuthoringKeys, lintUnknownStackKeys } from './kernel/metadat
 
 // Data Protocol
 import { ObjectSchema, ObjectExtensionSchema } from './data/object.zod';
+import { InlineGridColumnSchema } from './data/field.zod';
 import { SeedSchema } from './data/seed.zod';
 
 // UI Protocol
@@ -2665,6 +2666,115 @@ function collectPermissionGrantObjectErrors(
 }
 
 /**
+ * The inline grid column type a column that declares NO `type` renders as,
+ * keyed by the type of the child field it names — for the field types whose
+ * column type carries a type-conditional refusal in
+ * {@link InlineGridColumnSchema}, and for no other.
+ *
+ * Read from the renderer, not decided here: objectui's `hydrateColumns`
+ * (`packages/plugin-form/src/deriveMasterDetail.ts`, at the `.objectui-sha`
+ * pin) leaves a column that declares a `type` alone and otherwise sets
+ * `type: fieldTypeToColumnType(childField.type)`, whose only `currency` arm is
+ * the `currency` field type. Today the column schema's one type-conditional
+ * rule is the `currency` refusal of `scale`, so `currency` is the one row; a
+ * new type-conditional rule on the column adds its row here.
+ */
+const HYDRATED_INLINE_COLUMN_TYPE: Readonly<Record<string, 'currency'>> = {
+  currency: 'currency',
+};
+
+/** Own-key lookup — a column `name` such as `constructor` must not resolve up the prototype chain. */
+const hasOwnKey = (record: object, key: string): boolean => Object.prototype.hasOwnProperty.call(record, key);
+
+/**
+ * [#20901] Inline grid columns whose TYPE comes from the child field, judged by
+ * the column contract's own rules against the type they will render as.
+ *
+ * `InlineGridColumnSchema` refuses `scale` on a column that DECLARES
+ * `type: 'currency'` (ruling B on #19629, remedy 乙 on #19910), and sees only
+ * the declared type: an identity-only column (`{ name: 'amount', scale: 2 }`)
+ * takes its type from the child field when the grid hydrates it, so a column
+ * over a `currency` child field published green carrying the refused key. The
+ * child field is a fact the stack holds, so this is where it is judged.
+ *
+ * ⛔ No second rule. The verdict is the column schema's own: the column is
+ * re-parsed as `{ ...column, type: <resolved> }` and every issue that parse
+ * raises is reported, with the schema's own message. The column already passed
+ * the stack's parse without the type, so an issue here is one the resolved
+ * type brings.
+ *
+ * Both carriers of the column are walked:
+ *
+ * - a relationship field's `inlineColumns` — the field sits on the CHILD
+ *   object, so a column names a field of the object that owns the field;
+ * - a form view's `subforms[].columns` (the container's `form` and each
+ *   `formViews` entry) — a column names a field of the subform's
+ *   `childObject`.
+ *
+ * Resolution is against the stack's own objects, like the view data-source
+ * check in {@link validateCrossReferences}: a `childObject` this stack does not
+ * declare, or a column naming no field of it, is not judged here — an
+ * unresolved column is not a wrong one, and the console's render-time report
+ * stays the backstop for it.
+ */
+function collectHydratedInlineColumnErrors(config: ObjectStackDefinition): string[] {
+  const errors: string[] = [];
+  const fieldsByObject = new Map<string, Record<string, unknown>>();
+  for (const obj of config.objects ?? []) {
+    if (!isRecord(obj) || !isRecord(obj.fields)) continue;
+    fieldsByObject.set(obj.name, obj.fields);
+  }
+
+  const judge = (columns: unknown, childObject: string, where: string): void => {
+    const childFields = fieldsByObject.get(childObject);
+    if (!childFields || !Array.isArray(columns)) return;
+    columns.forEach((column: unknown, k: number) => {
+      if (!isRecord(column) || column.type !== undefined || typeof column.name !== 'string') return;
+      const childField = hasOwnKey(childFields, column.name) ? childFields[column.name] : undefined;
+      const fieldType = isRecord(childField) ? childField.type : undefined;
+      const resolved = typeof fieldType === 'string' && hasOwnKey(HYDRATED_INLINE_COLUMN_TYPE, fieldType)
+        ? HYDRATED_INLINE_COLUMN_TYPE[fieldType]
+        : undefined;
+      if (!resolved) return;
+      const verdict = InlineGridColumnSchema.safeParse({ ...column, type: resolved });
+      if (verdict.success) return;
+      for (const issue of verdict.error.issues) {
+        const at = issue.path.map((segment) => `.${String(segment)}`).join('');
+        errors.push(
+          `${where}[${k}]${at}: column '${column.name}' declares no \`type\`, so it renders as a ` +
+            `\`${resolved}\` column (field '${childObject}.${column.name}' is \`${fieldType}\`). ${issue.message}`,
+        );
+      }
+    });
+  };
+
+  for (const obj of config.objects ?? []) {
+    if (!isRecord(obj) || !isRecord(obj.fields)) continue;
+    for (const [fieldName, field] of Object.entries(obj.fields)) {
+      if (!isRecord(field)) continue;
+      judge(field.inlineColumns, obj.name, `Object '${obj.name}' field '${fieldName}' inlineColumns`);
+    }
+  }
+
+  for (const [i, view] of (config.views ?? []).entries()) {
+    const forms: Array<[where: string, form: unknown]> = [];
+    if (view.form) forms.push([`View[${i}].form`, view.form]);
+    for (const [key, form] of Object.entries(view.formViews ?? {})) {
+      forms.push([`View[${i}].formViews.${key}`, form]);
+    }
+    for (const [where, form] of forms) {
+      const subforms = isRecord(form) ? form.subforms : undefined;
+      if (!Array.isArray(subforms)) continue;
+      subforms.forEach((subform: unknown, j: number) => {
+        if (!isRecord(subform) || typeof subform.childObject !== 'string') return;
+        judge(subform.columns, subform.childObject, `${where}.subforms[${j}].columns`);
+      });
+    }
+  }
+  return errors;
+}
+
+/**
  * Perform strict cross-reference validation on a parsed stack definition.
  * Returns an array of error messages (empty if valid).
  *
@@ -2739,6 +2849,10 @@ function validateCrossReferences(
       }
     }
   }
+
+  // Validate identity-only inline grid columns against the child field's type
+  // (#20901) — both carriers, the column schema's own verdict.
+  errors.push(...collectHydratedInlineColumnErrors(config));
 
   // Validate seed data → object references. ARTIFACT-SCOPED (#18202).
   errors.push(...collectSeedDataObjectErrors(config, artifactScope));
