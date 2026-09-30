@@ -163,6 +163,7 @@
     "defineObjectExtension": "src/data/object.zod.ts#defineObjectExtension (function)",
     "definePage": "src/ui/page.zod.ts#definePage (function)",
     "definePermissionSet": "src/security/permission.zod.ts#definePermissionSet (function)",
+    "definePicklist": "src/data/picklist.zod.ts#definePicklist (function)",
     "definePosition": "src/identity/position.zod.ts#definePosition (function)",
     "defineReport": "src/ui/report.zod.ts#defineReport (function)",
     "defineSharingRule": "src/security/sharing.zod.ts#defineSharingRule (function)",
