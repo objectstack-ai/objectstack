@@ -1631,6 +1631,56 @@ async function registerAndSaveFlow(
     return { registered };
 }
 
+/** The engine methods {@link unregisterAndDeleteFlow} drives. */
+type FlowRemovalService =
+    Required<Pick<IAutomationService, 'unregisterFlow'>> & Pick<IAutomationService, 'registerFlow' | 'getFlow'>;
+
+/**
+ * [#20862] The removal half of {@link registerAndSaveFlow}, for
+ * `DELETE /:name`: unregister the flow in the engine, then delete its tenant
+ * row through the metadata protocol's own `deleteMetaItem`, env-wide.
+ *
+ * Needed because the create door now saves: a flow created and then removed
+ * here would otherwise keep its row, and the next boot would bind it again —
+ * a `200 {deleted: true}` for a removal the platform does not keep, the same
+ * defect in the other direction. The same order and the same undo as the
+ * write path:
+ *
+ *  - **Engine first.** The engine's own refusal (ADR-0126 §7.3's
+ *    `DELETE_RESTRICTED`, a packaged subflow a packaged caller still reaches)
+ *    is raised before the store is touched, so a refused removal deletes
+ *    nothing.
+ *  - **A name with no row is not a failure** — `deleteMetaItem` answers it as
+ *    "nothing to delete" (a flow registered before its door saved, or in a
+ *    composition with no store).
+ *  - **A delete that fails puts the definition back** in the engine and
+ *    relays the store's own failure, so no answer reports a removal that will
+ *    not survive. A composition with no metadata store keeps the engine-only
+ *    removal it always had.
+ *
+ * Returns the failure to answer, or nothing when the removal landed.
+ */
+async function unregisterAndDeleteFlow(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    automationService: FlowRemovalService,
+    name: string,
+): Promise<HttpDispatcherResult | undefined> {
+    const store: Partial<Pick<ObjectStackProtocolImplementation, 'deleteMetaItem'>> | undefined =
+        await deps.resolveServiceOrLoud(context, 'protocol');
+    const held = typeof automationService.getFlow === 'function' ? await automationService.getFlow(name) : null;
+    automationService.unregisterFlow(name);
+    if (typeof store?.deleteMetaItem === 'function') {
+        try {
+            await store.deleteMetaItem({ type: FLOW_METADATA_TYPE, name });
+        } catch (e) {
+            if (held) automationService.registerFlow?.(name, held);
+            return { handled: true, response: deps.errorFromThrown(e) };
+        }
+    }
+    return undefined;
+}
+
 /**
  * [#9378] The ONE mapper both trigger doors answer through — `POST
  * /:name/trigger` and the legacy `POST /trigger/:name`, which
@@ -3312,7 +3362,13 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // packaged base — refused before the engine is asked.
                 const locked = await refusePackagedFlowBaseChange(deps, context, name, 'delete');
                 if (locked) return locked;
-                automationService.unregisterFlow(name);
+                // [#20862] …and removed from the store as well as the engine,
+                // so a flow the create door now saves does not come back at
+                // the next boot — see `unregisterAndDeleteFlow`.
+                const failed = await unregisterAndDeleteFlow(
+                    deps, context, automationService as FlowRemovalService, name,
+                );
+                if (failed) return failed;
                 return { handled: true, response: deps.success({ name, deleted: true }) };
             }
         }
