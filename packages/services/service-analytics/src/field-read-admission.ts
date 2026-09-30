@@ -31,6 +31,22 @@
  * analytics layer alone knows: which (object, field) each member of a cube
  * query reads.
  *
+ * ## Readable is not queryable (#20935)
+ *
+ * Every member an analytics query names is a QUERY position — a group key, an
+ * aggregate input, a filter or a sort key — and the engine refuses one more
+ * field there than the read projection leaves out: a field the caller is
+ * served MASKED. Its key stays in the row and its value is replaced, so the
+ * read projection counts it readable; as a group key it would hand back the
+ * unmasked value, and as a filter it rebuilds the masked span probe by probe.
+ * So the gate asks a second answer beside the read projection,
+ * {@link QueryableFieldsProvider} — the `security` service's
+ * `getQueryableFields`, the same derivation the engine's two query guards
+ * refuse from — and a member is admitted only when both answers carry its
+ * field. The masking rule is the security service's, and it is not re-derived
+ * here; a security service too old to answer is the plugin bridge's to fail
+ * closed on (see `plugin.ts`).
+ *
  * ## The engine's words
  *
  * A refused member answers what the engine answers for the same field, word
@@ -42,8 +58,9 @@
  *
  * ## Fail direction
  *
- * - The provider THROWS → the query is refused (fail-closed) and the failure is
- *   logged at `error`.
+ * - A provider THROWS → the query is refused (fail-closed) and the failure is
+ *   logged at `error`. That holds for the queryable provider exactly as for
+ *   the readable one.
  * - The provider answers `undefined` for an object → the reader has no field
  *   answer for it (its contract's "no answer"), and no field of that object is
  *   judged: an object the security service cannot resolve is one the engine
@@ -73,6 +90,18 @@ export type ReadableFieldsProvider = (
   objectName: string,
   context?: ExecutionContext,
 ) => readonly string[] | undefined | Promise<readonly string[] | undefined>;
+
+/**
+ * [#20935] The fields `context` may QUERY ON in `objectName` — filter, sort,
+ * group or aggregate by — the host's answer, the `security` service's
+ * `getQueryableFields` in the shipped composition. A field the caller is
+ * served masked is readable and NOT queryable.
+ *
+ * The same shape and the same answers as {@link ReadableFieldsProvider}:
+ * MAY be async; `undefined` is "no answer for this object"; an array is the
+ * answer, `[]` included; a throw refuses the query.
+ */
+export type QueryableFieldsProvider = ReadableFieldsProvider;
 
 /**
  * How a query uses a field, which decides the engine's words for it.
@@ -137,7 +166,8 @@ function fieldReadUnresolvedError(object: string): Error {
 }
 
 /**
- * Refuse the query unless the caller may read every field it names.
+ * Refuse the query unless the caller may read — and query on — every field it
+ * names.
  *
  * @param named - Every field the query reads, in the order the query names
  *   them. The objects are judged in their first-named order, so the base
@@ -149,6 +179,10 @@ function fieldReadUnresolvedError(object: string): Error {
  *   registry adds), and the reader's list, which is built from fields, could
  *   never contain it — so only listed names are judged. With no list, every
  *   name is judged against the reader's answer.
+ * @param queryable - [#20935] The queryable-fields reader. When wired, a field
+ *   its answer leaves out is refused in the same words as an unreadable one —
+ *   the words the engine answers a masked field with. Each reader's answer is
+ *   judged on its own: `undefined` from one leaves the other's verdict intact.
  */
 export async function assertNamedFieldsReadable(
   named: readonly NamedField[],
@@ -156,6 +190,7 @@ export async function assertNamedFieldsReadable(
   context: ExecutionContext | undefined,
   knownFields: (object: string) => readonly string[] | undefined,
   logger?: AdmissionLogger,
+  queryable?: QueryableFieldsProvider,
 ): Promise<void> {
   const byObject = new Map<string, NamedField[]>();
   for (const f of named) {
@@ -166,8 +201,10 @@ export async function assertNamedFieldsReadable(
 
   for (const [object, fields] of byObject) {
     let readable: readonly string[] | undefined;
+    let queryableFields: readonly string[] | undefined;
     try {
       readable = await provider(object, context);
+      queryableFields = queryable ? await queryable(object, context) : undefined;
     } catch (e) {
       // Fail CLOSED: a reader that could not answer must not be read as
       // "every field readable".
@@ -179,13 +216,16 @@ export async function assertNamedFieldsReadable(
       else logger?.warn(report);
       throw fieldReadUnresolvedError(object);
     }
-    if (readable === undefined) continue;
+    if (readable === undefined && queryableFields === undefined) continue;
 
     const known = knownFields(object);
     const knownSet = known ? new Set(known) : undefined;
-    const readableSet = new Set(readable);
+    const readableSet = readable === undefined ? undefined : new Set(readable);
+    const queryableSet = queryableFields === undefined ? undefined : new Set(queryableFields);
     const hidden = (f: NamedField) =>
-      (!knownSet || knownSet.has(f.field)) && !readableSet.has(f.field);
+      (!knownSet || knownSet.has(f.field)) &&
+      ((readableSet !== undefined && !readableSet.has(f.field)) ||
+        (queryableSet !== undefined && !queryableSet.has(f.field)));
 
     for (const role of ['aggregate', 'predicate'] as const) {
       const refused = [...new Set(fields.filter((f) => f.role === role && hidden(f)).map((f) => f.field))];
