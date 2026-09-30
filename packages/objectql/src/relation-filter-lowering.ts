@@ -218,12 +218,12 @@ export function lowerRelationSite(site: RelationFilterSite, ids: readonly unknow
   };
 }
 
-/** How the words name the object beneath the field: its keys, never its values. */
+/** How the words name the condition: its keys, never its values. */
 function describeKeys(keys: readonly string[]): string {
-  if (keys.length === 0) return 'an empty object {}';
+  if (keys.length === 0) return 'no keys';
   const shown = keys.slice(0, 3).map((key) => JSON.stringify(key)).join(', ');
   const more = keys.length > 3 ? `, and ${keys.length - 3} more` : '';
-  return `an object with no operator key (keys ${shown}${more})`;
+  return `keys ${shown}${more}`;
 }
 
 /** The ids route every driver serves: `$in` on a single-valued relation, `$contains` per id on a multi-valued one. */
@@ -236,54 +236,49 @@ function idsRoute(field: string, multiple: boolean): string {
 /**
  * The words of a structural refusal ({@link admitRelationCondition}): the
  * position, the verdict and the route first — the REST door bounds a 4xx
- * message at 500 characters by truncation — and the reasoning after.
+ * message at 500 characters by truncation — and nothing after the route that a
+ * caller needs.
  */
 export function relationConditionRefusalMessage(refusal: RelationConditionRefusal, context: string): string {
   const { field, type, target, multiple, path, key } = refusal;
   const related = target === undefined ? 'the related object' : `the related object '${target}'`;
-  const readTarget = target === undefined ? 'the related object' : `'${target}'`;
+  const named = target === undefined ? 'the related object' : `'${target}'`;
   const head =
-    `${context}: filter on '${field}' puts ${describeKeys(refusal.keys)} at ${path}, a nested-relation `
-    + `condition beneath the declared ${type} field '${field}'`;
-  const route = `match '${field}' against the ids it returns: ${idsRoute(field, multiple)}`;
+    `${context}: filter on '${field}' puts a nested-relation condition (${describeKeys(refusal.keys)}) at `
+    + `${path}, beneath the declared ${type} field '${field}'`;
+  const verdict = 'The filter was NOT applied.';
+  const twoStep = `then match '${field}' against its ids: ${idsRoute(field, multiple)}.`;
   switch (refusal.reason) {
     case 'unregistered-target':
       return (
         head
         + (target === undefined
-          ? ' — and the field declares no related object, so there is nothing to read. '
-          : ` — and no object '${target}' is registered here, so there is nothing to read. `)
-        + 'The filter was NOT applied. Match the field against ids you already hold: '
-        + `${idsRoute(field, multiple)}.`
+          ? ', and the field declares no related object to read. '
+          : `, and no object '${target}' is registered here to read. `)
+        + `${verdict} Match '${field}' against ids you hold: ${idsRoute(field, multiple)}.`
       );
     case 'empty':
       return (
-        head
-        + ` that names no field of ${related}. The filter was NOT applied. Name a field of ${related} `
-        + `({ "${field}": { "FIELD": VALUE } }), or test that '${field}' has a value with `
+        `${head}, and it names no field of ${related}. ${verdict} Name one `
+        + `({ "${field}": { "FIELD": VALUE } }), or test that '${field}' has a value: `
         + `{ "${field}": { "$null": false } }.`
       );
     case 'undeclared-key':
       return (
-        head
-        + `, and '${key}' is not a field of ${related}. The filter was NOT applied. Name a field `
-        + `${related} declares: { "${field}": { "FIELD": VALUE } }. No driver matches a key the `
-        + 'related object does not declare the same way, and an empty answer would read exactly like a real one.'
+        `${head}, and '${key}' is not a field of ${related}. ${verdict} Name a field it declares: `
+        + `{ "${field}": { "FIELD": VALUE } }. A key it does not declare would read as a real empty answer.`
       );
     case 'dotted-key':
       return (
-        head
-        + `, and '${key}' is a dotted path — the condition reaches one level only, the fields of `
-        + `${related} itself. The filter was NOT applied. Read ${readTarget} with that condition `
-        + `yourself (one level there), then ${route}.`
+        `${head}, and '${key}' is a dotted path: the condition reaches one level only. ${verdict} `
+        + `Read ${named} with that condition yourself, ${twoStep}`
       );
     case 'second-level':
     default:
       return (
-        head
-        + `, and '${key}' is itself a ${refusal.keyType ?? 'relation'} field of ${related} holding a `
-        + 'condition of its own — the condition reaches one level only. The filter was NOT applied. '
-        + `Read ${readTarget} with { "${key}": { … } } yourself (one level there), then ${route}.`
+        `${head}, and '${key}' is itself a ${refusal.keyType ?? 'relation'} field of ${related} holding a `
+        + `condition of its own: one level only. ${verdict} Read ${named} with { "${key}": { … } } yourself, `
+        + twoStep
       );
   }
 }
@@ -300,13 +295,10 @@ export function relationConditionError(refusal: RelationConditionRefusal, contex
  * matching rows. The words name the cap, the relation and the two-step route.
  */
 export function relationFilterCapError(site: RelationFilterSite, context: string, cap: number): Error {
-  const keys = Object.keys(site.condition).map((key) => JSON.stringify(key)).join(', ');
   return invalidFilterError(
     `${context}: the nested-relation condition at ${site.path} matched more than ${cap} records of `
-    + `the related object '${site.target}' — past the engine's cap on the ids one condition may feed `
-    + `the filter — so the filter was NOT applied: a cut-off id list would silently drop matching rows. `
-    + `Narrow the condition, or run the two steps yourself: read '${site.target}' with the same `
-    + `condition (keys ${keys}) page by page, then match '${site.field}' against the ids it returns: `
-    + `${idsRoute(site.field, site.multiple)}.`,
+    + `the related object '${site.target}' (the engine's cap), so the filter was NOT applied: a cut-off `
+    + `id list would silently drop matching rows. Narrow the condition, or read '${site.target}' yourself `
+    + `page by page and match '${site.field}' against its ids: ${idsRoute(site.field, site.multiple)}.`,
   );
 }

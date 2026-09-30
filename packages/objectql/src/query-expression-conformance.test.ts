@@ -1226,17 +1226,37 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         // inner keys belong to ANOTHER object — the exact shape the collectors
         // refuse to descend into. If this control answers the dotted verdict's
         // INVALID_FIELD, that verdict has started judging comparand VALUES,
-        // which is a different (and wrong) gate. [#20745] The engine refuses
-        // the form itself — no driver serves it — so both doors answer the
-        // no-operator-object arm's INVALID_FILTER, in its own words.
-        for (const run of [
-            () => protocol.findData({ object: 'showcase_task', query: { where: { project_id: { name: 'Apollo' } } } }),
-            () => engine.find('showcase_task', { where: { project_id: { name: 'Apollo' } } }),
-        ]) {
-            const err: any = await run().then(() => null, (e: any) => e);
-            expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
-            expect(err.message).toContain('nested-relation form');
-        }
+        // which is a different (and wrong) gate. [#20745] The engine refused
+        // the form itself for a while — no driver served it. [#20802] It is
+        // SERVED now: the engine reads the related object with the condition
+        // and hands the driver `$in` on its ids, so both doors answer the rows
+        // the undotted `{ project_id: 'p1' }` control answers.
+        const byFk: any = await protocol.findData({ object: 'showcase_task', query: { where: { project_id: 'p1' } } });
+        const wanted = byFk.records.map((r: any) => r.id).sort();
+        expect(wanted).toHaveLength(5);
+        const viaProtocol: any = await protocol.findData({
+            object: 'showcase_task', query: { where: { project_id: { name: 'Apollo' } } },
+        });
+        expect(viaProtocol.records.map((r: any) => r.id).sort()).toEqual(wanted);
+        const viaEngine = await engine.find('showcase_task', { where: { project_id: { name: 'Apollo' } } });
+        expect(viaEngine.map((r: any) => r.id).sort()).toEqual(wanted);
+        const none = await engine.find('showcase_task', { where: { project_id: { name: 'Gemini' } } });
+        expect(none).toEqual([]);
+    });
+
+    it('[#20802] both doors\' dotted relation refusals name the SAME served nested route', async () => {
+        const ingressErr: any = await protocol
+            .findData({ object: 'showcase_task', query: { where: { 'project_id.name': 'Apollo' } } })
+            .then(() => null, (e: unknown) => e);
+        const engineErr: any = await engine
+            .find('showcase_task', { where: { 'project_id.name': 'Apollo' } })
+            .then(() => null, (e: unknown) => e);
+        const route = 'nest the condition beneath the relation field: { "project_id": { "name": VALUE } }';
+        expect(String(ingressErr?.message)).toContain(route);
+        expect(String(engineErr?.message)).toContain(route);
+        // The claim this change made false is gone from both doors.
+        expect(String(ingressErr?.message)).not.toContain('a filter reaches only columns');
+        expect(String(engineErr?.message)).not.toContain('a filter reaches only columns');
     });
 
     it('⛔ CONTROL — the structured/JSON head stays UNJUDGED at both doors: the ruled carve-out', async () => {

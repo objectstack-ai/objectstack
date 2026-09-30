@@ -175,14 +175,14 @@ describe('[#20745] a no-operator object beneath a relation, structured-JSON or p
   });
 
   it('refuses {} beneath a relation and a JSON column too, in the engine\'s words rather than each driver\'s', async () => {
-    for (const [where, words] of [
+    for (const [where, empty, words] of [
       // [#20802] Served at `where` otherwise — `{}` names no field of the related object.
-      [{ owner: {} }, 'names no field of the related object'],
-      [{ meta: {} }, 'whole-value match'],
+      [{ owner: {} }, '(no keys)', 'names no field of the related object'],
+      [{ meta: {} }, 'an empty object {}', 'whole-value match'],
     ] as const) {
       const err = await refusalOf(engine.find(OBJECT, { where: where as FilterCondition }));
       expect(envelopeOf(err), JSON.stringify(where)).toEqual(ENVELOPE);
-      expect(err!.message, JSON.stringify(where)).toContain('an empty object {}');
+      expect(err!.message, JSON.stringify(where)).toContain(empty);
       expect(err!.message, JSON.stringify(where)).toContain(words);
     }
     expect(reads).toHaveLength(0);

@@ -285,7 +285,7 @@ describe('[#20802] the nested-relation form is lowered at the engine\'s where se
     const cases: ReadonlyArray<readonly [FilterCondition, string, string]> = [
       [{ parent: { owner: { region: 'NA' } } }, 'where.parent', "'owner' is itself a lookup field of the related object 'nested_rel_ledger'"],
       [{ owner: { account: { title: 'a' } } }, 'where.owner', "'account' is itself a lookup field of the related object 'nested_rel_owner'"],
-      [{ owner: { 'account.title': 'a' } }, 'where.owner', "'account.title' is a dotted path — the condition reaches one level only"],
+      [{ owner: { 'account.title': 'a' } }, 'where.owner', "'account.title' is a dotted path: the condition reaches one level only"],
       [{ owner: { regio: 'NA' } }, 'where.owner', "'regio' is not a field of the related object 'nested_rel_owner'"],
       [{ owner: {} }, 'where.owner', 'names no field of the related object'],
       [{ stray: { region: 'NA' } }, 'where.stray', "no object 'nested_rel_missing' is registered here"],
@@ -295,7 +295,8 @@ describe('[#20802] the nested-relation form is lowered at the engine\'s where se
       rec.reads.length = 0;
       const err = await refusalOf(engine.find(OBJECT, { where }));
       expect(envelopeOf(err), JSON.stringify(where)).toEqual(INVALID_FILTER);
-      expect(err!.message, JSON.stringify(where)).toContain(`at ${path}, a nested-relation condition`);
+      expect(err!.message, JSON.stringify(where)).toContain('puts a nested-relation condition (');
+      expect(err!.message, JSON.stringify(where)).toContain(`at ${path}, beneath the declared`);
       expect(err!.message, JSON.stringify(where)).toContain(words);
       expect(err!.message, JSON.stringify(where)).toContain('The filter was NOT applied.');
       expect(rec.reads, JSON.stringify(where)).toHaveLength(0);
