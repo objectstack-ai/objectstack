@@ -39,6 +39,7 @@
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { referenceTargetOf } from '@objectstack/spec/data';
+import { bucketDateKey, bucketKeyToCalendarRange, isBucketGranularity } from '@objectstack/core';
 
 /** The minimal field shape this resolver needs. */
 export interface FieldMetaLite {
@@ -290,8 +291,6 @@ export function withLabelFetchCache(deps: DimensionLabelDeps): DimensionLabelDep
 /** Date-dimension granularity (mirrors the dataset `dateGranularity` enum). */
 export type DateGranularity = 'day' | 'week' | 'month' | 'quarter' | 'year';
 
-const pad = (n: number) => String(n).padStart(2, '0');
-
 /**
  * Format a raw date value (epoch-ms number, numeric string, ISO string, or
  * Date) to a human, sort-stable bucket label per granularity. Returns the input
@@ -308,18 +307,35 @@ const pad = (n: number) => String(n).padStart(2, '0');
  * here it is *already* the reference-zone bucket (often a label string like
  * "2026-Q2"). Re-applying a timezone here would shift an already-correct
  * `YYYY-MM-DD` day bucket by a day — this is a pure, idempotent re-labeler.
+ *
+ * [#20867] It reads the keys `@objectstack/core`'s `bucketDateKey` writes and
+ * spells none itself. A key that writer writes at `granularity` — the year in
+ * four digits, `0050` / `0050-06` / `0050-06-15` included — is recognised by
+ * core's one reader of those keys, `bucketKeyToCalendarRange`, and returned as
+ * written. A raw value is relabelled by `bucketDateKey` itself, in UTC (a
+ * `week` or unstated granularity as the value's own `day` key, as before).
+ * Before, the year check admitted only 1000..9999, so the key `0050` was read
+ * as epoch seconds (`1970`), and a relabelled year below 1000 lost its padding
+ * (`50-06`, `50-06-15`).
  */
 export function formatDateBucket(value: unknown, granularity?: DateGranularity | string): unknown {
   if (value == null || value instanceof Date === false) {
     if (typeof value !== 'number' && typeof value !== 'string') return value;
   }
-  // A YEAR bucket's canonical key IS the bare year ("2026" / 2026) — which the
-  // epoch heuristic below would read as 2026 milliseconds and relabel "1970".
-  // Being idempotent over already-formatted bucket keys is this function's whole
-  // contract, and every other granularity's key already survives the round trip
-  // ("2026-Q2", "2026-07", "2026-07-15" all fail the pure-digit test); only the
-  // year key collides with it. Recognised before parsing, for both the string
-  // and numeric forms drivers return.
+  // [#20867] A key the writer writes at this granularity is labelled as
+  // written: this function is idempotent over bucket keys, and core's reader,
+  // not a second pattern here, decides what one is.
+  if (
+    typeof value === 'string' &&
+    isBucketGranularity(granularity) &&
+    bucketKeyToCalendarRange(value, granularity) !== null
+  ) {
+    return value;
+  }
+  // The NUMERIC year key: a year bucket's key is the bare year, and a driver
+  // may answer it as a number (2026), which the epoch heuristic below would
+  // read as 2026 milliseconds and relabel "1970". Recognised before parsing;
+  // the string form is recognised above.
   if (granularity === 'year') {
     const y = typeof value === 'number' ? value : Number(String(value).trim());
     if (Number.isInteger(y) && y >= 1000 && y <= 9999) return String(y);
@@ -333,16 +349,10 @@ export function formatDateBucket(value: unknown, granularity?: DateGranularity |
     d = /^\d+$/.test(s) ? new Date(Number(s) < 1e12 ? Number(s) * 1000 : Number(s)) : new Date(s);
   }
   if (Number.isNaN(d.getTime())) return value;
-  const y = d.getUTCFullYear();
-  const m = d.getUTCMonth(); // 0-11
-  switch (granularity) {
-    case 'year': return String(y);
-    case 'quarter': return `${y}-Q${Math.floor(m / 3) + 1}`;
-    case 'month': return `${y}-${pad(m + 1)}`;
-    case 'week':
-    case 'day':
-    default: return `${y}-${pad(m + 1)}-${pad(d.getUTCDate())}`;
-  }
+  // [#20867] Spelled by the writer, in UTC (no zone: see above).
+  const labelGranularity =
+    isBucketGranularity(granularity) && granularity !== 'week' ? granularity : 'day';
+  return bucketDateKey(d, labelGranularity);
 }
 
 /**
