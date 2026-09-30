@@ -70,6 +70,10 @@ export type {
     // consumer needs the name to annotate a result or switch exhaustively over
     // `reason` — the three negatives exist precisely to be branched on.
     ConsumedSuspensionInspection,
+    // [#20761] The reader `AutomationEngine.setPackagedFlowSource` takes — the
+    // method is barrel-reachable, so a host building a custom composition
+    // needs the name to hand it the loader's set.
+    PackagedFlowSource,
 } from './engine.js';
 
 // [#11997] ADR-0005 overlay precedence for same-named flow definitions. The boot

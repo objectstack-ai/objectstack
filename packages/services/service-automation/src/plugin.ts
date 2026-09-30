@@ -446,6 +446,35 @@ export function findInertDeclaredConnectors(
 }
 
 /**
+ * [#20761, ADR-0126 §7.2 / §7.3] The engine's reader over THE LOADER'S SET:
+ * which package ships a flow name, asked of the metadata protocol's
+ * `packagedArtifactOwner` — the answer its locked-base verdict reads, drawn
+ * from the entries the artifact loader registered. ⛔ No second set is kept
+ * here, and nothing is read off a definition.
+ *
+ * Resolved at QUESTION time, never at boot: the protocol service may register
+ * after this plugin's `init()`, and a registry read turned into a recorded
+ * "not there" would be the startup-registry verdict AGENTS.md forbids. A
+ * composition with no protocol — or one whose protocol brings no such reader —
+ * holds no flow a managed package loaded as far as this engine can know, so
+ * the answer is "none": the §7.3 guards then protect nothing and the
+ * activation door refuses every flow, which fails closed rather than trusting
+ * a definition's own stamps.
+ */
+export function packagedFlowReader(ctx: Pick<PluginContext, 'getService'>): (name: string) => string | undefined {
+    return (name) => {
+        let protocol: { packagedArtifactOwner?: (request: { type: string; name: string }) => string | undefined } | undefined;
+        try {
+            protocol = ctx.getService('protocol');
+        } catch {
+            return undefined;
+        }
+        if (typeof protocol?.packagedArtifactOwner !== 'function') return undefined;
+        return protocol.packagedArtifactOwner({ type: 'flow', name });
+    };
+}
+
+/**
  * AutomationServicePlugin — Core engine plugin
  *
  * Responsibilities:
@@ -616,6 +645,12 @@ export class AutomationServicePlugin implements Plugin {
 
         // Register as global service — other plugins access via ctx.getService('automation')
         ctx.registerService('automation', this.engine);
+
+        // [#20761, ADR-0126 §7.2 / §7.3] Which flows are PACKAGED is the
+        // loader's set, read through the metadata protocol — the same answer
+        // its locked-base verdict reads — never the stamps on a definition.
+        // See `packagedFlowReader`.
+        this.engine.setPackagedFlowSource(packagedFlowReader(ctx));
 
         // [#20552] Every metadata read exit withholds the inbound hook's secret
         // from a served flow from here on — the `flow` entry of the per-type

@@ -74,6 +74,11 @@ import {
     // it prints it at.
     findUndeclarableFieldType,
     isObjectFieldTypeRefused,
+    // [#20761, ADR-0126 §2] The ADR-0029 D9.6 reading of a body's own
+    // provenance stamps — asked by {@link
+    // ObjectStackProtocolImplementation.tenantAuthoredWriteRefusal} to tell a
+    // body that CLAIMS to be code-shipped from one that does not.
+    isCodeArtifactBody,
 } from '@objectstack/metadata-core';
 // [#5532] One vocabulary of "which driver read errors are benign", shared with
 // `sys-metadata-repository.ts` in this package and with `DatabaseLoader` in
@@ -14246,24 +14251,134 @@ export class ObjectStackProtocolImplementation implements
      *    separately and records to `sys_metadata_audit`: with the hatch shut,
      *    an artifact-backed item of a type without `allowOrgOverride` is
      *    refused here before its `_lock` could matter;
-     *  - a named base (`?package=`): the second door carries none, so the
+     *  - a named base (`?package=`) on a door that carries none: the
      *    package-less refusal (`NOT_OVERRIDABLE`) is the whole answer there.
+     *    [#20761] A save that DOES name one — `/meta`'s own write, reaching
+     *    this verdict through {@link tenantAuthoredWriteRefusal} — passes it
+     *    as `packageId`, and gets the named-base answer `saveMetaItem`'s
+     *    package door gives (`ITEM_LOCKED` on a read-only base), so asking
+     *    here never moves that door's vocabulary.
      *
      * @returns the refusal to relay, or `null` when the `/meta` door would not
      *          refuse this write or removal on the locked-base ground.
      */
-    packagedBaseRefusal(request: { type: string; name: string; operation: 'save' | 'delete' }): Error | null {
+    packagedBaseRefusal(
+        request: { type: string; name: string; operation: 'save' | 'delete'; packageId?: string | null },
+    ): Error | null {
         // [#9009] Folded HERE, at the producer of the verdict, so a caller that
         // arrives with a plural spelling cannot address around the lock.
         const folded = canonicalizeMetaRequestType(request);
         try {
             if (folded.operation === 'delete') this.refusePackagedBaseRemoval(folded);
-            else this.refusePackagedBaseOverride({ type: folded.type, name: folded.name });
+            else {
+                this.refusePackagedBaseOverride({
+                    type: folded.type,
+                    name: folded.name,
+                    ...(folded.packageId ? { packageId: folded.packageId } : {}),
+                });
+            }
         } catch (err) {
             if (ObjectStackProtocolImplementation.isPackagedBaseRefusal(err)) return err;
             throw err;
         }
         return null;
+    }
+
+    /**
+     * [#20761, ADR-0126 §2 / §7.3] THE LOADER'S SET, read: the package that
+     * ships `(type, name)` as a code artifact, or `undefined` when none does.
+     *
+     * For a flow, "packaged" means exactly "loaded by the loader from a
+     * managed package" — there is no other legitimate route. This answers
+     * from the entries the artifact loader registered under a package id
+     * ({@link lookupArtifactItem} → `SchemaRegistry.getArtifactItem`, immune to
+     * plain-key overlay shadows and blind to tenant-authored rows) — the SAME
+     * lookup {@link packagedBaseRefusal}'s `isArtifactBacked` asks, so the
+     * lock and every classification built on this answer read one set. ⛔
+     * Never the body a caller sends: an authoring door's body cannot move it.
+     *
+     * The automation engine is the reader beside the lock: its §7.3 subflow
+     * guards, its activation door and the activation row's package
+     * attribution classify a flow by this answer (the automation plugin hands
+     * the engine a reader over it), never by the stamps the flow's own body
+     * carries. Read at question time, never cached, so it follows the
+     * registry across a package install, upgrade and reload exactly as the
+     * lock does.
+     */
+    packagedArtifactOwner(request: { type: string; name: string }): string | undefined {
+        const folded = canonicalizeMetaRequestType(request);
+        const artifact = this.lookupArtifactItem(folded.type, folded.name) as { _packageId?: unknown } | undefined;
+        const packageId = artifact?._packageId;
+        return typeof packageId === 'string' && packageId !== '' ? packageId : undefined;
+    }
+
+    /**
+     * [#20761, ADR-0126 §2, ADR-0131 D6] THE ONE RULE every authoring door
+     * applies to a `flow` it writes: a flow written through an authoring door
+     * is TENANT-AUTHORED — no exception, on any door. The automation create
+     * and update doors, the clone door and `/meta` all ask this method; none
+     * re-derives it.
+     *
+     *  1. **A name the loader's set holds** ({@link packagedArtifactOwner}) is a
+     *     locked base, and the answer is {@link packagedBaseRefusal}'s —
+     *     reused, never re-implemented. That covers a round trip of a shipped
+     *     flow: its served body echoes stamps that AGREE with the set, and the
+     *     write is still an in-place edit of a locked base. With the
+     *     `OS_METADATA_WRITABLE` hatch open the lock admits the write, and it
+     *     is still tenant-authored: the body's stamps decide nothing.
+     *  2. **Any other name, with a body whose stamps would classify it as
+     *     code-shipped** (`isCodeArtifactBody`, ADR-0029 D9.6), is refused
+     *     LOUDLY. The body asserts a provenance the platform never
+     *     established — a flow no managed package loaded, claiming one did.
+     *     ⛔ Never honoured (the engine would count it as a vendor flow under
+     *     §7.3 and attribute an activation row to the named package), and ⛔
+     *     never silently stripped (the caller would never learn that what it
+     *     sent is not what was stored).
+     *  3. **Everything else is admitted.** A tenant row's own stamps, echoed
+     *     on a round trip — `_provenance: 'org'`, the `sys_metadata`
+     *     sentinel, an app package bound to a tenant row — agree with the
+     *     server's fact and classify the body as tenant-authored, so they are
+     *     a no-op here.
+     *
+     * `INVALID_METADATA` / 422 — registered to this package in the ADR-0112
+     * ledger, ⛔ no code is minted — for the reason `saveMetaItem`'s
+     * layered-envelope refusal uses it: the body carries keys the server owns
+     * and a client may not persist. Not a 403: no caller can be authorized
+     * into asserting a provenance. Not a 409: nothing about the target's
+     * current state is contested — the name is free.
+     *
+     * Scoped to `flow` (the 2026-09-30 ruling recorded on the card, point 5):
+     * `/meta`'s handling of every OTHER type is unchanged, so for those this
+     * returns `null` and the caller proceeds exactly as before.
+     *
+     * @returns the refusal to relay verbatim, or `null` when the write may
+     *          proceed on these grounds.
+     */
+    tenantAuthoredWriteRefusal(
+        request: { type: string; name: string; item: unknown; packageId?: string | null },
+    ): Error | null {
+        const folded = canonicalizeMetaRequestType(request);
+        const singular = PLURAL_TO_SINGULAR[folded.type] ?? folded.type;
+        if (singular !== 'flow') return null;
+        if (this.packagedArtifactOwner(folded) !== undefined) {
+            return this.packagedBaseRefusal({
+                type: folded.type,
+                name: folded.name,
+                operation: 'save',
+                ...(folded.packageId ? { packageId: folded.packageId } : {}),
+            });
+        }
+        if (!isCodeArtifactBody(folded.item)) return null;
+        const err = new Error(
+            `Flow '${folded.name}' was sent with a code-package provenance, but no managed package ships a flow of `
+            + `that name. A flow written through an authoring door is authored in this deployment: which flows a `
+            + `package ships is established by the package loader, never by the definition a caller sends. `
+            + `Remove the provenance keys (_packageId, _packageVersion, _provenance) from the definition and send it `
+            + `again. Nothing was written. See docs/adr/0126-packaged-metadata-customization-model.md.`,
+        );
+        (err as any).code = 'INVALID_METADATA';
+        (err as any).status = 422;
+        return err;
     }
 
     /**
@@ -16166,6 +16281,32 @@ export class ObjectStackProtocolImplementation implements
         // the set. Placed alongside the decoration strip so the
         // destructive-change diff, the schema gate, the authoring gate and the
         // persisted body all still see one document.
+        //
+        // [#20761, ADR-0126 §2] …except for a FLOW, which is asked the one
+        // authoring rule FIRST, while the body still carries the stamps the
+        // caller sent: a flow no managed package loaded, sent with stamps that
+        // would classify it as code-shipped, is refused loudly rather than
+        // stripped silently, and a flow the loader's set holds is a locked
+        // base. A tenant row's own stamps echoed on a round trip pass and are
+        // stripped below as for every type. Every other type is untouched —
+        // {@link tenantAuthoredWriteRefusal} answers `null` for it.
+        //
+        // Asked of AUTHORING writes only. The two server-stated rewrites of
+        // rows this store already holds — {@link migrateStoredMetadata}
+        // (`source: 'migrate-stored'`, the only caller that states a source)
+        // and {@link duplicatePackage} (`writeFace: 'package-duplicate'`) —
+        // are no caller's claim about anything: a row stored before the
+        // #16702 strip may still carry stale stamps, and rewriting it keeps
+        // the silent strip it always had rather than failing the rewrite.
+        if (request.source === undefined && request.writeFace !== 'package-duplicate') {
+            const authored = this.tenantAuthoredWriteRefusal({
+                type: request.type,
+                name: request.name,
+                item: request.item,
+                ...(request.packageId ? { packageId: request.packageId } : {}),
+            });
+            if (authored) throw authored;
+        }
         request.item = stripDerivedProvenance(request.item);
         // [#6562] …and OUR OWN injected system columns, for the same reason and
         // at the same moment. `governServedItem` now serves the EFFECTIVE object

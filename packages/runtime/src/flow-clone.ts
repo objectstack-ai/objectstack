@@ -64,9 +64,14 @@
  * literal list here — an envelope key added to the spec is stripped by this
  * module the day it lands, with no edit and no second list to drift.
  *
- * ⚠️ This is the one place the implementation reads more into ADR-0126 than the
- * card spelled out; it is flagged on the PR for the reviewer. Everything else
- * below is the ADR verbatim.
+ * [#20761] What was once the one place this module read more into ADR-0126
+ * than its card spelled out is now the rule itself: a flow written through an
+ * authoring door is tenant-authored, and the one authoring rule every door asks
+ * (`tenantAuthoredWriteRefusal` in `@objectstack/metadata-protocol`) refuses a
+ * definition whose stamps claim a package for a name no package ships — so a
+ * copy that carried the base's envelope would be refused, not saved. The clone
+ * door asks that rule of the copy this module builds and then saves it as an
+ * ordinary tenant row. Pinned in `flow-clone.test.ts`.
  *
  * ## 3. REFERENCES ARE NOT RE-POINTED
  *

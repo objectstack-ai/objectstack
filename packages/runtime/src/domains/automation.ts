@@ -1509,6 +1509,48 @@ async function refusePackagedFlowBaseChange(
 }
 
 /**
+ * [#20761, ADR-0126 §2, ADR-0131 D6] THE AUTHORING RULE at this domain's
+ * definition-write doors — `POST /`, `PUT /:name` and the copy
+ * `POST /:name/clone` writes: a flow written through an authoring door is
+ * tenant-authored, no exception.
+ *
+ * Asked of the metadata protocol's `tenantAuthoredWriteRefusal` — the ONE
+ * function `/meta`'s flow write asks too — and relayed verbatim, so no door
+ * re-derives it and this domain stamps no code of its own:
+ *
+ *  - a name the loader's set holds is a locked base: `packagedBaseRefusal`'s
+ *    answer, which this door asked directly before (#20679) and now reaches
+ *    through the rule that reuses it — so a round trip of a shipped flow is
+ *    refused as a locked base;
+ *  - any other name, with a definition whose provenance stamps would classify
+ *    it as code-shipped, is refused loudly (`INVALID_METADATA` / 422): which
+ *    flows a package ships is the loader's fact, never the caller's claim;
+ *  - everything else — a customer flow's own round trip included — proceeds.
+ *
+ * Asked before the engine is called, so a refused write registers nothing.
+ * A protocol that brings the locked-base verdict but not this rule keeps
+ * #20679's lock, asked as before; a composition with no protocol keeps
+ * today's behaviour, exactly as {@link refusePackagedFlowBaseChange} states —
+ * and the engine classifies no flow as packaged from a definition's stamps
+ * either way, so nothing a caller sends here can make it count as one.
+ */
+async function refuseUnauthoredFlowWrite(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    name: string,
+    definition: unknown,
+): Promise<HttpDispatcherResult | undefined> {
+    const protocol: Partial<Pick<ObjectStackProtocolImplementation, 'tenantAuthoredWriteRefusal'>> | undefined =
+        await deps.resolveServiceOrLoud(context, 'protocol');
+    if (typeof protocol?.tenantAuthoredWriteRefusal !== 'function') {
+        return refusePackagedFlowBaseChange(deps, context, name, 'save');
+    }
+    const refusal = protocol.tenantAuthoredWriteRefusal({ type: FLOW_METADATA_TYPE, name, item: definition });
+    if (!refusal) return undefined;
+    return { handled: true, response: deps.errorFromThrown(refusal) };
+}
+
+/**
  * [#9378] The ONE mapper both trigger doors answer through — `POST
  * /:name/trigger` and the legacy `POST /trigger/:name`, which
  * `client.automation.trigger()` calls. Extracted rather than written twice:
@@ -2247,7 +2289,11 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
             // locked here exactly as on `PUT /:name` — the same verdict, asked
             // before anything is read or registered. A name no code package
             // ships is created as before.
-            const locked = await refusePackagedFlowBaseChange(deps, context, body.name, 'save');
+            // [#20761] …through the one authoring rule, which reuses that
+            // verdict and also refuses a definition claiming a package's
+            // provenance for a name no package ships — see
+            // `refuseUnauthoredFlowWrite`.
+            const locked = await refuseUnauthoredFlowWrite(deps, context, body.name, body);
             if (locked) return locked;
             // [#20552] Creating onto a name the engine already holds is an
             // overwrite, so the round-trip rule applies here as on `PUT /:name`.
@@ -2539,6 +2585,19 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 }
 
                 const clone = cloneFlowDefinition(source, { name: targetName, label: targetLabel });
+                // [#20761, ADR-0126 §7.1] The copy is TENANT-AUTHORED, stated by
+                // the server: `cloneFlowDefinition` drops the base's whole
+                // protection envelope, so the one authoring rule every door
+                // asks admits it — and would refuse it, loudly, if the base's
+                // provenance ever rode across. Asked before the engine is
+                // called, like every other definition write here. The
+                // metadata protocol is resolved HERE, before anything is
+                // registered, so a slot that fails to resolve cannot leave a
+                // registered-but-unsaved clone behind.
+                const authored = await refuseUnauthoredFlowWrite(deps, context, targetName, clone);
+                if (authored) return authored;
+                const store: Partial<Pick<ObjectStackProtocolImplementation, 'saveMetaItem'>> | undefined =
+                    await deps.resolveServiceOrLoud(context, 'protocol');
                 // Engine verdicts are answered as a 400, not rethrown — the
                 // create arm's reasoning (`flowDefinitionRefusal`) applies
                 // verbatim, and it matters more here: a clone that the engine
@@ -2552,6 +2611,28 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                         handled: true,
                         response: deps.errorFromThrown(flowDefinitionRefusal(e), VALIDATION_FAILED_STATUS),
                     };
+                }
+                // [#20761, ADR-0126 §7.1] …and SAVED as a tenant row. Registered
+                // in the engine alone the clone was a process-local fact: the
+                // metadata door read its name as absent, and the next boot —
+                // which binds flows from the stored metadata — did not know it,
+                // so the copy an administrator made to customize a locked flow
+                // vanished at the first restart. It is written through the
+                // metadata protocol's own save, env-wide (a flow has no per-org
+                // channel), so it lands as an ordinary `sys_metadata` row the
+                // boot hydrates, `/meta` reads back, and the same authoring rule
+                // judges. Engine first, store second: the engine's registration
+                // is the stricter validation, and a save that then fails
+                // withdraws the registration, so the answer never reports a
+                // clone that will not survive. A composition with no metadata
+                // store to save into keeps the engine-only clone it always had.
+                if (typeof store?.saveMetaItem === 'function') {
+                    try {
+                        await store.saveMetaItem({ type: FLOW_METADATA_TYPE, name: targetName, item: clone });
+                    } catch (e) {
+                        automationService.unregisterFlow?.(targetName);
+                        return { handled: true, response: deps.errorFromThrown(e) };
+                    }
                 }
                 // ⛔ NO ANCESTRY on the way out either (ADR-0126 amendment
                 // ruling 2, §9): the response names the flow that was created
@@ -3139,7 +3220,9 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // read or registered — see `refusePackagedFlowBaseChange`.
                 // After the envelope check, as on `/meta` (a missing body is
                 // refused before the lock is consulted there too).
-                const locked = await refusePackagedFlowBaseChange(deps, context, name, 'save');
+                // [#20761] Through the one authoring rule, which reuses that
+                // verdict — see `refuseUnauthoredFlowWrite`.
+                const locked = await refuseUnauthoredFlowWrite(deps, context, name, definition);
                 if (locked) return locked;
                 // [#8123] Same class as POST /: the engine's verdict on the
                 // definition is served as a 400, not a 500 — reusing the

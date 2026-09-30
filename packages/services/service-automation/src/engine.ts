@@ -51,13 +51,11 @@ import { FlowValueSlotSchema, VALUE_ENVELOPE_REFUSAL } from '@objectstack/spec/a
 // shared refusal to prevent. See `checkStructuralCondition` in `registerFlow`.
 import { EvaluatedExpressionInputSchema, EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec';
 import { applyConversionsToFlow, type ConversionNotice, type ConversionConflictNotice } from '@objectstack/spec';
-// [ADR-0126 §7.3] "Does a code package ship this flow?" for the subflow guard.
-// Routed through the local precedence module rather than importing
-// `isCodeArtifactBody` from `@objectstack/objectql` directly: that package is a
-// devDependency here, and `describeFlowContender` is already this package's one
-// wrapper over the canonical ADR-0029 D9.6 test — so the guard and the boot
-// pull cannot drift into two answers about what "packaged" means.
-import { describeFlowContender } from './flow-precedence.js';
+// [ADR-0126 §7.3, #20761] "Does a code package ship this flow?" is NOT read
+// off a definition here. The subflow guards, the arming gate and the
+// activation door ask {@link AutomationEngine.packagedFlowOwner} — the loader's
+// set, attached by the host — because a definition reaches `registerFlow`
+// through authoring doors too, and its provenance stamps are the caller's.
 import type { FlowRegionParsed } from '@objectstack/spec/automation';
 import type {
     Connector,
@@ -2245,6 +2243,13 @@ export interface FlowContender {
 }
 
 /**
+ * [#20761] A reader over the loader's set: the package that ships the flow
+ * `name` as a code artifact, or `undefined` when no managed package loaded a
+ * flow of that name. See {@link AutomationEngine.setPackagedFlowSource}.
+ */
+export type PackagedFlowSource = (name: string) => string | undefined;
+
+/**
  * [#11997] What the ADR-0005 overlay precedence decided for one bare flow name.
  *
  * Emitted only when a name had more than one contender at pull time. `armed` is
@@ -2352,6 +2357,13 @@ export class AutomationEngine implements IAutomationService {
      * a flip rather than reporting a durability it does not have.
      */
     private flowActivationStore: FlowActivationStore | null = null;
+    /**
+     * [#20761] The reader over the loader's set — see
+     * {@link setPackagedFlowSource}. `undefined` until a host attaches one, and
+     * with none attached NO flow is packaged: an engine no loader feeds holds
+     * no flow a managed package loaded.
+     */
+    private packagedFlowSource?: PackagedFlowSource;
     /**
      * Re-entrancy guard for record-triggered flows (complements the intra-run
      * {@link MAX_NODE_REENTRIES} back-edge guard, which cannot see a self-trigger
@@ -4406,7 +4418,7 @@ export class AutomationEngine implements IAutomationService {
      */
     unregisterFlow(name: string): void {
         const flow = this.flows.get(name);
-        if (flow && describeFlowContender(flow).source === 'package') {
+        if (flow && this.isPackagedFlow(name)) {
             const callers = this.packagedSubflowCallers(name);
             if (callers.length > 0) this.refuseUnderReachingCallers(name, 'remove', callers, new Map());
         }
@@ -4618,6 +4630,42 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [#20761, ADR-0126 §7.2 / §7.3] Attach the reader over THE LOADER'S SET —
+     * the one server-held fact of which flows are packaged. Hosts call this at
+     * start(); the automation plugin hands over a reader that asks the metadata
+     * protocol's `packagedArtifactOwner` at question time, which answers from
+     * the entries the artifact loader registered — the same set the protocol's
+     * locked-base verdict reads.
+     *
+     * For a flow, "packaged" means exactly "loaded by the loader from a managed
+     * package". Every classification this engine makes — the §7.3 subflow
+     * guards in both directions, the arming gate, the activation door, and the
+     * package the activation row is attributed to — reads {@link
+     * packagedFlowOwner}, and so this reader. ⛔ Never the stamps a definition
+     * carries: a definition reaches {@link registerFlow} through authoring doors
+     * too, and its `_packageId` / `_provenance` are the caller's bytes. They are
+     * kept on the definition for display only.
+     */
+    setPackagedFlowSource(source: PackagedFlowSource | undefined): void {
+        this.packagedFlowSource = source;
+    }
+
+    /**
+     * [#20761] The package that ships the flow `name`, per the loader's set
+     * ({@link setPackagedFlowSource}); `undefined` for a flow authored in this
+     * deployment — and for every flow while no reader is attached.
+     */
+    packagedFlowOwner(name: string): string | undefined {
+        const owner = this.packagedFlowSource?.(name);
+        return typeof owner === 'string' && owner !== '' ? owner : undefined;
+    }
+
+    /** [#20761] Is `name` a packaged flow — {@link packagedFlowOwner}, as a verdict. */
+    private isPackagedFlow(name: string): boolean {
+        return this.packagedFlowOwner(name) !== undefined;
+    }
+
+    /**
      * [ADR-0126 §7.2] Load the ledger into {@link flowLedgerDisabled}.
      *
      * Called once at boot, AFTER the flow pull, because the projection decides
@@ -4744,7 +4792,7 @@ export class AutomationEngine implements IAutomationService {
         const callers: string[] = [];
         for (const [callerName, flow] of this.flows) {
             if (callerName === name) continue;
-            if (describeFlowContender(flow).source !== 'package') continue;
+            if (!this.isPackagedFlow(callerName)) continue;
             if (this.subflowTargets(flow).includes(name)) callers.push(callerName);
         }
         return callers;
@@ -4942,7 +4990,7 @@ export class AutomationEngine implements IAutomationService {
         const disabled: Array<{ name: string; ledger: boolean; status?: string }> = [];
         for (const target of new Set(this.subflowTargets(flow))) {
             const child = this.flows.get(target);
-            if (!child || describeFlowContender(child).source !== 'package') continue;
+            if (!child || !this.isPackagedFlow(target)) continue;
             if (this.isFlowEnabled(target)) continue;
             const ledger = this.flowLedgerDisabled.has(target);
             const statusDisabled = this.flowStatusDisabled.get(target) === true;
@@ -4968,7 +5016,7 @@ export class AutomationEngine implements IAutomationService {
                 if (target === to) return true;
                 if (seen.has(target) || !this.flowLedgerDisabled.has(target)) continue;
                 const next = this.flows.get(target);
-                if (!next || describeFlowContender(next).source !== 'package') continue;
+                if (!next || !this.isPackagedFlow(target)) continue;
                 seen.add(target);
                 pending.push(target);
             }
@@ -4994,9 +5042,9 @@ export class AutomationEngine implements IAutomationService {
      * disabling a shipped flow being equivalent to deleting it, and enabling
      * is the opposite act.
      */
-    private refuseEnableOntoDisabledSubflow(name: string, flow: FlowParsed): void {
+    private refuseEnableOntoDisabledSubflow(name: string): void {
         if (!this.flowLedgerDisabled.has(name)) return;
-        if (describeFlowContender(flow).source !== 'package') return;
+        if (!this.isPackagedFlow(name)) return;
         const disabled = this.disabledPackagedSubflows(name);
         if (disabled.length === 0) return;
 
@@ -5080,7 +5128,7 @@ export class AutomationEngine implements IAutomationService {
      */
     private declineOntoDisabledSubflows(flowName: string, triggerType: string): boolean {
         const flow = this.flows.get(flowName);
-        const disabled = flow && describeFlowContender(flow).source === 'package'
+        const disabled = flow && this.isPackagedFlow(flowName)
             ? this.disabledPackagedSubflows(flowName)
             : [];
         if (disabled.length === 0) {
@@ -5159,13 +5207,14 @@ export class AutomationEngine implements IAutomationService {
      * flow's update door instead — `PUT /automation/:name`, which drives
      * {@link registerFlow} with the complete definition.
      *
-     * "No package provenance" is `describeFlowContender(flow).source !==
-     * 'package'` — the one discriminator the §7.3 guards already ask
-     * (`isCodeArtifactBody`, ADR-0029 D9.6), ⛔ never a second reading. So a
-     * runtime row carrying the `sys_metadata` sentinel, and a tenant-authored
-     * row bound to an app package, are refused exactly as a flow with no
-     * package envelope at all is: provenance decides, not whether a package
-     * id happens to be non-empty.
+     * "No package ships it" is {@link packagedFlowOwner} answering nothing —
+     * the one reading the §7.3 guards already ask, ⛔ never a second one.
+     * [#20761] That is the loader's set, never the definition's own stamps: a
+     * runtime row carrying the `sys_metadata` sentinel, a tenant-authored row
+     * bound to an app package, and a definition an authoring door registered
+     * with a package's stamps on it are all refused exactly as a flow with no
+     * package envelope at all is — the server's fact decides, not what the
+     * body says.
      *
      * ADR-0112 envelope: code AND status. `RESOURCE_CONFLICT` (409) is the
      * standard catalog's "the request conflicts with the resource's current
@@ -5191,8 +5240,8 @@ export class AutomationEngine implements IAutomationService {
      * (ADR-0126 §7.1), which no row holds. Still nothing is written: which
      * rows this door should clear is not this refusal's to decide.
      */
-    private refuseCustomerAuthoredToggle(name: string, flow: FlowParsed, enabled: boolean): void {
-        if (describeFlowContender(flow).source === 'package') return;
+    private refuseCustomerAuthoredToggle(name: string, enabled: boolean): void {
+        if (this.isPackagedFlow(name)) return;
         const updateDoor = `its update door, PUT /automation/${name}, which takes the complete definition`;
         const ownSwitch = this.flowLedgerDisabled.has(name)
             ? `This flow's own switch is its definition's status, published through ${updateDoor} — but it is ` +
@@ -5260,7 +5309,11 @@ export class AutomationEngine implements IAutomationService {
         // is never awaited for it, and the refusal lands before the ledger
         // write and before any in-process change — with a ledger attached or
         // in the degraded mode without one. Nothing half-flips.
-        this.refuseCustomerAuthoredToggle(name, flow, enabled);
+        this.refuseCustomerAuthoredToggle(name, enabled);
+        // Past the refusal the loader's set names a package, and the ledger row
+        // is attributed to exactly that one — read with the verdict, so the
+        // run-store await below cannot separate the two.
+        const packageOwner = this.packagedFlowOwner(name) as string;
 
         // [ADR-0126 §7.3] The subflow guard runs in BOTH directions, because
         // a subflow pair breaks from either end. Disabling a child breaks the
@@ -5270,7 +5323,7 @@ export class AutomationEngine implements IAutomationService {
         // the flows that call IT, so enabling a child is not guarded by its
         // callers.
         if (enabled) {
-            this.refuseEnableOntoDisabledSubflow(name, flow);
+            this.refuseEnableOntoDisabledSubflow(name);
         } else {
             // A switched-off caller guards only while it holds a parked run,
             // so only then are the run stores read — and only that read is
@@ -5291,7 +5344,10 @@ export class AutomationEngine implements IAutomationService {
         if (this.flowActivationStore) {
             await this.flowActivationStore.setActive({
                 name,
-                packageId: String((flow as { _packageId?: unknown })._packageId ?? ''),
+                // [#20761] The package the LOADER's set names, never the
+                // definition's stamps — so no row is attributed to a package
+                // from an authoring door. Read once, up top, with the verdict.
+                packageId: packageOwner,
                 active: enabled,
             });
         } else {
