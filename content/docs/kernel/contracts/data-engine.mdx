@@ -466,14 +466,11 @@ const result = await engine.aggregate('task', {
 
 ### EngineAggregateOptions
 
-```typescript
-interface EngineAggregateOptions {
-  where?: FilterCondition;                 // Pre-aggregation filter (WHERE)
-  groupBy?: string[];                      // GROUP BY fields
-  aggregations?: AggregationNode[];        // Aggregation definitions
-  context?: ExecutionContext;
-}
+The option keys are listed in the generated
+[`EngineAggregateOptions` reference](/docs/references/data/data-engine#engineaggregateoptions).
+`aggregations` takes `AggregationNode` entries:
 
+```typescript
 interface AggregationNode {
   function: 'count' | 'sum' | 'avg' | 'min' | 'max' | 'count_distinct';
   field?: string;           // Field to aggregate (optional for COUNT(*))

@@ -507,7 +507,9 @@ export function narrowNumberComparands<W>(
  * A `json` or `lookup` groupBy (or a `min` / `max` of one) is judged now, by
  * that same type: the engine evaluates `having` itself, and a relation column
  * there carries the related record's id, never the record — measured, a
- * nested-relation `having` kept no group on every driver.
+ * nested-relation `having` kept no group on every driver. [#20783] A `json`
+ * GROUPBY no longer reaches here: `aggregate` refuses it at its entry
+ * (`group-by-structured-json-door.ts`); a `min` / `max` of a json field does.
  */
 export function narrowHavingNumberComparands<H>(
   object: string,

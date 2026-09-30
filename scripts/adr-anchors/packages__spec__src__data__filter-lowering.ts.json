@@ -1,0 +1,7 @@
+{
+  "file": "packages/spec/src/data/filter-lowering.ts",
+  "adrs": [
+    "ADR-0053"
+  ],
+  "invariant": "ADR-0053 D-D1 (amended 2026-09-30): the bare-day upper bound, the `$between` split and the NULL-polarity guards are applied ONCE, by this one shared `FilterCondition → FilterCondition` lowering, at the seams that already run the comparand doors — after the doors and after filter-token resolution — and drivers receive the lowered filter. It emits a calendar string, never a storage form (D-A1), and runs before any face converts (D-E3, structural). It lives on the `@objectstack/spec/data` subpath and never on the package root entry. Moving the rule back into an emitter, running it before token resolution, or widening a column no declared `datetime` names at a typed seam reverts the amendment."
+}

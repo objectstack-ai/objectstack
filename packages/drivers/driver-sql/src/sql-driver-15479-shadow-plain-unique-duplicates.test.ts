@@ -169,7 +169,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow plain unique over duplicates (#15479
 
       // ⛔ And it must NOT carry the NULL-safe arm's framing, which is false
       // here: nothing admitted these rows and there is no NULL-safe key.
-      expect(diagnosis).not.toContain('#5030');
+      expect(diagnosis).not.toContain('NULL-distinct');
       expect(diagnosis).not.toContain('NULL-safe');
       expect(diagnosis).not.toContain('COALESCE');
 
@@ -196,7 +196,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow plain unique over duplicates (#15479
       const diagnosis = logs.find((l) => l.includes("cannot create hash-shadow unique index 'uniq_os15479_global_v'"));
       expect(diagnosis, 'the degradation must reach the durability channel').toBeTruthy();
       expect(diagnosis).toMatch(/Conflicting group\(s\):/);
-      expect(diagnosis).not.toContain('#5030');
+      expect(diagnosis).not.toContain('NULL-distinct');
       expect(diagnosis).not.toContain('COALESCE');
 
       const { idx } = await catalog('os15479_global');
@@ -219,7 +219,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow plain unique over duplicates (#15479
       expect(err, 'the NULL-safe arm already survived the boot').toBeNull();
       const diagnosis = logs.find((l) => l.includes("cannot create hash-shadow unique index 'uniq_os15479_org_v'"));
       expect(diagnosis, 'the NULL-safe degradation must still be logged').toBeTruthy();
-      expect(diagnosis).toContain('#5030');
+      expect(diagnosis).toContain('NULL-distinct');
       expect(diagnosis).toContain('NULL-safe');
       expect(diagnosis).toContain("COALESCE(organization_id, '__global__')");
     }, 60_000);

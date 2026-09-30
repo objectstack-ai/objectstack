@@ -1334,9 +1334,10 @@ const products = await engine.find('product', {
 ### Analytics: Revenue by Month
 
 `month` is not a column — bucket the `created_at` instant with `dateGranularity`. Note
-that `engine.aggregate()` accepts only `where` / `groupBy` / `aggregations` (plus a
-`timezone` for bucketing): there is no `orderBy` or `limit` on this path, so sort the
-returned rows yourself.
+that `engine.aggregate()` takes a closed option set with no `orderBy` or `limit` (the
+full list is under `EngineAggregateOptions` in the
+[Data Engine reference](/docs/references/data/data-engine)), so sort the returned rows
+yourself. It does carry a `timezone` for bucketing.
 
 ```typescript
 const monthlyRevenue = await engine.aggregate('order', {

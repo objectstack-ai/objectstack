@@ -294,7 +294,9 @@ describe('[#20745] a no-operator object beneath a relation, structured-JSON or p
     const cases: ReadonlyArray<readonly [EngineAggregateOptions, string, string, string]> = [
       [{ groupBy: ['owner'], aggregations: [{ function: 'count', alias: 'n' }], having: { owner: { region: 'NA' } } }, 'owner', 'lookup', 'nested-relation form'],
       [{ groupBy: ['title'], aggregations: [{ function: 'max', field: 'boss', alias: 'top' }], having: { top: { region: 'NA' } } }, 'top', 'master_detail', 'nested-relation form'],
-      [{ groupBy: ['meta'], aggregations: [{ function: 'count', alias: 'n' }], having: { meta: { a: 1 } } }, 'meta', 'json', 'whole-value match'],
+      // [#20783] A JSON column reaches `having` as a `max` of a json field: a
+      // json GROUPBY is refused one door earlier (`engine-group-by-json-door.test.ts`).
+      [{ groupBy: ['title'], aggregations: [{ function: 'max', field: 'meta', alias: 'top_meta' }], having: { top_meta: { a: 1 } } }, 'top_meta', 'json', 'whole-value match'],
     ] as ReadonlyArray<readonly [EngineAggregateOptions, string, string, string]>;
     for (const [query, column, type, words] of cases) {
       reads.length = 0;

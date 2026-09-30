@@ -20,6 +20,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { RowLevelSecurityPolicy } from '@objectstack/spec/security';
 import { compileCelToFilter } from '@objectstack/formula';
+import { lowerFilterCondition } from '@objectstack/spec/data';
 
 import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
 
@@ -152,7 +153,11 @@ describe('[#20212] CONTROL — a compiled filter the faces accept passes through
 
         const filter = compiler.compileFilter([policy(clause, predicate)], CTX, clause, GUARD);
 
-        expect(filter).toEqual(compiled.ok ? compiled.filter : undefined);
+        // [ADR-0053 D-D1, amended — #5930] The faces pass the compiled filter
+        // through unchanged; what the seam hands on is the shared lowering of
+        // it (the NULL-polarity guards — this GUARD declares no `datetime`
+        // column, so the whole-day rule reads none), and nothing else.
+        expect(filter).toEqual(compiled.ok ? lowerFilterCondition(compiled.filter, { isDatetimeColumn: () => false }) : undefined);
         expect(warn).not.toHaveBeenCalled();
       });
     }
