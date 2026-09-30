@@ -200,8 +200,9 @@ describe('[#20240] a year outside the four-digit years — the number and the Da
       }
       expect(reads.n, 'no read of the object — the refusal precedes the driver').toBe(0);
 
-      // [#20264] The same numbers on a `datetime` field are refused too — the
-      // supported years 0001..9999 hold for both kinds.
+      // [#20264] The same numbers on a `datetime` field are refused too — they
+      // fall outside both kinds' years (a `date` 0001..9999, [#20280] a
+      // `datetime` 1000..9999).
       for (const comparand of [ms, new Date(ms)]) {
         const err = await refusalOf(engine.find(OBJECT, { where: { opened_at: { $gt: comparand } } }));
         expect(err).toMatchObject({ code: 'INVALID_FILTER', status: 400 });

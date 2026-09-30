@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#20264] The supported years of a `date` and a `datetime` are 0001..9999.
- * The refusal outside them sits one layer up, at the engine's two doors (the
+ * [#20264] The supported years of a `date` are 0001..9999, and [#20280] of a
+ * `datetime` 1000..9999. The refusal outside them sits one layer up, at the engine's two doors (the
  * temporal-comparand door and the record validator, both asking
  * `@objectstack/core`'s `isOutsideTemporalYearRange`), so this driver's own
  * `where` and write paths are not a door and are not pinned as one. What this
@@ -16,6 +16,13 @@
  * REST create stored a `date` of `"+010000-01-01T00:00:00.000Z"` verbatim.
  * Both are refused at the engine now; the engine's own suite and REST's pin
  * those cells.
+ *
+ * [#20280] The `datetime` rows in 0001..0999 stay, on purpose: they are what a
+ * row stored before the `datetime` floor holds, written here straight through
+ * the driver, which no door fronts. The engine refuses such a value as a
+ * written value and as a comparand now; the driver still stores it and compares
+ * it as the instant it names, so an operator's `$lt` on year 1000 finds it.
+ * Year 1000 is the floor's edge row.
  */
 
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -30,13 +37,15 @@ const ROWS = [
   { id: 'first', placed_on: '0001-01-01', opened_at: '0001-01-01T00:00:00.000Z' },
   { id: 'y0099', placed_on: '0099-03-04', opened_at: '0099-03-04T10:00:00.000Z' },
   { id: 'y0999', placed_on: '0999-06-15', opened_at: '0999-06-15T10:00:00.000Z' },
+  // [#20280] The `datetime` floor's edge.
+  { id: 'y1000', placed_on: '1000-01-01', opened_at: '1000-01-01T00:00:00.000Z' },
   { id: 'c2026', placed_on: '2026-02-01', opened_at: '2026-02-01T10:00:00.000Z' },
   { id: 'last', placed_on: '9999-12-31', opened_at: '9999-12-31T23:59:59.999Z' },
 ];
 
-const ORDER = ['first', 'y0099', 'y0999', 'c2026', 'last'];
+const ORDER = ['first', 'y0099', 'y0999', 'y1000', 'c2026', 'last'];
 
-describe('[#20264] every year in 0001..9999 is stored and compared as the day or instant it names', () => {
+describe('[#20264] every year in 0001..9999 is stored and compared by this driver as the day or instant it names', () => {
   let driver: InMemoryDriver;
   const ids = async (where: FilterCondition) =>
     (await driver.find(OBJECT, { where })).map((r) => r.id as string).sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b));
@@ -53,7 +62,7 @@ describe('[#20264] every year in 0001..9999 is stored and compared as the day or
     }
   });
 
-  it('reads each row back as written — the edges and the 2026 control', async () => {
+  it('reads each row back as written — the edges, a datetime stored before the floor, and the 2026 control', async () => {
     for (const row of ROWS) {
       expect(await driver.findOne(OBJECT, { where: { id: row.id } }), row.id).toMatchObject(row);
     }

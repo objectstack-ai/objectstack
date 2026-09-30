@@ -104,19 +104,24 @@
  *   is read as before. The #8690 ruling scoped THAT change to strings; it did
  *   not rule non-strings out of this door.
  *
- * ## [#20264] The supported years, 0001..9999
+ * ## [#20264] The supported years: a `date` 0001..9999, a `datetime` 1000..9999
  *
- * A `date` or `datetime` comparand whose year falls outside 0001..9999 is
- * refused here, in the year class's own words, whatever its spelling — a
- * number, a `Date`, or a string the kind's rule reads (`+010000-01-01T…Z`,
- * `-000001-…`, `0000-06-15`). Measured before this on InMemoryDriver and
- * SqlDriver on SQLite and PostgreSQL 16: a `datetime` comparand for year 10000
- * or −1 counted `$gt` / `$lt` / `$eq` 7 / 0 / 0 on memory and SQLite (its
- * extended-year text sorts below every four-digit year) and answered 500 on
- * PostgreSQL; year 0 answered 500 on PostgreSQL, on both kinds, in every
- * spelling. `@objectstack/core`'s `isOutsideTemporalYearRange` is the range;
- * the predicate this door calls asks it, and so does the record validator's
- * write door, so the two doors cannot disagree about a year.
+ * A `date` comparand whose year falls outside 0001..9999, and [#20280] a
+ * `datetime` comparand whose UTC year falls outside 1000..9999, is refused
+ * here, in the year class's own words, whatever its spelling — a number, a
+ * `Date`, or a string the kind's rule reads (`+010000-01-01T…Z`, `-000001-…`,
+ * `0000-06-15`, `0500-07-15T10:00:00Z` on a `datetime`). Measured before this
+ * on InMemoryDriver and SqlDriver on SQLite and PostgreSQL 16: a `datetime`
+ * comparand for year 10000 or −1 counted `$gt` / `$lt` / `$eq` 7 / 0 / 0 on
+ * memory and SQLite (its extended-year text sorts below every four-digit year)
+ * and answered 500 on PostgreSQL; year 0 answered 500 on PostgreSQL, on both
+ * kinds, in every spelling. A `datetime` in 0001..0999 compared as the instant
+ * it names on every backend; it is refused because 1000 is MySQL's documented
+ * `DATETIME` floor, and MySQL reads a stored `DATETIME` in 0001..0099 back a
+ * century late, so its words say that rather than a misorder.
+ * `@objectstack/core`'s `isOutsideTemporalYearRange` is the range; the
+ * predicate this door calls asks it, and so does the record validator's write
+ * door, so the two doors cannot disagree about a year.
  *
  * ## [#20549] A value the rule reads as another value than it names
  *
@@ -189,6 +194,7 @@ import {
   isOutsideTemporalYearRange,
   isUninterpretableTemporalComparand,
   temporalComparandKind,
+  temporalStorageForm,
   type TemporalComparandKind,
 } from '@objectstack/core';
 import { isTextFilterOperator } from '@objectstack/spec/data';
@@ -202,8 +208,9 @@ export interface UninterpretableTemporalComparand {
   kind: TemporalComparandKind;
   /**
    * A non-empty string — or, on a `date` or `datetime` field, a number or
-   * `Date` whose year falls outside 0001..9999 ([#20240], [#20264]), and on a
-   * `time` field one whose UTC year has no four-digit spelling ([#20480]).
+   * `Date` whose year falls outside the kind's supported years ([#20240],
+   * [#20264]; [#20280] 1000..9999 on a `datetime`), and on a `time` field one
+   * whose UTC year has no four-digit spelling ([#20480]).
    */
   value: unknown;
   /** The `where.…` (or `having.…`, `aggregations[i].filter.…`) key path the offending comparand sits at. */
@@ -388,33 +395,90 @@ const REMEDY: Record<TemporalComparandKind, string> = {
 };
 
 /**
- * [#20240] [#20264] The year class, per kind: what the comparand's year is,
- * what it would do past this door, and the forms that carry a year the field
- * can compare. Only `date` and `datetime` have a year; `time` is never in
- * this class.
+ * [#20240] [#20264] A year class: what the comparand's year is, what it would
+ * do past this door (on `where` and on `having`), and the forms that carry a
+ * year the field can compare.
  */
-const YEAR_CLASS: Record<'date' | 'datetime', { year: string; misorder: string; remedy: string }> = {
+interface YearClass {
+  year: string;
+  where: string;
+  having: string;
+  remedy: string;
+}
+
+/** The two consequence sentences of a comparand whose text orders as no value of its kind does. */
+function misorders(misorder: string): Pick<YearClass, 'where' | 'having'> {
+  return {
+    where: `It would reach the driver in a form that ${misorder} and answer the wrong rows, or a database error.`,
+    having: `Compared with each group, it ${misorder} and would keep the wrong groups.`,
+  };
+}
+
+const DATETIME_YEARS = 'an instant whose UTC year falls outside the years 1000 to 9999';
+const DATETIME_REMEDY = 'Write an ISO-8601 instant, epoch milliseconds or a Date whose UTC year falls in the '
+  + 'years 1000 to 9999.';
+
+/**
+ * The year class, per kind. Only `date` and `datetime` have a year; `time` is
+ * never in this class. [#20280] A `datetime` names a year from 1000, so its
+ * range is 1000..9999; a `date` keeps 0001..9999.
+ */
+const YEAR_CLASS: Record<'date' | 'datetime', YearClass> = {
   date: {
     year: 'whose calendar day falls outside the years 0001 to 9999',
-    misorder: 'does not sort as a day',
+    ...misorders('does not sort as a day'),
     remedy: 'Write a "YYYY-MM-DD" calendar day in the years 0001 to 9999, or an epoch-millisecond '
       + 'number or Date whose UTC calendar day falls in those years.',
   },
   datetime: {
-    year: 'an instant whose UTC year falls outside the years 0001 to 9999',
-    misorder: 'does not sort as an instant',
-    remedy: 'Write an ISO-8601 instant, epoch milliseconds or a Date whose UTC year falls in the '
-      + 'years 0001 to 9999.',
+    year: DATETIME_YEARS,
+    ...misorders('does not sort as an instant'),
+    remedy: DATETIME_REMEDY,
   },
 };
+
+/**
+ * [#20280] A `datetime` in the years 0001..0999: outside its range, but a
+ * four-digit instant that sorts and compares as the instant it names on every
+ * backend. It is refused because 1000 is MySQL's documented `DATETIME` floor,
+ * and its words say so rather than claim a misorder it does not have.
+ */
+const BEFORE_YEAR_1000 = 'Before year 1000 a datetime is not held alike by every backend: MySQL documents '
+  + 'its DATETIME from year 1000 only, and reads one stored in the years 0001 to 0099 back a century late.';
+const DATETIME_BEFORE_YEAR_1000: YearClass = {
+  year: DATETIME_YEARS,
+  where: BEFORE_YEAR_1000,
+  having: BEFORE_YEAR_1000,
+  remedy: DATETIME_REMEDY,
+};
+
+/**
+ * [#20280] Is `value` an instant whose UTC year falls outside 0001..9999 — the
+ * four-digit years — read the way the `datetime` rule reads it? For the
+ * message only: it tells a `datetime` below its 1000 floor from one past the
+ * four-digit years, and it is the [#20480] class of a `time` comparand, which
+ * that floor does not move (a `time` column keeps the time of day of an
+ * instant in 0001..0999).
+ *
+ * Core's range is asked, never re-derived: the `date` range IS 0001..9999, and
+ * it reads a number or a `Date` exactly as the `datetime` rule does (the UTC
+ * year of the instant). A string is read into that instant by the `datetime`
+ * rule first, because the `date` rule would read its leading day instead
+ * (`9999-12-31T23:00:00-02:00` names year 10000 in UTC).
+ */
+function isInstantOutsideFourDigitYears(value: unknown): boolean {
+  const instant = typeof value === 'string' ? Date.parse(String(temporalStorageForm(value, 'datetime'))) : value;
+  return isOutsideTemporalYearRange(instant, 'date');
+}
 
 /**
  * [#20264] The year class of a hit, or `undefined` when the comparand is
  * refused for being unreadable at all — the range itself is core's
  * `isOutsideTemporalYearRange`, never re-derived here.
  */
-function yearClassOf(hit: UninterpretableTemporalComparand): (typeof YEAR_CLASS)['date'] | undefined {
+function yearClassOf(hit: UninterpretableTemporalComparand): YearClass | undefined {
   if (hit.kind === 'time' || !isOutsideTemporalYearRange(hit.value, hit.kind)) return undefined;
+  if (hit.kind === 'datetime' && !isInstantOutsideFourDigitYears(hit.value)) return DATETIME_BEFORE_YEAR_1000;
   return YEAR_CLASS[hit.kind];
 }
 
@@ -471,7 +535,10 @@ const TIME_OUTSIDE_FOUR_DIGIT_YEARS: MisreadClass = {
 function misreadClassOf(hit: UninterpretableTemporalComparand): MisreadClass | undefined {
   // [#20480] The range is core's, asked of the instant the `datetime` rule
   // reads — the reading a `time` column takes of every non-wall-clock value.
-  if (hit.kind === 'time' && isOutsideTemporalYearRange(hit.value, 'datetime')) return TIME_OUTSIDE_FOUR_DIGIT_YEARS;
+  // [#20280] The four-digit years, never the `datetime` range: that range
+  // starts at 1000, and a `time` column keeps the time of day of an instant in
+  // 0001..0999, so such a comparand is refused, if at all, for another reason.
+  if (hit.kind === 'time' && isInstantOutsideFourDigitYears(hit.value)) return TIME_OUTSIDE_FOUR_DIGIT_YEARS;
   if (typeof hit.value !== 'string') return undefined;
   const s = hit.value.trim();
   const day = /^\d{4}-\d{2}-\d{2}/.exec(s)?.[0];
@@ -506,18 +573,18 @@ export function assertTemporalComparandsInterpretable(
 ): void {
   const hit = findUninterpretableTemporalComparand(schema, where, path);
   if (!hit) return;
-  // [#20240] [#20264] A comparand whose year falls outside 0001..9999 gets
-  // words that say so. It does not compare false for every row as junk does:
-  // its text orders as no day or instant does, so it answers the WRONG rows
-  // (or, on PostgreSQL, a database error).
+  // [#20240] [#20264] A comparand whose year falls outside the kind's years
+  // gets words that say so. It does not compare false for every row as junk
+  // does: its text orders as no day or instant does, so it answers the WRONG
+  // rows (or, on PostgreSQL, a database error) — or [#20280], for a `datetime`
+  // in 0001..0999, it names a year MySQL's `DATETIME` does not document.
   const yearClass = yearClassOf(hit);
   if (yearClass) {
     throw invalidFilterError(
       `${operation}('${object}'): filter on '${hit.field}' compares a declared ${hit.kind} field `
       + `against ${preview(hit.value)} at ${hit.path}, ${yearClass.year}, the years a ${hit.kind} `
-      + `value may name, so it is not a ${hit.kind} value this platform can interpret. It `
-      + `would reach the driver in a form that ${yearClass.misorder} and answer the wrong rows, or a `
-      + `database error. The filter was NOT applied. ${yearClass.remedy}`,
+      + `value may name, so it is not a ${hit.kind} value this platform can interpret. `
+      + `${yearClass.where} The filter was NOT applied. ${yearClass.remedy}`,
     );
   }
   // [#20549] A comparand the rule reads as another value than it names.
@@ -591,14 +658,13 @@ export function assertHavingTemporalComparandsInterpretable(
   if (!hit) return;
   const column = `\`having\` on '${hit.field}' (${havingColumnSource(hit.field, query.groupBy, query.aggregations)}, `
     + `a ${hit.kind} column)`;
-  // The year class, in its own words, as on `where` (#20240, #20264).
+  // The year class, in its own words, as on `where` (#20240, #20264, #20280).
   const yearClass = yearClassOf(hit);
   if (yearClass) {
     throw invalidFilterError(
       `aggregate('${object}'): ${column} compares against ${preview(hit.value)} at ${hit.path}, `
       + `${yearClass.year}, the years a ${hit.kind} value may name, so it is not a ${hit.kind} `
-      + 'value this platform can interpret. Compared with each group, it '
-      + `${yearClass.misorder} and would keep the wrong groups. The \`having\` was NOT applied. `
+      + `value this platform can interpret. ${yearClass.having} The \`having\` was NOT applied. `
       + yearClass.remedy,
     );
   }

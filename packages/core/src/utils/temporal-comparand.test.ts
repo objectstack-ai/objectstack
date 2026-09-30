@@ -15,6 +15,11 @@
 // AND `datetime`: year 0 joins the refused years — PostgreSQL's `DATE` and
 // `timestamptz` have no year 0 — and a `datetime` number, `Date` or string
 // outside the range is refused as the `date` one is. `time` has no year.
+//
+// [#20280] A `datetime` starts at 1000 (triage's re-ruling on that card):
+// MySQL documents its `DATETIME` from year 1000 only, and reads one stored in
+// 0001..0099 back a century late. A `date` keeps 0001..9999, and a `time`
+// column still reads the time of day of an instant in 0001..0999.
 
 import { describe, it, expect } from 'vitest';
 import { isUninterpretableTemporalComparand } from './temporal-comparand.js';
@@ -39,6 +44,13 @@ const PAST_THE_DATE_RANGE: ReadonlyArray<readonly [string, number]> = [
   ['one before the minimum', -8.64e15 - 1],
   ['9e15', 9e15],
   ['MAX_SAFE_INTEGER', Number.MAX_SAFE_INTEGER],
+];
+
+/** [#20280] Finite numbers in 0001..0999: a `date` and a `time` read them, a `datetime` refuses them. */
+const BEFORE_THE_DATETIME_FLOOR: ReadonlyArray<readonly [string, number]> = [
+  ['the first millisecond of year 1', at('0001-01-01T00:00:00.000Z')],
+  ['0999-06-15', -30627504000000],
+  ['the last millisecond of year 999', at('0999-12-31T23:59:59.999Z')],
 ];
 
 /** Finite numbers whose UTC calendar day has a four-digit year — read as before. */
@@ -93,16 +105,22 @@ describe('[#20240] isUninterpretableTemporalComparand — a date column\'s numbe
     expect(isUninterpretableTemporalComparand('date', '0001-01-01')).toBe(false);
   });
 
-  it('[#20264] judges a datetime number or Date by the same years — the rule reads it, but its year is outside', () => {
-    for (const [name, ms] of [...OUT_OF_RANGE, ...PAST_THE_DATE_RANGE]) {
+  it('[#20264] judges a datetime number or Date by its own years — the rule reads it, but its year is outside', () => {
+    // [#20280] 0001..0999 joined the refused years on a `datetime`.
+    for (const [name, ms] of [...OUT_OF_RANGE, ...PAST_THE_DATE_RANGE, ...BEFORE_THE_DATETIME_FLOOR]) {
       expect(isUninterpretableTemporalComparand('datetime', ms), `number, ${name}`).toBe(true);
       if (Number.isFinite(new Date(ms).getTime())) {
         expect(isUninterpretableTemporalComparand('datetime', new Date(ms)), `Date, ${name}`).toBe(true);
       }
     }
-    for (const [name, ms] of IN_RANGE) {
+    for (const [name, ms] of IN_RANGE.filter(([, v]) => new Date(v).getUTCFullYear() >= 1000)) {
       expect(isUninterpretableTemporalComparand('datetime', ms), `number, ${name}`).toBe(false);
       expect(isUninterpretableTemporalComparand('datetime', new Date(ms)), `Date, ${name}`).toBe(false);
+    }
+    // The control: a `date` column reads the same numbers and Dates.
+    for (const [name, ms] of BEFORE_THE_DATETIME_FLOOR) {
+      expect(isUninterpretableTemporalComparand('date', ms), `date number, ${name}`).toBe(false);
+      expect(isUninterpretableTemporalComparand('date', new Date(ms)), `date Date, ${name}`).toBe(false);
     }
   });
 
@@ -115,10 +133,12 @@ describe('[#20240] isUninterpretableTemporalComparand — a date column\'s numbe
   // asserted all of them read before.
   it('[#20480] a time column reads the time of day of every instant with a four-digit UTC year, and refuses the rest', () => {
     const YEAR_0 = new Set(['[#20264] the first millisecond of year 0', '[#20264] the last millisecond of year 0']);
-    for (const [name, ms] of [...OUT_OF_RANGE, ...PAST_THE_DATE_RANGE, ...IN_RANGE]) {
+    // [#20280] The `datetime` floor is not `time`'s: 0001..0999 keep their time of day.
+    const READ = [...IN_RANGE, ...BEFORE_THE_DATETIME_FLOOR];
+    for (const [name, ms] of [...OUT_OF_RANGE, ...PAST_THE_DATE_RANGE, ...READ]) {
       const spelled = temporalStorageForm(ms, 'time');
       const keeps = typeof spelled === 'string' && /^\d{2}:\d{2}:\d{2}(\.\d{3})?$/.test(spelled);
-      const expected = !(IN_RANGE.some(([n]) => n === name) || YEAR_0.has(name));
+      const expected = !(READ.some(([n]) => n === name) || YEAR_0.has(name));
       expect(keeps, `the rule keeps a time of day for ${name}`).toBe(!expected);
       expect(isUninterpretableTemporalComparand('time', ms), `number, ${name}`).toBe(expected);
       if (Number.isFinite(new Date(ms).getTime())) {
@@ -150,7 +170,7 @@ describe('[#20240] isUninterpretableTemporalComparand — a date column\'s numbe
 // answer is 0 / 7 / 0), and PostgreSQL answered 500 (`22009`, `22007`) for
 // them and for year 0 (`22008`). Each is now uninterpretable, beside the same
 // instant a millisecond inside the range.
-describe('[#20264] isUninterpretableTemporalComparand — a datetime string outside the years 0001 to 9999', () => {
+describe('[#20264] isUninterpretableTemporalComparand — a datetime string outside the years 1000 to 9999', () => {
   const REFUSED: ReadonlyArray<readonly [string, string]> = [
     ['the extended ISO spelling of year 10000', '+010000-01-01T00:00:00.000Z'],
     ['a bare extended day', '10000-01-01'],
@@ -161,12 +181,20 @@ describe('[#20264] isUninterpretableTemporalComparand — a datetime string outs
     ['year 9999 in its zone, year 10000 in UTC', '9999-12-31T23:59:59-01:00'],
     ['year 1 in its zone, year 0 in UTC', '0001-01-01T00:00:00+08:00'],
     ['epoch milliseconds for year 10000, as a string', '253402300800000'],
+    // [#20280] Before year 1000, MySQL's documented `DATETIME` floor — the
+    // three #20264 read as inside, and the floor's own edges.
+    ['[#20280] the first instant of year 1', '0001-01-01T00:00:00.000Z'],
+    ['[#20280] year 1, a bare day', '0001-01-01'],
+    ['[#20280] year 0099', '0099-03-04T10:00:00.000Z'],
+    ['[#20280] the last instant of year 999', '0999-12-31T23:59:59.999Z'],
+    ['[#20280] year 999, zone-naive (read as UTC)', '0999-12-31 23:59'],
+    ['[#20280] year 1000 in its zone, 999 in UTC', '1000-01-01T00:00:00+08:00'],
   ];
   const READ: ReadonlyArray<readonly [string, string]> = [
-    ['the first instant of year 1', '0001-01-01T00:00:00.000Z'],
+    ['the first instant of year 1000', '1000-01-01T00:00:00.000Z'],
+    ['year 1000, a bare day', '1000-01-01'],
+    ['year 999 in its zone, 1000 in UTC', '0999-12-31T23:00:00-02:00'],
     ['the last instant of year 9999', '9999-12-31T23:59:59.999Z'],
-    ['year 1, a bare day', '0001-01-01'],
-    ['year 0099 — inside the range', '0099-03-04T10:00:00.000Z'],
     ['a 2026 instant (the control)', '2026-02-01T10:00:00.000Z'],
     ['a 2026 zone-naive timestamp (the control)', '2026-02-01 10:00'],
     // [#20549] The 2026 epoch-millisecond control is a NUMBER now: as a
@@ -178,6 +206,11 @@ describe('[#20264] isUninterpretableTemporalComparand — a datetime string outs
     }
     for (const value of ['+010000-01-01T00:00:00.000Z', '-000001-01-01T00:00:00.000Z', '0000-06-15']) {
       expect(isUninterpretableTemporalComparand('date', value), value).toBe(true);
+    }
+  });
+  it('[#20280] a date column still reads the years before 1000 — the control the datetime floor must not reach', () => {
+    for (const value of ['0001-01-01', '0099-03-04', '0999-12-31', '0001-01-01T00:00:00.000Z', '0999-12-31T23:59:59.999Z']) {
+      expect(isUninterpretableTemporalComparand('date', value), value).toBe(false);
     }
   });
   it('reads every instant inside the range, as before — the discriminating half', () => {
@@ -216,11 +249,13 @@ describe('[#20549] isUninterpretableTemporalComparand — a real calendar day, a
   });
 
   it('reads every real day beside them — the leap days and the month ends, the discriminating half', () => {
-    for (const day of ['2028-02-29', '2000-02-29', '2026-02-28', '2026-04-30', '2026-12-31', '0004-02-29', '2026-01-01']) {
+    for (const day of ['2028-02-29', '2000-02-29', '2026-02-28', '2026-04-30', '2026-12-31', '1004-02-29', '2026-01-01']) {
       expect(isUninterpretableTemporalComparand('date', day), `date ${day}`).toBe(false);
       expect(isUninterpretableTemporalComparand('datetime', day), `datetime ${day}`).toBe(false);
       expect(isUninterpretableTemporalComparand('datetime', `${day}T10:00:00Z`), `datetime ${day}T10:00:00Z`).toBe(false);
     }
+    // [#20280] The year-4 leap day stays a `date` control: a `datetime` begins at 1000.
+    expect(isUninterpretableTemporalComparand('date', '0004-02-29'), 'date 0004-02-29').toBe(false);
   });
 
   it('refuses a datetime string outside the ISO spellings — each one Date.parse reads', () => {
