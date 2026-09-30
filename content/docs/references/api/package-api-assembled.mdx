@@ -110,8 +110,10 @@ Installed package row whose manifest is the assembled package body
 | **integrity** | `Record<string, string>` | optional | Per-file content digests of the plugin artifact (ADR-0025 §3.2) |
 | **functions** | `Record<string, string \| { handler?: string; effect?: Enum<'pure' \| 'writes'> }> \| { name: string; handler?: string; packageId?: string; effect?: Enum<'pure' \| 'writes'> }[]` | optional | Named handler functions, lowered to the refs a JSON document carries |
 | **datasourceMapping** | `{ namespace?: string; package?: string; objectPattern?: string; default?: boolean; … }[]` | optional | Centralized datasource routing rules for packages/namespaces/objects |
-| **translations** | `Record<string, { objects?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; globalActions?: Record<string, object>; … }>[]` | optional | I18n Translation Bundles |
+| **translations** | `Record<string, { objects?: Record<string, object>; picklists?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; … }>[]` | optional | I18n Translation Bundles |
 | **objectExtensions** | `{ extend: string; fields?: Record<string, object>; label?: string; pluralLabel?: string; … }[]` | optional | Extensions to objects owned by other packages |
+| **picklists** | `{ name: string; label: string; description?: string; options: object[]; … }[]` | optional | Shared option lists that select fields reference by name |
+| **picklistExtensions** | `{ extend: string; options: object[] }[]` | optional | Options added to picklists owned by other packages (additive only) |
 | **apps** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; icon?: string; … }[]` | optional | Applications |
 | **views** | `{ name?: string; label?: string \| Record<string, string>; object?: string; list?: object; … }[]` | optional | List Views |
 | **viewItems** | `never` | optional | [MACHINE-ASSEMBLED] Non-container view artifacts of a runtime-assembled manifest (standalone ViewItems, flattened overlays) — written by package export and artifact factories, refused in authored stack sources. |
@@ -352,8 +354,10 @@ Installed package row whose manifest is the assembled package body
 | **integrity** | `Record<string, string>` | optional | Per-file content digests of the plugin artifact (ADR-0025 §3.2) |
 | **functions** | `Record<string, string \| { handler?: string; effect?: Enum<'pure' \| 'writes'> }> \| { name: string; handler?: string; packageId?: string; effect?: Enum<'pure' \| 'writes'> }[]` | optional | Named handler functions, lowered to the refs a JSON document carries |
 | **datasourceMapping** | `{ namespace?: string; package?: string; objectPattern?: string; default?: boolean; … }[]` | optional | Centralized datasource routing rules for packages/namespaces/objects |
-| **translations** | `Record<string, { objects?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; globalActions?: Record<string, object>; … }>[]` | optional | I18n Translation Bundles |
+| **translations** | `Record<string, { objects?: Record<string, object>; picklists?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; … }>[]` | optional | I18n Translation Bundles |
 | **objectExtensions** | `{ extend: string; fields?: Record<string, object>; label?: string; pluralLabel?: string; … }[]` | optional | Extensions to objects owned by other packages |
+| **picklists** | `{ name: string; label: string; description?: string; options: object[]; … }[]` | optional | Shared option lists that select fields reference by name |
+| **picklistExtensions** | `{ extend: string; options: object[] }[]` | optional | Options added to picklists owned by other packages (additive only) |
 | **apps** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; icon?: string; … }[]` | optional | Applications |
 | **views** | `{ name?: string; label?: string \| Record<string, string>; object?: string; list?: object; … }[]` | optional | List Views |
 | **viewItems** | `never` | optional | [MACHINE-ASSEMBLED] Non-container view artifacts of a runtime-assembled manifest (standalone ViewItems, flattened overlays) — written by package export and artifact factories, refused in authored stack sources. |

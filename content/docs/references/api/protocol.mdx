@@ -1602,13 +1602,14 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **locale** | `string` | ✅ | Locale code |
-| **translations** | `{ objects?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; globalActions?: Record<string, object>; … }` | ✅ | Translation data |
+| **translations** | `{ objects?: Record<string, object>; picklists?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; … }` | ✅ | Translation data |
 
 ### Nested Shape: `GetTranslationsResponse.translations`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **objects** | `Record<string, { label?: string; pluralLabel?: string; description?: string; fields?: Record<string, object>; … }>` | optional | Object translations keyed by object name |
+| **picklists** | `Record<string, { label?: string; options: Record<string, string> }>` | optional | Picklist translations keyed by picklist name |
 | **apps** | `Record<string, { label: string; description?: string; navigation?: Record<string, object> }>` | optional | App translations keyed by app name |
 | **messages** | `Record<string, string>` | optional | UI message translations keyed by message ID |
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
