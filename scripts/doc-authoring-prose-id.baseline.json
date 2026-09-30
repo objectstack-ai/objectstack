@@ -313,30 +313,7 @@
   "#4246": 1
  },
  "packages/objectql/src/engine.ts": {
-  "#3438": 2,
-  "#3617": 2,
-  "#4419": 1,
-  "#4769": 2,
-  "#4797": 2,
-  "#5351": 1,
-  "#7413": 1
- },
- "packages/objectql/src/integrity/dangling-reference-audit.ts": {
-  "#4551": 1
- },
- "packages/objectql/src/plugin.ts": {
-  "#2462": 1
- },
- "packages/objectql/src/registry.ts": {
-  "#3543": 1
- },
- "packages/objectql/src/validation/rule-validator.ts": {
-  "#2948": 1,
-  "#3407": 2,
-  "#3493": 2,
-  "#4649": 2,
-  "#5126": 2,
-  "#5503": 1
+  "#4419": 1
  },
  "packages/platform-objects/src/apps/translations/en.objects.generated.ts": {
   "#7987": 3,
