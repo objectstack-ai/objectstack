@@ -829,6 +829,151 @@ function stubPackages(entries) {
   return new Map(entries.map((e) => [e.name, { name: e.name, version: e.version, dir: `/tmp/${e.name}` }]));
 }
 
+// ── Battery 12's instruments: the audit step, run as Actions runs it ────────
+
+/**
+ * The `run: |` block of the step named `stepName`, read out of a workflow's
+ * TEXT and un-indented — the script Actions would hand to bash.
+ *
+ * Deliberately narrow: a literal block scalar only, one step of that name, and
+ * no `${{ … }}` inside it (the simulation has no expression evaluator, so a
+ * block that needs one is refused rather than run half-evaluated).
+ *
+ * @param {string} workflowText
+ * @param {string} stepName
+ * @returns {string}
+ */
+function workflowStepScript(workflowText, stepName) {
+  const lines = workflowText.split('\n');
+  const indentOf = (line) => line.length - line.trimStart().length;
+  const named = lines.flatMap((line, i) => (line.trim() === `- name: ${stepName}` ? [i] : []));
+  if (named.length !== 1) throw new Error(`expected ONE step named "${stepName}", found ${named.length}`);
+  const dashIndent = indentOf(lines[named[0]]);
+  let runAt = -1;
+  for (let i = named[0] + 1; i < lines.length; i += 1) {
+    if (lines[i].trim() === '') continue;
+    if (indentOf(lines[i]) <= dashIndent) break; // the next step, or the end of `steps:`
+    if (lines[i].trim() === 'run: |') {
+      runAt = i;
+      break;
+    }
+  }
+  if (runAt === -1) throw new Error(`step "${stepName}" has no literal \`run: |\` block`);
+  const keyIndent = indentOf(lines[runAt]);
+  const body = [];
+  for (let i = runAt + 1; i < lines.length; i += 1) {
+    if (lines[i].trim() !== '' && indentOf(lines[i]) <= keyIndent) break;
+    body.push(lines[i]);
+  }
+  while (body.length > 0 && body[body.length - 1].trim() === '') body.pop();
+  const first = body.find((line) => line.trim() !== '');
+  if (!first) throw new Error(`step "${stepName}" has an empty run block`);
+  const blockIndent = indentOf(first);
+  const script = `${body.map((line) => (line.trim() === '' ? '' : line.slice(blockIndent))).join('\n')}\n`;
+  if (script.includes('${{')) {
+    throw new Error(`step "${stepName}"'s run block carries an Actions expression this simulation cannot evaluate`);
+  }
+  return script;
+}
+
+/**
+ * A registry on 127.0.0.1 serving abbreviated packuments from a mutable set of
+ * `name@version` strings; names in `broken` answer 503. Records every name it
+ * was asked about, so a case can assert what the audit did NOT read.
+ */
+async function stubRegistryServer() {
+  let present = new Set();
+  let broken = new Set();
+  const asked = [];
+  const server = createServer((req, res) => {
+    const name = decodeURIComponent(String(req.url).replace(/^\//, ''));
+    asked.push(name);
+    if (broken.has(name)) {
+      res.writeHead(503);
+      res.end();
+      return;
+    }
+    const versions = [...present].filter((p) => p.startsWith(`${name}@`)).map((p) => p.slice(name.length + 1));
+    if (versions.length === 0) {
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end('{}');
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ name, versions: Object.fromEntries(versions.map((v) => [v, {}])) }));
+  });
+  await new Promise((resolve_) => { server.listen(0, '127.0.0.1', resolve_); });
+  return {
+    url: `http://127.0.0.1:${server.address().port}`,
+    asked,
+    set(next) {
+      present = new Set(next.present ?? []);
+      broken = new Set(next.broken ?? []);
+      asked.length = 0;
+    },
+    close: () => new Promise((resolve_) => { server.close(resolve_); }),
+  };
+}
+
+/**
+ * Stub `npm` / `gh` / `curl` for the audit step, each answering from env:
+ * `npm view NAME@V version` from STUB_NPM_PRESENT (the same set the registry
+ * serves), `gh release view` from STUB_GH, the two ghcr requests from STUB_GHCR.
+ */
+function writeStubBin(dir) {
+  mkdirSync(dir, { recursive: true });
+  const stubs = {
+    npm: [
+      '#!/bin/sh',
+      'case ",${STUB_NPM_PRESENT}," in',
+      '  *",$2,"*) echo "${2##*@}"; exit 0 ;;',
+      'esac',
+      'echo "npm error code E404" >&2',
+      'exit 1',
+    ],
+    gh: [
+      '#!/bin/sh',
+      '[ "$STUB_GH" = present ] || exit 1',
+      'case "$*" in *--json*) echo spec-changes.json ;; esac',
+      'exit 0',
+    ],
+    curl: [
+      '#!/bin/sh',
+      '[ "$STUB_GHCR" = present ] || exit 22',
+      'case "$*" in *ghcr.io/token*) echo \'{"token":"stub"}\' ;; esac',
+      'exit 0',
+    ],
+  };
+  for (const [name, lines] of Object.entries(stubs)) {
+    writeFileSync(join(dir, name), `${lines.join('\n')}\n`);
+    chmodSync(join(dir, name), 0o755);
+  }
+}
+
+/** Run a script the way Actions runs `run:` — bash --noprofile --norc -eo pipefail FILE. */
+function runAsActions({ scriptFile, cwd, env }) {
+  return new Promise((resolve_, reject) => {
+    const child = spawn('bash', ['--noprofile', '--norc', '-eo', 'pipefail', scriptFile], { cwd, env });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    child.on('error', reject);
+    child.on('close', (status) => resolve_({ status, stdout, stderr }));
+  });
+}
+
+/** `key=value` lines of a GITHUB_OUTPUT file, as a map. */
+function readOutputs(file) {
+  const out = {};
+  if (!existsSync(file)) return out;
+  for (const line of readFileSync(file, 'utf8').split('\n')) {
+    const eq = line.indexOf('=');
+    if (eq > 0) out[line.slice(0, eq)] = line.slice(eq + 1);
+  }
+  return out;
+}
+
 // Set by `selfTest()` only after its verdict is printed, and read at the
 // dispatch: a `return` that leaves the function above that line prints nothing
 // and still exits 0 — a self-test that never finished, reported as one that
@@ -1079,6 +1224,241 @@ export async function selfTest() {
       t('an unwritable summary path is swallowed — it is not a publish failure', !threw, 'no throw');
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  // ── 10. The probe ─────────────────────────────────────────────────────────
+  battery('10. The probe: the whole group in one read, three answers');
+  {
+    const GROUP = [
+      { name: '@objectstack/cli', version: '17.5.0' },
+      { name: '@objectstack/console', version: '17.5.0' },
+      { name: '@objectstack/spec', version: '17.5.0' },
+    ];
+    // The audit of run 36540562567 at 08:05:53Z: cli and console readable, spec not.
+    const window = stubRegistry({ never: ['@objectstack/spec'] });
+    const answer = await probeGroup({ targets: GROUP, probe: window.probe });
+    t('cli on npm and spec absent answers "unpublished"', answer.state === 'unpublished', JSON.stringify(answer));
+    t('it names spec, and only spec', answer.missing.length === 1 && answer.missing[0].name === '@objectstack/spec', JSON.stringify(answer.missing));
+    t('it read every package exactly once — one round, no retry', window.calls.length === GROUP.length, JSON.stringify(window.calls));
+
+    const canary = await probeGroup({ targets: [GROUP[0]], probe: stubRegistry({ never: ['@objectstack/spec'] }).probe });
+    t('OLD READING: the cli canary alone answers "published" at that same instant', canary.state === 'published', JSON.stringify(canary));
+
+    const all = await probeGroup({ targets: GROUP, probe: stubRegistry().probe });
+    t('the all-published control answers "published", naming nothing', all.state === 'published' && all.missing.length === 0 && all.checked === 3, JSON.stringify(all));
+
+    const blind = await probeGroup({ targets: GROUP, probe: stubRegistry({ throwsFor: { '@objectstack/spec': 'GET … → HTTP 503' } }).probe });
+    t('an unreadable package with none absent answers "unknown", never "published"', blind.state === 'unknown', JSON.stringify(blind));
+
+    const mixed = await probeGroup({
+      targets: GROUP,
+      probe: stubRegistry({ never: ['@objectstack/console'], throwsFor: { '@objectstack/spec': 'GET … → HTTP 503' } }).probe,
+    });
+    t('one package absent and another unreadable answers "unpublished" — absence is evidence', mixed.state === 'unpublished', JSON.stringify(mixed));
+
+    // The verifier's backoff absorbs a cold read; the probe does not wait for one.
+    const cold = await probeGroup({ targets: GROUP, probe: stubRegistry({ coldReads: { '@objectstack/spec': 1 } }).probe });
+    t('a cold read answers "unpublished" — the safe direction: the backfill waits for a later landing', cold.state === 'unpublished', JSON.stringify(cold));
+
+    let refused = false;
+    try {
+      await probeGroup({ targets: [], probe: stubRegistry().probe });
+    } catch (err) {
+      refused = /NO targets/.test(String(err && err.message));
+    }
+    t('an empty target set is refused, exactly as the verifier refuses it', refused, 'refused');
+  }
+
+  // ── 11. The 17.5.0 window ─────────────────────────────────────────────────
+  battery("11. The 17.5.0 publish window, replayed on npm's own clock");
+  {
+    // npm's own `time` field for 17.5.0, read off the registry: the first
+    // package of the group, the canary, the package the 08:05:53Z audit still
+    // had, and the last one.
+    const LANDED = {
+      '@objectstack/sdui-parser': '2026-09-29T07:54:59.851Z',
+      '@objectstack/cli': '2026-09-29T07:58:57.256Z',
+      '@objectstack/console': '2026-09-29T08:05:24.355Z',
+      '@objectstack/spec': '2026-09-29T08:09:33.521Z',
+    };
+    const GROUP = Object.keys(LANDED).map((name) => ({ name, version: '17.5.0' }));
+    const at = (ms) => async (name) => ms >= Date.parse(LANDED[name]);
+    const group = async (ms) => (await probeGroup({ targets: GROUP, probe: at(ms) })).state;
+    const canary = async (ms) => (await probeGroup({ targets: [GROUP[1]], probe: at(ms) })).state;
+    const ms = (iso) => Date.parse(iso);
+
+    t('before the first package lands: unpublished', (await group(ms('2026-09-29T07:54:00Z'))) === 'unpublished');
+    t(
+      'the instant cli lands: the canary says published, the group does not',
+      (await canary(ms(LANDED['@objectstack/cli']))) === 'published' && (await group(ms(LANDED['@objectstack/cli']))) === 'unpublished',
+    );
+    t('08:05:53Z, the audit of run 36540562567: unpublished', (await group(ms('2026-09-29T08:05:53Z'))) === 'unpublished');
+    t('08:09:32Z, a second before spec: unpublished', (await group(ms('2026-09-29T08:09:32Z'))) === 'unpublished');
+    t('the instant spec lands, the last of the group: published', (await group(ms(LANDED['@objectstack/spec']))) === 'published');
+
+    // A second-by-second sweep: the two readings disagree EXACTLY while cli is
+    // on npm and spec is not, and the group reading is never early.
+    let firstLie = null;
+    let lastLie = null;
+    let groupEarly = null;
+    for (let now = ms('2026-09-29T07:54:00Z'); now <= ms('2026-09-29T08:12:00Z'); now += 1000) {
+      const g = await group(now);
+      if ((await canary(now)) === 'published' && g !== 'published') {
+        firstLie ??= now;
+        lastLie = now;
+      }
+      if (g === 'published' && now < ms(LANDED['@objectstack/spec'])) groupEarly ??= now;
+    }
+    t(
+      'the canary reads published while the group is not from 07:58:58Z to 08:09:33Z, 10m35s of it',
+      firstLie === ms('2026-09-29T07:58:58Z') && lastLie === ms('2026-09-29T08:09:33Z'),
+      `${firstLie && new Date(firstLie).toISOString()} .. ${lastLie && new Date(lastLie).toISOString()}`,
+    );
+    t('the group reading never says published before spec lands', groupEarly === null, String(groupEarly && new Date(groupEarly).toISOString()));
+  }
+
+  // ── 12. The audit step itself ─────────────────────────────────────────────
+  battery('12. The audit step backfills only a version whose whole group is on npm');
+  {
+    // The step's REAL text, read out of release.yml, run by bash the way
+    // Actions runs it, in a throwaway repository: base (1.0.0) -> the version
+    // commit (1.1.0) -> a landing -> a landing that adds a package no release
+    // of 1.1.0 contains. The two release scripts it calls are this checkout's;
+    // npm, the GitHub Releases and ghcr are stubs.
+    let script = null;
+    let unreadable = '';
+    try {
+      script = workflowStepScript(readFileSync(RELEASE_WORKFLOW, 'utf8'), AUDIT_STEP_NAME);
+    } catch (err) {
+      unreadable = err instanceof Error ? err.message : String(err);
+    }
+    t('the audit step is read out of release.yml itself, not a copy of it', script !== null, unreadable);
+    let refusedMissing = false;
+    try {
+      workflowStepScript('jobs:\n  a:\n    steps:\n      - name: Something else\n        run: |\n          true\n', AUDIT_STEP_NAME);
+    } catch {
+      refusedMissing = true;
+    }
+    t('a workflow without that step is refused, never simulated as an empty script', refusedMissing);
+
+    const root = mkdtempSync(join(tmpdir(), 'release-verify-npm-audit-'));
+    const registry = await stubRegistryServer();
+    try {
+      const repo = join(root, 'repo');
+      mkdirSync(repo);
+      const g = (...args) => {
+        const r = spawnSync('git', [
+          '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid',
+          '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', ...args,
+        ], { cwd: repo, encoding: 'utf8' });
+        if (r.status !== 0) throw new Error(`git ${args.join(' ')} exited ${r.status}: ${r.stderr}`);
+        return r.stdout.trim();
+      };
+      const writePkg = (dir, name, version) => {
+        mkdirSync(join(repo, 'packages', dir), { recursive: true });
+        writeFileSync(join(repo, 'packages', dir, 'package.json'), `${JSON.stringify({ name, version }, null, 2)}\n`);
+      };
+      const commit = (message) => {
+        g('add', '-A');
+        g('commit', '-q', '-m', message);
+        return g('rev-parse', 'HEAD');
+      };
+      g('init', '-q', '-b', 'main');
+      writeFileSync(join(repo, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n");
+      writePkg('cli', '@objectstack/cli', '1.0.0');
+      writePkg('spec', '@objectstack/spec', '1.0.0');
+      const base = commit('base');
+      writePkg('cli', '@objectstack/cli', '1.1.0');
+      writePkg('spec', '@objectstack/spec', '1.1.0');
+      const vc = commit('chore: version packages');
+      writeFileSync(join(repo, 'one.txt'), 'one\n');
+      const landing = commit('a landing during the publish');
+      writePkg('fresh', '@objectstack/fresh', '1.1.0');
+      const freshLanding = commit('a package that no release of 1.1.0 contains');
+      // After every commit, so `git add -A` never took it: the step runs
+      // `node scripts/…` from the repository root, and these are ours.
+      symlinkSync(SCRIPTS_DIR, join(repo, 'scripts'));
+      const bin = join(root, 'bin');
+      writeStubBin(bin);
+      const scriptFile = join(root, 'audit-step.sh');
+      if (script !== null) writeFileSync(scriptFile, script);
+
+      let runs = 0;
+      const audit = async ({ event = 'push', before, head, present, broken = [], releases = false, image = false }) => {
+        runs += 1;
+        const temp = join(root, `run-${runs}`);
+        mkdirSync(temp);
+        g('checkout', '-q', '--detach', head);
+        registry.set({ present, broken });
+        const env = {
+          PATH: `${bin}:${dirname(process.execPath)}:${process.env.PATH ?? ''}`,
+          HOME: process.env.HOME ?? root,
+          SHA: head,
+          EVENT: event,
+          BEFORE: before ?? '',
+          GH_TOKEN: 'stub',
+          GITHUB_REPOSITORY: 'objectstack-ai/objectstack',
+          GITHUB_OUTPUT: join(temp, 'output'),
+          GITHUB_STEP_SUMMARY: join(temp, 'summary.md'),
+          RUNNER_TEMP: temp,
+          npm_config_registry: registry.url,
+          STUB_NPM_PRESENT: present.join(','),
+          STUB_GH: releases ? 'present' : 'absent',
+          STUB_GHCR: image ? 'present' : 'absent',
+        };
+        const r = script === null ? { status: -1, stdout: '', stderr: 'no script' } : await runAsActions({ scriptFile, cwd: repo, env });
+        const summary = existsSync(env.GITHUB_STEP_SUMMARY) ? readFileSync(env.GITHUB_STEP_SUMMARY, 'utf8') : '';
+        return { ...r, outputs: readOutputs(env.GITHUB_OUTPUT), summary, asked: [...registry.asked] };
+      };
+      const said = (r) => `exit ${r.status}; outputs ${JSON.stringify(r.outputs)}; asked ${JSON.stringify(r.asked)}; ${r.stderr.trim().split('\n').slice(-2).join(' | ')}`;
+      const backfills = (r) => r.outputs['image-missing'] === 'true' || r.outputs['releases-missing'] === 'true';
+
+      // THE pin: the 17.5.0 window. cli is on npm, spec is not; nothing is
+      // backfilled yet, and the image is missing.
+      const inWindow = await audit({ before: vc, head: landing, present: ['@objectstack/cli@1.1.0', '@objectstack/spec@1.0.0'] });
+      t('IN THE WINDOW (cli on npm, spec not): the audit stays green', inWindow.status === 0, said(inWindow));
+      t('...and requests NO image build, though the image is missing', inWindow.outputs['image-missing'] === undefined, said(inWindow));
+      t('...and backfills NO GitHub Release, though they are missing', inWindow.outputs['releases-missing'] === undefined, said(inWindow));
+      t(
+        '...and says why, naming the package npm does not have yet',
+        /::notice::.*1 of 2 package\(s\).*@objectstack\/spec@1\.1\.0/.test(inWindow.stdout) && /not fully on npm yet/.test(inWindow.summary),
+        said(inWindow),
+      );
+
+      // The all-published control: the same landing, spec now on npm.
+      const done = await audit({ before: vc, head: landing, present: ['@objectstack/cli@1.1.0', '@objectstack/spec@1.1.0'] });
+      t('CONTROL (the whole group on npm, image missing): the backfill branch requests the image', done.status === 0 && done.outputs['image-missing'] === 'true', said(done));
+      t('CONTROL: ...and backfills the missing GitHub Releases', done.outputs['releases-missing'] === 'true', said(done));
+
+      const complete = await audit({ before: vc, head: landing, present: ['@objectstack/cli@1.1.0', '@objectstack/spec@1.1.0'], releases: true, image: true });
+      t(
+        'nothing missing: no backfill, and the group is never read — the common path pays no registry reads',
+        complete.status === 0 && !backfills(complete) && complete.asked.length === 0,
+        said(complete),
+      );
+
+      const blind = await audit({ before: vc, head: landing, present: ['@objectstack/cli@1.1.0'], broken: ['@objectstack/spec'] });
+      t(
+        'npm unreadable for spec: no backfill off a guess, and a warning says so',
+        blind.status === 0 && !backfills(blind) && /::warning::.*could not be read/.test(blind.stdout),
+        said(blind),
+      );
+
+      // The version push itself: cli is not on npm, so this is a PUBLISH,
+      // decided by the cli reading exactly as before — never a backfill.
+      const versionPush = await audit({ before: base, head: vc, present: ['@objectstack/cli@1.0.0', '@objectstack/spec@1.0.0'] });
+      t('the version push, cli absent: the publish predicate still queues the publish', versionPush.status === 0 && versionPush.outputs['publish-pending'] === 'true', said(versionPush));
+      t('...and neither backfills nor reads the group', !backfills(versionPush) && versionPush.asked.length === 0, said(versionPush));
+
+      // The set is the VERSION COMMIT's workspace: a package that landed after
+      // it, and that no release of 1.1.0 contains, is not asked about.
+      const later = await audit({ before: landing, head: freshLanding, present: ['@objectstack/cli@1.1.0', '@objectstack/spec@1.1.0'] });
+      t("a later landing's new package does not hold the backfill back: the image is requested", later.status === 0 && later.outputs['image-missing'] === 'true', said(later));
+      t('...because the group read is the version commit\'s: the new package is never asked about', later.asked.length === 2 && !later.asked.includes('@objectstack/fresh'), said(later));
+    } finally {
+      await registry.close();
+      rmSync(root, { recursive: true, force: true });
     }
   }
 
