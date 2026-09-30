@@ -38,8 +38,7 @@ metadata:
 
 ## Flows — Visual Logic Orchestration
 
-A **Flow** is a directed graph of nodes that execute sequentially or in
-parallel. Flows are the primary automation building block in ObjectStack.
+A **Flow** is a directed graph of nodes — the primary automation building block.
 
 ### Flow Types
 
@@ -53,8 +52,8 @@ parallel. Flows are the primary automation building block in ObjectStack.
 
 ### Flow Node Types
 
-Flows are built from **20 built-in node types** (the `FlowNodeAction` seed set —
-plugins register more via `registerNodeExecutor`, e.g. `approval` below):
+Flows are built from **20 built-in node types** (plugins register more via
+`registerNodeExecutor`, e.g. `approval` below):
 
 #### Control Flow
 
@@ -85,7 +84,7 @@ plugins register more via `registerNodeExecutor`, e.g. `approval` below):
 
 | Node | Purpose |
 |:-----|:--------|
-| `http` | Call an external HTTP API — canonical since protocol 11.0; `http_request` survives only as a deprecation-window alias |
+| `http` | Call an external HTTP API — always set `timeoutMs` (unset = no timeout). `url` and `headers` are served with the definition to every member who can read flows (only `signingSecret` is withheld): never a credential there. Route by shape — a header credential → a declarative connector (`bearer` / `api-key`) with `auth.credentialRef`; a query-string key → `api-key` with `paramName`; a path-secret webhook url → a token-authenticated connector such as `slack` — called via `connector_action` |
 | `notify` | Send a notification through the messaging service (inbox channel by default) |
 | `connector_action` | Invoke a pre-built integration connector |
 | `script` | Call a **registered** function named by `config.function` (see *Valid-but-silently-wrong* #3) |
@@ -221,9 +220,8 @@ a query instead of narrowing it.
 
 ## Valid-but-silently-wrong (passes build, fails at runtime)
 
-These are *legal* metadata that authors — AI especially — get wrong. Most are now
-caught by `objectstack build` (a hard error, or an advisory warning), but write
-them right the first time:
+Legal metadata that authors — AI especially — get wrong; most are caught by
+`objectstack build`, but write them right the first time:
 
 1. **Flow node VALUE interpolation uses SINGLE braces.** Value fields on a node's
    `config` (`fields`, `inputs`, notify `message`/`title`, …) interpolate
@@ -256,7 +254,7 @@ them right the first time:
    function fails loudly.
 
    There is no other dispatch form: use **`notify`** for delivery, a
-   **`connector_action`** or `http` webhook for Slack, a function for logic.
+   **`connector_action`** on the `slack` connector for Slack, a function for logic.
 
    **A flow `function` is a PURE compute step — it does NOT read/write the
    database.** It receives `ctx.input` and **returns** a value; `config.outputVariable`
@@ -318,8 +316,7 @@ them right the first time:
 A `record_change` flow fires automatically on a data event. There is **no
 standalone trigger object and no top-level `trigger` / `event` key** — the
 binding lives entirely in the flow's **`start` node `config`**, which the
-automation engine parses (`resolveTriggerBinding`) and wires to the matching
-ObjectQL lifecycle hook.
+automation engine parses and wires to the matching ObjectQL lifecycle hook.
 
 ### Prerequisite — declare the capabilities your nodes need
 
@@ -406,16 +403,13 @@ owns `label`, `type`, `nodes` and the `edges` `FlowSchema` requires):
 
 ## CRM Automation Blueprint
 
-For enterprise automation design, align with this CRM-style structure:
+Align with this CRM-style structure:
 
 | Automation Type | Typical Location | Pattern |
 |:--|:--|:--|
 | Screen flow | `src/flows/*.flow.ts` | Use explicit `variables`, node graph (`nodes` + `edges`), and decision branches |
 | Approval flow | `src/flows/*.flow.ts` | A flow with `approval` node(s); set `approvers` / `behavior` / `lockRecord` / `approvalStatusField` in node `config`, branch on `approve` / `reject` edges |
 | Flow registry | `src/flows/index.ts` | Export `allFlows: Flow[]` and register centrally in `defineStack({ flows })` |
-
-Default approach for metadata apps: model business lifecycle in Flow/Approval
-metadata first; reserve custom code for edge-case integrations.
 
 ---
 
@@ -432,7 +426,7 @@ os validate     # CEL/predicate validation (record.<field> existence) + schema
 ```
 
 It runs the ADR-0032 gate over every condition, edge guard, validation and
-sharing rule, exiting non-zero. In a scaffolded project: `npm run validate`.
+sharing rule. In a scaffolded project: `npm run validate`.
 
 ---
 
@@ -441,8 +435,7 @@ sharing rule, exiting non-zero. In a scaffolded project: `npm run validate`.
 The send-back shape has a graded eval at
 [evals/approvals/test-revise-loop.md](./evals/approvals/test-revise-loop.md).
 
-See [references/_index.md](./references/_index.md) for the full list of Zod
-schemas (with one-line descriptions) — pointers into
-`node_modules/@objectstack/spec/src/`. Always `Read` the source for exact field
-shapes; do not rely on memory of property names.
+See [references/_index.md](./references/_index.md) for the Zod schemas (one-line
+descriptions, pointers into `node_modules/@objectstack/spec/src/`). Always `Read`
+the source for exact field shapes; do not rely on memory of property names.
 

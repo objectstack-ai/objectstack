@@ -26,10 +26,8 @@ export const EscalateOverdueCasesFlow = defineFlow({
       id: 'start',
       type: 'start',
       label: 'Daily at 09:00',
-      // The cadence lives HERE, on the start node's config — FlowSchema has NO
-      // top-level `schedule` key (one there is a named parse error, not a silent
-      // strip). A bare cron string also works: schedule: '0 9 * * *'. Do NOT use
-      // the cron`…` tagged template — its envelope is not a recognized shape.
+      // The cadence lives HERE — FlowSchema has NO top-level `schedule` key (a
+      // named parse error). A bare cron string also works; a cron`…` tag does not.
       config: { schedule: { type: 'cron', expression: '0 9 * * *' } },
     },
     {
@@ -38,7 +36,6 @@ export const EscalateOverdueCasesFlow = defineFlow({
       label: 'Escalate Overdue Cases',
       config: {
         objectName: 'support_case',
-        // which rows to update — `filter` is a `where` map, not filter triples
         filter: {
           status: { $in: ['new', 'open'] },
           due_date: { $lt: '{TODAY()}' },   // template token → today's date at run time
@@ -49,13 +46,15 @@ export const EscalateOverdueCasesFlow = defineFlow({
     },
     {
       id: 'notify_manager',
-      type: 'http',
+      type: 'connector_action',
       label: 'Notify Manager',
-      config: {
-        url: 'https://hooks.slack.com/services/...',
-        method: 'POST',
-        body: { text: 'Escalated overdue support cases.' },
-        timeoutMs: 10000,   // unset = NO timeout at all — always set one
+      // NOT an `http` node with a Slack webhook url: the definition (`url` and
+      // `headers` included) is served to every member who can read flows. The
+      // `slack` connector (@objectstack/connector-slack) holds the bot token.
+      connectorConfig: {
+        connectorId: 'slack',
+        actionId: 'chat.postMessage',
+        input: { channel: '#support-leads', text: 'Escalated overdue support cases.' },
       },
     },
     { id: 'end', type: 'end', label: 'End' },
