@@ -4,13 +4,14 @@
  * The filter refusals this driver raises, in ONE place — and, since #5324/#5328,
  * the ONE walk that decides which shapes are refused at all.
  *
- * All THREE of this package's filter surfaces refuse the same shapes with the
- * same wire envelope: the live query path (`memory-driver.ts` → mingo), the
- * reference matcher (`memory-matcher.ts`, the record-at-a-time evaluator the
- * conformance suites hold against `driver-sql` and `@objectstack/formula`), and
- * since #5345 the analytics/cube face (`memory-analytics.ts`). They were
- * independent code paths with independent notions of what a filter may be, which
- * is exactly how #5240's divergence survived unnoticed in-package.
+ * All of this package's filter surfaces refuse the same shapes with the same
+ * wire envelope: the live query path (`memory-driver.ts` → mingo) and since
+ * #5345 the analytics/cube face (`memory-analytics.ts`) — and, until #5930
+ * step 4 retired it (ruling D6: no production caller), the reference matcher
+ * (`memory-matcher.ts`, a record-at-a-time evaluator whose tests now hold the
+ * live path and this gate). They were independent code paths with independent
+ * notions of what a filter may be, which is exactly how #5240's divergence
+ * survived unnoticed in-package.
  *
  * #5240 gave the first two faces one refusal by writing the same check twice.
  * That was still two implementations of one rule, and the shapes #5324/#5328
@@ -319,8 +320,8 @@ export function emptyFieldConstraintError(field: string, path: string): Error {
  * RLS read scope is a permission bypass rather than a degraded filter (#3948).
  *
  * So the arms and the word list HAD to land in one PR, and #6520 did that:
- * `memory-matcher.ts` and `memory-driver.ts` both carry a `$icontains` case, and
- * `memory-analytics.ts` lowers it too. Re-verified by deleting the matcher's arm
+ * `memory-matcher.ts` (retired since) and `memory-driver.ts` both carried a
+ * `$icontains` case, and `memory-analytics.ts` lowers it too. Re-verified by deleting the matcher's arm
  * on the #6520 branch — with the name admitted, the reference matcher answered
  * EVERY row, which is the measurement, not a prediction.
  *
@@ -350,22 +351,22 @@ export function emptyFieldConstraintError(field: string, path: string): Error {
  * PARSES must survive to a matched row here.
  *
  * The ordering rule from the `$icontains` paragraph applies unchanged and was
- * followed: both arms (`memory-driver.ts`'s query path and `memory-matcher.ts`)
- * landed in the same commit as this widening. A name added here with no arm
+ * followed: both arms (`memory-driver.ts`'s query path and the since-retired
+ * `memory-matcher.ts`) landed in the same commit as this widening. A name added here with no arm
  * behind it is the #5701 measurement — gate stops refusing, matcher has no
  * case, predicate silently DROPPED, every row matches.
  *
  * Everything else is refused. That includes the mingo operators this driver used
  * to hand through by accident (`$elemMatch`, `$size`, `$type`, `$mod`, `$where`,
- * `$expr`, field-level `$not`) — none of them is in the Filter Protocol, none is
- * implemented by the matcher, and `driver-sql` refuses every one.
+ * `$expr`, field-level `$not`) — none of them is in the Filter Protocol, none was
+ * implemented by the retired matcher, and `driver-sql` refuses every one.
  */
 export const SUPPORTED_FIELD_OPERATORS: ReadonlySet<string> = new Set<string>([
   ...FILTER_OPERATORS,
   '$like',
   '$ilike',
   // [#20444] `$empty` was admitted here BY HAND, with both its arms (the
-  // reference matcher by value through `isEmptyFilterValue`, the live query
+  // since-retired reference matcher by value through `isEmptyFilterValue`, the live query
   // path by the field's DECLARED row through `expandEmptyOperator`), while it
   // was staged out of `FILTER_OPERATORS`. [#20446] It arrives by DERIVATION
   // now, after `$exists` in the spec's order, so the hand entry is gone — the
@@ -409,10 +410,10 @@ export interface FilterFaceCapabilities {
 }
 
 /**
- * [#5345] The default: the whole vocabulary this driver's query path and
- * reference matcher evaluate. Passing no capabilities means "this face compiles
- * everything the driver does", which is true of both of them and keeps every
- * pre-#5345 call site behaving byte-for-byte as before.
+ * [#5345] The default: the whole vocabulary this driver's query path evaluates
+ * (as its reference matcher did, until retired). Passing no capabilities means
+ * "this face compiles everything the driver does", which is true of the query
+ * path and keeps every pre-#5345 call site behaving byte-for-byte as before.
  */
 export const DRIVER_FILTER_CAPABILITIES: FilterFaceCapabilities = Object.freeze({
   face: 'this driver',
@@ -638,9 +639,10 @@ export function nonBooleanEmptyComparandError(field: string, value: unknown, pat
  *
  * What counts as empty is the field's DECLARED row of the ruled table, and the
  * live path reads it from the declaration rather than from a value, so without
- * one there is no answer to give: refused, never guessed. The reference matcher
- * (`memory-matcher.ts`) is the face that holds NO declarations at all, and it
- * judges the stored value instead — the spec's reading for such a face.
+ * one there is no answer to give: refused, never guessed. A face that holds NO
+ * declarations at all judges the stored value instead — the spec's reading for
+ * such a face (`@objectstack/formula`'s, and this package's reference matcher's
+ * until it was retired).
  */
 export function undeclaredEmptyOperatorFieldError(field: string, path: string): Error {
   return unsupportedFilterError(
@@ -804,7 +806,7 @@ export function filterNodeExpectedError(value: unknown, path: string): Error {
 }
 
 /**
- * [#5324 / #5328] The ONE shape gate, walked before either face evaluates.
+ * [#5324 / #5328] The ONE shape gate, walked before any face evaluates.
  *
  * ## Why up front, and why exhaustive
  *
@@ -845,8 +847,8 @@ export function filterNodeExpectedError(value: unknown, path: string): Error {
  * Shape is universal; CAPABILITY is per-face. `capabilities` narrows what this
  * particular caller can lower — see {@link FilterFaceCapabilities} — and the
  * walk refuses the difference. It defaults to
- * {@link DRIVER_FILTER_CAPABILITIES}, i.e. everything, so the query path and the
- * matcher are unaffected.
+ * {@link DRIVER_FILTER_CAPABILITIES}, i.e. everything, so the query path (and
+ * the matcher, while it lived) is unaffected.
  *
  * The capability check is made BEFORE the shape checks at the same key, and
  * deliberately: on a face that cannot compile `$or` at all, reporting that its

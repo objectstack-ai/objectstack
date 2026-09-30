@@ -1,7 +1,7 @@
 ---
 title: ObjectQL query syntax — the full specification
 navTitle: Query Syntax
-description: Database-agnostic query language with filtering, joins, aggregations, and sorting — aligned with the canonical @objectstack/spec QuerySchema
+description: Database-agnostic query language with filtering, expand, aggregations, and sorting — aligned with the canonical @objectstack/spec QuerySchema
 ---
 
 import { Search, Filter, GitMerge, BarChart } from 'lucide-react';
@@ -600,28 +600,71 @@ have kept a `null`-valued field.
 
 ### Filtering Across Relationships
 
-<Callout type="warn">
-**Relation traversal inside `where` is not supported.** Neither the nested form
-(`where: { account: { industry: 'tech' } }`) nor a dotted path
-(`where: { 'account.industry': 'tech' }`) is resolved. `SqlDriver.applyFilters()` only
-recognises a nested object as an operator map when its keys start with `$`; anything
-else is compiled as a comparison against a single column of the queried table, and a
-dotted key is emitted verbatim, so Knex renders it as `"account"."industry"` against a
-table that was never joined.
-</Callout>
-
-Filter on the local foreign key, or run two queries:
+Filter on a related record's fields by nesting the condition beneath the relation
+field in `where`:
 
 ```typescript
+// Opportunities whose account is in the tech industry
+const opportunities = await engine.find('opportunity', {
+  where: { account: { industry: 'tech' } },
+});
+```
+
+A condition on a related record's fields beneath a relation field (`lookup`,
+`master_detail`, `user`, `tree`) is served in `where`: the engine reads the
+related object with it **as the caller**, then matches the field against the
+ids it returns (`$in`; any member when `multiple: true`).
+
+Limits — one level: every key a field the related object declares, no relation
+or dotted key inside; forward only: never a parent by its children; `where`
+only: an aggregation's `filter` and `having` refuse it, `INVALID_FILTER` / 400;
+at most 1000 related ids, refused past that, `INVALID_FILTER` / 400, never
+truncated; as the caller: the related object's row scope and field permissions
+apply, so a field the caller cannot read is refused, `PERMISSION_DENIED` / 403,
+never an empty result.
+
+- **Every verb that takes a `where`** serves it — `find`, `findOne`, `count`,
+  `aggregate`, `update` and `delete` — and so do the REST `GET /data/:object` and
+  `POST /data/:object/query` doors, which read through the same engine calls. A
+  single-valued relation matches with `$in` on the related ids; a multi-valued one
+  (`multiple: true`) matches a record when **any** member qualifies, written as one
+  `$contains` per id under an `$or`.
+- **A second level is refused.** `{ account: { owner: { region: 'NA' } } }` and
+  `{ account: { 'owner.region': 'NA' } }` answer `INVALID_FILTER` / 400.
+- **The reverse direction is not served.** A parent filtered by its children is not
+  written as `{ opportunities: { stage: 'won' } }`: the parent has no such field, so the
+  REST doors answer `INVALID_FIELD` / 400.
+- **A dotted path is still refused.** `where: { 'account.industry': 'tech' }` answers
+  `INVALID_FIELD` / 400 at the engine and at the REST doors; the message names the
+  nested spelling to write instead.
+
+Past the 1000-id cap, and for the reverse direction, run the two steps yourself —
+filter the related object, then `$in` its ids:
+
+```typescript
+// Past the cap: read the related ids, then match the local key
 const techAccounts = await engine.find('account', {
   where: { industry: 'tech', annual_revenue: { $gt: 1000000 } },
   fields: ['id'],
 });
 
 const opportunities = await engine.find('opportunity', {
-  where: { account_id: { $in: techAccounts.map((a) => a.id) } },
+  where: { account: { $in: techAccounts.map((a) => a.id) } },
+});
+
+// Reverse: accounts that have a won opportunity
+const won = await engine.find('opportunity', {
+  where: { stage: 'won' },
+  fields: ['account'],
+});
+
+const accounts = await engine.find('account', {
+  where: { id: { $in: won.map((o) => o.account) } },
 });
 ```
+
+On a `multiple: true` relation, match the ids with one `$contains` per id under an
+`$or` instead of `$in`.
 
 ### Filtering on a `formula` field
 

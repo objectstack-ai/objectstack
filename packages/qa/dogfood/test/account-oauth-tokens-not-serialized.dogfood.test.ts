@@ -1,10 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #7987 (+ #8676) — `sys_account`'s credential columns must not come back on
+ * #7987 (+ commit d6e80b28b) — `sys_account`'s credential columns must not come back on
  * the generic data path.
  *
- * [#8676] The file was #7987's three OAuth columns; it now covers the object's
+ * [commit d6e80b28b] The file was #7987's three OAuth columns; it now covers the object's
  * other two credential columns as well — `password` and
  * `previous_password_hashes`, the one-way hashes of ADR-0100's third channel.
  * They belong here rather than in a fixture of their own because they are the
@@ -88,9 +88,9 @@ const PLANTED = {
 const TOKEN_COLUMNS = ['access_token', 'refresh_token', 'id_token'] as const;
 
 /**
- * [#8676] The two one-way password hashes on the same object — ADR-0100's third
+ * [commit d6e80b28b] The two one-way password hashes on the same object — ADR-0100's third
  * channel. They serialized on this very read path alongside the OAuth columns
- * (the #8676 key list was captured on this fixture's own ablation run), through
+ * (commit d6e80b28b's key list was captured on this fixture's own ablation run), through
  * the same two barriers that miss them: `collectMaskedReadFields` keys on the
  * field TYPE and exempts `managedBy: 'better-auth'`, while these are
  * `text` / `textarea`. Asserted through the SAME persona matrix below, because
@@ -277,7 +277,7 @@ describe('#7987: sys_account OAuth tokens never serialize on the generic data pa
       assertNoCredentialColumns(row);
     }
 
-    // [#8676] The same spelling attack aimed at the password hashes, from both
+    // [commit d6e80b28b] The same spelling attack aimed at the password hashes, from both
     // personas. The member's own row is the one that matters most here: the
     // `sys_account_self` policy grants the read, so this is a LEGAL request for
     // their own record that must still come back without the hash.
@@ -334,11 +334,11 @@ describe('#7987: sys_account OAuth tokens never serialize on the generic data pa
     // exactly one predicate — `internal === true` — so a column without the
     // flag is refused (ADR-0112 code + status).
     //
-    // ⚠️ Its instance changed with #8676, and only its instance. This test used
+    // ⚠️ Its instance changed with commit d6e80b28b, and only its instance. This test used
     // to spell the predicate with `password`, because #7987 deliberately left
     // that column unflagged and the test marked THAT card's scope boundary
     // ("a column that is **not flagged** … are deliberately NOT `internal`").
-    // #8676 flags it, so the premise of `password`-as-example disappears while
+    // Commit d6e80b28b flags it, so the premise of `password`-as-example disappears while
     // the proposition itself is untouched: `scope` is an ordinary unflagged
     // `sys_account` column and stands in as the example. What is NOT weakened
     // is the guard — no ADR-0100 carve-out was added, and the positive arm
@@ -361,7 +361,7 @@ describe('#7987: sys_account OAuth tokens never serialize on the generic data pa
   it('[#8676] `password` and `previous_password_hashes` are stripped, and reachable only through the accessor', async () => {
     // The card's own assertions, both directions. These are one-way password
     // hashes — ADR-0100's third channel — and they serialized on the generic
-    // data API before #8676: to an admin for every user's row, and to a member
+    // data API before commit d6e80b28b: to an admin for every user's row, and to a member
     // for their own.
     const rows: any[] = await ql.find('sys_account', {
       where: { id: memberAccountId },
