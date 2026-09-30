@@ -17,12 +17,25 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { parseFilterAST, type FilterCondition } from '@objectstack/spec/data';
+import { lowerFilterCondition, parseFilterAST, type FilterCondition } from '@objectstack/spec/data';
 import { InMemoryDriver } from './memory-driver.js';
 import { MemoryAnalyticsService } from './memory-analytics.js';
 import type { Cube } from '@objectstack/spec/data';
 
 const ids = (rows: any[]) => rows.map((r: any) => r.id).sort();
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5, 7 and 9, as amended] Where the rule lives
+ * now: the shared lowering (`lowerFilterCondition`), applied once at the seams,
+ * never in this driver. The `find()` cases below hand the driver what a TYPED
+ * seam hands it for a `task` object that declares `created_at` a `datetime`
+ * (the engine's reading of a registered object's field map), and keep their
+ * expected rows. What this driver does with a filter that passed NO seam is
+ * pinned in `memory-driver-20822-comparison-as-written.test.ts`.
+ */
+const TASK_FIELDS: Record<string, { type: string }> = { title: { type: 'text' }, created_at: { type: 'datetime' } };
+const seamed = <T,>(where: T): T =>
+  lowerFilterCondition(where, { isDatetimeColumn: (column) => TASK_FIELDS[column]?.type === 'datetime' });
 
 describe('InMemoryDriver — bare-day $lte covers the whole day (#4042)', () => {
   let driver: InMemoryDriver;
@@ -44,7 +57,7 @@ describe('InMemoryDriver — bare-day $lte covers the whole day (#4042)', () => 
 
   it('keeps the whole final day — the dashboard default-config window', async () => {
     const found = await driver.find('task', {
-      where: { created_at: { $gte: '2026-04-29', $lte: '2026-07-28' } },
+      where: seamed({ created_at: { $gte: '2026-04-29', $lte: '2026-07-28' } }),
     } as any);
     // Pre-fix: only [t_midnight, t_yesterday] — the 09:15 / 21:40 rows fell
     // past the midnight-anchored string prefix.
@@ -53,37 +66,37 @@ describe('InMemoryDriver — bare-day $lte covers the whole day (#4042)', () => 
 
   it('a full-ISO $lte keeps instant semantics — only the bare day is widened', async () => {
     const found = await driver.find('task', {
-      where: { created_at: { $lte: '2026-07-28T12:00:00.000Z' } },
+      where: seamed({ created_at: { $lte: '2026-07-28T12:00:00.000Z' } }),
     } as any);
     expect(ids(found)).toEqual(['t_midnight', 't_morning', 't_old', 't_yesterday']);
   });
 
   it('$gte / $gt / $lt keep their midnight anchoring', async () => {
-    const gte = await driver.find('task', { where: { created_at: { $gte: '2026-07-28' } } });
+    const gte = await driver.find('task', { where: seamed({ created_at: { $gte: '2026-07-28' } }) });
     expect(ids(gte)).toEqual(['t_evening', 't_midnight', 't_morning']);
 
-    const gt = await driver.find('task', { where: { created_at: { $gt: '2026-07-28' } } });
+    const gt = await driver.find('task', { where: seamed({ created_at: { $gt: '2026-07-28' } }) });
     expect(ids(gt)).toEqual(['t_evening', 't_midnight', 't_morning']); // string '…T00:00' > '2026-07-28'
 
-    const lt = await driver.find('task', { where: { created_at: { $lt: '2026-07-28' } } });
+    const lt = await driver.find('task', { where: seamed({ created_at: { $lt: '2026-07-28' } }) });
     expect(ids(lt)).toEqual(['t_old', 't_yesterday']);
   });
 
   it('$between with a bare-day max covers the whole final day', async () => {
     const found = await driver.find('task', {
-      where: { created_at: { $between: ['2026-04-29', '2026-07-28'] } },
+      where: seamed({ created_at: { $between: ['2026-04-29', '2026-07-28'] } }),
     } as any);
     expect(ids(found)).toEqual(['t_evening', 't_midnight', 't_morning', 't_yesterday']);
   });
 
   it('stays correct inside an $or branch', async () => {
     const found = await driver.find('task', {
-      where: {
+      where: seamed({
         $or: [
           { created_at: { $gte: '2026-07-28', $lte: '2026-07-28' } }, // "today" preset
           { title: 't_old' },
         ],
-      },
+      }),
     } as any);
     expect(ids(found)).toEqual(['t_evening', 't_midnight', 't_morning', 't_old']);
   });
@@ -93,14 +106,14 @@ describe('InMemoryDriver — bare-day $lte covers the whole day (#4042)', () => 
     // the driver no longer compiles it. Same authored filter, same rows. The
     // INFIX join has no lowering — the declared spelling is the prefix group.
     const lte = await driver.find('task', {
-      where: parseFilterAST(
+      where: seamed(parseFilterAST(
         ['and', ['created_at', '>=', '2026-04-29'], ['created_at', '<=', '2026-07-28']],
-      ) as any,
+      )) as any,
     } as any);
     expect(ids(lte)).toEqual(['t_evening', 't_midnight', 't_morning', 't_yesterday']);
 
     const between = await driver.find('task', {
-      where: parseFilterAST([['created_at', 'between', ['2026-04-29', '2026-07-28']]]) as any,
+      where: seamed(parseFilterAST([['created_at', 'between', ['2026-04-29', '2026-07-28']]])) as any,
     } as any);
     expect(ids(between)).toEqual(['t_evening', 't_midnight', 't_morning', 't_yesterday']);
   });
@@ -200,7 +213,7 @@ describe('[#20600] InMemoryDriver — a bare-day upper bound on the last support
 
   it('compiles no upper bound on 9999-12-31; 9999-12-30 is a bound; the lower-bound operators do not move', async () => {
     const got: Record<string, string[]> = {};
-    for (const [name, where] of CASES) got[name] = ids(await driver.find('task', { where: where() }));
+    for (const [name, where] of CASES) got[name] = ids(await driver.find('task', { where: seamed(where()) }));
     expect(got).toEqual(Object.fromEntries(CASES.map(([name, , want]) => [name, want])));
   });
 

@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { parseFilterAST } from '@objectstack/spec/data';
+import { lowerFilterCondition, parseFilterAST } from '@objectstack/spec/data';
 import { InMemoryDriver } from './memory-driver.js';
 
 const ids = (rows: any[]) => rows.map((r: any) => r.id).sort();
@@ -34,6 +34,20 @@ const TASK_SCHEMA = {
     created_on: { type: 'date' },
   },
 };
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5, 7 and 9, as amended] What a TYPED seam hands
+ * this driver: the filter through the shared lowering, reading
+ * {@link TASK_SCHEMA}'s declared `datetime` columns. The driver keeps no
+ * whole-day copy of its own any more, so a bare-day upper bound in these
+ * windows reaches it already lowered, as on every seam-fed path; the expected
+ * rows are unchanged.
+ */
+const seamed = <T,>(where: T): T =>
+  lowerFilterCondition(where, {
+    isDatetimeColumn: (column) =>
+      (TASK_SCHEMA.fields as Record<string, { type: string } | undefined>)[column]?.type === 'datetime',
+  });
 
 describe('InMemoryDriver Field.datetime storage (#4047)', () => {
   let driver: InMemoryDriver;
@@ -79,7 +93,7 @@ describe('InMemoryDriver Field.datetime storage (#4047)', () => {
   it('a date window reaches rows written in BOTH forms', async () => {
     await seedMixed();
     const found = await driver.find('task', {
-      where: { created_at: { $gte: '2026-04-29', $lte: '2026-07-28' } },
+      where: seamed({ created_at: { $gte: '2026-04-29', $lte: '2026-07-28' } }),
     } as any);
     expect(ids(found)).toEqual(['d_midnight', 'd_yesterday', 's_evening', 's_morning']);
   });
@@ -106,7 +120,7 @@ describe('InMemoryDriver Field.datetime storage (#4047)', () => {
     expect(ids(lt)).toEqual(['d_yesterday', 's_old']);
 
     const instant = await driver.find('task', {
-      where: { created_at: { $lte: '2026-07-28T12:00:00.000Z' } },
+      where: seamed({ created_at: { $lte: '2026-07-28T12:00:00.000Z' } }),
     } as any);
     expect(ids(instant)).toEqual(['d_midnight', 'd_yesterday', 's_morning', 's_old']);
   });
@@ -114,7 +128,7 @@ describe('InMemoryDriver Field.datetime storage (#4047)', () => {
   it('$between and the array spelling take the same coercion', async () => {
     await seedMixed();
     const between = await driver.find('task', {
-      where: { created_at: { $between: ['2026-04-29', '2026-07-28'] } },
+      where: seamed({ created_at: { $between: ['2026-04-29', '2026-07-28'] } }),
     } as any);
     expect(ids(between)).toEqual(['d_midnight', 'd_yesterday', 's_evening', 's_morning']);
 
@@ -122,9 +136,9 @@ describe('InMemoryDriver Field.datetime storage (#4047)', () => {
     // join (`[condA, 'and', condB]`) has no lowering at all and is refused at
     // the door; the declared spelling of "both bounds" is the prefix group.
     const array = await driver.find('task', {
-      where: parseFilterAST(
+      where: seamed(parseFilterAST(
         ['and', ['created_at', '>=', '2026-04-29'], ['created_at', '<=', '2026-07-28']],
-      ) as any,
+      )) as any,
     } as any);
     expect(ids(array)).toEqual(['d_midnight', 'd_yesterday', 's_evening', 's_morning']);
   });
@@ -145,7 +159,7 @@ describe('InMemoryDriver Field.datetime storage (#4047)', () => {
     await seeded.syncSchema('task', TASK_SCHEMA);
 
     const found = await seeded.find('task', {
-      where: { created_at: { $gte: '2026-07-28', $lte: '2026-07-28' } },
+      where: seamed({ created_at: { $gte: '2026-07-28', $lte: '2026-07-28' } }),
     } as any);
     expect(ids(found)).toEqual(['i_date', 'i_iso']);
   });
@@ -162,7 +176,7 @@ describe('InMemoryDriver Field.datetime storage (#4047)', () => {
     // …and the converged value is reachable by a date window, which is the
     // point of converging it.
     const found = await driver.find('task', {
-      where: { due_at: { $gte: '2026-07-28', $lte: '2026-07-28' } },
+      where: seamed({ due_at: { $gte: '2026-07-28', $lte: '2026-07-28' } }),
     } as any);
     expect(ids(found)).toEqual(['u1']);
   });
@@ -187,7 +201,7 @@ describe('InMemoryDriver Field.datetime storage (#4047)', () => {
     expect(onObj!.created_on).toBe('2026-07-28');
 
     const found = await driver.find('task', {
-      where: { created_on: { $gte: '2026-04-29', $lte: '2026-07-28' } },
+      where: seamed({ created_on: { $gte: '2026-04-29', $lte: '2026-07-28' } }),
     } as any);
     expect(ids(found)).toEqual(['on_mid', 'on_obj']);
   });
