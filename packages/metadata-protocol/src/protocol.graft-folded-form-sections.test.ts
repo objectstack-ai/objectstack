@@ -39,13 +39,15 @@
  * stage's own pins are the last three blocks, riding this file's pinned engine
  * double for the reason the #20051 door-half block below gives.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ViewMetadataSchema, VIEW_CONSOLE_ROUND_TRIP_KEYS } from '@objectstack/spec/ui';
+import { getMetadataTypeSchema, registerMetadataTypeSchema } from '@objectstack/spec/kernel';
+import { z } from 'zod';
 import {
     assertEngineDeleteDispatch,
     assertEngineUpdateDispatch, assertEngineFindOnePredicate,
 } from '@objectstack/metadata-core';
-import { ObjectStackProtocolImplementation, graftFoldedFormSections, projectStorableViewBody } from './protocol.js';
+import { ObjectStackProtocolImplementation, graftFoldedFormSections } from './protocol.js';
 
 interface Row {
     id: string;
@@ -728,35 +730,54 @@ describe('[#20051] stage (iv): the projection is view-only', () => {
     });
 });
 
-describe('projectStorableViewBody — structural safety, no save involved', () => {
-    const accept = (body: unknown) => ({ ok: true as const, data: body });
-
-    it('stores the parsed value of an authored key, and no key the parse added when the re-parse re-adds it', () => {
-        const out = projectStorableViewBody(
-            { a: 'x' },
-            { a: 'X', d: 1 },
-            () => ({ ok: true, data: { a: 'X', d: 1 } }),
-        );
-        expect(out).toEqual({ body: { a: 'X' }, converged: true });
+/**
+ * [#20051] The save's fail-safe arm, driven through the REAL `saveMetaItem`:
+ * when {@link projectStorableViewBody} does not converge, the view is stored
+ * as its whole parse output and a warning is logged ONCE per view name.
+ *
+ * No `view` schema reaches that arm today, so the seam is the production API
+ * a plugin uses to replace a type's schema, `registerMetadataTypeSchema` —
+ * never a test-only hook. The stand-in schema's parse is not idempotent (it
+ * bumps a counter on every parse), so no body re-parses to what the save
+ * parsed. The built-in `view` schema is registered back in `finally`.
+ */
+describe('[#20051] stage (iv): the non-converging fallback stores the parse output and warns once per view', () => {
+    const nonConverging = z.object({
+        name: z.string(),
+        object: z.string(),
+        viewKind: z.literal('list'),
+        n: z.number().transform((v) => v + 1),
     });
+    const FALLBACK_WARNING = 'no body of only the keys the request carried re-parses to the same view';
 
-    it('falls back to the whole parse output when a re-parse refuses the body', () => {
-        const parsed = { a: 'X', d: 1 };
-        expect(projectStorableViewBody({ a: 'x' }, parsed, () => ({ ok: false })))
-            .toEqual({ body: parsed, converged: false });
-    });
+    it('two saves of one view warn once; a second view warns on its own', async () => {
+        const builtin = getMetadataTypeSchema('view')!;
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        registerMetadataTypeSchema('view', nonConverging);
+        try {
+            const { protocol, rows } = makeProtocol();
+            const save = (name: string, n: number) => (protocol as any).saveMetaItem({
+                type: 'view', name, item: { name, object: 'crm_lead', viewKind: 'list', n },
+            });
+            await save('crm_lead.a', 1);
+            await save('crm_lead.a', 5);
+            const fallbackWarnings = () => warn.mock.calls
+                .map((call) => String(call[0]))
+                .filter((line) => line.includes(FALLBACK_WARNING));
+            expect(fallbackWarnings()).toHaveLength(1);
+            expect(fallbackWarnings()[0]).toContain('view/crm_lead.a');
+            // The row is the whole parse output of the LAST save — not the
+            // authored body (`n: 5`), and no key lost.
+            const row = Array.from(rows.values()).find((r) => r.type === 'view' && r.name === 'crm_lead.a');
+            expect(JSON.parse(row!.metadata)).toEqual({ name: 'crm_lead.a', object: 'crm_lead', viewKind: 'list', n: 6 });
 
-    it('falls back when a round adds nothing and the re-parse still differs', () => {
-        // A re-parse that never reproduces `a` as parsed: no body of the
-        // authored keys meets the invariant, so the parse output is stored.
-        const parsed = { a: 'X' };
-        expect(projectStorableViewBody({ a: 'x' }, parsed, (body) => accept({ ...(body as object), a: 'Y' })))
-            .toEqual({ body: parsed, converged: false });
-    });
-
-    it('stores a value whose shape the parse changed, or an array whose length it changed, as parsed', () => {
-        const parsed = { e: { formats: ['csv'] }, l: [1] };
-        const out = projectStorableViewBody({ e: ['csv'], l: [1, 2] }, parsed, accept);
-        expect(out).toEqual({ body: parsed, converged: true });
+            await save('crm_lead.b', 1);
+            expect(fallbackWarnings()).toHaveLength(2);
+            expect(fallbackWarnings()[1]).toContain('view/crm_lead.b');
+        } finally {
+            registerMetadataTypeSchema('view', builtin);
+            warn.mockRestore();
+        }
+        expect(getMetadataTypeSchema('view')).toBe(builtin);
     });
 });
