@@ -164,12 +164,12 @@ function makeStubEngine() {
             getPackage: (id: string) => packages[id],
         },
     };
-    return { engine, rows };
+    return { engine, rows, packages };
 }
 
 function makeProtocol() {
-    const { engine, rows } = makeStubEngine();
-    return { protocol: new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test') as any, rows };
+    const { engine, rows, packages } = makeStubEngine();
+    return { protocol: new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test') as any, rows, packages };
 }
 
 const save = (protocol: any, item: any, extra: Record<string, unknown> = {}) =>
@@ -238,13 +238,23 @@ describe('the write package closure reaches the gate (#9612)', () => {
         // Its `manifest.dependencies` is the ONLY declaration of what it may
         // reference; without it there is no bound, and an unbounded closure is
         // the whole collection.
-        const { protocol } = makeProtocol();
+        //
+        // [#20863] A flow SAVE can no longer name a package the registry does
+        // not hold — the one authoring rule refuses it before this gate runs —
+        // so the state is reached the way it still arises: a draft stored into
+        // an installed package, promoted after that package has left the
+        // registry. The promotion names the draft's base, as a package publish
+        // does; the same promotion with the package still installed is the
+        // discriminating control.
+        const promoted = async (uninstall: boolean) => {
+            const { protocol, packages } = makeProtocol();
+            await save(protocol, flowOn('crm_on_stranger', 'other_widget'), { packageId: OWN, mode: 'draft' });
+            if (uninstall) delete packages[OWN];
+            return protocol.publishMetaItem({ type: 'flow', name: 'crm_on_stranger', packageId: OWN });
+        };
 
-        const result = await save(protocol, flowOn('crm_on_stranger', 'other_widget'), {
-            packageId: 'com.never.installed',
-        });
-
-        expect(triggerAdvisories(result)).toEqual([]);
+        expect(triggerAdvisories(await promoted(false))).toEqual(['flow-trigger-unknown-object']);
+        expect(triggerAdvisories(await promoted(true))).toEqual([]);
     });
 
     it('narrows NOTHING for the `sys_metadata` overlay sentinel', async () => {

@@ -371,26 +371,39 @@ export function sanitizeRowError(raw: unknown): string {
  * undeclared key reads as before: the door relays the engine's own envelope,
  * in the engine's own words.
  *
- * Only that verdict is taken. The door also classifies a unique conflict and a
- * NOT NULL failure, and it says different words about them than the row does:
- * its conflict sentence has no trailing period and carries the engine's
- * sentence as `developerMessage`, and its NOT NULL answer is
- * `VALIDATION_FAILED` with a `required` finding and a `hint`, where the row
- * relays the driver's code. Those rows keep their own answers here. A finding
- * still wins over the door, as it does for `code` above.
+ * ## A NOT NULL refusal and a unique conflict get the create door's answer too (#20701)
+ *
+ * The same mapper classifies two more write failures, and the row takes those
+ * verdicts as well ({@link adoptDoorVerdict}):
+ *
+ *  - **A driver's NOT NULL refusal.** A field declared `storage: { notNull:
+ *    true }` and not `required` passes the record validator (ADR-0113), and
+ *    the driver refuses the missing value in its own dialect (SQLite
+ *    `SQLITE_CONSTRAINT_NOTNULL`, Postgres `23502`, MySQL
+ *    `ER_BAD_NULL_ERROR`). The row used to relay that dialect code on the wire
+ *    `code`, with no `field`; ADR-0112's vocabulary has no room for it. The
+ *    door answers `VALIDATION_FAILED` with a `required` finding for the
+ *    field, and the row renders the door's finding the way it renders the
+ *    engine's own: `code: 'required'` and `field`, with the door's sentence.
+ *    That is the row a metadata-`required` field already gets.
+ *  - **A unique conflict.** For the engine's envelope the row already said
+ *    `UNIQUE_VIOLATION` and named the column; it now carries the door's
+ *    sentence as well, where it carried the engine's (which the door ships as
+ *    `developerMessage`, a key the row does not have). A driver's unique
+ *    refusal that reaches this function without the envelope gets the same
+ *    answer, where the row used to relay its dialect code.
+ *
+ * Nothing from the door's body beyond `code`, `field` and the sentence reaches
+ * the row: the door's `hint`, `object` and `developerMessage` are not keys of
+ * `ImportRowResultSchema`. A finding on the thrown error still wins over the
+ * door, as it does for `code` above.
  */
 function toFailedResult(rowNo: number, err: unknown, objectName: string): ImportRowResult {
   const e = err as { code?: unknown; message?: unknown; fields?: unknown; field?: unknown } | null | undefined;
-  const head: unknown = Array.isArray(e?.fields) ? e.fields[0] : undefined;
-  const first = head !== null && typeof head === 'object' ? (head as { field?: unknown; code?: unknown }) : undefined;
+  const first = firstFinding(e?.fields);
   if (first === undefined) {
-    const door = mapDataError(err, objectName).body;
-    if (door.code === 'INVALID_FIELD') {
-      return {
-        row: rowNo, ok: false, action: 'failed', error: String(door.error), code: 'INVALID_FIELD',
-        ...(typeof door.field === 'string' && door.field !== '' ? { field: door.field } : {}),
-      };
-    }
+    const adopted = adoptDoorVerdict(rowNo, mapDataError(err, objectName).body);
+    if (adopted !== undefined) return adopted;
   }
   const thrownCode = isEngineDuplicateRecordEnvelope(e) ? 'UNIQUE_VIOLATION' : e?.code;
   const code = first?.code ?? thrownCode ?? 'IMPORT_ROW_FAILED';
@@ -399,6 +412,40 @@ function toFailedResult(rowNo: number, err: unknown, objectName: string): Import
   return {
     row: rowNo, ok: false, action: 'failed', error: message, code: String(code),
     ...(field != null && field !== '' ? { field: String(field) } : {}),
+  };
+}
+
+/** The head of a `fields` list when it is a finding (an object); a bare name or an empty list is none. */
+function firstFinding(fields: unknown): { field?: unknown; code?: unknown } | undefined {
+  const head: unknown = Array.isArray(fields) ? fields[0] : undefined;
+  return head !== null && typeof head === 'object' ? (head as { field?: unknown; code?: unknown }) : undefined;
+}
+
+/**
+ * The create door's verdicts an import row takes whole (#20701). The gate is
+ * on the door's VERDICT, never on the error: which arm fired, which `field` it
+ * named and the sentence are all `mapDataError`'s, and the import derives none
+ * of them. See {@link toFailedResult} for each verdict.
+ */
+const ADOPTED_DOOR_VERDICTS: ReadonlySet<string> = new Set(['INVALID_FIELD', 'UNIQUE_VIOLATION', 'VALIDATION_FAILED']);
+
+/**
+ * The row for a door verdict in {@link ADOPTED_DOOR_VERDICTS}, or `undefined`
+ * when the row keeps its own answer. The door's finding wins over its
+ * top-level `code`, the rule the row applies to the engine's findings. A
+ * `VALIDATION_FAILED` that carries no finding is not taken: it names no field,
+ * and the door's only source for one is the thrown error, which the row reads
+ * itself.
+ */
+function adoptDoorVerdict(rowNo: number, door: Record<string, unknown>): ImportRowResult | undefined {
+  if (typeof door.code !== 'string' || !ADOPTED_DOOR_VERDICTS.has(door.code)) return undefined;
+  const finding = firstFinding(door.fields);
+  if (door.code === 'VALIDATION_FAILED' && finding === undefined) return undefined;
+  const code = typeof finding?.code === 'string' && finding.code !== '' ? finding.code : door.code;
+  const field = typeof finding?.field === 'string' && finding.field !== '' ? finding.field : door.field;
+  return {
+    row: rowNo, ok: false, action: 'failed', error: String(door.error), code,
+    ...(typeof field === 'string' && field !== '' ? { field } : {}),
   };
 }
 

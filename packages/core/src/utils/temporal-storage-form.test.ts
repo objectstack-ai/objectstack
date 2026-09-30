@@ -9,7 +9,7 @@
 // `sql-driver-temporal-storage-form.test.ts`). This file pins the rule itself.
 
 import { describe, it, expect } from 'vitest';
-import { isOutsideTemporalYearRange, temporalStorageForm } from './temporal-storage-form.js';
+import { SUPPORTED_TEMPORAL_YEARS, isOutsideTemporalYearRange, temporalStorageForm } from './temporal-storage-form.js';
 
 describe('temporalStorageForm — datetime: canonical UTC ISO text', () => {
   const cases: ReadonlyArray<readonly [string, unknown, unknown]> = [
@@ -272,5 +272,29 @@ describe('[#20264] isOutsideTemporalYearRange — the years a date or datetime v
       const isDay = typeof spelled === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(spelled);
       expect(isOutsideTemporalYearRange(value, 'date'), String(value)).toBe(!isDay);
     }
+  });
+});
+
+// [#20846] The exported range is the one the predicate judges by, so a refusal
+// that names it (the record validator's and the import's sentence for a
+// readable value in a year outside it) names the years the doors enforce: the
+// first and last year of each kind are inside, the year before and the year
+// after are outside, whatever the numbers are.
+describe('[#20846] SUPPORTED_TEMPORAL_YEARS — the range isOutsideTemporalYearRange judges by', () => {
+  const day = (year: number) => new Date(Date.UTC(2000, 5, 15)).setUTCFullYear(year);
+
+  it.each(['date', 'datetime'] as const)('%s: its first and last years are inside, the years beside them outside', (kind) => {
+    const { first, last } = SUPPORTED_TEMPORAL_YEARS[kind];
+    expect(first).toBeLessThan(last);
+    expect(isOutsideTemporalYearRange(day(first), kind), `${kind} ${first}`).toBe(false);
+    expect(isOutsideTemporalYearRange(day(last), kind), `${kind} ${last}`).toBe(false);
+    expect(isOutsideTemporalYearRange(day(first - 1), kind), `${kind} ${first - 1}`).toBe(true);
+    expect(isOutsideTemporalYearRange(day(last + 1), kind), `${kind} ${last + 1}`).toBe(true);
+  });
+
+  it('is frozen: a caller cannot move the range the doors enforce', () => {
+    expect(Object.isFrozen(SUPPORTED_TEMPORAL_YEARS)).toBe(true);
+    expect(Object.isFrozen(SUPPORTED_TEMPORAL_YEARS.date)).toBe(true);
+    expect(Object.isFrozen(SUPPORTED_TEMPORAL_YEARS.datetime)).toBe(true);
   });
 });

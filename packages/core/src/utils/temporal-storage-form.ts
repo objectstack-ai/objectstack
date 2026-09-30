@@ -159,14 +159,23 @@ function instantMs(value: unknown): number | undefined {
 }
 
 /**
- * [#20264] The first year a value of each kind may name — [#20280] per kind:
- * a `date` from 0001, a `datetime` from 1000, MySQL's documented `DATETIME`
- * floor (see the module note). The `date` entry is also the year the `date`
- * rule pads to four digits from ({@link canonicalCalendarDay}).
+ * [#20264] The supported years of each kind, the first and the last inclusive —
+ * [#20280] a `date` from 0001, a `datetime` from 1000, MySQL's documented
+ * `DATETIME` floor (see the module note); both to 9999. The one range
+ * {@link isOutsideTemporalYearRange} judges a value by. The `date` entry's
+ * first year is also the year the `date` rule pads to four digits from
+ * ({@link canonicalCalendarDay}).
+ *
+ * [#20846] Exported so a refusal can NAME the range it refused a value for —
+ * the record validator's and the import's sentence for a readable value in a
+ * year outside it — from this one source, never from a copy of its numbers.
  */
-const FIRST_SUPPORTED_YEAR: Readonly<Record<'date' | 'datetime', number>> = { date: 1, datetime: 1000 };
-/** [#20264] The last year a `date` or `datetime` value may name. */
-const LAST_SUPPORTED_YEAR = 9999;
+export const SUPPORTED_TEMPORAL_YEARS: Readonly<
+  Record<'date' | 'datetime', Readonly<{ first: number; last: number }>>
+> = Object.freeze({
+  date: Object.freeze({ first: 1, last: 9999 }),
+  datetime: Object.freeze({ first: 1000, last: 9999 }),
+});
 
 /**
  * [#20264] Does `value` name a year outside the supported years for a column
@@ -203,7 +212,8 @@ export function isOutsideTemporalYearRange(value: unknown, kind: TemporalCompara
     if (ms === undefined) return false;
     year = new Date(ms).getUTCFullYear();
   }
-  return year < FIRST_SUPPORTED_YEAR[kind] || year > LAST_SUPPORTED_YEAR;
+  const { first, last } = SUPPORTED_TEMPORAL_YEARS[kind];
+  return year < first || year > last;
 }
 
 function canonicalCalendarDay(value: unknown): unknown {
@@ -227,7 +237,7 @@ function canonicalCalendarDay(value: unknown): unknown {
     // ({@link isOutsideTemporalYearRange}). [#20280] The `date` floor, never
     // the `datetime` one: a calendar day in 0001..0999 is a supported `date`.
     const y = instant.getUTCFullYear();
-    const yyyy = y >= FIRST_SUPPORTED_YEAR.date ? String(y).padStart(4, '0') : String(y);
+    const yyyy = y >= SUPPORTED_TEMPORAL_YEARS.date.first ? String(y).padStart(4, '0') : String(y);
     const m = String(instant.getUTCMonth() + 1).padStart(2, '0');
     const d = String(instant.getUTCDate()).padStart(2, '0');
     return `${yyyy}-${m}-${d}`;
