@@ -175,6 +175,18 @@ export function forwardSeedSettledToParent(msg: unknown): boolean {
   return true;
 }
 
+/**
+ * Whether this `os dev` boot runs the watch-recompile loop (#20681).
+ *
+ * Off when the operator passed `--no-watch`, when `--artifact` was given (there
+ * is no source to watch), or when the cwd has no `objectstack.config.ts`. The
+ * one decision both the loop and the stale-artifact remedy line read, exported
+ * so `dev-no-watch.pin.test.ts` can drive it with what oclif actually parsed.
+ */
+export function devWatchActive(opts: { watch: boolean; artifact?: string; configExists: boolean }): boolean {
+  return opts.watch && !opts.artifact && opts.configExists;
+}
+
 export default class Dev extends Command {
   static override description =
     'Start development mode — watch sources, rebuild the artifact, and restart the server on change';
@@ -184,7 +196,18 @@ export default class Dev extends Command {
   };
 
   static override flags = {
-    watch: Flags.boolean({ char: 'w', description: 'Enable watch mode (default)', default: true }),
+    // `allowNo` is what makes the off branch below (`devWatchActive`, the
+    // watch-recompile loop) reachable at all: without it `--no-watch` is a
+    // "Nonexistent flag", and `--watch=false` is not a boolean spelling oclif
+    // reads — it parses as `--watch` plus the PACKAGE positional `false`
+    // (#20681). Same declaration as the sibling `compile` / `restart` /
+    // `seed-admin` switches.
+    watch: Flags.boolean({
+      char: 'w',
+      description: 'Watch objectstack.config.ts and src/, rebuilding on change (default: on). Disable with --no-watch.',
+      default: true,
+      allowNo: true,
+    }),
     ui: Flags.boolean({ description: 'Enable the bundled Console portal at /_console/' }),
     verbose: Flags.boolean({ char: 'v', description: 'Verbose output (shortcut for --log-level debug)' }),
     'log-level': Flags.string({
@@ -380,7 +403,7 @@ export default class Dev extends Command {
       // and dev still printed `Plugins: 38 loaded` until a manual build.
       // Warn loudly and name the remedy; never gate the boot (per triage:
       // remove the silence, not the start).
-      const watchActive = flags.watch !== false && !flags.artifact && configExists;
+      const watchActive = devWatchActive({ watch: flags.watch, artifact: flags.artifact, configExists });
       if (!needsCompile && !flags.artifact && configExists) {
         const stale = assessArtifactStaleness({
           artifactPath,
@@ -697,7 +720,7 @@ export default class Dev extends Command {
       // running server keeps the old build.
       //
       // Skipped when:
-      //   - --watch=false (user opted out)
+      //   - --no-watch (user opted out)
       //   - --artifact was passed (no source to watch)
       //   - the environment has no objectstack.config.ts
       if (watchActive) {
@@ -728,7 +751,25 @@ export default class Dev extends Command {
         process.exit(1);
       }
 
-      const filter = packageName === 'all' ? '' : `--filter ${packageName}`;
+      // `--no-watch` turns off THIS process's watch-recompile loop, which only
+      // exists when `os dev` boots one environment. Here each package's own
+      // `dev` script runs and decides its own watching, so the flag cannot be
+      // honoured — refuse it rather than print "Watch: enabled" under an
+      // operator who just asked for the opposite (#20681).
+      if (!flags.watch) {
+        printError('--no-watch has no effect in monorepo orchestration mode: each package\'s own `dev` script decides whether it watches.');
+        console.error(chalk.yellow('  Run it in a directory with objectstack.config.ts, or pass --artifact <path|url>, to boot one environment with watch off.'));
+        process.exit(1);
+      }
+
+      // `--fail-if-no-match`: a PACKAGE that selects no workspace project fails
+      // non-zero instead of exiting 0 having started nothing (#20681). pnpm
+      // owns the filter grammar (names, globs, `./dir`, `...pkg`), so pnpm
+      // answers whether it matched — ⛔ no second reading of the workspace
+      // here. The measured trap it closes: `os dev --watch=false` parses as
+      // `--watch` plus the PACKAGE `false`, and used to print "No projects
+      // found" and exit 0.
+      const filter = packageName === 'all' ? '' : `--filter ${packageName} --fail-if-no-match`;
       printKV('Package', packageName === 'all' ? 'All packages' : packageName, '📦');
       printKV('Watch', 'enabled', '🔄');
 
