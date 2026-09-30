@@ -3,13 +3,13 @@
 '@objectstack/metadata-protocol': minor
 ---
 
-fix(runtime): `PUT` and `DELETE /api/v1/automation/:name` refuse a packaged flow, as the metadata door does (#20679)
+fix(runtime): the `/automation` write doors refuse a packaged flow, as the metadata door does (#20679)
 
 Clause-②: yes (widening)
 
-A flow that a code package ships has a locked base (ADR-0126 §2): changing or removing it in place is refused. `PUT /api/v1/meta/flow/:name` already refused it. The two `/automation` definition doors did not: an administrator holding `manage_metadata` could rewrite a packaged flow in the live engine with `PUT /api/v1/automation/:name`, or remove it with `DELETE /api/v1/automation/:name`.
+A flow that a code package ships has a locked base (ADR-0126 §2): changing or removing it in place is refused. `PUT /api/v1/meta/flow/:name` already refused it. The two `/automation` definition doors did not: an administrator holding `manage_metadata` could rewrite a packaged flow in the live engine with `PUT /api/v1/automation/:name` or with `POST /api/v1/automation` under its name (a create onto an existing name overwrites it), or remove it with `DELETE /api/v1/automation/:name`.
 
-Both doors now answer `403` `NOT_OVERRIDABLE` for a packaged flow, with the same message the metadata door gives. The refusal comes before the engine is called, so nothing is registered or removed. On `DELETE`, it also comes before the engine's own `DELETE_RESTRICTED` / `409` for a packaged subflow that packaged callers still reach.
+All three now answer `403` `NOT_OVERRIDABLE` for a packaged flow, with the same message the metadata door gives. The refusal comes before the engine is called, so nothing is registered or removed. On `DELETE`, it also comes before the engine's own `DELETE_RESTRICTED` / `409` for a packaged subflow that packaged callers still reach.
 
 What is not refused:
 

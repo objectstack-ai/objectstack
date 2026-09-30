@@ -4,7 +4,8 @@
  * [#20679, ADR-0126 §2] Write-door parity on a PACKAGED flow: `PUT` and
  * `DELETE /automation/:name` refuse the same packaged artifact the metadata
  * door refuses — the public checklist item
- * `access-security.packaged-flow-write-door-parity`, clauses 2 and 3.
+ * `access-security.packaged-flow-write-door-parity`, clauses 2 and 3 — and so
+ * does `POST /automation` onto its name, which would otherwise overwrite it.
  *
  * ## What this pins, at door level
  *
@@ -215,6 +216,26 @@ describe('a PACKAGED flow — the base is locked at both /automation definition 
             status: statusOf(remove.response),
             message: errorOf(remove.response).message,
         });
+    });
+
+    it('POST / onto a packaged flow\'s name — a create that would overwrite — is refused as a locked base; a new name is created', async () => {
+        const h = boot();
+        const before = h.held(PACKAGED);
+
+        const overwrite = await h.dispatcher.handleAutomation(
+            '', 'POST', definitionOf(PACKAGED, 'Overwritten via create'), AUTHOR(), undefined,
+        );
+        expect(statusOf(overwrite.response)).toBe(403);
+        expect(errorOf(overwrite.response).code).toBe('NOT_OVERRIDABLE');
+        expect(h.registerFlow).not.toHaveBeenCalled();
+        expect(h.held(PACKAGED)).toBe(before);
+
+        // Control: a name no code package ships is created exactly as before.
+        const created = await h.dispatcher.handleAutomation(
+            '', 'POST', definitionOf('brand_new_flow', 'New'), AUTHOR(), undefined,
+        );
+        expect(statusOf(created.response)).toBe(200);
+        expect(h.registerFlow).toHaveBeenCalledWith('brand_new_flow', expect.objectContaining({ label: 'New' }));
     });
 
     it('keys on the NAME the artifact loader registered — provenance stamps in the request body decide nothing', async () => {

@@ -1448,17 +1448,18 @@ function flowDefinitionRefusal(err: any): unknown {
 
 /**
  * [#20679, ADR-0126 §2] THE LOCKED BASE at this domain's definition-write and
- * removal doors — `PUT /:name` and `DELETE /:name`.
+ * removal doors — `PUT /:name`, `DELETE /:name`, and `POST /` onto a name the
+ * engine already holds (a create onto an existing name is an overwrite).
  *
  * ADR-0126 §2 puts a packaged flow in Regime C: "the packaged base is locked —
  * in-place edit refused loudly at the write door". The metadata door kept that
  * promise (`PUT /meta/flow/:name` on a flow a code package ships answers `403`
- * `NOT_OVERRIDABLE`) and these two doors did not: behind the `manage_metadata`
+ * `NOT_OVERRIDABLE`) and these doors did not: behind the `manage_metadata`
  * authoring gate they went straight to the engine's `registerFlow` /
  * `unregisterFlow`, which hold no lock and must not grow one — the boot pull
  * registers every packaged flow through that same method. So an administrator
  * refused at one door onto the artifact could rewrite, or remove, the same
- * packaged flow in the live engine through the other.
+ * packaged flow in the live engine through another.
  *
  * ## One predicate, asked of its owner
  *
@@ -1959,6 +1960,7 @@ export async function classifyResumeResult(
  *   GET    /:name                → getFlow
  *   POST   /                     → createFlow (registerFlow)
  *                                  ⚑ authoring write — `manage_metadata` (#10145)
+ *                                  ⚑ packaged base locked — as `PUT /:name`
  *   PUT    /:name                → updateFlow
  *                                  ⚑ authoring write — `manage_metadata` (#10145)
  *                                  ⚑ packaged base locked — the `/meta` door's
@@ -2240,6 +2242,13 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
             // `edge.condition` strings lowered to their envelopes) — the same
             // shape `GET /automation/:name` serves — never an echo of the
             // caller's own pre-parse bytes.
+            // [#20679, ADR-0126 §2] Creating onto a name the engine already
+            // holds is an overwrite (below), so a packaged flow's name is
+            // locked here exactly as on `PUT /:name` — the same verdict, asked
+            // before anything is read or registered. A name no code package
+            // ships is created as before.
+            const locked = await refusePackagedFlowBaseChange(deps, context, body.name, 'save');
+            if (locked) return locked;
             // [#20552] Creating onto a name the engine already holds is an
             // overwrite, so the round-trip rule applies here as on `PUT /:name`.
             const definition = await keepStoredFlowCredentials(automationService, body.name, body);
