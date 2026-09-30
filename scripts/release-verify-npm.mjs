@@ -8,6 +8,9 @@
  *   node scripts/release-verify-npm.mjs              # from release.yml
  *   node scripts/release-verify-npm.mjs --self-test  # verify this logic
  *   node scripts/release-verify-npm.mjs --dry-run    # print the target set only
+ *   RELEASE_VERSION=V node scripts/release-verify-npm.mjs --probe [--root DIR]
+ *                                                    # one read, no waiting: is
+ *                                                    # the whole group on npm?
  *
  * ## The two defects this replaces (#15321)
  *
@@ -107,14 +110,58 @@
  * only the first round probes the whole set, and every later round probes just
  * the packages still missing.
  *
- * dispatch-gates: no-path-population -- the self-test drives synthetic package maps and a stub registry; the live workspace read and the network read both belong to the release run, which no pull request schedules
+ * ## `--probe` — the same question BEFORE anyone waits for the answer (#20627)
+ *
+ * `release.yml`'s `release-integrity` audit repairs an already-published
+ * release: it backfills the GitHub Releases, the ADR-0087 D4 asset and the
+ * runtime image. It used to read "already published" off the
+ * `@objectstack/cli` canary alone, which is the defect ② above in a second
+ * place. A publish commits the group over minutes and `cli` is not the last:
+ * npm's own `time` field on 17.5.0 has the first package at 07:54:59.851Z,
+ * `cli` at 07:58:57.256Z, `console` at 08:05:24.355Z and `spec`, last, at
+ * 08:09:33.521Z. A landing audited at 08:05:53Z read `cli`, backfilled, and its
+ * image build went red installing a group npm did not have yet.
+ *
+ * So "published" has ONE definition, this file's: every package of the derived
+ * target set is readable at its own manifest's version. `--probe` asks it with
+ * the same derivation, the same refusals and the same `verifyAllPublished`, in
+ * ONE round (a budget of 0 — the parameter battery 2 already drives) and prints
+ * one JSON line: `state` is `published`, `unpublished` (some package is
+ * definitively absent) or `unknown` (nothing is absent, but a read failed).
+ * One round, not fifteen minutes of backoff, because the direction of error is
+ * the safe one: a cold read answers `unpublished` and the backfill waits for
+ * the next landing, while a false `published` is impossible — every package
+ * has to answer present. The exit status is 0 for all three answers; it is
+ * non-zero only when there is no answer (a target set this file refuses, an
+ * unreadable workspace, or no RELEASE_VERSION to hold the anchor to).
+ *
+ * `--root` names the workspace the set is derived from. The audit passes the
+ * VERSION COMMIT's tree, because that is the tree the publish job checked out
+ * and ran this file over: a later landing's tree can carry a package no
+ * release of this version contains, which would read as absent forever.
+ *
+ * The self-test's battery 12 runs the audit step itself — its text, read out of
+ * `.github/workflows/release.yml` — against a throwaway repository, a stub
+ * registry and stub `npm` / `gh` / `curl`, so the wiring is pinned where it
+ * lives rather than described here.
  */
 
-import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
 import { listWorkspacePackages } from './release-github-releases.mjs';
+
+const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
+
+/** The workflow whose audit step battery 12 runs. Read by the self-test only. */
+const RELEASE_WORKFLOW = resolve(SCRIPTS_DIR, '..', '.github/workflows/release.yml');
+
+/** The step in `release-integrity` that reads npm and decides every backfill. */
+const AUDIT_STEP_NAME = 'Audit the release that main actually carries';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -144,11 +191,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '7. The failure text names what is absent, and only that': 6,
   '8. The registry probe: present, absent, and unreadable': 6,
   '9. The job summary is written SYNCHRONOUSLY, before process.exit': 4,
+  '10. The probe: the whole group in one read, three answers': 9,
+  '11. The 17.5.0 publish window, replayed on npm\'s own clock': 7,
+  '12. The audit step backfills only a version whose whole group is on npm': 14,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 9;
+const SELF_TEST_BATTERY_FLOOR = 12;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -246,6 +296,9 @@ export const ANCHOR_PACKAGE = '@objectstack/cli';
 
 /** A registry read did not produce an answer. Never green, never a clean red. */
 export class RegistryUnreadable extends Error {}
+
+/** The reason a target carries when the registry answered and the version is not there. */
+export const NOT_ON_REGISTRY = 'not on the registry';
 
 // ---------------------------------------------------------------------------
 // The backoff schedule
@@ -470,7 +523,7 @@ export async function verifyAllPublished({
         reasons.delete(key);
         continue;
       }
-      reasons.set(key, 'not on the registry');
+      reasons.set(key, NOT_ON_REGISTRY);
       stillPending.push(target);
     }
     pending = stillPending;
@@ -493,11 +546,73 @@ export async function verifyAllPublished({
 
   return {
     ok: false,
-    missing: pending.map((t) => ({ ...t, reason: reasons.get(`${t.name}@${t.version}`) ?? 'not on the registry' })),
+    missing: pending.map((t) => ({ ...t, reason: reasons.get(`${t.name}@${t.version}`) ?? NOT_ON_REGISTRY })),
     rounds,
     waitedMs,
     checked: targets.length,
   };
+}
+
+// ---------------------------------------------------------------------------
+// The probe — the same definition, asked once (`--probe`, see the header)
+// ---------------------------------------------------------------------------
+
+/**
+ * The group's state on npm, read off one `verifyAllPublished` result.
+ *
+ *   published    every target is readable
+ *   unpublished  at least one target is DEFINITIVELY absent — the group is not
+ *                (yet) all on npm, whatever else could not be read
+ *   unknown      nothing is definitively absent, but at least one read failed
+ *
+ * Absence outranks unreadability because it is evidence and the other is not:
+ * one package the registry answered "no" for already settles the question.
+ *
+ * @param {{ ok: boolean, missing: { reason: string }[] }} result
+ * @returns {'published' | 'unpublished' | 'unknown'}
+ */
+export function groupState(result) {
+  if (result.ok) return 'published';
+  return result.missing.some((m) => m.reason === NOT_ON_REGISTRY) ? 'unpublished' : 'unknown';
+}
+
+/**
+ * Is the WHOLE target set readable on npm right now? One round, no waiting.
+ *
+ * This is `verifyAllPublished` with a budget of 0, not a second loop: the
+ * refusals (an empty set, a set without the anchor) and the per-target reasons
+ * are the verifier's own. The sleep it is handed throws, so a future change
+ * that made the probe wait would fail here rather than stall an audit.
+ *
+ * @param {{ targets: { name: string, version: string }[], probe: (name: string, version: string) => Promise<boolean> }} opts
+ * @returns {Promise<{ state: 'published' | 'unpublished' | 'unknown', checked: number,
+ *                     missing: { name: string, version: string, reason: string }[] }>}
+ */
+export async function probeGroup({ targets, probe }) {
+  const result = await verifyAllPublished({
+    targets,
+    probe,
+    budgetMs: 0,
+    sleep: async () => {
+      throw new Error('the group probe asks once; it never waits for the registry to settle');
+    },
+  });
+  return { state: groupState(result), checked: result.checked, missing: result.missing };
+}
+
+/**
+ * The probe's log line, for a human reading the audit (stdout carries the JSON).
+ *
+ * @param {string} version
+ * @param {{ state: string, checked: number, missing: { name: string, version: string, reason: string }[] }} answer
+ * @returns {string}
+ */
+export function formatProbe(version, answer) {
+  const { state, checked, missing } = answer;
+  if (state === 'published') return `probe: all ${checked} package(s) of ${version} are readable on npm.`;
+  const shown = missing.slice(0, 5).map((m) => `${m.name}@${m.version} (${m.reason})`);
+  const more = missing.length > shown.length ? `, and ${missing.length - shown.length} more` : '';
+  return `probe: ${state} — ${missing.length} of ${checked} package(s) of ${version} not readable: ${shown.join(', ')}${more}.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -572,12 +687,43 @@ export function formatSuccess(result) {
  * @returns {Promise<number>} process exit code
  */
 export async function main({ argv = process.argv.slice(2), env = process.env } = {}) {
-  const targets = resolveVerificationTargets(listWorkspacePackages());
+  const probeMode = argv.includes('--probe');
+  const what = probeMode ? 'probe the fixed group' : 'verify the publish';
+  if (probeMode && argv.includes('--dry-run')) {
+    console.error('::error::--probe reads the registry and --dry-run reads nothing; pass one of them.');
+    return 1;
+  }
+  // The probe answers for ONE release, so it must be told which: without it
+  // the anchor check below has nothing to hold the derived set to, and a
+  // `--root` pointing at the wrong tree would be answered about silently.
+  if (probeMode && !env.RELEASE_VERSION) {
+    console.error('::error::--probe needs RELEASE_VERSION — the version whose whole fixed group it is asked about.');
+    return 1;
+  }
+
+  let targets;
+  try {
+    const rootAt = argv.indexOf('--root');
+    const root = rootAt === -1 ? undefined : argv[rootAt + 1];
+    if (rootAt !== -1 && (!root || root.startsWith('--'))) throw new Error('--root needs a directory');
+    targets = resolveVerificationTargets(listWorkspacePackages(root === undefined ? undefined : resolve(root)));
+  } catch (err) {
+    console.error(`::error::cannot ${what} — the workspace could not be read: ${err instanceof Error ? err.message : err}`);
+    return 1;
+  }
   const problems = targetSetProblems(targets, { releaseVersion: env.RELEASE_VERSION });
   if (problems.length) {
-    console.error(`::error::cannot verify the publish — ${problems[0]}`);
+    console.error(`::error::cannot ${what} — ${problems[0]}`);
     for (const problem of problems.slice(1)) console.error(`  - ${problem}`);
     return 1;
+  }
+
+  if (probeMode) {
+    const answer = await probeGroup({ targets, probe: (name, version) => probeVersion(name, version) });
+    // stdout is the answer and nothing else; the log line goes to stderr.
+    process.stdout.write(`${JSON.stringify({ version: env.RELEASE_VERSION, ...answer })}\n`);
+    console.error(formatProbe(env.RELEASE_VERSION, answer));
+    return 0;
   }
 
   if (argv.includes('--dry-run')) {
