@@ -49,6 +49,7 @@ import { readScopeUnresolvedError } from './read-scope-refusal.js';
 // every member a query names, judged against the caller's readable fields.
 import {
   assertNamedFieldsReadable,
+  type QueryableFieldsProvider,
   type NamedField,
   type FieldReadRole,
   type ReadableFieldsProvider,
@@ -718,6 +719,25 @@ export interface AnalyticsServiceConfig {
    */
   getReadableFields?: ReadableFieldsProvider;
   /**
+   * [#20935] The QUERY-side half of the same field-level gate — which fields of
+   * an object the caller may filter, sort, group or aggregate by. Asked beside
+   * {@link getReadableFields}, at the same point and for the same objects, and
+   * a member is admitted only when BOTH answers carry its field: every member
+   * an analytics query names is a query position, and a field the caller is
+   * served MASKED is readable but not queryable (as a group key it hands back
+   * the unmasked value; as a filter it rebuilds the masked span). Refused
+   * `PERMISSION_DENIED` / 403 in the engine's words for the same field.
+   *
+   * The plugin auto-bridges this to the `security` service's
+   * `getQueryableFields`, and when that service predates the method, or
+   * answers `undefined`, it fails CLOSED: every field that declares a
+   * `maskingRule` is treated as not queryable. MAY be async; a THROW refuses
+   * the query. A host that wires {@link getReadableFields} and not this judges
+   * masked fields by the read projection alone, which admits them — the
+   * service says so once, at construction.
+   */
+  getQueryableFields?: QueryableFieldsProvider;
+  /**
    * ADR-0021 D-C — join allowlist per cube (the dataset's declared `include`).
    * Joins outside this set are rejected by the strategy. Compiled datasets
    * (via `queryDataset`/`registerDataset`) supply this automatically; this
@@ -1130,6 +1150,8 @@ export class AnalyticsService implements IAnalyticsService {
   private readonly readAdmissionProvider?: ObjectReadAdmissionProvider;
   /** [#20917] Field-level read-admission provider (bound per call to the request context). */
   private readonly readableFieldsProvider?: ReadableFieldsProvider;
+  /** [#20935] Field-level query-admission provider (bound per call to the request context). */
+  private readonly queryableFieldsProvider?: QueryableFieldsProvider;
   /**
    * Compiled datasets by name, as `registerDataset` registered them — feeds the
    * shared scope's join allowlist (D-C) and dataset scope. `queryDataset`
@@ -1199,6 +1221,14 @@ export class AnalyticsService implements IAnalyticsService {
     this.readScopeProvider = config.getReadScope;
     this.readAdmissionProvider = config.admitObjectRead;
     this.readableFieldsProvider = config.getReadableFields;
+    this.queryableFieldsProvider = config.getQueryableFields;
+    if (this.readableFieldsProvider && !this.queryableFieldsProvider) {
+      this.logger.warn(
+        '[Analytics] getReadableFields is configured without getQueryableFields: a field a caller is served ' +
+          'MASKED is readable, so the field-level gate admits it as a group key, a filter or a sort key, ' +
+          'which the data API refuses. Supply getQueryableFields (the security service\'s getQueryableFields).',
+      );
+    }
     this.configuredAllowedRelationships = config.getAllowedRelationships;
     this.relationshipResolver = config.relationshipResolver;
     this.sourceFieldMeta = config.sourceFieldMeta;
@@ -1626,6 +1656,7 @@ export class AnalyticsService implements IAnalyticsService {
       context,
       (object) => this.getObjectFieldNames?.(object),
       this.logger,
+      this.queryableFieldsProvider,
     );
   }
 
