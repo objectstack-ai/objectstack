@@ -26,7 +26,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { Cube, ValueShapeFieldDef } from '@objectstack/spec/data';
 import type { AnalyticsQuery, StrategyContext } from '@objectstack/spec/contracts';
 
-import { normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
+import { normalizeAnalyticsFilterTree, NO_DATETIME_COLUMNS } from '../strategies/filter-normalizer.js';
 import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
 import type { DatasetScopedStrategyContext } from '../strategies/types.js';
@@ -104,23 +104,23 @@ const query = (where: unknown): AnalyticsQuery =>
 
 describe('[#20445] normalizeAnalyticsFilterTree — `$empty` lowers to its own valueless leaf', () => {
   it('$empty: true → an `empty` leaf, $empty: false → `notEmpty`', () => {
-    expect(normalizeAnalyticsFilterTree({ where: { name: { $empty: true } } })).toEqual({
+    expect(normalizeAnalyticsFilterTree({ where: { name: { $empty: true } } }, NO_DATETIME_COLUMNS)).toEqual({
       kind: 'leaf', member: 'name', operator: 'empty', values: [],
     });
-    expect(normalizeAnalyticsFilterTree({ where: { name: { $empty: false } } })).toEqual({
+    expect(normalizeAnalyticsFilterTree({ where: { name: { $empty: false } } }, NO_DATETIME_COLUMNS)).toEqual({
       kind: 'leaf', member: 'name', operator: 'notEmpty', values: [],
     });
   });
 
   it('under $not the leaf takes no NULL guard: the arm is total on every consumer', () => {
-    expect(normalizeAnalyticsFilterTree({ where: { $not: { name: { $empty: true } } } })).toEqual({
+    expect(normalizeAnalyticsFilterTree({ where: { $not: { name: { $empty: true } } } }, NO_DATETIME_COLUMNS)).toEqual({
       kind: 'not', child: { kind: 'leaf', member: 'name', operator: 'empty', values: [] },
     });
   });
 
   for (const flag of ['true', 0, null, [true], new Date(0)]) {
     it(`a non-boolean flag (${String(flag)}) is refused INVALID_FILTER / 400, with the null flags`, async () => {
-      const err = await refusalOf(() => normalizeAnalyticsFilterTree({ where: { name: { $empty: flag } } }));
+      const err = await refusalOf(() => normalizeAnalyticsFilterTree({ where: { name: { $empty: flag } } }, NO_DATETIME_COLUMNS));
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.status).toBe(400);
       expect(err.message).toContain('Operator "$empty" on field "name" requires a boolean comparand');

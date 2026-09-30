@@ -2388,7 +2388,88 @@ export function normalizeAnalyticsFilterTree(
 ): NormalizedFilterNode | null {
   const condition = lowerAnalyticsWhere(query);
   if (!condition) return null;
-  return buildNode(lowerFilterCondition(condition, lowering));
+  return buildNode(lowerFilterCondition(spellNestedRelationsDotted(condition), lowering));
+}
+
+/**
+ * [ADR-0053 D-D1, amended — #5930 step 3] Spell every nested-relation field
+ * spec (`{ account: { region: 'NA' } }`) as the DOTTED members it names
+ * (`{ 'account.region': 'NA' }`), before the shared lowering reads the
+ * condition.
+ *
+ * The nested spelling is this door's own sugar: the schema accepts it, the
+ * engine refuses it on every driver, and {@link fieldLeaves} is what gives it a
+ * meaning here — it compiles each nested key as the dotted member. The shared
+ * lowering has no such reading: it takes `account` for a column and, inside a
+ * `$not`, guards it — `account IS NOT NULL`, a predicate on whatever the member
+ * `account` resolves to, which is not the member the leaf reads (the reason
+ * {@link guardFieldEntry} flattens before it guards). Spelled dotted first,
+ * the lowering guards `account.region`, the member the leaf binds.
+ *
+ * It rewrites only the spelling: every dotted member is the one
+ * {@link fieldLeaves} would have produced, in the same order, and a member that
+ * already has an entry keeps both, the second as an `$and` conjunct. An EMPTY
+ * spec is left as it is, for {@link fieldLeaves}' zero-operator refusal —
+ * flattening `{}` would make the constraint vanish. Copy-on-write: a condition
+ * with no nested relation comes back as the same object.
+ */
+function spellNestedRelationsDotted(node: Record<string, unknown>): Record<string, unknown> {
+  const isNonEmptyRelation = (spec: unknown): spec is Record<string, unknown> =>
+    isNestedRelationSpec(spec) && Object.keys(spec).length > 0;
+  const dottedPairs = (prefix: string, spec: Record<string, unknown>): Array<[string, unknown]> =>
+    Object.entries(spec).flatMap(([key, value]): Array<[string, unknown]> => {
+      const dotted = `${prefix}.${key}`;
+      return isNonEmptyRelation(value) ? dottedPairs(dotted, value) : [[dotted, value]];
+    });
+
+  let changed = false;
+  const entries: Array<[string, unknown]> = [];
+  const conjuncts: Record<string, unknown>[] = [];
+  const seen = new Set<string>();
+  const put = (key: string, value: unknown): void => {
+    if (seen.has(key)) conjuncts.push({ [key]: value });
+    else {
+      seen.add(key);
+      entries.push([key, value]);
+    }
+  };
+  for (const [key, spec] of Object.entries(node)) {
+    if ((key === '$and' || key === '$or') && Array.isArray(spec)) {
+      let copy: unknown[] | undefined;
+      spec.forEach((child, index) => {
+        if (!isFilterObject(child)) return;
+        const spelled = spellNestedRelationsDotted(child);
+        if (spelled !== child) {
+          copy ??= [...spec];
+          copy[index] = spelled;
+        }
+      });
+      if (copy) changed = true;
+      put(key, copy ?? spec);
+      continue;
+    }
+    if (key === '$not' && isFilterObject(spec)) {
+      const spelled = spellNestedRelationsDotted(spec);
+      if (spelled !== spec) changed = true;
+      put(key, spelled);
+      continue;
+    }
+    if (!key.startsWith('$') && isNonEmptyRelation(spec)) {
+      changed = true;
+      for (const [dotted, value] of dottedPairs(key, spec)) put(dotted, value);
+      continue;
+    }
+    put(key, spec);
+  }
+  if (!changed) return node;
+  const out: Record<string, unknown> = Object.fromEntries(entries);
+  if (conjuncts.length > 0) {
+    // A malformed `$and` is {@link buildNode}'s to refuse, in its own words;
+    // folding a conjunct into it would replace the shape it refuses.
+    if ('$and' in out && !Array.isArray(out.$and)) return node;
+    out.$and = [...((out.$and as unknown[] | undefined) ?? []), ...conjuncts];
+  }
+  return out;
 }
 
 /**

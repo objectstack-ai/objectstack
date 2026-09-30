@@ -28,7 +28,7 @@ import type { AnalyticsQuery, FilterCondition } from '@objectstack/spec/data';
 import type { StrategyContext } from '@objectstack/spec/contracts';
 
 import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
-import { normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
+import { normalizeAnalyticsFilterTree, NO_DATETIME_COLUMNS } from '../strategies/filter-normalizer.js';
 
 interface Row {
   id: string;
@@ -191,7 +191,7 @@ describe('analytics filters — every authorable operator reaches the query (#41
     // rows the filter excludes. A typo'd or non-spec operator is a caller
     // error, and a loud one — the same call driver-memory made in #3948.
     expect(() =>
-      normalizeAnalyticsFilterTree({ where: { name: { $sortOf: 'alpha' } } }),
+      normalizeAnalyticsFilterTree({ where: { name: { $sortOf: 'alpha' } } }, NO_DATETIME_COLUMNS),
     ).toThrow(/Unsupported filter operator "\$sortOf"/);
   });
 
@@ -199,7 +199,7 @@ describe('analytics filters — every authorable operator reaches the query (#41
     // [#20010] The shared comparand-shape face answers this one first now, in
     // its own words (the words the FilterArray spelling gets); this door's
     // "two-element" sentence is no longer reached from `normalizeAnalyticsFilterTree`.
-    expect(() => normalizeAnalyticsFilterTree({ where: { score: { $between: [10] } } })).toThrow(
+    expect(() => normalizeAnalyticsFilterTree({ where: { score: { $between: [10] } } }, NO_DATETIME_COLUMNS)).toThrow(
       /requires a \[min, max\] value array/,
     );
   });

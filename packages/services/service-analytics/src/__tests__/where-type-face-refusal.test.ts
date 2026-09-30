@@ -46,7 +46,7 @@ import { normalizeFilterComparandTypes, type Cube } from '@objectstack/spec/data
 import { DatasetSchema, type Dataset } from '@objectstack/spec/ui';
 import type { AnalyticsQuery, StrategyContext } from '@objectstack/spec/contracts';
 
-import { lowerAnalyticsWhere, normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
+import { lowerAnalyticsWhere, normalizeAnalyticsFilterTree, NO_DATETIME_COLUMNS } from '../strategies/filter-normalizer.js';
 import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
 import { evaluateAnalyticsQueryOverRows } from '../preview-evaluator.js';
@@ -57,7 +57,7 @@ interface Refusal extends Error {
   status?: unknown;
 }
 
-const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where } as never);
+const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where } as never, NO_DATETIME_COLUMNS);
 
 function refusalOf(run: () => unknown): Refusal {
   let out: unknown;

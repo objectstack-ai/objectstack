@@ -24,6 +24,14 @@
  * Both public entry points are covered here — `query()` and `generateSql()` —
  * because both call `normalizeFilters` and a refusal on one only would leave the
  * other silently answering the old way.
+ *
+ * [ADR-0053 D-D1, amended 2026-09-30 — #5930 step 3] Three of those shapes are
+ * no longer refusals: the face now COMPILES `$or` and `$null` (the shared
+ * lowering emits both), and a `$between` reaches its vocabulary gate as the two
+ * bounds the lowering splits it into. Each is pinned below as answered with the
+ * rows the live query path gives it — the invariant this file has always held,
+ * refuse-or-agree, never a different row set. `$not`, `$startsWith` and
+ * `$endsWith` stay refused.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -104,23 +112,30 @@ describe('[#5345] MemoryAnalyticsService — filters it cannot compile are refus
 
   // ── The combinators (`continue` #1) ────────────────────────────────────────
 
-  it('refuses $or instead of aggregating the whole table', async () => {
+  // [#5930 step 3] `$or` is compiled now, so the regression this section was
+  // written against — three rows asked for, five returned — is pinned as its
+  // answer: the rows the live query path returns, never the whole table.
+  const findCount = async (where: FilterCondition): Promise<number> => (await driver.find('deals', { where })).length;
+
+  it('compiles $or instead of aggregating the whole table', async () => {
     const where: FilterCondition = { $or: [{ stage: 'won' }, { stage: 'lost' }] };
-    const err = await expectRefusal(() => count(where), '$or', 'where.$or');
-    // The regression in one line: three rows were asked for, five were returned.
-    expect(err.message).toContain('WIDENS');
+    expect(await count(where)).toBe(3);
+    expect(await count(where)).toBe(await findCount(where));
   });
 
-  it('refuses a $or nested inside a $and it CAN compile', async () => {
+  it('compiles a $or nested inside a $and', async () => {
     const where: FilterCondition = { $and: [{ owner: 'u1' }, { $or: [{ stage: 'won' }, { stage: 'open' }] }] };
-    await expectRefusal(() => count(where), '$or', 'where.$and[1].$or');
+    expect(await count(where)).toBe(2);
+    expect(await count(where)).toBe(await findCount(where));
   });
 
-  it('refuses a $or that sits beside a compilable sibling key', async () => {
-    // The sharpest shape: the sibling `owner` lowered fine, so the query ran and
-    // returned a plausible-looking number computed without the $or at all.
+  it('compiles a $or that sits beside a sibling key, ANDed with it', async () => {
+    // The sharpest shape when `$or` was dropped: the sibling `owner` lowered
+    // fine, so the query ran and returned a plausible-looking number computed
+    // without the $or at all. Compiled, it narrows.
     const where: FilterCondition = { owner: 'u1', $or: [{ stage: 'won' }, { stage: 'lost' }] };
-    await expectRefusal(() => count(where), '$or');
+    expect(await count(where)).toBe(2);
+    expect(await count(where)).toBe(await findCount(where));
   });
 
   it('refuses $not — the shape an RLS read scope compiles to', async () => {
@@ -130,18 +145,30 @@ describe('[#5345] MemoryAnalyticsService — filters it cannot compile are refus
   });
 
   it('names the combinators it CAN compile, so the refusal is actionable', async () => {
-    const err = await expectRefusal(() => count({ $or: [{ stage: 'won' }] }));
-    expect(err.message).toContain('Supported combinators on this surface: $and');
+    const err = await expectRefusal(() => count({ $not: { stage: 'won' } }));
+    expect(err.message).toContain('Supported combinators on this surface: $and, $or');
   });
 
   // ── The unmapped operators (`continue` #2) ─────────────────────────────────
 
   const UNCOMPILABLE: Array<{ op: string; where: FilterCondition }> = [
-    { op: '$between', where: { amount: { $between: [100, 200] } } },
     { op: '$startsWith', where: { name: { $startsWith: 'al' } } },
     { op: '$endsWith', where: { name: { $endsWith: 'ta' } } },
-    { op: '$null', where: { closed_at: { $null: true } } },
   ];
+
+  // [#5930 step 3] Answered, not refused: `$null` joined this face's table, and
+  // a `$between` reaches it as its two bounds. Each agrees with the live path.
+  const NOW_COMPILED: Array<{ op: string; where: FilterCondition; rows: number }> = [
+    { op: '$between', where: { amount: { $between: [100, 200] } }, rows: 2 },
+    { op: '$null', where: { closed_at: { $null: true } }, rows: 2 },
+  ];
+
+  for (const { op, where, rows } of NOW_COMPILED) {
+    it(`compiles ${op}, with the rows the live query path returns`, async () => {
+      expect(await count(where)).toBe(rows);
+      expect(await findCount(where)).toBe(rows);
+    });
+  }
 
   for (const { op, where } of UNCOMPILABLE) {
     it(`refuses ${op} — declared by the Filter Protocol, not compilable by this face`, async () => {
@@ -221,17 +248,17 @@ describe('[#5345] MemoryAnalyticsService — filters it cannot compile are refus
       () => service.generateSql(asQuery({
         cube: 'deals',
         measures: ['deals.count'],
-        where: { $or: [{ stage: 'won' }, { stage: 'lost' }] },
+        where: { $not: { stage: 'lost' } },
       })),
-      '$or',
+      '$not',
     );
     await expectRefusal(
       () => service.generateSql(asQuery({
         cube: 'deals',
         measures: ['deals.count'],
-        where: { amount: { $between: [1, 2] } },
+        where: { name: { $startsWith: 'al' } },
       })),
-      '$between',
+      '$startsWith',
     );
     const ok = await service.generateSql(asQuery({
       cube: 'deals',

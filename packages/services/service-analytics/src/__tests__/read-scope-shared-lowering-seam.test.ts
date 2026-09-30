@@ -48,8 +48,9 @@
  * — it moves no answer.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { Cube, FilterCondition } from '@objectstack/spec/data';
 import type { AnalyticsQuery, StrategyContext } from '@objectstack/spec/contracts';
 
@@ -204,6 +205,23 @@ describe('[ADR-0053 D-D1 amended — #5930 step 3] the read scope lowers its fil
     const { sql, params } = compileScopedFilterToSql({ signed_at: { $lte: '2026-07-28' } }, ALIAS, { declaredValueShape });
     expect(sql).toBe('"t"."signed_at" < ?');
     expect(params).toEqual(['2026-07-29']);
+  });
+
+  it('a date macro resolves first, and the lowering widens the day it resolved to (item 3)', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-03-15T23:30:00.000Z'));
+      const scope = { signed_at: { $lte: '{today}' } } as FilterCondition;
+      expect(compileScopedFilterToSql(scope, ALIAS, { declaredValueShape })).toEqual({
+        sql: '"t"."signed_at" < ?',
+        params: ['2026-03-16'],
+      });
+      // The caller's calendar decides the day, and the bound is the day after it.
+      const shanghai = { timezone: 'Asia/Shanghai' } as ExecutionContext;
+      expect(compileScopedFilterToSql(scope, ALIAS, { declaredValueShape, context: shanghai }).params).toEqual(['2026-03-17']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('with no declarations handed in, no column reads as datetime and the bound compiles as written', () => {

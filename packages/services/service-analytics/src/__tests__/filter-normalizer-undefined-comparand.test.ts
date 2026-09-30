@@ -123,7 +123,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
+import { normalizeAnalyticsFilterTree, NO_DATETIME_COLUMNS } from '../strategies/filter-normalizer.js';
 
 /** The ADR-0112 fields a refusal must carry. */
 interface FilterRefusal extends Error {
@@ -133,7 +133,7 @@ interface FilterRefusal extends Error {
 
 function refusalFor(where: unknown): FilterRefusal | undefined {
   try {
-    normalizeAnalyticsFilterTree({ where });
+    normalizeAnalyticsFilterTree({ where }, NO_DATETIME_COLUMNS);
     return undefined;
   } catch (e) {
     return e as FilterRefusal;
@@ -141,7 +141,7 @@ function refusalFor(where: unknown): FilterRefusal | undefined {
 }
 
 function treeFor(where: unknown): unknown {
-  return normalizeAnalyticsFilterTree({ where });
+  return normalizeAnalyticsFilterTree({ where }, NO_DATETIME_COLUMNS);
 }
 
 /**
@@ -407,7 +407,7 @@ describe('[#6386] the `null` control group does not move', () => {
     // The refusal is about a KEY INSIDE a `where`; a missing `where` is the
     // legitimate way to say "no filter" and must stay silent.
     expect(treeFor(undefined)).toBeNull();
-    expect(normalizeAnalyticsFilterTree({})).toBeNull();
+    expect(normalizeAnalyticsFilterTree({}, NO_DATETIME_COLUMNS)).toBeNull();
     expect(treeFor({})).toBeNull();
     expect(treeFor([])).toBeNull();
   });

@@ -39,7 +39,7 @@ import { describe, it, expect } from 'vitest';
 import { FILTER_LOGIC_CASES, FILTER_LOGIC_ROWS, type Cube, type FilterCondition } from '@objectstack/spec/data';
 import type { AnalyticsQuery, StrategyContext } from '@objectstack/spec/contracts';
 
-import { normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
+import { collectFilterLeaves, normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
 import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
 import { evaluateAnalyticsQueryOverRows } from '../preview-evaluator.js';
 
@@ -111,6 +111,16 @@ describe('[ADR-0053 D-D1 amended — #5930 step 3] F10: the where → tree face 
         { kind: 'or', children: [leaf('stage', 'notSet', []), leaf('stage', 'notEquals', ['won'])] },
       ],
     });
+  });
+
+  it('a nested relation under $not is guarded on the dotted member its leaf reads, never on the relation key', () => {
+    // The nested spelling is this door's sugar (the engine refuses it); the
+    // door spells it dotted before the lowering reads it, so the lowering's
+    // guard lands on `account.region` — not on whatever `account` resolves to.
+    const members = (where: FilterCondition) =>
+      [...new Set(collectFilterLeaves(tree(where) as never).map((l) => l.member))].sort();
+    expect(members({ $not: { account: { region: 'NA' } } })).toEqual(['account.region']);
+    expect(members({ $not: { account: { owner: { name: 'x' } } } })).toEqual(['account.owner.name']);
   });
 
   it('an instant is never widened', () => {
