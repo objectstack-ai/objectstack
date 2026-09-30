@@ -16,12 +16,16 @@
 // value" while the engine armed the PACKAGED body — the warning was actively
 // contradicted by the thing it warned about.
 //
-// The direction asserted here is NOT chosen by this test. ADR-0048 §1.5 lists
-// the runtime/DB overlay as "the sanctioned override path" and §3.4 routes it
-// to "the ADR-0005 overlay precedence"; ADR-0005 states that precedence as
-// `sys_metadata … ← overlay (wins)` over `SchemaRegistry … ← artifact default`.
-// Runtime wins. If that direction is ever revisited, this file is one of the
-// places the decision has to be re-argued — do not flip it to match code.
+// The direction asserted here is NOT chosen by this test. It was first written
+// as ADR-0005's (a runtime/DB overlay wins, per ADR-0048 §1.5 and §3.4). It is
+// re-argued here, as this file asked, and it is ADR-0126's for a FLOW
+// ([#20913]): §3 assigns `flow` to Regime C, whose packaged base is locked —
+// "⛔ Never silent override, never an overlay read path" (§2) — and ADR-0131
+// D6 seals every managed package's definitions. The overlay regime is
+// admitted for five presentation types, and `flow` is not one of them. So a
+// name the loader's set holds arms the loader's body, and a stored row of that
+// name is shadowed and reported. The #20761 ruling's rule 1 decides which
+// contender is the loader's: the loader's set, never a body's stamps.
 
 import { describe, it, expect, vi } from 'vitest';
 import { SchemaRegistry } from '@objectstack/objectql';
@@ -114,16 +118,18 @@ describe('#11997 — packaged flow shadowed by a same-named runtime flow', () =>
         const armedSecond = (await second.engine.getFlow(FLOW)) as any;
 
         // Pre-fix these were 'RUNTIME' and 'PACKAGED' respectively.
-        expect(armedFirst?.label).toBe('RUNTIME');
-        expect(armedSecond?.label).toBe('RUNTIME');
+        expect(armedFirst?.label).toBe('PACKAGED');
+        expect(armedSecond?.label).toBe('PACKAGED');
         expect(armedFirst?.label).toBe(armedSecond?.label);
     });
 
-    it('arms the runtime overlay over the packaged artifact (ADR-0005 direction)', async () => {
-        const { engine } = bootPull(registryWithBoth('package-first'));
-        const armed = (await engine.getFlow(FLOW)) as any;
-        expect(armed?.label).toBe('RUNTIME');
-        expect(armed?._packageId).toBeUndefined();
+    it('arms the packaged artifact over a same-named stored row (ADR-0126 §2, the sealed base)', async () => {
+        for (const order of ['package-first', 'runtime-first'] as const) {
+            const { engine } = bootPull(registryWithBoth(order));
+            const armed = (await engine.getFlow(FLOW)) as any;
+            expect(armed?.label).toBe('PACKAGED');
+            expect(armed?._packageId).toBe('crm');
+        }
     });
 
     it('registers ONE flow per bare name, not one per definition', async () => {
@@ -150,15 +156,15 @@ describe('#11997 — packaged flow shadowed by a same-named runtime flow', () =>
         // separately below, so the two cannot drift together and stay green.
         expect(message).toContain(renderFlowContender({ source: 'package', packageId: 'crm' })); // contender A
         expect(message).toContain('runtime-authored row'); // contender B
-        expect(message).toContain('arming a runtime-authored row'); // which one wins
-        expect(message).toContain('ADR-0005');
+        expect(message).toContain(`arming ${renderFlowContender({ source: 'package', packageId: 'crm' })}`); // which one wins
+        expect(message).toContain('ADR-0126 §2'); // the rule that armed it
         // A single line: the boot diagnostic buffer keeps only the line
         // carrying the level prefix (#5048).
         expect(message).not.toContain('\n');
 
         expect(meta.flow).toBe(FLOW);
-        expect(meta.armed).toEqual({ source: 'runtime' });
-        expect(meta.shadowed).toEqual([{ source: 'package', packageId: 'crm' }]);
+        expect(meta.armed).toEqual({ source: 'package', packageId: 'crm' });
+        expect(meta.shadowed).toEqual([{ source: 'runtime' }]);
     });
 
     it('leaves an admin-visible receipt for the shadowed definition', () => {
@@ -168,8 +174,8 @@ describe('#11997 — packaged flow shadowed by a same-named runtime flow', () =>
         expect(engine.getShadowedFlows()).toEqual([
             {
                 name: FLOW,
-                armed: { source: 'runtime' },
-                shadowed: [{ source: 'package', packageId: 'crm' }],
+                armed: { source: 'package', packageId: 'crm' },
+                shadowed: [{ source: 'runtime' }],
             },
         ]);
 
@@ -178,8 +184,8 @@ describe('#11997 — packaged flow shadowed by a same-named runtime flow', () =>
         const states = engine.getFlowRuntimeStates();
         expect(states).toHaveLength(1);
         expect(states[0].name).toBe(FLOW);
-        expect(states[0].armedFrom).toEqual({ source: 'runtime' });
-        expect(states[0].shadowed).toEqual([{ source: 'package', packageId: 'crm' }]);
+        expect(states[0].armedFrom).toEqual({ source: 'package', packageId: 'crm' });
+        expect(states[0].shadowed).toEqual([{ source: 'runtime' }]);
     });
 
     it('says nothing and attaches nothing when a name has only one definition', () => {
@@ -245,11 +251,13 @@ describe('#11997 — precedence is a total order, not an iteration order', () =>
         });
     });
 
-    it('a tenant overlay beats the package even when both carry a real package id', () => {
+    it('the package beats a tenant row even when both carry a real package id, in either order', () => {
         const packaged = { ...flowBody(FLOW, 'PACKAGED'), _packageId: 'crm' };
         const tenant = { ...flowBody(FLOW, 'TENANT'), _packageId: 'crm', _provenance: 'org' };
-        const resolved = resolveFlowPrecedence([packaged, tenant], silentLogger, setOf({ [FLOW]: 'crm' }));
-        expect((resolved[0].definition as any).label).toBe('TENANT');
+        for (const listed of [[packaged, tenant], [tenant, packaged]]) {
+            const resolved = resolveFlowPrecedence(listed, silentLogger, setOf({ [FLOW]: 'crm' }));
+            expect((resolved[0].definition as any).label).toBe('PACKAGED');
+        }
     });
 });
 

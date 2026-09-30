@@ -1010,20 +1010,21 @@ export class AutomationServicePlugin implements Plugin {
             const flows = ql?.registry?.listItems?.('flow') ?? [];
             ctx.logger.debug(`[Automation] flow pull: registry returned ${flows.length} flow(s)`);
             // [#11997] Collapse same-named contenders BEFORE anything is armed.
-            // `listItems` returns a packaged flow and a same-named runtime
-            // overlay as two entries (ADR-0048 §3.4 coexistence, deliberate);
-            // the engine's flow map is keyed by bare name, so registering both
+            // `listItems` returns a packaged flow and a same-named stored row
+            // as two entries (ADR-0048 §3.4 coexistence, deliberate); the
+            // engine's flow map is keyed by bare name, so registering both
             // used to let Map iteration order decide which one dispatches.
-            // resolveFlowPrecedence applies the ADR-0005 direction — runtime
-            // overlay wins over the packaged artifact — and warns per colliding
-            // name, which is the artifact-vs-DB warning ADR-0048 §3.4 routes to.
+            // [#20913] resolveFlowPrecedence applies ADR-0126 §2 — a managed
+            // package's flow is sealed, so the loader's body is armed and a
+            // stored row of its name is shadowed — and warns per colliding name.
             // [#20864, ADR-0126 §7.3] Which contender IS the packaged artifact
             // is the loader's set, asked through the engine's own
             // `packagedFlowOwner` (the `packagedFlowReader` attached in
             // `init()`), so precedence and every other classification the
             // engine makes read one source — never the stamps on the bodies.
-            const engine = this.engine;
-            const resolved = resolveFlowPrecedence(flows, ctx.logger, (name) => engine.packagedFlowOwner(name));
+            // [#20913] Through {@link resolveFlowContenders}, the one decision
+            // the two protocol syncs below resolve through as well.
+            const resolved = this.resolveFlowContenders(ctx, flows);
             const shadowedNames = resolved.filter((entry) => entry.shadowing).length;
             let registered = 0;
             for (const entry of resolved) {
@@ -1160,6 +1161,8 @@ export class AutomationServicePlugin implements Plugin {
         // on-demand from the registry. Bind from THAT at kernel:ready,
         // once every plugin has finished init()/start() (so the app — hence its
         // flows — is registered). registerFlow is idempotent with the boot pull.
+        // [#20913] …and it arms what the boot pull armed: both resolve through
+        // the one precedence decision ({@link resolveFlowContenders}).
         ctx.hook('kernel:ready', async () => {
             await this.syncFlowsFromProtocol(ctx);
             // Every plugin's init()/start() has completed here, so connector
@@ -1230,8 +1233,8 @@ export class AutomationServicePlugin implements Plugin {
                     `[Automation] flow '${record.name}' is claimed by ${record.shadowed.length + 1} definitions — ` +
                         `${renderFlowContender(record.armed)} is ARMED and ` +
                         `${record.shadowed.map(renderFlowContender).join(', ')} ` +
-                        `${record.shadowed.length === 1 ? 'is' : 'are'} shadowed (ADR-0005 overlay precedence). ` +
-                        `Only the armed definition dispatches.`,
+                        `${record.shadowed.length === 1 ? 'is' : 'are'} shadowed (see the flow name collision ` +
+                        `warning for the rule that armed it). Only the armed definition dispatches.`,
                 );
             }
 
@@ -2045,6 +2048,36 @@ export class AutomationServicePlugin implements Plugin {
     }
 
     /**
+     * [#20913, #20761 ruling rule 1, ADR-0126 §2] THE ONE precedence decision
+     * every step that arms flows at boot or on reload goes through: the boot
+     * pull over the registry's flow list, the `kernel:ready` sync and the
+     * `metadata:reloaded` re-sync over the protocol's flow view.
+     *
+     * `resolveFlowPrecedence`, with the engine's own `packagedFlowOwner` — the
+     * loader's set, the one server-held fact of which flows are packaged — so
+     * for a name the loader's set holds, the loader's body is what is armed,
+     * at every step. Before this, the two syncs registered the view's bodies
+     * one by one with no precedence at all, and the `kernel:ready` sync re-armed
+     * over what the boot pull had just resolved. ⛔ No step keeps a second
+     * precedence path: a step that needs one calls this.
+     *
+     * Only the boot pull records the shadowing receipt: it is the step that
+     * sees a stored row of a shipped name at all (the protocol's view does not
+     * merge one in — see `getMetaItemsForExecution`), and the syncs resolve to
+     * the same winners by this same decision, so its receipt describes what is
+     * armed after them too. The collision warning is logged by every step that
+     * meets a contested name.
+     */
+    private resolveFlowContenders(ctx: PluginContext, items: readonly unknown[]) {
+        const engine = this.engine;
+        return resolveFlowPrecedence(
+            items,
+            ctx.logger,
+            engine ? (name) => engine.packagedFlowOwner(name) : undefined,
+        );
+    }
+
+    /**
      * Re-pull flow definitions from the protocol and re-register them into the
      * engine, so a RUNTIME metadata change re-binds flow triggers instead of
      * leaving the engine executing the boot-time definitions. Driven by the
@@ -2078,16 +2111,17 @@ export class AutomationServicePlugin implements Plugin {
 
         const freshNames = new Set<string>();
         let resynced = 0;
-        for (const def of defs) {
-            if (!def?.name) continue;
-            freshNames.add(def.name);
+        // [#20913] Same-named contenders in the view resolve through the ONE
+        // precedence the boot pull used — never "last one registered wins".
+        for (const entry of this.resolveFlowContenders(ctx, defs)) {
+            freshNames.add(entry.name);
             try {
-                this.engine.registerFlow(def.name, def as never);
+                this.engine.registerFlow(entry.name, entry.definition as never);
                 resynced++;
             } catch (err) {
                 // #5048 — see ./thrown-cause-diagnostics.ts.
                 ctx.logger.warn('[Automation] flow re-sync: failed to register flow', {
-                    flow: def.name,
+                    flow: entry.name,
                     ...describeThrownForLog(err),
                 });
             }
@@ -2127,16 +2161,18 @@ export class AutomationServicePlugin implements Plugin {
         const defs = await this.readFlowDefsFromProtocol(ctx);
         if (!defs) return;
         let bound = 0;
-        for (const def of defs) {
-            if (!def?.name) continue; // registerFlow is idempotent, so re-binding is safe
+        // [#20913] Through the boot pull's own precedence decision — see
+        // {@link resolveFlowContenders}. registerFlow is idempotent, so
+        // re-binding the body the boot pull armed is safe.
+        for (const entry of this.resolveFlowContenders(ctx, defs)) {
             try {
-                this.engine.registerFlow(def.name, def as never);
-                this.syncedFlowNames.add(def.name);
+                this.engine.registerFlow(entry.name, entry.definition as never);
+                this.syncedFlowNames.add(entry.name);
                 bound++;
             } catch (err) {
                 // #5048 — see ./thrown-cause-diagnostics.ts.
                 ctx.logger.warn('[Automation] cold-boot flow bind: failed to register flow', {
-                    flow: def.name,
+                    flow: entry.name,
                     ...describeThrownForLog(err),
                 });
             }

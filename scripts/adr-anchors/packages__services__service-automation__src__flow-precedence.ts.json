@@ -1,0 +1,8 @@
+{
+  "file": "packages/services/service-automation/src/flow-precedence.ts",
+  "adrs": [
+    "ADR-0126",
+    "ADR-0048"
+  ],
+  "invariant": "ADR-0126 §2 / §3 — `flow` is Regime C: a managed package's flow is sealed, \"⛔ Never silent override, never an overlay read path\". So within a name the loader's set holds, `resolveFlowPrecedence` ranks the loader's entry (`package`) BEFORE a stored row of that name (`runtime`): the stored row is shadowed and reported, never armed. The rank is not the ADR-0005 overlay direction, and flipping it back to \"runtime wins\" re-arms a stored body over a sealed definition. Which contender is `package` is the loader's set's answer, never a body's stamps (#20761 ruling rule 1). ADR-0048 §3.4 — two packages shipping one bare name resolve by lexicographic package id, because the engine's flow map is keyed by bare name. The boot pull and both protocol syncs in `plugin.ts` resolve through this one function."
+}
