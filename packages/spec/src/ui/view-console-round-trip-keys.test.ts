@@ -7,12 +7,12 @@
  *
  * ## Why this is a closure pin
  *
- * `saveMetaItem` stores the request body verbatim (ADR-0005 appendix (c)), so a
+ * `saveMetaItem` stored the request body verbatim (ADR-0005 appendix (c)), so a
  * key the console writes and reads back lived in the store while the members'
  * `.strip()` dropped it from the parse. Nothing failed: the parse output was
- * simply never persisted. The end state the ruling names is the parsed body
- * becoming the stored one, and it may land only once every round-trip key is
- * declared. This file is what "every" means.
+ * simply never persisted. Stage (iv) made the parsed body the stored one — the
+ * parsed value of every key a body carries — so a round-trip key survives a
+ * save only if it is declared. This file is what "every" means.
  *
  * `CENSUS` below is the measurement, written down independently of the spec's
  * own record: the keys objectui's console writes onto a stored `view` row and

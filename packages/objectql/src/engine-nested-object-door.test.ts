@@ -30,6 +30,14 @@
  * measured (`d1`, `d3` for `$in` on a lookup and `$contains` on a multiple
  * lookup) and are not pinned in a new suite: that driver's test consumers are
  * a ruled, closed census (`check:driver-memory-census`).
+ *
+ * [#20802] The relation rows at `where` are SERVED now (maintainer ruling,
+ * letter A): the engine lowers the nested-relation form by reading the related
+ * object, and `engine-nested-relation-lowering.test.ts` pins it. What stays
+ * here is what still refuses: the structured-JSON and provisioned-`id` rows,
+ * `{}` beneath a relation (it names no field of the related object), and the
+ * relation rows at an aggregation's own `filter` and at `having`, whose words
+ * now say the form is served in `where`.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -73,15 +81,6 @@ const PROBE = {
 };
 
 const OWNER_OBJECT = { name: OWNER, label: 'Owner', fields: { region: { name: 'region', type: 'text' } } };
-
-/** field · declared type · the related object the words name · whether the route is `$contains`. */
-const RELATIONS: ReadonlyArray<readonly [string, string, string, boolean]> = [
-  ['owner', 'lookup', OWNER, false],
-  ['owners', 'lookup', OWNER, true],
-  ['boss', 'master_detail', OWNER, false],
-  ['assignee', 'user', 'sys_user', false],
-  ['parent', 'tree', OBJECT, false],
-];
 
 /** field · declared type — structured-JSON columns. */
 const JSONS: ReadonlyArray<readonly [string, string]> = [
@@ -153,25 +152,6 @@ describe('[#20745] a no-operator object beneath a relation, structured-JSON or p
 
   // ── where ────────────────────────────────────────────────────────────────
 
-  it('refuses the nested-relation form beneath every relation type, single or multiple, naming the route that works — no read', async () => {
-    for (const [field, type, related, multiple] of RELATIONS) {
-      const err = await refusalOf(engine.find(OBJECT, { where: { [field]: { region: 'NA' } } as FilterCondition }));
-      expect(envelopeOf(err), field).toEqual(ENVELOPE);
-      expect(err!.httpStatus, field).toBe(400);
-      expect(err!.message, field).toMatch(/^find\('nested_object_probe'\): /);
-      expect(err!.message, field).toContain(`filter on '${field}'`);
-      expect(err!.message, field).toContain(`at where.${field},`);
-      expect(err!.message, field).toContain(`beneath the declared ${type} field '${field}'`);
-      expect(err!.message, field).toContain('nested-relation form');
-      expect(err!.message, field).toContain('NOT applied');
-      expect(err!.message, field).toContain(`Filter the related object '${related}' first`);
-      expect(err!.message, field).toContain(
-        multiple ? `{ "${field}": { "$contains": ID } }` : `{ "${field}": { "$in": [ID, …] } }`,
-      );
-    }
-    expect(reads).toHaveLength(0);
-  });
-
   it('refuses a whole-value object beneath every structured-JSON type, naming what every driver answers alike — no read', async () => {
     for (const [field, type] of JSONS) {
       const err = await refusalOf(engine.find(OBJECT, { where: { [field]: { a: 1 } } as FilterCondition }));
@@ -195,20 +175,23 @@ describe('[#20745] a no-operator object beneath a relation, structured-JSON or p
   });
 
   it('refuses {} beneath a relation and a JSON column too, in the engine\'s words rather than each driver\'s', async () => {
-    for (const [where, words] of [
-      [{ owner: {} }, 'nested-relation form'],
-      [{ meta: {} }, 'whole-value match'],
+    for (const [where, empty, words] of [
+      // [#20802] Served at `where` otherwise — `{}` names no field of the related object.
+      [{ owner: {} }, '(no keys)', 'names no field of the related object'],
+      [{ meta: {} }, 'an empty object {}', 'whole-value match'],
     ] as const) {
       const err = await refusalOf(engine.find(OBJECT, { where: where as FilterCondition }));
       expect(envelopeOf(err), JSON.stringify(where)).toEqual(ENVELOPE);
-      expect(err!.message, JSON.stringify(where)).toContain('an empty object {}');
+      expect(err!.message, JSON.stringify(where)).toContain(empty);
       expect(err!.message, JSON.stringify(where)).toContain(words);
     }
     expect(reads).toHaveLength(0);
   });
 
   it('covers every engine verb that collects a filter — read and write sides — and the judge', async () => {
-    for (const where of [{ owner: { region: 'NA' } }, { meta: { a: 1 } }] as FilterCondition[]) {
+    // [#20802] The relation row is served at `where` on every verb now:
+    // `engine-nested-relation-lowering.test.ts`.
+    for (const where of [{ ship_to: { city: 'Paris' } }, { meta: { a: 1 } }] as FilterCondition[]) {
       const path = `at where.${Object.keys(where)[0]},`;
       for (const call of [
         () => engine.find(OBJECT, { where }),
@@ -230,9 +213,9 @@ describe('[#20745] a no-operator object beneath a relation, structured-JSON or p
 
   it('reaches inside $and / $or / $not, and answers the FilterArray sugar alike', async () => {
     const cases: ReadonlyArray<readonly [FilterCondition, string]> = [
-      [{ $and: [{ title: 'a' }, { owner: { region: 'NA' } }] }, 'where.$and[1].owner'],
+      [{ $and: [{ title: 'a' }, { ship_to: { city: 'Paris' } }] }, 'where.$and[1].ship_to'],
       [{ $or: [{ meta: { a: 1 } }, { amount: 30 }] }, 'where.$or[0].meta'],
-      [{ $not: { boss: { region: 'NA' } } }, 'where.$not.boss'],
+      [{ $not: { spec: { k: 1 } } }, 'where.$not.spec'],
     ];
     for (const [where, path] of cases) {
       const err = await refusalOf(engine.find(OBJECT, { where }));
@@ -240,10 +223,10 @@ describe('[#20745] a no-operator object beneath a relation, structured-JSON or p
       expect(err!.message, path).toContain(`at ${path},`);
     }
     const sugar = await refusalOf(
-      engine.find(OBJECT, { where: [['owner', '=', { region: 'NA' }]] } as unknown as EngineQueryOptions),
+      engine.find(OBJECT, { where: [['meta', '=', { a: 1 }]] } as unknown as EngineQueryOptions),
     );
     expect(envelopeOf(sugar)).toEqual(ENVELOPE);
-    expect(sugar!.message).toContain('at where.owner,');
+    expect(sugar!.message).toContain('at where.meta,');
     expect(reads).toHaveLength(0);
   });
 
@@ -333,9 +316,9 @@ describe('[#20745] a no-operator object beneath a relation, structured-JSON or p
     });
 
     const DOORS: ReadonlyArray<{ door: string; query: Record<string, unknown> }> = [
-      { door: 'where object', query: { where: { owner: { region: 'NA' } } } },
+      { door: 'where object', query: { where: { ship_to: { city: 'Paris' } } } },
       { door: '$filter string', query: { $filter: JSON.stringify({ meta: { a: 1 } }) } },
-      { door: 'filter AST', query: { filter: [['owner', '=', { region: 'NA' }]] } },
+      { door: 'filter AST', query: { filter: [['meta', '=', { a: 1 }]] } },
     ];
 
     it.each(DOORS)('the $door door refuses it', async ({ query }) => {

@@ -178,18 +178,40 @@ where: {
   ],
 }
 
-// A condition on a related record's fields: filter the related object first,
-// then match the lookup against the ids it returns
-const tech = await engine.find('account', { where: { industry: 'tech' }, fields: ['id'] });
-where: { account: { $in: tech.map((a) => a.id) } }
+// Nested relation filter
+where: {
+  account: { industry: 'tech' },
+}
 ```
 
-A plain object with no `$` operator beneath a field — `{ account: { industry: 'tech' } }`
-under a lookup, `{ meta: { a: 1 } }` under a `json` field — is refused with
-`INVALID_FILTER` / 400 on every driver: no driver follows a relation into the related
-object, and a whole-value match on a JSON value means something different on each
-backend. On a multi-valued lookup (`multiple: true`), match each id with `$contains`
-(an `$or` of those for several ids) instead of `$in`.
+A nested relation filter is a condition on a related record's own fields, written
+beneath a relation field (`lookup`, `master_detail`, `user` or `tree`, single or
+multiple). The engine serves it in `where`, the same on every driver: it reads the
+related object with the condition **as the caller** — that object's row scope and field
+permissions apply, so a condition on a field the caller cannot read is refused
+(`PERMISSION_DENIED` / 403), never answered with an empty list — and then matches the
+relation field against the ids that read returns: `$in` on a single-valued relation, any
+member on a multi-valued one (`multiple: true`). No related record matching selects no
+rows; under `$not`, a record whose relation is empty satisfies the negation.
+
+It reaches **one level**: every key must be a field the related object declares
+(`{ account: { owner: { region: 'NA' } } }` and the dotted `{ account: { 'owner.region': 'NA' } }`
+are refused), and a condition matching more than 1,000 related records is refused with
+`INVALID_FILTER` / 400 rather than run over a cut-off list. For either, run the two steps
+yourself — filter the related object, then match its ids:
+
+```typescript
+const tech = await engine.find('account', { where: { industry: 'tech' }, fields: ['id'] });
+where: { account: { $in: tech.map((a) => a.id) } }
+// On a multi-valued lookup, one $contains per id:
+where: { $or: tech.map((a) => ({ accounts: { $contains: a.id } })) }
+```
+
+An aggregation's own `filter` and `having` do not serve the nested form (put the
+condition in `where`), and a plain object with no `$` operator beneath a `json` field —
+`{ meta: { a: 1 } }`, a whole-value match — is refused with `INVALID_FILTER` / 400 on
+every driver. A dotted path (`{ 'account.industry': 'tech' }`) is refused with
+`INVALID_FIELD` / 400: write it nested instead.
 
 **Supported operators:** `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$between`, `$contains`, `$notContains`, `$startsWith`, `$endsWith`, `$null`, `$exists`
 

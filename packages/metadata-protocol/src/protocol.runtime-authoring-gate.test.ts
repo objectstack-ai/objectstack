@@ -781,9 +781,9 @@ describe('runtime authoring gate on OBJECT writes (#4716)', () => {
 // THE MEASUREMENT THIS BLOCK EXISTS TO TAKE. The entry's `surfaceReason` held
 // the crossing back on an open question: does the gate's `body` reach the rule
 // BEFORE the per-type `safeParse`, whose residue stage strips the only evidence
-// the rule reads? It does — and not by luck. `saveMetaItem` keeps the AUTHORED
-// body verbatim on purpose (`parsed.data` would strip the Studio-only auxiliary
-// fields an overlay rides with) and grafts back exactly two normalizations,
+// the rule reads? It does — and not by luck. For every type but `view` (a
+// permission set among them; a `view` stores its parsed body since #20051),
+// `saveMetaItem` keeps the AUTHORED body verbatim and grafts back exactly two normalizations,
 // each a walk over the authored keys that adds nothing and drops nothing else.
 // So the residue is still there at the gate call, and the persisted row proves
 // it from the other side. Post-parse the rule would indeed be structurally
