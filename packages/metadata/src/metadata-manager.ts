@@ -1239,7 +1239,7 @@ export class MetadataManager implements IMetadataService {
         `declarations this loader holds as "never declared" — which grants or locks out depending on the consumer, silently either way. ` +
         `Fix: check the datasource behind \`${loaderName}\` — connection, credentials, and that its metadata table exists. ` +
         `The read is retried on the next list once the ${MetadataManager.DEGRADED_LIST_CACHE_TTL_MS}ms degraded-result list cache lapses ` +
-        `(a known-partial listing is memoized far more briefly than a complete one — #5184), so a transient cause recovers on its ` +
+        `(a known-partial listing is memoized far more briefly than a complete one), so a transient cause recovers on its ` +
         `own within seconds and the recovery is logged.`,
       error instanceof Error ? error : undefined,
       { loader: loaderName, type, error },

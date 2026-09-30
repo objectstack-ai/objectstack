@@ -2,6 +2,8 @@
 
 import { z } from 'zod';
 import { BaseResponseSchema } from './contract.zod';
+import { ValidateDataIssueSchema } from './protocol.zod';
+import { DroppedFieldsEventSchema } from '../data/data-engine.zod';
 
 /**
  * Data Export & Import Protocol
@@ -318,6 +320,24 @@ export type ImportRequestParsed = z.infer<typeof ImportRequestSchema>;
  * Import Row Result
  * Per-row outcome so a UI can render an import report and offer a failed-row
  * re-export.
+ *
+ * Two optional report keys ride on an `ok` row, and neither changes its
+ * `ok` / `action`:
+ *
+ * - `warnings` was SERVED before it was declared: the REST import runner's
+ *   dry-run branch (`packages/rest/src/import-runner.ts`) copies the admitted
+ *   findings of the engine's validate verdict onto the row, and both the
+ *   synchronous route and the async job's results carry it (pinned at the wire
+ *   by `packages/rest/src/import-dryrun-parity.test.ts`). Undeclared, it was
+ *   invisible to every reader typed by this schema, and
+ *   `ImportRowResultSchema.parse` stripped it.
+ * - `droppedFields` is DECLARED AHEAD of its producer, per row rather than
+ *   import-wide so the report keeps which row dropped what. The engine has to
+ *   report drops per row out of `validateData` and `insertMany`, and the REST
+ *   import route has to copy them onto the row; until both do, no server sets
+ *   the key, which is why its describe says an absent key does not prove
+ *   nothing was dropped. The element IS {@link DroppedFieldsEventSchema}, so
+ *   the `reason` vocabulary is the engine's — ⛔ never a second enum here.
  */
 export const ImportRowResultSchema = lazySchema(() => z.object({
   row: z.number().int().describe('1-based row number in the source data'),
@@ -328,6 +348,21 @@ export const ImportRowResultSchema = lazySchema(() => z.object({
   field: z.string().optional().describe('Field that caused a coercion/validation error'),
   code: z.string().optional().describe('Error code (failed rows)'),
   error: z.string().optional().describe('Human-readable error message (failed rows)'),
+  warnings: z.array(ValidateDataIssueSchema).optional().describe(
+    'Findings this deployment ADMITS rather than rejects (ADR-0104 value shapes under a warn-first posture), '
+    + 'in the same `{ field, code, message }` shape the validate verdict carries. Set only on a dry-run row the '
+    + 'verdict accepted: the row is `ok` because the write would store it and log the same complaint. A '
+    + 'committed row never carries it, since the write path has no channel to report admitted findings on.',
+  ),
+  droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
+    'Write-observability: caller-supplied fields the engine LEGALLY strips from THIS row, one event per '
+    + 'reason, in the engine\'s own `droppedFields` shape and reason vocabulary. A dry-run row reports the '
+    + 'strips the write would make; a committed row reports the strips it made. The row still succeeds: '
+    + '`ok` and `action` are unchanged. Present only when at least one field was dropped. A server that '
+    + 'does not produce this report omits the key too, so an absent key alone does not prove nothing was '
+    + 'dropped. In an async job\'s `results`, an ok row\'s drops reach the reader only if the row falls '
+    + 'inside that capped, failures-first sample.',
+  ),
 }));
 export type ImportRowResult = z.input<typeof ImportRowResultSchema>;
 
@@ -424,9 +459,18 @@ export type ImportJobProgress = z.input<typeof ImportJobProgressSchema>;
 /**
  * Import Job Results — the progress payload plus a capped sample of per-row
  * outcomes (failures first) so a UI can render the report / failed-row export.
+ *
+ * The sample is the whole of what an async reader gets per row: a report that
+ * rides on an `ok` row (`droppedFields`, `warnings`) is visible only for the
+ * ok rows that fit inside the cap after every failure. The cap itself is the
+ * REST server's, and this contract does not change it.
  */
 export const ImportJobResultsSchema = lazySchema(() => ImportJobProgressSchema.extend({
-  results: z.array(ImportRowResultSchema).describe('Capped sample of per-row outcomes (failures first)'),
+  results: z.array(ImportRowResultSchema).describe(
+    'Capped sample of per-row outcomes, failures first. An ok row, and any `droppedFields` or `warnings` it '
+    + 'carries, reaches this reader only if it falls inside the sample; `resultsTruncated` says whether the '
+    + 'sample is partial, and the job counters count every row.',
+  ),
   resultsTruncated: z.boolean().describe('Whether `results` is a capped sample of a larger set'),
 }));
 export type ImportJobResults = z.input<typeof ImportJobResultsSchema>;

@@ -580,6 +580,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "小数桁",
         helpText: "小数部の桁数"
       },
+      useGrouping: {
+        label: "桁区切り",
+        helpText: "表示する値の桁区切り（3 桁ごとの区切り記号）。未設定の場合はレンダラーが決めます。一度も操作していないスイッチは何も書き込まないため、レンダラーが区切る場合でもオフと表示されます。オフ：区切りません（例：年や ID）。オン：常に区切ります。"
+      },
       currencyConfig: {
         label: "通貨設定",
         helpText: "このフィールドの通貨。未設定の場合は dynamic モードです。どちらのモードでも、保存される値は単なる数値です。"

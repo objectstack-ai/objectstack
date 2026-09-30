@@ -469,7 +469,7 @@ export class MetadataPlugin implements Plugin {
             throw new Error(
                 `[MetadataPlugin] artifactSource.mode '${bad}' is not supported`
                 + (bad === 'artifact-api'
-                    ? " — the 'artifact-api' source was removed (#4246). Load the same artifact with"
+                    ? " — the 'artifact-api' source was removed. Load the same artifact with"
                       + " { mode: 'local-file', path: '<http(s) URL>' } (e.g. the control plane's"
                       + " /pub/v1/environments/:id/artifact route), or install packages into a running"
                       + ' runtime via @objectstack/cloud-connection.'

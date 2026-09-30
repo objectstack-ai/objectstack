@@ -388,13 +388,6 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     kind: 'omit',
     type: 'field',
     path: ROOT_PATH,
-    key: 'useGrouping',
-    why: 'declared, not enforced yet — liveness verdict `planned` (the renderer read side that maps it onto `Intl.NumberFormat` is not landed). No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate',
-  },
-  {
-    kind: 'omit',
-    type: 'field',
-    path: ROOT_PATH,
     key: 'picklist',
     why: 'declared, not enforced yet — liveness verdict `planned` (the server-side resolution that serves a picklist-bound field its options is not landed). No offer until it is enforced; the field designer offering a picklist is a later Studio phase',
   },
