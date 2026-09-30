@@ -133,6 +133,9 @@ describe('#20768 — the first boot of a new SQLite database reads the migration
 
   it('CONTROL a malformed read on an existing table still warns, and so does a missing table read after boot', async () => {
     const { driver, lines } = await boot(newDatabaseFile());
+    // Count only what the reads below log. The boot's own lines are the first
+    // test's subject, and this control must not move with them.
+    lines.length = 0;
 
     // More bound variables than SQLite takes in one statement, on a table that
     // exists: the backend refuses it, and that is a real refusal.
