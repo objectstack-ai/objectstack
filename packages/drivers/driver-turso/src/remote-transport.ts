@@ -945,7 +945,7 @@ function undeclaredAggregateFunctionError(func: string): Error {
     `Declared functions: ${DECLARED_AGGREGATE_FUNCTIONS.join(', ')} ` +
     `(@objectstack/spec AggregationFunction). Fix the "function" key of the aggregations[] ` +
     `entry — the Query Protocol has no such function, so this is a query no backend can run, ` +
-    `not a gap in this one (#5907).`,
+    `not a gap in this one.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.INVALID_QUERY;
   err.status = 400;
@@ -984,7 +984,7 @@ function uncompilableAggregateFunctionError(func: string): Error {
     `correctly and @objectstack/spec AggregationFunction declares it — this is a capability gap ` +
     `in the backend, not a mistake in the query, which is why it answers NOT_IMPLEMENTED/501 ` +
     `rather than a 400. Aggregate with a function this backend compiles; whether the declaration ` +
-    `itself should stand is ADR-0049's enforce-or-remove question (#5907).`,
+    `itself should stand is ADR-0049's enforce-or-remove question.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
@@ -1011,7 +1011,7 @@ function refuseDistinctAggregateWithoutField(func: string): never {
   const err = new Error(
     `Aggregate function "${func}" needs a "field" — there is nothing to deduplicate. ` +
     `COUNT(*) counts rows and is the spelling that takes no field; a distinct count has to name ` +
-    `the column whose values are deduplicated. Add "field" to the aggregations[] entry (#6409).`,
+    `the column whose values are deduplicated. Add "field" to the aggregations[] entry.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.INVALID_QUERY;
   err.status = 400;
@@ -1068,7 +1068,7 @@ function refusePerAggregationFilter(alias: string): never {
     `Per-aggregation \`filter\` on "${alias}" is not supported by this backend (Turso remote transport). ` +
     `The query is spelled correctly and @objectstack/spec AggregationNodeSchema declares the key — ` +
     `this backend compiles no conditional-aggregate (SQL FILTER (WHERE …) / CASE WHEN) expression ` +
-    `for it, so it is refused rather than silently aggregating the UNFILTERED rows (#10413), which ` +
+    `for it, so it is refused rather than silently aggregating the UNFILTERED rows, which ` +
     `is why it answers NOT_IMPLEMENTED/501 rather than a 400. \`engine.aggregate\` lowers filtered ` +
     `aggregations in memory for every driver without native support — route the query through the ` +
     `engine, or drop the \`filter\` key.`,
@@ -1105,7 +1105,7 @@ function refuseDateBucketedGroupBy(granularity: string): never {
     `a capability gap in the backend, not a mistake in the query, which is why it answers ` +
     `NOT_IMPLEMENTED/501 rather than a 400. A driver publishes the granularities it buckets ` +
     `natively as \`supports.queryDateGranularity\`; the engine reads that record and buckets ` +
-    `in memory for every granularity absent from it, which is always correct (#6212).`,
+    `in memory for every granularity absent from it, which is always correct.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
