@@ -669,8 +669,8 @@ transparent to the query — you get the same buckets either way.
 <Callout type="warn">
 Buckets are computed in **UTC**. A non-UTC reference timezone is only reachable through
 `ObjectQL.aggregate(object, { …, timezone })`; the `POST /api/v1/data/:object/query`
-route forwards only `where` / `groupBy` / `aggregations`, so a query sent over REST
-always buckets on UTC calendar boundaries.
+route does not forward `timezone` to the engine, so a query sent over REST always
+buckets on UTC calendar boundaries.
 
 The optional `alias` on a structured `groupBy` node is honoured only on the in-memory
 path. The SQL driver ignores it and always projects the bucket under the **field name**,
