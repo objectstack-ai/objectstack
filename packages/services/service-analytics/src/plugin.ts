@@ -814,11 +814,12 @@ export class AnalyticsServicePlugin implements Plugin {
     // `undefined`. The fallback is NOT the read projection alone, which counts a
     // masked field readable and would admit exactly the queries this half
     // exists to refuse. It fails CLOSED: the read projection less every field
-    // whose declaration carries a `maskingRule`, for every caller but a system
-    // one (the contract's own bypass). That over-refuses a caller the rule is
-    // lifted for, which is the safe direction and the only one available: an
-    // older reader cannot say for whom a rule is lifted, and deciding that here
-    // would be a second copy of the masking rule.
+    // whose declaration carries a `maskingRule`, whoever the caller is. That
+    // over-refuses a caller the rule is lifted for — a system one included —
+    // which is the safe direction and the only one available: an older reader
+    // cannot say for whom a rule is lifted, and deciding that here (reading the
+    // caller's capabilities, or its system bit) would be a second copy of the
+    // masking rule.
     interface SecurityQueryableFields extends SecurityReadableFields {
       getQueryableFields?(object: string, context?: ExecutionContext): Promise<string[] | undefined>;
     }
@@ -858,7 +859,6 @@ export class AnalyticsServicePlugin implements Plugin {
       }
       const readable = await svc.getReadableFields(object, context);
       if (readable === undefined) return undefined;
-      if ((context as { isSystem?: unknown } | undefined)?.isSystem === true) return readable;
       const masked = maskingRuleFields(object);
       return readable.filter((f) => !masked.has(f));
     };

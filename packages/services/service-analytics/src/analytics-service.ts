@@ -731,7 +731,8 @@ export interface AnalyticsServiceConfig {
    * The plugin auto-bridges this to the `security` service's
    * `getQueryableFields`, and when that service predates the method, or
    * answers `undefined`, it fails CLOSED: every field that declares a
-   * `maskingRule` is treated as not queryable. MAY be async; a THROW refuses
+   * `maskingRule` is treated as not queryable, whoever the caller is. MAY be
+   * async; a THROW refuses
    * the query. A host that wires {@link getReadableFields} and not this judges
    * masked fields by the read projection alone, which admits them — the
    * service says so once, at construction.

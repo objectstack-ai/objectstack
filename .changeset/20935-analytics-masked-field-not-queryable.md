@@ -28,7 +28,7 @@ unaffected. A query that names no masked field answers as before.
 supplies the answer. `AnalyticsServicePlugin` wires it to the `security`
 service's `getQueryableFields`. When that service predates the method, or
 answers "no answer", the plugin treats every field that declares a
-`maskingRule` as not queryable, for every caller but a system one. A host that
+`maskingRule` as not queryable, for every caller. A host that
 constructs `AnalyticsService` itself with `getReadableFields` and without
 `getQueryableFields` is warned once at construction.
 

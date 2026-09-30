@@ -379,9 +379,8 @@ export interface ISecurityService {
    * (`typeof svc.getQueryableFields === 'function'`). ⛔ A consumer that cannot
    * get this answer — the method is absent, or it answered `undefined` — must
    * treat every field that declares a `maskingRule` as NOT queryable, whoever
-   * the caller is (only a system context is exempt): the older reader cannot
-   * say for whom a rule is lifted, and the read projection reports a masked
-   * field as readable. Falling back to the read projection alone fails OPEN on
+   * the caller is: the older reader cannot say for whom a rule is lifted, and
+   * the read projection reports a masked field as readable. Falling back to the read projection alone fails OPEN on
    * precisely the fields this method exists for. Declaring it optional keeps
    * that degradation a property of the type: the unguarded call does not
    * compile, so a consumer cannot skip its fallback by accident.

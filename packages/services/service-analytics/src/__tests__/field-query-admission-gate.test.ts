@@ -281,9 +281,10 @@ describe('[#20935] analytics plugin — the query-side half of the "security" br
     // A field that declares no rule is judged by the read projection alone, as before.
     await service.query(groupedPlain as never, CALLER);
     expect(reads).toHaveLength(1);
-    // The contract's system bypass holds on the fallback too.
-    await service.query(groupedMasked as never, SYSTEM);
-    expect(reads).toHaveLength(2);
+    // The fallback reads no caller property — it cannot say for whom a rule is
+    // lifted — so it refuses every caller, a system one included.
+    await expect(service.query(groupedMasked as never, SYSTEM)).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403, fields: ['masked_code'] });
+    expect(reads).toHaveLength(1);
   });
 
   it('fails CLOSED the same way when getQueryableFields answers "no answer" (undefined)', async () => {
