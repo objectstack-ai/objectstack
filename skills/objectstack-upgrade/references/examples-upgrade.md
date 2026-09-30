@@ -44,7 +44,7 @@ maintainer can read in five minutes and a year from now. Write
 # Protocol 16 → 17 upgrade — <project>
 
 **Status:** complete | complete with N open decisions
-**Spec:** <installed @objectstack/spec version>  ·  **Chain:** 16 → 17
+**Spec:** <installed @objectstack/spec version>  ·  **Chain:** 16 → 18
 **Verified:** `os validate` green · `tsc --noEmit` green · replay-from-17 applies 0 mechanical changes
 
 ## 1 · Mechanical (applied by the chain)

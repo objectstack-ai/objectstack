@@ -4231,7 +4231,7 @@
         {
           "revision": 1,
           "date": "2026-09-30",
-          "change": "initial — planned. The spec layer landed (#19518), but nothing outside packages/spec reads a picklist yet (packages/spec/liveness/picklist.json grades every key `planned`), so there is nothing to drive. The acceptance clauses are drafted from the design of record and #19519's acceptance; steps arrive with #19519, in the edit that promotes this item after a run in which it passes. The locale relabel sits on this item rather than on the organization item because it is phase-1 behaviour, and a promotion needs the whole item to pass",
+          "change": "initial — planned. The spec layer landed (#19518), but no runtime reads a picklist yet (packages/spec/liveness/picklist.json grades every key `planned`), so there is nothing to drive. The acceptance clauses are drafted from the design of record and #19519's acceptance; steps arrive with #19519, in the edit that promotes this item after a run in which it passes. The locale relabel sits on this item rather than on the organization item because it is phase-1 behaviour, and a promotion needs the whole item to pass",
           "ref": "#19518"
         }
       ]
