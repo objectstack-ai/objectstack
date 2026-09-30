@@ -111,17 +111,29 @@ describe('[#20897] a non-boolean $exists is refused on every entry of driver-mem
   const cubeQuery = (where: unknown) =>
     ({ cube: 'deals', measures: ['total'], dimensions: ['id'], where }) as never;
 
-  /** Every entry of this package that takes a `where`, by name. */
-  const ENTRIES: Array<[name: string, run: (where: unknown) => Promise<unknown>, path: string]> = [
-    ['find', (w) => driver.find('deal', q(w)), 'filter'],
-    ['findOne', (w) => driver.findOne('deal', q(w)), 'filter'],
-    ['count', (w) => driver.count('deal', q(w)), 'filter'],
-    ['aggregate', (w) => driver.aggregate('deal', { ...q(w), aggregations: [{ function: 'count', alias: 'n' }] } as never), 'filter'],
-    ['updateMany', (w) => driver.updateMany('deal', q(w), { score: 99 }), 'filter'],
-    ['deleteMany', (w) => driver.deleteMany('deal', q(w)), 'filter'],
-    ['the analytics face, query()', (w) => analytics.query(cubeQuery(w)), 'where'],
-    ['the analytics face, generateSql()', (w) => analytics.generateSql(cubeQuery(w)), 'where'],
+  /**
+   * Every entry of this package that takes a `where`, by name, with the root its
+   * refusal names and whether the shared comparand-TYPE face runs ahead of the
+   * gate there. The analytics face runs it first (its door, ADR-0053 D-D1), so
+   * a flag that face refuses on TYPE — `undefined`, a plain object — keeps that
+   * face's own sentence, the precedence the analytics `where` door and the
+   * engine seam give it too; the envelope and the position are the same.
+   */
+  const ENTRIES: Array<[name: string, run: (where: unknown) => Promise<unknown>, path: string, typeFaceFirst: boolean]> = [
+    ['find', (w) => driver.find('deal', q(w)), 'filter', false],
+    ['findOne', (w) => driver.findOne('deal', q(w)), 'filter', false],
+    ['count', (w) => driver.count('deal', q(w)), 'filter', false],
+    ['aggregate', (w) => driver.aggregate('deal', { ...q(w), aggregations: [{ function: 'count', alias: 'n' }] } as never), 'filter', false],
+    ['updateMany', (w) => driver.updateMany('deal', q(w), { score: 99 }), 'filter', false],
+    ['deleteMany', (w) => driver.deleteMany('deal', q(w)), 'filter', false],
+    ['the analytics face, query()', (w) => analytics.query(cubeQuery(w)), 'where', true],
+    ['the analytics face, generateSql()', (w) => analytics.generateSql(cubeQuery(w)), 'where', true],
   ];
+
+  /** The comparands the comparand-TYPE face refuses before any flag rule is asked. */
+  const TYPE_FACE_REFUSED: ReadonlySet<unknown> = new Set<unknown>([undefined]);
+  const isTypeFaceRefused = (value: unknown): boolean =>
+    TYPE_FACE_REFUSED.has(value) || (typeof value === 'object' && value !== null);
 
   const refusalOf = async (run: () => Promise<unknown>): Promise<WireBearingError> => {
     try {
@@ -132,14 +144,19 @@ describe('[#20897] a non-boolean $exists is refused on every entry of driver-mem
     throw new Error('expected this entry to refuse the filter, but it resolved');
   };
 
-  for (const [entry, run, root] of ENTRIES) {
+  for (const [entry, run, root, typeFaceFirst] of ENTRIES) {
     for (const [label, value] of NON_BOOLEAN) {
-      it(`${entry} refuses ${label} with INVALID_FILTER / 400, in driver-sql's words`, async () => {
+      const words = typeFaceFirst && isTypeFaceRefused(value) ? 'the type face\'s words' : 'driver-sql\'s words';
+      it(`${entry} refuses ${label} with INVALID_FILTER / 400, in ${words}`, async () => {
         const err = await refusalOf(() => run({ stage: { $exists: value } }));
         expect(err.code).toBe('INVALID_FILTER');
         expect(err.status).toBe(400);
-        expect(err.message).toContain(DRIVER_SQL_LEADING_SENTENCE('stage'));
         expect(err.message).toContain(`${root}.stage.$exists`);
+        // The type face's sentence is its own contract, pinned in its own
+        // suite; here only the flag rule's first sentence is load-bearing.
+        if (!(typeFaceFirst && isTypeFaceRefused(value))) {
+          expect(err.message).toContain(DRIVER_SQL_LEADING_SENTENCE('stage'));
+        }
       });
     }
   }
