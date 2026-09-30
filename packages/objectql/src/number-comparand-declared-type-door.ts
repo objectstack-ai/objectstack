@@ -141,6 +141,18 @@
  * no meaning for), and a platform-provisioned column the declared map omits
  * (`id`, …): the same walk and the same three positions, words per kind.
  *
+ * ## [#20802] …and the nested-relation arm, at `where` only
+ *
+ * The nested-relation form is SERVED at `where` (`relation-filter-lowering.ts`).
+ * There a no-operator object beneath a relation column is not refused by the
+ * arm above: it is admitted against the related object's declarations
+ * (`admitRelationCondition` — one level, declared keys, a registered related
+ * object) or refused in words of its own. The engine then walks the admitted
+ * `where` again with this SAME walk ({@link mapRelationConditions}) to collect
+ * each condition and, after reading the related object, to replace it — so the
+ * door and the lowering find a condition at the same boundaries by
+ * construction. The per-aggregation `filter` and `having` keep the refusal.
+ *
  * @see numberComparandDoorVerdict — the pure verdict (lane 1, `@objectstack/spec`).
  * @see https://github.com/objectstack-ai/objectstack/issues/20336 (the contract)
  * @see https://github.com/objectstack-ai/objectstack/issues/20351 (this door)
@@ -386,7 +398,9 @@ function judgeFieldSpec(
  * [#20546] It carries TWO arms, asked in order at every field key: the
  * no-operator-object arm (`no-operator-object-door.ts` — a plain object with
  * no `$` key where a scalar column's value belongs), then the number arm
- * ({@link judgeFieldSpec}). One traversal, one set of boundaries (the depth
+ * ({@link judgeFieldSpec}). [#20802] At `where` the first arm hands a relation
+ * column's object to the nested-relation admission instead, and the lowering
+ * pass ({@link WalkContext.lowerOnly}) asks that question alone. One traversal, one set of boundaries (the depth
  * bound, the combinators descended, the `$` and dotted keys skipped), two
  * questions — the shape the spec's save-door walk takes for its own arms
  * (`checkFilterConditionComparands`: "One walk, one set of boundaries, `n`

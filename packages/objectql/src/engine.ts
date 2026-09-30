@@ -1259,6 +1259,13 @@ function admissionRefusalOf(
  *    condition.
  * 2. {@link resolveWhereFilterTokens}: the placeholder resolver.
  *
+ * [#20802] Execution then lowers each nested-relation condition by READING
+ * the related object (`ObjectQL.lowerRelationConditions`); that read admits the
+ * condition through the related object's own two stages. The judge runs those
+ * two stages on each condition too — as a `find` on the related object — and
+ * stops there: which ids the read finds, the cap and the caller's permissions
+ * on the related object need data and a caller, and are execution's alone.
+ *
  * What differs by verb sits BETWEEN or AROUND those stages and judges
  * something other than `where`: option-key folding and refusal, the driver
  * lookup (`getDriver`, before stage 1 on the writes and between the stages on
