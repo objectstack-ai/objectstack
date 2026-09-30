@@ -31,8 +31,10 @@
  * lands in the two channels an upgrading author — very often an AI (ADR-0033) —
  * actually reads:
  *
- *   1. **`tsc`.** The input type becomes `never`, so assigning anything to the
- *      key fails to compile at the authoring site, before anything runs.
+ *   1. **`tsc`.** The input type admits nothing but absence, so assigning
+ *      anything to the key fails to compile at the authoring site, before
+ *      anything runs — and the diagnostic itself says the key was removed and
+ *      where its migration is printed ({@link RetiredKeySchema}).
  *   2. **The parse.** A value reaching the runtime raises the prescription
  *      itself — not a generic "unrecognized key". This matters because upgrades
  *      do not happen in the order we imagine: someone jumping several majors at
@@ -89,11 +91,59 @@
 import { z } from 'zod';
 
 /**
+ * The declared type of every {@link retiredKey} tombstone: optional, never
+ * produces a value, and its INPUT is an object type whose one required
+ * property is named by the retirement sentence and typed `never`.
+ *
+ * The input type is what `tsc` and the editor show an author who writes the
+ * key, so it is spelled to be read there. Writing any value prints the
+ * sentence, whatever the value's kind:
+ *
+ *     TS2322: Type 'string' is not assignable to type '{ readonly '[REMOVED] This key …': never; }'.
+ *     TS2741: Property ''[REMOVED] This key …'' is missing in type 'string[]' but required in type '{ … }'.
+ *     TS2353: Object literal may only specify known properties, and 'field' does not exist in type '{ … }'.
+ *
+ * and the hover reads `key?: { readonly '[REMOVED] This key …': never; } | undefined`.
+ * Before this type the input was `undefined`, and the diagnostic read
+ * `Type 'string[]' is not assignable to type 'undefined'` — audible, but it
+ * said nothing about a retirement, so an upgrading author read it as a typing
+ * bug.
+ *
+ * Three choices here are measured, not stylistic:
+ *
+ *   - **The object type is written INLINE and anonymous.** A named alias or
+ *     interface is printed BY NAME in the diagnostic (the sentence is lost for
+ *     every value that is not an array), and the name would appear in the
+ *     declared type of every tombstoned schema — a new type every consumer's
+ *     declaration emit must be able to name through an entry point. Inline,
+ *     each site's declared type references `zod` alone.
+ *   - **The sentence is fixed, not the key's own prescription.** A type can
+ *     carry a prescription only as a string LITERAL type, and TypeScript types
+ *     `'…' + '…'`, a constant built that way and a helper's return all as
+ *     `string` — the form every guidance in this tree takes. So a type
+ *     generic over `guidance` would carry the text at no site at all. The
+ *     sentence names what happened and the door that prints the per-key
+ *     prescription (`os validate`, or the parse itself); it never says
+ *     "delete", because some retirements are renames.
+ *   - **No value satisfies it.** The property's type is `never`, so no
+ *     authored value — array, object or primitive — is assignable without a
+ *     cast, exactly as `undefined` refused everything but absence. The
+ *     runtime is untouched: the schema IS the `z.never().optional()` below
+ *     (an upcast, `never` being assignable to anything), so the parse, the
+ *     prescription and every walker reading `_zod.def` (`acceptsNothing`,
+ *     the JSON-schema build) see what they saw before.
+ */
+type RetiredKeySchema = z.ZodOptional<z.ZodType<never, {
+  readonly '[REMOVED] This key was removed from @objectstack/spec. Run `os validate` for its migration.': never;
+}>>;
+
+/**
  * Declare a key that has been REMOVED from the spec.
  *
  * Accepts only `undefined` — i.e. absence. Any authored value is rejected with
- * `guidance`, and `z.input` types the key as `never` so the same mistake fails
- * `tsc` first.
+ * `guidance`, and `z.input` types the key so the same mistake fails `tsc`
+ * first, with a diagnostic that says the key was removed
+ * ({@link RetiredKeySchema}).
  *
  * @param guidance - The upgrade prescription. State what replaced the key, the
  *   version that removed it, and the one-line fix — this string IS the migration
@@ -110,7 +160,7 @@ import { z } from 'zod';
  * ),
  * ```
  */
-export function retiredKey(guidance: string) {
+export function retiredKey(guidance: string): RetiredKeySchema {
   return z.never({ error: () => guidance }).optional().describe(`[REMOVED] ${guidance}`);
 }
 
@@ -133,8 +183,8 @@ export type RetiredDefaultResidue = Readonly<Record<string, boolean | number | s
  *
  * ## The class of retirement this exists for
  *
- * {@link retiredKey} makes a removal audible in both authoring channels (`tsc`
- * `never` + the parse-time prescription). That is the right posture for a key
+ * {@link retiredKey} makes a removal audible in both authoring channels (the
+ * `tsc` tombstone input type + the parse-time prescription). That is the right posture for a key
  * an author WROTE — but a key that carried a Zod `.default(…)` has a third
  * population nobody authored: **every artifact built by a released toolchain
  * has the key MATERIALIZED at its default in every entry**, because the parse
@@ -154,7 +204,7 @@ export type RetiredDefaultResidue = Readonly<Record<string, boolean | number | s
  *     re-emission). The strip is deliberately SILENT — real artifacts carry
  *     the residue once per permission entry, and a per-occurrence notice would
  *     be a 75-line storm that teaches operators to skim; the loud channels for
- *     authored sources (tsc `never`, `os migrate meta`, the D2 conversion)
+ *     authored sources (the tsc tombstone, `os migrate meta`, the D2 conversion)
  *     are unchanged.
  *   - any other value → the untouched {@link retiredKey} refusal, guidance
  *     byte-for-byte: the key stays a tombstone in the shape, and this wrapper
@@ -165,8 +215,8 @@ export type RetiredDefaultResidue = Readonly<Record<string, boolean | number | s
  *
  * The authoring surface keeps every refusal the retirement established: the
  * shape still declares the key as a {@link retiredKey} tombstone (`z.input`
- * stays `never`, so writing the key in TypeScript source fails `tsc` exactly
- * as before), the JSON-schema/authorable-surface artifacts still publish the
+ * stays the tombstone input type, so writing the key in TypeScript source fails
+ * `tsc` exactly as before), the JSON-schema/authorable-surface artifacts still publish the
  * `[REMOVED]` tombstone row, and a non-default value is refused with the
  * original prescription everywhere. What changes is only the disposition of
  * the **emitted default in already-parsed data** — provenance that JSON cannot
