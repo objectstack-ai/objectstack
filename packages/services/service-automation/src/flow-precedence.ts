@@ -216,6 +216,13 @@ function precedenceRank(contender: FlowContender): number {
  * boot order does. That case is warned about too — it is exactly as invisible as
  * the artifact-vs-DB one.
  *
+ * Two `runtime` contenders tie on both rules and keep arrival order. The boot
+ * hydration registers every stored row under the one bare-name slot, so the
+ * stored rows bring at most one tenant row per name into this list. Without a
+ * reader nothing is packaged, so two packages shipping one bare name tie the
+ * same way — the fail-closed composition gives up rule 2 rather than rank by
+ * a body's own claim.
+ *
  * [#20864] Which contender is `package` is the loader's set's answer, asked
  * ONCE per contested name so every contender of that name is judged against
  * one answer — see {@link describeFlowContender}. A name with one contender
@@ -262,8 +269,14 @@ export function resolveFlowPrecedence(
         const ranked = [...group].sort((a, b) => {
             const byRank = precedenceRank(a.contender) - precedenceRank(b.contender);
             if (byRank !== 0) return byRank;
-            const byPackage = (a.contender.packageId ?? '').localeCompare(b.contender.packageId ?? '');
-            if (byPackage !== 0) return byPackage;
+            // [#20864] Rule 2 is WITHIN `package` only, as stated above. A
+            // `runtime` contender's id is the body's own bytes, kept for
+            // display — letting it order tenant rows would hand the armed
+            // slot back to the stamps the loader's set just stopped trusting.
+            if (a.contender.source === 'package') {
+                const byPackage = (a.contender.packageId ?? '').localeCompare(b.contender.packageId ?? '');
+                if (byPackage !== 0) return byPackage;
+            }
             // Fully-tied bodies: keep arrival order so the result is still total.
             return a.index - b.index;
         });
