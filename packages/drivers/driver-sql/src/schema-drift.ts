@@ -995,7 +995,7 @@ export function diffManagedTable(args: {
         message:
           `${table}.${fieldName}: the column carries DEFAULT '${field.defaultValue}', but ` +
           `'${field.defaultValue}' is a runtime token the engine resolves per write — the database ` +
-          `has been stamping the literal token into every insert that omitted the field (#4560). ` +
+          `has been stamping the literal token into every insert that omitted the field. ` +
           `Dropping the default is non-destructive: run "os migrate apply". Rows already holding ` +
           `'${field.defaultValue}' are NOT rewritten — the dangling-reference audit reports them.`,
       });
@@ -1142,7 +1142,7 @@ export function diffManagedTable(args: {
           `column is \`${col.type}\` — the database was created while the field was single-value and the ` +
           `additive sync never migrates a column's type. Arrays are being written as the STRINGIFIED ` +
           `literal (e.g. '["a","b"]') and read back as a string, so anything consuming the value ` +
-          `receives one opaque id instead of a list (#11535). REMEDY: run ` +
+          `receives one opaque id instead of a list. REMEDY: run ` +
           `"${MULTI_VALUE_COLUMN_REMEDY_COMMAND}" — it is a DRY RUN by default that executes nothing ` +
           `and prints the statements; take a backup, then re-run it with --apply. ObjectStack never ` +
           `migrates this column on its own: the boot path only reports it and "os migrate apply" ` +
@@ -1347,8 +1347,8 @@ export function diffManagedTable(args: {
           `\`varchar(${col.maxLength})\` and the additive sync never changes a column's type. The ` +
           `column still caps at ${col.maxLength} characters, so the server refuses longer values the ` +
           `declaration ALLOWS (Postgres 22001, MySQL ER_DATA_TOO_LONG) — a data URI in a ` +
-          `\`signature\`/\`qrcode\` field, or an ordinary rich-text body, is routinely past it ` +
-          `(#12121). ObjectStack does NOT migrate this column: "os migrate apply" reports this entry ` +
+          `\`signature\`/\`qrcode\` field, or an ordinary rich-text body, is routinely past it. ` +
+          `ObjectStack does NOT migrate this column: "os migrate apply" reports this entry ` +
           `as skipped. Two operator routes — declare a \`maxLength\` this dialect can express, which ` +
           `turns this into the widen op "os migrate apply" performs; or convert the column to TEXT by ` +
           `hand, with a backup taken first, restating the FULL column definition on MySQL (MODIFY ` +
@@ -2391,7 +2391,7 @@ export function diffManagedIndexes(args: {
       message:
         `${table}.${l.legacyColumns.join('+')}: a legacy platform-wide UNIQUE index (${present.join(', ')}) still enforces ` +
         `uniqueness across ALL tenants, but metadata scopes it per '${l.replacement.columns[0]}' — a second ` +
-        `tenant reusing the value is rejected on insert (#3696). Replacing it with ${indexSignature(l.replacement.columns, true, l.replacement.nullSafeColumns)} ` +
+        `tenant reusing the value is rejected on insert. Replacing it with ${indexSignature(l.replacement.columns, true, l.replacement.nullSafeColumns)} ` +
         `is a pure relaxation: run "os migrate apply".`,
     });
   }

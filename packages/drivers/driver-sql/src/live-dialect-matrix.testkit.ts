@@ -216,7 +216,7 @@ export function currentLiveSchema(): string {
   const testPath = expect.getState().testPath;
   if (!testPath) {
     throw new Error(
-      'live-dialect isolation (#9350): vitest reported no testPath, so this live connection ' +
+      'live-dialect isolation: vitest reported no testPath, so this live connection ' +
         'cannot be given a per-file schema and would fall back to sharing one database with ' +
         'every other live file — the contention this removed. Build live connections from a ' +
         'test file, through DIALECT_CELLS[].config().',

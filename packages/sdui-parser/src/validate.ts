@@ -60,24 +60,122 @@ export function acceptsChildren(comp: Pick<ManifestComponent, 'inputs'>): boolea
 }
 
 /**
- * Base props every node may carry (mirrors BaseSchema) — never "unknown prop".
+ * Where a base prop is legal without a declaration (objectui#11044).
+ *
+ *  - `'every-node'` — on every node, and a registration's own input of the
+ *    same name is not consulted: {@link validateTree} skips the key before the
+ *    declared-input lookup.
+ *  - `'where-undeclared'` — on a type whose registration declares NO input of
+ *    that name. Where one does, the declared input wins, its `type-mismatch`
+ *    check included, and the generated JSX types take the declared type too.
+ */
+export type SduiBasePropScope = 'every-node' | 'where-undeclared';
+
+/** One entry of {@link SDUI_BASE_PROPS}. */
+export interface SduiBaseProp {
+  /** The `BaseSchema` member (`@object-ui/types`). */
+  readonly name: string;
+  readonly scope: SduiBasePropScope;
+  /**
+   * The attribute's type in the generated JSX surface (`SduiBaseProps` in
+   * `sdui-intrinsics.d.ts`), or `null` for the one key that is no attribute:
+   * `type`, which the tag name carries (`parse.ts` refuses a `type` attribute).
+   */
+  readonly tsType: string | null;
+}
+
+/**
+ * The base props: the `BaseSchema` members this tier accepts on a node without
+ * a registration declaring them. ONE list, read by BOTH of its consumers —
+ * {@link validateTree}'s `unknown-prop` branch and `generateDts`'s
+ * `SduiBaseProps` (objectui#11044). Before this list the two were separate
+ * hand-kept copies and had drifted: the validator accepted `bind` and `hidden`
+ * (objectui#11008) while the generated types still refused both.
+ *
+ * `bind` and `hidden` are `'every-node'` (objectui#11008). `BaseSchema` declares
+ * both for every node and no registration declares either as an input, so
+ * before they joined, the undeclared-key branch below answered every authored
+ * one with `unknown-prop` — "has no prop" about a key the protocol declares,
+ * on the nodes that honour it: `hidden` is read for every node by
+ * `SchemaRenderer`'s hide chain, and `bind` by every renderer that calls
+ * `useDataScope` (`list`, `tree-view`, the `object-*` widgets). The
+ * declaration outranks the implementation, so the parser's view is the
+ * declared type's, not a per-registration subset. The cost is accepted and
+ * named: a `bind` on a node that does not read it — `data-table`
+ * (objectui#6575) — draws nothing here either, and its render-time console
+ * warning is the one signal left.
+ *
+ * `visibleWhen`, `hiddenOn` and `testId` are `'every-node'` for the same reason
+ * (objectui#11044): no registration declares any of them, `SchemaRenderer`'s
+ * hide chain reads the first two for every node, and it strips `testId` and
+ * re-emits it as `data-testid`. `visibleWhen` is the canonical ADR-0089
+ * predicate; before it joined, the deprecated `visibleOn` was silent while it
+ * drew `unknown-prop`.
+ *
+ * The `'where-undeclared'` members (objectui#11044, triage ruling) are the
+ * `BaseSchema` members some registrations DECLARE as typed inputs — the input
+ * family's `placeholder`, `label`, `name`, … . Skipping them the way the
+ * `'every-node'` members are skipped would silence those registrations'
+ * `type-mismatch`, so they are base props only where the type declares no
+ * input of that name. ⛔ Never move one to `'every-node'` to accept a key: that
+ * silences a declared type check.
+ *
+ * Held over the live registry by `base-props-one-list-11044.test.tsx` in
+ * `@object-ui/components` — every member a `BaseSchema` member, and `body` the
+ * one member left out.
+ *
+ * ⛔ `body` is NOT here and must not be added. It was `BaseSchema`'s second
+ * child-list spelling until objectui#6771 retired it; teaching this list the
+ * key was the option that ruling refused, because it would have blessed a
+ * second permanent spelling of one concept. `./body-dialect.ts` answers it by
+ * name instead.
+ *
+ * LOCKSTEP: the list, its scopes and the two Sets below are the port of
+ * objectui's `SDUI_BASE_PROPS` (objectui#11008, #11044, pin `db11afd4967c`).
+ * Both consumers are ported too: {@link validateTree} and `codegen.ts`'s
+ * `SduiBaseProps`. The list is exported for `codegen.ts` only; `index.ts` does
+ * not re-export it.
  *
  * `children` IS here: the key is legal on every node, so it never draws
  * `unknown-prop` and its declared `slot` input is never type-checked. Whether
  * a given component RENDERS it is the containment question below, answered by
  * {@link acceptsChildren} from the declared input.
  */
-const BASE_PROPS = new Set([
-  'type',
-  'id',
-  'className',
-  'style',
-  'visible',
-  'visibleOn',
-  'disabled',
-  'disabledOn',
-  CHILD_LIST_KEY,
-]);
+export const SDUI_BASE_PROPS: readonly SduiBaseProp[] = Object.freeze([
+  { name: 'type', scope: 'every-node', tsType: null },
+  { name: 'id', scope: 'every-node', tsType: 'string' },
+  { name: 'className', scope: 'every-node', tsType: 'string' },
+  { name: 'style', scope: 'every-node', tsType: 'Record<string, unknown>' },
+  { name: 'visible', scope: 'every-node', tsType: 'boolean' },
+  { name: 'visibleWhen', scope: 'every-node', tsType: 'string' },
+  { name: 'visibleOn', scope: 'every-node', tsType: 'string' },
+  { name: 'hidden', scope: 'every-node', tsType: 'boolean' },
+  { name: 'hiddenOn', scope: 'every-node', tsType: 'string' },
+  { name: 'disabled', scope: 'every-node', tsType: 'boolean' },
+  { name: 'disabledOn', scope: 'every-node', tsType: 'string' },
+  { name: 'bind', scope: 'every-node', tsType: 'string' },
+  { name: 'testId', scope: 'every-node', tsType: 'string' },
+  { name: CHILD_LIST_KEY, scope: 'every-node', tsType: 'unknown' },
+  { name: 'name', scope: 'where-undeclared', tsType: 'string' },
+  { name: 'label', scope: 'where-undeclared', tsType: 'string | Record<string, string>' },
+  { name: 'description', scope: 'where-undeclared', tsType: 'string | Record<string, string>' },
+  { name: 'placeholder', scope: 'where-undeclared', tsType: 'string' },
+  { name: 'data', scope: 'where-undeclared', tsType: 'unknown' },
+  {
+    name: 'ariaLabel',
+    scope: 'where-undeclared',
+    tsType: 'string | { key: string; defaultValue?: string; params?: Record<string, unknown> }',
+  },
+] satisfies SduiBaseProp[]);
+
+const basePropNames = (scope: SduiBasePropScope): Set<string> =>
+  new Set(SDUI_BASE_PROPS.filter((prop) => prop.scope === scope).map((prop) => prop.name));
+
+/** The `'every-node'` members of {@link SDUI_BASE_PROPS}: never "unknown prop". */
+const BASE_PROPS = basePropNames('every-node');
+
+/** The `'where-undeclared'` members of {@link SDUI_BASE_PROPS}. */
+const WHERE_UNDECLARED_BASE_PROPS = basePropNames('where-undeclared');
 
 const isExpr = (v: unknown): boolean =>
   typeof v === 'object' && v !== null && '$expr' in (v as Record<string, unknown>);
@@ -116,6 +214,10 @@ export function validateTree(tree: SchemaElement | null, manifest: Manifest): Va
       // each provided prop
       for (const [key, value] of Object.entries(node)) {
         if (BASE_PROPS.has(key)) continue;
+        // A declaration outranks a `'where-undeclared'` base prop
+        // (objectui#11044): skipped only when this type declares no input of
+        // that name, so a declared one keeps its type check below.
+        if (WHERE_UNDECLARED_BASE_PROPS.has(key) && !byName.has(key)) continue;
         // The `object-kanban` Quick Add pair (objectui#8285): a key
         // `@objectstack/spec` still publishes and the renderer cannot honour,
         // because the control is gated on a RUNTIME SLOT no parsed page can

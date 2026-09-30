@@ -219,7 +219,7 @@ describe('#14902 plain unique index over duplicate rows', () => {
       expect(entry!.message).toContain('os migrate plan');
       // ⛔ And it must NOT borrow path A's story: no prior index admitted these
       // rows, so #5030 is not what happened here.
-      expect(entry!.message).not.toContain('#5030');
+      expect(entry!.message).not.toContain('NULL-distinct');
       expect(entry!.message).not.toContain('NULL-safe');
     });
 
@@ -298,14 +298,14 @@ describe('#14902 plain unique index over duplicate rows', () => {
       const durability = logs.filter((l) => l.level === 'error');
       expect(durability).toHaveLength(1);
       expect(durability[0].msg).toContain('NULL-safe unique index');
-      expect(durability[0].msg).toContain('#5030');
+      expect(durability[0].msg).toContain('NULL-distinct');
       expect(durability[0].msg).toContain('ADR-0120 D4');
       expect(durability[0].msg).toContain("'organization_id, quote_number'");
 
       const entry = (await driver.detectManagedDrift()).find((d) => d.op.type === 'create_index')!;
       expect(entry.category).toBe('destructive');
       expect(entry.severity).toBe('error');
-      expect(entry.message).toContain('#5030');
+      expect(entry.message).toContain('NULL-distinct');
       expect(entry.message).toContain('__global__');
       // Both key groups, with counts — the NULL-organization bucket and a real
       // organization, which is what makes the COALESCE key self-describing.

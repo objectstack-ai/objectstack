@@ -18,6 +18,11 @@ import type { CelFilterFailReason } from '@objectstack/formula';
 // engine's `where` seam and analytics' read-scope guard call. Called on every
 // compiled policy filter, never restated (see `judgeCompiledComparands`).
 import { assertListComparandShapes, normalizeFilterComparandTypes } from '@objectstack/spec/data';
+// [ADR-0053 D-D1, amended 2026-09-30 — #5930] The shared lowering, run on every
+// compiled policy filter right after the two faces above
+// (`judgeCompiledComparands`), so `using` and `check` hand their consumers the
+// same lowered filter.
+import { lowerFilterCondition, type FilterLoweringOptions } from '@objectstack/spec/data';
 
 /**
  * Why a policy's predicate produced no filter — the compiler's OWN answer,
@@ -117,6 +122,18 @@ interface RLSUserContext {
 export interface RlsFieldGuard {
   /** Every column the object declares, exactly as `getObjectFieldNames` builds it. */
   declared: ReadonlySet<string>;
+  /**
+   * [ADR-0053 D-D1 item 7 — #5930] The columns the object declares as
+   * `datetime`, read from the same declaration as {@link declared}. The shared
+   * lowering's whole-day rule (a bare-day `$lte`, a `$between`) rewrites these
+   * columns only, the scope `SqlDriver` holds — so a `date`, `time` or
+   * non-temporal column reaches `using`'s drivers and `check`'s evaluator
+   * byte-identical to before. Absent (no guard, or a caller that did not read
+   * the types) reads NO column as `datetime`: the rule is left to each face's
+   * own copy, as it was, never applied type-blind to a column no driver
+   * widens. The NULL-polarity guards do not depend on it.
+   */
+  datetime?: ReadonlySet<string>;
 }
 
 /** {@link judgeCompiledFields}' answer. */
@@ -277,14 +294,30 @@ type RlsComparandVerdict =
  * it, and there a refusal could only be a 400 the caller cannot act on.
  *
  * Returns the faces' own filter (the type face narrows an exact-range `bigint`
- * copy-on-write and returns the same reference otherwise). A thrown value
+ * copy-on-write and returns the same reference otherwise), then LOWERED by the
+ * shared `lowerFilterCondition` (ADR-0053 D-D1, amended — #5930): this is the
+ * RLS compile seam the amendment names, so the `$between` split, the whole-day
+ * upper bound on the guard's `datetime` columns and the NULL-polarity guards
+ * are applied here once, for `using` and `check` alike. A thrown value
  * without the ADR-0112 envelope (a string `code` and a numeric `status`) is not
  * a verdict about the filter, so it is re-thrown rather than dressed up as one.
  */
-function judgeCompiledComparands(filter: Record<string, unknown>): RlsComparandVerdict {
+function judgeCompiledComparands(
+  filter: Record<string, unknown>,
+  lowering: FilterLoweringOptions,
+): RlsComparandVerdict {
   try {
     assertListComparandShapes(filter);
-    return { ok: true, filter: normalizeFilterComparandTypes(filter) };
+    // [ADR-0053 D-D1, amended — #5930] The RLS compile seam's lowering, AFTER
+    // both faces (the amendment's items 2-3). No token resolution precedes it
+    // because none exists on either clause: the engine resolves the caller's
+    // `where` before its middleware composes this filter, and the write check
+    // evaluates it directly — measured, a policy comparand `'{today}'` compiles
+    // and reaches both consumers verbatim, so the lowering reads it as the
+    // non-day string it is and leaves it as written, as every face does today.
+    // Never refuses: a shape it does not lower passes through for the face that
+    // owns its refusal.
+    return { ok: true, filter: lowerFilterCondition(normalizeFilterComparandTypes(filter), lowering) };
   } catch (thrown) {
     const { code, status } = (thrown ?? {}) as { code?: unknown; status?: unknown };
     if (!(thrown instanceof Error) || typeof code !== 'string' || typeof status !== 'number') throw thrown;
@@ -299,6 +332,16 @@ function judgeCompiledComparands(filter: Record<string, unknown>): RlsComparandV
         `filter: ${thrown.message.replace(/\.$/, '')}`,
     };
   }
+}
+
+/**
+ * [ADR-0053 D-D1 item 7 — #5930] The RLS seam's declared-type reader: a column
+ * is `datetime` when the caller's guard says so ({@link RlsFieldGuard.datetime}),
+ * and no column is when it carries no type set.
+ */
+function rlsLowering(fieldGuard: RlsFieldGuard | undefined): FilterLoweringOptions {
+  const datetime = fieldGuard?.datetime;
+  return { isDatetimeColumn: (column) => datetime?.has(column) === true };
 }
 
 /**
@@ -644,7 +687,7 @@ export class RLSCompiler {
           // refusal joins `deniedBy` like the rows above — the per-request
           // fail-closed route a list under `==` already takes — so `using` and
           // `check` refuse together and a granting sibling still grants.
-          const comparands = judgeCompiledComparands(outcome.filter);
+          const comparands = judgeCompiledComparands(outcome.filter, rlsLowering(fieldGuard));
           if (comparands.ok) {
             filters.push(comparands.filter);
             POLICY_OF_COMPILED_FILTER.set(comparands.filter, (policy as { name?: string }).name ?? '(unnamed)');
