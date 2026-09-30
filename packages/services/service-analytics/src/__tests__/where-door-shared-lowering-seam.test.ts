@@ -113,14 +113,24 @@ describe('[ADR-0053 D-D1 amended — #5930 step 3] F10: the where → tree face 
     });
   });
 
-  it('a nested relation under $not is guarded on the dotted member its leaf reads, never on the relation key', () => {
-    // The nested spelling is this door's sugar (the engine refuses it); the
-    // door spells it dotted before the lowering reads it, so the lowering's
-    // guard lands on `account.region` — not on whatever `account` resolves to.
+  it('a nested relation under $not travels as written, its NULL guard on the relation column the engine\'s lowering reads', () => {
+    // [#20887] REPLACED. This case pinned the door spelling the nested form
+    // dotted (`account.region`) before the lowering read it, so the guard landed
+    // on the joined member — the reading of a door that compiled the form into a
+    // JOIN. The form is the ENGINE's now (#20802's ruling: served in `where` by
+    // reading the related object as the caller, capped), carried as written: the
+    // engine lowers it to `account IN (ids)`, and the NULL guard the shared
+    // lowering puts on `account` is the one the engine puts on that `$in` itself.
     const members = (where: FilterCondition) =>
       [...new Set(collectFilterLeaves(tree(where) as never).map((l) => l.member))].sort();
-    expect(members({ $not: { account: { region: 'NA' } } })).toEqual(['account.region']);
-    expect(members({ $not: { account: { owner: { name: 'x' } } } })).toEqual(['account.owner.name']);
+    expect(members({ $not: { account: { region: 'NA' } } })).toEqual(['account']);
+    expect(JSON.stringify(tree({ $not: { account: { region: 'NA' } } }))).toContain(
+      '{"kind":"relation","member":"account","condition":{"region":"NA"}}',
+    );
+    // A second level is carried as written too: the engine refuses it (one level).
+    expect(JSON.stringify(tree({ $not: { account: { owner: { name: 'x' } } } }))).toContain(
+      '{"kind":"relation","member":"account","condition":{"owner":{"name":"x"}}}',
+    );
   });
 
   it('an instant is never widened', () => {

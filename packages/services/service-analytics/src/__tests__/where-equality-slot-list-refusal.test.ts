@@ -186,7 +186,8 @@ describe('[#19888] the neighbouring shapes compile exactly as before', () => {
     // [ADR-0053 D-D1, amended — #5930 step 3] The TRUE constant, inside the
     // shared lowering's NULL escape (`$nin` is negative-polarity): TRUE still.
     ['the empty $nin — the TRUE constant', { stage: { $nin: [] } }, { kind: 'or', children: [leaf('stage', 'notSet', []), { kind: 'const', value: true }] }],
-    ['a nested-relation scalar', { acct: { region: 'NA' } }, leaf('acct.region', 'equals', ['NA'])],
+    // [#20887] Accepted, and carried as written for the engine (it used to flatten to `acct.region`).
+    ['a nested-relation scalar', { acct: { region: 'NA' } }, { kind: 'relation', member: 'acct', condition: { region: 'NA' } }],
     ['a field reference under $eq (served on the engine path)', { amount: { $eq: { $field: 'budget' } } }, leaf('amount', 'equals', [{ $field: 'budget' }])],
   ];
 

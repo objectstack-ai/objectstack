@@ -1312,8 +1312,30 @@ function compileField(field: string, value: unknown, qAlias: string, params: unk
 
   const ops = value as Record<string, unknown>;
   const keys = Object.keys(ops);
-  // A value object must be ALL operators; a non-$ key means a nested relation,
-  // which a flat read scope cannot join — fail closed.
+  // [#20887] The nested-relation form — a value object whose keys are ALL
+  // fields (`{ owner: { region: 'NA' } }`) — keeps its fail-closed refusal
+  // HERE, in words that name the route that serves it. The form is answered by
+  // READING the related object as the caller (#20802's ruling: its row scope
+  // and field permissions, and a cap), and this compile reads nothing: it is a
+  // synchronous string builder that holds the caller's context for
+  // placeholders and no data engine. The engine is where the form is served,
+  // and the analytics query face routes a read scope carrying it there
+  // (`NativeSQLStrategy.canHandle` declines; `ObjectQLStrategy` hands the scope
+  // to the engine as written). What still compiles a scope to SQL — this
+  // module's export, and the display SQL of `/analytics/sql` — refuses it.
+  if (keys.length > 0 && keys.every((k) => !k.startsWith('$'))) {
+    throw readScopeCompileError(
+      `[read-scope-sql] "${field}" carries a nested-relation condition ({ "${field}": { … } }), ` +
+      `which a read scope compiled to SQL cannot serve (fail-closed): the condition is answered by ` +
+      `reading the related object, and this compile reads no other object. The engine serves it — ` +
+      `it reads the related object as the caller, with that object's row scope and field permissions, ` +
+      `and refuses a match past its cap — so the analytics query face routes a read scope carrying it ` +
+      `to the engine. To compile this scope as SQL, name the related ids on a single-valued relation: ` +
+      `{ "${field}": { "$in": [ID, …] } }.`,
+    );
+  }
+  // A value object must be ALL operators; a non-$ key beside a $ key (or no
+  // key at all) is no shape this compiler reads — fail closed.
   if (keys.length === 0 || keys.some((k) => !k.startsWith('$'))) {
     throw readScopeCompileError(`[read-scope-sql] "${field}" has a nested/relation value which is not supported in a read scope (fail-closed).`);
   }

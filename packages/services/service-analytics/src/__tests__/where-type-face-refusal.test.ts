@@ -252,8 +252,9 @@ describe('[#20035] a bigint within 2^53 is NARROWED, copy-on-write — and every
       kind: 'and',
       children: [leaf('amt', 'gte', [2]), leaf('amt', 'lte', [5])],
     });
-    // A nested relation's bigint is narrowed on its dotted member.
-    expect(tree({ acct: { amt: 7n } })).toEqual(leaf('acct.amt', 'equals', [7]));
+    // A nested relation's bigint is narrowed inside the condition the engine
+    // receives as written (#20887: it used to flatten to the dotted member).
+    expect(tree({ acct: { amt: 7n } })).toEqual({ kind: 'relation', member: 'acct', condition: { amt: 7 } });
   });
 
   it('the caller\'s condition is never edited, and nothing is copied when nothing narrowed', () => {
@@ -281,7 +282,8 @@ describe('[#20035] a bigint within 2^53 is NARROWED, copy-on-write — and every
       [{ stage: { $null: true } }, leaf('stage', 'notSet', [])],
       [{ stage: { $contains: null } }, leaf('stage', 'contains', [null])],
       [{ amt: { $gt: { $field: 'id' } } }, leaf('amt', 'gt', [{ $field: 'id' }])],
-      [{ acct: { region: 'emea' } }, leaf('acct.region', 'equals', ['emea'])],
+      // [#20887] Carried as written for the engine (it used to flatten to `acct.region`).
+      [{ acct: { region: 'emea' } }, { kind: 'relation', member: 'acct', condition: { region: 'emea' } }],
     ];
     for (const [where, expected] of ACCEPTED) {
       expect(tree(where), JSON.stringify(where)).toEqual(expected);
