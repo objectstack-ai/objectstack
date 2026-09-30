@@ -487,7 +487,8 @@ function withDeclaredGranularityDefaults(query: AnalyticsQuery, cube: Cube | und
  * column of a result with the display `format` its cube measure declares.
  *
  * `fields[].format` is the presentation surface a client formats amounts from
- * (`AnalyticsResult`); `GET /analytics/meta` deliberately does not carry it.
+ * (`AnalyticsResult`), column by column; `GET /analytics/meta` publishes the
+ * same declared value per measure (`getMeta`), with no column to attach it to.
  * The compiled-dataset path fills it from the dataset's own measure
  * (`enrichResultColumns`), and the dataset compiler copies that same value onto
  * the cube it mints — so for a compiled dataset the value read here is the one
@@ -2307,6 +2308,13 @@ export class AnalyticsService implements IAnalyticsService {
    * Only cubes the analytics API exposes are listed: a cube declared
    * `public: false` is omitted, and asking for it by name answers `[]` — the
    * same answer as a name no cube has (`cube-visibility.ts`).
+   *
+   * `description` (cube, measure, dimension) and a measure's `format` are the
+   * registered definition's own values, copied when declared and left off when
+   * not — never filled in. An authored cube carries what its author wrote; a
+   * compiled dataset's cube carries the `format` the dataset compiler copies
+   * from each dataset measure, and no `description`, because the compiler
+   * writes none.
    */
   async getMeta(cubeName?: string): Promise<CubeMeta[]> {
     const cubes = (cubeName
@@ -2317,15 +2325,19 @@ export class AnalyticsService implements IAnalyticsService {
     return cubes.map(cube => ({
       name: cube.name,
       title: cube.title,
+      ...(cube.description === undefined ? {} : { description: cube.description }),
       measures: Object.entries(cube.measures).map(([key, measure]) => ({
         name: `${cube.name}.${key}`,
         type: measure.type,
         title: measure.label,
+        ...(measure.description === undefined ? {} : { description: measure.description }),
+        ...(measure.format === undefined ? {} : { format: measure.format }),
       })),
       dimensions: Object.entries(cube.dimensions).map(([key, dimension]) => ({
         name: `${cube.name}.${key}`,
         type: dimension.type,
         title: dimension.label,
+        ...(dimension.description === undefined ? {} : { description: dimension.description }),
       })),
     }));
   }

@@ -371,7 +371,7 @@ describe('#4639 — predicate writes publish aggregate BulkDataEvents', () => {
     expect(published).toHaveLength(0);
     const logged = offWarn.mock.calls.map((c) => String(c[0])).join('\n');
     expect(logged).toContain('data.records.updated');
-    expect(logged).toContain('#4639');
+    expect(logged).toContain('it carries no records and no predicate');
   });
 
   it('a by-id delete still takes the PER-RECORD path even with multi: true', async () => {

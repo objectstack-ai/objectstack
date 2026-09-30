@@ -39,7 +39,9 @@ export const DeliveryCube = defineCube({
       label: 'Done Rate (%)',
       type: 'number',
       sql: "SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) * 100.0 / COUNT(*)",
-      format: 'percent',
+      // A numeral pattern, the vocabulary `fields[].format` documents: `%` marks a
+      // percent, `.0` one decimal. The value above is in percentage points (0-100).
+      format: '0.0%',
     },
   },
   dimensions: {

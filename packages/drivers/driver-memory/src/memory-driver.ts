@@ -14,7 +14,7 @@ import { hasDanglingLikeEscape, hasNulInLikePattern, likePatternToRegExp } from 
 // the ruled 「is empty」 table, asked of the spec by the live query path.
 import { expandEmptyOperator, type ValueShapeFieldDef } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
-import { Logger, createLogger, nextUtcCalendarDay, isUnboundedAbove } from '@objectstack/core';
+import { Logger, createLogger, nextUtcCalendarDay, isUnboundedAbove, compensatedSum } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
 import {
   assertSingleTenantPosture,
@@ -2014,12 +2014,21 @@ export class InMemoryDriver implements IDataDriver {
           // because "the faces disagree" is this package's recurring defect
           // class (#5374, #6814) and one face aligned alone leaves the other
           // free to keep its own answer.
+          //
+          // [#20544] The addition is `@objectstack/core`'s `compensatedSum`,
+          // the fold objectql's rows path and SQLite add with. It used to be a
+          // naive `reduce`, so on this driver `engine.aggregate` answered two
+          // doubles by path — `0.1 + 0.2 + 0.3` was `0.6000000000000001` here
+          // and `0.6` on the rows path a filtered sibling aggregation forces,
+          // and `having { s: { $eq: 0.6 } }` kept the group on that path alone.
+          // Which values count as addends is untouched: the boolean rule above
+          // and the `typeof === 'number'` gate decide that, the fold only adds.
           case 'sum':
           case 'avg': {
               const nums = values
                   .map(v => (typeof v === 'boolean' ? (v ? 1 : 0) : v))
                   .filter(v => typeof v === 'number');
-              const sum = nums.reduce((a, b) => a + b, 0);
+              const sum = compensatedSum(nums);
               if (func === 'sum') return sum;
               return nums.length > 0 ? sum / nums.length : null;
           }

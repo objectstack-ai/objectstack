@@ -47,7 +47,7 @@ const result = AnalyticsEndpoint.parse(data);
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ name: string; title?: string; measures: object[]; dimensions: object[] }[]` | ✅ | Available cubes, each as the `CubeMeta` discovery projection — the cube name, its title, and the measures/dimensions a client may name in a query. A bare array: there is no `cubes` wrapper object, and no cube `sql` is published. |
+| **data** | `{ name: string; title?: string; description?: string; measures: object[]; … }[]` | ✅ | Available cubes, each as the `CubeMeta` discovery projection — the cube name, its title and description, and the measures/dimensions a client may name in a query. A bare array: there is no `cubes` wrapper object, and no cube `sql` is published. |
 
 ### Nested Shape: `AnalyticsMetadataResponse.error`
 
@@ -78,8 +78,9 @@ const result = AnalyticsEndpoint.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Cube name |
 | **title** | `string` | optional | Human-readable cube title |
-| **measures** | `{ name: string; type: string; title?: string }[]` | ✅ | Measures this cube accepts in `/analytics/query` |
-| **dimensions** | `{ name: string; type: string; title?: string }[]` | ✅ | Dimensions this cube accepts in `/analytics/query` |
+| **description** | `string` | optional | Cube description, projected from the cube definition's `description` |
+| **measures** | `{ name: string; type: string; title?: string; description?: string; … }[]` | ✅ | Measures this cube accepts in `/analytics/query` |
+| **dimensions** | `{ name: string; type: string; title?: string; description?: string }[]` | ✅ | Dimensions this cube accepts in `/analytics/query` |
 
 
 ---

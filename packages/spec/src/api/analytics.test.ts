@@ -386,9 +386,10 @@ describe('GetAnalyticsMetaRequestSchema', () => {
  */
 describe('AnalyticsMetadataResponseSchema — the CubeMeta[] projection (#6442)', () => {
   /**
-   * A real `GET /analytics/meta` body: what `AnalyticsService.getMeta` and its
-   * `driver-memory` twin both build — measure/dimension names CUBE-QUALIFIED,
-   * `title` projected from the definition's `label`, and no `sql` anywhere.
+   * A real `GET /analytics/meta` body: what `AnalyticsService.getMeta` builds —
+   * measure/dimension names CUBE-QUALIFIED, `title` projected from the
+   * definition's `label`, `description` and a measure's `format` copied from
+   * the definition when it declares them, and no `sql` anywhere.
    */
   const SERVED_BODY = {
     success: true,
@@ -396,11 +397,18 @@ describe('AnalyticsMetadataResponseSchema — the CubeMeta[] projection (#6442)'
       {
         name: 'orders',
         title: 'Orders',
+        description: 'Every order placed in the shop',
         measures: [
-          { name: 'orders.total_revenue', type: 'sum', title: 'Total Revenue' },
+          {
+            name: 'orders.total_revenue',
+            type: 'sum',
+            title: 'Total Revenue',
+            description: 'Sum of order amounts',
+            format: '$0,0.00',
+          },
         ],
         dimensions: [
-          { name: 'orders.status', type: 'string', title: 'Status' },
+          { name: 'orders.status', type: 'string', title: 'Status', description: 'Fulfilment status' },
         ],
       },
     ],
@@ -416,6 +424,12 @@ describe('AnalyticsMetadataResponseSchema — the CubeMeta[] projection (#6442)'
     expect(resp.data[0].measures[0].title).toBe('Total Revenue');
     expect(resp.data[0].dimensions[0].name).toBe('orders.status');
     expect(resp.data[0]).not.toHaveProperty('sql');
+    // The descriptions and the measure format are DECLARED members: a key the
+    // object schema did not declare would be stripped by this parse, not kept.
+    expect(resp.data[0].description).toBe('Every order placed in the shop');
+    expect(resp.data[0].measures[0].description).toBe('Sum of order amounts');
+    expect(resp.data[0].measures[0].format).toBe('$0,0.00');
+    expect(resp.data[0].dimensions[0].description).toBe('Fulfilment status');
   });
 
   it('accepts an empty cube list', () => {
@@ -468,6 +482,22 @@ describe('AnalyticsMetadataResponseSchema — the CubeMeta[] projection (#6442)'
       dimensions: [{ name: 'orders.status', type: 'string' }],
     };
     expect(() => AnalyticsMetadataResponseSchema.parse({ success: true, data: [fromContract] })).not.toThrow();
+
+    // Every optional member the contract declares survives the parse, on the
+    // member kind that declares it: `format` is a measure's, not a dimension's.
+    const fullContract: CubeMeta = {
+      name: 'orders',
+      title: 'Orders',
+      description: 'd',
+      measures: [{ name: 'orders.total_revenue', type: 'sum', title: 't', description: 'd', format: '0.0%' }],
+      dimensions: [{ name: 'orders.status', type: 'string', title: 't', description: 'd' }],
+    };
+    expect(AnalyticsMetadataResponseSchema.parse({ success: true, data: [fullContract] }).data).toEqual([fullContract]);
+    const [cube] = AnalyticsMetadataResponseSchema.parse({
+      success: true,
+      data: [{ ...fullContract, dimensions: [{ name: 'orders.status', type: 'string', format: '0.0%' }] }],
+    }).data;
+    expect(cube.dimensions[0]).not.toHaveProperty('format');
   });
 });
 

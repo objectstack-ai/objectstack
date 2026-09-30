@@ -81,7 +81,7 @@ describe('an escaped throw carrying a declared ADR-0112 envelope is rendered as 
   /**
    * The motivating path, in the shape `service-datasource` really produces it:
    * `AuthzStoreUnavailableError` declares `status: 503` / `code:
-   * SERVICE_UNAVAILABLE` and `requireDatasourceAdmin` re-raises it (#13279), so
+   * SERVICE_UNAVAILABLE` and `requireDatasourceAdmin` re-raises it (commit 6a180e42d), so
    * before this card the operator's outage reached the caller as a generic
    * fault naming the wrong component.
    */
@@ -149,7 +149,7 @@ describe('an escaped throw carrying a declared ADR-0112 envelope is rendered as 
     const res = await call(s, '/api/v1/conflicted');
     const body = await res.json();
     expect(res.status).toBe(409);
-    // `userMessage` is the producer's END-USER-addressed text (#9934) and
+    // `userMessage` is the producer's END-USER-addressed text (commit 79c46da90) and
     // `details` its structured context — the same two channels the REST twin
     // forwards. A door that dropped them would answer a narrower envelope than
     // the producer declared.

@@ -81,8 +81,8 @@ describe('resumeAuthority omission warning (#5561)', () => {
     // one field that restores their resume route.
     expect(line).toContain("'any'");
     expect(line).toContain("'service'");
-    expect(line).toContain('#3801');
-    expect(line).toContain('#3823');
+    expect(line).toContain("an undeclared resumeAuthority resolves to 'service', fail-closed");
+    expect(line).toContain('walked past an approval decision no service had recorded');
     expect(line).toContain('REFUSES');
     expect(line).toContain("Declaring 'any' is what RESTORES the generic route");
     expect(line).not.toContain('changes no behaviour');

@@ -260,12 +260,12 @@ export const MetricSchema = lazySchema(() => strictObject(
      * Display format for this measure's result column. The analytics service
      * relays it as `fields[].format` on `POST /analytics/query` results, the
      * slot the dataset door fills from a dataset measure's own `format`, so its
-     * vocabulary is that slot's: a numeral pattern. It is not part of the
-     * `GET /analytics/meta` projection.
+     * vocabulary is that slot's: a numeral pattern. The `GET /analytics/meta`
+     * projection publishes it on the measure too.
      */
     format: z.string().optional().describe(
       'Display format for this measure\'s result column: a numeral pattern such as "$0,0.00" or "0.0%". '
-      + 'Relayed verbatim as fields[].format on POST /analytics/query results; not published by GET /analytics/meta.',
+      + 'Relayed verbatim as fields[].format on POST /analytics/query results, and on the measure by GET /analytics/meta.',
     ),
   },
 ));
