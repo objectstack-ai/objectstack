@@ -38,10 +38,18 @@
  * Because this package's recurring defect is not "a face is wrong", it is "the
  * faces disagree" — #5374, #5324/#5328, #5347, and #6682 itself. A per-face
  * file lets one arm rot without the others noticing, so each case below runs
- * through the live query path and the reference matcher and demands one answer;
- * the analytics face runs the subset its cube vocabulary can express
- * (`contains` / `notContains` / `icontains` — it has no `startsWith` /
- * `endsWith` row in `MONGO_TO_CUBE_OPERATOR`).
+ * through the live query path and demands the table's answer; the analytics
+ * face runs the subset its cube vocabulary can express (`contains` /
+ * `notContains` / `icontains` — it has no `startsWith` / `endsWith` row in
+ * `MONGO_TO_CUBE_OPERATOR`).
+ *
+ * [#5930 step 4, ruling D6] Every case used to run through the reference
+ * matcher too. The matcher had no production caller and is retired: its row
+ * cases asserted the same `expected` column the query-path cases assert (and
+ * `@objectstack/formula` and every other backend answer the same table), its
+ * refusals were raised by `assertFilterConditionShape` — asserted on that gate
+ * directly below — and its one private cell (#14079, a valued non-string row)
+ * is asserted on the live path.
  *
  * ## Pre-fix measurement, recorded before the diff existed
  *
@@ -59,7 +67,7 @@ import { FILTER_TEXT_CASES, FILTER_TEXT_ROWS } from '@objectstack/spec/data';
 import type { FilterTextCase, Cube } from '@objectstack/spec/data';
 import { InMemoryDriver } from './memory-driver.js';
 import { MemoryAnalyticsService } from './memory-analytics.js';
-import { match } from './memory-matcher.js';
+import { assertFilterConditionShape } from './filter-refusal.js';
 
 const TABLE = 'text_rows';
 
@@ -77,10 +85,6 @@ async function seed(): Promise<InMemoryDriver> {
 /** Ids the LIVE QUERY PATH returns (mingo), ascending. */
 const queryIds = async (driver: InMemoryDriver, filter: unknown): Promise<string[]> =>
   (await driver.find(TABLE, { where: filter as any })).map((r: any) => String(r.id)).sort(byId);
-
-/** Ids the REFERENCE MATCHER returns, ascending. */
-const matcherIds = (filter: unknown): string[] =>
-  ROWS.filter((r) => match(r, filter)).map((r) => r.id).sort(byId);
 
 const isRejection = (c: FilterTextCase): c is Extract<FilterTextCase, { expectRejection: true }> =>
   c.expectRejection === true;
@@ -108,29 +112,21 @@ describe('[#6682] InMemoryDriver — text-operator conformance, the query path',
   }
 });
 
-describe('[#6682] the reference matcher answers the same table', () => {
-  for (const c of rowCases) {
-    it(c.name, () => {
-      expect(matcherIds(c.filter), c.note ?? c.name).toEqual([...c.expected]);
-    });
-  }
-});
-
-describe('[#5374] the two general-purpose faces agree, case by case', () => {
+describe('[#5374] the general-purpose face answers the whole table', () => {
   let driver: InMemoryDriver;
   beforeEach(async () => { driver = await seed(); });
 
   /**
-   * Not redundant with the two blocks above, and this is the row that would
-   * have been red for the whole life of the defect: a package can satisfy a
-   * table face-by-face at two different times and still be the thing #6682 was
-   * filed about in between. Stated as an equality between the faces so it fails
-   * on the DIVERGENCE rather than on the table.
+   * This was "every case returns the same ids through find() and match()" — an
+   * equality between the two general-purpose faces, the row that would have
+   * been red for the whole life of #6682. [#5930 step 4] One face is left, so
+   * the equality is kept against the oracle both faces were held to: the whole
+   * table in ONE assertion, which survives the per-case loop being edited.
    */
-  it('every case returns the same ids through find() and match()', async () => {
-    for (const c of rowCases) {
-      expect(await queryIds(driver, c.filter), c.name).toEqual(matcherIds(c.filter));
-    }
+  it('every case returns the table\'s ids through find(), in one sweep', async () => {
+    const got: Record<string, string[]> = {};
+    for (const c of rowCases) got[c.name] = await queryIds(driver, c.filter);
+    expect(got).toEqual(Object.fromEntries(rowCases.map((c) => [c.name, [...c.expected]])));
   });
 
   /**
@@ -152,13 +148,12 @@ describe('[#5374] the two general-purpose faces agree, case by case', () => {
     for (const c of rowCases) {
       if (c.name === WHOLE_SET) continue;
       expect((await queryIds(driver, c.filter)).length, c.name).toBeLessThan(ROWS.length);
-      expect(matcherIds(c.filter).length, c.name).toBeLessThan(ROWS.length);
     }
   });
 });
 
 /**
- * The refusals, on both general-purpose faces.
+ * The refusals, on the query path and on the shared shape gate it runs.
  *
  * `code` AND `status`, never a bare `toThrow()` (ADR-0112): a rejection test
  * that only asserts "something threw" carries one bit where the defect has two,
@@ -168,7 +163,7 @@ describe('[#5374] the two general-purpose faces agree, case by case', () => {
  * because a refusal that does not name the replacement sends the author to the
  * docs, which is what `RETIRED_FILTER_OPERATORS` exists to prevent.
  */
-describe('[#6682] refusals, in the ADR-0112 envelope, on both faces', () => {
+describe('[#6682] refusals, in the ADR-0112 envelope, on the query path and the shape gate', () => {
   let driver: InMemoryDriver;
   beforeEach(async () => { driver = await seed(); });
 
@@ -190,8 +185,9 @@ describe('[#6682] refusals, in the ADR-0112 envelope, on both faces', () => {
       for (const fragment of c.mustMention) expect(err.message).toContain(fragment);
     });
 
-    it(`reference matcher: ${c.name}`, async () => {
-      const err = await thrownBy(() => match(ROWS[0], c.filter));
+    // [#5930 step 4] The retired reference matcher's refusal was this gate's.
+    it(`shape gate: ${c.name}`, async () => {
+      const err = await thrownBy(() => assertFilterConditionShape(c.filter, 'filter'));
       expect(err, c.name).toBeInstanceOf(Error);
       expect(err.code).toBe(c.code);
       expect(err.status).toBe(400);
@@ -302,13 +298,13 @@ describe('[#6682] the analytics face answers the same text rules', () => {
  * carry `$like` rows — a driver's enrolment is the whole table (rule 2 of its
  * header) and `driver-mongodb` refuses those two operators — so the pair is
  * pinned per face that answers it. Same shape as the table's `score` rows:
- * the positive pattern matches NOTHING, its `$not` matches EVERYTHING, on
- * both faces, and the two faces agree before either is checked against the
- * answer. Under coercion `'%5%'` would match seven rows and `'%0'` every row
+ * the positive pattern matches NOTHING, its `$not` matches EVERYTHING. (The
+ * retired reference matcher was asserted to agree first; it did, with these
+ * same literal answers.) Under coercion `'%5%'` would match seven rows and `'%0'` every row
  * on a REAL column (`5` renders `'5.0'`), which is the wrong answer the
  * assertion keeps out.
  */
-describe('[#14079] $like / $ilike over a stored non-string value, on both faces', () => {
+describe('[#14079] $like / $ilike over a stored non-string value, on the query path', () => {
   let driver: InMemoryDriver;
   beforeEach(async () => { driver = await seed(); });
 
@@ -323,22 +319,22 @@ describe('[#14079] $like / $ilike over a stored non-string value, on both faces'
 
   for (const [name, filter, expected] of CASES) {
     it(name, async () => {
-      const fromQuery = await queryIds(driver, filter);
-      const fromMatcher = matcherIds(filter);
-      expect(fromMatcher, 'the reference matcher disagrees with the query path').toEqual(fromQuery);
-      expect(fromQuery).toEqual(expected);
+      expect(await queryIds(driver, filter)).toEqual(expected);
     });
   }
 
-  it('the reference matcher answers BOTH polarities for a valued non-string row — the #14079 cell itself', () => {
-    // The measured defect: `{ n: 5 }` failed `$contains: '5'` AND
-    // `$notContains: '5'`. A type test in place of the predicate says NO to an
-    // operator and to its negation; the predicate says NO to one and YES to
-    // the other.
-    const row = { id: 'x', n: 5 };
-    expect(match(row, { n: { $contains: '5' } })).toBe(false);
-    expect(match(row, { n: { $notContains: '5' } })).toBe(true);
-    expect(match({ id: 'y', n: 0 }, { n: { $notContains: '0' } })).toBe(true);
-    expect(match({ id: 'z', n: true }, { n: { $notContains: 'true' } })).toBe(true);
+  it('BOTH polarities are answered for a valued non-string row — the #14079 cell itself', async () => {
+    // The measured defect, on the retired reference matcher: `{ n: 5 }` failed
+    // `$contains: '5'` AND `$notContains: '5'`. A type test in place of the
+    // predicate says NO to an operator and to its negation; the predicate says
+    // NO to one and YES to the other. [#5930 step 4] Held on the live path now.
+    const cell = new InMemoryDriver();
+    for (const row of [{ id: 'x', n: 5 }, { id: 'y', n: 0 }, { id: 'z', n: true }]) await cell.create('cell', row);
+    const ids = async (where: unknown): Promise<string[]> =>
+      ((await cell.find('cell', { where: where as any })) as any[]).map((r) => String(r.id)).sort(byId);
+    expect(await ids({ n: { $contains: '5' } })).toEqual([]);
+    expect(await ids({ n: { $notContains: '5' } })).toEqual(['x', 'y', 'z']);
+    expect(await ids({ n: { $notContains: '0' } })).toEqual(['x', 'y', 'z']);
+    expect(await ids({ n: { $notContains: 'true' } })).toEqual(['x', 'y', 'z']);
   });
 });

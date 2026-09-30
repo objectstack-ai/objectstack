@@ -8,22 +8,22 @@
 //   1. A data-door create/edit lands in the METADATA store (write-through) and
 //      the record is re-derived by the AWAITED projector — consistent on the
 //      very next read, no race.
-//   2. [#6483 inverted this pin] A data-door edit of a CODE-DECLARED set is
+//   2. [commit ee58392e1 inverted this pin] A data-door edit of a CODE-DECLARED set is
 //      REFUSED — `permission` rolled back to `allowOrgOverride: false`
 //      (ADR-0005 security row: "Authorization correctness; overlays would
 //      create silent privilege drift"), so overriding an artifact-backed set
 //      answers 403 `not_overridable` instead of minting an overlay. The
-//      pre-#6483 behaviour (ADR-0094's 2026-07-14 "customize via env
+//      behaviour before commit ee58392e1 (ADR-0094's 2026-07-14 "customize via env
 //      overlay" direction) is closed until an ADR-0005 revision readmits the
 //      type; ADR-0086 two-doors applies meanwhile (edit the package,
 //      re-publish).
 //   3. Deleting a runtime-only set retires its record; deleting an
 //      artifact-backed set never removes it — the definition ships with the
-//      app and cannot be removed from the environment. Since #6483 there is
+//      app and cannot be removed from the environment. Since commit ee58392e1 there is
 //      no overlay left to lift, so that "reset" is a no-op success, not the
 //      revert-to-the-declared-body step ADR-0094's 2026-07-14 direction
 //      described (retired by D5-R).
-//   4. [#6483 inverted this pin too] An environment-door metadata save that
+//   4. [commit ee58392e1 inverted this pin too] An environment-door metadata save that
 //      targets a package-owned, artifact-backed set is refused the same way —
 //      record, provenance and effective body all stay exactly as shipped.
 //      (Package-bound rows MATERIALIZED through the metadata door carry
@@ -100,11 +100,11 @@ describe('sys_permission_set pure projection (ADR-0094)', () => {
     expect(await overlayBody(NAME), 'metadata overlay gone too').toBeFalsy();
   });
 
-  // ── 2. Data-door edit of a DECLARED set is REFUSED (#6483) ────────────────
+  // ── 2. Data-door edit of a DECLARED set is REFUSED (commit ee58392e1) ─────
   it('editing a declared set through the data door is refused — no overlay is minted', async () => {
     // member_default is a platform-declared set (an artifact baseline
     // exists), so the write-through's `saveMetaItem` hits the ADR-0005 type
-    // gate: `permission` is no longer `allowOrgOverride` (#6483, the
+    // gate: `permission` is no longer `allowOrgOverride` (commit ee58392e1, the
     // security row's "silent privilege drift"). The refusal must be LOUD —
     // an error status, not a 2xx that quietly skipped the metadata write —
     // and must leave no overlay behind (#6190's phantom-write shape is the
@@ -124,13 +124,13 @@ describe('sys_permission_set pure projection (ADR-0094)', () => {
 
   // ── 3. Delete of an artifact-backed set RESETS (does not remove) ──────────
   it('deleting a declared set through the data door resets it to the declared body, keeping the record', async () => {
-    // (#6483: with the edit above refused, there is no overlay to lift — the
+    // (commit ee58392e1: with the edit above refused, there is no overlay to lift — the
     // delete is a no-op reset. The invariant it pins is unchanged: a
     // declared definition cannot be removed from the environment.)
     const before = await findSet('member_default');
     const res = await stack.apiAs(adminToken, 'DELETE', `/data/sys_permission_set/${before.id}`);
     expect(res.status).toBeLessThan(300);
-    // [#19306] The status cannot tell this reset apart from a real deletion —
+    // [commit f9e16d856] The status cannot tell this reset apart from a real deletion —
     // the whole envelope used to be byte-identical to one, so every assertion
     // below stayed green while the door told the caller the set was gone.
     // `success: false` is the one field that says the record is still here,
@@ -144,7 +144,7 @@ describe('sys_permission_set pure projection (ADR-0094)', () => {
     expect(after.description ?? null).not.toBe('customized via Setup (ADR-0094)');
   });
 
-  // ── 4. Env overlay of a PACKAGE set is REFUSED (#6483) ────────────────────
+  // ── 4. Env overlay of a PACKAGE set is REFUSED (commit ee58392e1) ─────────
   it('an environment-door metadata save on a package-owned set is refused and changes nothing', async () => {
     const contributor = await findSet('showcase_contributor');
     expect(contributor?.managed_by, 'showcase_contributor is package-owned').toBe('package');
@@ -152,7 +152,7 @@ describe('sys_permission_set pure projection (ADR-0094)', () => {
     const baseline = layeredBefore?.code ?? null;
     expect(baseline, 'the packaged declaration is the code layer').toBeTruthy();
 
-    // #6483 — `permission` rolled back to `allowOrgOverride: false`
+    // Commit ee58392e1 — `permission` rolled back to `allowOrgOverride: false`
     // (ADR-0005 security row). The overlay ADR-0094's 2026-07-14 direction
     // used here is exactly the per-org shadowing of a code-shipped
     // authorization contract the ADR forbids, so the save refuses LOUDLY at

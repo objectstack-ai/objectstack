@@ -93,7 +93,7 @@
 // silencing that particular red costs an enforcement site rather than a
 // `covers` append on a row that records an absence.
 //
-// [#8711] That completeness is over ROUTES, not over primitives: a primitive
+// [commit 2ce1eb41b] That completeness is over ROUTES, not over primitives: a primitive
 // enforced by a predicate inside an existing resolver adds no entry point, so
 // it can be neither UNCLASSIFIED nor STALE. Measured against the rows below:
 // 44 of 51 carry no `covers` key at all (7 rows, 15 keys, every one an
@@ -390,12 +390,12 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   // mass-revoked) and the 0/1 storage shape the primary driver returns is
   // judged as well as a literal `false`.
   //
-  // [#8711] Both rows carry NO `covers`, and that is a statement about the
+  // [commit 60ade586e] Both rows carry NO `covers`, and that is a statement about the
   // RATCHET, not an omission: `discover()` enumerates HTTP entry points from a
   // curated per-file probe table, and a predicate inside an existing resolver
   // adds no entry point — so neither flag could ever have surfaced as
   // UNCLASSIFIED during the whole period it was inert. These two rows restore
-  // the ledger's stated invariant. [Resolved — maintainer ruling on #8711,
+  // the ledger's stated invariant. [Resolved — maintainer ruling (commit 2ce1eb41b),
   // 2026-08-15] The invariant's advertised SCOPE is narrowed to what the
   // ratchet can check, not the ratchet widened to reach in-resolver
   // predicates like this one — widening was measured unachievable in general
@@ -408,7 +408,7 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     enforcement: 'core/security/resolve-authz-context.ts step 6a — isRowActive gates BOTH halves, and only both hold it: (i) only ACTIVE position ids collect their `sys_position_permission_set` linkage, so a deactivated position carries no bound set; (ii) the deactivated NAME is dropped from `grants.positions`, because resolvePermissionSetsForContext requests positions as permission-set NAMES and a name left standing resolves the same grant one layer down',
     note: 'Only a name whose `sys_position` row is EXPLICITLY deactivated is dropped — a name with no row at all (`org_owner`, a membership-derived role, the built-in `everyone` audience anchor) has no flag to read and is untouched. Deliberately NOT a blanket revocation of the sets themselves: a set held via BOTH a deactivated position AND a direct user grant still resolves, since the direct grant is a different grant (resolve-authz-context.test.ts pins exactly that case). Symmetrically, the WRITE gates and blast-radius reads in plugin-security (assertAudienceAnchorBindingGate, setsBoundToPosition, the delegated-admin surfaces) stay UNFILTERED on purpose — dropping a deactivated row there would make a refused binding permitted, narrow a delegate\'s boundary, and make a deactivated position unmanageable. Unit-proven in core/security/resolve-authz-context.test.ts (a deactivated position stops granting its sets; an active one still grants; an absent column grants; the 0/1 shape deactivates; deactivating ONE position leaves the others granting) + core/security/row-active.test.ts. Not HIGH_RISK for the same reason as `permission-set-active`.' },
 
-  // ── ADR-0091 D1/D2 — grant validity windows (#8811) ───────────────────
+  // ── ADR-0091 D1/D2 — grant validity windows (commit d6e793507) ────────
   //
   // The sibling of the `active` switch above, and enforced at the same seam
   // for the same stated reason: a grant that is supposed to lapse on a date,

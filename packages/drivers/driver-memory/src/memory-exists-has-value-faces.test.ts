@@ -9,8 +9,13 @@
  * `$exists` means "the field has a value" (`!= null`), never key-presence:
  * #5298 leg 3 / #5369, landed in PR #5962. It is settled and shipped on the
  * surfaces that ruling named — `@objectstack/formula`'s `matchesFilterCondition`
- * and this package's reference matcher (`memory-matcher.ts`, pinned by
- * `memory-matcher-not-null-safe.test.ts`).
+ * and this package's reference matcher (`memory-matcher.ts`, since retired).
+ *
+ * [#5930 step 4, ruling D6] That matcher had no production caller and is
+ * RETIRED. It was this file's second exit and the ORACLE for its composed cells;
+ * each of its assertions is kept as the literal answer it gave — which is the
+ * ruling's answer, the one every other exit is asserted against here — so the
+ * three exits that remain are held to it rather than to each other alone.
  *
  * ## What this file is — and what it WAS
  *
@@ -76,7 +81,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 import { InMemoryDriver } from './memory-driver.js';
-import { match } from './memory-matcher.js';
 import { MemoryAnalyticsService } from './memory-analytics.js';
 
 /** `name` present but NULL — how a SQL NULL round-trips into a record. */
@@ -107,10 +111,6 @@ async function liveIds(rows: Array<Record<string, unknown>>, where: unknown): Pr
     await driver.disconnect();
   }
 }
-
-/** Exit 2 — the REFERENCE matcher, the exit #5962 already aligned. */
-const matcherIds = (rows: Array<Record<string, unknown>>, where: unknown): string[] =>
-  sorted(rows.filter((r) => match(r, where)).map((r) => String(r.id)));
 
 const CUBE = {
   name: 'deals',
@@ -149,27 +149,26 @@ describe('[#13195] `$exists` on a row with NO VALUE — the two readings, the fo
   describe('the key-absent reading: the CONTROL — it answered the ruling before and must not move', () => {
     it('`$exists: true` excludes the no-key row everywhere', async () => {
       expect(await liveIds(MISSING, { name: { $exists: true } })).toEqual(['1', '2']);
-      expect(matcherIds(MISSING, { name: { $exists: true } })).toEqual(['1', '2']);
       expect((await analytics(MISSING, { name: { $exists: true } })).executed).toEqual(['1', '2']);
     });
 
     it('`$exists: false` returns the no-key row everywhere', async () => {
       expect(await liveIds(MISSING, { name: { $exists: false } })).toEqual(['3']);
-      expect(matcherIds(MISSING, { name: { $exists: false } })).toEqual(['3']);
       expect((await analytics(MISSING, { name: { $exists: false } })).executed).toEqual(['3']);
     });
 
     it('`$not` around it agrees too, on the exits that accept `$not`', async () => {
       expect(await liveIds(MISSING, { $not: { name: { $exists: true } } })).toEqual(['3']);
-      expect(matcherIds(MISSING, { $not: { name: { $exists: true } } })).toEqual(['3']);
     });
   });
 
   describe('the `name: null` reading: every exit now answers the ruling (#13195, ruled 2026-08-30)', () => {
-    it('the reference matcher reads HAS-VALUE — the ruling, shipped by #5962', () => {
-      expect(matcherIds(NULLED, { name: { $exists: true } })).toEqual(['1', '2']);
-      expect(matcherIds(NULLED, { name: { $exists: false } })).toEqual(['3']);
-      expect(matcherIds(NULLED, { $not: { name: { $exists: true } } })).toEqual(['3']);
+    it('the ruling, shipped by #5962 on the retired reference matcher, holds on the live path in all three spellings', async () => {
+      // These three lines were the matcher's; its answers were the ruling's, so
+      // they stay as literals, now binding the face that serves queries.
+      expect(await liveIds(NULLED, { name: { $exists: true } })).toEqual(['1', '2']);
+      expect(await liveIds(NULLED, { name: { $exists: false } })).toEqual(['3']);
+      expect(await liveIds(NULLED, { $not: { name: { $exists: true } } })).toEqual(['3']);
     });
 
     it('the live mingo path reads HAS-VALUE: `$exists: true` drops the null row', async () => {
@@ -198,7 +197,8 @@ describe('[#13195] `$exists` on a row with NO VALUE — the two readings, the fo
       const direct = await liveIds(NULLED, { name: { $exists: false } });
       const negated = await liveIds(NULLED, { $not: { name: { $exists: true } } });
       expect(direct).toEqual(negated);
-      expect(direct).toEqual(matcherIds(NULLED, { name: { $exists: false } }));
+      // The retired reference matcher's answer, the ruling's.
+      expect(direct).toEqual(['3']);
 
       // And on the other reading of "no value", where they already agreed.
       const directMissing = await liveIds(MISSING, { name: { $exists: false } });
@@ -225,8 +225,12 @@ describe('[#13195] `$exists` on a row with NO VALUE — the two readings, the fo
       const f = await analytics(NULLED, { name: { $exists: false } });
       expect(t.sql).toContain('name IS NOT NULL');
       expect(f.sql).toContain('name IS NULL');
-      expect(t.executed).toEqual(matcherIds(NULLED, { name: { $exists: true } }));
-      expect(f.executed).toEqual(matcherIds(NULLED, { name: { $exists: false } }));
+      // Held against the retired reference matcher's answers (the ruling's), and
+      // against the live path, so this face cannot drift from either.
+      expect(t.executed).toEqual(['1', '2']);
+      expect(f.executed).toEqual(['3']);
+      expect(t.executed).toEqual(await liveIds(NULLED, { name: { $exists: true } }));
+      expect(f.executed).toEqual(await liveIds(NULLED, { name: { $exists: false } }));
     });
   });
 
@@ -250,7 +254,6 @@ describe('[#13195] `$exists` on a row with NO VALUE — the two readings, the fo
 
     it('a predicate that should narrow still narrows on every exit', async () => {
       expect(await liveIds(NULLED, { name: { $eq: 'beta' } })).toEqual(['2']);
-      expect(matcherIds(NULLED, { name: { $eq: 'beta' } })).toEqual(['2']);
       expect((await analytics(NULLED, { name: { $eq: 'beta' } })).executed).toEqual(['2']);
     });
   });
@@ -276,22 +279,26 @@ describe('[#13195] `$exists` on a row with NO VALUE — the two readings, the fo
    * Four of those six cells AGREED with the reference matcher on `origin/main`
    * before the alignment, so shipping the merge unguarded would have traded a
    * fixed single-operator cell for a broken composed one — the one-driver,
-   * two-faces shape this card exists to remove. The reference matcher is the
-   * ORACLE here, exactly as it is for the single-operator cells above.
+   * two-faces shape this card exists to remove. The reference matcher was the
+   * ORACLE here, exactly as it was for the single-operator cells above.
+   *
+   * [#5930 step 4] With the matcher retired, the oracle is its answers, written
+   * out: measured on it at `9905e61ca2` for both fixtures, and identical on the
+   * two readings of "no value" for every cell.
    */
   describe('composed constraints — the lowering must not clobber a sibling operator', () => {
-    const COMPOSED: Array<[string, unknown]> = [
-      ['$exists:true beside $ne', { name: { $exists: true, $ne: 'beta' } }],
-      ['$ne beside $exists:true (keys swapped)', { name: { $ne: 'beta', $exists: true } }],
-      ['$exists:false beside $eq', { name: { $exists: false, $eq: 'alpha-one' } }],
-      ['$exists:true beside $eq', { name: { $exists: true, $eq: 'alpha-one' } }],
-      ['$exists:true beside $contains', { name: { $exists: true, $contains: 'alpha' } }],
+    const COMPOSED: Array<[string, unknown, string[]]> = [
+      ['$exists:true beside $ne', { name: { $exists: true, $ne: 'beta' } }, ['1']],
+      ['$ne beside $exists:true (keys swapped)', { name: { $ne: 'beta', $exists: true } }, ['1']],
+      ['$exists:false beside $eq', { name: { $exists: false, $eq: 'alpha-one' } }, []],
+      ['$exists:true beside $eq', { name: { $exists: true, $eq: 'alpha-one' } }, ['1']],
+      ['$exists:true beside $contains', { name: { $exists: true, $contains: 'alpha' } }, ['1']],
     ];
 
-    for (const [label, where] of COMPOSED) {
-      it(`${label}: the live path answers what the reference matcher answers`, async () => {
+    for (const [label, where, oracle] of COMPOSED) {
+      it(`${label}: the live path answers what the reference matcher answered`, async () => {
         for (const rows of [NULLED, MISSING]) {
-          expect(await liveIds(rows, where), label).toEqual(matcherIds(rows, where));
+          expect(await liveIds(rows, where), label).toEqual(oracle);
         }
       });
     }

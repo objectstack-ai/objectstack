@@ -37,11 +37,19 @@
  * a matcher that started answering "every row" to everything cannot pass this
  * file: the ruling is that a no-value row joins the negative answer, not that
  * predicates stop discriminating.
+ *
+ * [#5930 step 4, ruling D6] The reference matcher had no production caller and
+ * is RETIRED. This file keeps its name — `@objectstack/spec`'s
+ * `filter-logic-conformance.ts` points here for the key-ABSENT reading of these
+ * cells — and holds the LIVE query path now (`InMemoryDriver.find`, through
+ * mingo), every cell and every expectation unchanged: the live path gave each
+ * of them already, measured before the move. (The `$exists` caution above is
+ * history: #13195 converged the live path on has-value.)
  */
 
 import { describe, it, expect } from 'vitest';
 
-import { match } from './memory-matcher.js';
+import { InMemoryDriver } from './memory-driver.js';
 
 /** `name` present but null — how a SQL NULL round-trips into a record. */
 const NULLED: Array<Record<string, unknown>> = [
@@ -57,8 +65,16 @@ const MISSING: Array<Record<string, unknown>> = [
   { id: '3' },
 ];
 
-const ids = (rows: Array<Record<string, unknown>>, filter: unknown): string[] =>
-  rows.filter((r) => match(r, filter)).map((r) => String(r.id));
+/** The ids the LIVE query path returns for `rows`, in fixture order. */
+async function ids(rows: Array<Record<string, unknown>>, filter: unknown): Promise<string[]> {
+  const driver = new InMemoryDriver({ persistence: false });
+  await driver.connect();
+  for (const row of rows) await driver.create('t', { ...row });
+  const found = new Set(
+    ((await driver.find('t', { where: filter } as never)) as Array<Record<string, unknown>>).map((r) => String(r.id)),
+  );
+  return rows.map((r) => String(r.id)).filter((id) => found.has(id));
+}
 
 /** The ruling's answer: row 2 has a different value, row 3 has none. */
 const NO_VALUE_INCLUDED = ['2', '3'];
@@ -72,37 +88,37 @@ describe('[#13166] no-value rows and the negation-carrying operators', () => {
     ];
 
     for (const [op, filter] of OPERATORS) {
-      it(`${op}: a null value satisfies it`, () => {
-        expect(ids(NULLED, filter)).toEqual(NO_VALUE_INCLUDED);
+      it(`${op}: a null value satisfies it`, async () => {
+        expect(await ids(NULLED, filter)).toEqual(NO_VALUE_INCLUDED);
       });
 
-      it(`${op}: an absent key satisfies it`, () => {
-        expect(ids(MISSING, filter)).toEqual(NO_VALUE_INCLUDED);
+      it(`${op}: an absent key satisfies it`, async () => {
+        expect(await ids(MISSING, filter)).toEqual(NO_VALUE_INCLUDED);
       });
 
-      it(`${op}: both readings of "no value" answer alike`, () => {
-        expect(ids(MISSING, filter)).toEqual(ids(NULLED, filter));
+      it(`${op}: both readings of "no value" answer alike`, async () => {
+        expect(await ids(MISSING, filter)).toEqual(await ids(NULLED, filter));
       });
     }
   });
 
   describe('the operators still discriminate — this is not "match everything"', () => {
-    it('each negation excludes the row that DOES carry the comparand', () => {
-      expect(ids(NULLED, { name: { $ne: 'alpha-one' } })).not.toContain('1');
-      expect(ids(NULLED, { name: { $nin: ['alpha-one'] } })).not.toContain('1');
-      expect(ids(NULLED, { name: { $notContains: 'one' } })).not.toContain('1');
+    it('each negation excludes the row that DOES carry the comparand', async () => {
+      expect(await ids(NULLED, { name: { $ne: 'alpha-one' } })).not.toContain('1');
+      expect(await ids(NULLED, { name: { $nin: ['alpha-one'] } })).not.toContain('1');
+      expect(await ids(NULLED, { name: { $notContains: 'one' } })).not.toContain('1');
     });
 
-    it('the positive twins keep answering the complement over the VALUED rows', () => {
+    it('the positive twins keep answering the complement over the VALUED rows', async () => {
       // A no-value row is in NEITHER answer for the positive operators: the
       // ruling moved the negative cells only.
-      expect(ids(NULLED, { name: { $eq: 'alpha-one' } })).toEqual(['1']);
-      expect(ids(MISSING, { name: { $in: ['alpha-one'] } })).toEqual(['1']);
-      expect(ids(NULLED, { name: { $contains: 'one' } })).toEqual(['1']);
-      expect(ids(MISSING, { name: { $contains: 'one' } })).toEqual(['1']);
+      expect(await ids(NULLED, { name: { $eq: 'alpha-one' } })).toEqual(['1']);
+      expect(await ids(MISSING, { name: { $in: ['alpha-one'] } })).toEqual(['1']);
+      expect(await ids(NULLED, { name: { $contains: 'one' } })).toEqual(['1']);
+      expect(await ids(MISSING, { name: { $contains: 'one' } })).toEqual(['1']);
     });
 
-    it('[#14079] a present non-string value SATISFIES $notContains — the predicate, not the type test', () => {
+    it('[#14079] a present non-string value SATISFIES $notContains — the predicate, not the type test', async () => {
       // This pin used to assert the opposite (`toEqual([])`), stated as out of
       // #13166's scope: "a value that is there and is not a string keeps the
       // answer it had". That answer was NO to `$notContains` AND to
@@ -114,27 +130,27 @@ describe('[#13166] no-value rows and the negation-carrying operators', () => {
       // direction, and asserted with substance: the row IS in the negation,
       // is NOT in the positive twin, and the two still partition the rows.
       const rows = [{ id: '1', name: 'alpha-one' }, { id: '9', name: 42 }];
-      expect(ids(rows, { name: { $notContains: 'one' } })).toEqual(['9']);
-      expect(ids(rows, { name: { $contains: 'one' } })).toEqual(['1']);
-      expect(ids([{ id: '0', name: 0 }, { id: 'f', name: false }], { name: { $notContains: 'one' } })).toEqual(['0', 'f']);
+      expect(await ids(rows, { name: { $notContains: 'one' } })).toEqual(['9']);
+      expect(await ids(rows, { name: { $contains: 'one' } })).toEqual(['1']);
+      expect(await ids([{ id: '0', name: 0 }, { id: 'f', name: false }], { name: { $notContains: 'one' } })).toEqual(['0', 'f']);
     });
   });
 
   describe('cross-operator agreement, the invariant that outlives the fixture', () => {
-    it('$nin answers exactly what $ne answers — it is the list form of it', () => {
+    it('$nin answers exactly what $ne answers — it is the list form of it', async () => {
       // `formula`'s suite states the same identity over its own fixture. `$ne`
       // is the operator ENROLLED in `FILTER_LOGIC_CASES`, so this is the link
       // between the enrolled cell and the two that are not enrolled yet.
       for (const rows of [NULLED, MISSING]) {
-        expect(ids(rows, { name: { $nin: ['alpha-one'] } }))
-          .toEqual(ids(rows, { name: { $ne: 'alpha-one' } }));
+        expect(await ids(rows, { name: { $nin: ['alpha-one'] } }))
+          .toEqual(await ids(rows, { name: { $ne: 'alpha-one' } }));
       }
     });
 
-    it('$contains and $notContains partition the VALUED rows and both keep the no-value row out of the positive side', () => {
+    it('$contains and $notContains partition the VALUED rows and both keep the no-value row out of the positive side', async () => {
       for (const rows of [NULLED, MISSING]) {
-        const inside = ids(rows, { name: { $contains: 'one' } });
-        const outside = ids(rows, { name: { $notContains: 'one' } });
+        const inside = await ids(rows, { name: { $contains: 'one' } });
+        const outside = await ids(rows, { name: { $notContains: 'one' } });
         expect(inside).toEqual(['1']);
         expect(outside).toEqual(NO_VALUE_INCLUDED);
         expect(inside.filter((id) => outside.includes(id))).toEqual([]);

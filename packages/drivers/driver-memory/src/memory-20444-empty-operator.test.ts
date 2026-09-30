@@ -9,9 +9,13 @@
  *   the spec's `expandEmptyOperator`): text-like = null or `''`; multi-value =
  *   null or `[]`; every other type = null only; `$empty: false` the exact
  *   complement. A field it holds no declaration for is REFUSED.
- * - **The reference matcher** (`match`) holds no declarations at all, so it
- *   takes the reading the spec gives such a face — by value
- *   (`isEmptyFilterValue`): null, a missing key, `''` and `[]` are empty.
+ * - **The by-value reading** — what a face holding no declarations at all
+ *   answers (`isEmptyFilterValue`): null, a missing key, `''` and `[]` are
+ *   empty. [#5930 step 4, ruling D6] This package's reference matcher was such
+ *   a face and is retired; its half of each cell is held here on the spec's
+ *   `isEmptyFilterValue` (the one function it evaluated), and the combinator
+ *   cells on `@objectstack/formula`'s `matches-filter-empty-operator.test.ts`,
+ *   the by-value face that ships (same five rows, same answers).
  * - **The analytics (cube) face** does not lower the flag (nor `$null`), and
  *   refuses it loudly as a declared operator it cannot compile.
  *
@@ -23,8 +27,9 @@
 
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { Cube, FilterCondition } from '@objectstack/spec/data';
+import { isEmptyFilterValue } from '@objectstack/spec/data';
 import { InMemoryDriver } from './memory-driver.js';
-import { match } from './memory-matcher.js';
+import { assertFilterConditionShape } from './filter-refusal.js';
 import { MemoryAnalyticsService } from './memory-analytics.js';
 
 const TABLE = 'os20444_empty';
@@ -72,12 +77,24 @@ function refusal(run: () => unknown): Promise<{ code?: string; status?: number }
     );
 }
 
-describe('[#20444] InMemoryDriver — $empty on the live path, the reference matcher and the analytics face', () => {
+/**
+ * The by-value reading of ONE leaf `{ field: { $empty: flag } }` — the spec's
+ * `isEmptyFilterValue`, which is all the retired reference matcher evaluated
+ * for this operator. `null` when the filter is not a single `$empty` leaf.
+ */
+function byValue(rows: Array<Record<string, unknown>>, where: FilterCondition): string[] | null {
+  const keys = Object.keys(where);
+  if (keys.length !== 1 || keys[0].startsWith('$')) return null;
+  const spec = (where as Record<string, unknown>)[keys[0]];
+  if (!spec || typeof spec !== 'object' || Object.keys(spec).length !== 1 || !('$empty' in spec)) return null;
+  const flag = (spec as { $empty: unknown }).$empty === true;
+  return rows.filter((r) => isEmptyFilterValue(r[keys[0]]) === flag).map((r) => String(r.id)).sort();
+}
+
+describe('[#20444] InMemoryDriver — $empty on the live path, the by-value reading and the analytics face', () => {
   let driver: InMemoryDriver;
   const ids = async (where: FilterCondition) =>
     ((await driver.find(TABLE, { where })) as Array<Record<string, unknown>>).map((r) => String(r.id)).sort();
-  const reference = (where: FilterCondition) =>
-    ROWS.filter((r) => match(r, where)).map((r) => String(r.id)).sort();
 
   beforeAll(async () => {
     driver = new InMemoryDriver({ persistence: false });
@@ -91,33 +108,37 @@ describe('[#20444] InMemoryDriver — $empty on the live path, the reference mat
   });
 
   for (const c of CASES) {
-    it(`${JSON.stringify(c.where)} → ${JSON.stringify(c.expected)} on the live path AND the reference matcher`, async () => {
+    it(`${JSON.stringify(c.where)} → ${JSON.stringify(c.expected)} on the live path AND by value`, async () => {
       expect(await ids(c.where), 'live').toEqual(c.expected);
-      expect(reference(c.where), 'reference matcher').toEqual(c.expected);
+      // A single leaf is judged by value here; a combinator cell's by-value half
+      // is `formula`'s (see the module note).
+      const leaf = byValue(ROWS, c.where);
+      if (leaf !== null) expect(leaf, 'by value').toEqual(c.expected);
     });
   }
 
-  it('$empty: false partitions every declared field with $empty: true, on both faces', async () => {
+  it('$empty: false partitions every declared field with $empty: true, live and by value', async () => {
     for (const field of ['title', 'tags', 'owners', 'score']) {
       const empty = await ids({ [field]: { $empty: true } });
       const full = await ids({ [field]: { $empty: false } });
       expect([...empty, ...full].sort(), field).toEqual(['r1', 'r2', 'r3', 'r4', 'r5']);
-      expect(reference({ [field]: { $empty: true } }), field).toEqual(empty);
+      expect(byValue(ROWS, { [field]: { $empty: true } }), field).toEqual(empty);
     }
   });
 
-  it('the live path REFUSES a field it holds no declaration for; the matcher judges the value', async () => {
+  it('the live path REFUSES a field it holds no declaration for; the by-value reading judges the value', async () => {
     expect(await refusal(() => driver.find(TABLE, { where: { nope: { $empty: true } } })))
       .toEqual({ code: 'INVALID_FILTER', status: 400 });
     expect(await refusal(() => driver.find('never_synced', { where: { title: { $empty: true } } })))
       .toEqual({ code: 'INVALID_FILTER', status: 400 });
-    expect(reference({ nope: { $empty: true } })).toEqual(['r1', 'r2', 'r3', 'r4', 'r5']);
+    expect(byValue(ROWS, { nope: { $empty: true } })).toEqual(['r1', 'r2', 'r3', 'r4', 'r5']);
   });
 
   it('the one cell where the declared row and the by-value reading part: a stored state the type cannot hold', async () => {
     // A number column holding '' is a write-door defect, never a value the
     // declaration predicts. The declared null-only row does not count it; the
-    // declaration-free matcher does. Pinned so the divergence is known.
+    // by-value reading a declaration-free face gives (the retired matcher's,
+    // and `formula`'s) does. Pinned so the divergence is known.
     const odd = new InMemoryDriver({ persistence: false });
     await odd.connect();
     await odd.syncSchema('odd', { fields: { id: { type: 'text' }, score: { type: 'number' } } });
@@ -126,16 +147,19 @@ describe('[#20444] InMemoryDriver — $empty on the live path, the reference mat
     const live = ((await odd.find('odd', { where: { score: { $empty: true } } })) as Array<Record<string, unknown>>)
       .map((r) => r.id);
     expect(live).toEqual([]);
-    expect(rows.filter((r) => match(r, { score: { $empty: true } })).map((r) => r.id)).toEqual(['blank']);
+    expect(byValue(rows, { score: { $empty: true } })).toEqual(['blank']);
   });
 
-  it('a non-boolean flag is refused by both faces, on the shared shape gate', async () => {
+  it('a non-boolean flag is refused on the live path and by the shared shape gate itself', async () => {
     expect(await refusal(() => driver.find(TABLE, { where: { title: { $empty: 'yes' as never } } })))
       .toEqual({ code: 'INVALID_FILTER', status: 400 });
-    expect(await refusal(() => match(ROWS[0], { title: { $empty: 1 as never } })))
+    // The gate the retired reference matcher ran, called directly.
+    expect(await refusal(() => assertFilterConditionShape({ title: { $empty: 1 } }, 'filter')))
       .toEqual({ code: 'INVALID_FILTER', status: 400 });
     // Even where an identity would settle the node before any arm ran.
-    expect(await refusal(() => match(ROWS[0], { $or: [{}, { title: { $empty: 'no' as never } }] })))
+    expect(await refusal(() => assertFilterConditionShape({ $or: [{}, { title: { $empty: 'no' } }] }, 'filter')))
+      .toEqual({ code: 'INVALID_FILTER', status: 400 });
+    expect(await refusal(() => driver.find(TABLE, { where: { $or: [{}, { title: { $empty: 'no' as never } }] } })))
       .toEqual({ code: 'INVALID_FILTER', status: 400 });
   });
 

@@ -43,7 +43,7 @@
  *
  * ## Two more published surfaces move with the verb, and are pinned here too
  *
- * The contract review of PR #16687 measured what the first round did not name:
+ * The contract review recorded in commit 779710213 measured what the first round did not name:
  *
  *  - the DERIVED `import` door. `API_METHOD_DERIVATION` (`@objectstack/spec`,
  *    `api-derivation.ts`) derives `import` from `any: ['create', 'update']`, so

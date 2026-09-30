@@ -225,6 +225,31 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
    * `AuthManagerOptions.databaseHooks` for the hop-by-hop correction (#4802).
    */
   databaseHooks?: BetterAuthOptions['databaseHooks'];
+
+  /**
+   * [#20861] The HOST declares that it signs humans into this deployment
+   * through a handoff route of its OWN — a sign-in path that is not a
+   * login-page provider, and that mints the session without writing a
+   * `sys_account` row. A hosted kernel whose owner enters through the control
+   * plane's handoff is the case this exists for: that owner signs in whether or
+   * not the login page shows any platform sign-in button.
+   *
+   * It has ONE reader, the `no_sign_in_account_at_boot` boot report
+   * (`boot-sign-in-reachability.ts`): with it declared, "human `sys_user` rows,
+   * zero `sys_account` rows" is this deployment's healthy state rather than an
+   * unrecoverable dead end, and the shape is recorded at `debug`, naming this
+   * declaration, instead of at `error`.
+   *
+   * ⛔ A declaration, never an inference and never a silencer. Set it only where
+   * the host really mounts such a route; declared without one, it turns the loud
+   * report of a deployment nobody can sign in to into a quiet one. It changes
+   * nothing the login page is told — `getPublicConfig()` returns the same with
+   * or without it, and no provider is registered. It is read from this option
+   * alone (no env var, no setting), so the code that wires the handoff is the
+   * one place it can be stated.
+   * @default false
+   */
+  hostSignInHandoff?: boolean;
 }
 
 /**
@@ -1052,7 +1077,10 @@ export class AuthPlugin implements Plugin {
       // pays for its bounded provider read only when the answer can change what
       // is reported; a deployment with no delegated path is untouched and still
       // reports at `error`.
-      const signInPath = await probeSignInPathWiring(reachability, pub, ql);
+      // [#20861] The plugin's own options ride along as the fourth fact: a
+      // handoff route the HOST owns never appears in `pub`, so the host's
+      // `hostSignInHandoff` declaration is the only place the gate can read it.
+      const signInPath = await probeSignInPathWiring(reachability, pub, ql, this.options);
       const deadEnd = reportIfNoSignInAccountExists(reachability, ctx.logger, signInPath);
 
       let ownerAccountState: WalledOwnerAccountState = 'unknown';
