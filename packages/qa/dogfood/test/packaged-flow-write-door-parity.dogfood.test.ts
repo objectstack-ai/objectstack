@@ -57,11 +57,24 @@ const CUSTOMER_FLOW = 'dogfood_customer_flow_20679';
 /** The ledgered locked-base family the metadata door answers with (ADR-0112). */
 const LOCKED_BASE_CODES = ['NOT_OVERRIDABLE', 'ITEM_LOCKED'];
 
-interface Envelope {
+/**
+ * The two transports answer in two envelopes, and this file reads each where
+ * it lives rather than tolerating both at one read: the `/automation` door is
+ * the dispatcher's (`{ success, error: { code, message } }`), while `/meta` on
+ * this composition is served by the REST server, whose refusal is
+ * `{ error: <sentence>, code }` (`@objectstack/rest` `error-response.ts`).
+ */
+interface DispatcherEnvelope {
     success?: boolean;
     data?: Record<string, unknown>;
     error?: { code?: string; message?: string };
 }
+interface RestRefusal {
+    error?: string;
+    code?: string;
+}
+const dataOf = (json: unknown) => (json as DispatcherEnvelope).data;
+const dispatcherCode = (json: unknown) => (json as DispatcherEnvelope).error?.code;
 
 describe('a packaged flow keeps its locked base at every write door (showcase)', () => {
     let stack: VerifyStack;
@@ -74,13 +87,13 @@ describe('a packaged flow keeps its locked base at every write door (showcase)',
 
     const call = async (method: string, path: string, body?: unknown) => {
         const res = await stack.apiAs(token, method, path, body);
-        const json = (await res.json().catch(() => ({}))) as Envelope;
+        const json: unknown = await res.json().catch(() => ({}));
         return { status: res.status, json };
     };
     const statusRow = async () => {
         const { status, json } = await call('GET', '/automation/_status');
         expect(status).toBe(200);
-        const flows = (json.data as { flows?: Array<{ name: string }> } | undefined)?.flows ?? [];
+        const flows = (dataOf(json) as { flows?: Array<{ name: string }> } | undefined)?.flows ?? [];
         return flows.find((f) => f.name === FLOW);
     };
     const probeBody = () => ({ ...capture, label: `${String(capture.label)} (probe)` });
@@ -100,7 +113,7 @@ describe('a packaged flow keeps its locked base at every write door (showcase)',
 
         const read = await call('GET', `/automation/${FLOW}`);
         expect(read.status, `the packaged flow must be registered: ${JSON.stringify(read.json)}`).toBe(200);
-        capture = read.json.data!;
+        capture = dataOf(read.json)!;
         statusBefore = await statusRow();
         expect(statusBefore, 'the packaged flow has no runtime status row').toBeDefined();
     }, 120_000);
@@ -114,28 +127,30 @@ describe('a packaged flow keeps its locked base at every write door (showcase)',
         const put = await call('PUT', `/meta/flow/${FLOW}`, probeBody());
 
         expect(put.status, JSON.stringify(put.json)).toBe(403);
-        expect(LOCKED_BASE_CODES).toContain(put.json.error?.code);
-        expect((await call('GET', `/automation/${FLOW}`)).json.data).toEqual(capture);
+        // Recorded, not over-pinned: which member of the family answers is part
+        // of the evidence (package-less on this topology: `NOT_OVERRIDABLE`).
+        expect(LOCKED_BASE_CODES, JSON.stringify(put.json)).toContain((put.json as RestRefusal).code);
+        expect(dataOf((await call('GET', `/automation/${FLOW}`)).json)).toEqual(capture);
     });
 
     it('PUT /automation/:name on the same artifact is refused, and the engine still serves the captured definition', async () => {
         const put = await call('PUT', `/automation/${FLOW}`, probeBody());
 
         expect(put.status, JSON.stringify(put.json)).toBe(403);
-        expect(put.json.error?.code).toBe('NOT_OVERRIDABLE');
+        expect(dispatcherCode(put.json)).toBe('NOT_OVERRIDABLE');
         const after = await call('GET', `/automation/${FLOW}`);
         expect(after.status).toBe(200);
-        expect(after.json.data).toEqual(capture);
+        expect(dataOf(after.json)).toEqual(capture);
     });
 
     it('DELETE /automation/:name on the same artifact is refused, and the flow still serves', async () => {
         const del = await call('DELETE', `/automation/${FLOW}`);
 
         expect(del.status, JSON.stringify(del.json)).toBe(403);
-        expect(del.json.error?.code).toBe('NOT_OVERRIDABLE');
+        expect(dispatcherCode(del.json)).toBe('NOT_OVERRIDABLE');
         const after = await call('GET', `/automation/${FLOW}`);
         expect(after.status).toBe(200);
-        expect(after.json.data).toEqual(capture);
+        expect(dataOf(after.json)).toEqual(capture);
     });
 
     it('no residue: the flow\'s enabled/bound row is the one it had before the probes', async () => {
@@ -159,7 +174,7 @@ describe('a packaged flow keeps its locked base at every write door (showcase)',
 
         const updated = await call('PUT', `/automation/${CUSTOMER_FLOW}`, { ...definition, label: 'Customer Flow (edited)' });
         expect(updated.status, JSON.stringify(updated.json)).toBe(200);
-        expect((await call('GET', `/automation/${CUSTOMER_FLOW}`)).json.data?.label).toBe('Customer Flow (edited)');
+        expect(dataOf((await call('GET', `/automation/${CUSTOMER_FLOW}`)).json)?.label).toBe('Customer Flow (edited)');
 
         const removed = await call('DELETE', `/automation/${CUSTOMER_FLOW}`);
         expect(removed.status, JSON.stringify(removed.json)).toBe(200);
