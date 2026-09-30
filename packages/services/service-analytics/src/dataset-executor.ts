@@ -16,6 +16,7 @@ import {
   filterTokenContextFrom,
   resolveAnalyticsDateRangeString,
   resolveFilterTokens,
+  wallClockToUtcMs,
   zonedDateStartToUtcMs,
   type LoweredDateRangeWindow,
 } from '@objectstack/core';
@@ -838,7 +839,9 @@ function isoWeekKeyOfUtcMs(ms: number): string {
   const target = new Date(ms);
   const dayNum = (target.getUTCDay() + 6) % 7; // Mon=0..Sun=6
   target.setUTCDate(target.getUTCDate() - dayNum + 3); // that week's Thursday
-  const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4));
+  // [#20599] Core's `wallClockToUtcMs`, never `Date.UTC`, which reads a year
+  // from 0 to 99 as 1900 + year and put this Thursday's January 4 in the 1900s.
+  const firstThursday = new Date(wallClockToUtcMs({ year: target.getUTCFullYear(), month: 1, day: 4 }));
   const weekNo =
     1 +
     Math.round(
