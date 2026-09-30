@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #11060 — the flow VALUE-expression function table, both halves of the ruling:
+ * Commit 815585513 — the flow VALUE-expression function table, both halves of the ruling:
  *
  *  1. `round` / `floor` / `ceil` / `abs` / `min` / `max` work in value
  *     expressions, every name and semantic mirrored **1:1 from the CEL

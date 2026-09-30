@@ -901,7 +901,7 @@ describe('ObjectStoreSuspendedRunStore — organization attribution (cloud#1395)
     it('⛔ pins the sys_api_key divergence: the stamp column is the DECLARED active_organization_id, not the wall', async () => {
         // The credential table: unwalled by necessity (`enabled: false`,
         // #8287) while its rows are still ABOUT one organization under
-        // `tenancy.organizationField` (#8778). A flow triggered by an api-key
+        // `tenancy.organizationField` (commit 7901b2dd2). A flow triggered by an api-key
         // record must file its run under the org the key authenticates into —
         // limb 0 of the shared resolver, winning over the ADR-0066 opt-out.
         const engine = createFakeEngine({

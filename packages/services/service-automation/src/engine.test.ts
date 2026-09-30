@@ -1480,7 +1480,7 @@ describe('AutomationEngine - Execution History', () => {
          * assert the opposite — that unregistering a flow FORGOT it had been
          * switched off, so re-registering it came back enabled. That was a
          * faithful pin of the retired `flowEnabled` map: an in-process bit with
-         * no durable home, which is exactly the mechanism #10243 measured
+         * no durable home, which is exactly the mechanism commit 02b41232d measured
          * leaking and ADR-0126 §7.2 retires.
          *
          * Under the activation ledger the answer inverts, and it is ADR-0126 §6
