@@ -274,7 +274,7 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   screen's second clause: `titleField` is NOT required). ⚠️ The screen's
  *   copy is LOCALISED at the pin: objectui#10101 (objectui `afb228418`), which
  *   the pin now contains, routes it through `tt('calendar.configRequired', …)`
- *   (`ObjectCalendar.tsx:1301-1302`), whose default and the `en` pack both
+ *   (`ObjectCalendar.tsx:1308-1309`), whose default and the `en` pack both
  *   read "Calendar configuration required. Please specify startDateField, …",
  *   while a non-English locale renders its own pack's words for the same
  *   screen (e.g. `zh`, `de`). The refusal itself — the `if (!calendarConfig)`
@@ -283,8 +283,17 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   English sentence. So the loss is total rather than partial — every
  *   record, on every object — and the author is told at render time as well
  *   as here. Both reads hold at the pin this repo builds against
- *   (`.objectui-sha` = `dd3f7e1be`, re-read 2026-09-28: `ObjectCalendar.tsx`
- *   changed on this hop — objectui#10866's date-only day reads and writes,
+ *   (`.objectui-sha` = `db11afd49`, re-read 2026-09-29: `ObjectCalendar.tsx`
+ *   changed again on the hop off `dd3f7e1be` (18 insertions, 11 deletions:
+ *   objectui#11005's and its sibling's DST wall-clock moves, in
+ *   `toStoredDateValue` and the handlers below the config gate, plus comment
+ *   citations), while `getCalendarConfig` is byte-identical and unmoved at
+ *   `:294`, and the `if (!calendarConfig)` arm and its `tt(…)` lines are
+ *   byte-identical, moved `:1294` → `:1301` and `:1301-1302` → `:1308-1309`;
+ *   `ListView.tsx` changed only in comments and its region-aria read, with
+ *   every `case` arm byte-identical, and the `en` / `zh` / `de` pack strings
+ *   did not change. At `dd3f7e1be` (2026-09-28) `ObjectCalendar.tsx`
+ *   changed on that hop — objectui#10866's date-only day reads and writes,
  *   the display-locale and invalidation re-reads of objectui#10668 /
  *   objectui#10572, objectui#7508's row ceiling — while `getCalendarConfig`,
  *   the `if (!calendarConfig)` arm and its `tt(…)` lines are byte-identical
@@ -299,8 +308,13 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   This repo already records the same deletion one door over: the #13817
  *   check in `../ui/view.zod.ts` names objectui#7029 as its runtime half.
  * - `gantt`    → NO fallback, and no silence [#19630]. Measured at the pin
- *   this repo builds against (`.objectui-sha` = `dd3f7e1be`, re-read
- *   2026-09-28; first measured at `87af769e9`, both files byte-identical to
+ *   this repo builds against (`.objectui-sha` = `db11afd49`, re-read
+ *   2026-09-29; on the hop off `dd3f7e1be` `ObjectGantt.tsx` changed again
+ *   (14 insertions, 10 deletions: objectui#10866's zoned-chart DST day read
+ *   and write, and a comment citation), so `getGanttConfig` MOVED `:556` →
+ *   `:560` and the `if (!ganttConfig)` arm `:2198` → `:2202`, both
+ *   byte-identical, and `ListView.tsx`'s `case 'gantt'` is byte-identical;
+ *   first measured at `87af769e9`, both files byte-identical to
  *   it at `62597c588`, and at `f8a9d0fb0` `case 'gantt'` gained the
  *   EFFECTIVE `filter` and the toolbar `search` / `searchableFields`
  *   (objectui#10037, objectui#10250), which `ObjectGantt.tsx` still sends as
@@ -310,7 +324,7 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   it reads and writes a date-only day (objectui#10866), `case 'gantt'` only
  *   in a comment; `getGanttConfig` and the `if (!ganttConfig)` arm are
  *   byte-identical to `f8a9d0fb0`, moved `:498` → `:556` and `:1973` →
- *   `:2198`, and none of it touches which date fields are bound or the
+ *   `:2198` (`:560` and `:2202` at `db11afd49`), and none of it touches which date fields are bound or the
  *   config gate read below. ① `ListView.tsx`'s
  *   `case 'gantt'` spreads `startDateField` / `endDateField` / `titleField`
  *   only when the view DECLARED them — the `'start_date'` / `'end_date'`
@@ -327,7 +341,9 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   requires. So the view does not draw a blank chart: it refuses, by name.
  * - `timeline` → date axis: NO fallback [#19630]; title: `titleField || 'name'`,
  *   which still stands. Measured at the same pin (`.objectui-sha` =
- *   `dd3f7e1be`; `ObjectTimeline.tsx`, byte-identical from `87af769e9` through
+ *   `db11afd49`; `ObjectTimeline.tsx` and `ListView.tsx`'s `case 'timeline'`
+ *   are byte-identical to `dd3f7e1be` on the hop onto this pin, so
+ *   `:533-535` and `:862` did not move. At `dd3f7e1be`, `ObjectTimeline.tsx`, byte-identical from `87af769e9` through
  *   `62597c588` to `f8a9d0fb0`, changed on this hop — objectui#6356's
  *   declared timeline item, objectui#10222's retired `metaFields` read,
  *   objectui#10866's date-only day in its sort and date buckets,
@@ -353,7 +369,11 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   block does render; the warning still fires there, because the block the
  *   view TYPE names is the one that is missing. Unchanged by this row.
  * - `map`      → NO fallback, and no silence [#19630]. Measured at the same
- *   pin (`.objectui-sha` = `dd3f7e1be`; `ObjectMap.tsx` changed on this hop —
+ *   pin (`.objectui-sha` = `db11afd49`; `ObjectMap.tsx` is byte-identical to
+ *   `dd3f7e1be` on the hop onto this pin, `getMapConfig` `:388`,
+ *   `hasCoordinateBinding` `:487` and the refusal arm `:1285` did not move,
+ *   and `ListView.tsx`'s `case 'map'` is byte-identical. At `dd3f7e1be`
+ *   `ObjectMap.tsx` changed on that hop —
  *   objectui#10664's single expanded read keyed on the query it issues,
  *   objectui#10623's invalidation re-read, objectui#7508's row ceiling among
  *   others — but `getMapConfig` and `hasCoordinateBinding` are

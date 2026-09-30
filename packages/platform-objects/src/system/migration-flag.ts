@@ -42,7 +42,16 @@ export interface AdmittedMigrationViolations {
 /** Engine surface the flag helpers need — duck-typed like the storage seams. */
 export interface MigrationFlagEngine {
   getObject(name: string): unknown | undefined;
-  find(object: string, options: Record<string, unknown>): Promise<Array<Record<string, unknown>>>;
+  /**
+   * The one read these helpers make: a flag row by primary key (#20648).
+   *
+   * `findOne`, not `find` with `limit: 1`. The SQL driver reads a `limit` on
+   * `find` as page one of a walk and, on a table it has not registered, warns
+   * that the walk is not deterministic — a false alarm for a primary-key
+   * lookup, printed on every boot of an upgraded deployment. `findOne` is the
+   * single-row route the driver already exempts, and it says what the read is.
+   */
+  findOne(object: string, options: Record<string, unknown>): Promise<Record<string, unknown> | null>;
   insert(object: string, data: Record<string, unknown>, options?: Record<string, unknown>): Promise<unknown>;
   update(object: string, data: Record<string, unknown>, options: Record<string, unknown>): Promise<unknown>;
   /**
@@ -65,12 +74,10 @@ export async function readDataMigrationFlag(
 ): Promise<DataMigrationFlag | null> {
   if (!engine.getObject(DATA_MIGRATION_FLAG_OBJECT)) return null;
   try {
-    const rows = await engine.find(DATA_MIGRATION_FLAG_OBJECT, {
+    const row = await engine.findOne(DATA_MIGRATION_FLAG_OBJECT, {
       where: { id: migrationId },
-      limit: 1,
       context: { ...SYSTEM_CTX },
     });
-    const row = rows?.[0];
     if (!row || row.id !== migrationId) return null;
     return {
       id: migrationId,

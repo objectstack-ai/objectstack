@@ -3,7 +3,7 @@
 > **v5.0 update (2026):** Throughout this document, the term *project* has been renamed to *environment* (no aliases; CLI flags, URL paths, schemas, env vars all hard-renamed). See [ADR-0006 v4 — the v5.0 rename and its no-alias decision](./0006-project-environment-split.v4.md#the-v50-rename-and-its-no-alias-decision) for the rationale. The body below is preserved verbatim for historical context.
 
 
-**Status**: Accepted (2026-05-16) · **Amended** (2026-05-22, see "Amendment: post-ADR-0006 v4 scope") · **Amended** (2026-04-13, branch concept removed — see [ADR-0008 §0](./0008-metadata-repository-and-change-log.md#0-2026-04-13-amendment--drop-project-and-branch-from-metaref)) · **Amended** (2026-08-09, #6825 — the Phase-1 overlay-index migration is deleted; see "Amendment (2026-08-09, #6825): overlay-index delivery after the Phase-1 migration was deleted") · **Amended** (2026-09-04, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D6 — the per-organization overlay axis is **retired for now**: `sys_metadata` carries no organization column, org-scoped writes of the five tier-A types are refused, and the environment layer is the whole ledger; the environment → code layered resolution and the "no overlay row = the registry" reading are unchanged)
+**Status**: Accepted (2026-05-16) · **Amended** (2026-05-22, see "Amendment: post-ADR-0006 v4 scope") · **Amended** (2026-04-13, branch concept removed — see [ADR-0008 §0](./0008-metadata-repository-and-change-log.md#0-2026-04-13-amendment--drop-project-and-branch-from-metaref)) · **Amended** (2026-08-09, #6825 — the Phase-1 overlay-index migration is deleted; see "Amendment (2026-08-09, #6825): overlay-index delivery after the Phase-1 migration was deleted") · **Amended** (2026-09-04, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D6 — the per-organization overlay axis is **retired for now**: `sys_metadata` carries no organization column, org-scoped writes of the five tier-A types are refused, and the environment layer is the whole ledger; the environment → code layered resolution and the "no overlay row = the registry" reading are unchanged) · **Amended** (2026-09-30, #20051 ruling 甲 — in "Addendum — 2026-05-16 (c)", which code cites as appendix (c), the persisted document is the **parsed body** once every round-trip key is declared, reversing the verbatim `request.item` save; a stored `view` row's round-trip keys are declared, and the storage switch itself is the ruling's last stage, not yet landed — see the amendment note under that addendum's persisted-document bullet)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0003](./0003-package-as-first-class-citizen.md) (Package as first-class citizen), [ADR-0004](./0004-cloud-multi-kernel.md) (Cloud + per-project kernels)
 **Amended by**: [ADR-0006 v4](./0006-project-environment-split.v4.md) (drops `sys_project` entirely), [ADR-0008](./0008-metadata-repository-and-change-log.md) (re-expresses overlay as `LayeredRepository`; subsequently drops `project`/`branch` from `MetaRef`), [ADR-0029 D9](./0029-kernel-object-ownership-and-platform-objects-decomposition.md#amendment-2026-08-09-6853-a-tenant-overlay-of-an-object-is-its-own-contributor-layer-not-a-second-own) (for `object` only: the overlay is a registry contributor LAYER over the packaged owner, resolved as `base = overlay ?? own`, instead of a destructive in-place overwrite)
@@ -334,12 +334,76 @@ Implementation (`packages/metadata-protocol/src/protocol.ts`):
   carrying `path/message/code` for each Zod issue. REST layer
   (`packages/rest/src/rest-server.ts`) already propagates `status`
   and `code` to the response.
-- The persisted document is the **original** `request.item`, NOT
-  `parsed.data`. Studio attaches auxiliary fields (`isPinned`,
-  `isDefault`, `sortOrder`, `objectName`, …) that aren't in the canonical
-  schema; storing `parsed.data` would silently strip them on every save.
-  This trades strict-stripping against forward compatibility for Studio
-  extensions — the canonical fields are still type-checked.
+- The persisted document is the **parsed body** (`parsed.data`) once every
+  round-trip key is declared. A key a client writes onto a stored row and
+  reads back after a reload is declared on the type's schema, with its
+  meaning, so the parse keeps it; a key nothing declares is not stored. The
+  canonical fields are type-checked, and the stored row is what the contract
+  says it is. ⚠️ **Ruled, not yet in force:** the storage switch is the
+  ruling's last stage and has not landed, so today `saveMetaItem` still
+  stores the request body (`request.item`). The note below records what is
+  declared and what remains.
+
+  > **Amended (2026-09-30) — the persisted document is the parsed body once
+  > every round-trip key is declared, and a stored `view` row's round-trip
+  > keys now are.** Provenance: ruling 甲 on #20051 — maintainer
+  > 「开始总监决裁」, 2026-09-27, director batch #227 item 2, recorded on the
+  > card as comment 5856781584 — which keeps the persistence half of ruling A
+  > (comment 5824043998, item 2) as the end state: 「a saved view is the
+  > parsed body, every key the console reads back is declared on the
+  > contract, and ADR-0005 appendix (c) is amended to say so」. Code cites
+  > this addendum as "ADR-0005 appendix (c)". Why: stored as sent, the Studio
+  > keys lived in the store and nowhere in the contract, and nothing failed
+  > while the parse dropped them unread. State the console needs after a
+  > reload is declared, not kept alive by a store-the-raw-request exception.
+  >
+  > 1. **Superseded.** The bullet above read, as written on 2026-05-16:
+  >    "The persisted document is the **original** `request.item`, NOT
+  >    `parsed.data`. Studio attaches auxiliary fields (`isPinned`,
+  >    `isDefault`, `sortOrder`, `objectName`, …) that aren't in the
+  >    canonical schema; storing `parsed.data` would silently strip them on
+  >    every save. This trades strict-stripping against forward compatibility
+  >    for Studio extensions — the canonical fields are still type-checked."
+  > 2. **What "every round-trip key is declared" means for `view`** (stage
+  >    (ii) of the ruling, #20456, PR #20474). It means one record:
+  >    `packages/spec/src/ui/view.zod.ts#VIEW_CONSOLE_ROUND_TRIP_KEYS`, each key the console writes onto a stored `view` row and reads back, mapped to the `#VIEW_METADATA_MEMBERS` branches it is declared on.
+  >    `packages/spec/src/ui/view-console-round-trip-keys.test.ts` holds the
+  >    record equal to the census of objectui's console at the
+  >    `.objectui-sha` pin, and holds each (key, member) pair declared,
+  >    described and kept by a parse. A new round-trip key joins the record,
+  >    declared on its members, in the change that adds the console write.
+  > 3. **The declarations, key by key** — a reading at `origin/main`
+  >    `c9c182ed`; the record, not this list, is the authority. Two members
+  >    carry them: `viewItem`, published as `packages/spec/src/ui/view.zod.ts#ViewItemWireSchema`, and `listOverlay`, published as `packages/spec/src/ui/view.zod.ts#VIEW_METADATA_MEMBERS.listOverlay`.
+  >    - `isPinned`, `sortOrder`, `visibility`: one declaration, `packages/spec/src/ui/view.zod.ts#viewSwitcherRowStateFields`, spread into the two members by `#viewItemWireFields` and `#listOverlayRoundTripFields`.
+  >    - `isDefault`: `packages/spec/src/ui/view.zod.ts#viewItemBaseShape` on `viewItem`, `#flattenedViewOverlayFields` on `listOverlay`.
+  >    - `columnState`: `packages/spec/src/ui/view.zod.ts#viewItemWireFields` on `viewItem`, `#flattenedViewOverlayFields` on `listOverlay`.
+  >    - `_isOverride`: `packages/spec/src/ui/view.zod.ts#listOverlayRoundTripFields`, on `listOverlay` only, the one row shape the console's settings-overlay marker is written on.
+  >
+  >    No form-overlay row carries these keys: the switcher lists list-family
+  >    views only.
+  > 4. **The census's other finds map to a spelling already declared, not to
+  >    a new key.** `objectName`, named in the superseded bullet, maps to
+  >    `object`; a top-level `id` maps to `name`; a bare-array
+  >    `exportOptions` maps to the object form the parse lifts it to.
+  >    `filter[].id` / `sort[].id` are removed before the parse by `packages/spec/src/ui/view.zod.ts#stripViewConsoleDecorations` (`#VIEW_CONSOLE_ROW_DECORATIONS`).
+  >    `_draft` / `_diagnostics` are `packages/spec/src/kernel/metadata-read-decorations.ts#METADATA_READ_DECORATIONS`, stamped on the read and never stored.
+  >    The record's docblock gives the reason for each.
+  > 5. **Interim state: the storage switch is stage (iv) of #20051, and it
+  >    has not landed.** Until it does, `packages/metadata-protocol/src/protocol.ts#saveMetaItem` stores the request body, with the normalizations it grafts back from the parse, and the pins that hold that verbatim save stay green.
+  >    One of them is `packages/objectql/src/protocol-meta.test.ts`
+  >    "preserves Studio-only auxiliary fields verbatim (not stripped)", the
+  >    2026-05-16 "unknown extras preserved" case listed below. So today a
+  >    key no member declares is still stored: "declared" does not yet mean
+  >    "the only keys stored".
+  > 6. **What stage (iv) does, on #20051 itself.** Persistence stores the
+  >    parsed body; the GUARD pins flip to assert the declared round-trip
+  >    instead of the verbatim save; the top-level `options` of
+  >    `ViewItemWireSchema` is judged in the same step; and the switch lands
+  >    only once the count of stored `view` rows carrying undeclared top-level
+  >    keys has been measured against production `sys_metadata`. Made before
+  >    its prerequisites, the switch turns 「stored and unread」 into 「200,
+  >    then the user's pinned / sort / visibility state silently dropped」.
 
 Sample 422 response:
 

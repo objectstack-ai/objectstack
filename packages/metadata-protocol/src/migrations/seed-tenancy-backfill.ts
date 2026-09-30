@@ -1001,7 +1001,13 @@ export const SEED_TENANCY_MIGRATION_ID = 'seed-tenancy-backfill';
  */
 export interface SeedTenancyLedger {
   getObject(name: string): unknown;
-  find(object: string, options: Record<string, unknown>): Promise<Array<Record<string, unknown>>>;
+  /**
+   * The receipt's one read: its own row by primary key, through the engine's
+   * single-row route (#20648). ⛔ Not `find` with `limit: 1` — the SQL driver
+   * reads that as page one of a walk and, on a table it has not registered,
+   * warns that the walk is not deterministic, a false alarm for a key lookup.
+   */
+  findOne(object: string, options: Record<string, unknown>): Promise<Record<string, unknown> | null>;
   insert(object: string, data: Record<string, unknown>, options?: Record<string, unknown>): Promise<unknown>;
   update(object: string, data: Record<string, unknown>, options: Record<string, unknown>): Promise<unknown>;
 }
@@ -1018,7 +1024,7 @@ export interface SeedTenancyLedger {
  */
 export function resolveSeedTenancyLedger(engine: unknown): SeedTenancyLedger | undefined {
   const candidate = engine as any;
-  for (const method of ['getObject', 'find', 'insert', 'update']) {
+  for (const method of ['getObject', 'findOne', 'insert', 'update']) {
     if (typeof candidate?.[method] !== 'function') return undefined;
   }
   return candidate as SeedTenancyLedger;
@@ -1051,7 +1057,8 @@ export function resolveSeedTenancyLedger(engine: unknown): SeedTenancyLedger | u
  * Verified by enumeration rather than assumed: every consumer of this ledger
  * (`ObjectQL.readMigrationFlagVerified`, `recordObservedDeviation`,
  * `retractCreationAttestation`, and `platform-objects`' `readDataMigrationFlag`)
- * reads `where: { id }, limit: 1`. There is no bulk or aggregate read of
+ * reads one row by `where: { id }` through the engine's `findOne` (#20648).
+ * There is no bulk or aggregate read of
  * `sys_migration` anywhere in the repo, so no reading of these fields under a
  * NEW id can reach another id's gate.
  *
@@ -1098,9 +1105,8 @@ async function persistSeedTenancyReceiptRow(
   flag: DataMigrationFlag,
 ): Promise<'inserted' | 'updated'> {
   const context = { isSystem: true };
-  const rows = await ledger.find(DATA_MIGRATION_FLAG_OBJECT, {
+  const existing = await ledger.findOne(DATA_MIGRATION_FLAG_OBJECT, {
     where: { id: flag.id },
-    limit: 1,
     context,
   });
   const row: Record<string, unknown> = { ...flag, updated_at: flag.last_run_at };
@@ -1110,7 +1116,7 @@ async function persistSeedTenancyReceiptRow(
   // probe finds nothing and later boots return `no-split` — but a run that could
   // only stamp some objects leaves a split behind, and the next boot's row
   // should describe the LATEST attempt.
-  if (rows?.[0]?.id === flag.id) {
+  if (existing?.id === flag.id) {
     await ledger.update(DATA_MIGRATION_FLAG_OBJECT, row, { context });
     return 'updated';
   }

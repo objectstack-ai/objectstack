@@ -349,7 +349,8 @@ describe('migration-flag memoization: a read that never happened is not an answe
     const store = newStore();
     const engine = boot(store, { created: false });
     const driver: any = (engine as any).drivers.get('default');
-    const find = vi.spyOn(driver, 'find');
+    // [#20648] The flag read is a primary-key lookup through `findOne`.
+    const findOne = vi.spyOn(driver, 'findOne');
 
     await engine.insert('showcase_task', { id: 't1', cover: 'file_01H0000000000000000000' });
     await engine.insert('showcase_task', { id: 't2', cover: 'file_01H0000000000000000001' });
@@ -359,7 +360,7 @@ describe('migration-flag memoization: a read that never happened is not an answe
     // are live — one read each, never one per write. The conclusive negative
     // (the ledger is readable and empty) IS memoized; only "could not ask" is
     // re-asked.
-    const flagReads = find.mock.calls.filter((c: unknown[]) => c[0] === 'sys_migration');
+    const flagReads = findOne.mock.calls.filter((c: unknown[]) => c[0] === 'sys_migration');
     expect(flagReads).toHaveLength(2);
     expect(flagReads.map((c: any) => c[1]?.where?.id).sort()).toEqual(
       [FILE_REFERENCES_MIGRATION_ID, VALUE_SHAPES_MIGRATION_ID].sort(),
