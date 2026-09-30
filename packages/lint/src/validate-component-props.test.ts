@@ -75,6 +75,22 @@ describe('validateComponentProps — undeclared keys', () => {
     expect(findings).toEqual([]);
   });
 
+  // #20758 — `PageHeaderProps.breadcrumb` is a retiredKey tombstone. A page is
+  // never hard-refused for carrying it: this rule is the door where an author
+  // meets the prescription, and every finding it files is a WARNING.
+  it('reports a retired page-header `breadcrumb` as a warning carrying the prescription, for `true` and `false`', () => {
+    for (const breadcrumb of [true, false]) {
+      const findings = validateComponentProps(
+        stackWith([{ type: 'page:header', properties: { title: 'T', breadcrumb } }]),
+      );
+      expect(findings, `breadcrumb: ${breadcrumb}`).toHaveLength(1);
+      const [f] = findings;
+      expect(f.severity).toBe('warning');
+      expect(f.path).toBe('pages[0].regions[0].components[0].properties.breadcrumb');
+      expect(f.message).toContain('`page:header` property `breadcrumb` was removed in @objectstack/spec 17');
+    }
+  });
+
   it('walks components nested inside `properties` (tabs items → children)', () => {
     const findings = validateComponentProps(
       stackWith([
