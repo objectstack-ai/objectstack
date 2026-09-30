@@ -39,7 +39,9 @@ The passthrough six ride along on `find`/`findOne` (and on `update`/`delete`)
 because there the option bag IS the base of the driver options, which is how an
 explicit `tenantId` reaches the driver. `count` and `aggregate` never forward the
 bag, so on those two the same keys are deliberately ILLEGAL — accepting them
-would be the silently-ignored option this check exists to close.
+would be the silently-ignored option this check exists to close. The one
+exception is `timezone`: `aggregate` reads it itself, for date bucketing, so it
+is legal there and the row above lists it; `count` refuses it with the rest.
 
 ### Which filter dialect?
 
