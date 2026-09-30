@@ -24,7 +24,13 @@
  * is the PROCESS-LOCAL clock, not UTC — see {@link exportContentDisposition}
  * for why the two contracts deliberately differ, and {@link zonedWallClock}
  * for where that choice is left to each caller.
+ *
+ * Fourth contract, on the year (#20602): every `date` and `datetime` cell takes
+ * its day from core's `temporalStorageForm` `date` rule — see
+ * {@link calendarDay} — so the year keeps four digits and the export re-imports.
  */
+
+import { temporalStorageForm } from '@objectstack/core';
 
 export interface ExportFieldMeta {
   name: string;
@@ -228,10 +234,29 @@ function zonedFormatter(timezone: string): Intl.DateTimeFormat | null {
   return fmt;
 }
 
+/**
+ * [#20602] The `YYYY-MM-DD` of `day`'s UTC calendar day, spelled by core's
+ * `temporalStorageForm` `date` rule, imported rather than mirrored: the
+ * storage form the write doors keep and the one `/import`'s reader
+ * (`parseDateCell`) spells an instant's day with. Every export `date` and
+ * `datetime` cell takes its day from here.
+ *
+ * The rule pads the year to four digits. `getUTCFullYear()` and `Intl`'s
+ * `year` part are unpadded numbers, so a `date` `0500-01-01` used to export as
+ * `500-01-01` and a `datetime` on that day as `500-01-01 10:00:00`, and
+ * `/import`, which reads a four-digit year only, refused the file's row as
+ * `invalid_date`. A year outside 0001..9999 has no `YYYY-MM-DD` form: the rule
+ * leaves it unpadded (`0-12-31`, `10000-01-01`), as the export always spelled
+ * it, and the import refuses it.
+ */
+function calendarDay(day: Date): string {
+  return String(temporalStorageForm(day, 'date'));
+}
+
 /** The UTC wall clock of an instant — `YYYY-MM-DD` + `HH:mm:ss`. */
 function utcWallClock(d: Date): { ymd: string; hms: string } {
   return {
-    ymd: `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`,
+    ymd: calendarDay(d),
     hms: `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())}`,
   };
 }
@@ -272,7 +297,20 @@ function zonedWallClock(d: Date, timezone?: string): { ymd: string; hms: string 
   const mi = get('minute');
   const s = get('second');
   if (!(y && mo && da && h && mi && s)) return null;
-  return { ymd: `${y}-${mo}-${da}`, hms: `${h}:${mi}:${s}` };
+  // [#20602] The zone's calendar day, spelled by the same rule as every other
+  // cell ({@link calendarDay}). Its year is NOT `Intl`'s `year` part, which is
+  // an ERA year: year 0 (1 BC) reads `1` there, so padding it would spell
+  // `0001-01-01T03:00Z` in New York as the last day of year 1, a day a year
+  // later than the instant's. An offset is under a day, so the zone's
+  // year is the instant's UTC year, one more when the zone has reached January
+  // and UTC is still in December, one less the other way round.
+  const month = Number(mo);
+  const utcMonth = d.getUTCMonth() + 1;
+  const year = d.getUTCFullYear() + (month === 1 && utcMonth === 12 ? 1 : month === 12 && utcMonth === 1 ? -1 : 0);
+  const day = new Date(0);
+  // `setUTCFullYear`, never `Date.UTC`, which reads a year 0..99 as 1900..1999.
+  day.setUTCFullYear(year, month - 1, Number(da));
+  return { ymd: calendarDay(day), hms: `${h}:${mi}:${s}` };
 }
 
 /**
@@ -319,13 +357,14 @@ function toDate(value: unknown): Date | null {
  *
  * `timezone` absent (or unknown to the platform) ⇒ UTC, i.e. exactly the
  * pre-#8373 output.
+ *
+ * Both branches spell the day through {@link calendarDay}, so the year keeps
+ * four digits (#20602).
  */
 function formatDate(value: unknown, withTime: boolean, timezone?: string): unknown {
   const d = toDate(value);
   if (!d) return value;
-  if (!withTime) {
-    return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
-  }
+  if (!withTime) return calendarDay(d);
   const { ymd, hms } = wallClock(d, timezone);
   return `${ymd} ${hms}`;
 }
