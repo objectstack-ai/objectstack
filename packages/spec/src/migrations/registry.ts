@@ -11867,6 +11867,44 @@ const step18: MigrationStep = {
         + 'the field left empty is stored with that value — or the author has decided the form needs '
         + 'no pre-selection and the object field is unchanged.',
     },
+    // #20901 — the form-view carrier of the inline grid column. `subforms[].columns`
+    // was `z.array(z.any())` while the other carrier, a relationship field's
+    // `inlineColumns`, has been the strict `InlineGridColumnSchema` since #9227; the
+    // carrier now REFERENCES that schema, so both carriers are judged by one
+    // contract. D3 only, deliberately: the one mechanical respelling the family
+    // had (`field` → `name`, conversion `field-column-lists-canonicalized`) is
+    // already retired from the load path, and every other refused shape is a
+    // judgment only the author can make. A stored view whose column fails is
+    // refused with the column schema's own prescription, never stripped.
+    {
+      id: 'form-view-subform-columns-closed',
+      surface: 'view.form.subforms[].columns[] and view.formViews.<key>.subforms[].columns[] — the '
+        + 'form view\'s inline grid columns, which used to accept any value',
+      replacement: 'each entry is the strict, name-keyed inline grid column a relationship field\'s '
+        + '`inlineColumns` takes — `{ name, label?, type?, … }`, where `{ name }` alone hydrates the rest '
+        + 'from the child object\'s field. Write `name` where a column said `field` (or `fieldName`, '
+        + '`key`); delete `scale` from a column declaring `type: \'currency\'`; delete any key the '
+        + 'column schema does not declare.',
+      reason: 'Both carriers feed the one console grid, which reads only the keys the column schema '
+        + 'declares and keys a column by `name` alone. On the form view the columns were never judged, '
+        + 'so a mis-keyed column published clean and drew a blank grid column, and a key the other '
+        + 'carrier refuses — `scale` on a currency column, under the maintainer\'s ruling of 2026-09-23 '
+        + '(option B, `scale` retired from the currency type) and the remedy ruled on 2026-09-24 '
+        + '(option 乙 — a currency\'s ISO 4217 minor unit decides its display) — published green here. '
+        + 'The carrier now references the column schema, so every rule it holds applies here too, with '
+        + 'its own prescription. NOT mechanically converted: the `field` → `name` respelling this family '
+        + 'had is already retired from the load path, and which column an unknown key or a mixed '
+        + '`field`/`name` entry meant is the author\'s call — a conversion that dropped the key would '
+        + 'accept on every load what the parse now refuses. Population measured at the change, on '
+        + 'origin/main cb4c31dd52: zero authored `subforms` in the repository (the showcase derives its '
+        + 'master-detail grids from the data model instead), against one authored `inlineColumns` block '
+        + 'as the control. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every view in the stack parses: `objectstack validate` and a view parse report '
+        + 'no issue on a `subforms[].columns[]` path. Every column entry is an object carrying `name`, '
+        + 'no entry carries `field`, `fieldName` or `key`, and no column declaring `type: \'currency\'` '
+        + 'carries `scale`. Each column `name` names a field of the subform\'s `childObject`, and the '
+        + 'master-detail grid renders a value — not a blank cell — in each column for a row that has one.',
+    },
     {
       id: 'hook-register-undispatched-lifecycle-event-refused',
       surface:
@@ -12302,6 +12340,45 @@ const step18: MigrationStep = {
         + 'currency column that carried `scale` no longer declares it, and a diff of the column shows '
         + 'that one line deleted and no key added. `number` columns, and columns declaring no `type`, '
         + 'keep their `scale`; a column\'s `prefix` is still accepted on a currency column.',
+    },
+    // #20901 — the reach of `inline-grid-column-currency-scale-refused`, extended to
+    // the column that declares no `type`. The column schema judges only a DECLARED
+    // type; an identity-only column takes its type from the child field when the
+    // console hydrates it, and the child field is a fact the stack holds. So
+    // `defineStack`'s cross-reference check re-parses such a column as the type it
+    // renders as and reports the column schema's own refusal — no second scale
+    // rule. D3 only, for the reason the declared-type entry gives: a conversion
+    // that dropped the key would accept it on every load, the grace window the
+    // ruling refused.
+    {
+      id: 'inline-grid-column-identity-only-currency-scale-refused',
+      surface: 'object.fields.<name>.inlineColumns[].scale and view.form.subforms[].columns[].scale '
+        + '(and each formViews entry) on a column that declares NO `type` and whose `name` is a '
+        + '`currency` field of the child object — any value, `scale: 0` included. A column declaring '
+        + '`type: \'number\'`, and a column over a field of any other type, keep `scale`',
+      replacement: 'no `scale` on the column. DELETE the key — that is the whole migration: the column '
+        + 'renders as a currency column, and a currency amount\'s decimal places are its currency\'s. '
+        + 'The currency\'s ISO 4217 minor unit decides how the cell displays the amount and the width a '
+        + 'computed amount is rounded to. ⛔ Nothing replaces the key: do not re-declare its value under '
+        + 'any other key, and do not add `type: \'number\'` to keep it on a currency amount.',
+      reason: 'The refusal of `scale` on a currency inline grid column (entry '
+        + '`inline-grid-column-currency-scale-refused`, under the maintainer\'s rulings of 2026-09-23, '
+        + 'option B, and 2026-09-24, option 乙) reached only a column that DECLARES `type: \'currency\'`, '
+        + 'because the column schema cannot see the child field. An identity-only column — the '
+        + 'recommended form — over a currency field renders as a currency column all the same, so it '
+        + 'published green carrying the refused key, and the console ignored it. `defineStack`\'s '
+        + 'cross-reference check, which holds the child object\'s fields, now judges such a column as the '
+        + 'type it renders as and refuses it with the column schema\'s own message. Reach: the child '
+        + 'object must be declared in the same stack; a column naming no field of it, or a subform whose '
+        + 'child object comes from another package, is not judged there. Population measured at the '
+        + 'change, on origin/main cb4c31dd52: one authored `inlineColumns` block (the showcase invoice, '
+        + 'seven identity-only columns, none carrying `scale`) and zero authored `subforms`. Deployed '
+        + 'metadata NOT MEASURED.',
+      acceptanceCriteria: '`objectstack validate` and `defineStack` report no cross-reference finding on '
+        + 'an `inlineColumns[].scale` or `subforms[].columns[].scale` path. A column that carried `scale` '
+        + 'over a currency child field no longer declares it, and a diff of the column shows that one line '
+        + 'deleted and no key added. Columns over `number` fields, and columns declaring `type: '
+        + '\'number\'`, keep their `scale`.',
     },
     // #14478 (maintainer ruling B: a duration key carries its unit in its NAME) —
     // the D3 entry of the `job-timeout-to-timeout-ms` family (ruling B on #17152:
