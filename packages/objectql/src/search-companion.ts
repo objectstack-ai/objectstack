@@ -323,7 +323,7 @@ export function provisionSearchCompanion<T extends CompanionObjectMeta>(schema: 
         searchable: false,
         description:
           `Search-normalized forms of the display/name field (normalizers: ${SEARCH_COMPANION_NORMALIZERS.join(', ')}) — ` +
-          'e.g. full pinyin + initials for CJK names. Maintained by plugin-pinyin-search; never hand-edited. See #2486.',
+          'e.g. full pinyin + initials for CJK names. Maintained by plugin-pinyin-search; never hand-edited.',
       },
     },
   };

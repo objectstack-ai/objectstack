@@ -302,7 +302,7 @@ function buildRefusalMessage(
     `${DEFAULT_TENANT_FIELD} = NULL, which the autonumber counter and the partitioned unique index ` +
     `(COALESCE(${DEFAULT_TENANT_FIELD}, '${GLOBAL_TENANT}'), <field>) both collapse to the ` +
     `'${GLOBAL_TENANT}' pseudo-tenant — a second counter that cannot see the organization's own, so a ` +
-    `field declared unique silently gets the same value twice (#8844). Nothing was written. Fix it by ` +
+    `field declared unique silently gets the same value twice. Nothing was written. Fix it by ` +
     `carrying the organization the way a session write does: pass it on the execution context ` +
     `({ context: { isSystem: true, tenantId: '<organization id>' } }), or set ${DEFAULT_TENANT_FIELD} ` +
     `on the record itself. If rows of '${object}' are genuinely platform-global and belong to no ` +

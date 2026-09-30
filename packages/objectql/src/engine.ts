@@ -770,7 +770,7 @@ function rejectUnknownEngineOptions(
   throw new Error(
     `${operation}('${object}') does not recognise option${unknown.length > 1 ? 's' : ''} ` +
     `${details.join('; ')}. The engine executes none of ${unknown.length > 1 ? 'them' : 'it'}, ` +
-    `so the call would succeed with the option silently ignored (#4371). ` +
+    `so the call would succeed with the option silently ignored. ` +
     `Legal keys for ${operation}: ${[...legal].sort().join(', ')}.`,
   );
 }
@@ -1071,7 +1071,7 @@ function lowerWhereFilterArray<T extends object | undefined>(
       `${JSON.stringify(where)}. A filter array is a comparison [field, operator, value], ` +
       `a logical node ["and"|"or", ...conditions], or a list of those — it is INPUT-ONLY ` +
       `sugar (spec 'FilterArray'), lowered to a FilterCondition here before any driver sees ` +
-      `it (#5158). This value cannot be lowered, and an unapplied filter would have returned ` +
+      `it. This value cannot be lowered, and an unapplied filter would have returned ` +
       `the UNFILTERED result set. Recognised operators: ` +
       `${[...VALID_AST_OPERATORS].sort().join(', ')}. Infix joins ([condA, "or", condB]) are ` +
       `NOT one of the shapes — write the prefix form ["or", condA, condB].`,
@@ -1094,7 +1094,7 @@ function lowerWhereFilterArray<T extends object | undefined>(
     throw new Error(
       `${operation}('${object}'): filter array ${JSON.stringify(where)} passed isFilterAST() ` +
       `but parseFilterAST() lowered it to nothing. Refusing rather than running the query ` +
-      `unfiltered (#5158).`,
+      `unfiltered.`,
     );
   }
   // [#5869] Door 2's half of the same check USED to be a second
@@ -14017,7 +14017,9 @@ export class ObjectQL implements IObjectQLEngine {
            if (!ast) {
                throw new Error(
                  `[Security] Refusing bulk update on '${object}': row-scoping AST was not seeded ` +
-                   `(the predicate branch was reached without the #2982 seed).`,
+                   `(the predicate branch was reached without the AST seeded before the middleware ` +
+                   `chain — the one RLS and sharing compose their row-scoping onto, so that a bulk ` +
+                   `write reaches only the rows this caller may edit).`,
                );
            }
            // [#9974] The unscoped-multi shape check, BEFORE the matched-row
@@ -16337,7 +16339,9 @@ export class ObjectQL implements IObjectQLEngine {
         if (!ast) {
           throw new Error(
             `[Security] Refusing bulk delete on '${object}': row-scoping AST was not seeded ` +
-              `(the predicate branch was reached without the #2982 seed).`,
+              `(the predicate branch was reached without the AST seeded before the middleware ` +
+              `chain — the one RLS and sharing compose their row-scoping onto, so that a bulk ` +
+              `write reaches only the rows this caller may edit).`,
           );
         }
         // [#9719] The unscoped-multi shape check, BEFORE the matched-row read:
@@ -16658,7 +16662,7 @@ export class ObjectQL implements IObjectQLEngine {
           + 'secret/password fields are masked on read and `internal: true` fields are omitted '
           + 'outright, so the value never leaves the engine on the generic data path; aggregating '
           + 'them (group-by, min/max, array_agg, …) would surface it. '
-          + 'Refusing (fail-closed) — see ADR-0100 / #3171 / #7922.',
+          + 'Refusing (fail-closed) — see ADR-0100.',
       );
     }
   }
