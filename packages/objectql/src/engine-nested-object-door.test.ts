@@ -26,8 +26,10 @@
  * The InMemoryDriver cell is this suite's recording driver by construction:
  * the arm answers before any driver is resolved, so no read runs. The SQL
  * cells and the named routes over a real driver live in `@objectstack/rest`'s
- * `data-nested-object-door.test.ts`; InMemoryDriver's routes in
- * `@objectstack/runtime`'s `data-nested-object-door-memory.test.ts`.
+ * `data-nested-object-door.test.ts`. The routes on InMemoryDriver were
+ * measured (`d1`, `d3` for `$in` on a lookup and `$contains` on a multiple
+ * lookup) and are not pinned in a new suite: that driver's test consumers are
+ * a ruled, closed census (`check:driver-memory-census`).
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
