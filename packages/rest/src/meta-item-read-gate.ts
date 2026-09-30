@@ -1891,8 +1891,7 @@ export function metaTranslateOptions(
  * The rule the base feeds is ADR-0029 D9.2a's — an explicit override beats a
  * packaged default, decided by comparison against the PACKAGED declaration
  * (`@objectstack/spec/system` owns the comparison; this table only hands it
- * the value it cannot see). The types it covers are exactly the translatable
- * types whose served document can diverge from what the package shipped:
+ * the value it cannot see). The rows, one per protocol accessor:
  *
  *  - `object` — a code `objectExtensions` scalar or a tenant rename folds onto
  *    the owner's declaration (`getPackagedObjectBase`, pre-fold);
@@ -1902,9 +1901,10 @@ export function metaTranslateOptions(
  *    by the served item's registry name, the qualified `<object>.<viewKey>` —
  *    never the bare key the catalog addresses it by under its object.
  *
- * The other translatable types (`action`, `app`, `dataset`, `page`) are
- * Regime B — a packaged item is not customizable — so the served document of
- * a packaged item is the packaged one and there is nothing to compare.
+ * A translatable type without a row (`action`, `app`, `dataset`, `page`) is
+ * ADR-0126 tier B — a write against its packaged item answers
+ * `NOT_OVERRIDABLE`, so no org overlay of a packaged item exists for it —
+ * and the protocol has no packaged-base accessor for it.
  *
  * ⛔ One table, never a second resolver beside it: a type that gains a
  * packaged-base accessor on the protocol adds its row here.
