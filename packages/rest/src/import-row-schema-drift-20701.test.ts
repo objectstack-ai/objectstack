@@ -1,36 +1,43 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#20701] A declared field whose column is missing (schema drift): the import
- * row answers what `POST /api/v1/data/:object` answers, on the commit and on
- * the async job's rows. Read through the public doors over a REAL
- * {@link ObjectQL} + {@link ObjectStackProtocolImplementation} + SQLite
- * `:memory:`, with the platform's own `sys_import_job`.
+ * [#20701] A write the driver refuses on a column: the import row answers what
+ * `POST /api/v1/data/:object` answers, on the commit and on the async job's
+ * rows. Read through the public doors over a REAL {@link ObjectQL} +
+ * {@link ObjectStackProtocolImplementation} + SQLite `:memory:`, with the
+ * platform's own `sys_import_job`. Three refusals, each classified by
+ * `mapDataError`, the mapper the door uses (`toFailedResult` adopts its
+ * verdict):
  *
- * Drift is made the way it happens: the object declares `late` after the DDL
- * ran, with no re-sync. The engine's declared-field door passes `late`, since it
- * is declared, and the driver refuses the write.
+ *  1. **Schema drift.** The object declares `late` after the DDL ran, with no
+ *     re-sync. The engine's declared-field door passes `late`, since it is
+ *     declared, and the driver refuses the write.
+ *  2. **NOT NULL.** `must` is `storage: { notNull: true }` and not `required`,
+ *     so the record validator lets a missing value through (ADR-0113) and the
+ *     driver refuses it.
+ *  3. **Unique conflict.** `code` is `unique: true` and the row repeats `X`.
  *
- * Measured on the base (`67c1b11a20`):
+ * Measured on the bases (`67c1b11a20` for 1, `75519e1c0a` for 2 and 3):
  *
- * | door | answer for `late` |
- * |:--|:--|
- * | `POST /data/:object` | `400 INVALID_FIELD`, `field: 'late'`, "The database table of object … has no column for field 'late'. …" |
- * | import commit, insert | failed, `code: 'SQLITE_ERROR'`, `table proj_… has no column named late`, no `field` |
- * | import commit, upsert onto an existing row | failed, `code: 'SQLITE_ERROR'`, `no such column: late`, no `field` |
- * | async import job, results route | failed, `code: 'SQLITE_ERROR'`, the driver's text, no `field` |
+ * | door | drift (`late`) | NOT NULL (`must`) | unique (`code`) |
+ * |:--|:--|:--|:--|
+ * | `POST /data/:object` | `400 INVALID_FIELD`, `field: 'late'`, "The database table of object … has no column for field 'late'. …" | `400 VALIDATION_FAILED`, `fields: [{ field: 'must', code: 'required' }]`, "must is required", a `hint` | `409 UNIQUE_VIOLATION`, `field: 'code'`, "A record with this code already exists", the engine's sentence as `developerMessage` |
+ * | import commit row, before | `SQLITE_ERROR`, the driver's text, no `field` | `SQLITE_CONSTRAINT_NOTNULL`, "must is required.", no `field` | `UNIQUE_VIOLATION`, `field: 'code'`, the engine's sentence |
+ * | async import job row, before | the same as the commit | the same as the commit | the same as the commit |
  *
- * The row now takes the door's verdict when the door's verdict is
- * `INVALID_FIELD` (`toFailedResult` asks `mapDataError`, the mapper the door
- * uses). The unique-conflict and NOT NULL rows are controls: the door answers
- * them in other words (see `toFailedResult`'s docblock), and this change leaves
- * both rows as they were. Their pins say "unchanged by this card", not "right".
- * A card that converges them updates these pins on purpose.
+ * Each row now carries the door's `code`, `field` and sentence. For NOT NULL
+ * the door's `required` finding wins over its top-level `VALIDATION_FAILED`,
+ * the rule the row applies to the engine's own findings, so the row reads
+ * `code: 'required'`, `field: 'must'` — the row a metadata-`required` field
+ * already gets — and no driver dialect's code reaches the wire (ADR-0112). No
+ * key is added: the door's `hint`, `object` and `developerMessage` stay off the
+ * row, whose keys are `ImportRowResultSchema`'s.
  *
  * ⚠️ Not pinned: the dry run. `engine.validate` reads metadata, never the
- * table, so a drifted column previews as `ok` / `created` (measured on the
- * base, and unchanged here). That is the gap between the preview and the
- * commit that the fix report names, not a behaviour this file vouches for.
+ * table, and does not judge `storage.notNull` or uniqueness, so all three rows
+ * preview as `ok` / `created` (measured on the bases, and unchanged here). That
+ * gap between the preview and the commit is not a behaviour this file vouches
+ * for; triage settled the drift case as the migration door's.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -175,26 +182,97 @@ describe('[#20701] the async import job\'s rows carry the same answer', () => {
   });
 });
 
-describe('[#20701] controls: a unique conflict and a NOT NULL row keep the answers they had', () => {
+/** The row's whole key set: the door's extra keys (`hint`, `object`, `developerMessage`) are not on it. */
+const ROW_KEYS = ['action', 'code', 'error', 'field', 'ok', 'row'];
+
+/** Dialect codes for a NOT NULL or unique refusal (SQLite, Postgres SQLSTATE, MySQL): none reaches a row. */
+const DIALECT_CODE = /^(SQLITE_|ER_)|^\d{5}$/;
+
+function expectRowIsDoor(row: any, door: { code: unknown; field: unknown; error: unknown }, rowNo: number) {
+  expect(row, JSON.stringify(row)).toMatchObject({ row: rowNo, ok: false, action: 'failed', ...door });
+  expect(Object.keys(row).sort()).toEqual(ROW_KEYS);
+  expect(String(row.code)).not.toMatch(DIALECT_CODE);
+}
+
+describe('[#20701] a NOT NULL refusal fails the row with the create door\'s `required` finding', () => {
   let b: Boot;
   beforeEach(async () => { b = await boot(); });
 
-  it('unique conflict: UNIQUE_VIOLATION naming the column, with the engine\'s sentence', async () => {
-    const door = await b.call('POST', '/api/v1/data/:object', { title: 't', must: 'm', code: 'X' });
-    expect(door.status).toBe(409);
-    const r = await b.importRows([{ title: 't', must: 'm', code: 'X' }]);
-    expect(r.body.results[0]).toMatchObject({
-      row: 1, ok: false, action: 'failed', code: 'UNIQUE_VIOLATION', field: 'code',
-      // The row's sentence is the engine's, which the door ships as `developerMessage`.
-      error: door.body.developerMessage,
-    });
+  /** What the door answers for a record missing `must`, read as the row renders a finding. */
+  const notNullDoor = async () => {
+    const door = await b.call('POST', '/api/v1/data/:object', { title: 't' });
+    expect(door.status, JSON.stringify(door.body)).toBe(400);
+    expect(door.body).toMatchObject({ code: 'VALIDATION_FAILED', fields: [{ field: 'must', code: 'required' }] });
+    return { code: door.body.fields[0].code, field: door.body.fields[0].field, error: door.body.error };
+  };
+
+  it('insert: the bulk create path', async () => {
+    const door = await notNullDoor();
+    const r = await b.importRows([{ title: 't' }, { id: 'w1', title: 'control', must: 'm' }]);
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expectRowIsDoor(r.body.results[0], door, 1);
+    expect(r.body.results[0]).toMatchObject({ code: 'required', field: 'must' });
+    expect(r.body.results[1]).toMatchObject({ row: 2, ok: true, action: 'created', id: 'w1' });
+    expect(r.body).toMatchObject({ ok: 1, errors: 1, created: 1 });
   });
 
-  it('NOT NULL: the driver\'s code, with no field (the door says VALIDATION_FAILED with a `required` finding)', async () => {
-    const door = await b.call('POST', '/api/v1/data/:object', { title: 't' });
-    expect(door.body).toMatchObject({ code: 'VALIDATION_FAILED' });
-    const r = await b.importRows([{ title: 't' }]);
-    expect(r.body.results[0]).toMatchObject({ row: 1, ok: false, action: 'failed', code: 'SQLITE_CONSTRAINT_NOTNULL' });
-    expect(r.body.results[0]).not.toHaveProperty('field');
+  it('upsert with no match: the create half of an upsert', async () => {
+    const door = await notNullDoor();
+    const r = await b.importRows([{ id: 'n1', title: 't' }], { writeMode: 'upsert' });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expectRowIsDoor(r.body.results[0], door, 1);
+    expect(await b.engine.findOne(OBJECT, { where: { id: 'n1' } })).toBeNull();
+  });
+});
+
+describe('[#20701] a unique conflict fails the row with the create door\'s sentence', () => {
+  let b: Boot;
+  beforeEach(async () => { b = await boot(); });
+
+  it('insert: UNIQUE_VIOLATION naming the column, in the words of `POST /data/:object`', async () => {
+    const door = await b.call('POST', '/api/v1/data/:object', { title: 't', must: 'm', code: 'X' });
+    expect(door.status, JSON.stringify(door.body)).toBe(409);
+    expect(door.body).toMatchObject({ code: 'UNIQUE_VIOLATION', field: 'code' });
+    const r = await b.importRows([{ title: 't', must: 'm', code: 'X' }, { id: 'w1', title: 'control', must: 'm', code: 'Z' }]);
+    expectRowIsDoor(r.body.results[0], { code: door.body.code, field: door.body.field, error: door.body.error }, 1);
+    // The engine's sentence is the door's `developerMessage`, and it is no longer the row's.
+    expect(r.body.results[0].error).not.toBe(door.body.developerMessage);
+    expect(r.body.results[1]).toMatchObject({ row: 2, ok: true, action: 'created', id: 'w1' });
+  });
+
+  it('upsert onto an existing row: the update path, in the words of `PATCH /data/:object/:id`', async () => {
+    await b.engine.insert(OBJECT, { id: 'e2', title: 'other', code: 'Y', must: 'm' } as any);
+    const door = await b.call('PATCH', '/api/v1/data/:object/:id', { code: 'X' }, { object: OBJECT, id: 'e2' });
+    expect(door.status, JSON.stringify(door.body)).toBe(409);
+    const r = await b.importRows([{ id: 'e2', code: 'X' }], { writeMode: 'upsert' });
+    expectRowIsDoor(r.body.results[0], { code: door.body.code, field: door.body.field, error: door.body.error }, 1);
+    expect(await b.engine.findOne(OBJECT, { where: { id: 'e2' } })).toMatchObject({ code: 'Y' });
+  });
+});
+
+describe('[#20701] the async import job\'s rows carry the door\'s NOT NULL and unique answers', () => {
+  it('the results route reports both, and the writable row is created', async () => {
+    const b = await boot();
+    const notNull = await b.call('POST', '/api/v1/data/:object', { title: 't' });
+    const unique = await b.call('POST', '/api/v1/data/:object', { title: 't', must: 'm', code: 'X' });
+    const created = await b.call('POST', '/api/v1/data/:object/import/jobs', {
+      format: 'json', dryRun: false,
+      rows: [{ title: 't' }, { title: 't', must: 'm', code: 'X' }, { id: 'w3', title: 'control', must: 'm' }],
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const jobId = String(created.body.jobId);
+    let progress: { status: number; body: any } | undefined;
+    for (let i = 0; i < 200; i++) {
+      progress = await b.call('GET', '/api/v1/data/import/jobs/:jobId', undefined, { jobId });
+      if (['succeeded', 'failed', 'cancelled'].includes(progress.body?.status)) break;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(progress?.body).toMatchObject({ status: 'succeeded', created: 1, errors: 2 });
+    const rows: any[] = (await b.call('GET', '/api/v1/data/import/jobs/:jobId/results', undefined, { jobId })).body.results;
+    expectRowIsDoor(rows.find((r) => r.row === 1), {
+      code: notNull.body.fields[0].code, field: notNull.body.fields[0].field, error: notNull.body.error,
+    }, 1);
+    expectRowIsDoor(rows.find((r) => r.row === 2), { code: unique.body.code, field: unique.body.field, error: unique.body.error }, 2);
+    expect(rows.find((r) => r.row === 3)).toMatchObject({ row: 3, ok: true, action: 'created', id: 'w3' });
   });
 });
