@@ -735,8 +735,9 @@ runProjectCliOverridePreflight({
 // resolves the two as one object (`deepMerge(configDefaults, test, cliOptions)`)
 // — measured on 4.1.11, it honours this key, projects included. The
 // partitioner's `--self-test` fails when a sliced package's config stops
-// reading the variable.
-const sliceFromEnv: Pick<TestUserConfig, 'shard'> = { shard: process.env.OS_TEST_SHARD };
+// reading the variable — it looks for the read in code position, so the read
+// lives at its use site in the `test` block below, not in a helper binding
+// that could outlive the spread.
 
 export default defineConfig({
   resolve: {
@@ -812,8 +813,9 @@ export default defineConfig({
     ],
   },
   test: {
-    // The file-level slice, when Test Core runs one — see `sliceFromEnv` above.
-    ...sliceFromEnv,
+    // The file-level slice, when Test Core runs one (#19278) — see the section
+    // above `export default` for why it is spread and typed this way.
+    ...({ shard: process.env.OS_TEST_SHARD } satisfies Pick<TestUserConfig, 'shard'>),
     // A late console.* must not redden a green suite (#10374): vitest's worker
     // forwards console output over RPC and discards the promise, and a write
     // landing after teardown's rpcDone() snapshot is rejected into an unhandled
