@@ -5334,7 +5334,11 @@ export const ObjectTreePropsSchema = lazySchema(() => strictObject({
    * holds for them because each registers through `ElementDataSourceGate`,
    * which lowers the spec binding onto `objectName` before the renderer sees
    * the node. `plugin-tree/src/index.tsx` does NOT: at the pin this repo
-   * builds against (`.objectui-sha` = `db11afd49`, re-COUNTED there 2026-09-29 by
+   * builds against (`.objectui-sha` = `e420df310`, re-COUNTED there 2026-09-30 by
+   * the same method — 3 each again and 0 for the tree; `plugin-map` and
+   * `plugin-gantt`'s `src/index.tsx` changed on the hop (objectui#8220's
+   * `filter` / `sort` inputs) and still read 3, the tree's is byte-identical;
+   * re-COUNTED at `db11afd49` 2026-09-29 by
    * the same method — 3 each again and 0 for the tree;
    * `plugin-grid/src/index.tsx` changed on the hop and still reads 3; re-COUNTED
    * at `dd3f7e1be`
@@ -5428,8 +5432,18 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * `object-timeline` (objectui `plugin-timeline/src/ObjectTimeline.tsx`, the
  * presentational `plugin-timeline/src/renderer.tsx` it composes into, and the
  * registry shell `plugin-timeline/src/index.tsx` — all read at the pin this
- * repo builds against (`.objectui-sha` = `db11afd49`), re-measured there
- * 2026-09-29: `ObjectTimeline.tsx` and `index.tsx` are byte-identical to
+ * repo builds against (`.objectui-sha` = `e420df310`), re-measured there
+ * 2026-09-30: `ObjectTimeline.tsx` is byte-identical to `db11afd49`, so every
+ * anchor in it held unmoved and was re-read in place; `index.tsx` changed
+ * (+17/-0, objectui#8220: `filter` / `sort` inputs on both registrations, in
+ * the array forms this row declares, and their shared descriptions above the
+ * first), the `variant` input MOVING `361-362` -> `374-375` byte-identical and
+ * `:333` not moving; and `renderer.tsx` changed (+83/-8, objectui#11141's
+ * inclusive date-only end), its three anchors MOVING with their cited text
+ * byte-identical, `1497` -> `1569`, `1794` -> `1869`, `1722-1737` ->
+ * `1794-1809`; its schema-key read set (`schema.*`) is unchanged. At
+ * `db11afd49` (2026-09-29) `ObjectTimeline.tsx` and `index.tsx` were
+ * byte-identical to
  * `dd3f7e1be`, and `renderer.tsx` changed hard (+387/-177: objectui#11079's
  * continuous gantt axis and objectui `9e6619ffa`'s date-only day in every zone),
  * its three anchors MOVING with their cited text byte-identical, `1295` ->
@@ -5496,11 +5510,11 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * `variant` (`:809`) and `navigation` (`:753-756` → `:888` → `:943-944`).
  * Four more are read by the presentational renderer off the schema this
  * component spreads into it (`effectiveSchema`, `:872-891`): `dateFormat`
- * (`plugin-timeline/src/renderer.tsx:1497`, every variant — its number was the
+ * (`plugin-timeline/src/renderer.tsx:1569`, every variant — its number was the
  * same at `53ded82bf` and `87af769e9`, as `plugin-timeline/src/index.tsx:333`'s
  * also was, which is why the number alone is never the reading) and the gantt
- * trio `rowLabel` (`plugin-timeline/src/renderer.tsx:1794`), `minDate` /
- * `maxDate` (`plugin-timeline/src/renderer.tsx:1722-1737`). ⚠️ All three name their
+ * trio `rowLabel` (`plugin-timeline/src/renderer.tsx:1869`), `minDate` /
+ * `maxDate` (`plugin-timeline/src/renderer.tsx:1794-1809`). ⚠️ All three name their
  * package because objectui has a second `renderer.tsx` (in `plugin-chatbot`):
  * a suffix that matches two files names neither, and the gate drops it from
  * the population rather than guessing.
@@ -5525,7 +5539,7 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * reference, for the reason the ruling gives.
  *
  * ⚠️ `variant: 'gantt'` is declared because the registration declares it
- * (`plugin-timeline/src/index.tsx:361-362`) and the renderer reads it — but the
+ * (`plugin-timeline/src/index.tsx:374-375`) and the renderer reads it — but the
  * OBJECT-BOUND composed path REFUSES it loudly (objectui#6655,
  * `ObjectTimeline.tsx:809-811`:
  * `:809` gates on `!hasAuthoredItems && schema.variant === 'gantt'` and `:811`
@@ -5580,7 +5594,13 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
    * first publishes a refusal for a key the renderer honours.
    *
    * Read points at the pin this repo builds against (`.objectui-sha` =
-   * `db11afd49`, re-READ there 2026-09-29 — the file is byte-identical to
+   * `e420df310`, re-READ there 2026-09-30 — the file is byte-identical to
+   * `db11afd49`, so every anchor held unmoved; and the prop channel above
+   * still carries the key here: `SchemaRenderer` strips an authored `data`
+   * prop only on the types `core`'s `RECORD_SOURCE_DATA_ARM_BY_TYPE` puts on
+   * the `view-data` arm (objectui#9571), and `object-timeline` is not listed,
+   * so it stays `undeclared` and keeps the seat. At `db11afd49`, 2026-09-29,
+   * the file was byte-identical to
    * `dd3f7e1be`, so every anchor held unmoved; at `dd3f7e1be`, 2026-09-28, the
    * file changed across the hop
    * from `f8a9d0fb0` (+129/-26), so every anchor was re-mapped through the
@@ -5792,8 +5812,12 @@ export const ComponentPropsMap = {
   // set from this map's keys), on the three-part evidence that vocabulary's
   // string-arm ledger asks of a type admitted without an enum member — all
   // measured at the pin this repo builds against (`.objectui-sha` =
-  // `db11afd49`; re-measured there 2026-09-29, all four files byte-identical to
-  // `dd3f7e1be`):
+  // `e420df310`; re-measured there 2026-09-30: `data-list.tsx`,
+  // `public-blocks.ts` and `block-types.ts` byte-identical to `db11afd49`, and
+  // `block-config.ts` changed (+12/-3) outside the two inspectors — two
+  // line-neutral one-line edits above them and an insertion below — so every
+  // anchor below held unmoved; at `db11afd49`, 2026-09-29, all four files were
+  // byte-identical to `dd3f7e1be`):
   //  - registration: `@object-ui/components` registers both in the `element`
   //    namespace (`components/src/renderers/basic/data-list.tsx:75`, `:205`);
   //  - publication: both are `PUBLIC_BLOCKS` members
@@ -5835,7 +5859,13 @@ export const ComponentPropsMap = {
   // authority for map and gantt while tree's rung-1 `data` read stayed
   // undeclared on every face. Key sets measured from the renderers' read
   // points at the pin this repo builds against (`.objectui-sha` =
-  // `db11afd49`), all three re-measured there 2026-09-29 (`ObjectMap.tsx`
+  // `e420df310`), all three re-measured there 2026-09-30 (all three renderers
+  // changed and were re-READ: `ObjectMap.tsx` in one docblock, `ObjectGantt.tsx`
+  // in objectui#11141's inclusive date-only end, and `ObjectTree.tsx`, whose
+  // rung-1 call now passes the `view-data` arm this row declares and whose
+  // host-data read stopped reading the authored `schema.data`, objectui#8348;
+  // the `schema.*` read set of each is unchanged, so no declared key set moved
+  // and no read point died. At `db11afd49`, 2026-09-29: `ObjectMap.tsx`
   // byte-identical to `dd3f7e1be`, `ObjectTree.tsx` changed in one comment line,
   // `ObjectGantt.tsx` in its date-only DST handling and citations; the `schema.*`
   // read set of each is unchanged, so no declared key set moved and no read point
@@ -5863,7 +5893,11 @@ export const ComponentPropsMap = {
   // it — so `object-timeline` was unjudged in both directions, a real key and
   // a typo riding through alike. Key set measured from the renderer's read
   // points at the pin this repo builds against (`.objectui-sha` =
-  // `db11afd49`), re-measured there 2026-09-29 (`ObjectTimeline.tsx` and
+  // `e420df310`), re-measured there 2026-09-30 (`ObjectTimeline.tsx`
+  // byte-identical to `db11afd49`; `index.tsx` gained `filter` / `sort` inputs,
+  // objectui#8220, and `renderer.tsx` changed, objectui#11141, both re-READ,
+  // the `schema.*` read set unchanged and every anchor moved with its text
+  // byte-identical. At `db11afd49`, 2026-09-29: `ObjectTimeline.tsx` and
   // `index.tsx` byte-identical to `dd3f7e1be`; `renderer.tsx` changed and was
   // re-READ, its `schema.*` read set unchanged and its three anchors moved with
   // their text byte-identical. At `dd3f7e1be`, 2026-09-28, `index.tsx`
