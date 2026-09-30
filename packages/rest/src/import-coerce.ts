@@ -16,7 +16,7 @@
  *   - number / currency / percent / rating / slider → a finite `number`
  *   - boolean / toggle                              → a real `boolean`
  *   - date / datetime                               → an ISO-8601 string
- *   - time                                          → `HH:MM` / `HH:MM:SS`
+ *   - time                                          → `HH:MM:SS`, `.fff` when non-zero
  *   - select / radio                                → an option *value*
  *   - multiselect / checkboxes / tags               → an array of option values
  *   - lookup / master_detail / user / reference     → a record id (resolved async)
@@ -31,7 +31,12 @@
  * untouched, so an import stays byte-identical to the pre-coercion behaviour.
  */
 
-import { temporalStorageForm, zonedWallClockToUtcMs, type WallClockParts } from '@objectstack/core';
+import {
+  isUninterpretableTemporalComparand,
+  temporalStorageForm,
+  zonedWallClockToUtcMs,
+  type WallClockParts,
+} from '@objectstack/core';
 import type { ExportFieldMeta } from './export-format.js';
 import {
   SINGLE_OPTION_TYPES as OPTION_TYPES,
@@ -43,6 +48,7 @@ import {
   IMPORT_BOOLEAN_TRUE_TOKENS,
   IMPORT_BOOLEAN_FALSE_TOKENS,
   IMPORT_REFERENCE_TYPES,
+  classifyFilterToken,
 } from '@objectstack/spec/data';
 import type { FieldErrorCode } from '@objectstack/spec/api';
 import {
@@ -270,7 +276,38 @@ function pad2(n: number): string {
   return n < 10 ? `0${n}` : String(n);
 }
 
-const TIME_OF_DAY = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
+/**
+ * [#20722] A `time` cell read by `@objectstack/core`'s one `time` rule, or
+ * `undefined` when that rule refuses it. It is the rule the write door asks of
+ * a written `time` (#20671) and the comparand door asks of a filter value, so a
+ * cell is admitted here exactly when the same value is admitted there, and is
+ * stored as the same wall clock:
+ *
+ * - the verdict is `isUninterpretableTemporalComparand('time', …)`: a bare
+ *   `HH:MM[:SS[.f…]]` in range, or an instant in an ISO 8601 spelling a
+ *   `datetime` is written in, on a day that exists, whose UTC year has four
+ *   digits. A time of day with a `Z` or an offset (`10:00Z`) is refused: a
+ *   `time` carries no zone (ADR-0053 D-C1);
+ * - the value is `temporalStorageForm(…, 'time')`: `HH:MM:SS`, `.fff` kept
+ *   when non-zero (a fraction past milliseconds truncated), and an instant's
+ *   UTC time of day, fraction included.
+ *
+ * The storage form is not a verdict on its own: it hands a string it cannot
+ * read back unchanged, and it reads `07/15/2026 10:00` through `Date.parse`
+ * in the host's zone and rolls `2026-02-30T10:00:00Z` over to March 2, both of
+ * which the verdict refuses. A `{placeholder}` is filter vocabulary, which the
+ * verdict steps around rather than judges, so it is refused here, as the write
+ * door refuses it.
+ *
+ * This replaced a private pattern with no fractional part, which refused the
+ * `10:00:00.250` that `/export` writes for a `time` with milliseconds, so such
+ * a row did not re-import.
+ */
+function readTimeOfDayCell(s: string): string | undefined {
+  if (classifyFilterToken(s) !== null || isUninterpretableTemporalComparand('time', s)) return undefined;
+  const form = temporalStorageForm(s, 'time');
+  return typeof form === 'string' ? form : undefined;
+}
 
 /**
  * [#20534] The text shapes a `date` / `datetime` / `time` cell is read in,
@@ -416,10 +453,12 @@ function utcClock(t: Date): string {
  * Coerce a cell into the string shape the engine accepts for a date-ish field:
  *   - `date`     → `YYYY-MM-DD`
  *   - `datetime` → full ISO-8601 (`toISOString`)
- *   - `time`     → `HH:MM` / `HH:MM:SS`
+ *   - `time`     → `HH:MM:SS`, `.fff` when non-zero ({@link readTimeOfDayCell})
  * Returns `undefined` when the cell is not a recognisable date/time, and the
- * caller fails the row with `invalid_date` (`import_invalid_date` /
- * `import_invalid_datetime` / `import_invalid_time`).
+ * caller fails the row with the write door's code for the same cell:
+ * `invalid_date` for a `date` / `datetime` (`import_invalid_date` /
+ * `import_invalid_datetime`), `invalid_time` for a `time`
+ * (`import_invalid_time`).
  *
  * ## Which text is read at all (#20534)
  *
@@ -427,8 +466,11 @@ function utcClock(t: Date): string {
  * or the export's own `YYYY-MM-DD HH:mm:ss` — or as a year-first date
  * ({@link YEAR_FIRST_CELL}: `2026/7/15`, `2026/7/15 9:00`, stored padded, the
  * clock read exactly as the export shape's), and only on a calendar day that
- * exists. A `time` cell may also be a bare `HH:MM` / `HH:MM:SS`. Every other
- * cell is refused on every branch; nothing reaches `new Date(s)`:
+ * exists. A `time` cell is read by core's one `time` rule instead
+ * ({@link readTimeOfDayCell}, #20722): a bare `HH:MM[:SS[.f…]]` or an ISO
+ * 8601 instant, as the write door reads it, and otherwise in the year-first
+ * form. Every other cell is refused on every branch; nothing reaches
+ * `new Date(s)`:
  *
  *  - **an impossible day** (`2026-02-30`, `2026-02-29`, `2026-04-31`,
  *    `2026/2/30`, in any of the shapes) — `Date.UTC` and `Date.parse` rolled it
@@ -482,9 +524,10 @@ function utcClock(t: Date): string {
  *    see it.
  *
  * For a naive cell landing in a `date` or `time` field the typed components are
- * taken verbatim (`2026-08-01 06:00:00` → `2026-08-01` / `06:00:00`), which is
- * both zone-free and host-`TZ`-free. An offset-bearing cell landing in either
- * takes the UTC calendar day or UTC clock of the instant it names.
+ * taken verbatim (`2026-08-01 06:00:00` → `2026-08-01` / `06:00:00`, a `time`
+ * keeping a non-zero fraction), which is both zone-free and host-`TZ`-free. An
+ * offset-bearing cell landing in either takes the UTC calendar day or UTC
+ * clock of the instant it names.
  */
 export function parseDateCell(
   raw: unknown,
@@ -503,9 +546,15 @@ export function parseDateCell(
   const s = String(raw).trim();
   if (s === '') return undefined;
 
-  if (kind === 'time' && TIME_OF_DAY.test(s)) return s.length === 5 ? `${s}:00` : s;
+  if (kind === 'time') {
+    const clock = readTimeOfDayCell(s);
+    if (clock !== undefined) return clock;
+  }
 
-  const cell = readIsoTemporalCell(s) ?? readYearFirstCell(s);
+  // [#20722] Core's rule is the whole verdict on an ISO 8601 `time` cell, so a
+  // `time` cell it refuses is read in the year-first form alone — the one
+  // reading the import has beyond the write door (#20534, maintainer ruling).
+  const cell = (kind === 'time' ? undefined : readIsoTemporalCell(s)) ?? readYearFirstCell(s);
   if (!cell) return undefined;
 
   if (cell.wall) {
@@ -593,9 +642,11 @@ export async function coerceFieldValue(
     // The business timezone an offset-free datetime cell is read in (#8485).
     const d = parseDateCell(raw, t, ctx.timezone);
     if (d === undefined) {
-      // One code, three sentences — a `time` cell is not "not a valid date".
+      // [#20722] The write door's code for the same cell — `invalid_time` for a
+      // `time`, `invalid_date` for a `date` / `datetime` — and three sentences.
+      const code = t === 'time' ? 'invalid_time' : 'invalid_date';
       const key = t === 'datetime' ? 'import_invalid_datetime' : t === 'time' ? 'import_invalid_time' : 'import_invalid_date';
-      return coerceError(meta, field, 'invalid_date', key, raw, ctx);
+      return coerceError(meta, field, code, key, raw, ctx);
     }
     return { value: d };
   }
