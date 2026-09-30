@@ -127,7 +127,7 @@ describe('[#20745] a no-operator object beneath a relation, JSON or id column at
       expect(res.status, `${name}: ${JSON.stringify(res.body)}`).toBe(400);
       expect(res.body.code, name).toBe('INVALID_FILTER');
       expect(res.body.error, name).toContain(`at ${path},`);
-      expect(res.body.error, name).toContain('is filter structure, not a value');
+      expect(res.body.error, name).toContain('The filter was NOT applied.');
     }
     expect(reads.n - before, 'no read of the object — every refusal precedes the driver').toBe(0);
   });

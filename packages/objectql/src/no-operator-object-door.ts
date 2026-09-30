@@ -256,15 +256,22 @@ function describeColumn(refusal: NoOperatorObjectRefusal): string {
   return `the declared ${column.type} field '${field}'`;
 }
 
-/** The scalar kind's words (#20546), less the context and the object. */
+/**
+ * The scalar kind's words (#20546), less the context and the object.
+ *
+ * [#20745] Every kind's words put the verdict and the route FIRST and the
+ * reasoning after: the REST door bounds a 4xx message at 500 characters by
+ * truncation (`CLIENT_MESSAGE_MAX`, `@objectstack/rest`'s
+ * `error-response.ts`), so what a caller must do next has to land inside it.
+ */
 function scalarWords(refusal: NoOperatorObjectRefusal): string {
   const { field, column } = refusal;
   return (
     `where a value of ${describeColumn(refusal)} belongs. An object with no "$" operator is filter `
-    + `structure, not a value, and a ${column.type} column holds scalar values — one, or a list of `
-    + 'them — so no record can match an object there, and an empty answer would read exactly like a '
-    + `real one. The filter was NOT applied. Compare '${field}' with a value ({ "${field}": VALUE }) `
-    + `or an operator ({ "${field}": { "$eq": VALUE } }).`
+    + 'structure, not a value, and the filter was NOT applied. Compare '
+    + `'${field}' with a value ({ "${field}": VALUE }) or an operator ({ "${field}": { "$eq": VALUE } }). `
+    + `A ${column.type} column holds scalar values — one, or a list of them — so no record can match an `
+    + 'object there, and an empty answer would read exactly like a real one.'
   );
 }
 
@@ -282,15 +289,14 @@ function relationWords(refusal: NoOperatorObjectRefusal): string {
   const related = target === undefined ? 'the related object' : `the related object '${target}'`;
   const multiple = def !== undefined && isMultiValueField(def);
   const match = multiple
-    ? `{ "${field}": { "$contains": ID } } for one id, and an $or of those for several`
+    ? `{ "${field}": { "$contains": ID } } for one id, an $or of those for several`
     : `{ "${field}": { "$in": [ID, …] } }`;
   return (
-    `beneath ${describeColumn(refusal)}. An object with no "$" operator is filter structure, not a `
-    + 'value: beneath a relation field it is the nested-relation form, a condition on the related '
-    + `record's own fields, and the engine does not serve it — '${field}' stores the related record's `
-    + `id, no driver follows it into ${related}, and an empty answer would read exactly like a real `
-    + `one. The filter was NOT applied. Filter ${related} first, then match '${field}' against the ids `
-    + `it returns: ${match}.`
+    `beneath ${describeColumn(refusal)} — the nested-relation form, which the engine does not serve. `
+    + `The filter was NOT applied. Filter ${related} first, then match '${field}' against the ids it `
+    + `returns: ${match}. An object with no "$" operator is filter structure, not a value: '${field}' `
+    + 'stores the related record\'s id, no driver follows it into the related object, and an empty '
+    + 'answer would read exactly like a real one.'
   );
 }
 
@@ -301,14 +307,13 @@ function relationWords(refusal: NoOperatorObjectRefusal): string {
  * some backends and silently empty on others, so it is not offered).
  */
 function jsonWords(refusal: NoOperatorObjectRefusal): string {
-  const { field, column } = refusal;
+  const { field } = refusal;
   return (
-    `as the value of ${describeColumn(refusal)}. An object with no "$" operator is filter `
-    + `structure, not a value: beneath a ${column.type} field it would be a whole-value match, and the `
-    + 'engine does not serve one — the drivers share no meaning for it (one compares the documents, '
-    + 'another refuses the bind), so one filter would answer differently by backend. The filter was '
-    + `NOT applied. Test the whole value's presence with { "${field}": { "$null": false } }, or store `
-    + 'the part you filter on in a field of its own and filter that field.'
+    `as the value of ${describeColumn(refusal)} — a whole-value match, which the engine does not `
+    + `serve. The filter was NOT applied. Test the whole value's presence with { "${field}": { "$null": `
+    + 'false } }, or store the part you filter on in a field of its own and filter that field. An object '
+    + 'with no "$" operator is filter structure, not a value, and the drivers share no meaning for a '
+    + 'whole-value match: one compares the documents, another refuses the bind.'
   );
 }
 

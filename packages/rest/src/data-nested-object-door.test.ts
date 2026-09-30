@@ -103,17 +103,21 @@ const CELLS: readonly Cell[] = [
   },
 ];
 
-/** name · the `where` · the field · the path · words only this kind's refusal prints. */
-const REFUSED: ReadonlyArray<readonly [string, FilterCondition, string, string, string]> = [
-  ['a lookup (the card)', { owner: { region: 'NA' } }, 'owner', 'where.owner', 'nested-relation form'],
-  ['a master-detail', { boss: { region: 'NA' } }, 'boss', 'where.boss', 'nested-relation form'],
-  ['a multiple lookup', { owners: { region: 'NA' } }, 'owners', 'where.owners', 'nested-relation form'],
-  ['a user field', { assignee: { region: 'NA' } }, 'assignee', 'where.assignee', 'nested-relation form'],
-  ['a tree field', { parent: { title: 'a' } }, 'parent', 'where.parent', 'nested-relation form'],
-  ['a json field (the card)', { meta: { a: 1 } }, 'meta', 'where.meta', 'whole-value match'],
-  ['an address field', { ship_to: { city: 'Paris' } }, 'ship_to', 'where.ship_to', 'whole-value match'],
-  ['the id column (the card)', { id: { a: 1 } }, 'id', 'where.id', 'platform-provisioned'],
-  ['inside $not', { $not: { owner: { region: 'NA' } } }, 'owner', 'where.$not.owner', 'nested-relation form'],
+/**
+ * name · the `where` · the field · the path · words only this kind's refusal
+ * prints · the route it names. Both are asserted on the REST body, so the
+ * route is pinned to land inside the door's 500-character message bound.
+ */
+const REFUSED: ReadonlyArray<readonly [string, FilterCondition, string, string, string, string]> = [
+  ['a lookup (the card)', { owner: { region: 'NA' } }, 'owner', 'where.owner', 'nested-relation form', `Filter the related object '${OWNER}' first, then match 'owner' against the ids it returns: { "owner": { "$in": [ID, …] } }.`],
+  ['a master-detail', { boss: { region: 'NA' } }, 'boss', 'where.boss', 'nested-relation form', '{ "boss": { "$in": [ID, …] } }'],
+  ['a multiple lookup', { owners: { region: 'NA' } }, 'owners', 'where.owners', 'nested-relation form', '{ "owners": { "$contains": ID } } for one id, an $or of those for several'],
+  ['a user field', { assignee: { region: 'NA' } }, 'assignee', 'where.assignee', 'nested-relation form', `Filter the related object 'sys_user' first`],
+  ['a tree field', { parent: { title: 'a' } }, 'parent', 'where.parent', 'nested-relation form', `Filter the related object '${OBJECT}' first`],
+  ['a json field (the card)', { meta: { a: 1 } }, 'meta', 'where.meta', 'whole-value match', '{ "meta": { "$null": false } }, or store the part you filter on in a field of its own'],
+  ['an address field', { ship_to: { city: 'Paris' } }, 'ship_to', 'where.ship_to', 'whole-value match', '{ "ship_to": { "$null": false } }'],
+  ['the id column (the card)', { id: { a: 1 } }, 'id', 'where.id', "the platform-provisioned text column 'id'", `Compare 'id' with a value ({ "id": VALUE })`],
+  ['inside $not', { $not: { owner: { region: 'NA' } } }, 'owner', 'where.$not.owner', 'nested-relation form', '{ "owner": { "$in": [ID, …] } }'],
 ];
 
 /** The arm's own words, in every refusal it raises — a control must never be answered in them. */
@@ -191,14 +195,18 @@ for (const cell of CELLS) {
 
       it('where: every row of the card answers 400 INVALID_FILTER in the engine\'s words, naming the field and the path — no read', async () => {
         const before = reads.n;
-        for (const [name, where, field, path, words] of REFUSED) {
+        for (const [name, where, field, path, words, route] of REFUSED) {
           const res = await query({ where });
           expect(res.status, `${name}: ${JSON.stringify(res.body)}`).toBe(400);
           expect(res.body.code, name).toBe('INVALID_FILTER');
           expect(res.body.error, name).toContain(`filter on '${field}'`);
           expect(res.body.error, name).toContain(`at ${path},`);
-          expect(res.body.error, name).toContain(ARM_WORDS);
+          expect(res.body.error, name).toContain('The filter was NOT applied.');
           expect(res.body.error, name).toContain(words);
+          expect(res.body.error, name).toContain(route);
+          const err = await engine.find(OBJECT, { where }).then(() => null, (e: any) => e);
+          expect({ code: err?.code, status: err?.status }, `engine.find, ${name}`).toEqual({ code: 'INVALID_FILTER', status: 400 });
+          expect(err?.message, `engine.find, ${name}`).toContain(ARM_WORDS);
         }
         expect(reads.n - before, 'no read of the object — every refusal precedes the driver').toBe(0);
       });

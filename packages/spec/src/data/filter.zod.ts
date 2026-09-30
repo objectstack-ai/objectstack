@@ -1922,7 +1922,8 @@ function checkFilterConditionComparands(
     const hasOperatorKeys = Object.keys(value).some((k) => k.startsWith('$'));
     if (!hasOperatorKeys) {
       // Nested relation / deep equality — the schema does not re-parse these,
-      // so the walk descends itself.
+      // so the walk descends itself. (The query engine refuses both at query
+      // time, `INVALID_FILTER`; see form 4 on {@link FilterCondition}.)
       checkFilterConditionComparands(value, ctx, [...path, key], depth + 1);
       continue;
     }
@@ -1979,13 +1980,21 @@ function checkFilterConditionComparands(
  * 1. Implicit equality: { field: value }
  * 2. Explicit operators: { field: { $op: value } }
  * 3. Logical combinations: { $and: [...], $or: [...], $not: {...} }
- * 4. Nested relations: { relation: { field: value } }
+ * 4. Nested relations: { relation: { field: value } } — the type and the schema
+ *    accept this form, and the query engine REFUSES it: a plain object with no
+ *    `$` operator beneath a relation field answers `INVALID_FILTER` / 400 on
+ *    every driver, because no data-path driver follows a relation into the
+ *    related object (the field stores the related record's id). Filter the
+ *    related object first, then match the relation field against the ids it
+ *    returns: `{ relation: { $in: [id, …] } }`, or `{ relation: { $contains: id } }`
+ *    per id on a multi-valued relation. The same object beneath a JSON-valued
+ *    field (a whole-value match) and beneath a scalar field is refused too.
  */
 export type FilterCondition = {
   [key: string]: 
     | any  // Implicit equality: key: value
     | z.infer<typeof FieldOperatorsSchema>  // Explicit operators: key: { $op: value }
-    | FilterCondition;  // Nested relation: key: { nested: ... }
+    | FilterCondition;  // Nested relation: key: { nested: ... } — accepted here, refused by the engine (form 4 above)
 } & {
   /** Logical AND - combines all conditions that must be true */
   $and?: FilterCondition[];
@@ -2121,10 +2130,7 @@ export const FilterConditionSchema: z.ZodType<FilterCondition, FilterCondition> 
  *     $or: [                               // Logical combination
  *       { role: "admin" },
  *       { email: { $contains: "@company.com" } }
- *     ],
- *     profile: {                           // Nested relation
- *       verified: true
- *     }
+ *     ]
  *   }
  * }
  * ```
@@ -2214,7 +2220,7 @@ export type Filter<T = any> = {
         $null?: boolean;
         $exists?: boolean;
       }
-    | (T[K] extends object ? Filter<T[K]> : never);  // Nested relation
+    | (T[K] extends object ? Filter<T[K]> : never);  // Nested relation — typed here, refused by the engine (see FilterCondition)
 } & {
   $and?: Filter<T>[];
   $or?: Filter<T>[];

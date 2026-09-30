@@ -178,11 +178,18 @@ where: {
   ],
 }
 
-// Nested relation filter
-where: {
-  account: { industry: 'tech' },
-}
+// A condition on a related record's fields: filter the related object first,
+// then match the lookup against the ids it returns
+const tech = await engine.find('account', { where: { industry: 'tech' }, fields: ['id'] });
+where: { account: { $in: tech.map((a) => a.id) } }
 ```
+
+A plain object with no `$` operator beneath a field — `{ account: { industry: 'tech' } }`
+under a lookup, `{ meta: { a: 1 } }` under a `json` field — is refused with
+`INVALID_FILTER` / 400 on every driver: no driver follows a relation into the related
+object, and a whole-value match on a JSON value means something different on each
+backend. On a multi-valued lookup (`multiple: true`), match each id with `$contains`
+(an `$or` of those for several ids) instead of `$in`.
 
 **Supported operators:** `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$between`, `$contains`, `$notContains`, `$startsWith`, `$endsWith`, `$null`, `$exists`
 
