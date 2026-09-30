@@ -266,7 +266,7 @@ The `locations` array declares where an action surfaces. The canonical enum (`AC
 | `list_item` | Per-row action on a list/grid row |
 | `record_header` | Primary actions in the record-detail title bar |
 | `record_more` | Overflow ("More" / ⋯) menu on a record |
-| `record_related` | Actions on a related-list section inside a record |
+| `record_related` | Per-row action on each row of a related-list section inside a parent record, in that parent's context only — unlike `list_item`, never on the object's own list views. Declared, not yet placed: the console does not render it on those rows yet |
 | `record_section` | Actions inside a body section/tab of a record |
 
 ```yaml

@@ -1499,7 +1499,7 @@
       "title": "Action buttons surface at exactly their declared locations — list toolbar, list row, record header/more/related/section — and each dispatches for real",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1520,7 +1520,7 @@
         "list_item — showcase_quick_view / showcase_mark_done in the row menu",
         "record_header — showcase_mark_done / showcase_log_time in the detail title bar",
         "record_more — showcase_open_docs / showcase_recalc_selection under the ⋯ overflow",
-        "record_related — showcase_log_time on the related-list section",
+        "record_related — showcase_log_time on each row of the related-list section inside a record (the Tasks related list on a showcase_project record), and on no row of the showcase_task list view",
         "record_section — showcase_mark_done / showcase_log_time in the Task Detail quick-actions bar (record:quick_actions resolves through the location filter)",
         "empty-locations semantics probe — an action with NO locations key renders on NO surface, and `locations: []` likewise (objectui#3142 collapsed the renderers onto one membership predicate, `actionRendersAt`; placement is a declaration, which is why recalc_selection has to name record_more)"
       ],
@@ -1616,6 +1616,12 @@
           "date": "2026-08-21",
           "change": "recorded on the item that its automation is pinned exclusively in the objectui repo and is therefore neither runnable nor pin-evidenced from this checkout — one of 23 items in that position, each of which every sweep had been re-deriving from scratch. The knownGap names the two honest ways to score it (hand-drive it as a manual run, or run the pin in an objectui checkout and cite the revision) and forbids the third: treating the `automated` field itself as coverage. The protocol and the exclusive-vs-mixed distinction live once in RUNNER.md; this line is the pointer (#10236 A5)",
           "ref": "#10236"
+        },
+        {
+          "revision": 6,
+          "date": "2026-09-30",
+          "change": "re-worded the record_related variant to the location's placement as the spec's ACTION_LOCATIONS docblock now states it (#20937): a per-row action on each row of a related list inside a parent record, in that parent's context only — so showcase_log_time is expected on the rows of the Tasks related list on a showcase_project record, and on no row of the showcase_task list view. It used to read 'on the related-list section', which a runner could score against the section's toolbar. The console at this repo's objectui pin places no record_related action on related-list rows yet (its related list puts list_item actions on rows and list_toolbar actions in the header; the renderer half is objectui#11270), so a run against that pin records this variant as a missing placement — the correct verdict, not a checklist defect",
+          "ref": "#20937"
         }
       ],
       "enumSource": {

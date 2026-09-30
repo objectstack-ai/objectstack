@@ -634,7 +634,10 @@ const GLOBAL_NAV_RETIRED =
  * - `list_item`       — per-row action on a list/grid row (Salesforce row-level menu).
  * - `record_header`   — primary actions in the record-detail title bar.
  * - `record_more`     — overflow menu under the "More" / ⋯ button on a record.
- * - `record_related`  — actions on a related list section inside a record.
+ * - `record_related`  — per-row action on each row of a related list shown inside
+ *                       a parent record, in that parent's context only. Unlike
+ *                       `list_item` (every row wherever the object is listed), it
+ *                       never surfaces on the object's own list views.
  * - `record_section`  — actions surfaced inside a body section/tab of a record
  *                       (e.g. a Security tab grouping change-password, 2FA, etc.).
  *
