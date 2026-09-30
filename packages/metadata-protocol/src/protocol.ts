@@ -4799,6 +4799,13 @@ function isNonCanonicalStoredType(type: string): boolean {
 }
 
 /**
+ * [#20819] An ADR-0126 customization regime the packaged-base refusal speaks
+ * for — only the regimes it needs today (see
+ * `ObjectStackProtocolImplementation.PACKAGED_BASE_REGIME`).
+ */
+type PackagedBaseRegime = 'C';
+
+/**
  * Implements the per-domain contracts this class ACTUALLY provides (ADR-0076
  * D10 — the facade never implemented the other domains; those live in their
  * owning services and are reached through the discovery `services` registry,
@@ -14670,6 +14677,85 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#20819, ADR-0126 §2 / §3] The customization REGIME of a metadata type,
+     * declared for the types whose packaged-base refusal speaks for its regime.
+     *
+     * ADR-0126 §2 requires a Regime C refusal to name the sanctioned path —
+     * "in-place edit refused loudly at the write door, the refusal naming the
+     * sanctioned path" — and §10 gives the reason: a locked base that refuses
+     * with its sanctioned path in the message is what keeps AI-written metadata
+     * from guessing. The regime is recorded nowhere else in code (the ADR's
+     * table is prose, and the registry entries carry no regime field), so this
+     * map is its one declaration for the refusal, and
+     * {@link PACKAGED_BASE_REFUSAL_BY_REGIME} is keyed off it — never a second
+     * list of type names, and never a type branch in the emitters' prose.
+     *
+     * It carries `flow` only, deliberately, though ADR-0126 §3's Regime C row is
+     * longer — `flow`, `permission`, `action`, and pre-charted `tool` / `skill`
+     * / `position`. A type is declared here only once the Regime C sentence's
+     * paths are ITS served paths: that sentence names the `/automation` clone
+     * and switch routes, which exist for a flow alone. `action` has a switch at
+     * its own route and no clone at all (the action-clone half is not
+     * chartered, §8 item 2), and `permission` has its own clone machinery, so
+     * declaring either would advertise a route that does not exist for it —
+     * both keep the sentence they had until their own sanctioned paths are
+     * written into the table.
+     */
+    private static readonly PACKAGED_BASE_REGIME: Readonly<Record<string, PackagedBaseRegime>> = {
+        flow: 'C',
+    };
+
+    /**
+     * [#20819, ADR-0126 §2 / §7] The packaged-base refusal's sentence, chosen
+     * PER REGIME ({@link PACKAGED_BASE_REGIME}). A type with no declared regime
+     * keeps the sentence the emitters carry inline, byte for byte.
+     *
+     * Regime C (§2: behavioral — locked base, disable, clone-as-sibling) names
+     * its two sanctioned paths and cites the ADR that decided them:
+     *
+     *  - **clone under a new name** (§7.1) — `POST /automation/:name/clone`,
+     *    whose body `{ name, label }` requires both keys;
+     *  - **the enable/disable switch** (§7.2) — `POST /automation/:name/toggle`,
+     *    body `{ enabled }`, operator-gated per §5 where one install serves
+     *    several organizations (the `group` / `isolated` postures).
+     *
+     * ⛔ It does not name the `OS_METADATA_WRITABLE` hatch. The hatch still
+     * opens this lock exactly as before ({@link isOverlayAllowed}), so which
+     * writes are refused does not move — only what the refusal prescribes.
+     * ⛔ Nor does it prescribe editing the source and redeploying: the
+     * administrator of an installed package cannot do that.
+     *
+     * Kept under the REST door's 500-character client-message bound, past
+     * which the tail is truncated: 411 characters before the item's name on
+     * save and 404 on removal, so a name of up to 88 characters arrives whole.
+     */
+    private static readonly PACKAGED_BASE_REFUSAL_BY_REGIME: Readonly<
+        Record<PackagedBaseRegime, (type: string, name: string, operation: 'save' | 'delete') => string>
+    > = {
+        C: (type, name, operation) =>
+            `Metadata item '${type}/${name}' is provided by a code package, and its packaged base is locked `
+            + (operation === 'delete' ? `against removal. ` : `against in-place edits. `)
+            + `Clone it under a new name to customize it (POST /api/v1/automation/:name/clone, body {name, label}), `
+            + `or switch it off (POST /api/v1/automation/:name/toggle, body {enabled: false}; `
+            + `operator-only where one install serves several organizations). `
+            + `See docs/adr/0126-packaged-metadata-customization-model.md.`,
+    };
+
+    /**
+     * The regime-chosen refusal sentence for `(type, name, operation)`, or
+     * `undefined` when the type declares no regime and the emitter keeps its
+     * own sentence.
+     */
+    private static packagedBaseRegimeSentence(
+        type: string, name: string, operation: 'save' | 'delete',
+    ): string | undefined {
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        const regimes = ObjectStackProtocolImplementation.PACKAGED_BASE_REGIME;
+        if (!Object.prototype.hasOwnProperty.call(regimes, singular)) return undefined;
+        return ObjectStackProtocolImplementation.PACKAGED_BASE_REFUSAL_BY_REGIME[regimes[singular]](singular, name, operation);
+    }
+
+    /**
      * [#8184] THE PACKAGE DOOR — `saveMetaItem`'s refusal of a write onto an
      * item a code package ships, on a type with no per-org overlay channel.
      * Throws the refusal; returns when the write is not refused on that ground.
@@ -14682,6 +14768,10 @@ export class ObjectStackProtocolImplementation implements
      * refusals, above the ADR-0010 `_lock` check). The one added line computes
      * `overlayAllowed` the way `saveMetaItem` computes it at its top. In the
      * record, "the block comment above" and "this method" mean `saveMetaItem`.
+     *
+     * [#20819] Since lifted, the package-less `NOT_OVERRIDABLE` SENTENCE is
+     * chosen per ADR-0126 regime ({@link packagedBaseRegimeSentence}); the
+     * predicate, the code, the status and the named-base limb are unchanged.
      */
     private refusePackagedBaseOverride(
         request: { type: string; name: string; packageId?: string | null },
@@ -14757,11 +14847,14 @@ export class ObjectStackProtocolImplementation implements
                     request.type, request.packageId as string, false,
                 );
             }
+            // [#20819] The SENTENCE is chosen per ADR-0126 regime; the code,
+            // the status and this branch's predicate are unchanged.
             const err = new Error(
-                `Metadata item '${request.type}/${request.name}' is provided by a code package `
+                ObjectStackProtocolImplementation.packagedBaseRegimeSentence(request.type, request.name, 'save')
+                ?? (`Metadata item '${request.type}/${request.name}' is provided by a code package `
                 + `and the type has not opted into per-org overlay writes (allowOrgOverride=false). `
                 + `Edit the source artifact and redeploy, or set OS_METADATA_WRITABLE to grant a runtime escape hatch. `
-                + `See docs/adr/0005-metadata-customization-overlay.md.`
+                + `See docs/adr/0005-metadata-customization-overlay.md.`)
             );
             (err as any).code = 'NOT_OVERRIDABLE';
             (err as any).status = 403;
@@ -14784,6 +14877,10 @@ export class ObjectStackProtocolImplementation implements
      * lines, byte for byte apart from indentation. The two added lines compute
      * `overlayAllowed` and `artifactBacked` the way `deleteMetaItem` computes
      * them, where both still stand for its `NOT_CREATABLE` check.
+     *
+     * [#20819] Since lifted, the SENTENCE is chosen per ADR-0126 regime
+     * ({@link packagedBaseRegimeSentence}); the predicate, the code and the
+     * status are unchanged.
      */
     private refusePackagedBaseRemoval(request: { type: string; name: string }): void {
         const overlayAllowed = ObjectStackProtocolImplementation.isOverlayAllowed(request.type);
@@ -14791,10 +14888,12 @@ export class ObjectStackProtocolImplementation implements
         const legacyOverlayRemoval = ObjectStackProtocolImplementation
             .mergesOverlayAtRead(request.type);
         if (artifactBacked && !overlayAllowed && !legacyOverlayRemoval) {
+            // [#20819] Sentence per ADR-0126 regime, as in the save door.
             const err = new Error(
-                `Metadata item '${request.type}/${request.name}' is provided by a code package `
+                ObjectStackProtocolImplementation.packagedBaseRegimeSentence(request.type, request.name, 'delete')
+                ?? (`Metadata item '${request.type}/${request.name}' is provided by a code package `
                 + `and the type has not opted into per-org overlay writes. `
-                + `See docs/adr/0005-metadata-customization-overlay.md.`
+                + `See docs/adr/0005-metadata-customization-overlay.md.`)
             );
             (err as any).code = 'NOT_OVERRIDABLE';
             (err as any).status = 403;
