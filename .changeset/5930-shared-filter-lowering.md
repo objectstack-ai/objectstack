@@ -1,7 +1,7 @@
 ---
 '@objectstack/spec': minor
 '@objectstack/objectql': patch
-'@objectstack/plugin-security': patch
+'@objectstack/plugin-security': minor
 ---
 
 feat(spec, objectql, plugin-security): one shared filter lowering, run once at the engine and RLS seams (ADR-0053 D-D1, amended)
