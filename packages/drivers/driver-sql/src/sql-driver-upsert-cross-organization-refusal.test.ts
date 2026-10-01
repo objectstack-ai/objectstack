@@ -186,6 +186,51 @@ function declareCrossOrganizationRefusal(cell: DialectCell): void {
       expect(await snapshot(), "the other organization's row was written, or a row was added").toEqual(before);
     });
 
+    /**
+     * Inside a CALLER's transaction the refusal must not depend on what the
+     * caller does next: a caller that swallows the error and commits must not
+     * commit a cross-organization merge. On SQLite and PostgreSQL the statement
+     * never writes the row; on MySQL the statement and its check run in a
+     * nested transaction (a savepoint) that the check's throw rolls back.
+     */
+    it("refuses inside a caller's transaction, and a commit after the refusal writes nothing", async () => {
+      const before = await snapshot();
+
+      const trx = await driver.beginTransaction();
+      let err: WireBearingError | null;
+      try {
+        err = await captureError(() =>
+          driver.upsert(
+            ACCOUNT.name,
+            { email: OTHER_EMAIL, title: 'overwritten?' },
+            ['email'],
+            { tenantId: CALLER_ORG, transaction: trx } as any,
+          ),
+        );
+        // The caller carries on with its own transaction, and commits it.
+        await driver.upsert(
+          ACCOUNT.name,
+          { id: 'os21185_after_refusal', email: 'after@os21185.test', title: 'committed' },
+          ['email'],
+          { tenantId: CALLER_ORG, transaction: trx } as any,
+        );
+        await driver.commit(trx);
+      } catch (e) {
+        await driver.rollback(trx).catch(() => {});
+        throw e;
+      }
+
+      expect(err, 'the cross-organization merge was not refused').not.toBeNull();
+      expect(err!.code).toBe('UNIQUE_VIOLATION');
+      expect(err!.status).toBe(409);
+      const after = await snapshot();
+      expect(after.filter((r) => r.id !== 'os21185_after_refusal')).toEqual(before);
+      expect(after.find((r) => r.id === 'os21185_after_refusal')).toMatchObject({
+        title: 'committed',
+        organization_id: CALLER_ORG,
+      });
+    });
+
     it('names no organization, and no value of the other row, in the refusal', async () => {
       for (const run of [
         () => driver.upsert(ACCOUNT.name, { id: OTHER_ID, title: 'x' }, ['id'], { tenantId: CALLER_ORG } as any),
@@ -263,9 +308,12 @@ function declareCrossOrganizationRefusal(cell: DialectCell): void {
     // ───────────────────────────────────────────────────────────────────
 
     it('control: a same-organization upsert on the same key merges as before, on both targets', async () => {
-      const own = await driver.create(
+      // The id is the literal, not `create()`'s answer: on the MySQL family
+      // that answer is not the stored row (knex has no `RETURNING` there).
+      const own = { id: 'os21185_own_row' };
+      await driver.create(
         ACCOUNT.name,
-        { id: 'os21185_own_row', email: 'own@os21185.test', title: 'first' },
+        { id: own.id, email: 'own@os21185.test', title: 'first' },
         { tenantId: CALLER_ORG } as any,
       );
 

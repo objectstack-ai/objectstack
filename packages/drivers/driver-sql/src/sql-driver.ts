@@ -8905,6 +8905,19 @@ export class SqlDriver implements IDataDriver {
    * The verdict itself is tenant-independent regardless: `id` is the PRIMARY
    * KEY, so at most one row in the table can carry it.
    *
+   * ⚠️ [#21185] The first two bullets no longer reach this method: a
+   * tenant-scoped call on a tenanted object is fenced to its organization, and
+   * on MySQL {@link assertMergeLandedInWrittenOrganization} runs in this
+   * check's place, reading under the written tenant and carrying #8807's
+   * verdict with it. What still arrives here is the third bullet — and there
+   * the written tenant must NOT become a scope: the tenant column is now
+   * insert-only, so a payload naming another organization than the stored
+   * row's is a merge that keeps the row's organization (measured on MariaDB
+   * 10.11 before this guard: the read scoped to the payload's tenant missed the
+   * merged row and answered this method's cross-row refusal for a merge that
+   * landed on the supplied id). So the written tenant is used only under a
+   * tenant context, and a call without one reads unscoped.
+   *
    * # The write target, not the object
    *
    * A rotation-sharded write lands in the current shard, so that is where the
@@ -8925,9 +8938,11 @@ export class SqlDriver implements IDataDriver {
     // cross-tenant write, and a no-op when neither exists. `tenantIds` is
     // dropped deliberately — the group-union posture widens a READ to a
     // membership set, and this is an identity probe for ONE row, not a read.
+    const tenantContext = options?.tenantId !== undefined && options?.tenantId !== null && options?.tenantId !== '';
     const scopeOptions: DriverOptions = {
       ...options,
-      tenantId: typeof writtenTenant === 'string' && writtenTenant !== '' ? writtenTenant : options?.tenantId,
+      tenantId:
+        tenantContext && typeof writtenTenant === 'string' && writtenTenant !== '' ? writtenTenant : options?.tenantId,
       tenantIds: undefined,
     };
     this.applyTenantScope(builder, object, scopeOptions);
