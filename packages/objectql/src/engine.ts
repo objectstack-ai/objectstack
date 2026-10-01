@@ -2960,6 +2960,14 @@ export type HeldFileResolver = (
  * That row is gone with the divergence.
  */
 const METADATA_ARRAY_KEYS = [
+  // Data Protocol — shared option lists. FIRST, so a source's lists are in the
+  // registry before anything later in this loop reads them; objects do not
+  // depend on the order (they resolve a list lazily, on the next fold), so this
+  // is the declared loading order (`picklist` loads before `object`), not a
+  // precondition. Both are dispatched to their own registry verbs in
+  // `registerMetadataCollections`: the extensions merge into the list they
+  // name instead of registering as items of their own.
+  'picklists', 'picklistExtensions',
   // UI Protocol
   'actions', 'views', 'pages', 'dashboards', 'reports', 'datasets', 'themes',
   // Automation Protocol
@@ -6856,6 +6864,13 @@ export class ObjectQL implements IObjectQLEngine {
           const items = (source as any)?.[key];
           if (!Array.isArray(items) || items.length === 0) continue;
           this.logger.debug(`Registering ${key} from ${sourceLabel}`, { id: ownerId, count: items.length });
+          // A `picklistExtensions` entry is not an item: it has no name, only
+          // the list it adds to, and the registry merges it there — additive
+          // only, a repeated value refused loudly (`registerPicklistExtension`).
+          if (key === 'picklistExtensions') {
+              for (const extension of items) this._registry.registerPicklistExtension(extension, ownerId);
+              continue;
+          }
           for (const item of items) {
               const itemName = resolveMetadataItemName(key, item);
               if (!itemName) {

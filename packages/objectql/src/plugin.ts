@@ -25,6 +25,12 @@ import {
 } from './action-activation.js';
 import type { IMetadataService } from '@objectstack/spec/contracts';
 import type { ServiceObject } from '@objectstack/spec/data';
+import {
+  collectManifestPicklistExtensions,
+  collectManifestPicklistNames,
+  collectManifestPicklistReferences,
+  describeUnresolvedPicklistReferences,
+} from './picklist-resolution.js';
 
 export type { Plugin, PluginContext };
 
@@ -262,6 +268,14 @@ export class ObjectQLPlugin implements Plugin {
    * the fix off in marketplace install-local's primary home.
    */
   private bridgeLateManifests = false;
+
+  /**
+   * Set at `kernel:ready`, once the boot audit has found every picklist a
+   * field names: from then on an artifact registered through the `manifest`
+   * service is judged before it registers (AGENTS.md, startup registry reads:
+   * seal the vocabulary, then judge).
+   */
+  private picklistVocabularySealed = false;
   /** Unsubscribe handles for metadata-event subscriptions (ADR-0008 PR-7). */
   private metadataUnsubscribes: Array<() => void> = [];
   /** ADR-0057 lifecycle enforcement (Reaper/Rotator/Archiver). */
@@ -454,6 +468,25 @@ export class ObjectQLPlugin implements Plugin {
             .filter((id): id is string => id !== undefined),
         };
 
+        // Once the boot has sealed the picklist vocabulary (`kernel:ready`,
+        // below), an artifact arriving later is judged BEFORE anything of it
+        // registers: every field it brings that names a picklist must resolve
+        // against the registry or against a list the artifact itself declares.
+        // A refused install registers nothing.
+        if (this.picklistVocabularySealed) {
+          const declared = new Set<string>();
+          for (const manifest of ordered) for (const name of collectManifestPicklistNames(manifest)) declared.add(name);
+          const known = (name: string) => declared.has(name) || ql.registry.resolvePicklistOptions(name) !== undefined;
+          const unresolved = ordered
+            .flatMap((manifest) => collectManifestPicklistReferences(manifest, artifactPackageId(manifest)))
+            .filter((ref) => !known(ref.picklist));
+          const orphans = ordered
+            .flatMap((manifest) => collectManifestPicklistExtensions(manifest, artifactPackageId(manifest)))
+            .filter((ext) => !known(ext.picklist));
+          const refusal = describeUnresolvedPicklistReferences(unresolved, orphans);
+          if (refusal) throw refusal;
+        }
+
         for (const manifest of ordered) {
           ql.registerApp(manifest, scope);
           ctx.logger.debug('Manifest registered via manifest service', {
@@ -565,6 +598,20 @@ export class ObjectQLPlugin implements Plugin {
     // Idempotent: the bind fully replaces the 'metadata-service' package
     // set, so edited hooks re-bind and deleted hooks tear down.
     ctx.hook('kernel:ready', async () => {
+        // A field naming a picklist no package declares fails the boot, naming
+        // the field and the package — never served as a select with nothing to
+        // choose — and so does an extension of such a list, whose values would
+        // otherwise go nowhere. Judged HERE because every package has registered by now, so
+        // "not declared" is final; a list a later package declares would
+        // otherwise read as missing (AGENTS.md, startup registry reads). From
+        // here on the vocabulary is sealed and each late artifact is judged as
+        // it arrives (the `manifest` service above).
+        const unresolvedPicklists = describeUnresolvedPicklistReferences(
+            this.ql?.registry.findUnresolvedPicklistReferences() ?? [],
+            this.ql?.registry.findOrphanPicklistExtensions() ?? [],
+        );
+        if (unresolvedPicklists) throw unresolvedPicklists;
+        this.picklistVocabularySealed = true;
         // #7737 — FIRST, before anything that might read data: bind every
         // declared federated object to its remote table now that every
         // plugin's `start()` (including the declared-datasource auto-connect

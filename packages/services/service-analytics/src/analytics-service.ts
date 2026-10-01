@@ -101,6 +101,10 @@ import { assertNoStructuredJsonDimension } from './structured-json-dimension-doo
 // the compilers read, so the contract has one definition and this file states
 // it rather than restating it.
 import { ACCEPTED_SQL_DIALECTS, isUnrecognisedSqlDialectAnswer, type AcceptedSqlDialect } from './text-match-sql.js';
+// [#20986] The one resolver of the object a relationship-path hop reads. The
+// door's field gate and its admitted and scoped set read it here; both
+// strategies read it through the context's `relationshipReference`.
+import { resolvePathHops, type HopReference } from './hop-object.js';
 
 /**
  * [#5717] Does this error carry an ADR-0112 envelope — i.e. did its PRODUCER
@@ -402,33 +406,32 @@ const IDENTIFIER_PATH = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$/;
  * - A bare identifier is a column of the base object.
  * - A dotted identifier path is a relationship path: every segment but the
  *   last is a relationship field on the object before it, the last is the
- *   column. Each hop's object is the cube's join at that path, keyed as the
- *   strategies key it (the path with its dots as `__`) and falling back to the
- *   alias itself — the object both strategies read there. The relationship
- *   fields are named too: a hidden relationship field discloses which record
- *   each row points to, and the engine judges a path's first segment on the
- *   local object for the same reason.
+ *   column. [#20986] Each hop's object is the one `hop-object.ts` resolves —
+ *   the cube's join at that path, else the relationship field's declared
+ *   `reference`, else the alias itself — which both strategies read there
+ *   through the same resolver. The relationship fields are named too: a
+ *   hidden relationship field discloses which record each row points to, and
+ *   the engine judges a path's first segment on the local object for the same
+ *   reason.
  * - Anything else is an EXPRESSION the cube's author wrote (`CASE WHEN …`,
  *   `SUM(…)`, `*`). It names no field this gate can attribute, so it adds
  *   nothing — the author's declaration of a derived value, the way a formula
  *   field is.
  */
-function fieldsOfColumnSql(cube: Cube, baseObject: string, sql: string, role: FieldReadRole): NamedField[] {
+function fieldsOfColumnSql(
+  cube: Cube,
+  baseObject: string,
+  sql: string,
+  role: FieldReadRole,
+  referenceOf: HopReference | undefined,
+): NamedField[] {
   const path = sql.trim();
   if (BARE_IDENTIFIER.test(path)) return [{ object: baseObject, field: path, role }];
   if (!IDENTIFIER_PATH.test(path)) return [];
   const segments = path.split('.');
-  const joins = cube.joins as Record<string, { name?: unknown } | undefined> | undefined;
-  const out: NamedField[] = [];
-  let object = baseObject;
-  let alias = '';
-  for (const segment of segments.slice(0, -1)) {
-    out.push({ object, field: segment, role });
-    alias = alias ? `${alias}__${segment}` : segment;
-    const joined = joins?.[alias]?.name;
-    object = typeof joined === 'string' && joined !== '' ? joined : alias;
-  }
-  out.push({ object, field: segments[segments.length - 1], role });
+  const hops = resolvePathHops(cube, baseObject, segments.slice(0, -1), referenceOf);
+  const out: NamedField[] = hops.map((hop) => ({ object: hop.from, field: hop.field, role }));
+  out.push({ object: hops[hops.length - 1].object, field: segments[segments.length - 1], role });
   return out;
 }
 
@@ -459,11 +462,15 @@ function fieldsOfColumnSql(cube: Cube, baseObject: string, sql: string, role: Fi
  * predicates — they may name fields the caller cannot read.
  *
  * A cube whose `sql` is not a bare object name names no attributable field.
+ *
+ * [#20986] `referenceOf` answers a relationship field's declared target: the
+ * service's own, the same one it hands the strategies.
  */
 function namedQueryFields(
   query: AnalyticsQuery,
   cube: Cube,
   datasetScope: DatasetScope | undefined,
+  referenceOf: HopReference | undefined,
 ): NamedField[] {
   const baseObject = typeof cube.sql === 'string' ? cube.sql.trim() : '';
   if (!baseObject || !BARE_IDENTIFIER.test(baseObject)) return [];
@@ -472,7 +479,7 @@ function namedQueryFields(
     if (typeof member !== 'string' || member === '') return;
     const entry = declaredMemberEntry(cube, member, kind);
     const sql = entry ? entry.sql : kind === 'measure' ? undefined : member;
-    if (typeof sql === 'string') out.push(...fieldsOfColumnSql(cube, baseObject, sql, role));
+    if (typeof sql === 'string') out.push(...fieldsOfColumnSql(cube, baseObject, sql, role, referenceOf));
   };
   const filterMembers = (where: unknown): string[] => {
     if (!where || typeof where !== 'object') return [];
@@ -898,6 +905,13 @@ export interface AnalyticsServiceConfig {
    * ADR-0021 — optional object-graph resolver used when compiling datasets:
    * `(baseObject, relationshipName) => relatedObjectName | undefined`. When
    * provided, `queryDataset` validates that every declared `include` exists.
+   *
+   * [#20986] It also answers the object a relationship-path hop reads when the
+   * cube declares no join for it — an inferred cube's dotted member, an
+   * authored member walking a relationship its `joins` does not list — so a
+   * lookup named differently from its target is admitted, scoped, joined and
+   * read as the target. Absent, or `undefined` for a field, such a hop reads
+   * the object named after the relationship (`hop-object.ts`).
    */
   relationshipResolver?: RelationshipResolver;
   /**
@@ -1164,8 +1178,22 @@ export class AnalyticsService implements IAnalyticsService {
   private readonly sharedScope: CubeScope;
   /** The configured join-allowlist hook for cubes that are not compiled datasets. */
   private readonly configuredAllowedRelationships?: AnalyticsServiceConfig['getAllowedRelationships'];
-  /** Optional object-graph resolver used when compiling datasets. */
+  /** Optional object-graph resolver used when compiling datasets, and for a hop's declared target (#20986). */
   private readonly relationshipResolver?: RelationshipResolver;
+  /**
+   * [#20986] Tier 2 of the one hop resolver (`hop-object.ts`): the object a
+   * relationship field declares as its target, read through
+   * {@link relationshipResolver}. ONE function, read by the door's field gate
+   * and admitted and scoped set and handed to both strategies as the context's
+   * `relationshipReference`, so every reader resolves a hop with the same
+   * answer. A `RelationshipTarget` answers with its `object`: the object
+   * is what is admitted and scoped, and it names the table too (an object's
+   * name is its table's name).
+   */
+  private readonly hopReference: HopReference = (object, field) => {
+    const target = this.relationshipResolver?.(object, field);
+    return typeof target === 'string' ? target : target?.object;
+  };
   private readonly sourceFieldMeta?: AnalyticsServiceConfig['sourceFieldMeta'];
   /** Optional dimension display-label resolver (select options / lookup names). */
   private readonly labelResolver?: DimensionLabelDeps;
@@ -1269,6 +1297,11 @@ export class AnalyticsService implements IAnalyticsService {
       coerceTemporalFilterValue: config.coerceTemporalFilterValue,
       coerceTemporalFilterColumn: config.coerceTemporalFilterColumn,
       isExternalObject: config.isExternalObject,
+      // [#20986] A relationship field's declared target — the SAME function
+      // the door's field gate and its admitted and scoped set resolve hops
+      // with, so a strategy joins, scopes and reads the object the door
+      // admitted, never a second resolution of it.
+      relationshipReference: this.hopReference,
       // [#14079] The declared field type, read off the same `sourceFieldMeta`
       // hook the display chains use — so the three SQL compilers can give a
       // text operator over a numeric or boolean column the contract's answer
@@ -1589,10 +1622,17 @@ export class AnalyticsService implements IAnalyticsService {
    * read scope reaches the strategy exactly as a declared join's does — the
    * strategies apply the scope of every object they read from this set, and
    * carry no rule of their own. Each hop's object is the one the field gate
-   * attributes the hop's fields to ({@link namedQueryFields}: the cube's join
-   * keyed by the path with its dots as `__`, falling back to the alias itself),
-   * reused rather than re-derived, so the field gate and this set can never
-   * name different objects for the same hop.
+   * attributes the hop's fields to ({@link namedQueryFields}), reused rather
+   * than re-derived, so the field gate and this set can never name different
+   * objects for the same hop.
+   *
+   * [#20986] That object comes from the one hop resolver (`hop-object.ts`):
+   * the cube's join keyed by the path with its dots as `__`, else the
+   * relationship field's declared `reference` ({@link hopReference}), else the
+   * alias itself. An inferred cube declares no join, so a lookup named
+   * differently from its target admits the TARGET, never the lookup's name;
+   * the strategies join, scope and read the same object through the same
+   * resolver.
    *
    * An unregistered cube yields the empty set — the query fails its own
    * cube-existence gate downstream, and inventing an object name here would
@@ -1609,7 +1649,7 @@ export class AnalyticsService implements IAnalyticsService {
     const cube = scope.getCube(query.cube);
     if (!cube) return new Set<string>();
     const objects = this.cubeObjects(cube);
-    for (const { object } of namedQueryFields(query, cube, this.cubeReads(scope).getDatasetScope(query.cube))) {
+    for (const { object } of namedQueryFields(query, cube, this.cubeReads(scope).getDatasetScope(query.cube), this.hopReference)) {
       objects.add(object);
     }
     return objects;
@@ -1679,7 +1719,7 @@ export class AnalyticsService implements IAnalyticsService {
   ): Promise<void> {
     const provider = this.readableFieldsProvider;
     if (!provider || !cube) return;
-    const named = namedQueryFields(query, cube, datasetScope);
+    const named = namedQueryFields(query, cube, datasetScope, this.hopReference);
     if (named.length === 0) return;
     await assertNamedFieldsReadable(
       named,

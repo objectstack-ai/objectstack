@@ -84,6 +84,24 @@ export interface DatasetScopedStrategyContext extends StrategyContext {
    */
   readScopedObjects?: readonly string[];
   /**
+   * [#20986] The object `field` on `objectName` DECLARES as its target — a
+   * relationship field's `reference` — or `undefined` when the host cannot
+   * answer (no resolver wired, a field it does not know, a field that names
+   * no target).
+   *
+   * Tier 2 of the one hop resolver (`hop-object.ts`), which every strategy
+   * reads to name the object a relationship-path hop with no declared join
+   * reaches: the table it joins, the read scope it applies to that join, the
+   * object it reads the related value from. `AnalyticsService` hands its
+   * strategies the SAME function its field gate and its admitted and scoped
+   * set resolve hops with, so the object a strategy joins is the object the
+   * door admitted. Declared HERE rather than on the spec's
+   * {@link StrategyContext} for the reason `getDatasetScope` is: nothing about
+   * it is an authorable surface. Absent, a hop reads the object named after
+   * the relationship — the behaviour a strategy had before it knew the hook.
+   */
+  relationshipReference?(objectName: string, field: string): string | undefined;
+  /**
    * [#14079] The DECLARED type of `field` on `objectName` — `'number'`,
    * `'boolean'`, `'text'`, … — or `undefined` when the host cannot answer (no
    * data engine wired, an object or field it does not know).
