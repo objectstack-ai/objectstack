@@ -182,7 +182,83 @@ describe('resolveBookTree — derived membership (the AI-safety core)', () => {
       { name: 'b', packageId: 'other' },
     ]);
     expect(tree.groups[0].entries.map((e) => e.doc)).toEqual(['a']);
-    expect(tree.groups.at(-1)!.key).toBe('uncategorized'); // 'b' falls through
+    // 'b' is another package's doc: not this book's orphan either (#20980,
+    // ADR-0046 §6.4), so no Uncategorized group is appended for it.
+    expect(tree.groups.map((g) => g.key)).toEqual(['g']);
+  });
+});
+
+// [#20980] ADR-0046 §6.4: "any doc left unplaced rolls up under a synthetic
+// *Uncategorized* group" — the unplaced docs are the PACKAGE's. The orphan
+// pass used to sweep every doc handed in, so `GET /meta/book/:name/tree`
+// (which resolves over an env-wide corpus) filed every other package's
+// ungrouped docs under this book's Uncategorized group.
+describe('resolveBookTree — the Uncategorized group holds only the book\'s own packages\' docs (§6.4)', () => {
+  const book: Book = { name: 'crm_guide', groups: [{ key: 'start', label: 'Start', include: 'crm_intro' }] };
+  const keysAndDocs = (tree: ResolvedBook) =>
+    Object.fromEntries(tree.groups.map((g) => [g.key, g.entries.map((e) => e.doc)]));
+
+  it('another package\'s ungrouped doc is NOT in the book\'s Uncategorized group; the book\'s own is', () => {
+    const tree = resolveBookTree(book, [
+      { name: 'crm_intro', packageId: 'crm' },
+      { name: 'crm_stray', packageId: 'crm' },
+      { name: 'ops_keys', packageId: 'ops' },
+    ], 'crm');
+    expect(keysAndDocs(tree)).toEqual({ start: ['crm_intro'], uncategorized: ['crm_stray'] });
+  });
+
+  it('control: a cross-package doc whose `group` names the book\'s group still joins it (placement is unscoped)', () => {
+    const tree = resolveBookTree(book, [
+      { name: 'crm_intro', packageId: 'crm' },
+      { name: 'ops_placed', packageId: 'ops', group: 'start' },
+      { name: 'ops_keys', packageId: 'ops' },
+    ], 'crm');
+    expect(keysAndDocs(tree)).toEqual({ start: ['crm_intro', 'ops_placed'] });
+  });
+
+  it('a group\'s `package` is one of the book\'s packages: that package\'s unmatched doc is an orphan here', () => {
+    const crossBook: Book = {
+      name: 'crm_guide',
+      groups: [{ key: 'ops', label: 'Operations', include: 'ops_runbook_*', package: 'ops' }],
+    };
+    const tree = resolveBookTree(crossBook, [
+      { name: 'crm_stray', packageId: 'crm' },
+      { name: 'ops_runbook_keys', packageId: 'ops' },
+      { name: 'ops_other', packageId: 'ops' },
+      { name: 'hr_policy', packageId: 'hr' },
+    ], 'crm');
+    expect(keysAndDocs(tree)).toEqual({ ops: ['ops_runbook_keys'], uncategorized: ['crm_stray', 'ops_other'] });
+  });
+
+  it('the implicit package book (no `bookPackage`, the tree route\'s fallback) catches no other package\'s doc', () => {
+    const tree = resolveBookTree(deriveImplicitPackageBook('crm', 'CRM'), [
+      { name: 'crm_intro', packageId: 'crm' },
+      { name: 'ops_keys', packageId: 'ops' },
+    ]);
+    expect(keysAndDocs(tree)).toEqual({ all: ['crm_intro'] });
+  });
+
+  it('no package declared anywhere: every unclaimed doc is an orphan, as before', () => {
+    const tree = resolveBookTree(book, [
+      { name: 'crm_intro', packageId: 'crm' },
+      { name: 'crm_stray', packageId: 'crm' },
+      { name: 'ops_keys', packageId: 'ops' },
+    ]);
+    expect(keysAndDocs(tree)).toEqual({ start: ['crm_intro'], uncategorized: ['crm_stray', 'ops_keys'] });
+  });
+
+  it('a doc with no stamped `packageId` is in every scope — the same reading `include` scoping uses', () => {
+    const tree = resolveBookTree(book, [{ name: 'crm_intro', packageId: 'crm' }, { name: 'loose_note' }], 'crm');
+    expect(keysAndDocs(tree)).toEqual({ start: ['crm_intro'], uncategorized: ['loose_note'] });
+  });
+
+  it('the claim set is unchanged: neither the own nor the foreign orphan is claimed', () => {
+    const corpus: ResolverDoc[] = [
+      { name: 'crm_intro', packageId: 'crm' },
+      { name: 'crm_stray', packageId: 'crm' },
+      { name: 'ops_keys', packageId: 'ops' },
+    ];
+    expect([...resolveBookClaimedDocs(book, corpus, 'crm')]).toEqual(['crm_intro']);
   });
 });
 

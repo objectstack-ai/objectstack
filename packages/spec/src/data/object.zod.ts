@@ -1954,45 +1954,58 @@ const ObjectSchemaBase = strictObject(
    * Data Model
    */
   fields: refuseRecordProtoKey(
-    z.record(
-      z.string()
-        .regex(/^[a-z_][a-z0-9_]*$/, {
-          message: 'Field names must be lowercase snake_case (e.g., "first_name", "company", "annual_revenue")',
+    // [#17852, #19346] The three JS-prototype names are refused by
+    // TWO mechanisms, because zod reaches them at two different depths:
+    //
+    //   - `__proto__` reaches NO schema at all — zod's record parser skips it
+    //     with an unconditional `continue` ABOVE the key schema — so it is
+    //     refused on the RAW input by `refuseRecordProtoKey` around this.
+    //   - `constructor` and `prototype` DO reach the parse (ordinary
+    //     lowercase words the snake_case regex below already admits) and are
+    //     refused HERE, on the RECORD, through the closed projection list's
+    //     `banned-keys` arm.
+    //
+    // ⭐ The arm — and not the key-schema `.refine()` it replaces (#19147) —
+    // is what carries the refusal into `packages/spec/json-schema/**`.
+    // `z.toJSONSchema()` has no arm for a `custom` check, so a rule written
+    // on the KEY schema was enforced by the runtime and ABSENT from the
+    // published file: nine `fields.out.keyType` rows in
+    // `dropped-refinements.baseline.json`, one per embedding schema, and a
+    // validator reading the published contract answered PASS on a document
+    // the platform refuses by name. Declared through `bannedKeys`, the same
+    // rule is published as `propertyNames` + `not` and those nine rows leave
+    // the ledger (#19346, closing a piece of #18670). The accept set is
+    // unchanged in both directions — `bannedKeys` reads OWN properties, which
+    // is exactly what the key schema judged.
+    //
+    // ⭐ [#20997] ONE refine PER NAME, each located AT its key
+    // (`fields.constructor`, `fields.prototype`) — the path the `__proto__`
+    // guard and the key grammar's `invalid_key` already report at, and the one
+    // `saveMetaItem`'s structured issues need for a Studio form to highlight
+    // the offending field. `.refine()`'s `path` is STATIC, so a single
+    // two-name predicate could only ever name the slot; one single-name
+    // predicate per name makes the path a constant again, and the name is ONE
+    // string read twice — into the ban and into the path — so the two cannot
+    // drift. ⛔ Not a `.superRefine()` with a computed path: that check holds
+    // no readable predicate, so the generator could not project it and the
+    // published file would go wide again (the nine rows above would return).
+    // The published keywords are the same rule, conjoined one clause per name
+    // (`not enum [a, b]` ≡ `not enum [a]` ∧ `not enum [b]`), and the message
+    // and `custom` code are byte-identical to the one-refine spelling.
+    (['constructor', 'prototype'] as const).reduce(
+      (record, reserved) =>
+        record.refine(bannedKeys([reserved]), {
+          message: 'Field names must not be "constructor" or "prototype" (reserved JavaScript prototype property names).',
+          path: [reserved],
         }),
-      FieldSchema,
-    )
-      // [#17852, #19346] The three JS-prototype names are refused by
-      // TWO mechanisms, because zod reaches them at two different depths:
-      //
-      //   - `__proto__` reaches NO schema at all — zod's record parser skips it
-      //     with an unconditional `continue` ABOVE the key schema — so it is
-      //     refused on the RAW input by `refuseRecordProtoKey` below.
-      //   - `constructor` and `prototype` DO reach the parse (ordinary
-      //     lowercase words the snake_case regex above already admits) and are
-      //     refused HERE, on the RECORD, through the closed projection list's
-      //     `banned-keys` arm.
-      //
-      // ⭐ The arm — and not the key-schema `.refine()` it replaces (#19147) —
-      // is what carries the refusal into `packages/spec/json-schema/**`.
-      // `z.toJSONSchema()` has no arm for a `custom` check, so a rule written
-      // on the KEY schema was enforced by the runtime and ABSENT from the
-      // published file: nine `fields.out.keyType` rows in
-      // `dropped-refinements.baseline.json`, one per embedding schema, and a
-      // validator reading the published contract answered PASS on a document
-      // the platform refuses by name. Declared through `bannedKeys`, the same
-      // rule is published as `propertyNames` + `not` and those nine rows leave
-      // the ledger (#19346, closing a piece of #18670). The accept set is
-      // unchanged in both directions — `bannedKeys` reads OWN properties, which
-      // is exactly what the key schema judged.
-      //
-      // ⚠️ The refusal is located at the SLOT (`fields`, code `custom`) rather
-      // than at the offending key (`fields.constructor`, code `invalid_key`):
-      // a record-level predicate is the only shape the closed list can project,
-      // and `.refine()` carries no per-key path. The ban list is closed and two
-      // names long, so the message names both in full.
-      .refine(bannedKeys(['constructor', 'prototype']), {
-        message: 'Field names must not be "constructor" or "prototype" (reserved JavaScript prototype property names).',
-      }),
+      z.record(
+        z.string()
+          .regex(/^[a-z_][a-z0-9_]*$/, {
+            message: 'Field names must be lowercase snake_case (e.g., "first_name", "company", "annual_revenue")',
+          }),
+        FieldSchema,
+      ),
+    ),
     'fields',
   ).describe('Field definitions map. Keys must be snake_case identifiers; "__proto__", "constructor" and "prototype" are refused.'),
   indexes: z.array(IndexSchema).optional().describe('Database performance indexes'),
