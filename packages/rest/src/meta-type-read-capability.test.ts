@@ -69,7 +69,7 @@ const GATED = [
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 const singular = (type: unknown): string => String(type ?? '').replace(/s$/, '');
-const find = (type: unknown, name: unknown): any => (STORE[singular(type)] ?? []).find((i: any) => i.name === name);
+const findStored = (type: unknown, name: unknown): any => (STORE[singular(type)] ?? []).find((i: any) => i.name === name);
 
 // ── Callers ───────────────────────────────────────────────────────────────────
 
@@ -114,15 +114,15 @@ function protocolDouble() {
         getMetaTypes: vi.fn().mockResolvedValue({ types: Object.keys(STORE), entries: [] }),
         getMetaItems: vi.fn(async ({ type }: any) => clone(STORE[singular(type)] ?? [])),
         getMetaItem: vi.fn(async ({ type, name }: any) => {
-            const found = find(type, name);
+            const found = findStored(type, name);
             return { type: singular(type), name, item: found ? clone(found) : undefined, lock: 'none', editable: true, deletable: true, resettable: false };
         }),
         getMetaItemCached: vi.fn(async ({ type, name }: any) => ({
-            data: clone(find(type, name)),
+            data: clone(findStored(type, name)),
             etag: { value: `etag-${singular(type)}-${name}`, weak: false },
         })),
         getMetaItemLayered: vi.fn(async ({ type, name }: any) => {
-            const found = find(type, name);
+            const found = findStored(type, name);
             const layer = () => (found ? clone(found) : null);
             return { type: singular(type), name, code: layer(), overlay: layer(), effective: layer() };
         }),
@@ -133,7 +133,7 @@ function protocolDouble() {
             events: [{ type: singular(type), name, operation: 'save', allowed: true, actor: 'u_settings', at: '2026-10-01T00:00:00.000Z' }],
         })),
         diffMetaItem: vi.fn(async ({ type, name }: any) => {
-            const found = clone(find(type, name) ?? {});
+            const found = clone(findStored(type, name) ?? {});
             return { type: singular(type), name, fromVersion: 1, toVersion: 2, added: Object.keys(found).filter((k) => k !== 'name').map((k) => ({ path: k, value: found[k] })), removed: [], changed: [] };
         }),
         findReferencesToMeta: vi.fn(async () => ({ references: [{ type: 'object', name: 'wh_order', path: 'datasource', kind: 'object datasource' }] })),
@@ -145,7 +145,7 @@ function protocolDouble() {
 /** A RestServer whose caller is `ctx`; `reads` counts every store read either seam made. */
 function boot(ctx: Record<string, unknown> | undefined) {
     const protocol = protocolDouble();
-    const getPublished = vi.fn(async (type: string, name: string) => clone(find(type, name)));
+    const getPublished = vi.fn(async (type: string, name: string) => clone(findStored(type, name)));
     const rest: any = new RestServer(createMockServer() as any, protocol as any, {} as any);
     rest.resolveExecCtx = async () => (ctx ? clone(ctx) : undefined);
     rest.securityServiceProvider = async () => ({
@@ -337,23 +337,39 @@ const SETS: Record<string, string[]> = {
     ps_org_user_admin: ['manage_org_users'],
 };
 
+/**
+ * The grant store, as rows: the minimal in-memory ObjectQL `@objectstack/core`'s
+ * own resolver suite drives (`resolve-authz-context.test.ts`) — `===` and `$in`
+ * matching, an unsupported operator refused loudly, and the caller's `limit`
+ * applied by presence after the filter.
+ */
+const GRANT_TABLES: Record<string, any[]> = {
+    sys_user_permission_set: Object.values(PRINCIPALS).flatMap((p) => p.sets.map((setId) => ({
+        id: `ups_${p.userId}_${setId}`, user_id: p.userId, permission_set_id: setId, organization_id: null,
+    }))),
+    sys_permission_set: Object.entries(SETS).map(([id, caps]) => ({
+        id, name: id, system_permissions: JSON.stringify(caps), object_permissions: '{}',
+    })),
+};
+
+function bounded<T>(rows: T[], opts: any): T[] {
+    return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
+}
+
 const grantsEngine = {
-    find: async (object: string, opts: any) => {
+    async find(object: string, opts: any) {
+        const rows = GRANT_TABLES[object] ?? [];
         const where = opts?.where ?? {};
-        if (object === 'sys_user_permission_set') {
-            const principal = Object.values(PRINCIPALS).find((p) => p.userId === where.user_id);
-            return (principal?.sets ?? []).map((setId) => ({ id: `ups_${where.user_id}_${setId}`, user_id: where.user_id, permission_set_id: setId, organization_id: null }));
-        }
-        if (object === 'sys_permission_set') {
-            const ids: string[] = where.id?.$in ?? [];
-            return ids.filter((id) => id in SETS).map((id) => ({
-                id,
-                name: id,
-                system_permissions: JSON.stringify(SETS[id]),
-                object_permissions: '{}',
-            }));
-        }
-        return [];
+        return bounded(
+            rows.filter((r) =>
+                Object.entries(where).every(([k, v]) => {
+                    if (k.startsWith('$')) throw new Error(`grants double: unsupported operator ${k}`);
+                    if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(r[k]);
+                    return r[k] === v;
+                }),
+            ),
+            opts,
+        );
     },
 };
 
