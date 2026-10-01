@@ -420,15 +420,18 @@ export default class Validate extends Command {
         this.exit(1);
       }
 
-      // 2d. A field `picklist` that names no picklist the stack declares is
-      //     REFUSED, naming the field and the list. `FieldSchema` judges the
-      //     name's spelling only, so a misspelt reference parsed, passed this
-      //     door at exit 0 and reached the runtime as a choice with nothing to
-      //     choose — the silence a NAMED list exists to remove.
+      // 2d. A field `picklist`, or a `picklistExtensions` entry's `extend`, that
+      //     names no picklist the stack declares is REFUSED, naming the field
+      //     (or the extension) and the list. `FieldSchema` and
+      //     `PicklistExtensionSchema` judge the name's spelling only, so a
+      //     misspelt reference parsed, passed this door at exit 0 and reached
+      //     the runtime as a choice with nothing to choose — the silence a NAMED
+      //     list exists to remove.
       //
       //     The walk is the load path's (see `utils/picklist-references.ts`):
-      //     each `packages[]` body's fields, or the top level's when there is
-      //     no `packages[]`, resolved against every picklist the stack declares.
+      //     each `packages[]` body's fields and extensions, or the top level's
+      //     when there is no `packages[]`, resolved against every picklist the
+      //     stack declares.
       //     A reference that resolves nowhere is refused only when the
       //     declaring package depends on no package outside the stack; when it
       //     does, the list may live there, and this command cannot read it — so
@@ -455,7 +458,7 @@ export default class Validate extends Command {
         }
         const n = picklistJudgement.refusals.length;
         console.log('');
-        printError(`A field names a picklist this stack does not declare (${n} reference${n > 1 ? 's' : ''})`);
+        printError(`A picklist reference names a picklist this stack does not declare (${n} reference${n > 1 ? 's' : ''})`);
         printAuthoringRuleErrors(picklistJudgement.refusals, { remedy: JSON_FULL_LIST_REMEDY });
         this.exit(1);
       }

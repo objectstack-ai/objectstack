@@ -459,11 +459,12 @@ export default class Compile extends Command {
         this.exit(1);
       }
 
-      // 3a-bis. A field `picklist` that names no picklist the stack declares is
-      //     REFUSED — the SAME call `os validate` makes at its step 2d, so the
-      //     two doors cannot disagree about which references resolve. Without
-      //     it this door wrote the artifact carrying the misspelt reference, and
-      //     the command that ships shipped a choice with nothing to choose.
+      // 3a-bis. A field `picklist`, or a `picklistExtensions` entry's `extend`,
+      //     that names no picklist the stack declares is REFUSED — the SAME call
+      //     `os validate` makes at its step 2d, so the two doors cannot disagree
+      //     about which references resolve. Without it this door wrote the
+      //     artifact carrying the misspelt reference, and the command that ships
+      //     shipped a choice with nothing to choose.
       //
       //     A reference the stack cannot resolve while the declaring package
       //     depends on packages outside the stack is an `info` notice instead
@@ -484,7 +485,7 @@ export default class Compile extends Command {
         }
         const n = picklistJudgement.refusals.length;
         console.log('');
-        printError(`A field names a picklist this stack does not declare (${n} reference${n > 1 ? 's' : ''})`);
+        printError(`A picklist reference names a picklist this stack does not declare (${n} reference${n > 1 ? 's' : ''})`);
         printAuthoringRuleErrors(picklistJudgement.refusals, { remedy: JSON_FULL_LIST_REMEDY });
         this.exit(1);
       }

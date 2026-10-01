@@ -21,6 +21,10 @@ import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readA
 // "the protocol has no such function" refusal cannot drift from what
 // `AggregationNodeSchema.function` actually admits.
 import { AggregationFunction, emptyGroupValueFor } from '@objectstack/spec/data';
+// [#20335, #20889] What each aggregate function ANSWERS, and the `'number'`
+// presenter its counts and totals take — defined once in core, for this
+// driver's `aggregate()` and the analytics native-SQL face alike.
+import { AGGREGATE_ANSWER_KIND, presentAsNumber } from '@objectstack/core';
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES, isMultiValueField } from '@objectstack/spec/data';
 // [#16318] The per-field-type physical representation of the NUMERIC family.
 // `os generate migration` reads the SAME table, in both of its formats — that
@@ -1524,63 +1528,11 @@ const SQL_AGGREGATE_FUNCTIONS: ReadonlyMap<string, SqlAggregateLowering> = new M
   ['count_distinct', { sql: 'count', distinct: true }],
 ]);
 
-/**
- * [#20335] What each declared aggregate function ANSWERS — a derived `number`,
- * or a value OF the aggregated column — and therefore which read presentation
- * {@link SqlDriver.aggregate} gives its result column.
- *
- * - `'number'` — `count`, `count_distinct`, `sum`, `avg`. A count or a total is
- *   a number whatever the column held, and it is presented as one (`'number'`,
- *   the presenter `formatOutput` applies to a numeric field on a `find()` row).
- * - `'column'` — `min`, `max`. The answer is one of the column's own values, so
- *   it takes that column's presentation ({@link SqlDriver.readPresentationKind}),
- *   exactly as before this table existed.
- *
- * Why the `'number'` half needs presenting at all: the SQL client hands a
- * result back as the wire type of the SQL expression, not as the platform's
- * value type. Measured on live PostgreSQL 16.13 and MySQL 8.0.46 through this
- * driver's own connections: node-postgres parses `bigint` (OID 20 — `count`,
- * and `sum` over an integer column) and `numeric` (OID 1700 — `sum` / `avg`
- * over the exact-decimal numeric family, `avg` over an integer column) to
- * STRINGS (`"2"`, `"500.000000000000000000000000000000"`), and mysql2 does the
- * same for `DECIMAL` (`SUM` / `AVG`; its `COUNT` arrives as a number). The
- * engine's rows path (`objectql`'s `in-memory-aggregation.ts`) and SQLite answer
- * numbers for the same query, so `having { n: { $in: [2] } }` kept c1, c2 on
- * those and no group on PostgreSQL's native path.
- *
- * Keyed on the function the query ASKED for, never on whether a value looks
- * numeric, and deliberately not gated by dialect: the presenter only rewrites a
- * STRING, so a client that already answers a number (better-sqlite3, mysql2's
- * `COUNT`) passes through untouched — measured byte-identical on SQLite — and
- * no list of "string-answering dialects" exists to drift.
- *
- * ## The precision policy — one JS number, the loss declared
- *
- * The answer is `Number(text)`: an IEEE-754 double, on every dialect. A `sum` /
- * `avg` over the exact-decimal column (`numeric(65,30)` / `DECIMAL(65,30)`)
- * whose value needs more than a double's ~15-17 significant digits, or an
- * integer at or above 2^53, is ROUNDED to the nearest double — declared, not
- * silent: it is the same bound `formatOutput` already puts on a `find()` read of
- * that column (#16318, `valueSchemaFor`'s `z.number().finite()`, ADR-0104 D1),
- * and the bound the rows path has always had (`toNumber` sums JS doubles). A
- * value-dependent type — a number when it fits, a string when it does not — was
- * rejected: it would reopen this defect for exactly the large totals, where a
- * `having` `$in` or a chart silently stops matching. Only a string `Number()`
- * reads as NaN (PostgreSQL's `numeric` `'NaN'`) is left as written, the
- * presenter's existing rule.
- *
- * A `Record` over `AggregationFunction` on purpose: a function that joins the
- * declared vocabulary without an answer here fails `tsc` rather than reaching a
- * caller unpresented.
- */
-const AGGREGATE_ANSWER_KIND: Readonly<Record<AggregationFunction, 'number' | 'column'>> = {
-  count: 'number',
-  count_distinct: 'number',
-  sum: 'number',
-  avg: 'number',
-  min: 'column',
-  max: 'column',
-};
+// [#20335, #20889] `AGGREGATE_ANSWER_KIND` — what each declared aggregate
+// function ANSWERS, and the one-double precision policy for that answer — lives
+// in `@objectstack/core` (`utils/aggregate-answer.ts`), imported above with its
+// `'number'` presenter, so the analytics native-SQL face presents a count or a
+// total with this driver's own rule.
 
 /**
  * [#20387] What each declared aggregate function ACCUMULATES IN on PostgreSQL
@@ -15496,16 +15448,11 @@ export class SqlDriver implements IDataDriver {
         return presentAuditTimestampOutput(value);
       case 'boolean':
         return Boolean(value);
-      case 'number': {
-        // Only strings are repaired, exactly as in `formatOutput`: a fresh
-        // REAL/INTEGER column already yields a number, and genuinely
-        // non-numeric legacy junk is left intact rather than turned into NaN.
-        if (typeof value === 'string' && value.trim() !== '') {
-          const n = Number(value);
-          if (!Number.isNaN(n)) return n;
-        }
-        return value;
-      }
+      case 'number':
+        // [#20889] The presenter lives in `@objectstack/core`, beside
+        // `AGGREGATE_ANSWER_KIND`, so the analytics native-SQL face presents
+        // a count or a total with this same function.
+        return presentAsNumber(value);
     }
   }
 
