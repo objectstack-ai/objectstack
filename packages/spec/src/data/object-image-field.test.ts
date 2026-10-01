@@ -130,7 +130,7 @@ describe('[#21182] `imageField` names a declared `image` or `avatar` field of th
 
   it('the stack door refuses it inside `objects`, located at the object', () => {
     const manifest = {
-      id: 'com.example.image_field',
+      id: 'com.example.imagefield',
       name: 'image-field-test',
       version: '1.0.0',
       type: 'app' as const,
