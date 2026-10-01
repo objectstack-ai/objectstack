@@ -100,6 +100,31 @@ Derived from the changesets objectui declared over the range — 87 releasing of
 
 - _(no changeset)_ docs: re-fence the plugins and core remainder of objectui#5867 as ts, 17 blocks across 8 pages (batch 6) (#11176) (objectui `340dc718f`)
 
-<!-- adr-0087: TODO — the pin bump cannot answer this; a human must (objectstack#6494) -->
+<!-- adr-0087: not-required (no-migration-prescription)
+     This diff moves `.objectui-sha` and the artefacts that travel with it (this console
+     changeset, `sdui.manifest.json` + `scripts/sdui-manifest.record.json`, the re-recorded
+     `packages/sdui-parser/objectui-lockstep.json`, the re-measured pin citations in
+     `packages/spec/src`, and the `@objectstack/sdui-parser` port of objectui `6f864cf62`
+     that the lockstep demands, which carries its own changeset and disposition). It adds,
+     removes or renames no ObjectStack-authorable key: no Zod schema, no spec declaration and
+     no stored `sys_metadata` shape moves in it, so `objectstack migrate meta` has nothing
+     here to rewrite, and this body carries no FROM/TO prescription of its own.
+     The pin-citation re-measure changes text only: source comments, one `.describe()`
+     sentence (`FormField.span`) and the description text of six semantic migration
+     entries, with the generated `migrations/registry.ts` and reference page that project
+     them. It adds, removes or renames no key, and moves no default, enum member or export.
+     The 5 declared-breaking entries listed above are objectui's OWN package surfaces, each
+     already carrying its upstream record: `52aad5cef` (`@object-ui/types`,
+     `@object-ui/plugin-kanban`), `615346d61` (`@object-ui/types`, `@object-ui/fields`),
+     `6f864cf62` (`@object-ui/types`, `@object-ui/plugin-kanban`, `@object-ui/sdui-parser`),
+     `3c13675e5` (`@object-ui/types`, `@object-ui/data-objectstack`, `@object-ui/app-shell`,
+     `@object-ui/plugin-view`) and `846cec0ef` (`@object-ui/core`, `@object-ui/plugin-tree`).
+     Where one of them mirrors an ObjectStack-authorable key, the ledger entry belongs to the
+     `packages/spec` PR that lands the mirror, never to the pin bump: the one such key in this
+     range, `object-kanban.quickAdd`, is already registered on this side as
+     `page.component.object-kanban.quickAdd` (#17260).
+     Scope of the claim, stated rather than implied: it is a claim about THIS diff, not
+     a per-entry re-measurement of the 5 upstream declared-breaking entries.
+-->
 
 objectui range: `db11afd4967c...e420df310f5b`
