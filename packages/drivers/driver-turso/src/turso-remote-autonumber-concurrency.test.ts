@@ -38,8 +38,13 @@
  * - Each writer's own sequence is strictly increasing: the counter is
  *   gap-tolerant-monotonic. With no statement failing, the union is exactly
  *   1..N, and the file says so when it is.
- * - The two writers really overlapped: neither's numbers form one contiguous
- *   block. (Had they run one after the other, the pin above would be vacuous.)
+ * - The two writers really overlapped: in the global order of the numbers,
+ *   the writer changes at least twice — each wrote while the other still had
+ *   writes pending. (One change is a serial run, A then B, which would make
+ *   the distinct-count pin vacuous; a writer finishing a contiguous run INSIDE
+ *   the other's run is still an overlap, and is what the scheduler does under
+ *   load, so contiguity itself is not the criterion.) The measured number of
+ *   changes is printed with the failure, and reported in the PR.
  * - The writers are different processes, and neither is this one.
  *
  * # Reverse verification — direction predicted BEFORE it was run
@@ -65,7 +70,7 @@ const HERE = fileURLToPath(new URL('.', import.meta.url));
 const PKG_ROOT = join(HERE, '..');
 const DRIVER_ENTRY = new URL('./index.ts', import.meta.url).href;
 
-const WRITES_PER_WORKER = 25;
+const WRITES_PER_WORKER = 100;
 const WORKERS = ['A', 'B'] as const;
 
 const NUMBERED_OBJECT = {
@@ -210,12 +215,18 @@ describe('[#21113] two writers in two processes draw distinct numbers from one d
       for (let i = 1; i < ints.length; i++) expect(ints[i], `writer ${r.tag} at ${i}`).toBeGreaterThan(ints[i - 1]);
     }
 
-    // They really overlapped: no writer's numbers form one contiguous block.
-    for (const r of reports) {
-      const ints = r.numbers.map(asInt);
-      const contiguous = ints[ints.length - 1] - ints[0] + 1 === ints.length;
-      expect(contiguous, `writer ${r.tag} ran alone: ${r.numbers[0]}..${r.numbers[r.numbers.length - 1]}`).toBe(false);
-    }
+    // They really overlapped: walking the numbers in order, the writer
+    // changes at least twice. A serial run (all of A, then all of B) changes
+    // once; a writer whose contiguous run sits inside the other's changes
+    // twice, and that is still both writers contending on one counter.
+    const owner = new Map<number, string>();
+    for (const r of reports) for (const n of r.numbers) owner.set(asInt(n), r.tag);
+    const inOrder = [...owner.keys()].sort((a, b) => a - b).map((n) => owner.get(n)!);
+    let switches = 0;
+    for (let i = 1; i < inOrder.length; i++) if (inOrder[i] !== inOrder[i - 1]) switches++;
+    expect(switches, `the writers ran one after the other (${switches} change(s) of writer across ${total} numbers)`).toBeGreaterThanOrEqual(2);
+    // The measurement, on the record: how hard the two writers contended.
+    process.stdout.write(`[turso-remote-autonumber-concurrency] pids ${pids.join('/')} · ${total} writes · ${new Set(all).size} distinct · ${switches} writer change(s)\n`);
 
     // And the database agrees: one row per number, one counter row at N.
     const rows = await parent.find('crm_case', { orderBy: [{ field: 'case_number', order: 'asc' }] } as any);
