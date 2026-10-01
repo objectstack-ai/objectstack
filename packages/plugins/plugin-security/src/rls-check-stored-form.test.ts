@@ -123,6 +123,8 @@ async function boot(makeDriver: () => Driver, predicate: string) {
           due_on: { name: 'due_on', type: 'date' },
           due_at: { name: 'due_at', type: 'datetime' },
           start_time: { name: 'start_time', type: 'time' },
+          tags: { name: 'tags', type: 'tags' },
+          owners: { name: 'owners', type: 'select', multiple: true, options: [{ label: 'X', value: 'x' }, { label: 'XY', value: 'xy' }] },
         },
       },
     ],
@@ -199,6 +201,16 @@ const CELLS: Cell[] = [
   // Control: a TEXT column is judged as written, whatever its value looks like.
   { predicate: "record.title == '2026-01-05'", column: 'title', value: '2026-01-05T15:00:00Z', stored: '2026-01-05T15:00:00Z', admitted: false },
   { predicate: "record.title > '2026-01-05'", column: 'title', value: '2026-01-05T15:00:00Z', stored: '2026-01-05T15:00:00Z', admitted: true },
+  // [#21238] A declared multi-valued column: a lone scalar is stored as a one-member list.
+  { predicate: "record.tags.contains('x')", column: 'tags', value: 'x', stored: ['x'], admitted: true },
+  { predicate: "record.tags.contains('x')", column: 'tags', value: 'xy', stored: ['xy'], admitted: false },
+  { predicate: "record.tags.contains('x')", column: 'tags', value: ['x'], stored: ['x'], admitted: true },
+  { predicate: "!record.tags.contains('x')", column: 'tags', value: 'x', stored: ['x'], admitted: false },
+  { predicate: "record.owners.contains('x')", column: 'owners', value: 'x', stored: ['x'], admitted: true },
+  { predicate: "record.owners.contains('x')", column: 'owners', value: 'xy', stored: ['xy'], admitted: false },
+  // Control: a TEXT column keeps its scalar, and `contains` stays a substring test.
+  { predicate: "record.title == 'x'", column: 'title', value: 'x', stored: 'x', admitted: true },
+  { predicate: "record.title.contains('x')", column: 'title', value: 'xy', stored: 'xy', admitted: true },
 ];
 
 describe("formula's whole-day copy is out of reach in this file", () => {
@@ -234,6 +246,29 @@ for (const [driverName, makeDriver] of DRIVERS) {
       expect(await outcome(r.engine.update(r.OBJ, { due_on: new Date('2026-01-06T00:30:00Z') }, { where: { id: 'u' }, context: r.caller } as never)))
         .toEqual(DENIED);
       expect((await r.storedRow('u'))?.due_on).toBe('2026-01-05');
+    });
+
+    it("[#21238] a by-id update judges a lone scalar on a multi-valued column as its stored list: 'x' admitted, 'xy' 403 and unchanged", async () => {
+      const r = await boot(makeDriver, "record.tags.contains('x')");
+      await r.engine.insert(r.OBJ, { id: 'u', tags: ['x', 'z'] }, { context: SYS_CTX } as never);
+      expect(await outcome(r.engine.update(r.OBJ, { tags: 'x' }, { where: { id: 'u' }, context: r.caller } as never)))
+        .toBe('admitted');
+      expect((await r.storedRow('u'))?.tags).toEqual(['x']);
+      expect(await outcome(r.engine.update(r.OBJ, { tags: 'xy' }, { where: { id: 'u' }, context: r.caller } as never)))
+        .toEqual(DENIED);
+      expect((await r.storedRow('u'))?.tags).toEqual(['x']);
+      expect(await r.shownTo('u')).toBe(true);
+    });
+
+    it("[#21238] a predicate update judges a lone scalar on a multi-valued column as its stored list: 'x' admitted, 'xy' 403 and unchanged", async () => {
+      const r = await boot(makeDriver, "record.tags.contains('x')");
+      await r.engine.insert(r.OBJ, { id: 'p', title: 'batch', tags: ['x'] }, { context: SYS_CTX } as never);
+      expect(await outcome(r.engine.update(r.OBJ, { tags: 'x' }, { where: { title: 'batch' }, multi: true, context: r.caller } as never)))
+        .toBe('admitted');
+      expect((await r.storedRow('p'))?.tags).toEqual(['x']);
+      expect(await outcome(r.engine.update(r.OBJ, { tags: 'xy' }, { where: { title: 'batch' }, multi: true, context: r.caller } as never)))
+        .toEqual(DENIED);
+      expect((await r.storedRow('p'))?.tags).toEqual(['x']);
     });
   });
 }
