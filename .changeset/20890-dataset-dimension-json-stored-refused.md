@@ -4,7 +4,7 @@
 
 fix(lint)!: `os validate`, `os build` and `os lint` refuse a dataset dimension over a JSON-stored field, the group key the analytics door already refuses at query time
 
-Clause-②: no (a lint verdict widens its refusals; no published payload gains a key, read against `scripts/pm/clause2-line.mjs`)
+Clause-②: yes (narrowing)
 
 <!-- adr-0087: not-required (no-migration-prescription) a refusal of a grouping TARGET at authoring time: a dataset dimensions entry whose field resolves to a declared structured-JSON field (json, composite, repeater, record, location, address, vector) or multi-value field (multiselect, checkboxes, tags, or a select, radio, lookup, user, file or image declared multiple: true). It is the authoring leg of the analytics door that already refuses every query grouping by such a column with 400 INVALID_FIELD, and that door's own changeset declared this category for this surface. No authorable key, spelling, export or stored shape moves: DatasetSchema keeps parsing every dimension, no stored row is read or rewritten, and which scalar part of a document, or which member of a list, an author meant to group on is not something a ledger entry can rewrite. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers a grouping target, and dataset-measure-aggregate-field-type-refused says in its own reason that a field used as a DIMENSION is untouched (not already-registered); and the change is a rule verdict, not a declaration (not runtime-interface-only or type-surface-only). -->
 

@@ -4,7 +4,7 @@
 
 fix(lint)!: a dataset `count_distinct` measure over a field declared `multiple: true` is refused by `measure-aggregate-field-type-refused`, as the compile leg and the engine already refuse it
 
-Clause-②: no (a lint verdict widens its refusals; no published payload gains a key, read against `scripts/pm/clause2-line.mjs`)
+Clause-②: yes (narrowing)
 
 <!-- adr-0087: not-required (already-registered dataset-measure-aggregate-field-type-refused) the registered entry carries this family's hand-migration, an aggregate the field accepts with count as the one that stays for a JSON-stored field, and the count_distinct narrowing over the JSON-stored types already rides it. A select, radio, lookup, user, file or image field declared multiple: true is the one JSON-stored shape the per-type table cannot see; the dataset compile leg and the engine's count_distinct door refuse it beside the table's row, and this is the authoring leg of that same pair, so it adds no surface of its own. -->
 
