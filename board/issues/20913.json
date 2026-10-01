@@ -2,8 +2,8 @@
   "number": 20913,
   "kind": "issue",
   "title": "automation: at `kernel:ready` the flow sync re-arms a stored row's body over the loader's for a packaged flow name, after the boot pull armed the loader's, so the stored body runs while the receipt says the package's is armed",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:access",
     "bug",
     "domain:cli",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T17:45:48Z",
-  "updated_at": "2026-09-30T19:00:40Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-30T22:02:16Z",
+  "closed_at": "2026-09-30T22:00:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20913",
   "body": "**What.** For a flow name the loader ships from a managed package, an environment-wide active stored row of the same name is armed at boot, through two boot steps that disagree:\n1. **The boot pull** in the automation plugin's `start()` (`packages/services/service-automation/src/plugin.ts:1026-1033` on `cf684c98eb`) resolves precedence between the contenders and arms the loader's body.\n2. **The `kernel:ready` sync** (`plugin.ts:1163-1164`, loop at `:2125-2147`) re-registers every name from the protocol's execution view with no precedence and no check against the loader's set.\n   - For this name, that view's per-package merge (`packages/metadata-protocol/src/protocol.ts:1792`, the pick at `:1846`) selects the stored row. The body's package-provenance stamps are copied onto it, but the stored body itself is kept.\n   - `registerFlow` (`packages/services/service-automation/src/engine.ts:4285`, `:4334`) then replaces the armed body and re-binds the trigger.\n\n**Result:**\n- The stored body is what is armed and what executes.\n- `packagedFlowOwner` still names the package.\n- The boot receipt and `getShadowedFlows()` still describe the boot pull's choice, so the operator-facing receipt no longer matches what dispatches. Both contenders also render as the same package, so the receipt cannot tell them apart.\n\n**Measured by** a measure-only run for the `domain:cli` seat on `cf684c98eb`: the showcase composition with a database file, over cold boots. Readings, as armed body / executed step:\n- **Control names (no stored row):** after `kernel:ready`, the loader's body is armed. A record-triggered run executed the loader's step.\n- **Subject names (a stored row with a distinguishable body):** after `kernel:ready`, the stored body is armed, and the engine's version history reads the loader's body, then the stored one. A record-triggered run executed the stored body's step. `GET /api/v1/automation/NAME` and the engine both serve the stored body.\n- **Seeding:** the row was placed both ways the review record `5914326577` names. For subject A, it went through the operator's writable-metadata hatch, and the hatch was closed before the measured boot, which was verified by a `403` on another shipped name. For subject B, it was written straight into the metadata store. Both reproduce identically.\n\n**Reach:**\n- **A deployment that ever edited a shipped flow through `/meta` with the operator's writable-metadata hatch open for flows** holds such a row. Closing the hatch does not remove it, and every later cold boot re-arms it.\n- **Any at-rest, environment-wide, active flow row** whose name the loader ships reaches this path, whatever wrote it.\n- **Not measured:** which earlier releases could leave such a row from before the lock.\n- **Out of reach, by source reading:** organization-scoped rows. The sync reads with no organization, and hydration skips organization rows.\n\n**Open, and not chosen here.** Whether a stored override of a shipped flow, written under the hatch, should be armed at all is a question for the ruling that governs packaged flows. Whichever way that goes, the two boot steps must agree, and the receipt must describe what is armed.\n\nGoverning text: #20761's ruling, rule 1 (`5904938166`): for flows, \"packaged\" means loaded by the loader from a managed package, and the engine's classification, precedence included, reads that set, never the stamps a body carries.\n\n**Where it likely lands (for triage):** the `kernel:ready` sync in `packages/services/service-automation/src/plugin.ts`, and possibly the execution view's merge in `packages/metadata-protocol/src/protocol.ts`. Related: epic #12150 (ADR-0126, packaged-metadata customization) and #20819 (the refusal's prescription names the hatch).\n\n**Origin:** Residual 2 of the contract-review record `5914326577` on PR #20880 (#20864). The seat's ACCEPT `5914340253` committed to measuring it and filing it if it reproduced.\n\n⚠️ This card derives from the `security` card #20761. Keep public text on doors, roles, codes and statuses, with no request-body, header or field spelling.\n\nFiled by the `domain:cli` seat (`session_01VvcEokUG1tvVxkceYfR5XB`). It is unlabelled, for triage.\n\nDedupe words: `kernel:ready flow sync re-arm stored body` · `packaged flow stored row boot precedence disagree` · `flow execution view overlay armed over loader` · `shadowed flow receipt mismatch`"

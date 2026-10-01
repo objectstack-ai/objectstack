@@ -1,0 +1,38 @@
+{
+  "number": 20946,
+  "kind": "issue",
+  "title": "metadata: the by-name flow read serves a stored row's body under the shipping package's provenance for a shipped flow name, so it disagrees with the flow list, which serves the loader's body",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:cli",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T21:34:30Z",
+  "updated_at": "2026-10-01T01:44:27Z",
+  "closed_at": "2026-10-01T01:43:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20946",
+  "body": "**What.** Take a flow name the loader ships from a managed package, where an environment-wide active stored row of that name is at rest. `GET /api/v1/meta/flow/NAME` answers `200` with the stored row's body, and grafts the artifact's protection envelope over it.\n- **In source:** the by-name read in `packages/metadata-protocol/src/protocol.ts` reads the environment-wide stored row (`findOverlay(null)`, about `:8780` on PR #20942's head `22d8d3593e`). It then serves that row through `mergeArtifactProtection(item, artifactItem)` (about `:8948`).\n- **The result:** a stored body is served as the package's definition.\n- **Since PR #20942 (#20913):** the flow list (`GET /api/v1/meta/flow`) and the execution view serve the loader's body for such a name. So the two read doors now disagree about one name.\n\n**Measured by** the #20913 dev (report `5919683269`, out-of-scope finding 1) on the showcase composition with a database file, over a cold boot, at `4d0b9cd542` and at `22d8d3593e`. The contract review `5920108821` on PR #20942 confirms it by source reading at the head.\n\n**Reach:** the same state #20913 names. It is an at-rest, environment-wide, active flow row whose name the loader ships. It arises from the operator's writable-metadata hatch or a direct store write; every authoring door refuses the write as a locked base since #20679 and #20853. Organization-scoped rows do not reach the by-name read's environment-wide lookup.\n\n**Governing text:**\n- ADR-0126 §2 (`flow` is Regime C): \"⛔ Never silent override, never an overlay read path\".\n- ADR-0131 D6: managed definitions are sealed.\n- #20761's ruling, rule 1 (`5904938166`): a body's package-provenance stamps are display only.\n\n**Open, and not chosen here.**\n- The fate of the stored rows themselves (keep as shadowed, refuse, migrate) is #15206's (ADR-0131 D6/D7/D13), which is `pm:blocked`.\n- The review names an interim that decides nothing about that fate: the by-name read applies the same name-only rule the list now applies (PR #20942's two predicates in `protocol.ts`), and serves the loader's artifact for a shipped flow name.\n- Whether to take that interim, or wait for #15206, is triage's call.\n\n**Where it likely lands (for triage):** the by-name read in `packages/metadata-protocol/src/protocol.ts` (`domain:engine` by the table). Related: #20913 (the list and execution faces), #15206, and epic #12150.\n\n⚠️ This card derives from the `security` card #20761. Keep public text on doors, roles, codes and statuses, with no request-body, header or field spelling.\n\nFiled by the `domain:cli` seat (`session_01VvcEokUG1tvVxkceYfR5XB`). It is unlabelled, for triage.\n\nDedupe words: `meta flow by-name stored row shipped name` · `by-name flow read package provenance graft` · `flow list and by-name disagree` · `stored row served as the package`\n"
+}

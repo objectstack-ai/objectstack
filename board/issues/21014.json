@@ -1,0 +1,32 @@
+{
+  "number": 21014,
+  "kind": "pull_request",
+  "title": "docs(spec): the 17.4.0 entry no longer records the paid packages/rest follow-up as owed",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T01:39:12Z",
+  "updated_at": "2026-10-01T02:09:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21014",
+  "body": "Fixes #18858\n\nClause-②: no\n\n## What\n\n`packages/spec/CHANGELOG.md`, inside the released `@objectstack/spec` 17.4.0 entry for 094b8fd, closed its `batch.maxBatchSize` note with \"it is owed to a follow-up in `packages/rest`\" and anchored the quoted docblock at `packages/rest/src/rest-server.ts:2071`. Both are false today, and the first was already false when it was published:\n\n- ec5db7b (PR #16942) paid that follow-up. It rewrote `enforceBatchSize`'s docblock to call the cap embedder policy. It landed 2026-09-08T18:05Z, eleven hours after 094b8fd (06:54Z), and shipped in `@objectstack/rest` 17.4.0, the same release as the note. The npm registry's `time` field shows spec 17.4.0 published at 2026-09-09T03:57:51Z and rest 17.4.0 at 03:58:13Z.\n- `:2071` was correct at 094b8fd and has drifted since. At `a5bce4088` that line is JSDoc on `resolveRequestEnvironmentId`.\n\nThis PR amends that one entry in place. It uses the shape this file's own errata already use (`*Erratum, DATE — … (Corrected after publication, #N.)*`, six instances in this file). The closest is the 2026-09-18 batch-cap erratum on the same subject, which puts the line at the end of the entry and says how many passages above it were corrected in place:\n\n1. The passage now anchors the quotation by symbol (the `enforceBatchSize` docblock of `packages/rest/src/rest-server.ts`) instead of by line number. Its last clause names ec5db7b as the follow-up that was paid.\n2. One dated erratum line closes the entry and quotes both old phrasings.\n\nNo other sentence in the entry is touched. This PR has no changeset. The `packages/*/CHANGELOG.md` row of the AGENTS.md Documentation Guardrails says a factual error in a released entry is amended in place in a docs-only PR. A changeset would compile the correction into a new release note, which is the erratum-in-a-later-entry shape that row rules out. The amended text reaches npm with the next `@objectstack/spec` tarball.\n\n## Evidence (measured on `a5bce4088`, this branch's base)\n\n| Reading | Result |\n|---|---|\n| `grep -c \"deployment policy\" packages/rest/src/rest-server.ts` | 0. Positive control `grep -c maxBatchSize` on the same file: 6. The docblock now reads \"⛔ It is NOT deployment policy\", but a line break splits that phrase, so the single-line grep cannot match it. Its text was read directly as well. |\n| `packages/rest/CHANGELOG.md` | `ec5db7b` occurs once, under `## 17.4.0` / `### Patch Changes` |\n| npm tarballs `@objectstack/spec` 17.4.0 and 17.5.0 | the \"owed to a follow-up\" sentence is in each `package/CHANGELOG.md` once, under `## 17.4.0` |\n| npm tarballs `@objectstack/rest` 17.4.0 and 17.5.0 | the `ec5db7b` entry is in each once, under `## 17.4.0` |\n| `git show 094b8fd:packages/rest/src/rest-server.ts`, line 2071 | \"The cap is deployment policy — …\", so the anchor was correct when it was written |\n\n## Gates (on `efea2a386e`, the final commit)\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` derived 55 commands for this one path. 51 ran and exited 0. They include `pnpm check:nul-bytes`, `pnpm check:issue-citations`, `pnpm check:published-files`, `pnpm check:release-notes`, `pnpm check:release-page-status` and `node scripts/check-release-section-coverage.mjs --strict`. The `--ran` reconciliation reads: 55 accounted for, 51 run, 4 NOT-MEASURED, 0 UNRUN.\n\nNOT MEASURED (4): `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure` and `check:sourcemap-no-sources-content`. Each exited 3 with PREREQUISITE NOT MET. They read the `dist/` of every workspace package, and this worktree has no workspace build. A CHANGELOG prose edit changes no build input, and CI runs these gates over a fresh build.\n\n`check:issue-citations` passes, but `**/CHANGELOG.md` is one of its declared deferred surfaces, so it did not judge the new `#18858` citation. That citation was checked by hand: REST `GET /issues/18858` answers 200, and the item is an issue, not a pull request.\n\n## Acceptance notes\n\n- The entry's bold lead (\"really does describe itself as deployment policy\") and its \"it exists verbatim in the REST server\" are in the present tense. They describe the tree 094b8fd landed on. Following the card's scope, they stay as written, and the erratum line records that the docblock was rewritten in the same release.\n- The card cites the passage at `:3581`, read at `631dcbd4b`. At `a5bce4088` it is at `:18471`, because later release sections were added above it.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JAhu8u8QfBvRjVZDox7CP9)_\n"
+}

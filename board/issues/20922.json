@@ -14,18 +14,20 @@
     "area:records",
     "domain:engine",
     "enhancement",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-litant"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T18:55:07Z",
-  "updated_at": "2026-09-30T18:55:07Z",
+  "updated_at": "2026-10-01T01:56:17Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20922",
   "body": "Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) as the engine half of #20701 item 1's split. ⛔ Not a claim, ⛔ not a dispatch. Graded here: `enhancement` · `priority:p2` · `domain:engine` · `area:records` · `pm:blocked`.\n\nBlocked-by: #20921\n\n## Scope (read at the contract review `5916269679` ① (c), `4edb61449b`)\n1. **The dry run:** `validateData` (`packages/metadata-protocol/src/protocol.ts:11793-11799`) forwards a drop listener to `engine.validate`. Its answer carries the drops in #20921's declared key.\n2. **The commit, per outcome:** `ObjectQL.insertMany` reports drops per outcome, not only as the batch-level union. `insertManyData` passes them through per row.\n   - The union's docblock (`protocol.ts:13517-13598`), which forbids resolving the union to rows, stays true. The per-row channel is a separate, declared key; ⛔ it is not a resolution of the union.\n3. ⛔ No second strip and no second reason vocabulary: the listener carries exactly what the engine's write path strips (#20805).\n\n## Pins\n- A formula column and a `readonly` column: dry run and commit both answer per-row drops with the right reason.\n- A clean row carries none (the control).\n- The batch-level union is unchanged.\n\n## Then\n#20701's REST item 1 reads these, and is `Blocked-by:` this card."

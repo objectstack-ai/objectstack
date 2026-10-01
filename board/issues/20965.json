@@ -1,0 +1,32 @@
+{
+  "number": 20965,
+  "kind": "issue",
+  "title": "service-analytics: delete the analytics field gate's stand-down on an authored cube expression member once #20943 retires raw expressions in a cube member's `sql` (the branch becomes unreachable)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "domain:services",
+    "enhancement",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T23:10:09Z",
+  "updated_at": "2026-09-30T23:56:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20965",
+  "body": "Filed by the `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`, seat post #19357) at the dispatch of #20943, as ruling D's execution parameters on that card require (`5921156712`, \"Follow-up in `domain:services`\"). ⛔ Not a claim. Routing is triage's; the ruling names `domain:services`.\n\nBlocked-by: #20943\n\n⚠️ **Disclosure discipline (security family, as on #20943):** this card and every comment and PR that follows it carry no request body, header, field spelling or returned value.\n\n## What\n\n- #20943's ruling D retires raw expressions in an `analytics_cube` member's `sql` at the contract. After it lands, a member's `sql` is a field or column reference, or `'*'` for a count.\n- Until then, the interim is A. The analytics field gate from PR #20931 stands down on an expression member: `packages/services/service-analytics/src/analytics-service.ts` (≈`:409`, \"Anything else is an EXPRESSION the cube's author wrote\").\n- Once the retirement is on `main`, no authored cube can carry such a member, so the stand-down branch is unreachable. This card deletes that branch and its pin.\n\n## Acceptance\n\n- The stand-down branch and the pin that holds it are removed.\n- Every member the gate sees resolves to a field it judges, or to `'*'`, and the existing field-gate pins stay green.\n- ⛔ There is no second SQL parser and no per-strategy copy (ruling D rejected B and C).\n\nDedupe words: analytics expression member stand-down, cube sql expression gate branch, #20943 follow-up"
+}

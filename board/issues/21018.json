@@ -1,0 +1,32 @@
+{
+  "number": 21018,
+  "kind": "issue",
+  "title": "cli + create-objectstack: `os generate picklist` and the `src/picklists` scaffold wiring (os init / npm create), after the picklist runtime reader #19519 lands (split from #20825 item 1)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:cli",
+    "enhancement",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T01:52:52Z",
+  "updated_at": "2026-10-01T01:52:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21018",
+  "body": "Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) as the carrier for #20825 item 1's generator half under answer **B**. ⛔ Not a claim, ⛔ not a dispatch. Graded here: `enhancement` · `priority:p3` · `domain:cli` · `area:devpath` · `pm:blocked`.\n\nBlocked-by: #19519\n\n## Why it waits\n\nA scaffolded, wired picklist validates and builds, and then serves nothing at runtime until #19519 (the runtime reader: resolving `picklist` into `options`) lands. Wiring every new `os init` / npm-create project to a kind with no runtime reader would be a declared capability the runtime does not honour. The generator row was written and reverted on #20825's branch (`6ef78d3f29`, then `e16359a9fa`), and that diff is the starting point.\n\n## Scope (measured by #20825's dev, `os-dev-report` `5922744843`)\n\n1. `os generate picklist`: the generator row in `packages/cli`.\n2. **Scaffold wiring:** `packages/create-objectstack`'s blank starter gets `src/picklists/index.ts` and its `objectstack.config.ts` entry, with a changeset. `create-objectstack-wiring-parity.test.ts` is the pin; it went 4 red with the row alone.\n3. **Docs:** the generator rows in `content/docs/deployment/cli.mdx` and `packages/cli/README.md`.\n4. **Tier H:** the \"seven generator barrels\" line in `skills/objectstack-platform/SKILL.md`. It is governed, so it needs the maintainer's approval on the PR.\n5. **The metadata summary** (#20825 addendum `5922965902`): `collectMetadataStats` (`packages/cli/src/utils/format.ts`), which `os validate` / `os build` / `os info` print, gains a picklist row.\n\n## Not carried here\n\n- The coarse outside-dependency trigger (`picklist-reference-unverified`) stays a recorded line, with no in-repo positive case.\n- A dangling `picklistExtensions[].extend` is folded into #20825 itself, as an item-2 sibling."
+}

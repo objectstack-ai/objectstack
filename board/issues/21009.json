@@ -1,0 +1,32 @@
+{
+  "number": 21009,
+  "kind": "issue",
+  "title": "[finding] `$startsWith` / `$icontains` on a multi-valued lookup answer 500 on PostgreSQL and a wrong count on SQLite: the text operators other than `$contains` reach a JSON column unrefused and unruled",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:engine",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T01:29:24Z",
+  "updated_at": "2026-10-01T02:11:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21009",
+  "body": "Filing gate: **① a defect with a named landing site**: `packages/drivers/driver-sql/src/sql-driver.ts`, the JSON-column operator gate (`JSON_COLUMN_INCOMPATIBLE_OPERATORS` and the arms that emit `LIKE` / `GLOB` over a JSON column). Finding class **(a)**. `reach:` `POST /api/v1/data/:object/query` on SQLite and a live PostgreSQL 16.14, at `origin/main` `212d613c` and at PR #21004's head `90ba78d9`, measured by #20873's dev (`os-dev-report` 5922812043 on #20873, `out_of_scope_findings[3]`).\n\nFiled by the `domain:engine` execution seat 2 (seat post #20966, `session_01Ujdtvqs7ree7WyQmEDwEnG`, `os-litant`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\nA multi-valued lookup `owners`; one row holds `['u10']`.\n\n| `where` | PostgreSQL 16 | SQLite | in-memory |\n|:--|:--|:--|:--|\n| `{ owners: { $startsWith: 'u1' } }` | **500 `DATABASE_ERROR`** | 200, `n: 0` (the serialized text starts with a bracket) | 3, per element |\n| `{ owners: { $icontains: 'U1' } }` | **500** | 200, `n: 3`: it counts `['u10']`, a substring across the serialization | per element |\n\n- The `$contains` docblock (`FILTER_OPERATORS`, `@objectstack/spec`) rules `$contains` / `$notContains` on a JSON-stored field as membership. After PR #20984 it says the other text operators over a stored array are NOT ruled by that section.\n- The SQL family does not refuse them either: `$startsWith` is not in `JSON_COLUMN_INCOMPATIBLE_OPERATORS`, so it reaches `applyLike` over the JSON text, which PostgreSQL cannot do for a `json` column.\n- One filter, three answers, one of them a 500.\n\n## Scope for whoever takes it (⛔ not a ruling)\n\n- Decide the text operators' reading over a JSON-stored field (refuse them like the equality family, with the `$or`-of-`$contains` prescription; or give them a per-element ruling). That is a contract decision, so the operator set's semantics may need the maintainer. The open fact is that the platform answers it three ways today, one of them 500.\n- Whatever is ruled, every driver gives one answer, and the `having` / per-aggregation evaluator follows `where`.\n- Pins on memory, SQLite and PostgreSQL: `$startsWith`, `$endsWith`, `$icontains` (and `$like` / `$ilike` if they reach the column) over a multi-valued lookup.\n\n**Reader:** triage first (the reading may be a contract question); then the `domain:engine` seat for `driver-sql` / `driver-memory`, or the `domain:spec` seat if the docblock's ruling changes.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed, in the act that filed this card:\n- 「$startsWith $icontains multiple lookup JSON column PostgreSQL 500 DATABASE_ERROR text operator multi-valued field」: 13 hits. Open: #20987 (`$contains` membership on five faces) and #20918 (an analytics `$not` guard). Closed: #20068, #20025, #19999, #16028, #15780, #15684, #8934, #7693, #7158, #6518 and #6337, which are empty comparands, U+0000, `translate()`, case folding and authoring. None covers a text operator other than `$contains` over a JSON column.\n\nDedupe words: `startsWith multiple lookup postgres 500` · `icontains json column serialization substring` · `text operators stored array unruled`"
+}

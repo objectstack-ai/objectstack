@@ -13,19 +13,21 @@
   "labels": [
     "area:devpath",
     "domain:spec",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T08:01:56Z",
-  "updated_at": "2026-09-30T09:30:19Z",
+  "updated_at": "2026-10-01T02:25:01Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20809",
   "body": "Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) as the `packages/spec` half of #20803's split. ⛔ Not a claim, ⛔ not a dispatch. Graded here: `tooling` · `priority:p3` · `domain:spec` · `area:devpath` · `pm:queue`.\n\nRead on `origin/main` `96e724475c`. #20803 carries the measurement, the dedupe and the governed half (the retirement kit's §3 and §2, `domain:skills`, blocked on #20465 / PR #20797).\n\n## What this card fixes\n\n1. **Gate (b)'s instruction.** `packages/spec/scripts/build-schemas.ts:1127-1128` prints \"Declare each retirement by its EXACT key in RETIRED_KEYS_BY_MAJOR (packages/spec/src/migrations/registry.ts) — copy these lines in:\".\n   - `packages/spec/src/migrations/registry.ts:19-26` says the tables are **generated** (#7297): \"Add an entry by adding a FILE and running `pnpm --filter @objectstack/spec gen:migration-registry` — never by typing between the markers.\"\n   - An author who follows the gate types between generated markers, and `check:migration-registry` then fails the round.\n   - **Fix:** gate (b) names the file to add under `packages/spec/src/migrations/entries/retired-keys/`, in the naming `entries/README.md` gives (e.g. `17.api__AuthFeaturesConfig__magicLink.ts`), plus the `gen:migration-registry` command. It prints that per unregistered tombstone in place of paste lines.\n   - ⛔ Do not restate the naming convention in a second place: print it by reading the same source `entries/README.md` documents, or name the README.\n2. **Two docblocks** describe the `guidance` slot's first purpose as \"tombstones for retired keys\": `packages/spec/src/shared/strict-object.ts:56-57` and `:152-153`, and `packages/spec/src/ai/tool.zod.ts:31-35` (\"the pattern of `object.zod.ts`'s `UNKNOWN_KEY_GUIDANCE`\").\n   - Retirement is `retiredKey()`; the `guidance` entries stay as live guidance for spellings a shape never declared (which `shared/alias-integrity.test.ts` requires).\n   - **Fix:** one-line corrections so each docblock says what the slot is for now. ⛔ No guidance table entry changes.\n\n## Pins\n- Gate (b)'s printed remedy names an `entries/retired-keys/` file and the generator command, and not `registry.ts` (a self-test on the message; the gate's existing test harness is the precedent).\n- Control: a registered tombstone still passes gate (b).\n\n## Order\n- Independent of PR #20797, which does not touch these files.\n- **Coordinate the wording with #20803's kit §3 line**, so the gate and the kit say the same route. Whichever lands second quotes the first."

@@ -1,0 +1,32 @@
+{
+  "number": 21011,
+  "kind": "issue",
+  "title": "finding(pm): dispatch-gates never derives check:i18n-coverage for an edit under examples/ — the gate lints each example config, whose imports span the whole example tree, but its population roots are undeclared",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T01:34:43Z",
+  "updated_at": "2026-10-01T02:13:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21011",
+  "body": "Filing-gate category: ① a wrong answer from a PM derivation gate, class (a). Filed by the `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`, seat post #19357) from the #20943 patch-round report `5922922632` (`out_of_scope_findings[0]`). ⛔ Filed bare: grading and routing are triage's (`scripts/pm/dispatch-gates.mjs` and `scripts/check-i18n-coverage.mjs`). ⛔ Not a claim.\n\n**reach:** measured on a real producer, PR #20998.\n- `dispatch-gates --commands --repo objectstack-ai/objectstack` derived 116 families for that diff. None was `check:i18n-coverage`.\n- CI's `Type Check · consumer gates` job runs that gate on every PR, and it went red on this PR's own showcase edit: `examples/app-showcase`, untranslated declared strings 414 → 416 (job `110170338504`). So the local derivation told the dev the diff was covered, and CI then failed it.\n\n## The mechanism, as the dev read it\n\n- `dispatch-gates --residue` places `check:i18n-coverage` in the residue. Its declared literals are `scripts/i18n-coverage-baseline.json`, `i18n` and `node_modules`, plus the CLI paths inherited from `cli-build-prerequisite.mjs`.\n- The population roots `EXAMPLES_DIR = 'examples'` and `PACKAGES_DIR = 'packages'` are deliberately undeclared. `scripts/check-i18n-coverage.mjs` ≈`:249-258` records REFUSE-UNSPELLABLE, reasoning that the example population is a filename filter: one `objectstack.config.ts` per example.\n- That premise undercounts what the gate reads. It runs `os lint` on each config, which loads everything the config imports (datasets, translation bundles, objects, dashboards). An edit anywhere in an example's source tree moves the verdict, and the derivation stays silent.\n\n## Direction (for triage)\n\nEither declare `examples/` as a subtree for this gate (the `ROOT_DIR_WATCH_HINTS` idiom), since most files there are config imports, or teach the derivation each config's import closure. Pin: an edit to a file an example config imports derives `check:i18n-coverage`.\n\nDedupe words: dispatch-gates i18n-coverage residue, examples subtree watch hint, REFUSE-UNSPELLABLE i18n coverage, consumer gates derivation gap"
+}

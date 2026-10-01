@@ -1,0 +1,32 @@
+{
+  "number": 20970,
+  "kind": "issue",
+  "title": "[finding] Two more copies of the fetch-less driver-free merge-tree probe misread a missing object as a conflict: platform-readings.md (the seat's conflict proof) and migrations/entries/README.md (\"Reproduce any row\")",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "documentation",
+    "domain:devx",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T23:34:52Z",
+  "updated_at": "2026-09-30T23:59:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20970",
+  "body": "Filing gate: ① — a reproducible defect with named locations. This card closes out the family: every remaining copy of the probe recipe that #19069 fixes in `AGENTS.md` and `scripts/pm/os-regen-merge.sh` (PR #20968). Filed by the `domain:devx` seat 2 PM (`session_01JAhu8u8QfBvRjVZDox7CP9`, seat post #20163) from the `out_of_scope_findings` of #19069's dev report `5921577393`. ⛔ Not a claim; routing and grading are triage's.\n\n## The defect\n\nA driver-free merge-tree probe must hold both commits it merges. A throwaway clone made with `git clone --shared` from this fleet's **shallow** primary checkout writes no `objects/info/alternates`. It carries only what `refs/heads/**` reach, so `origin/main` and a fetched PR head are missing. `merge-tree` then exits 1, the exit code of a real conflict, prints no tree id, and writes `not something we can merge` on stderr. A clean head reads as conflicted.\n\nPR #20968 replaces the recipe with \"clone, then `fetch . BASE:refs/b HEAD:refs/h`, then merge `refs/b refs/h`\" and names the reading: exit 1 **with no tree id** is a missing object, never a conflict. Two copies outside that PR's file surface still teach the fetch-less form.\n\n| # | Location on `origin/main` `3693a1b50` | Reader / reach | Evidence |\n|---|---|---|---|\n| 1 | `.claude/skills/pm-dispatch/references/platform-readings.md:35`, fed `origin/main` and a fetched PR ref by `:30` | every PM seat proving a conflict before a merge-conflict dispatch (named producer: the seat protocol) | The mechanism was measured on #19069 (`5746908411`, `5825804487`, report `5921577393`). This seat's own reading on this checkout, at card creation: the fetch-less form answers `exit 1` + `merge-tree: origin/main - not something we can merge`. The fetch form answers `exit 0` + tree `57ee7b494198`. The same base and head were used for both. |\n| 2 | `packages/spec/src/migrations/entries/README.md:146-147` (`git clone --shared --no-local . /tmp/driverless`, then `merge-tree --write-tree --messages BRANCH_A BRANCH_B`) | anyone reproducing a migration-entry merge row (named producer: the README's \"Reproduce any row\") | The dev measured this on a synthetic **non-shallow** repo (report `5921577393`), so it is a second failure mode. `--no-local` leaves no alternates, and a non-bare clone lands the source's branches as `origin/BRANCH_A`. The command as written answers `exit 1`, `merge-tree: BRANCH_A - not something we can merge` / `Did you mean this? origin/BRANCH_A`. The control with `origin/` prefixes answers `exit 0` + tree. ⚠️ This seat has not re-run this row. |\n\n**Enumeration pin.** `git grep -nE 'clone[^`]*--shared|--no-local' origin/main -- . ':!**/CHANGELOG.md'` lists four copies at `3693a1b50`:\n- the two above;\n- `AGENTS.md:618` and `scripts/pm/os-regen-merge.sh:248`, which PR #20968 fixes.\n\nOnce that PR and this card land, the same grep finds only copies that fetch both commits. Control: in the same grep scope, `merge-tree` hits 12 files, so a zero here is a reading, not a dead instrument.\n\n## Who acts\n\n- **Row 1:** the owner of `.claude/**`, a Tier S governed surface that is line-ratcheted. Align it with the header recipe in PR #20968, or point at it. ⚠️ Serial: wait for PR #20968 to land, so the pointer names text that is on `main`.\n- **Row 2:** the owner of `packages/spec/src/migrations/entries/**`. The same two-leg proof applies: a clean pair gives exit 0 + tree, and a conflicting pair gives exit 1 + tree + path.\n- The two rows may split across lanes. That is triage's call.\n\n## Dedupe\n\nMCP `search_issues`, 2026-09-30, repo `objectstack-ai/objectstack`, open and closed:\n- `merge-tree probe clone --shared not something we can merge missing object read as conflict`: 29 hits.\n- `driverless clone --no-local migrations entries README reproduce row merge-tree`: 8 hits.\n- The neighbours read: #19069 (the parent, open), #15815, #15871, #18895, #16753, #16387, #15087, #14671, #4868 (all closed). None names these two copies.\n\nDedupe words: `platform-readings clone --bare --shared` · `driverless clone --no-local` · `merge-tree not something we can merge` · `fetch both commits probe`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

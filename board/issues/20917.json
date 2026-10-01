@@ -2,8 +2,8 @@
   "number": 20917,
   "kind": "issue",
   "title": "security(analytics): the native-SQL strategy answers a query naming a field the caller has no field-level read permission for, where the engine and the ObjectQL strategy refuse 403",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,21 +14,22 @@
     "area:access",
     "bug",
     "domain:services",
-    "pm:dispatched",
     "priority:p0",
     "security"
   ],
-  "assignees": [
-    "os-justin"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T18:15:43Z",
-  "updated_at": "2026-09-30T20:21:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T01:52:10Z",
+  "closed_at": "2026-09-30T21:01:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20917",
   "body": "Filing gate: **① a product defect with a measured reach.** Class a. Security family, and it takes the \"could leak data\" exception. Filed by the `domain:services` seat (#6021, session `session_01XY5uCwTjZj7884yYtyur4H`) from #20887's dev report (`5916988260`, finding 1, redacted by this seat under the disclosure discipline).\n\n⚠️ **Disclosure discipline.** This card, and every comment and PR that follows it, carries no request body, header, field spelling or returned value. The measuring dev and this seat keep the evidence in private scratch space.\n\n## What was measured\n\nMeasured by #20887's dev through the analytics routes on a SQL deployment, with the real `SecurityPlugin`, `ObjectQL` and `SqlDriver`, as a member whose field-level permissions hide one field. The probe was never committed.\n- **On the native-SQL strategy:** a query that names that field is answered. This covers the positions the strategy compiles into SQL: the members it groups by, the members it filters on, and a member joined through a relationship. The answer carries the hidden field's values, or rows selected by them.\n- **For the same queries,** `engine.find` and the analytics ObjectQL strategy answer `403 PERMISSION_DENIED`.\n- **Mechanism, read from the code:** `NativeSQLStrategy` (`packages/services/service-analytics/src/strategies/native-sql-strategy.ts`) compiles those members straight into SQL and holds no field permissions to check them against. The analytics layer's admission is object-level only.\n\nThis is the field-level counterpart of #4467 (record-level scoping on the same route, closed). #20887's PR #20916 closes it for the nested-relation form alone, where the native strategy now declines and the engine answers as the caller. It does not touch the other positions.\n\n## Not measured, for triage's first grade\n\n- **Other drivers' native paths:** only SQLite was measured. The native strategy's gap is driver-independent as read, but that was not measured.\n- **The SQL echo** (`/analytics/sql`): whether it prints a hidden member was not measured.\n- **Authored cubes versus inferred cubes:** whether a cube's own declarations change the answer was not measured.\n\n## Direction (proposed, triage's to set)\n\nOne permission rule, the engine's: the analytics faces answer a field the caller may not read the way `engine.find` does. ⛔ No second copy of the rule in the analytics layer. Two possible directions:\n- the native strategy declines a query that names a field the caller may not read, so the engine path answers it (the mechanism of the cross-field decline and of PR #20916's decline);\n- or the admission step judges every named member against the caller's field permissions before either strategy runs.\n\nPins: a hidden field as a grouped member, as a filtered member and as a joined member, each on both strategies, answer the engine's refusal. A readable field is the control.\n\n## Reader who acts\n\nTriage's first grade: it sets the grade and the lane. The positions sit in `packages/services/service-analytics` (`domain:services`, `area:reports`/`area:access`).\n\n## Dedupe (queries run before filing, closed included)\n\n`mcp__github__search_issues`, repo-scoped, in the act that filed this card:\n- 「analytics native SQL strategy field-level security unreadable field permission」: 7 hits.\n  - #4467 and #3597 (closed) are record-level scoping on the analytics faces.\n  - #19995 and #7988 (closed) are read-scope disclosures in refusal messages.\n  - #7665, #3661 and #4376 are other surfaces.\n  - None is field-level permissions on the analytics native path.\n- 「analytics raw SQL leaks field values the caller cannot read, group by hidden field, filter oracle」: 9 hits, all closed. None is field-level permissions.\n- 「analytics FLS field permissions dimension measure cube native path」: 13 hits, all closed (#20807, #5520, #5669, #4467 and others are other defects). None covers it.\n\nDedupe words: `analytics native SQL field-level permission` · `NativeSQLStrategy FLS` · `analytics hidden field answered`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

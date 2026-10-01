@@ -2,8 +2,8 @@
   "number": 20826,
   "kind": "issue",
   "title": "fleet-write: `automerge_enable` reports ✓ while auto-merge stays off — cloud PR #2491, twice (clean and draft); the GraphQL `errors` are not surfaced",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "bug",
     "domain:devx",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T09:19:29Z",
-  "updated_at": "2026-09-30T09:19:29Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T00:39:44Z",
+  "closed_at": "2026-10-01T00:38:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20826",
   "body": "Filed by the director seat (objectstack#12708, `session_01AsCNgFBs8HCjwhyHQsFbx3`) from a relay stroke that did not land. ⛔ Not a claim, ⛔ not a dispatch; grading is triage's (suggested `domain:devx`, `bug`, p2 — it blocks every relay landing on cloud, whose rule is auto-merge).\n\n## What happened (measured, 2026-09-30)\n\nTarget: objectstack-ai/cloud PR #2491 (head `dbb291ab90`, all five check-runs `success`, `mergeable_state: clean`, the repository reports `allow_auto_merge: true`, `allow_squash_merge: true`, `allow_merge_commit: false`).\n\n1. `[{\"op\":\"pr_ready\",\"pull\":2491}]` — relay run 36694807792, ✓; the PR read back `draft: false`.\n2. `[{\"op\":\"automerge_enable\",\"pull\":2491}]` — relay run 36694856488. The execute step printed `✓ action 1 automerge_enable: POST /graphql enablePullRequestAutoMerge -> HTTP 200 · #2491 · auto-merge off` and `every action done`; the run concluded `success`. The PR read back `auto_merge: null`; no merge and no queue run followed.\n3. Suspecting GitHub's \"already mergeable\" refusal, the seat converted the PR to draft (`pr_draft`, run 36695063835, ✓ `draft: true`) and repeated `automerge_enable` (run 36695124034): the same `HTTP 200 · auto-merge off`, `auto_merge: null` on read-back. Returned to ready (run 36695210925).\n\nSo the mutation (`ops.mjs` `PR_MUTATIONS.automerge_enable`, which does pass `mergeMethod: SQUASH`) answered 200 with no `autoMergeRequest` twice, and the executor reported the action as done both times. The seat cannot see why: the relay logs the formatted `pullRequest` fields only (`execute.mjs`, the `auto-merge off` bit), not the response's `errors` array.\n\n## What is wrong, in two parts\n\n- **Honesty:** an `automerge_enable` whose read-back is `auto-merge off` is not a landed action. The row should exit non-zero (or at least mark the action failed) and print the GraphQL `errors[].message` verbatim, the way a REST 4xx is printed.\n- **Cause, to establish:** why GitHub declined. Candidates the seat could not distinguish from outside: an `errors` entry such as \"Pull request is in clean status\" (should not apply to the draft attempt), a permission the installation token lacks for this mutation on cloud (the token was minted with `contents: write`, `pull-requests: write`), or a repository/branch-protection condition (`enforce_admins=false`, required context `build-and-test`, strict).\n\n## Suggested shape\n\n- Surface `errors` on every GraphQL row; fail the action when the mutation's read-back does not show the requested state.\n- Reproduce on a throwaway PR in cloud with the same token, record the `errors` text on this card, and fix the cause if it is the relay's (a missing input, a missing permission in the mint step).\n- Until fixed: a cloud PR that the relay cannot arm lands by the maintainer's click; say so in `scripts/pm/fleet-write/ops.mjs`'s header so the next seat does not repeat the two strokes.\n\n## Related\n\ncloud#2488 / cloud PR #2491 (the stroke that surfaced it) · the relay's own `execute.mjs` self-test row `automerge_enable arms SQUASH and the row says so`, which pins the happy path only."

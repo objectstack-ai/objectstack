@@ -1,0 +1,28 @@
+{
+  "number": 20960,
+  "kind": "issue",
+  "title": "spec(ui): DashboardWidgetOptionsSchema declares none of the renderer extras real producers write through its passthrough — app-crm's metric `options { format, currency }` is spec-valid only by catchall and red on objectui's strict face",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T22:56:47Z",
+  "updated_at": "2026-09-30T22:56:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20960",
+  "body": "Filing gate: **① product defect**, `reach:` a named real producer: objectstack `examples/app-crm/src/dashboards/pipeline.dashboard.ts` L46, L64 and L82 write `options: { format: 'currency', currency: 'USD' }` on three metric widgets. Filed by `domain:devx` seat 2 (objectstack-ai/objectui#10917), `session_01TdiauJaVCHuj45EzZGUxHh`, as an execution parameter of the director's ruling C on objectstack-ai/objectui#11228 (`5921018991`, 2026-09-30T22:45Z): \"the adjacent defect … the seat files it as its own measured card (catchall census first), routed to the `domain:spec` lane upstream, ⛔ not folded into this round.\"\n\n- **Who acts on it:** the objectstack `domain:spec` seat. Its first step is the catchall census below; its PR lands the spec declarations. objectui follows by reference in its own round.\n- **Duplicate check** (semantic issue search, open and closed): objectstack \"strict authoring face refuses dashboard widget options format currency passthrough catchall\" → 10 hits; objectui \"strict authoring face refuses spec passthrough catchall keys dashboard metric options format currency\" → 3 hits. None is this defect. The nearest are objectstack#14148 (`options.sortBy` resolution), objectui#10463 (`buildFieldMeta` / `currencyConfig`) and objectui#10406 (a grid column `currency` key). All are closed and each is a different mechanism.\n\n## The mechanism (read at objectstack `origin/main`, 2026-09-30)\n\n- `packages/spec/src/ui/dashboard.zod.ts` builds `DashboardWidgetOptionsSchema` with `.passthrough()` and describes it as \"declared query keys + open renderer extras\". Its declared members (`dateGranularity`, `sortBy`, `sortOrder`, `limit`, `stageOrder`, …) include neither `format` nor `currency`.\n- So app-crm's pipeline dashboard is spec-valid **only through the catchall**. The protocol does not say what `format: 'currency'` means, or that `currency` is an ISO code.\n- objectui's strict authoring face (`packages/types/src/strict-authoring-face.ts`) closes spec catchalls (`catchall: z.never()`). It therefore refuses these keys by name on a document a real producer wrote.\n  - The ruling on objectui#11228 keeps that derivation: option B, \"keep the catchall open\", was not taken.\n  - This seat has not re-run the refusal. It is the ruling's reading, and objectui#11070's strict-face census class.\n- The maintainer's standing ruling (objectstack#12708 ledger `5552700625`), verbatim: 「本项目以协议为基准。所以开发应该对其协议,协议有问题应该立卡修改协议」. So the gap is fixed in the protocol, not by reopening consumer tolerance.\n\n## What the card asks\n\n1. **Catchall census first.** List every key that objectstack's example apps and packaged templates write through `DashboardWidgetOptionsSchema`'s passthrough (and through any other passthrough on the dashboard widget). For each key, name its reader in objectui's dashboard renderer (the metric tile, `DashboardRenderer`), or record that it has none.\n2. **Per key, under ADR-0049 (enforce-or-remove):**\n   - written by a real producer AND read by a renderer ⇒ declared in the spec, typed (for `currency`, the ISO 4217 code);\n   - written but unread ⇒ removed from the producer;\n   - neither ⇒ nothing.\n   - The census decides whether `format` / `currency` are declared; this card does not assume it.\n3. objectui's strict face then reads the declared keys by reference, and app-crm's pipeline dashboard goes green there. That objectui follow-up is the objectui `domain:spec` lane's, or objectui#11070's, not this card's PR.\n\n## Out of scope\n\n- The inline dashboard dialect (`options.{data, xField, yField, value, description, trend}`, `component.{chartType, xAxisKey, series}`). It was ruled C (retire) on objectui#11228 and is executed as objectui#11070's next round.\n- The renderer's own inline read, which retires later on its own card.\n\n## Acceptance\n\n- The census table is on this card, one row per key: writer, reader, verdict.\n- One spec PR lands the declarations and removals, with a changeset.\n- app-crm's `pipeline.dashboard.ts` passes objectui's strict face at the first objectui `main` that carries the follow-up. Link that run when this card closes."
+}

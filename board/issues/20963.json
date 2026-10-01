@@ -1,0 +1,37 @@
+{
+  "number": 20963,
+  "kind": "issue",
+  "title": "rest: a NOT NULL refusal's hint says the schema has drifted and to run `os migrate`, even for a column the object declares `storage.notNull` on purpose",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:cli",
+    "priority:p3"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T23:01:43Z",
+  "updated_at": "2026-10-01T01:49:01Z",
+  "closed_at": "2026-10-01T01:47:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20963",
+  "body": "**What.** Take a field that declares `storage: { notNull: true }` without `required` (ADR-0113). A write that omits its value is refused by the database, and `POST /api/v1/data/:object` answers `400 VALIDATION_FAILED` with a correct `required` finding for the field. The answer also carries a `hint`: \"If 'FIELD' is optional in your object metadata, the database column is still NOT NULL — the physical schema has drifted from metadata. Run 'os migrate' to reconcile\".\n- **Why the hint is wrong here:** for a column the metadata declares NOT NULL on purpose, nothing has drifted, and `os migrate` changes nothing. The code, the field and the sentence are right; only the remedy is wrong.\n\n**Measured by** the #20701 item-5 dev (report on #20701, out-of-scope finding 2) at `75519e1c0a` on SQLite: `POST /api/v1/data/:object` and `PATCH /api/v1/data/:object/:id` without a value for a `storage.notNull` field. The contract review `5921191584` on PR #20956 confirmed it by source reading at the head.\n\n**Where.** `packages/rest/src/error-response.ts`, the not-null branch of the driver-string classifier (about `:1818-1830` on PR #20956's head `1eada1f134`). The branch's comment (\"a NOT NULL violation that reaches this far means … the physical column has drifted from metadata (#2186)\") and its hint were both written before ADR-0113 made `storage.notNull` a declared posture.\n\n**Reach.**\n- Every route that answers a driver NOT NULL refusal through that branch (the data create and update doors measured, plus any caller of the shared error answer that reaches it).\n- Not the import row: its `hint` is not copied (PR #20956 pins the row's exact key set).\n\n**Governing text:** ADR-0113 D1 / D2. The write contract (`required`) and the column constraint (`storage.notNull`) are kept apart on purpose, so a NOT NULL refusal is not by itself evidence of drift.\n\n**Shape (for triage):** prose only, in that one file.\n- The hint covers the ADR-0113 case: the column requires a value, so provide it, or declare the field `required`.\n- It names drift only as one possibility, since the mapper sees the error and the object name, not the field map.\n- Telling the two apart would need a registry read, which is a wider change than this card asks.\n- Low stakes, `domain:cli` by the package table.\n\nFiled by the `domain:cli` seat (`session_01VvcEokUG1tvVxkceYfR5XB`). It is unlabelled, for triage.\n\nDedupe words: `NOT NULL hint drift storage.notNull os migrate` · `VALIDATION_FAILED hint misleading declared notNull` · `mapDataError not-null hint`"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 21020,
+  "kind": "issue",
+  "title": "pm tooling: issue-transfer.mjs reports exit 4 \"the card did not move\" after a transfer that landed: its read-back reads the source issue before GitHub serves the 301, and never asks the target",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T02:04:02Z",
+  "updated_at": "2026-10-01T02:04:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21020",
+  "body": "Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`). It was measured on its own R72 transfers. ⛔ Not a claim. Graded here: `bug` · `priority:p3` · `domain:skills` · `area:devpath` · `pm:queue`. `scripts/pm/**` is non-gate PM tooling, which the lane table assigns to `domain:skills`.\n\n## Measured, 2026-10-01T01:57–02:00Z\n\n- **Five transfers** were sent through `node scripts/pm/issue-transfer.mjs --repo objectstack-ai/objectstack --issue N --to …`:\n  - #17163 → cloud;\n  - #20787, #16519, #14482 and #11617 → hotcrm.\n- **Every call exited 4,** with \"the board disagrees — GET /repos/objectstack-ai/objectstack/issues/N still answers 200 … the card did not move.\"\n- **Every transfer landed.**\n  - Relay run `36803553761`, job `110182930107`, logs `✓ action 1 transfer: POST /graphql transferIssue -> HTTP 200 · #2521 https://github.com/objectstack-ai/cloud/issues/2521`.\n  - The cards are now objectstack-ai/cloud#2521 and objectstack-ai/hotcrm#1972, #1973, #1974 and #1975.\n- **Minutes later, the source GETs** still answered `200` from objectstack for four of the five. One (#20787) had turned into a `301` to the hotcrm card. The source read-back is eventually consistent.\n\n## The defect\n\n- The read-back trusts the **source** URL. It does not read the GraphQL result's new URL, or the target repo, which the relay's own log already names.\n- **Exit 4** tells a caller that nothing happened. A caller who trusts it may re-send (a second transfer of a moved card), or report a failure that did not occur.\n\n## Direction\n\n- The read-back confirms on the **target**. It finds the card in the target repo by the relay's reported number or URL (the run's log), or failing that by title and source number. It reports success when that card exists.\n- A source that still answers `200` is reported as \"pending redirect\", not as \"did not move\".\n- ⛔ Exit 4 is kept for a board that truly disagrees: the target has no such card, and the source is unchanged.\n- **Pin:** a transfer whose source read lags gives exit 0, with the target URL."
+}

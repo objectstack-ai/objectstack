@@ -1,0 +1,37 @@
+{
+  "number": 21001,
+  "kind": "pull_request",
+  "title": "fix(rest): a NOT NULL refusal's hint leads with the remedy for a declared column and names schema drift only as a condition",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T01:10:49Z",
+  "updated_at": "2026-10-01T01:47:29Z",
+  "closed_at": "2026-10-01T01:47:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-01T01:47:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21001",
+  "body": "Fixes #20963\nClause-②: no\n\nThe `hint` on a driver's NOT NULL refusal no longer asserts that the schema has drifted. It first says the column requires a value (provide it, or declare the field `required`), then names drift in one sentence that is conditional on the object declaring neither `required` nor `storage: { notNull: true }`. Prose only, in the one branch of the driver-string classifier in `packages/rest/src/error-response.ts`; the branch's comment gets the same correction (ADR-0113 D1 / D2). The status, `code`, `error`, `fields` and `object` are unchanged, no key is added, no registry is read, and the import row is untouched (PR #20956 pins its key set).\n\n## Repro (`hint`, same answer on both doors)\n\nObject `proj_notnull_hint_20963` declares `must: { type: 'text', storage: { notNull: true } }` with no `required`. `POST /api/v1/data/:object` with `must` omitted, and `PATCH /api/v1/data/:object/:id` writing `must: null`, over a real ObjectQL + SQLite `:memory:` (the pin's harness). Both answer `400 VALIDATION_FAILED`, `error: \"must is required\"`, `fields: [{ field: 'must', code: 'required', message: 'must is required' }]`, `object`.\n\n- **Before** (`origin/main` 05be352596, the pin run red on it): \"If 'must' is optional in your object metadata, the database column is still NOT NULL — the physical schema has drifted from metadata. Run 'os migrate' to reconcile (or reset the dev database).\"\n- **After**: \"The database column for 'must' requires a value: provide it, or declare the field `required` in the object metadata. If the object declares neither `required` nor `storage: { notNull: true }` for 'must', the physical schema has drifted from metadata instead: run 'os migrate' to reconcile (or reset the dev database).\"\n\n## What is pinned\n\n`packages/rest/src/data-not-null-hint-20963.test.ts`, three tests, by kind and not by wording:\n- the fixture is the ADR-0113 posture: the engine's own insert is refused by the database for the missing value, and the field declares no `required`;\n- the control, on both doors: status 400, `code`, `error`, the `required` finding and `object` as before, and the body's key set is exactly `code, error, fields, hint, object`;\n- the `hint`: its first sentence says the column requires a value, tells the caller to provide it or declare `required`, and names no drift; drift appears in exactly one later sentence, which begins with a condition naming `storage` and `notNull`; the update door answers the create door's hint byte for byte.\n\nNot pinned: telling the two cases apart. That needs a registry read, a wider change than this card asks.\n\n## Verification (head 592069136c)\n\n- **Red on the old text, green on the new.** The pin on `origin/main` before the edit: 2 failed, 1 passed (the fixture test). With the fix: 3 passed.\n- **Ablation.** With the fix committed (cf4bd61490, before the rebase onto 7fa67dada3), `scripts/ablation-replace.mjs` put the old hint text back (anchor hit 1 time, blob 0b1a39350 to 3197ecfe1; the mutated file resolves by relative source import from the test, so no rebuild applies) and the pin went red: 2 failed, 1 passed (the control and fixture held; the hint tests failed). The restore proved `blob == HEAD` and an empty `git diff HEAD`. Direction: turned red, the usual one.\n- **Package.** `pnpm --filter @objectstack/rest typecheck` exit 0 (`tsc --noEmit`, and `check:test-typecheck` over `tsconfig.test.json`: 0 files, 0 errors; the new test is in that program). `vitest run --project local` on `@objectstack/rest`: 250 files passed, 4964 tests passed, 114 skipped. The ten files that read this mapper, this file included, were also run alone: 10 passed, 567 tests.\n- **Gates.** `dispatch-gates --commands` derived 61 commands at this head; all 61 were run with exit codes recorded and `--ran` reconciled: 61 derived, 59 run, 2 NOT MEASURED, 0 unrun. The two NOT MEASURED exited 3, PREREQUISITE NOT MET: `check:dual-build-cjs-loads` and `check:type-check-debt` read every package's built output and need the full-repo build, which was not run on the shared box; `Build Core` and `Lint & Repo Gates` cover them in CI. The diff adds no package, no export and no ledger entry, and the package's own test-layer typecheck holds 0 debt.\n- **Lint.** `pnpm lint` (eslint over the whole repo, `--no-inline-config`) exit 0 at this head, no narrowing.\n\n## Acceptance notes\n\nNoted, not filed (no defect, polish only):\n- `packages/rest/src/rest.test.ts` (the test \"maps SQLite NOT NULL constraint → 400 VALIDATION_FAILED with required field\", about `:2514`) keeps a comment that says reaching this branch means the metadata did not require the field, so it is physical-schema drift. Its assertions still hold (the hint keeps `os migrate` and \"drifted from metadata\" in the conditional sentence), so only the comment restates the corrected reading. It sits outside this claim's file surface, so it is untouched.\n- `packages/rest/src/error-response.ts` `:176` lists \"not-null drift\" as a label for the branch in a docblock about a different branch. A name, not a claim about the hint.\n- Branch note: rebased once onto `origin/main` 7fa67dada3 (only `scripts/pm/fleet-write/` moved) with `--force-with-lease`, before any PR existed, so the dispatch-gates families were derived from a current tree.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VvcEokUG1tvVxkceYfR5XB)_"
+}

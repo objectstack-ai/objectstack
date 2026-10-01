@@ -1,0 +1,37 @@
+{
+  "number": 20944,
+  "kind": "pull_request",
+  "title": "fix(driver-memory): the cube face lowers the FilterArray spelling of `where` instead of answering every row",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T21:22:11Z",
+  "updated_at": "2026-09-30T22:14:11Z",
+  "closed_at": "2026-09-30T22:14:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-30T22:14:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20944",
+  "body": "Fixes #20859\nClause-②: no (narrowing)\n\n## What changed\n\n`MemoryAnalyticsService.normalizeFilters` (`packages/drivers/driver-memory/src/memory-analytics.ts`) read only a non-array object `where`. A `FilterArray` `where` therefore skipped the shared comparand doors, the shared lowering, the vocabulary gate and the flatten, so its predicate vanished.\n\nThe array is now lowered at the method's entry by a module-private `lowerWhereFilterArray`, which calls the spec's own pair: `isFilterAST` gates the shape and `parseFilterAST` lowers it. That is the pair the analytics `where` door (`lowerAnalyticsWhere`, see #5334) and the engine's `lowerWhereFilterArray` call. The face adds no parser of its own. The lowered condition then enters the step-3 door (#20857) exactly as an authored object does. So both spellings meet the same comparand doors, the same `lowerFilterCondition` and the same gate, and both exits (`query()` and `generateSql()`) read the same normalized list.\n\nThe three arrival answers are the analytics `where` door's:\n\n| arrival | answer |\n|---|---|\n| `[]` | no filter (unchanged: every row, no WHERE) |\n| an array `isFilterAST` accepts | lowered by `parseFilterAST`, then the door, the lowering and the gate, like the object spelling |\n| any other array (infix join, unknown operator, list of scalars, a cube-style entry list) | refused `INVALID_FILTER` / 400 on both exits |\n\n## Measured\n\nOn the fixture from the card (`d` is `'v1'`, `'v2'`, `null`, absent):\n\n| `where` | before (base `d78a0bda07`) | after (`ca8448c005`) |\n|---|---|---|\n| `{ d: 'v1' }` | rows 1; echo `d = 'v1'` | rows 1; echo `d = 'v1'` (control, unchanged) |\n| `[['d', '=', 'v1']]` | rows 1, 2, 3, 4; echo has no WHERE | rows 1; echo `d = 'v1'` |\n| `[]` | rows 1–4; no WHERE | rows 1–4; no WHERE (unchanged) |\n| `[['d', '=', 'v1'], 'or', ['d', '=', 'v2']]` (infix) | rows 1–4 | `INVALID_FILTER` / 400 |\n| `[['d', 'in', 'v1']]` (scalar `in`) | rows 1–4 | `INVALID_FILTER` / 400, as `{ d: { $in: 'v1' } }` is |\n\n## Tests\n\nNew pin file `packages/drivers/driver-memory/src/memory-analytics-filter-array-where.test.ts`, 16 cases:\n- the card's row, rows and echo;\n- seven spellings, each answering the rows and the echo of the `FilterCondition` it lowers to (a comparison, a flat list, an `and` group, an `or` group, a negative-polarity leaf, `is_null`, `is_not_null`);\n- the `[]` control;\n- four non-lowerable arrays refused on both exits;\n- three lowerable arrays that are refused exactly as their object spelling is refused.\n\nRefusals assert the envelope (`code` + `status`), not the prose.\n\n- Red first: at `62eff2a8f9` (pins only, source at the base), the file gave 15 failed, 1 passed. The one pass is the `[]` control. The card's row read rows `['1','2','3','4']` and echo `undefined`.\n- Green: 16 of 16 passed at `f2be8432cd`.\n- Ablation on the parse: `scripts/ablation-replace.mjs` replaced `const where = lowerWhereFilterArray((query as { where?: unknown }).where);` with the pre-fix read. The anchor went from 1 to 0, and the blob moved `cc0aaa764022` to `3445aece6953`. Result: 15 failed, 1 passed (the `[]` control). The restore was proven: the blob equals HEAD `cc0aaa764022`, and `git diff HEAD` is empty. The pins import `./memory-analytics.js` by relative path, and the package's vitest config aliases `@objectstack/*` to source, so no build sat between the mutation and the reading.\n- At `ca8448c005`, after `pnpm --filter '@objectstack/driver-memory...' build`, the `driver-memory` suite gave 66 files and 1429 tests passed. `typecheck` exited 0, and `tsc --noEmit --listFiles` includes the new test file.\n- Gates at `ca8448c005`: `dispatch-gates --commands` derived 60 families, and all 60 were run.\n  - Three first answered PREREQUISITE NOT MET (exit 3): `check:dual-build-cjs-loads`, `check:lean-entry-closure` and `check:type-check-debt`. After a full `turbo run build` (72 tasks) they were re-run, and all three passed.\n  - `dispatch-gates --ran` reported 60 derived, 60 run, 0 NOT-MEASURED, 0 UNRUN.\n  - The six roster families under touched directories were also run, and all passed: `check-changeset-fixed`, `authz-resolver`, `error-code-casing`, `filter-alias-parity`, `object-def-param-keys`, `tenant-chokepoint`.\n- Lint, narrowed and measured:\n  - Population: `eslint.config.mjs`'s `**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}` block.\n  - `eslint --no-inline-config --format json` over the two changed TypeScript files: 2 files, 0 errors, 0 warnings, at `ca8448c005`.\n  - The config enables no type-aware linting, so no untouched file's verdict can move.\n- NOT MEASURED, left to CI: the path-scheduled CI jobs (Test Core shards, Dogfood, Temporal Conformance, Build Core) and the workspace type-check lanes.\n\n## Acceptance notes\n\n- **Accept-set reading.** A well-formed array that answered every row now answers its predicate's rows. An array whose lowered condition the doors refuse is refused as that object spelling already is. One row goes beyond \"a dropped predicate now filters\": an array `isFilterAST` refuses (the infix join, an unknown operator, a list of scalars, a cube-style entry list) used to answer every row and now answers `INVALID_FILTER` / 400. None of those shapes is admitted by `AnalyticsQuerySchema.where` (`FilterConditionSchema`) or by `FilterArraySchema`, and the triage direction rules out dropping. Answered by the seat (5920030329, B, open to veto): the face's accept set narrows, as it did on PR #20857 (#5930 step 3) on this same face, so this PR takes `Clause-②: no (narrowing)`. The changeset is `minor` with a **BREAKING** paragraph and one ADR-0087 marker; the claim's \"nothing is newly refused\" was the seat's error.\n- On an array, the shared comparand-shape and comparand-type faces run twice: inside `parseFilterAST`, then at the door. Both are idempotent (an assertion, and a copy-on-write narrowing), so the verdict is the same one the first pass gives.\n- `normalizeFilters`' object branch still carries its `!Array.isArray(where)` test. After the lowering it is always true for anything that reaches it, and it is kept as the object branch's own statement of what it reads.\n- Unmeasured reading, not filed (carrier: none): the analytics `where` door's and the engine's non-lowerable-array refusals render the value with a bare `JSON.stringify`. A `bigint` inside such an array would make that call throw a raw `TypeError` instead of the envelope. This face's message renders through a non-throwing preview. No JSON wire can carry a `bigint`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DEvba2nBuD4tWzfq8r8NFY)_\n\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 20983,
+  "kind": "pull_request",
+  "title": "docs(cli): drop the dead tracker number from bin/run.js docblock and keep the sentence",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T00:11:56Z",
+  "updated_at": "2026-10-01T01:03:18Z",
+  "closed_at": "2026-10-01T01:03:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-01T01:03:16Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/20983",
+  "body": "Part of #20594\nClause-②: no\n\n## What changed\n\nStage 18 of the `domain:cli` lane's dead-citation sweep: the last comment site that ships in the tarball and has no deciding commit.\n\n- `packages/cli/bin/run.js`, the docblock line at `:225`: ` — #14874` is removed (the space, the dash, the number). The sentence stays and still ends in a period: \"`files` names only `dist`, but npm packs a `bin` target regardless).\" That sentence already states the measured fact in words, so nothing is lost.\n- `.changeset/20594-cli-bin-form-d.md`: `@objectstack/cli` `patch`. `bin/run.js` is packed as a bin target regardless of `files`, so a published byte moves even though behaviour does not.\n\nThis is ruling C+D's form D for a shipped line: runtime-facing text carries no tracker number and the lesson is written into the words. Form C (anchor a commit) is not available because no commit decided that number: the history search of stage 17, re-read adversarially in contract review `5920476831`, found only commits that restate or apply the packing fact. Routing is the stage 17 ACCEPT `5920504334`; the claim is `5920968376`.\n\n## Not in this PR\n\nThe five test sites with no deciding commit keep their numbers, as listed under `5914299201`: `vitest.config.ts:221`, `test/init.test.ts:189`, and the three `#14874` mentions in `test/published-entry-stderr-error-listener.test.ts` and `test/published-subpath-hook-body.pin.test.ts`. The 97 dead string sites across the lane belong to #20752.\n\n## Evidence (head `fdb924cc7d`, base `013f97df93`)\n\n**Comment only, measured two ways.**\n- Byte level: exactly one line differs (225); `bin/run.js` is 258 lines before and 258 after; occurrences of `14874` in the file go 1 to 0; the removed suffix is exactly the dash-and-number and putting it back reproduces the base line.\n- Token level: the non-comment token stream of `bin/run.js`, taken with the TypeScript parser with JSDoc nodes dropped, is identical before and after (179 tokens, equal sha256).\n- Controls on copies, never on the worktree: mutating a code identifier flips the guard (2 token lines differ); mutating a string literal in an import specifier flips it (2 differ); a comment-only mutation does not (identical). A first version of the guard counted JSDoc blocks as tokens and flagged the real edit as well as the comment-only control; that was an instrument defect, found by the controls and corrected before any reading was taken, and the before-state was re-measured from the byte-identical base blob (`git hash-object` equal to the base blob).\n\n**Smoke** (after building the dependency closure): `node packages/cli/bin/run.js --help` exits 0 with 66 stdout lines and empty stderr; `--version` exits 0 and prints `@objectstack/cli/17.5.0 linux-x64 node-v22.22.2`.\n\n**Gates.** `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` with no path derived 54 commands. All 54 were run one by one with the exit code captured before any pipe, and `--ran` reconciled them: 54 derived, 54 run, 0 NOT-MEASURED, 0 UNRUN. The derivation line named commit `fdb924cc7d`, which is the final head. An earlier pass ran before the workspace was fully built and read exit 3 (prerequisite not met, so not a verdict) for `check:dual-build-cjs-loads` and `check:i18n-coverage`; after a full `turbo run build` (72 of 72 tasks) the whole list was re-run from scratch and is what is reported here.\n\n**Lint.** The full `pnpm lint` (`eslint . --no-inline-config`) exits 0 with no findings, run on this head, so no narrowed form is relied on.\n\n**cli package.**\n- `pnpm --filter @objectstack/cli typecheck`: exit 0.\n- Unit tier (`vitest run --project unit`): 239 files, 3391 tests passed.\n- Integration tier, run locally because the diff touches `bin/`, a spawn entry: 67 files in six `--shard=i/6` runs, all exit 0 (12, 11, 11, 11, 11, 11 files; 71, 118, 74, 94, 114, 107 tests passed, 1 skipped). The whole tier in one call exceeded my 540 s bound and exited 124, which is no reading; it was re-run as the six shards.\n- The two published-entry pins read `bin/run.js` through `maskComments`, so they cannot see a comment edit by construction, and both are inside the integration shards above.\n\n## Acceptance notes\n\n- `scripts/check-issue-citations.mjs` declares its surface as comment prose in `packages/**/src/**`; `bin/run.js` is outside it, so its green is not a reading of this line. The reading of this line is the byte and token evidence above.\n- Not measured here: CI's own jobs (Test Core shards, Dogfood, Build Core, Temporal Conformance, the type-check lanes), which run after this report.\n- Commit trailers are the model-free pair AGENTS.md prescribes, not the harness reminder's model-named form.\n- Governed surfaces: none (the two paths are `packages/cli/bin/run.js` and a `.changeset` file); 15 changed lines against the 5000-line human-merge threshold.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VvcEokUG1tvVxkceYfR5XB)_\n"
+}

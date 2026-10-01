@@ -1,0 +1,35 @@
+{
+  "number": 20957,
+  "kind": "issue",
+  "title": "pm-dispatch: retire the fleet one-`tooling`-slot rule — the take-order alone sequences tooling cards, and a lane's \"open P0/P1\" is an undispatched one (maintainer direct dispatch)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-30T22:52:55Z",
+  "updated_at": "2026-10-01T00:12:50Z",
+  "closed_at": "2026-10-01T00:10:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/20957",
+  "body": "Filing gate: **③ a task the maintainer dispatched directly** — the order is quoted verbatim below. `Path: none` (an instrument card; the fleet decision is the maintainer's order). Self-triaged by the `domain:skills` seat under the lane's own-finding exception (`references/lanes/skills.md`: 本车道 finding 自分诊).\n\nFiled by the `domain:skills` execution seat 1 (`session_01KTZmMfzVzjNvyaLyQ8mHvg`, seat post #7623) and dispatched by it in the same round on the maintainer's word (message 3 below).\n\n## The order (出处三件)\n\n- **Who:** the maintainer, to this seat.\n- **Where:** the seat's cloud session `session_01KTZmMfzVzjNvyaLyQ8mHvg`, 2026-09-30 between 22:20Z and 22:55Z, three messages.\n- **Verbatim:**\n  1. 「spec工具卡的全舰队名额仍被 #20765 占着, 车道p0p1 是应该优先,但p0p1已经在开发中时,不应该卡住其他卡的派发,这个应该立卡优化」\n  2. 「或者简单点,直接撤掉这个规矩,只要优先派高优先级的卡片就可以」\n  3. 「这个应该是 skills卡片吧?你可以直接派发处理」\n\n## What the rule does today (measured 2026-09-30T22:50Z, `main` at `013f97df9`)\n\n- The rule: `.claude/skills/pm-dispatch/references/execution-duties.md:22` — \"舰队至多一张 `tooling` 卡带 `pm:dispatched`,第二张等;带 `Unblocks:` 者继承产品级不计数\". Its named reader: `.claude/skills/pm-dispatch/SKILL.md:112`, the `tooling` label row, \"四具名读者 = 候选查询排除、首触即关、舰队一张在飞、普查半态行\".\n- No script enforces it. A grep of `scripts/pm/**` for the slot finds only the `Unblocks:`/named-surface ENTRY condition (`ensure-pm-labels.sh:285-296`, `check-skill-line-ratchet.mjs:344`), which is a different rule and stays.\n- The fleet does not hold to it. `GET /repos/objectstack-ai/objectstack/issues?labels=tooling&state=open` answers 24 open `tooling` cards, 7 of them carrying `pm:dispatched` at once (#20621, #20627, #20636, #20686, #20765, #20784, #20949; one with an `Unblocks:` line). So the line is read by some seats and not by others. In this lane it held #20855 (p1) until the maintainer's one-card exception (「破例立即派」, recorded on that card's claim), and it would hold this card.\n- The P0/P1 reading. `execution-duties.md:45` — \"取卡前置 = `docs/NORTH-STAR.md`「优先级」第 3 条:本车道队列开放 P0/P1 每次取卡现读\" — and `triage-duties.md:64` — \"所入车道队列 P0/P1 开着时,无解锁对象的 p2/p3 `tooling` 卡同样关\". Neither says whether a P0/P1 already `pm:dispatched` counts as 开放/开着. The maintainer's message 1 settles it: a P0/P1 in development holds nothing back.\n\n## What changes (the order, as work items)\n\n1. **Retire the fleet one-`tooling`-slot line** at `execution-duties.md:22`. Its second half (an `Unblocks:` card inherits the product card's priority) survives only where it already has another home: read `docs/NORTH-STAR.md` 优先级 3 (\"解锁产品 P0/P1 的仪器卡沿链继承其优先级\") and `execution-duties.md` \"p0/p1 优先级沿链传递\" first; if both carry it, the whole line goes.\n2. **The `tooling` label row** at `SKILL.md:112`: \"四具名读者\" loses 舰队一张在飞 and becomes three named readers. Measure the fourth reader (普查半态行) while there: `grep -n tooling scripts/pm/check-half-states.mjs` finds no such row today. If that holds, report it under the PR's `## Acceptance notes`; ⛔ do not widen this PR to it.\n3. **\"Open P0/P1\" means undispatched.** At `execution-duties.md:45` and `triage-duties.md:64`, say in the line itself that the P0/P1 which holds a lane's p2/p3 tooling cards back is one still in the queue, not yet dispatched (no `pm:dispatched`, no assignee); a P0/P1 in development holds nothing back. The take-order (`execution-duties.md:46-47`) is then the only sequencing: the higher-priority candidate is taken first, and an in-flight card of any priority never blocks a candidate.\n4. **Census.** Re-read `.claude/**`, `AGENTS.md` and `scripts/pm/**` for any other restatement (`一张在飞`, `舰队至多`, `第二张等`, `tooling slot`, \"one `tooling`\") and retire it in the same PR; the PR body names the query and its count.\n\n## What does not change\n\n- The `Unblocks: #N` / named-surface entry condition for a `tooling` card to enter `pm:queue` (`triage-duties.md:34`, the candidate exclusion at `execution-duties.md:10`, the label description in `ensure-pm-labels.sh`): the maintainer named the slot, not the entry.\n- `docs/NORTH-STAR.md`: its rule 3 wording (\"还有开放的 P0/P1\") already reads as an open queue item, and it is Tier H (a human's approval). ⛔ Do not edit it. If item 3 cannot be stated without contradicting NORTH-STAR's words, stop and report `blocked`.\n- The maintainer's exception on #20855 is history, not a rule; nothing to write there.\n\n## File surface and budget\n\n`.claude/skills/pm-dispatch/references/execution-duties.md`, `.claude/skills/pm-dispatch/SKILL.md` (the one row), `.claude/skills/pm-dispatch/references/triage-duties.md`, plus `scripts/pm/check-skill-line-ratchet.mjs` only to LOWER a ceiling row. All three files sit AT their ratchet ceiling (319 / 183 / 120 lines): net lines ≤ 0 per file, ⛔ no re-wrap to make room, ⛔ no ceiling raise. Item 1 frees one line in `execution-duties.md`; items 2 and 3 are in-line rewrites. Skill text cites no issue numbers (`check:pm-skill-id-lint`).\n\nTier: `.claude/**` is governed Tier S — the PR lands on the seat's contract-review-tier review PASS, then ready → queue; no human approval. Draft PR, first body line `Fixes #<this card>`, `Clause-②: no`.\n\n## Dedupe\n\n`GET /repos/objectstack-ai/objectstack/issues?labels=tooling&state=all&per_page=100`, pages 1–4 (300 cards, open and closed), titles and bodies grepped for `tooling slot | one tooling | 一张在飞 | 舰队 | 名额 | fleet slot | at most one | tooling…dispatched`: 0 on-topic cards. The three regex hits (#20613 release.yml, #20511 scenario `requires`, #20245 view overlay) are unrelated.\n\nHands-on reader: the os-dev this seat dispatches on this card in this round; the seat reviews and lands the PR.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}
