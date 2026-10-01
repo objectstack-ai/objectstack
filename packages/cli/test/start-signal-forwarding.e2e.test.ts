@@ -109,17 +109,30 @@ function argvFor(command: Command, artifact: string, port: number): string[] {
     : ['dev', '--artifact', artifact, '--port', String(port)];
 }
 
-/** Every pid whose parent is `ppid`, read from the process table. */
-function childPidsOf(ppid: number): number[] {
-  const table = execFileSync('ps', ['-A', '-o', 'pid=,ppid='], {
+/**
+ * The pids of `ppid`'s `serve` children, read from the process table — a child
+ * whose argv carries the `serve` command token.
+ *
+ * ⚠️ Selected by argv, not "every child", and MEASURED to need it: on a cold
+ * tsx transform cache the loader runs an `esbuild --service` process as a
+ * second child of the CLI parent. It exits on its own a moment AFTER the parent
+ * (alive at the parent's exit, gone 2 s later, 2 of 2 runs with
+ * `TSX_DISABLE_CACHE=1`), so counting it reads as an orphaned server on the
+ * file's first boot and on no other. The ruling's sentence is about the
+ * `serve` child, and so is this probe. `-ww` keeps BSD `ps` from cutting the
+ * argv at a terminal width.
+ */
+function serveChildPidsOf(ppid: number): number[] {
+  const table = execFileSync('ps', ['-A', '-ww', '-o', 'pid=,ppid=,args='], {
     encoding: 'utf8',
     env: childEnv(),
   });
   return table
     .split('\n')
-    .map((line) => line.trim().split(/\s+/).map(Number))
-    .filter(([pid, parent]) => Number.isInteger(pid) && parent === ppid)
-    .map(([pid]) => pid);
+    .map((line) => line.trim().split(/\s+/))
+    .filter(([pid, parent, ...args]) =>
+      Number.isInteger(Number(pid)) && Number(parent) === ppid && args.includes('serve'))
+    .map(([pid]) => Number(pid));
 }
 
 /** Does `pid` name a live process? (`EPERM` = alive, owned by someone else.) */
@@ -225,9 +238,9 @@ async function signalParent(command: Command, signal: NodeJS.Signals): Promise<v
   const parentPid = parent.pid!;
 
   // ── Positive controls, on the same boot, before the signal ─────────────
-  const children = childPidsOf(parentPid);
-  expect(children.length, `os ${command}: the probe sees no child of the parent.\n${output()}`)
-    .toBeGreaterThan(0);
+  const children = serveChildPidsOf(parentPid);
+  expect(children, `os ${command}: the probe does not see exactly one serve child.\n${output()}`)
+    .toHaveLength(1);
   expect(children.every(isAlive), `os ${command}: a child reads dead before the signal`).toBe(true);
   expect(portIsFree(port), `os ${command}: port ${port} reads free while the server is up`).toBe(false);
 
