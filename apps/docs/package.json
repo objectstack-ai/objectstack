@@ -13,16 +13,16 @@
     "typecheck": "fumadocs-mdx && next typegen && tsc --noEmit"
   },
   "dependencies": {
-    "fumadocs-core": "16.14.4",
-    "fumadocs-mdx": "15.2.3",
-    "fumadocs-ui": "16.14.4",
-    "lucide-react": "^1.31.0",
+    "fumadocs-core": "16.15.15",
+    "fumadocs-mdx": "15.4.5",
+    "fumadocs-ui": "16.15.15",
+    "lucide-react": "^1.48.0",
     "mermaid": "^11.16.0",
-    "next": "16.3.3",
+    "next": "16.3.6",
     "next-themes": "^0.4.6",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "tailwind-merge": "^3.6.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "tailwind-merge": "^3.7.0",
     "unist-util-visit": "^5.1.0"
   },
   "devDependencies": {
@@ -31,13 +31,13 @@
     "@types/mdx": "^2.0.14",
     "@types/negotiator": "^0.6.5",
     "@types/node": "^26.2.0",
-    "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "negotiator": "^1.0.0",
     "postcss": "^8.5.26",
     "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
-    "zod": "^4.6.1"
+    "zod": "^4.6.5"
   },
   "engines": {
     "node": ">=22.0.0"
