@@ -54,6 +54,14 @@ describe('storedMetadataBodyAnalyticsRefusal', () => {
     expect(storedMetadataBodyAnalyticsRefusal([])).toBeUndefined();
   });
 
+  it('leaves a member that names no field (an authored expression) to the field gate', () => {
+    // The field-level gate refuses an expression member itself; this refusal
+    // judges attributable fields only, so it adds no second rule for them.
+    expect(
+      storedMetadataBodyAnalyticsRefusal([{ object: 'sys_metadata', member: 'derived', expression: true }]),
+    ).toBeUndefined();
+  });
+
   it('refuses when the body column appears among other admissible members', () => {
     const err = storedMetadataBodyAnalyticsRefusal([
       field('sys_metadata', 'type', 'aggregate'),

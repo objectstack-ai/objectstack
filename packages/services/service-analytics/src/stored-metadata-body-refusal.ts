@@ -39,22 +39,24 @@
 
 import { isStoredMetadataBodyObject, STORED_METADATA_BODY_COLUMN } from '@objectstack/spec/kernel';
 import type { StandardErrorCode } from '@objectstack/spec/api';
+import type { NamedField, NamedRead } from './field-read-admission.js';
 
 /** `INVALID_FIELD`, pinned against the STANDARD catalog — the member refusal every sibling answers. */
 const INVALID_FIELD: StandardErrorCode = 'INVALID_FIELD';
 
 /** One field a query reads, on the object that declares it, in the role it is read in. */
-export interface NamedAnalyticsField {
-  readonly object: string;
-  readonly field: string;
-  readonly role: 'aggregate' | 'predicate';
-}
+export type NamedAnalyticsField = NamedField;
 
 /** The `INVALID_FIELD` / 400 refusal for the stored body column, or `undefined` when none applies. */
 export function storedMetadataBodyAnalyticsRefusal(
-  named: readonly NamedAnalyticsField[],
+  named: readonly NamedRead[],
 ): (Error & { code: string; status: number; field: string; object: string; param: string }) | undefined {
   for (const f of named) {
+    // A member that names no field (an authored expression) is not judged
+    // here: no field can be attributed to it, and the field-level gate refuses
+    // it outright (`field-read-admission.ts`, the expression refusal) — one
+    // rule for expressions, never a second one in this module.
+    if ('expression' in f) continue;
     if (!isStoredMetadataBodyObject(f.object) || f.field !== STORED_METADATA_BODY_COLUMN) continue;
     const param = f.role === 'aggregate' ? 'dimensions' : 'where';
     const err = new Error(
