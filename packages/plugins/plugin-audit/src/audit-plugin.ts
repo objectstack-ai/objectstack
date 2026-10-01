@@ -337,6 +337,10 @@ export class AuditPlugin implements Plugin {
         ctx.logger.info('AuditPlugin: sys_audit_log field redaction installed');
         // [#21175] …and the ledger's rows take the activity stream's parent-record
         // gate: a row about a record is served only to a caller who can read it.
+        // Middleware runs in registration order, so on the ledger the #21154
+        // query guard above judges a query first (a refused query never pays
+        // this gate's pre-scan), and the field redaction narrows only the rows
+        // this gate keeps.
         installAuditLogReadVisibility(engine as any, ctx.logger);
         ctx.logger.info('AuditPlugin: sys_audit_log parent-record read visibility installed');
       } else {
