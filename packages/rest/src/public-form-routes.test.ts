@@ -462,9 +462,11 @@ describe('[#21180] GET /forms/:slug/lookup/:field is gone — it answers what an
   // The anonymous record-search picker route is deleted, not refused: no
   // registered route matches the path, so the adapter's own unmatched-request
   // answer is the whole response. Driven through the real `HonoHttpServer`
-  // (the adapter `os serve` mounts) because "unregistered" is the adapter's
-  // statement, not a handler's. The control is a sibling path of the same
-  // shape that never existed.
+  // (the adapter `os serve` mounts), with the unmatched-request seam installed
+  // the way `HonoServerPlugin.start()` installs it, because "unregistered" is
+  // the adapter's statement, not a handler's. The control is a sibling path of
+  // the same shape that never existed; the lit control is the registered
+  // resolve route on the same harness, which answers its own envelope.
   async function answer(path: string) {
     const server = new HonoHttpServer(0);
     const protocol: any = {
@@ -480,6 +482,7 @@ describe('[#21180] GET /forms/:slug/lookup/:field is gone — it answers what an
     const rest = new RestServer(server as any, protocol, { api: { requireAuth: false } } as any);
     (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
     rest.registerRoutes();
+    server.installNotFoundSeam();
     const res: Response = await server.getRawApp().fetch(new Request(`http://local${path}`));
     return { status: res.status, body: await res.json(), findData: protocol.findData };
   }
@@ -502,5 +505,9 @@ describe('[#21180] GET /forms/:slug/lookup/:field is gone — it answers what an
     expect(picker.status).toBe(control.status);
     expect(JSON.stringify(picker.body).replace('/lookup/', '/never_registered/')).toBe(JSON.stringify(control.body));
     expect(picker.findData).not.toHaveBeenCalled();
+    // Lit control: the same harness DOES dispatch a registered public-form route.
+    const resolved = await answer('/api/v1/forms/test');
+    expect(resolved.status).toBe(200);
+    expect(resolved.body?.slug).toBe('test');
   });
 });
