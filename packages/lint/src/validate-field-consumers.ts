@@ -48,11 +48,11 @@
  *     must clean up; none of them is evidence that anything reads the field.
  *     A seeded value nothing reads is precisely the shape being hunted.
  *
- * ## Three consumers that name the field nowhere
+ * ## Consumers that name the field nowhere
  *
  * A metadata reference is not the only way a field is read, and the first real
  * app to take this rule reported 12 fields that were all on screen or
- * load-bearing. All three paths are read off the SPEC, not off a hand-kept list:
+ * load-bearing. Each path below is read off the SPEC, not off a hand-kept list:
  *
  *   - **The synthesized layout** ({@link deriveFieldGroupLayout}, ADR-0085 §5).
  *     An object's `fieldGroups` plus a field's `group` membership are what the
@@ -83,6 +83,18 @@
  *     rule reproduced exactly, so the rule credits exactly the columns it
  *     returns — the hidden, readonly, system and non-editable fields it leaves
  *     out stay uncredited.
+ *   - **That grid's per-row expand form** ({@link creditDerivedRowForm},
+ *     `deriveInlineRowFormFields` and `isInlineRowFormOffered`). Each row of
+ *     a derived grid can open a full form whose fields are derived by a
+ *     broader rule: it keeps the `readonly`, `richtext` and `json` fields the
+ *     grid leaves out. Both the fields and the condition the form is offered
+ *     under are the spec's; the hidden, system and computed fields stay
+ *     uncredited.
+ *
+ * One consumer is the relationship itself: a `lookup` or `master_detail`
+ * field that sets `inlineEdit` is the inline grid's join key — the renderer
+ * loads the child rows filtered on it and stamps it on every row it saves —
+ * so it is read whatever columns the grid draws.
  *
  * A field with at least one behaviour OR display site is consumed and gets no
  * finding — a field that is only drawn is the ordinary state of most fields
@@ -128,7 +140,13 @@
  * maintainer's call, not this rule's.
  */
 
-import { deriveFieldGroupLayout, deriveInlineGridColumns, resolveDisplayField } from '@objectstack/spec/data';
+import {
+  deriveFieldGroupLayout,
+  deriveInlineGridColumns,
+  deriveInlineRowFormFields,
+  isInlineRowFormOffered,
+  resolveDisplayField,
+} from '@objectstack/spec/data';
 import type { DisplayNameObjectMeta } from '@objectstack/spec/data';
 import { referenceTargetOf } from '@objectstack/spec/data';
 import { collectionEntries } from './collection-entries.js';
@@ -308,6 +326,15 @@ const CHILD_COLLECTION_KEYS: ReadonlySet<string> = new Set(['subforms', 'details
  * carries. The read is per key, never a context switch for the whole entry.
  */
 const CHILD_ENTRY_FIELD_KEYS: ReadonlySet<string> = new Set(['amountField', 'relationshipField']);
+
+/**
+ * [#21091] The key of a child collection entry whose value LISTS fields of the
+ * CHILD object: an `object-master-detail-form` detail entry's `formFields`,
+ * "Child field names for the per-row expand form". Read against the entry's
+ * `childObject` by {@link creditAuthoredRowForm}, and skipped by the general
+ * walk, which would read it against the parent.
+ */
+const CHILD_ENTRY_FORM_FIELDS_KEY = 'formFields';
 
 /**
  * Keys whose value is a literal from some other vocabulary, never a field
@@ -572,19 +599,108 @@ function hasAuthoredColumns(columns: unknown): boolean {
  * detection, so the derived list it credits includes the relationship field.
  * That relationship is read either way: it is the key the child rows are
  * loaded and saved by.
+ *
+ * [#21091] The same grid offers each row a full expand form, credited here
+ * too when `rowForm` is set — see {@link creditDerivedRowForm}.
  */
 function creditDerivedInlineGrid(
   ledger: ConsumerLedger,
   childObject: string | undefined,
   relationshipField: string | undefined,
+  rowForm: { inlineMode: 'grid' | 'form' | undefined } | undefined,
   root: string,
   path: string,
 ): void {
   const fields = childObject === undefined ? undefined : ledger.fieldMapByObject.get(childObject);
   if (childObject === undefined || fields === undefined) return;
-  for (const { name } of deriveInlineGridColumns({ fields }, { relationshipField })) {
+  const columns = deriveInlineGridColumns({ fields }, { relationshipField });
+  for (const { name } of columns) {
     if (ledger.declares(childObject, name)) ledger.record(childObject, name, { root, path, kind: 'display' });
   }
+  if (rowForm) creditDerivedRowForm(ledger, childObject, fields, relationshipField, rowForm.inlineMode, columns, root, path);
+}
+
+/**
+ * [#21091] Credit the fields a DERIVED per-row expand form draws, on the child.
+ *
+ * Each row of an inline grid can open a full form whose fields, when nobody
+ * listed them, are `deriveInlineRowFormFields` (`@objectstack/spec/data`) —
+ * broader than the grid: a `richtext`, `json` or `readonly` field the grid
+ * leaves out is drawn there. The renderer offers that form only when
+ * `isInlineRowFormOffered` says so, and this rule credits it under the same
+ * condition, both read off the spec rather than restated here.
+ *
+ * The derived grid's columns are a subset of the derived form's fields, so
+ * the condition decides nothing the columns had not already credited: a form
+ * that is not offered has no field the grid does not draw. That is why an
+ * `inlineMode` this rule cannot resolve (the renderer's smart default for
+ * `inlineEdit: true`) is passed as `undefined` without changing the verdict.
+ */
+function creditDerivedRowForm(
+  ledger: ConsumerLedger,
+  childObject: string,
+  fields: Record<string, AnyRec>,
+  relationshipField: string | undefined,
+  inlineMode: 'grid' | 'form' | undefined,
+  columns: readonly unknown[],
+  root: string,
+  path: string,
+): void {
+  const formFields = deriveInlineRowFormFields({ fields }, { relationshipField });
+  if (!isInlineRowFormOffered({ inlineMode, formFields, columns })) return;
+  for (const name of formFields) {
+    if (ledger.declares(childObject, name)) ledger.record(childObject, name, { root, path, kind: 'display' });
+  }
+}
+
+/**
+ * [#21091] Credit an AUTHORED `formFields` list of a child collection entry,
+ * against the entry's `childObject`.
+ *
+ * Each name is a child field the per-row expand form draws — when the form is
+ * offered. `isInlineRowFormOffered` decides that only when the entry DECLARES
+ * its `inlineMode`: an omitted one is resolved by the renderer (from the
+ * relationship's `inlineEdit`, or from the child's shape), which this rule
+ * does not reproduce, so the list is credited as drawn. With a declared mode
+ * and a form that is never offered, the list names its fields without drawing
+ * them: a carrier a removal must clean, as `inlineColumns` is on a field that
+ * does not set `inlineEdit`.
+ *
+ * The grid the comparison counts is the entry's authored `columns` when it
+ * has any, and the derived grid otherwise. A derived grid is counted only
+ * when the entry names its `relationshipField`: without one the renderer
+ * detects the relationship and leaves it out of the grid, and this rule keeps
+ * no copy of that detection, so it cannot count that grid and credits the
+ * list as drawn. A name the child does not declare is counted unresolved.
+ */
+function creditAuthoredRowForm(
+  ledger: ConsumerLedger,
+  entry: AnyRec,
+  childObject: string | undefined,
+  root: string,
+  path: string,
+): void {
+  const formFields = entry[CHILD_ENTRY_FORM_FIELDS_KEY];
+  if (!Array.isArray(formFields)) return;
+  const inlineMode = entry.inlineMode === 'grid' || entry.inlineMode === 'form' ? entry.inlineMode : undefined;
+  const relationshipField = strName(entry.relationshipField);
+  const childFields = childObject === undefined ? undefined : ledger.fieldMapByObject.get(childObject);
+  const columns = hasAuthoredColumns(entry.columns)
+    ? (entry.columns as unknown[])
+    : relationshipField !== undefined && childFields !== undefined
+      ? deriveInlineGridColumns({ fields: childFields }, { relationshipField })
+      : undefined;
+  const offered =
+    inlineMode === undefined || columns === undefined || isInlineRowFormOffered({ inlineMode, formFields, columns });
+  formFields.forEach((value: unknown, i: number) => {
+    const field = strName(value);
+    if (field === undefined || !ledger.objectsByField.has(field)) return;
+    if (ledger.declares(childObject, field)) {
+      ledger.record(childObject, field, { root, path: `${path}[${i}]`, kind: offered ? 'display' : 'carrier' });
+    } else {
+      ledger.unresolved += 1;
+    }
+  });
 }
 
 /**
@@ -674,9 +790,15 @@ function walk(
     const childObject = strName(rec.childObject);
     creditInlineGridColumns(ledger, rec.columns, childObject, 'display', root, `${path}.columns`);
     // [#20951] With no authored columns, the grid draws the derived ones.
+    // [#21091] With no authored `formFields` either, its per-row expand form
+    // draws the derived fields; an authored list replaces them.
     if (!hasAuthoredColumns(rec.columns)) {
-      creditDerivedInlineGrid(ledger, childObject, strName(rec.relationshipField), root, `${path}.childObject`);
+      const inlineMode = rec.inlineMode === 'grid' || rec.inlineMode === 'form' ? rec.inlineMode : undefined;
+      const rowForm = Array.isArray(rec[CHILD_ENTRY_FORM_FIELDS_KEY]) ? undefined : { inlineMode };
+      creditDerivedInlineGrid(ledger, childObject, strName(rec.relationshipField), rowForm, root, `${path}.childObject`);
     }
+    // [#21091] An authored row form, read against the child.
+    creditAuthoredRowForm(ledger, rec, childObject, root, `${path}.${CHILD_ENTRY_FORM_FIELDS_KEY}`);
     // [#20951] The child-field keys, each read against the child — and only
     // there, which is why the loop below skips them.
     for (const key of CHILD_ENTRY_FIELD_KEYS) {
@@ -684,7 +806,7 @@ function walk(
     }
   }
   for (const [key, value] of Object.entries(rec)) {
-    if (childEntry && CHILD_ENTRY_FIELD_KEYS.has(key)) continue;
+    if (childEntry && (CHILD_ENTRY_FIELD_KEYS.has(key) || key === CHILD_ENTRY_FORM_FIELDS_KEY)) continue;
     const childPath = `${path}.${key}`;
     const childSegments = [...segments, key];
     // A predicate map spells the field as its KEY (`{ is_active: true }`); a
@@ -769,10 +891,20 @@ function walkObject(ledger: ConsumerLedger, obj: AnyRec, objectName: string, obj
       fieldName !== undefined &&
       field.inlineEdit &&
       (field.type === 'master_detail' || field.type === 'lookup') &&
-      !!reference &&
-      !hasAuthoredColumns(field.inlineColumns)
+      !!reference
     ) {
-      creditDerivedInlineGrid(ledger, objectName, fieldName, 'objects', `${fieldPath}.inlineEdit`);
+      // [#21091] The relationship itself is the grid's join key: the renderer
+      // loads the child rows filtered on it and stamps it on every row it
+      // saves. That holds whether the columns are authored or derived, and
+      // for a `lookup` as for a `master_detail` — which is exempt anyway.
+      ledger.record(objectName, fieldName, { root: 'objects', path: `${fieldPath}.inlineEdit`, kind: 'behaviour' });
+      if (!hasAuthoredColumns(field.inlineColumns)) {
+        // [#21091] The derived grid's per-row expand form draws more of THIS
+        // object. An explicit `grid` / `form` is the form factor; `true` is
+        // the renderer's smart default, which this rule does not resolve.
+        const inlineMode = field.inlineEdit === 'grid' || field.inlineEdit === 'form' ? field.inlineEdit : undefined;
+        creditDerivedInlineGrid(ledger, objectName, fieldName, { inlineMode }, 'objects', `${fieldPath}.inlineEdit`);
+      }
     }
     for (const [key, value] of Object.entries(field)) {
       if (FIELD_SELF_KEYS.has(key) || key === 'displayField') continue;
