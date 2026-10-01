@@ -212,7 +212,7 @@ import {
   SECRET_MASK,
 } from './secret-fields.js';
 import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
-import { assertCountDistinctNamesNoJsonStoredField } from './count-distinct-json-stored-door.js';
+import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
 import { pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
 import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter } from './search-filter.js';
@@ -16880,12 +16880,15 @@ export class ObjectQL implements IObjectQLEngine {
       // a JSON column, split the same three ways), judged in one walk so the
       // first offending position is the one named.
       assertGroupByNamesNoJsonStoredField(object, this._registry.getObject(object), query.groupBy);
-      // [#20808] …and a `count_distinct` over a JSON-stored field: the spec
-      // table's `count_distinct` row (`isAggregateCompatibleWithFieldType`)
-      // beside `isMultiValueField`, before any driver is asked — memory counted
-      // equal documents apart, SQLite compared serialized text, PostgreSQL
-      // answered 500 (no equality operator for `json`).
-      assertCountDistinctNamesNoJsonStoredField(object, this._registry.getObject(object), query.aggregations);
+      // [#20808] …and every aggregation's (function, declared field type)
+      // pair, asked of the spec table (`isAggregateCompatibleWithFieldType`)
+      // beside `isMultiValueField`, before any driver is asked. [#20808] took
+      // the `count_distinct` row (memory counted equal documents apart, SQLite
+      // compared serialized text, PostgreSQL answered 500); [#20914] took the
+      // other rows — `max` over a `json` field answered a document in memory, a
+      // string on SQLite and a 500 on PostgreSQL. The `sum` row is held back by
+      // that card's census (see the door's header).
+      assertAggregationFieldTypesAccepted(object, this._registry.getObject(object), query.aggregations);
       // [#10576] The per-aggregation `filter` (`AggregationNodeSchema.filter`,
       // the contract half of #10413) is a second filter position on this verb,
       // so it walks through the same refusal doors `where` does at this seam:
