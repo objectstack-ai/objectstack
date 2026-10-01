@@ -799,6 +799,70 @@ export class AnalyticsServicePlugin implements Plugin {
       return svc.getReadableFields(object, context);
     };
 
+    // [#20935] The QUERY-side half (`AnalyticsServiceConfig.getQueryableFields`):
+    // which fields the caller may filter, sort, group or aggregate by. A field
+    // the caller is served MASKED is in the read projection above and is NOT
+    // queryable — the engine's two query guards refuse it — so the gate asks
+    // both. Bridged the same way, with the same three resolutions:
+    //
+    //   ABSENT   — no security service: `undefined`, no answer, as above.
+    //   UNUSABLE — resolving it threw: THROW, the query is refused.
+    //   USABLE   — ask its `getQueryableFields`.
+    //
+    // ⛔ And one more state the read half does not have: a USABLE service that
+    // cannot give THIS answer — it predates the method, or it answered
+    // `undefined`. The fallback is NOT the read projection alone, which counts a
+    // masked field readable and would admit exactly the queries this half
+    // exists to refuse. It fails CLOSED: the read projection less every field
+    // whose declaration carries a `maskingRule`, whoever the caller is. That
+    // over-refuses a caller the rule is lifted for — a system one included —
+    // which is the safe direction and the only one available: an older reader
+    // cannot say for whom a rule is lifted, and deciding that here (reading the
+    // caller's capabilities, or its system bit) would be a second copy of the
+    // masking rule.
+    interface SecurityQueryableFields extends SecurityReadableFields {
+      getQueryableFields?(object: string, context?: ExecutionContext): Promise<string[] | undefined>;
+    }
+    const maskingRuleFields = (object: string): Set<string> => {
+      const fields = dataEngine()?.getObject?.(object)?.fields as unknown;
+      const out = new Set<string>();
+      const collect = (name: unknown, def: unknown) => {
+        const rule = (def as { maskingRule?: unknown } | null | undefined)?.maskingRule;
+        if (typeof name === 'string' && name && rule !== undefined && rule !== null) out.add(name);
+      };
+      if (Array.isArray(fields)) {
+        for (const f of fields) collect((f as { name?: unknown } | null)?.name, f);
+      } else if (fields && typeof fields === 'object') {
+        for (const [name, def] of Object.entries(fields as Record<string, unknown>)) collect(name, def);
+      }
+      return out;
+    };
+    const getQueryableFields: AnalyticsServiceConfig['getQueryableFields'] = async (object, context) => {
+      let svc: SecurityQueryableFields | undefined;
+      try {
+        svc = ctx.getService<SecurityQueryableFields>('security');
+      } catch (e) {
+        throw new Error(
+          `resolving the "security" service threw (${String((e as Error)?.message ?? e)})`,
+        );
+      }
+      if (!svc) return undefined;
+      if (typeof svc.getQueryableFields === 'function') {
+        const answer = await svc.getQueryableFields(object, context);
+        if (answer !== undefined) return answer;
+      }
+      if (typeof svc.getReadableFields !== 'function') {
+        throw new Error(
+          'the registered "security" service exposes neither getQueryableFields() nor getReadableFields(), ' +
+          'so it cannot answer which fields the caller may query on',
+        );
+      }
+      const readable = await svc.getReadableFields(object, context);
+      if (readable === undefined) return undefined;
+      const masked = maskingRuleFields(object);
+      return readable.filter((f) => !masked.has(f));
+    };
+
     // ADR-0021 — relationship → target-object resolver. A dataset's `include`
     // names lookup/master_detail FIELDS on the base object; the joined TABLE is
     // each field's `reference` target (which can differ from the field name,
@@ -1153,6 +1217,7 @@ export class AnalyticsServicePlugin implements Plugin {
       getReadScope,
       admitObjectRead,
       getReadableFields,
+      getQueryableFields,
       getAllowedRelationships: this.options.getAllowedRelationships,
       coerceTemporalFilterValue,
       coerceTemporalFilterColumn,
