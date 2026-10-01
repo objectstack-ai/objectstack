@@ -19,6 +19,10 @@
 #
 # Usage:
 #   scripts/build-console.sh
+#   scripts/build-console.sh --check-single-zod <assets-dir>
+#                           run ONLY the single-zod canary (below) over an
+#                           existing dist's assets/ and exit with its verdict;
+#                           builds nothing, writes nothing
 #
 # Env:
 #   OBJECTUI_ROOT           override path to objectui checkout
@@ -28,6 +32,102 @@
 #   CONSOLE_BUNDLE_CANARY   literal asserted in the built assets (default: import/jobs)
 
 set -euo pipefail
+
+# ── Single-zod canary (objectstack#21108) ────────────────────────────
+# The console bundle must carry exactly ONE zod instance. Two copies split
+# zod's internals: a spec schema built by one instance and walked by the other
+# (`z.toJSONSchema`) throws, so every spec-derived Studio form lost its fields —
+# the New Package dialog could not create a package and the dashboard/report
+# inspectors read "Spec schema unavailable". The pin `db11afd4967c` shipped that
+# split: objectui's zod 4.4.3 in `vendor-zod` beside the injected spec's 4.6.1
+# in `vendor-objectstack`, each carrying its own version literal.
+#
+# objectui#11353 (objectui#11327) fixed it at the source: inside the console's
+# Vite build it pins every `zod` import to the console's copy, asserts the
+# console's zod satisfies the injected spec's declared range, and fails the
+# build on more than one zod package directory in the emitted chunks. This is
+# the belt to that brace, measured on what this script SHIPS rather than on how
+# the pinned objectui build is configured, so it still holds for a future pin
+# that drops or weakens that guard.
+#
+# What it counts: zod 4 stamps every instance with a version object literal
+# (`version` in `zod/v4/core/versions`, read back as `_zod.version`), which the
+# minifier emits as `{major:4,minor:6,patch:5}`. One instance = one literal, so
+# the canary requires EXACTLY ONE occurrence across assets/*.js:
+#   - two DIFFERENT literals: two zod versions, the shipped defect;
+#   - one literal found twice: two instances of the same version — still two
+#     instances, which is what the crash keys on;
+#   - none at all: the matcher has gone blind (the console always bundles zod),
+#     and a negative check that cannot see its subject would pass forever.
+ZOD_VERSION_LITERAL='\{[[:space:]]*major:[[:space:]]*[0-9]+,[[:space:]]*minor:[[:space:]]*[0-9]+,[[:space:]]*patch:[[:space:]]*[0-9]+[[:space:]]*,?[[:space:]]*\}'
+
+assert_single_zod() {
+  local assets="$1"
+  if [[ ! -d "$assets" ]]; then
+    echo "✗ Single-zod canary: ${assets} is not a directory."
+    return 1
+  fi
+  local files=()
+  local f
+  for f in "$assets"/*.js; do
+    [[ -f "$f" ]] && files+=("$f")
+  done
+  if (( ${#files[@]} == 0 )); then
+    echo "✗ Single-zod canary: no .js files under ${assets} — nothing was measured."
+    return 1
+  fi
+  local hits="" rc=0
+  hits="$(grep -oHE "$ZOD_VERSION_LITERAL" "${files[@]}")" || rc=$?
+  if (( rc > 1 )); then
+    echo "✗ Single-zod canary: grep failed (exit ${rc}) reading ${assets}/*.js."
+    return 1
+  fi
+  # One line per occurrence: <file>:<literal>, the literal's whitespace and any
+  # trailing comma dropped so a re-formatted bundle reads the same version.
+  local occurrences
+  occurrences="$(printf '%s\n' "$hits" | sed -e '/^$/d' -e 's/[[:space:]]//g' -e 's/,}$/}/')"
+  local count=0 distinct=0
+  if [[ -n "$occurrences" ]]; then
+    count="$(printf '%s\n' "$occurrences" | wc -l | tr -d ' ')"
+    distinct="$(printf '%s\n' "$occurrences" | sed 's/^.*:{/{/' | sort -u | wc -l | tr -d ' ')"
+  fi
+  if (( count == 0 )); then
+    echo "✗ Single-zod canary: none of the ${#files[@]} assets/*.js files carries a zod version"
+    echo "  literal ({major:N,minor:N,patch:N}). The console always bundles zod, so zero means"
+    echo "  this matcher can no longer see it — and a check that cannot see its subject cannot"
+    echo "  fail. Fix the matcher (ZOD_VERSION_LITERAL in scripts/build-console.sh) before"
+    echo "  trusting this bundle."
+    return 1
+  fi
+  if (( count > 1 )); then
+    if (( distinct > 1 )); then
+      echo "✗ Single-zod canary: the console bundle carries ${distinct} different zod versions"
+      echo "  (${count} version literals) and must carry exactly one:"
+    else
+      echo "✗ Single-zod canary: the console bundle carries ${count} copies of ONE zod version"
+      echo "  literal — two instances of the same version are still two instances:"
+    fi
+    printf '%s\n' "$occurrences" | sed "s|^${assets%/}/|    |"
+    echo "  A schema built by one zod instance and walked by another breaks every spec-derived"
+    echo "  Studio form. If OBJECTSTACK_SPEC_DIST was injected, the pinned objectui build did not"
+    echo "  pin the spec's zod imports to the console's copy; otherwise objectui's own lockfile"
+    echo "  resolves zod twice. Move .objectui-sha to an objectui commit whose console build"
+    echo "  holds zod to one copy."
+    return 1
+  fi
+  echo "✓ Single-zod canary: exactly one zod version literal $(printf '%s' "$occurrences" | sed 's/^.*:{/{/') in ${occurrences%%:*}."
+  echo "  (${#files[@]} assets/*.js files read)"
+  return 0
+}
+
+if [[ "${1:-}" == "--check-single-zod" ]]; then
+  if [[ -z "${2:-}" ]]; then
+    echo "usage: scripts/build-console.sh --check-single-zod <assets-dir>"
+    exit 2
+  fi
+  if assert_single_zod "$2"; then exit 0; fi
+  exit 1
+fi
 
 FRAMEWORK_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SHA_FILE="${FRAMEWORK_ROOT}/.objectui-sha"
@@ -258,6 +358,14 @@ if ! grep -rq "$BUNDLE_CANARY" "${TARGET}/assets"; then
   exit 1
 fi
 echo "✓ Bundle canary '${BUNDLE_CANARY}' present — framework client is in the bundle."
+
+# Assert ONE zod instance in what ships (see the single-zod canary at the top).
+# Placed after the bundle canary and, like it, after the SHA stamp: CI's split
+# restore/save saves only when every step passed, so a failure here never
+# seeds the dist cache.
+if ! assert_single_zod "${TARGET}/assets"; then
+  exit 1
+fi
 
 # Assert the injected SPEC landed too. Deliberately NOT a frozen literal like
 # BUNDLE_CANARY above: "does the bundle carry the surface the framework declares
