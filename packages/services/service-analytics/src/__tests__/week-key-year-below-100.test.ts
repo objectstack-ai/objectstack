@@ -6,7 +6,10 @@
  *
  * - The preview evaluator's `week` key (`bucketDate`) built the day with
  *   `Date.UTC(year, …)`, which reads a year from 0 to 99 as 1900 + year, so a
- *   row on 0050-06-15 was keyed to a Monday in 1950.
+ *   row on 0050-06-15 was keyed to a Monday in 1950. [#20867] It delegates to
+ *   core's `bucketDateKey` now, so its week key is the runtime's ISO week label
+ *   (`0050-W24`), no longer the Monday's `YYYY-MM-DD`; the pins below read the
+ *   label, and `bucket-key-readers-four-digit-year.test.ts` pins the rest.
  * - The dataset executor's `compareTo` alignment counts bucket ordinals from a
  *   bound's day (core's `zonedDateStartToUtcMs`, the same remap) and mints a
  *   week key back from an ordinal (then a private week rule, whose January 4
@@ -36,26 +39,28 @@ describe.each(HOSTS)('on a %s host', (host) => {
     expect(Intl.DateTimeFormat().resolvedOptions().timeZone).toBe(host);
   });
 
-  describe('[#20599] preview bucketDate(week) names the Monday of a day in 0001..0099', () => {
+  describe('[#20599] preview bucketDate(week) names the ISO week of a day in 0001..0099', () => {
     it.each([
-      ['0001-01-03T10:00:00.000Z', '0001-01-01'],
-      ['0050-01-01T10:00:00.000Z', '0049-12-27'],
-      ['0050-06-15T10:00:00.000Z', '0050-06-13'],
-      ['0099-12-31T10:00:00.000Z', '0099-12-28'],
-      ['0100-01-06T10:00:00.000Z', '0100-01-04'],
-      ['2026-06-17T10:00:00.000Z', '2026-06-15'],
-    ])('%s in UTC is the week of %s', (instant, monday) => {
-      expect(bucketDate(instant, 'week')).toBe(monday);
-      expect(bucketDate(instant, 'week', 'UTC')).toBe(monday);
+      // [#20867] The ISO week label; the Monday each week starts on is in
+      // the comment.
+      ['0001-01-03T10:00:00.000Z', '0001-W01'], // Monday 0001-01-01
+      ['0050-01-01T10:00:00.000Z', '0049-W52'], // Monday 0049-12-27
+      ['0050-06-15T10:00:00.000Z', '0050-W24'], // Monday 0050-06-13
+      ['0099-12-31T10:00:00.000Z', '0099-W53'], // Monday 0099-12-28
+      ['0100-01-06T10:00:00.000Z', '0100-W01'], // Monday 0100-01-04
+      ['2026-06-17T10:00:00.000Z', '2026-W25'], // Monday 2026-06-15
+    ])('%s in UTC is in week %s', (instant, week) => {
+      expect(bucketDate(instant, 'week')).toBe(week);
+      expect(bucketDate(instant, 'week', 'UTC')).toBe(week);
     });
 
     it.each([
       // Sunday 0050-01-02 in UTC is Monday 0050-01-03 in Shanghai.
-      ['0050-01-02T20:00:00.000Z', '0049-12-27', '0050-01-03'],
-      ['0001-01-07T20:00:00.000Z', '0001-01-01', '0001-01-08'],
-      ['0099-12-31T20:00:00.000Z', '0099-12-28', '0099-12-28'],
-      ['2026-06-14T20:00:00.000Z', '2026-06-08', '2026-06-15'],
-    ])('%s is the week of %s in UTC and of %s in Asia/Shanghai', (instant, utc, shanghai) => {
+      ['0050-01-02T20:00:00.000Z', '0049-W52', '0050-W01'],
+      ['0001-01-07T20:00:00.000Z', '0001-W01', '0001-W02'],
+      ['0099-12-31T20:00:00.000Z', '0099-W53', '0099-W53'],
+      ['2026-06-14T20:00:00.000Z', '2026-W24', '2026-W25'],
+    ])('%s is in week %s in UTC and in week %s in Asia/Shanghai', (instant, utc, shanghai) => {
       expect(bucketDate(instant, 'week')).toBe(utc);
       expect(bucketDate(instant, 'week', 'Asia/Shanghai')).toBe(shanghai);
     });

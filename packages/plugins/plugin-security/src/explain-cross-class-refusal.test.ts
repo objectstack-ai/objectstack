@@ -181,14 +181,25 @@ const ROW = { id: 'r1', status: 'open', title: 'x', amount: 5 };
 const rlsRecordOf = (d: ExplainDecision) => d.layers.find((l) => l.layer === 'rls')?.record;
 
 /**
+ * The remedy explain's refusal leads with. It comes before the policy names and
+ * the diagnostic, which have no length bound, because the REST door keeps only
+ * a long message's first 499 characters.
+ */
+const REMEDY =
+  'Compare a field only with a field of the same class, or fix the declaration of the one that is declared with ' +
+  'the wrong type.';
+
+/**
  * Explain's answer is the find's refusal: the same envelope, no decision and so
- * no record verdict, and a message that names the policy and both columns.
+ * no record verdict, and a message that leads with the remedy and names the
+ * policy and both columns.
  */
 async function expectExplainRefuses(p: Promise<unknown>, columns: [string, string]): Promise<void> {
   const r = await refusalOf(p);
   expect(r).not.toBe('answered');
   if (r === 'answered') return;
   expect({ code: r.code, status: r.status }).toEqual(INVALID);
+  expect(r.message.startsWith(`${REMEDY} `), r.message).toBe(true);
   expect(r.message).toContain(`'${POLICY}'`);
   for (const column of columns) expect(r.message).toContain(`"${column}"`);
 }
