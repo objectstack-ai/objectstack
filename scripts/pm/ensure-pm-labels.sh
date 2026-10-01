@@ -279,13 +279,14 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # seat protocol or PM tooling file (scripts/**, .github/**, .claude/**,
   # packages/lint gate rules, packages/spec/scripts/**) rather than in a product
   # package. Triage applies it at FIRST GRADING, in the same label write as
-  # domain:* and priority:*; a filer may pre-apply it. Four named consumers, all
+  # domain:* and priority:*; a filer may pre-apply it. Three named consumers, all
   # in the pm-dispatch charter (SKILL.md 状态模型 row, 分诊座位职责 and 候选与批次):
   # the execution seat's candidate query, which excludes a tooling card carrying
   # neither an `Unblocks: #N` line nor a named published surface; the triage
-  # first-touch close; the fleet-wide one-tooling-card-in-flight count; and the
-  # census / half-state patrol, for which a tooling card open in pm:queue with
-  # neither line is a half-state. It is in this five-repo loop on the rule stated
+  # first-touch close; and the census / half-state patrol, for which a tooling
+  # card open in pm:queue with neither line is a half-state. (No fleet-wide
+  # in-flight count: the take-order alone sequences tooling cards.) It is in this
+  # five-repo loop on the rule stated
   # beside priority:p0 above — the sweep that reads it is repo-parameterized
   # (PM_SWEEP_REPO) and first-touch grading is a five-repo triage duty. Measured
   # 2026-09-21 in objectstack, where the label is live on 44 queue cards: the
