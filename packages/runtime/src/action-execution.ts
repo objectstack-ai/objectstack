@@ -2472,9 +2472,10 @@ export function doubledPostSuccessNavigationWarning(
     const where = objectName ? `${objectName}/${actionDef?.name ?? '<unnamed>'}` : String(actionDef?.name ?? '<unnamed>');
     return (
         `[action-contract] Action '${where}': the handler returned \`redirectUrl\` while the action `
-        + 'also declares `onSuccess.navigate` — two post-success destinations for one success '
-        + '(#11519). The DECLARED `onSuccess` wins and the handler\'s `redirectUrl` is ignored '
-        + '(interim renderer precedence, objectui#5933). Fix the action, not the renderer: keep '
+        + 'also declares `onSuccess.navigate` — two post-success destinations for one success, '
+        + 'a pair the contract refuses rather than ranks. The DECLARED `onSuccess` wins and the '
+        + 'handler\'s `redirectUrl` is ignored (the interim precedence the console renderer '
+        + 'applies, which no contract promises). Fix the action, not the renderer: keep '
         + '`onSuccess` and stop returning `redirectUrl` from the handler, or drop `onSuccess` and '
         + 'let the handler return drive the navigation. There is no `precedence` field, by ruling.'
     );

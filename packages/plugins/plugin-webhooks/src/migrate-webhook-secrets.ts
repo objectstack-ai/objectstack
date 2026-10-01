@@ -131,8 +131,8 @@ export async function migrateLegacyWebhookSecrets(
         : legacySecret ? 'signing secret' : 'custom headers';
       logger?.warn?.(
         protection
-          ? `[webhook] ${what} STILL CLEARTEXT in definition_json — no CryptoProvider to encrypt them (#7799/#7986)`
-          : `[webhook] ${what} migration failed — row left unchanged (#7799/#7986)`,
+          ? `[webhook] ${what} STILL CLEARTEXT in definition_json — no CryptoProvider to move them into their encrypted columns`
+          : `[webhook] ${what} migration failed — row left unchanged, still cleartext in definition_json`,
         {
           name: row.name ?? row.id,
           id: row.id,

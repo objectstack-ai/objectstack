@@ -339,6 +339,15 @@ const EMPTY_REQUIRED_PERMISSIONS: NormalizedRequiredPermissions = Object.freeze(
  * permission set, holds no capability, and is the one
  * {@link SecurityPlugin.resolveCallerPosture} gives the object's masking rules
  * and [#21063] its per-field capability contract.
+ *
+ * [#21079] ADR-0056 D2 — THE DENY BASELINE. For such a caller an empty set list
+ * grants nothing: it is asked the same grant questions as any caller, over the
+ * empty list, and every one answers no. Object admission refuses it (the
+ * middleware's step 2 CRUD gate, and `canReadObject` / `canWriteObject` /
+ * `canExport`), and its row scope is the deny sentinel (`getReadFilter`). This
+ * predicate is the ONE exception an empty list has, everywhere: the
+ * principal-less hand-off above, which ADR-0096 stages separately. ⛔ No door,
+ * probe or layer carries a second spelling of "no sets means no restriction".
  */
 function isPrincipalLessContext(context: any): boolean {
   const positions = context?.positions ?? [];
@@ -2504,8 +2513,16 @@ export class SecurityPlugin implements Plugin {
       const referentialFieldClearWrite =
         opCtx.operation === 'update' && opCtx.context?.__referentialFieldClear === true;
 
-      // 2. CRUD permission check ([#12597] except the referential FK clear)
-      if (permissionSets.length > 0 && !referentialFieldClearWrite) {
+      // 2. CRUD permission check ([#12597] except the referential FK clear).
+      //
+      // [#21079] ADR-0056 D2 — the deny baseline. NOT guarded on a resolved
+      // set: a caller who resolves none is asked the same grant question over
+      // its empty list, and an empty list grants nothing, so it is refused
+      // here with the same `PERMISSION_DENIED` any ungranted caller gets. The
+      // guard this replaced admitted that caller to every object no set
+      // grants. A principal-less context never reaches this line — it was
+      // handed through above ({@link isPrincipalLessContext}, ADR-0096).
+      if (!referentialFieldClearWrite) {
         const allowed = this.permissionEvaluator.checkObjectPermission(
           opCtx.operation,
           opCtx.object,
@@ -5327,6 +5344,13 @@ export class SecurityPlugin implements Plugin {
    *
    * Fails CLOSED on any resolution failure: a dropped predicate here is the
    * leak, so an unresolvable layer denies (zero rows) rather than widening.
+   *
+   * [#21079] And it answers the deny sentinel, not a composed scope, for a
+   * non-system caller who carries a principal and resolves NO permission set —
+   * the ADR-0056 D2 deny baseline, which the middleware enforces by refusing
+   * that caller at object admission. Only the principal-less context
+   * ({@link isPrincipalLessContext}, ADR-0096) keeps the sharing predicate
+   * alone.
    */
   async getReadFilter(
     object: string,
@@ -5334,8 +5358,6 @@ export class SecurityPlugin implements Plugin {
   ): Promise<Record<string, unknown> | undefined> {
     // System operations bypass scoping (mirrors the middleware's isSystem skip).
     if (context?.isSystem) return undefined;
-    const positions = context?.positions ?? [];
-    const explicit = context?.permissions ?? [];
     // [#4467] The OWD/sharing predicate is resolved for EVERY non-system caller,
     // ahead of the RLS branches below, because it is a SEPARATE middleware in
     // the chain this method mirrors: none of the RLS stand-downs below is a
@@ -5362,7 +5384,9 @@ export class SecurityPlugin implements Plugin {
     // without a `userId` (`computeControlledByParentFilter` returns null), and
     // this branch is reached only when there is none — so the middleware adds
     // nothing here either. Agreement holds by both sides standing down.
-    if (positions.length === 0 && explicit.length === 0 && !context?.userId) {
+    // [#21079] The same predicate the middleware hands through on — the one
+    // exception the deny baseline has (ADR-0096); see below.
+    if (isPrincipalLessContext(context)) {
       return sharingFilter ?? undefined;
     }
     // [#2852] D10 delegator intersection is NOT implemented on this path.
@@ -5388,6 +5412,14 @@ export class SecurityPlugin implements Plugin {
     }
     try {
       const permissionSets = await this.resolvePermissionSetsForContext(context);
+      // [#21079] ADR-0056 D2 — the deny baseline at the row scope. A caller who
+      // carries a principal (the principal-less hand-off returned above) and
+      // resolves NO permission set is refused at the middleware's object
+      // admission, so the scope that agrees with it is zero rows. Composed
+      // from the layers instead, it was the sharing predicate alone — every
+      // row of an object whose sharing model is not private. Not a failure,
+      // so nothing is logged.
+      if (permissionSets.length === 0) return { ...RLS_DENY_FILTER };
       const filter = await this.computeRlsFilter(permissionSets, object, 'find', context);
       // [#5815] ADR-0055 — the SECOND thing the middleware ANDs into `ast.where`
       // for a read. Resolved from the sets already resolved above, exactly as
@@ -5510,9 +5542,12 @@ export class SecurityPlugin implements Plugin {
    * is the complement of that gate's own primitive,
    * `FieldMasker.getNonEditableFields` — so a field is here iff a payload
    * naming it passes step 2.5. [#21063] A caller who resolves no permission
-   * set gets the full set minus every capability-gated field: step 2.5 reaches
+   * set gets the full set minus every capability-gated field: step 2.5 judges
    * it over the posture's per-field capability contract
-   * ({@link resolveCallerPosture}), and its evaluator map is empty.
+   * ({@link resolveCallerPosture}), and its evaluator map is empty. [#21079]
+   * Like every answer here, that one is field-level only: such a caller who
+   * carries a principal is refused the write itself at object admission (the
+   * ADR-0056 D2 deny baseline), ahead of step 2.5.
    */
   async getWritableFields(object: string, context?: any): Promise<string[] | undefined> {
     const mask = await this.resolveProjectionFieldMask(object, context, { fallbackOnEmptySets: false });
@@ -5685,10 +5720,13 @@ export class SecurityPlugin implements Plugin {
    *
    * ⛔ Deliberately NOT carried: the object's capability contract
    * (`requiredPermissions` on the object). It is an OBJECT-level admission
-   * gate, and this caller's object admission — the capability and CRUD gates,
-   * both guarded by a resolved set — is not decided here. Its field answers
-   * are: the published projections' answer for this caller is the full field
-   * set minus every field it is not served, as the service contract states.
+   * gate, and this caller's object admission is not decided here: [#21079]
+   * the middleware's CRUD gate refuses it over its empty set list (the
+   * ADR-0056 D2 deny baseline), ahead of every field gate. Its field answers
+   * are decided here, and are still read: by the public-form grant's result
+   * masker, which admits ahead of that gate, and by the published projections,
+   * whose answer for this caller is the full field set minus every field it is
+   * not served, as the service contract states.
    */
   private async resolveCallerPosture(
     object: string,
@@ -5732,9 +5770,10 @@ export class SecurityPlugin implements Plugin {
    * one verdict" a property of the code rather than a promise:
    *
    *   1. `isSystem` → admit (the middleware's total bypass);
-   *   2. no permission sets resolved → admit (the middleware guards its whole
-   *      CRUD gate with `if (permissionSets.length > 0)`; reporting a denial the
-   *      data path would not enforce is its own kind of drift);
+   *   2. [#21079] no permission sets resolved → the ADR-0056 D2 deny baseline:
+   *      DENY, as the middleware's CRUD gate answers an empty list; ADMIT only
+   *      a principal-less context, which the middleware hands through before
+   *      any gate ({@link isPrincipalLessContext}, ADR-0096);
    *   3. `secMeta.unresolved` → DENY (#3545 — `isPrivate` would default to
    *      `false`, which is exactly what lets a plain `'*'` wildcard reach an
    *      object ADR-0066 D2 says it must not);
@@ -5766,10 +5805,11 @@ export class SecurityPlugin implements Plugin {
 
     try {
       const permissionSets = await this.resolvePermissionSetsForContext(context);
-      // 2. No sets resolved (unauthenticated, or a deployment with no sets) →
-      //    no permission-set restriction applies, exactly as the middleware
-      //    treats it.
-      if (permissionSets.length === 0) return true;
+      // 2. [#21079] No sets resolved → the deny baseline (ADR-0056 D2): an
+      //    empty list grants nothing, which is the middleware's step 2 answer
+      //    for a caller who carries a principal. Only the principal-less
+      //    context is admitted, as the middleware hands it through.
+      if (permissionSets.length === 0) return isPrincipalLessContext(context);
 
       const { isPrivate, unresolved, requiredPermissions } =
         await this.getObjectSecurityMeta(objectName);
@@ -5806,9 +5846,11 @@ export class SecurityPlugin implements Plugin {
       }
 
       // 6. [ADR-0090 D10] The delegator must independently grant the same read.
+      //    [#21079] Asked over the delegator's list whatever its length, as the
+      //    middleware asks it: a delegator who resolves NO set grants nothing,
+      //    the deny baseline for the second principal too.
       if (
         delegatorSets &&
-        delegatorSets.length > 0 &&
         !this.permissionEvaluator.checkObjectPermission('find', objectName, delegatorSets, { isPrivate })
       ) {
         return false;
@@ -5861,8 +5903,11 @@ export class SecurityPlugin implements Plugin {
    *      middleware calls, handed `object`, `operation`, `context` and the rows
    *      of `data`. A plain-CRUD holder on an RBAC link table DENIES; a tenant
    *      admin passes to the arms below;
-   *   4. no permission sets resolved → arm 10 decides (the middleware guards its
-   *      whole CRUD gate with `if (permissionSets.length > 0)`, not that wall);
+   *   4. [#21079] no permission sets resolved → the ADR-0056 D2 deny baseline:
+   *      DENY, as the middleware's CRUD gate answers an empty list; ADMIT only
+   *      a principal-less context, which the middleware hands through before
+   *      any gate ({@link isPrincipalLessContext}, ADR-0096) and which carries
+   *      no user id for arm 10 to ask about;
    *   5. `secMeta.unresolved` → DENY (#3545);
    *   6. ADR-0066 D3/⑤ `requiredPermissions` capability AND-gate for the WRITE
    *      CRUD class, checked BEFORE the grant, for the caller AND (D10) the
@@ -5904,9 +5949,8 @@ export class SecurityPlugin implements Plugin {
    *  10. ADR-0123 D2 `organizationWallRefusal` — the method the middleware's
    *      step 3.7 throws on, asked under that step's guard (a payload is
    *      supplied, the context names a user) at that step's point, after arm
-   *      9; arm 4 asks it too, as the middleware does with no set resolved. It
-   *      is handed no row — the payload decides only whether it is asked — so
-   *      it refuses a CALLER CLASS, as arms 2 and 3 do.
+   *      9. It is handed no row — the payload decides only whether it is
+   *      asked — so it refuses a CALLER CLASS, as arms 2 and 3 do.
    *
    * `can-write-object-admission.test.ts` pins this method's answer equal to the
    * registered middleware's on its equivalence block's cases, and pins one
@@ -6035,9 +6079,7 @@ export class SecurityPlugin implements Plugin {
       // 10. [ADR-0123 D2] The no-active-organization write wall — the
       //     middleware's own verdict, `organizationWallRefusal`, under its step
       //     3.7 guard: a payload is supplied and the context names a user. Its
-      //     point is last, after the field gate; it is spelled here because
-      //     arm 4 returns through it — the middleware asks it with no set
-      //     resolved as well.
+      //     point is last, after the field gate.
       const organizationWallAdmits = async (
         delegatorSets: PermissionSet[] | null,
         delegatorContext: unknown,
@@ -6046,29 +6088,14 @@ export class SecurityPlugin implements Plugin {
           && (await this.organizationWallRefusal(
             permissionSets, objectName, operation, context, delegatorSets, delegatorContext,
           )));
-      // 4. No sets resolved → no permission-set GRANT applies (the middleware
-      //    guards its capability and CRUD gates with `if (permissionSets.length > 0)`),
-      //    and arm 10 is not behind that guard. [#21063] Neither is arm 9: a
-      //    caller who carries a principal reaches the middleware's step 2.5
-      //    over the posture it reads (resolveCallerPosture), whose per-field
-      //    capability contract this caller holds none of. A principal-less
-      //    context is handed through before any gate, so it is asked nothing
-      //    about fields.
-      if (permissionSets.length === 0) {
-        if (data && !isPrincipalLessContext(context)) {
-          const standIn = await this.resolveCallerPosture(objectName, permissionSets);
-          // [#3545] The field arm reads the per-field capability contract off
-          // the posture; an unreadable posture leaves it unknown, and reading
-          // it as "no contract" would admit every capability-gated field. Fail
-          // closed, as the write projection answers `[]` there.
-          if (standIn.unresolved) return false;
-          const forbidden = this.computeForbiddenFieldWrites(
-            objectName, data as Record<string, any> | Record<string, any>[], standIn, permissionSets, null,
-          );
-          if (forbidden.length > 0) return false;
-        }
-        return await organizationWallAdmits(null, null);
-      }
+      // 4. [#21079] No sets resolved → the deny baseline (ADR-0056 D2): an
+      //    empty list grants no create or edit, which is the middleware's step
+      //    2 answer for a caller who carries a principal — refused there
+      //    before its field gate or its organization wall is reached, whatever
+      //    the payload. Only the principal-less context is admitted, as the
+      //    middleware hands it through before any gate; it names no user, so
+      //    arm 10 would not be asked about it either.
+      if (permissionSets.length === 0) return isPrincipalLessContext(context);
 
       const { isPrivate, unresolved, requiredPermissions, fieldRequiredPermissions } =
         await this.getObjectSecurityMeta(objectName);
@@ -6106,9 +6133,11 @@ export class SecurityPlugin implements Plugin {
       }
 
       // 8. [ADR-0090 D10] The delegator must independently grant the same write.
+      //    [#21079] Asked over the delegator's list whatever its length, as the
+      //    middleware asks it: a delegator who resolves NO set grants nothing,
+      //    the deny baseline for the second principal too.
       if (
         delegatorSets &&
-        delegatorSets.length > 0 &&
         !this.permissionEvaluator.checkObjectPermission(operation, objectName, delegatorSets, { isPrivate })
       ) {
         return false;
@@ -6152,10 +6181,11 @@ export class SecurityPlugin implements Plugin {
    * `export` branch — so the axis cannot drift from data-plane enforcement.
    *
    * Fails CLOSED (an access-narrowing answer): a dangling on-behalf-of delegator
-   * denies, and callers must treat a throw as a denial. `isSystem` bypasses, and
-   * so does an empty set resolution — the middleware skips its CRUD gate
-   * entirely for a caller with no permission sets, and reporting a denial the
-   * data path would not enforce is its own kind of drift.
+   * denies, and callers must treat a throw as a denial. `isSystem` bypasses.
+   * [#21079] An empty set resolution is the ADR-0056 D2 deny baseline — `false`,
+   * as the middleware's CRUD gate refuses the read an export is — except for a
+   * principal-less context, which the middleware hands through before any gate
+   * ({@link isPrincipalLessContext}, ADR-0096).
    */
   async canExport(object: string, context?: any): Promise<boolean> {
     const objectName = String(object ?? '');
@@ -6164,10 +6194,11 @@ export class SecurityPlugin implements Plugin {
     if (context?.isSystem) return true;
 
     const permissionSets = await this.resolvePermissionSetsForContext(context);
-    // No sets resolved (e.g. unauthenticated, or a deployment with no sets) →
-    // no permission-set restriction applies, exactly as the middleware treats it
-    // (`if (permissionSets.length > 0)` guards its whole CRUD gate).
-    if (permissionSets.length === 0) return true;
+    // [#21079] No sets resolved → the deny baseline (ADR-0056 D2): an empty
+    // list grants nothing, which is the middleware's step 2 answer for a caller
+    // who carries a principal. Only the principal-less context is admitted, as
+    // the middleware hands it through.
+    if (permissionSets.length === 0) return isPrincipalLessContext(context);
 
     const { isPrivate, unresolved } = await this.getObjectSecurityMeta(objectName);
     // [#3545] Posture unresolvable → deny. `isPrivate` would default to `false`,
@@ -6181,14 +6212,15 @@ export class SecurityPlugin implements Plugin {
     // [ADR-0090 D10] An on-behalf-of caller may never export past what the
     // DELEGATOR could have exported themselves — intersect the delegator's own
     // answer. A dangling delegator fails CLOSED, the same stance the CRUD
-    // middleware and {@link getReadableFields} take.
+    // middleware and {@link getReadableFields} take. [#21079] So does a
+    // delegator who resolves NO set: the evaluator answers that empty list's
+    // export as it answers any list, and the middleware refuses its read.
     if (context?.onBehalfOf?.userId) {
       const del = await resolveDelegatorContext(this.ql, context);
       if (del.kind === 'missing') return false;
       if (del.kind === 'resolved') {
         const delegatorSets = await this.resolvePermissionSetsForContext(del.context);
         if (
-          delegatorSets.length > 0 &&
           !this.permissionEvaluator.checkObjectPermission('export', objectName, delegatorSets, { isPrivate })
         ) {
           return false;

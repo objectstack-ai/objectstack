@@ -149,7 +149,7 @@ function unsupportedDriverMessage(raw: string, source: 'OS_DATABASE_DRIVER' | 'd
         `[StandaloneStack] Unsupported ${source} value: "${raw}". ` +
         `Supported drivers: ${DATABASE_DRIVER_SELECTION_ALIASES.join(', ')}. ` +
         `Booting on the SQLite default instead would silently ignore the driver you asked for ` +
-        `and write into a local database (#3276). Fix the value, or unset it ` +
+        `and write into a local database. Fix the value, or unset it ` +
         `to let the OS_DATABASE_URL scheme select the driver.`
     );
 }
@@ -420,7 +420,7 @@ function assertUrlNamedForRemoteDriver(
         `and ${driver} has no local default to fall back on — its database lives on a server or ` +
         `endpoint this process cannot guess. Set OS_DATABASE_URL (or --database) to it. ` +
         `Falling back to the local SQLite file instead would connect you to a database you never ` +
-        `named, and every write would land in the wrong place (#3276).`
+        `named, and every write would land in the wrong place.`
     );
 }
 
@@ -672,7 +672,7 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         throw new Error(
             `[StandaloneStack] No dispatch arm for database driver kind: ${String(unreachable)}. ` +
             `Every kind in StandaloneDatabaseDriverSchema needs one — falling through to SQLite ` +
-            `is the #3276 defect.`
+            `would hand the caller a database engine they never selected.`
         );
     }
     const defaultDatasourcePlugin = new DefaultDatasourcePlugin(

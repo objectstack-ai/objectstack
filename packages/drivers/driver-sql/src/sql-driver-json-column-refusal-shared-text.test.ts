@@ -7,10 +7,11 @@
  * move: what it throws IS the shared text, and what it refuses IS the shared
  * set, on a real `SqlDriver` over SQLite.
  *
- * That the shared text is byte for byte what this driver printed before the move
- * is pinned beside the text itself (`@objectstack/core`'s
- * `json-column-operator-refusal.test.ts`, hashes captured from this driver at the
- * commit before). Together: this driver's refusal did not change by one byte.
+ * The words themselves are pinned beside the text (`@objectstack/core`'s
+ * `json-column-operator-refusal.test.ts`, by hash): captured from this driver at
+ * the commit before the move, and re-captured when [#21067] rewrote them for
+ * every face and under the REST bound. That they reach a caller whole is
+ * `sql-driver-json-column-refusal-wire-bound.test.ts`.
  *
  * The per-operator content of the refusal (code, status, the prescription, every
  * lowering face) stays pinned in `sql-driver-json-column-operator-refusal.test.ts`.

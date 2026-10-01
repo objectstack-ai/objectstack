@@ -209,7 +209,7 @@ describe('planEndpointTarget — the unsupported subset is enumerated once', () 
         // The reason names the type so an author is not left guessing which of
         // their endpoints the runtime declined.
         expect((plan as any).reason).toContain(`'${type}'`);
-        expect((plan as any).hint).toContain('#5040 §7-3');
+        expect((plan as any).hint).toContain('rejected at publish pending their own rulings');
     });
 });
 

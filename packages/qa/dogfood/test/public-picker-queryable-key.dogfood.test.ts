@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // [#21062] A public lookup picker whose FIRST display field declares a masking
-// rule serves its rows, on a real boot, to a caller the rule applies to.
+// rule served its rows, on a real boot, to a caller the rule applies to.
 //
 // The picker searches and sorts by one key. It is the first display field the
 // caller may query on, by the security service's published answer
@@ -10,13 +10,21 @@
 // searched or sorted on, so a picker keyed on it answered `403` to every such
 // caller.
 //
-// What is asserted, by class, for a visitor with no session on a deployment
-// that registers no profile for public forms: the scene is real (a system read
-// carries the stored values); the rows are sorted on the next queryable display
-// field, and the search matches it; the masked field is still served, masked;
-// a signed-in caller reaching the same door is served the same (the door builds
-// its own context); and a picker whose only display field is masked answers
-// the engine's refusal, `403 PERMISSION_DENIED`.
+// [#21079] On a deployment that registers no profile for public forms, the
+// picker's context resolves NO permission set, and an empty set list is the
+// ADR-0056 D2 deny baseline: the engine refuses that caller at object
+// admission, before any field guard. So on this fixture every picker answers
+// `403 PERMISSION_DENIED` and serves nothing — the key it composes is unchanged
+// (the unit pin `public-form-lookup-picker-queryable-key.test.ts` holds that),
+// but no row leaves the door. The picker is retired on its own card; until
+// then this is what it answers here.
+//
+// What is asserted, by class, for a visitor with no session on that
+// deployment: the scene is real (a system read carries the stored values); the
+// listing and the search are both refused at object admission, with no stored
+// value in the answer; a signed-in caller reaching the same door is refused the
+// same (the door builds its own context); and a picker whose only display field
+// is masked is refused with the same code and status.
 //
 // `bootStack` with the real `SecurityPlugin`, `ObjectQL`, SQL driver, REST and
 // auth layers. `@objectstack/rest` resolves to its BUILT output here (no source
@@ -38,7 +46,6 @@ const SEED = [
   { name: 'Alpha Synthetic', [KEY]: 'SYNTH3CCC' },
   { name: 'Charlie Synthetic', [KEY]: 'SYNTH2BBB' },
 ];
-const BY_NAME = ['Alpha Synthetic', 'Bravo Synthetic', 'Charlie Synthetic'];
 
 const PqkeyContact = ObjectSchema.create({
   name: CONTACT,
@@ -103,19 +110,19 @@ const pqkeyStack = defineStack({
 type Stack = Parameters<typeof bootStack>[0];
 type Row = Record<string, unknown>;
 
-function expectServedMasked(rows: Row[]): void {
-  const stored = new Map(SEED.map((r) => [r.name, r[KEY]]));
-  for (const row of rows) {
-    const value = row[KEY];
-    expect(typeof value, 'the masked field is served, as a string').toBe('string');
-    expect(value).not.toBe(stored.get(String(row.name)));
-    expect(String(value)).toContain('*');
-  }
+/** [#21079] The deny baseline's answer at the door: refused at object admission, nothing served. */
+async function expectRefusedAtAdmission(res: Response, what: string): Promise<void> {
+  const text = await res.clone().text();
+  expect(res.status, `${what}: ${text}`).toBe(403);
+  const refusal = (await res.json()) as { code?: unknown; error?: { code?: unknown }; data?: unknown };
+  expect(refusal.code ?? refusal.error?.code, what).toBe('PERMISSION_DENIED');
+  expect(refusal.data, `${what}: no row is served`).toBeUndefined();
+  for (const row of SEED) expect(text, `${what}: no stored value leaves the door`).not.toContain(String(row[KEY]));
 }
 
-describe('[#21062] a public picker whose first display field is masked serves rows sorted on the next queryable one', () => {
+describe('[#21062] a public picker whose first display field is masked: [#21079] refused at object admission on a deployment without the public-form profile', () => {
   it(
-    'to a visitor with no session and to a signed-in caller; a picker with no queryable display field is refused',
+    'to a visitor with no session and to a signed-in caller; a picker with no queryable display field is refused the same',
     async () => {
       const stack = await bootStack(pqkeyStack as unknown as Stack);
       try {
@@ -130,24 +137,14 @@ describe('[#21062] a public picker whose first display field is masked serves ro
           ['a visitor with no session', (path: string) => stack.api(path)],
           ['a signed-in caller', (path: string) => stack.apiAs(token, 'GET', path)],
         ] as const) {
-          const listed = await call('/forms/pqkey-intake/lookup/contact');
-          expect(listed.status, who).toBe(200);
-          const rows = ((await listed.json()) as { data: Row[] }).data;
-          expect(rows.map((r) => r.name), `${who}: sorted on the next queryable display field`).toEqual(BY_NAME);
-          expectServedMasked(rows);
-
-          const searched = await call('/forms/pqkey-intake/lookup/contact?q=Charlie');
-          expect(searched.status, who).toBe(200);
-          const hits = ((await searched.json()) as { data: Row[] }).data;
-          expect(hits.map((r) => r.name), `${who}: the search matches the next queryable display field`)
-            .toEqual(['Charlie Synthetic']);
-          expectServedMasked(hits);
+          await expectRefusedAtAdmission(await call('/forms/pqkey-intake/lookup/contact'), `${who}: the listing`);
+          await expectRefusedAtAdmission(await call('/forms/pqkey-intake/lookup/contact?q=Charlie'), `${who}: the search`);
         }
 
-        const refused = await stack.api('/forms/pqkey-intake/lookup/contact_masked_only');
-        expect(refused.status).toBe(403);
-        const refusal = (await refused.json()) as { code?: unknown; error?: { code?: unknown } };
-        expect(refusal.code ?? refusal.error?.code).toBe('PERMISSION_DENIED');
+        await expectRefusedAtAdmission(
+          await stack.api('/forms/pqkey-intake/lookup/contact_masked_only'),
+          'a picker with no queryable display field',
+        );
       } finally {
         await stack.stop();
       }

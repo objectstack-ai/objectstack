@@ -127,7 +127,8 @@ export async function resetVerifiedOnTwoFactorReenrollment(ctx: any): Promise<vo
     if (typeof userId !== 'string' || !userId) {
       console.error(
         '[AuthManager] /two-factor/enable succeeded with no resolvable session user; ' +
-        'could not confirm that sys_two_factor.verified describes the stored secret (#10700).',
+        'could not confirm that sys_two_factor.verified describes the stored secret, so a re-enrolled ' +
+        'TOTP secret may be live at sign-in without ever having been confirmed.',
       );
       return;
     }
@@ -145,7 +146,8 @@ export async function resetVerifiedOnTwoFactorReenrollment(ctx: any): Promise<vo
     if (!row) {
       console.error(
         '[AuthManager] /two-factor/enable succeeded but no sys_two_factor row was ' +
-        `readable for user ${userId}; sys_two_factor.verified could not be confirmed (#10700).`,
+        `readable for user ${userId}; sys_two_factor.verified could not be confirmed, so a re-enrolled ` +
+        'TOTP secret may be live at sign-in without ever having been confirmed.',
       );
       return;
     }
@@ -164,8 +166,8 @@ export async function resetVerifiedOnTwoFactorReenrollment(ctx: any): Promise<vo
     });
   } catch (err: any) {
     console.error(
-      '[AuthManager] could not reset sys_two_factor.verified after /two-factor/enable ' +
-      `(#10700): ${err?.message ?? err}`,
+      '[AuthManager] could not reset sys_two_factor.verified after /two-factor/enable, so the ' +
+      `re-enrolled TOTP secret may be live at sign-in without having been confirmed: ${err?.message ?? err}`,
     );
   }
 }

@@ -31,6 +31,13 @@
       "status": "live",
       "note": "ADR-0079 canonical record-title pointer; read by data/display-name.ts resolveDisplayField/resolveRecordDisplayName, objectql search displayField, and plugin-approvals."
     },
+    "imageField": {
+      "status": "planned",
+      "verifiedAt": "2026-10-01",
+      "evidenceScope": "cross-repo",
+      "evidence": "packages/spec/src/data/object.zod.ts#refuseNonPictureImageField (the AUTHORING judgement only: a name the object does not declare, or a field of any type but `image` / `avatar`, is refused at parse, so at the defineStack, `os validate` and metadata-save doors alike; a value it ACCEPTS has no reader yet); objectui @31971ff1: packages/components/src/renderers/layout/containers.tsx (the record chrome resolves the header title from `nameField` and reads no image key — zero `imageField` hits there, control `nameField` 4 hits)",
+      "note": "PLANNED, carrier objectui#11383 (the record chrome draws the record's picture from the object's `imageField` in the record page header), which is the seam's acceptance: flip to `live` citing that reader at the `.objectui-sha` pin that carries it. Declared by ruling A on objectstack-ai/hotcrm#1199 — one object-level declaration every record detail page reads, not a `page:header` prop, and no initials/placeholder avatar when the field is empty. ZERO consumers measured: in this repo `imageField` had 0 hits repo-wide before this key (control `nameField` hits), and objectui @31971ff1 has no object-level `imageField` read (its only `imageField` hits are the gallery view's legacy option, a different key on a different schema). Not `authorWarn`'d, on the `app.branding.logo` precedent and README rule 1: a picture pointer is display metadata, an author who sets it today loses nothing and is not misled about behaviour, and the value takes effect the moment the carrier lands with no re-authoring. The key's own describe says the renderer is pending."
+    },
     "titleFormat": {
       "status": "live",
       "note": "objectui ({{record.field}} interpolation)."

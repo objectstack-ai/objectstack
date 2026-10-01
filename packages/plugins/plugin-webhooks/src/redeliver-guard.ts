@@ -87,7 +87,8 @@ export function createWebhookRedeliverGuard(
             return (
                 `the ${subscriptionsObject} subscription '${row.refId}' this delivery belongs to no `
                 + 'longer exists, so there is nothing left to say whether it may still be signed and '
-                + 'sent (#8069). Recreate the webhook if the endpoint should keep receiving events; '
+                + 'sent, so it is refused rather than risk going out unsigned. Recreate the webhook if the '
+                + 'endpoint should keep receiving events; '
                 + 'new events are then delivered signed.'
             );
         }
@@ -119,7 +120,7 @@ export function createWebhookRedeliverGuard(
         return (
             `webhook '${String(subscription.name ?? row.refId)}' stores a signing secret that cannot `
             + 'be recovered, so this delivery cannot be authenticated as coming from us — refusing '
-            + 'rather than sending (#7799, #8069). Fix: register a CryptoProvider with the same key '
+            + 'rather than sending it unsigned. Fix: register a CryptoProvider with the same key '
             + 'the secret was written under and make sure the sys_secret row is reachable.'
         );
     };

@@ -366,7 +366,7 @@ describe('actionBodyRunnerFactory', () => {
         // Refusing silently would only relocate the invisibility the issue is about.
         expect(warnings).toHaveLength(1);
         expect(warnings[0]).toContain("type: '" + type + "'");
-        expect(warnings[0]).toContain('#4352');
+        expect(warnings[0]).toContain("`body` only runs for `type: 'script'`");
       });
     }
 

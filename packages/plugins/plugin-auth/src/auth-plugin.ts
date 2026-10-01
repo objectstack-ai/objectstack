@@ -504,11 +504,11 @@ export class AuthPlugin implements Plugin {
       authConfig.sharedCounterStore = createLazyCounterStore({
         resolveCache,
         logger: ctx.logger,
-        subject: 'per-number OTP send budget (#2780)',
+        subject: 'per-number OTP send budget',
         degradedImpact:
           'The budget is still enforced, but PER NODE: every node grants the same phone number its own ' +
           'cooldown and hourly cap, so an N-node deployment can send up to N× the configured number of ' +
-          'PAID SMS to one number (#4790)',
+          'PAID SMS to one number',
       });
     }
 

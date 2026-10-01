@@ -340,7 +340,8 @@ export class WebhookOutboxPlugin implements Plugin {
                 '[webhook-outbox] messaging service exposes no registerRedeliverGuard() — redelivery '
                     + 'of a webhook whose signing configuration is gone CANNOT be refused, so an operator '
                     + 'pressing redeliver may send a delivery that can no longer be authenticated '
-                    + '(#7799, #8069). The POST /api/v1/webhooks/redeliver endpoint is reachable by any '
+                    + '(an unsigned send, which webhook delivery otherwise never makes). The POST '
+                    + '/api/v1/webhooks/redeliver endpoint is reachable by any '
                     + 'authenticated user. Fix: upgrade @objectstack/service-messaging to a build that '
                     + 'implements registerRedeliverGuard.',
             );

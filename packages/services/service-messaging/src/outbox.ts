@@ -184,7 +184,8 @@ export function notificationAckNotClaimedMessage(id: string, status: DeliverySta
         + 'the caller CLAIMED, and this row is not claimed. Acking an unclaimed row would race the '
         + "dispatcher (claim() is atomic by contract and ack() is not part of that atom) and record an "
         + 'attempt that never went on the wire. To stop a pending delivery, there is deliberately no '
-        + 'ack() spelling — see #11453.'
+        + 'ack() spelling: cancelling a pending row is not part of this contract until a live consumer '
+        + 'needs it.'
     );
 }
 
@@ -206,8 +207,7 @@ export function notificationAckLostClaimMessage(id: string, status: DeliveryStat
         `Delivery row '${id}' is no longer held by the claim this ack completes (it now reads `
         + `'${status}'), so the ownership-checked conditional update matched no row and NOTHING was `
         + 'written — this attempt was not recorded and the row belongs to whoever holds it now. '
-        + 'Expected when a slow send outruns `claimTtlMs` and the row is reaped and re-claimed '
-        + '(#11453, #11859).'
+        + 'Expected when a slow send outruns `claimTtlMs` and the row is reaped and re-claimed.'
     );
 }
 

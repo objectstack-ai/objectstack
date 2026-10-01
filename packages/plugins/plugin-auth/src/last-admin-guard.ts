@@ -792,7 +792,7 @@ export const STANDING_KEY_EXCLUSIONS: Readonly<Record<string, Readonly<Record<st
       'ADR-0091 windows are still not columns on `sys_member` (`sys-member.object.ts` declares '
       + 'neither bound, AUTH_MEMBER_SCHEMA maps neither), and the engine refuses an undeclared '
       + 'write key on both verbs (the declared-field door) — so no stored membership row carries '
-      + 'a bound and no write can smuggle one in. Since #10982 the resolver applies isGrantActive '
+      + 'a bound and no write can smuggle one in. The resolver now applies isGrantActive '
       + 'to the membership rows of the principal in BOTH derivations off one `sys_member` read — '
       + '`accessible_org_ids` AND the org-administration role projection it feeds `positions` '
       + 'from (maintainer ruling 2026-08-22: a lapsed membership is NO membership) — so the '
@@ -837,7 +837,8 @@ export const STANDING_KEY_EXCLUSIONS: Readonly<Record<string, Readonly<Record<st
       + 'key, so a key rewrite is not expressible through this write path at all.',
     ai_access:
       'cloud ADR-0024 `ai_seat` synthesis (§7). It grants an AI seat, never administrator standing: the '
-      + 'posture rung is derived from the unscoped `admin_full_access` grant and, since #11663 L2, '
+      + 'posture rung is derived from the unscoped `admin_full_access` grant and, now that deployment '
+      + 'config names the platform-admin holder, '
       + 'from the configured-and-verified email pair — never from this flag. Emptying it costs the '
       + 'holder their AI seat, which is an ADR-0086 capability question with an in-product remedy, '
       + 'not a break-glass one.',
@@ -1211,7 +1212,7 @@ export function registerLastAdminGuard(
         `the bootstrap window — ${dangling.length} unscoped, in-window '${USER_PERMISSION_SET}' ` +
         `grant(s) still point at a '${SystemObjectName.PERMISSION_SET}' row that no longer exists ` +
         `(${dangling.join(', ')}). That is the state a DELETED '${ADMIN_FULL_ACCESS}' ` +
-        'permission-set row leaves behind (#6084): it un-makes every platform admin at once, and ' +
+        'permission-set row leaves behind: it un-makes every platform admin at once, and ' +
         'reading the resulting emptiness as "no administrator to protect" would switch this guard ' +
         `off for every other write too (${BREAK_GLASS_CITATION}). Restore the ` +
         `'${ADMIN_FULL_ACCESS}' permission set — the grants naming it are still there — before ` +
