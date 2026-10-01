@@ -337,7 +337,8 @@ const EMPTY_REQUIRED_PERMISSIONS: NormalizedRequiredPermissions = Object.freeze(
  * Every other non-system context reaches the gates, including one whose
  * positions or named sets resolve to nothing: that caller resolves no
  * permission set, holds no capability, and is the one
- * {@link SecurityPlugin.resolveCallerPosture} gives the object's masking rules.
+ * {@link SecurityPlugin.resolveCallerPosture} gives the object's masking rules
+ * and [#21063] its per-field capability contract.
  */
 function isPrincipalLessContext(context: any): boolean {
   const positions = context?.positions ?? [];
@@ -2279,8 +2280,9 @@ export class SecurityPlugin implements Plugin {
       // [ADR-0066 D2/D3] Resolve the object's security posture (private flag,
       // platform-global flag, capability contract) once for the checks below.
       // [#20995] For a caller who resolved NO permission set this is the
-      // stand-in that carries the object's masking rules and nothing else —
-      // see resolveCallerPosture, which the field projections read too.
+      // stand-in that carries the object's masking rules and [#21063] its
+      // per-field capability contract, and no grant-based narrowing — see
+      // resolveCallerPosture, which the field projections read too.
       const secMeta = await this.resolveCallerPosture(opCtx.object, permissionSets);
 
       // [#3545] Fail CLOSED when the object's own posture could not be resolved.
@@ -2300,8 +2302,9 @@ export class SecurityPlugin implements Plugin {
       // (`isSystem`) and principal-less/anonymous contexts short-circuited above,
       // so reaching here means a principal asking for an object whose
       // declaration is missing — one with resolved grants, or [#20995] one
-      // resolving none, whose masking rules come from this same posture and are
-      // unknown while it is unreadable. Cold start therefore
+      // resolving none, whose masking rules and [#21063] field capability
+      // contract come from this same posture and are unknown while it is
+      // unreadable. Cold start therefore
       // does NOT trip this — that window is served by the earlier short-circuits,
       // not by the permissive default — which is why the tiered decision recorded
       // for the exposure gate (transient unavailability → fail open) can stay
@@ -2864,42 +2867,32 @@ export class SecurityPlugin implements Plugin {
       // system-set fields are not subject to the user's edit
       // permissions — they are populated from the execution context,
       // not from the caller's payload.
+      //
+      // [#21063] Not gated on a resolved set, as 2.5a and 2.5b are not: a
+      // caller who resolves none holds no capability, so the posture's
+      // per-field capability contract (resolveCallerPosture) refuses every
+      // capability-gated field it names — "deny on write" — and its evaluator
+      // map is empty, so nothing else is refused. The verdict is
+      // computeForbiddenFieldWrites, which `canWriteObject` asks too.
       if (
         (opCtx.operation === 'insert' || opCtx.operation === 'update') &&
-        opCtx.data &&
-        permissionSets.length > 0
+        opCtx.data
       ) {
-        let fieldPerms = this.permissionEvaluator.getFieldPermissions(
-          opCtx.object,
-          permissionSets,
+        const forbidden = this.computeForbiddenFieldWrites(
+          opCtx.object, opCtx.data, secMeta, permissionSets, delegatorSets,
         );
-        // [ADR-0066 D3] AND-gate field-level requiredPermissions into the map.
-        fieldPerms = this.foldFieldRequiredPermissions(fieldPerms, secMeta.fieldRequiredPermissions, permissionSets);
-        // [ADR-0090 D10] Intersect with the delegator's field perms — a field
-        // the agent may edit but the delegator may not becomes forbidden.
-        if (delegatorSets) {
-          let delFieldPerms = this.permissionEvaluator.getFieldPermissions(opCtx.object, delegatorSets);
-          delFieldPerms = this.foldFieldRequiredPermissions(delFieldPerms, secMeta.fieldRequiredPermissions, delegatorSets);
-          fieldPerms = intersectFieldMasks(fieldPerms, delFieldPerms);
-        }
-        if (Object.keys(fieldPerms).length > 0) {
-          const forbidden = this.fieldMasker.detectForbiddenWrites(
-            opCtx.data,
-            fieldPerms,
+        if (forbidden.length > 0) {
+          throw new PermissionDeniedError(
+            `[Security] Field write denied: not permitted to edit ` +
+              `[${forbidden.join(', ')}] on '${opCtx.object}'`,
+            {
+              operation: opCtx.operation,
+              object: opCtx.object,
+              positions,
+              permissionSets: explicitPermissionSets,
+              forbiddenFields: forbidden,
+            },
           );
-          if (forbidden.length > 0) {
-            throw new PermissionDeniedError(
-              `[Security] Field write denied: not permitted to edit ` +
-                `[${forbidden.join(', ')}] on '${opCtx.object}'`,
-              {
-                operation: opCtx.operation,
-                object: opCtx.object,
-                positions,
-                permissionSets: explicitPermissionSets,
-                forbiddenFields: forbidden,
-              },
-            );
-          }
         }
       }
 
@@ -2943,7 +2936,8 @@ export class SecurityPlugin implements Plugin {
       // (mirrors the write gate in 2.5). `where`-filter probing is a
       // platform-wide class shared with find() and is not widened here.
       // [#20995] Not gated on a resolved set, as step 2.9 never was: for a
-      // caller who resolves none the map is its masked fields alone.
+      // caller who resolves none the map is its masked fields and [#21063]
+      // its capability-gated fields alone.
       if (opCtx.operation === 'aggregate') {
         // The field map (ADR-0066 D3 `requiredPermissions` AND-gate, ADR-0090
         // D10 delegator intersection — a field the agent may read but the
@@ -5462,9 +5456,12 @@ export class SecurityPlugin implements Plugin {
    * engine middleware, which skips its grant-based gates for a caller with no
    * permission sets — reporting a narrowing the data path would not enforce is
    * its own kind of drift, so on the DATA plane falling open is the correct,
-   * drift-free answer. ([#20995] The object's masking rules do reach that
-   * caller, but a masked field is a served column, so the read answer is still
-   * the full set.) The metadata plane has no such symmetry to preserve: the
+   * drift-free answer. What reaches that caller is the object's posture
+   * ({@link resolveCallerPosture}): [#20995] its masking rules, and a masked
+   * field is a served column, so it stays; [#21063] its per-field capability
+   * contract, and a capability-gated field is not served, so it leaves. The
+   * answer is the full set minus those fields. The metadata plane has no such
+   * symmetry to preserve: the
    * question there is disclosure, and ADR-0106 D7 rules that a public/guest
    * deployment's schema exposure must be a deliberate permission-set decision
    * rather than an accidental everything-default. Anonymous callers on a
@@ -5472,7 +5469,9 @@ export class SecurityPlugin implements Plugin {
    *
    * Still falls open when the fallback set itself resolves to nothing (no
    * `member_default` in the deployment at all) — that is the "no FLS posture
-   * here" tier, not a restricted caller.
+   * here" tier, not a restricted caller — to the data plane's answer for a
+   * caller with no set: [#21063] the full set minus every capability-gated
+   * field, which no grant reaches.
    */
   async getMetadataReadableFields(object: string, context?: any): Promise<string[] | undefined> {
     return this.computeReadableFields(object, context, { fallbackOnEmptySets: true });
@@ -5510,8 +5509,10 @@ export class SecurityPlugin implements Plugin {
    * which is the one the middleware's step 2.5 write gate takes, and the answer
    * is the complement of that gate's own primitive,
    * `FieldMasker.getNonEditableFields` — so a field is here iff a payload
-   * naming it passes step 2.5. A caller with no permission sets gets the full
-   * set: the middleware skips step 2.5 for it.
+   * naming it passes step 2.5. [#21063] A caller who resolves no permission
+   * set gets the full set minus every capability-gated field: step 2.5 reaches
+   * it over the posture's per-field capability contract
+   * ({@link resolveCallerPosture}), and its evaluator map is empty.
    */
   async getWritableFields(object: string, context?: any): Promise<string[] | undefined> {
     const mask = await this.resolveProjectionFieldMask(object, context, { fallbackOnEmptySets: false });
@@ -5541,7 +5542,8 @@ export class SecurityPlugin implements Plugin {
    * closed). [#20995] A caller who resolves NO permission set is not settled
    * early: it holds no capability, so every masking rule reaches it and its
    * masked fields are not queryable, as both guards refuse them
-   * ({@link resolveCallerPosture}).
+   * ({@link resolveCallerPosture}); [#21063] nor are its capability-gated
+   * fields, which it is not served at all.
    */
   async getQueryableFields(object: string, context?: any): Promise<string[] | undefined> {
     const mask = await this.resolveProjectionFieldMask(object, context, { fallbackOnEmptySets: false });
@@ -5596,8 +5598,9 @@ export class SecurityPlugin implements Plugin {
     // [#20995] A principal-less context is handed straight through by the
     // middleware, so no field gate reaches it: the full set, read off the SAME
     // predicate. A caller who resolved no set but carries a principal is NOT
-    // this case — it reaches the gates, and the object's masking rules reach it
-    // (resolveCallerPosture), so it falls through to the mask below.
+    // this case — it reaches the gates, and the object's masking rules and
+    // [#21063] per-field capability contract reach it (resolveCallerPosture),
+    // so it falls through to the mask below.
     if (permissionSets.length === 0 && isPrincipalLessContext(context)) {
       return { kind: 'answer', fields: allFields };
     }
@@ -5607,7 +5610,8 @@ export class SecurityPlugin implements Plugin {
     // stance this method already takes on a dangling delegator below. The
     // per-field capability contract (`fieldRequiredPermissions`) would otherwise
     // default to empty and silently unmask every capability-gated column, and
-    // [#20995] the masking rules a caller with no set is held to are unknown.
+    // [#20995] the masking rules a caller with no set is held to are unknown
+    // ([#21063] as is that caller's field capability contract).
     if (secMeta.unresolved) return { kind: 'answer', fields: [] };
     const basePerms = this.permissionEvaluator.getFieldPermissions(objectName, permissionSets);
     let fieldPerms = this.foldFieldRequiredPermissions(basePerms, secMeta.fieldRequiredPermissions, permissionSets);
@@ -5617,8 +5621,9 @@ export class SecurityPlugin implements Plugin {
     // dangling delegator fails CLOSED (expose no columns), the same fail-closed
     // stance the CRUD middleware takes on a 'missing' delegator. [#20995] Asked
     // only when the caller resolved a set, as the middleware asks it: a caller
-    // who resolved none reaches here only for its masking rules, and every one
-    // of them already applies to it.
+    // who resolved none reaches here only for its masking rules and [#21063]
+    // its field capability contract, and every one of them already applies to
+    // it.
     let delBasePerms: Record<string, { readable: boolean; editable: boolean }> | null = null;
     let delegatorSets: PermissionSet[] | null = null;
     if (permissionSets.length > 0 && context?.onBehalfOf?.userId) {
@@ -5655,8 +5660,8 @@ export class SecurityPlugin implements Plugin {
    * is ({@link getObjectSecurityMeta}). A caller who resolved NONE — and still
    * carries a principal; a principal-less context ({@link isPrincipalLessContext})
    * never reaches a gate — reads a stand-in: every grant-based narrowing at
-   * rest (no capability contract, no capability-gated field, `isPrivate` and
-   * the tenancy flags `false`), EXCEPT two things carried from the posture:
+   * rest (no object capability contract, `isPrivate` and the tenancy flags
+   * `false`), EXCEPT three things carried from the posture:
    *
    *  - **The masking rules.** `maskingRule` applies to "every non-system caller
    *    unless the field's `requiredPermissions` are ALL held", and this caller
@@ -5664,15 +5669,26 @@ export class SecurityPlugin implements Plugin {
    *    it: the field is served masked and is not queryable. The stand-in used
    *    to carry no rule at all, so every reader answered "stored and
    *    queryable" for this caller.
-   *  - **Whether the posture resolved.** The rules come from it, so an
-   *    unreadable posture leaves them unknown and fails closed for this caller
-   *    exactly as for any other (#3545).
+   *  - **[#21063] The per-field capability contract.** A field's
+   *    `requiredPermissions` declares "mask on read, deny on write" (ADR-0066
+   *    D3) unless the caller holds ALL of them, and this caller holds none, so
+   *    {@link foldFieldRequiredPermissions} — the fold every reader already
+   *    takes — marks each such field neither readable nor editable for it: not
+   *    served (masked instead where a masking rule softens it), not queryable,
+   *    and refused in a write payload (step 2.5). The explain engine reads the
+   *    posture itself and has always reported the field hidden for this caller;
+   *    the stand-in used to carry no field contract, so every enforcing reader
+   *    served the stored value.
+   *  - **Whether the posture resolved.** The rules and the field contract come
+   *    from it, so an unreadable posture leaves them unknown and fails closed
+   *    for this caller exactly as for any other (#3545).
    *
-   * ⛔ Deliberately NOT carried: the per-field capability fold and the object's
-   * capability contract. Those narrow by what a caller holds through its sets,
-   * and the data-plane read projection's answer for a caller with no set — the
-   * full field set — is stated by the service contract. Masking does not move
-   * that answer (a masked field is a served column); the capability fold would.
+   * ⛔ Deliberately NOT carried: the object's capability contract
+   * (`requiredPermissions` on the object). It is an OBJECT-level admission
+   * gate, and this caller's object admission — the capability and CRUD gates,
+   * both guarded by a resolved set — is not decided here. Its field answers
+   * are: the published projections' answer for this caller is the full field
+   * set minus every field it is not served, as the service contract states.
    */
   private async resolveCallerPosture(
     object: string,
@@ -5687,7 +5703,7 @@ export class SecurityPlugin implements Plugin {
       tenantAnchorIsPhantom: false,
       owdOpensRowWrites: false,
       requiredPermissions: EMPTY_REQUIRED_PERMISSIONS,
-      fieldRequiredPermissions: {},
+      fieldRequiredPermissions: posture.fieldRequiredPermissions,
       fieldMaskingRules: posture.fieldMaskingRules,
       unresolved: posture.unresolved,
       // [#10401] Explanation only, and present only on the refusing path.
@@ -6030,10 +6046,29 @@ export class SecurityPlugin implements Plugin {
           && (await this.organizationWallRefusal(
             permissionSets, objectName, operation, context, delegatorSets, delegatorContext,
           )));
-      // 4. No sets resolved → no permission-set restriction applies (the
-      //    middleware guards its whole CRUD gate with `if (permissionSets.length > 0)`),
-      //    and arm 10 is not behind that guard.
-      if (permissionSets.length === 0) return await organizationWallAdmits(null, null);
+      // 4. No sets resolved → no permission-set GRANT applies (the middleware
+      //    guards its capability and CRUD gates with `if (permissionSets.length > 0)`),
+      //    and arm 10 is not behind that guard. [#21063] Neither is arm 9: a
+      //    caller who carries a principal reaches the middleware's step 2.5
+      //    over the posture it reads (resolveCallerPosture), whose per-field
+      //    capability contract this caller holds none of. A principal-less
+      //    context is handed through before any gate, so it is asked nothing
+      //    about fields.
+      if (permissionSets.length === 0) {
+        if (data && !isPrincipalLessContext(context)) {
+          const standIn = await this.resolveCallerPosture(objectName, permissionSets);
+          // [#3545] The field arm reads the per-field capability contract off
+          // the posture; an unreadable posture leaves it unknown, and reading
+          // it as "no contract" would admit every capability-gated field. Fail
+          // closed, as the write projection answers `[]` there.
+          if (standIn.unresolved) return false;
+          const forbidden = this.computeForbiddenFieldWrites(
+            objectName, data as Record<string, any> | Record<string, any>[], standIn, permissionSets, null,
+          );
+          if (forbidden.length > 0) return false;
+        }
+        return await organizationWallAdmits(null, null);
+      }
 
       const { isPrivate, unresolved, requiredPermissions, fieldRequiredPermissions } =
         await this.getObjectSecurityMeta(objectName);
@@ -6080,30 +6115,17 @@ export class SecurityPlugin implements Plugin {
       }
 
       // 9. The field-level-security WRITE gate — the middleware's step 2.5,
-      //    over the payload the caller supplied. Same primitives, same order,
-      //    same guards: the middleware runs this only for an `insert`/`update`
-      //    carrying `opCtx.data` with permission sets resolved, and both of the
-      //    latter already hold here (arm 4 returned for the empty resolution).
-      //    ⛔ Not a re-derivation — a second spelling of "which fields may this
-      //    caller write" is the drift this whole method exists to avoid.
+      //    over the payload the caller supplied: the middleware runs it for an
+      //    `insert`/`update` carrying `opCtx.data`. ⛔ Not a re-derivation —
+      //    [#21063] it IS the middleware's verdict (computeForbiddenFieldWrites);
+      //    a second spelling of "which fields may this caller write" is the
+      //    drift this whole method exists to avoid.
       if (data) {
-        let fieldPerms = this.permissionEvaluator.getFieldPermissions(objectName, permissionSets);
-        // [ADR-0066 D3] AND-gate field-level requiredPermissions into the map.
-        fieldPerms = this.foldFieldRequiredPermissions(fieldPerms, fieldRequiredPermissions, permissionSets);
-        // [ADR-0090 D10] Intersect with the delegator's field perms — a field
-        // the agent may edit but the delegator may not becomes forbidden.
-        if (delegatorSets) {
-          let delFieldPerms = this.permissionEvaluator.getFieldPermissions(objectName, delegatorSets);
-          delFieldPerms = this.foldFieldRequiredPermissions(delFieldPerms, fieldRequiredPermissions, delegatorSets);
-          fieldPerms = intersectFieldMasks(fieldPerms, delFieldPerms);
-        }
-        if (Object.keys(fieldPerms).length > 0) {
-          const forbidden = this.fieldMasker.detectForbiddenWrites(
-            data as Record<string, any> | Record<string, any>[],
-            fieldPerms,
-          );
-          if (forbidden.length > 0) return false;
-        }
+        const forbidden = this.computeForbiddenFieldWrites(
+          objectName, data as Record<string, any> | Record<string, any>[],
+          { fieldRequiredPermissions }, permissionSets, delegatorSets,
+        );
+        if (forbidden.length > 0) return false;
       }
 
       // 10. [ADR-0123 D2] At the middleware's point — see above.
@@ -8987,6 +9009,37 @@ export class SecurityPlugin implements Plugin {
       }
     }
     return out;
+  }
+
+  /**
+   * [#21063] The step 2.5 field-level-security WRITE gate's verdict: the fields
+   * a payload names that this caller may NOT write on `objectName`, sorted (an
+   * empty list admits). The evaluator's field grants with the ADR-0066 D3
+   * `requiredPermissions` AND-gate folded in from `secMeta` — the posture the
+   * caller's gates read ({@link resolveCallerPosture}) — and on an on-behalf-of
+   * request the ADR-0090 D10 intersection with the delegator's map.
+   *
+   * Two readers, one derivation: the engine middleware's step 2.5, which
+   * throws on a non-empty answer, and {@link canWriteObject}'s field arm, which
+   * denies on one. {@link getWritableFields} is their complement over the same
+   * posture and the same fold ({@link resolveProjectionFieldMask}).
+   */
+  private computeForbiddenFieldWrites(
+    objectName: string,
+    data: Record<string, any> | Record<string, any>[],
+    secMeta: Pick<ObjectSecurityMeta, 'fieldRequiredPermissions'>,
+    permissionSets: PermissionSet[],
+    delegatorSets: PermissionSet[] | null,
+  ): string[] {
+    let fieldPerms = this.permissionEvaluator.getFieldPermissions(objectName, permissionSets);
+    fieldPerms = this.foldFieldRequiredPermissions(fieldPerms, secMeta.fieldRequiredPermissions, permissionSets);
+    if (delegatorSets) {
+      let delFieldPerms = this.permissionEvaluator.getFieldPermissions(objectName, delegatorSets);
+      delFieldPerms = this.foldFieldRequiredPermissions(delFieldPerms, secMeta.fieldRequiredPermissions, delegatorSets);
+      fieldPerms = intersectFieldMasks(fieldPerms, delFieldPerms);
+    }
+    if (Object.keys(fieldPerms).length === 0) return [];
+    return this.fieldMasker.detectForbiddenWrites(data, fieldPerms);
   }
 
   /**

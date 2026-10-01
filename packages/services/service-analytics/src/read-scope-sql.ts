@@ -28,6 +28,7 @@ import type { EngineFilterJudgement, EngineFilterJudgementOptions } from '@objec
 import type { ReadScopeFilterJudge } from './strategies/types.js';
 import { type LikeShape } from './like-pattern.js';
 import { textMatchPredicateSql, normalizeSqlDialect } from './text-match-sql.js';
+import { containsMembershipSql, isJsonStoredShape } from './contains-membership-sql.js';
 import { emptyOperatorPredicateSql } from './empty-operator-sql.js';
 import { textOperatorPolarity } from './non-text-column.js';
 import {
@@ -1400,6 +1401,47 @@ function textOverNonTextColumn(op: string, field: string, opts: ReadScopeCompile
 }
 
 /**
+ * [#20987] The MEMBERSHIP reading of `$contains` / `$notContains` on a column
+ * the caller DECLARED multi-valued or JSON-stored
+ * ({@link ReadScopeCompileOptions.declaredValueShape}), or `null` when the
+ * column is not one (or the caller cannot name it) and the arm keeps its text
+ * match. `contains-membership-sql.ts` carries the contract and the construct,
+ * which is `driver-sql`'s, from `@objectstack/core`.
+ *
+ * A substring test over the stored JSON text is over-reach on a read scope
+ * (#3948): a policy admitting the rows that hold `u1` admitted the row storing
+ * `["u10"]`. So the `'unknown'` dialect, where no membership construct parses
+ * on every engine, is REFUSED here in this module's one envelope, before
+ * anything binds, never answered with the substring residue — the posture
+ * {@link compileEmptyOperator} takes for a multi-value field there.
+ */
+function membershipMatch(
+  col: string,
+  op: string,
+  val: unknown,
+  field: string,
+  params: unknown[],
+  opts: ReadScopeCompileOptions,
+): string | null {
+  if (!isJsonStoredShape(opts.declaredValueShape?.(field))) return null;
+  const sql = containsMembershipSql({
+    dialect: normalizeSqlDialect(opts.dialect),
+    column: col,
+    value: val,
+    negate: op === '$notContains',
+    bind: (v) => bind(params, v),
+  });
+  if (sql === null) {
+    throw readScopeCompileError(
+      `[read-scope-sql] "${op}" on "${field}" is a membership test on a multi-valued or JSON-stored field, whose ` +
+        `JSON function differs per SQL dialect, and the dialect of this datasource is not known — refusing to ` +
+        `build read scope (fail-closed) rather than reading the stored JSON text as a substring.`,
+    );
+  }
+  return sql;
+}
+
+/**
  * [#5298] Wrap a negative-polarity value test so a row whose column has no value
  * SATISFIES it: `(col IS NULL OR <test>)`.
  *
@@ -2032,9 +2074,14 @@ function compileOperator(
     // [#15684] …and the four case-EXACT arms take their construct from the
     // DIALECT ({@link textMatch}): a plain `LIKE` folds ASCII case on SQLite,
     // so this scope ADMITTED rows the policy excludes — over-reach (#3948).
+    // [#20987] …and on a column declared multi-valued or JSON-stored the
+    // operator is MEMBERSHIP, not a substring of the stored JSON text — see
+    // {@link membershipMatch}.
     case '$contains':
       assertRenderableText(op, field, val);
-      return textOverNonTextColumn(op, field, opts) ?? textMatch(col, 'contains', val, false, params, opts);
+      return textOverNonTextColumn(op, field, opts)
+        ?? membershipMatch(col, op, val, field, params, opts)
+        ?? textMatch(col, 'contains', val, false, params, opts);
     /**
      * [#6520] `$icontains` on the READ-SCOPE lowering — the one compiler in this
      * package where a wrong answer is an ADR-0021 scope over-reach rather than a
@@ -2079,10 +2126,15 @@ function compileOperator(
         ?? textMatch(col, 'contains', val, false, params, opts, true);
     // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and "does not
     // contain" is true of a value that is not there.
+    // [#20987] The same wrapper around the negated MEMBERSHIP test on a column
+    // declared multi-valued or JSON-stored, `driver-sql`'s NULL rule.
     case '$notContains':
       assertRenderableText(op, field, val);
       return textOverNonTextColumn(op, field, opts)
-        ?? nullSafeNegative(col, textMatch(col, 'contains', val, true, params, opts));
+        ?? nullSafeNegative(
+          col,
+          membershipMatch(col, op, val, field, params, opts) ?? textMatch(col, 'contains', val, true, params, opts),
+        );
     case '$startsWith':
       assertRenderableText(op, field, val);
       return textOverNonTextColumn(op, field, opts) ?? textMatch(col, 'starts', val, false, params, opts);

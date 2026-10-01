@@ -3,8 +3,10 @@
 // #17260 — ADR-0049 enforce-or-remove, executing the objectui#8285
 // director-seat ruling (comment 5583979207, decision batch #91, 2026-09-08,
 // standing maintainer delegation): ruled option B — `quickAdd` is retired from
-// the `object-kanban` board and stays only on the `kanban-ui` block, where a
-// React host can supply the runtime function the control needs.
+// the `object-kanban` board. The ruling kept the control on the `kanban-ui`
+// block, where a React host can supply the runtime function it needs; objectui
+// has since retired that block (objectui#8257), so `object-kanban` offers no
+// quick-add control and no block a document can name offers one either.
 // The board FORWARDED the key but never honoured it: measured at the
 // `.objectui-sha` pin `53ded82bf`, `ObjectKanban.tsx:931` spreads the authored
 // bag into `KanbanRenderer` (`plugin-kanban/src/index.tsx:196` passes both
@@ -20,7 +22,7 @@
 // wrong. Tombstoned with `retiredKey()` in `ObjectKanbanPropsSchema` (the
 // surface baseline line carries `[RETIRED]`); sources are stripped by the D2
 // conversion `object-kanban-quick-add-removed`, a pure lossless delete scoped
-// by component `type` so the LIVE `kanban-ui` spelling is untouched.
+// by component `type` so the same key on any other component type is untouched.
 //
 // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
 // removal ships on the 17.x line (launch-window convention: accept-set

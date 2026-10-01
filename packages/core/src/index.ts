@@ -56,6 +56,7 @@ export * from './utils/datetime.js';
 // runtime dependencies, and a copy per face is how one `sum` came to answer
 // two doubles.
 export * from './utils/compensated-sum.js';
+export * from './utils/json-membership-sql.js';
 // [#20889] What an aggregate ANSWERS and its `'number'` presenter, moved from
 // `driver-sql` so the analytics native-SQL face presents with the same rule.
 export * from './utils/aggregate-answer.js';
