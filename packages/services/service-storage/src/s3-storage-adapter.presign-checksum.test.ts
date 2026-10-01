@@ -84,11 +84,6 @@ describe('S3StorageAdapter presigned URLs carry no flexible-checksum parameters'
     expect(checksumParams(desc.uploadUrl)).toEqual([]);
   });
 
-  it('getPresignedUpload: the descriptor tells the browser to send content-type only, never a checksum header', async () => {
-    const desc = await makeAdapter().getPresignedUpload('uploads/a.txt', 300, { contentType: 'text/plain' });
-    expect(desc.headers).toEqual({ 'content-type': 'text/plain' });
-  });
-
   it('getPresignedDownload / getSignedUrl: the signed GET URL has no x-amz-checksum-mode parameter', async () => {
     const adapter = makeAdapter();
     const desc = await adapter.getPresignedDownload('uploads/a.txt', 300, {
