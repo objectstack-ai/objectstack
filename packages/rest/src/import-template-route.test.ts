@@ -471,7 +471,17 @@ describe('?template=true — a required field the engine fills from its option d
 const OPTS = [{ label: 'A', value: 'a' }, { label: 'B', value: 'b' }, { label: 'C', value: 'c' }];
 const mark = (...values: string[]) => OPTS.map((o) => (values.includes(o.value) ? { ...o, default: true } : o));
 
-const PARITY: Record<string, { def: Record<string, unknown>; blank: 'refused' | 'accepted'; stored?: unknown }> = {
+/**
+ * A shared picklist whose option is marked `default: true`. A field bound to it
+ * authors NO options of its own — the registry resolves the list onto the
+ * served field — so the template's object read and the engine's registry
+ * schema must BOTH see the resolved options, or the template would unstar a
+ * column the engine still refuses blank. `served` is that resolved field, for
+ * the direct mirror check below (which reads a field def, not the registry).
+ */
+const PARITY_PICKLIST = { name: 'pty_list', label: 'List', options: mark('b') };
+
+const PARITY: Record<string, { def: Record<string, unknown>; blank: 'refused' | 'accepted'; stored?: unknown; served?: Record<string, unknown> }> = {
   plain: { def: { type: 'text' }, blank: 'refused' },
   default_value: { def: { type: 'text', defaultValue: 'x' }, blank: 'accepted', stored: 'x' },
   default_value_false: { def: { type: 'boolean', defaultValue: false }, blank: 'accepted', stored: false },
@@ -491,12 +501,17 @@ const PARITY: Record<string, { def: Record<string, unknown>; blank: 'refused' | 
   readonly: { def: { type: 'text', readonly: true }, blank: 'accepted' },
   system: { def: { type: 'text', system: true }, blank: 'accepted' },
   autonumber: { def: { type: 'autonumber', autonumberFormat: 'N-{0000}' }, blank: 'accepted' },
+  picklist_option_default: {
+    def: { type: 'select', picklist: 'pty_list' }, blank: 'accepted', stored: 'b',
+    served: { type: 'select', picklist: 'pty_list', options: mark('b') },
+  },
 };
 
 describe('the `*` agrees with the engine: starred exactly when the import door refuses a blank', () => {
   it('for every shape of default the engine reads', async () => {
     const { get, importRoute, engine } = await boot();
     const objectOf = (key: string) => `pty_${key}`;
+    engine.registry.registerItem('picklist', PARITY_PICKLIST, 'name', 'com.test.parity');
     for (const [key, { def }] of Object.entries(PARITY)) {
       engine.registry.registerObject({
         name: objectOf(key), label: key,
@@ -506,7 +521,9 @@ describe('the `*` agrees with the engine: starred exactly when the import door r
     await engine.syncSchemas();
 
     const disagreements: string[] = [];
-    for (const [key, { def, blank, stored }] of Object.entries(PARITY)) {
+    for (const [key, { def: authored, blank, stored, served }] of Object.entries(PARITY)) {
+      // The mirror reads a field def; a picklist-bound one is judged as the registry serves it.
+      const def = served ?? authored;
       const object = objectOf(key);
       // The template's own verdict — its header, via `?fields=` so every shape is a column.
       const wb = await loadXlsxWorkbook((await get({ template: 'true', fields: 'f' }, object)).body());

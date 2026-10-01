@@ -2,7 +2,15 @@
   "extends": "../../../tsconfig.json",
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "src",
+    // [#20919] Widened from `src` to `packages/` as a CONSEQUENCE, the way
+    // `packages/core/tsconfig.json` records for its `paths` rule:
+    // `src/connector-pull.integration.test.ts` imports `connector-rest`'s SOURCE by
+    // relative path (that package dev-depends on this one, so a manifest edge
+    // back would close a cycle; the read is declared in
+    // `scripts/cross-package-test-inputs.mjs`), which puts those files in this
+    // program, and `rootDir` is enforced over every program file even under
+    // `--noEmit`. Emit is unaffected: this package builds with tsup.
+    "rootDir": "../..",
     "types": [
       "node"
     ]

@@ -721,12 +721,14 @@ describe('#19542 — group C: wired, dispatched, and silent by ledger (email_tem
     ).toContain('lintLivenessProperties');
   });
 
-  it.each(GROUP_C)('`%s` — and the rule judges NOTHING today, because its ledger warns on nothing', (type) => {
+  it.each(GROUP_C)('`%s` — and the rule judges NOTHING for an item that authors no warned key', (type) => {
     // ⚠️ The report's first reading for these two, pinned rather than
     // remembered. The ruling dispatched the wiring and ⛔ no ledger population,
     // so this silence is the ruled end state. The day a property earns an
     // `authorWarn` row the door lights up with no second edit — which is what
-    // the dispatch pin above is for.
+    // the dispatch pin above is for. [#20919] `mapping` has one such row now,
+    // `connectorSource` (nothing schedules a pull until the `job` stage), and
+    // the item below does not author it.
     const item = type === 'email_template'
       ? { name: 'acme_welcome', label: 'Welcome', subject: 'Hi', bodyHtml: '<p>Hi</p>', category: 'workflow' }
       : { name: 'acme_feed', label: 'Feed', sourceFormat: 'csv', targetObject: 'acme_invoice', mode: 'upsert' };

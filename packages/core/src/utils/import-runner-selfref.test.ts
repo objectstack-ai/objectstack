@@ -22,7 +22,7 @@ import { runImport, type ImportProtocolLike } from './import-runner';
  * type; that re-opens the seam.
  */
 type FindArgs = Parameters<ImportProtocolLike['findData']>[0];
-import type { ExportFieldMeta } from './export-format.js';
+import type { ExportFieldMeta } from './import-field-meta.js';
 
 // `parent` is a lookup back to this same object (a category tree).
 const metaMap = new Map<string, ExportFieldMeta>([

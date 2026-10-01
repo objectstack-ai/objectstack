@@ -370,12 +370,20 @@ querying the related object directly.
 | `count_distinct` | Count unique values | `{ function: 'count_distinct', field: 'category', alias: 'categories' }` |
 
 <Callout type="warn">
-`count_distinct` is not yet lowered by the SQL drivers. They map
-`count`/`sum`/`avg`/`min`/`max` and refuse it as a **capability gap** —
-`501 NOT_IMPLEMENTED`, "declared but not implemented by this backend" — rather than as a
-caller mistake, because the query is spelled correctly and the gap is the backend's
-(#5907). It works on the MongoDB driver and on the engine's in-memory fallback, and its
-SQL lowering (`COUNT(DISTINCT field)`) is scheduled.
+`count_distinct` is computed on every backend. The SQL drivers (`SqlDriver`, and both
+Turso transports) lower it to `COUNT(DISTINCT field)`; the MongoDB driver, the in-memory
+driver and the engine's in-memory fallback count the distinct non-null values. Nulls are
+not counted, and a `count_distinct` with no `field` is refused `400 INVALID_QUERY`
+(`COUNT(DISTINCT *)` is not SQL).
+
+The one real limit is the field's type: a `count_distinct` over a JSON-stored field — the
+structured-JSON types (`json`, `composite`, `repeater`, `record`, `location`, `address`,
+`vector`), `multiselect` / `checkboxes` / `tags`, or a `select` / `lookup` / `user` /
+`file` / `image` declared `multiple: true` — is refused `400 INVALID_FIELD` by the engine
+before any driver runs, because no two backends compare such values for equality alike.
+Store the part you count in a field of its own, or count the rows with `count`. `min`, `max` and
+`avg` over a type the table refuses answer the same `400 INVALID_FIELD` on every driver
+(`sum` is not judged by that door yet).
 </Callout>
 
 <Callout type="warn">

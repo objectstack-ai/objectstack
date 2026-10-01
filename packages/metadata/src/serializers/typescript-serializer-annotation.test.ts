@@ -46,6 +46,7 @@ const REPRESENTATIVE: Record<string, Record<string, unknown>> = {
   hook: { name: 'account_audit', object: 'account', events: ['beforeInsert'], handler: 'audit_account' },
   seed: { object: 'account', records: [{ name: 'Acme' }] },
   mapping: { name: 'account_import', targetObject: 'account', fieldMapping: [] },
+  picklist: { name: 'industry', label: 'Industry', options: [{ label: 'Technology', value: 'technology' }] },
   datasource: { name: 'warehouse', driver: 'sqlite', config: {} },
   analytics_cube: { name: 'account_cube', sql: 'account', measures: {}, dimensions: {} },
   page: { name: 'account_home', label: 'Account Home', regions: [] },
@@ -81,7 +82,7 @@ const REPRESENTATIVE: Record<string, Record<string, unknown>> = {
  */
 const BOUND_SCHEMA: Record<string, string> = {
   object: 'ObjectSchema', field: 'FieldSchema', hook: 'HookSchema', seed: 'SeedSchema',
-  mapping: 'MappingSchema', datasource: 'DatasourceSchema', analytics_cube: 'CubeSchema',
+  mapping: 'MappingSchema', picklist: 'PicklistSchema', datasource: 'DatasourceSchema', analytics_cube: 'CubeSchema',
   page: 'PageSchema', dashboard: 'DashboardSchema', app: 'AppSchema', action: 'ActionSchema',
   report: 'ReportSchema', dataset: 'DatasetSchema', flow: 'FlowSchema', webhook: 'WebhookSchema',
   job: 'JobSchema', translation: 'TranslationItemSchema', email_template: 'EmailTemplateDefinitionSchema',
