@@ -30,9 +30,8 @@ Without a `template` parameter the export is exactly as before, byte for byte.
 - **Language.** The sheets are in Chinese for a `zh` request locale
   (`?locale=` or `Accept-Language`) and in English otherwise.
 
-The import's permission checks apply, not the export's: an object that exposes
-neither create nor update answers `405`, and a caller without the create
-permission on the object answers `403`. The export permission (`allowExport`) is
-not needed. `template` with a value other than `true` or `false`, a `format` other
+The same two permission checks as the export apply: an object that does not
+expose export answers `405`, and a caller without the export permission answers
+`403`. `template` with a value other than `true` or `false`, a `format` other
 than `xlsx`, or any of `limit`, `page`, `filter`, `search`, `searchFields`,
 `orderby` or `header` beside `template=true`, answers `400 VALIDATION_ERROR`.
