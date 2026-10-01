@@ -33,6 +33,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PassThrough } from 'node:stream';
+import ts from 'typescript';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { SysMetadataObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
@@ -477,9 +478,11 @@ const BRIDGE_MEMBERS: Record<string, string> = {
  * site fails the second test below until it is routed through the projection or
  * refuses, and listed here.
  *
- * Found by the CALL, not by the receiver's name: an engine read's first argument
- * is an object name, while an array's `find` takes a callback — so any receiver
- * (a renamed variable, a cast) is caught, and a callback-taking `find` is not.
+ * Found on the syntax tree by the CALL, not by the receiver's name: an engine
+ * read's first argument is an object name, while an array's `find` takes a
+ * callback — so any receiver (a renamed variable, a cast) is caught, a
+ * callback-taking `find` is not, and a call spelled inside a comment is not a
+ * call at all.
  */
 const ENGINE_READ_SITES: Record<string, Record<string, number>> = {
   // findById (get, and the update / remove existence probes) and query; aggregate.
@@ -488,8 +491,28 @@ const ENGINE_READ_SITES: Record<string, Record<string, number>> = {
   'plugin.ts': { 'find(objectName)': 1 },
 };
 
-function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+const ENGINE_READ_VERBS: ReadonlySet<string> = new Set(['find', 'findOne', 'aggregate', 'count']);
+
+/** Every `verb(first argument)` engine-read-shaped call in one source file, counted. */
+function engineReadSites(file: string, text: string): Record<string, number> {
+  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const sites: Record<string, number> = {};
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node)
+      && ts.isPropertyAccessExpression(node.expression)
+      && ENGINE_READ_VERBS.has(node.expression.name.text)
+    ) {
+      const first = node.arguments[0];
+      if (first && !ts.isArrowFunction(first) && !ts.isFunctionExpression(first)) {
+        const site = `${node.expression.name.text}(${first.getText(sf)})`;
+        sites[site] = (sites[site] ?? 0) + 1;
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return sites;
 }
 
 describe('[#21207] stdio transport: every reader is classified (a new one fails here, not silently)', () => {
@@ -502,14 +525,8 @@ describe('[#21207] stdio transport: every reader is classified (a new one fails 
     const found: Record<string, Record<string, number>> = {};
     for (const file of readdirSync(HERE)) {
       if (!file.endsWith('.ts') || file.endsWith('.test.ts') || file.endsWith('.d.ts')) continue;
-      const source = stripComments(readFileSync(join(HERE, file), 'utf8'));
-      for (const m of source.matchAll(/\.\s*(find|findOne|aggregate|count)\s*\(([^,)]*)/g)) {
-        const firstArg = m[2]!.trim();
-        // A callback is an array / iterator method, not an engine read.
-        if (firstArg.startsWith('(') || firstArg.includes('=>') || /^function\b/.test(firstArg)) continue;
-        const site = `${m[1]}(${firstArg})`;
-        (found[file] ??= {})[site] = ((found[file] ?? {})[site] ?? 0) + 1;
-      }
+      const sites = engineReadSites(file, readFileSync(join(HERE, file), 'utf8'));
+      if (Object.keys(sites).length > 0) found[file] = sites;
     }
     expect(found).toEqual(ENGINE_READ_SITES);
   });
