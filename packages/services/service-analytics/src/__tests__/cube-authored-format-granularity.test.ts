@@ -274,13 +274,19 @@ describe('analytics_cube.dimensions.granularities — the declared single granul
   });
 
   it('DECLARED NARROWING: a custom-SQL measure grouped by a declared-default dimension gets the refusal a stated granularity gets', async () => {
-    const withExpression: Cube = CubeSchema.parse({
+    // NOT parsed: since #20943 the cube contract admits a column reference
+    // only, so `CubeSchema` refuses this expression member at every authoring
+    // door. The engine path's refusal it pins is still owed to a cube that
+    // reaches the service without meeting that parse (a host registering one
+    // in-process), so the member is built directly on the parsed cube.
+    const withExpression: Cube = {
       ...authored,
       measures: {
         ...authored.measures,
         done_rate: { label: 'Done', type: 'number', sql: "SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) * 1.0 / COUNT(*)" },
       },
-    });
+    };
+    expect(CubeSchema.safeParse(withExpression).success).toBe(false);
     const aggregated: string[] = [];
     const sqls: string[] = [];
     const service = new AnalyticsService({

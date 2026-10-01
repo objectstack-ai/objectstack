@@ -51,7 +51,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { Cube, FilterCondition } from '@objectstack/spec/data';
+import { lowerFilterCondition, type Cube, type FilterCondition } from '@objectstack/spec/data';
 import type { AnalyticsQuery, StrategyContext } from '@objectstack/spec/contracts';
 
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
@@ -127,8 +127,20 @@ describe('[ADR-0053 D-D1 amended — #5930 step 3] the read scope lowers its fil
     await driver?.disconnect?.();
   });
 
-  /** `SqlDriver.find` — the answer every other face is held to. */
-  const findFace = async (scope: FilterCondition) => ids((await driver.find(OBJECT, { where: scope } as never)) as never);
+  /**
+   * `SqlDriver.find` as the engine drives it — the answer every other face is
+   * held to. [#20822 · ADR-0053 D-D1 items 5 and 9, as amended] The engine's
+   * `where` seam hands the driver the filter through the shared lowering,
+   * reading the declared field map (`datetime` columns only for the whole-day
+   * rule; the NULL-polarity guards on every column); `SqlDriver` keeps no copy
+   * of either rule any more, so this face reads what the seam hands it.
+   */
+  const findFace = async (scope: FilterCondition) =>
+    ids(
+      (await driver.find(OBJECT, {
+        where: lowerFilterCondition(scope, { isDatetimeColumn: (column) => FIELDS[column]?.type === 'datetime' }),
+      } as never)) as never,
+    );
 
   /** The published export, its SQL executed on the same database. */
   const compiledFace = async (scope: FilterCondition, withTypes = true) => {

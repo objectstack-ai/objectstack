@@ -35,14 +35,12 @@ export const DeliveryCube = defineCube({
       type: 'avg',
       sql: 'estimate_hours',
     },
-    done_rate: {
-      label: 'Done Rate (%)',
-      type: 'number',
-      sql: "SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) * 100.0 / COUNT(*)",
-      // A numeral pattern, the vocabulary `fields[].format` documents: `%` marks a
-      // percent, `.0` one decimal. The value above is in percentage points (0-100).
-      format: '0.0%',
-    },
+    // No `done_rate` here: a member's `sql` names a column, never a SQL
+    // expression (ADR-0021 "zero raw expressions", carried to the cube layer by
+    // #20943). The done rate this cube used to compute with a CASE expression
+    // is declared where the platform can judge every field it reads — the
+    // `showcase_task_metrics` dataset (src/ui/datasets/chart-gallery.dataset.ts),
+    // as a filtered count over a count.
   },
   dimensions: {
     status: {

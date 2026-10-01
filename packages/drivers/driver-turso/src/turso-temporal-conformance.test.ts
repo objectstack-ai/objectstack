@@ -40,6 +40,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
+  lowerFilterCondition,
   TEMPORAL_CASES,
   TEMPORAL_NOW,
   TEMPORAL_ROWS,
@@ -51,6 +52,21 @@ import { TursoDriver } from './turso-driver.js';
 
 const resolveTokens = <T,>(filter: T): T =>
   resolveFilterTokens(filter, { now: new Date(TEMPORAL_NOW) });
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5, 7 and 9, as amended] What a TYPED seam hands
+ * this driver: the case's filter through the shared lowering, reading the
+ * object's declared field map (`datetime` columns only). Neither this driver nor
+ * the `SqlDriver` it inherits keeps a whole-day copy any more, so the whole-day
+ * cells are answered by the lowered filter, as on every seam-fed path; the
+ * expected rows are the shared table's, unchanged. Tokens resolve first, then
+ * lower (item 3).
+ */
+const lowered = <T,>(object: { fields: Record<string, { type: string }> }, filter: T): T =>
+  lowerFilterCondition(filter, {
+    isDatetimeColumn: (column) =>
+      Object.prototype.hasOwnProperty.call(object.fields, column) && object.fields[column]!.type === 'datetime',
+  });
 
 const CONFORMANCE_OBJECT = {
   name: 'conformance',
@@ -122,14 +138,14 @@ describe('TursoDriver — temporal conformance (local mode)', () => {
 
   for (const c of TEMPORAL_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('conformance', { where: c.filter });
+      const rows = await driver.find('conformance', { where: lowered(CONFORMANCE_OBJECT, c.filter) });
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });
 
     if (c.tokenFilter) {
       it(`${c.name} — via relative tokens`, async () => {
-        const rows = await driver.find('conformance', { where: resolveTokens(c.tokenFilter) });
+        const rows = await driver.find('conformance', { where: lowered(CONFORMANCE_OBJECT, resolveTokens(c.tokenFilter)) });
         const got = (rows as any[]).map((r) => r.id).sort();
         expect(got, c.note).toEqual([...c.expected].sort());
       });
@@ -164,7 +180,7 @@ describe('TursoDriver — Field.time conformance (local mode)', () => {
 
   for (const c of TEMPORAL_TIME_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('time_conformance', { where: c.filter });
+      const rows = await driver.find('time_conformance', { where: lowered(TIME_CONFORMANCE_OBJECT, c.filter) });
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });
@@ -209,7 +225,7 @@ describe('TursoDriver — temporal conformance on un-backfilled legacy storage',
   // already swept above — a divergence here is a repair-path bug by construction.
   for (const c of TEMPORAL_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('conformance', { where: c.filter });
+      const rows = await driver.find('conformance', { where: lowered(CONFORMANCE_OBJECT, c.filter) });
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });
@@ -252,7 +268,7 @@ describe('TursoDriver — Field.time conformance on un-backfilled legacy storage
 
   for (const c of TEMPORAL_TIME_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('time_conformance', { where: c.filter });
+      const rows = await driver.find('time_conformance', { where: lowered(TIME_CONFORMANCE_OBJECT, c.filter) });
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });

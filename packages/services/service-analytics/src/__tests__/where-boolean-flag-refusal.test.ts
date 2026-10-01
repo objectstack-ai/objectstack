@@ -238,12 +238,12 @@ interface ControlFamily {
   rows: string[];
 }
 const IS_NULL: Record<'top' | 'not' | 'notNe', ControlFamily> = {
-  top: { tree: notSet, sql: `${SELECT}stage IS NULL${TAIL}`, params: [], engine: { stage: null }, rows: ['r2'] },
+  top: { tree: notSet, sql: `${SELECT}stage IS NULL${TAIL}`, params: [], engine: { stage: { $null: true } }, rows: ['r2'] },
   not: {
     tree: { kind: 'not', child: notSet },
     sql: `${SELECT}NOT (stage IS NULL)${TAIL}`,
     params: [],
-    engine: { $and: [{ $not: { stage: null } }] },
+    engine: { $and: [{ $not: { stage: { $null: true } } }] },
     rows: ['r1', 'r3'],
   },
   // [ADR-0053 D-D1, amended — #5930 step 3] The shared lowering's `allowNull`
@@ -253,17 +253,17 @@ const IS_NULL: Record<'top' | 'not' | 'notNe', ControlFamily> = {
     tree: { kind: 'not', child: { kind: 'or', children: [notSet, { kind: 'or', children: [notSet, { kind: 'and', children: [notSet, neLost] }] }] } },
     sql: `${SELECT}NOT ((stage IS NULL OR (stage IS NULL OR (stage IS NULL AND (stage IS NULL OR stage != $1)))))${TAIL}`,
     params: ['lost'],
-    engine: { $and: [{ $not: { $or: [{ stage: null }, { $or: [{ stage: null }, { stage: null, $and: [{ $or: [{ stage: null }, { stage: { $ne: 'lost' } }] }] }] }] } }] },
+    engine: { $and: [{ $not: { $or: [{ stage: { $null: true } }, { $or: [{ stage: { $null: true } }, { stage: { $null: true }, $and: [{ $or: [{ stage: { $null: true } }, { stage: { $ne: 'lost' } }] }] }] }] } }] },
     rows: ['r1', 'r3'],
   },
 };
 const IS_NOT_NULL: Record<'top' | 'not' | 'notNe', ControlFamily> = {
-  top: { tree: set, sql: `${SELECT}stage IS NOT NULL${TAIL}`, params: [], engine: { stage: { $ne: null } }, rows: ['r1', 'r3'] },
+  top: { tree: set, sql: `${SELECT}stage IS NOT NULL${TAIL}`, params: [], engine: { stage: { $null: false } }, rows: ['r1', 'r3'] },
   not: {
     tree: { kind: 'not', child: set },
     sql: `${SELECT}NOT (stage IS NOT NULL)${TAIL}`,
     params: [],
-    engine: { $and: [{ $not: { stage: { $ne: null } } }] },
+    engine: { $and: [{ $not: { stage: { $null: false } } }] },
     rows: ['r2'],
   },
   // [ADR-0053 D-D1, amended — #5930 step 3] …and the `requireValue` guard the
@@ -272,7 +272,7 @@ const IS_NOT_NULL: Record<'top' | 'not' | 'notNe', ControlFamily> = {
     tree: { kind: 'not', child: { kind: 'and', children: [set, { kind: 'and', children: [set, { kind: 'and', children: [set, neLost] }] }] } },
     sql: `${SELECT}NOT ((stage IS NOT NULL AND (stage IS NOT NULL AND (stage IS NOT NULL AND (stage IS NULL OR stage != $1)))))${TAIL}`,
     params: ['lost'],
-    engine: { $and: [{ $not: { stage: { $ne: null }, $and: [{ stage: { $ne: null } }, { stage: { $ne: null } }, { $or: [{ stage: null }, { stage: { $ne: 'lost' } }] }] } }] },
+    engine: { $and: [{ $not: { stage: { $null: false }, $and: [{ stage: { $null: false } }, { stage: { $null: false } }, { $or: [{ stage: { $null: true } }, { stage: { $ne: 'lost' } }] }] } }] },
     rows: ['r2', 'r3'],
   },
 };

@@ -37,7 +37,7 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import type { DriverQuery } from '@objectstack/spec/contracts';
-import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
+import { lowerFilterCondition, markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import { RemoteTransport } from './remote-transport.js';
 import { TursoDriver } from './turso-driver.js';
 import { asLibsqlClient, makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
@@ -640,8 +640,14 @@ describe('[#20094] TursoDriver LOCAL and REMOTE refuse a $between that is not tw
     ['bare days on a datetime column', { closed_at: { $between: ['2026-01-01', '2026-01-31'] } }, ['r1', 'r2']],
   ];
 
-  for (const [label, where, expected] of CONTROLS) {
+  for (const [label, authored, expected] of CONTROLS) {
     it(`well-formed control, ${label}: both faces return the same rows, and count agrees`, async () => {
+      // [#20822 · ADR-0053 D-D1 items 5 and 9, as amended] What a TYPED seam
+      // hands both faces: the whole-day rule is the shared lowering's, applied
+      // to the declared `datetime` column only; neither face keeps a copy.
+      const where = lowerFilterCondition(authored, {
+        isDatetimeColumn: (column) => (OBJECT.fields as Record<string, { type: string }>)[column]?.type === 'datetime',
+      });
       for (const driver of [local, remote]) {
         const rows = await driver.find(OBJECT.name, { where } as DriverQuery);
         expect(rows.map((row) => String(row.id)).sort(), driver.transportMode).toEqual(expected);

@@ -193,6 +193,78 @@ const CUBE_METRIC_NAME_REMOVED = cubeMemberNameRemoved('measures.<metric>.name',
 const CUBE_DIMENSION_NAME_REMOVED = cubeMemberNameRemoved('dimensions.<dimension>.name', 'dimensions', 'dimension');
 
 /**
+ * A cube member's `sql` is a COLUMN REFERENCE, never a SQL expression — the
+ * expression half RETIRED (#20943, maintainer ruling D on 2026-09-30: ADR-0021's
+ * "zero raw SQL / zero raw expressions" carried from the dataset layer down to
+ * the cube members it compiles to; ADR-0049 enforce-or-remove).
+ *
+ * Admitted, on a measure and a dimension alike, and parsed byte-identically to
+ * before — the accept set the ruling's execution parameters name:
+ * - a column of the cube's object — `amount`;
+ * - a relationship path of bare identifiers ending in one — `account.amount`,
+ *   `account.owner.region` — the chain
+ *   `NativeSQLStrategy#qualifyAndRegisterJoin` lowers into its LEFT JOINs;
+ * - the row wildcard `'*'`, the form a `count` measure uses.
+ *
+ * The identifier half of {@link CUBE_MEMBER_SQL} is the pattern the readers
+ * already use to tell a column path from an expression — `IDENTIFIER_PATH` in
+ * `native-sql-strategy.ts`, and the field-level read gate's bare-identifier /
+ * identifier-path pair in `analytics-service.ts` — so the contract now admits
+ * exactly the values those readers resolve to fields (and `'*'`, which reads
+ * no field value). It is a `.regex()`, not a refinement, so the published JSON
+ * Schema carries the same rule as a `pattern`: a document validated against
+ * `json-schema/**` is judged as the parse judges it.
+ *
+ * Refused at parse: everything else — `CASE WHEN …`, `SUM(…) / COUNT(*)`, a
+ * quoted identifier, a `$`-prefixed spelling, an empty string. Such a value
+ * names no single field, so no platform check could judge which fields it
+ * reads, and the two strategies never agreed on it: the raw-SQL path emitted
+ * it verbatim, while `ObjectQLStrategy#resolveMeasureAggregation` refuses only
+ * the `number` / `string` / `boolean` partition (`EXPRESSION_METRIC_TYPES`)
+ * and forwards an expression under an aggregate type as a field name, which
+ * fails downstream.
+ * A derived value has a declared home the platform CAN judge — an ADR-0021
+ * dataset, where a conditional count or sum is a measure with its own
+ * structured `filter`, and a ratio / sum / difference / product of measures is
+ * `derived: { op, of: [...] }` over measures named in the same dataset.
+ *
+ * No D2 conversion, deliberately: an expression has no mechanical rewrite — it
+ * moves to another metadata type (`dataset`), and a ratio's value may change
+ * scale on the way (a `derived` ratio is a 0–1 fraction). The D3 entry
+ * `cube-member-sql-expression-retired` carries what the upgrader still owes.
+ * The runtime's expression branches (the gate's stand-down, the raw-SQL
+ * verbatim emit) are left as they are here; they become unreachable for any
+ * cube that met this parse, and their deletion is the services lane's
+ * follow-up, not this schema's.
+ */
+const CUBE_MEMBER_SQL = /^(?:\*|[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)$/;
+
+const CUBE_MEMBER_SQL_RETIRED =
+  'A SQL expression there was retired in @objectstack/spec 17 (ADR-0021 zero raw expressions; '
+  + 'ADR-0049 enforce-or-remove) — an expression names no single field, so no platform check can '
+  + 'judge which fields it reads, and the two analytics strategies never agreed on it: one ran it '
+  + 'verbatim, the other refused it.';
+
+const CUBE_METRIC_SQL_EXPRESSION_REFUSED =
+  '`measures.<metric>.sql` is a column reference: a field of the cube\'s object (`amount`), a '
+  + 'relationship path ending in one (`account.amount`), or `\'*\'` for a count. '
+  + `${CUBE_MEMBER_SQL_RETIRED} Name the column the measure aggregates, or declare the derived `
+  + 'value on an ADR-0021 dataset, where the platform judges every field it reads: a conditional '
+  + 'count or sum is a dataset measure with its own structured `filter` '
+  + '(`{ name: \'done_count\', aggregate: \'count\', filter: { status: \'done\' } }`), and a ratio, '
+  + 'sum, difference or product of measures is `derived: { op, of: [...] }` over measures named in '
+  + 'the same dataset (`{ name: \'done_rate\', derived: { op: \'ratio\', of: [\'done_count\', '
+  + '\'task_count\'] }, format: \'0.0%\' }` — a 0–1 fraction, which the `%` pattern displays as a '
+  + 'percentage).';
+
+const CUBE_DIMENSION_SQL_EXPRESSION_REFUSED =
+  '`dimensions.<dimension>.sql` is a column reference: a field of the cube\'s object (`status`) '
+  + `or a relationship path ending in one (\`account.industry\`). ${CUBE_MEMBER_SQL_RETIRED} `
+  + 'Group by the column itself. A bucket computed over a column\'s values (a CASE over them) '
+  + 'has no expression form in the cube layer or the dataset layer: keep the bucket as a field '
+  + 'of the object, and name that field here or in an ADR-0021 dataset dimension\'s `field`.';
+
+/**
  * Metric Schema
  * A quantitative measurement (e.g., "Total Revenue", "Average Order Value").
  *
@@ -220,9 +292,11 @@ export const MetricSchema = lazySchema(() => strictObject(
       // both SQL strategies aggregate `sql` and never read it, so a
       // hand-authored condition parsed, registered, and silently returned the
       // UNFILTERED aggregate under the author's metric name (the #10298 shape,
-      // one level up). What actually filters: the query's `where`, the
-      // condition folded into the metric's own `sql` expression, or an
-      // ADR-0021 dataset measure's structured `filter` (#10411). The nested
+      // one level up). What actually filters: the query's `where`, or an
+      // ADR-0021 dataset measure's structured `filter` (#10411). A third
+      // channel this text used to name — folding the condition into the
+      // metric's own `sql` expression — went with #20943: a member's `sql` is
+      // a column reference (see `CUBE_MEMBER_SQL`). The nested
       // `strictObject` the key carried (closed by #4001 batch D) is gone with
       // it — strictness on a shape nothing reads was fake compliance either way.
       filters:
@@ -231,8 +305,9 @@ export const MetricSchema = lazySchema(() => strictObject(
         + 'both aggregate the metric\'s `sql` and ignore `filters`), so an authored '
         + '`filters: [{ sql: … }]` parsed clean and the query returned the UNFILTERED aggregate. '
         + 'Delete the key. To filter what a metric measures: filter at query time with `where` '
-        + '(canonical Query DSL FilterCondition), fold the condition into the metric\'s own `sql` '
-        + 'expression, or use an ADR-0021 dataset measure\'s structured `filter`. '
+        + '(canonical Query DSL FilterCondition), or declare the measure on an ADR-0021 dataset, whose '
+        + 'measure takes a structured `filter` — a metric\'s own `sql` is a column reference and '
+        + 'carries no condition. '
         + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
     },
   },
@@ -246,8 +321,17 @@ export const MetricSchema = lazySchema(() => strictObject(
 
     type: AggregationMetricType,
 
-    /** Source Calculation */
-    sql: z.string().describe('SQL expression or field reference'),
+    /**
+     * The column the measure aggregates — a field of the cube's object, a
+     * relationship path ending in one, or `'*'` for a count. A SQL expression
+     * is refused at parse (#20943, ruling D; see `CUBE_MEMBER_SQL`): a derived
+     * value is declared on an ADR-0021 dataset instead.
+     */
+    sql: z.string().regex(CUBE_MEMBER_SQL, { error: () => CUBE_METRIC_SQL_EXPRESSION_REFUSED }).describe(
+      'Column reference: a field of the cube\'s object ("amount"), a relationship path ending in one '
+      + '("account.amount"), or "*" for a count. Never a SQL expression: a derived value is '
+      + 'declared on an ADR-0021 dataset (a measure-scoped filter, or derived: { op, of }).',
+    ),
 
     // `filters` was REMOVED here (#10414) — see the `guidance` entry above for
     // the full story and the replacement channels. The raw-SQL fragment shape
@@ -301,8 +385,16 @@ export const DimensionSchema = lazySchema(() => strictObject(
 
     type: DimensionType,
 
-    /** Source Column */
-    sql: z.string().describe('SQL expression or column reference'),
+    /**
+     * The column the dimension groups by — a field of the cube's object, or a
+     * relationship path ending in one (`'*'` is admitted with the measure's
+     * accept set). A SQL expression is refused at parse (#20943, ruling D; see
+     * `CUBE_MEMBER_SQL`).
+     */
+    sql: z.string().regex(CUBE_MEMBER_SQL, { error: () => CUBE_DIMENSION_SQL_EXPRESSION_REFUSED }).describe(
+      'Column reference: a field of the cube\'s object ("status") or a relationship path ending in one '
+      + '("account.industry"). Never a SQL expression.',
+    ),
 
     /**
      * For a time dimension: the intervals it is bucketed at. A SINGLE interval
@@ -788,11 +880,13 @@ export const AnalyticsQuerySchema = lazySchema(() => strictObject(
     guidance: {
       // The second sentence used to point at the cube metric's own `filters` —
       // a key #10414 removed (never suggest a key the schema cannot accept;
-      // the `triggerPhrase` lesson in strict-object.ts).
+      // the `triggerPhrase` lesson in strict-object.ts). It also used to offer
+      // folding the condition into the metric's own `sql` expression, which
+      // #20943 retired (a member's `sql` is a column reference).
       filters: '`filters` is not an AnalyticsQuery field — use `where` (canonical Query DSL '
         + 'FilterCondition, the same shape find() takes). There is no per-metric filter key '
-        + 'either: fold the condition into the metric\'s own `sql` expression, or use '
-        + 'an ADR-0021 dataset measure\'s structured `filter`.',
+        + 'either: a measure that counts or sums only some rows is an ADR-0021 dataset measure '
+        + 'with its own structured `filter`.',
     },
     // No `extraKeys`: the one extension (`AnalyticsQueryRequestSchema`) adds
     // only the #3878 `retiredKey` tombstones, and a tombstone must never be

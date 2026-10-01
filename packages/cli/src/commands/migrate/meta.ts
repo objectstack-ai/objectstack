@@ -13,6 +13,7 @@ import {
   MIGRATION_MAJORS,
   MIGRATION_SUPPORT_FLOOR,
   type MigrationChainResult,
+  type MigrationTodo,
 } from '@objectstack/spec/migrations';
 import { PROTOCOL_MAJOR, PROTOCOL_VERSION } from '@objectstack/spec/kernel';
 import { FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, STRUCTURED_JSON_TYPES } from '@objectstack/spec/data';
@@ -296,12 +297,78 @@ function printSchemaVerdict(report: MigrationReport): void {
 }
 
 /**
+ * The semantic entries that judge each conversion, keyed by conversion id —
+ * read off the entries' declared `conversionIds` (`SemanticMigration`), in the
+ * order the chain reports the entries.
+ *
+ * ⛔ Declared links only. An entry's prose naming a conversion id is not a
+ * link: prose also names incidental analogues, so the spec lane authors a link
+ * only after reading both sides, and this printer pairs nothing it was not
+ * told to.
+ *
+ * The join runs over the whole chain result, not hop by hop: a link may name a
+ * conversion an EARLIER step replays than the entry's own, and both halves sit
+ * in the flat `applied` / `todos` arrays whichever hop produced them.
+ */
+function judgesByConversion(todos: readonly MigrationTodo[]): ReadonlyMap<string, readonly MigrationTodo[]> {
+  const judges = new Map<string, MigrationTodo[]>();
+  for (const todo of todos) {
+    for (const conversionId of todo.conversionIds ?? []) {
+      const list = judges.get(conversionId);
+      if (!list) judges.set(conversionId, [todo]);
+      else if (!list.includes(todo)) list.push(todo);
+    }
+  }
+  return judges;
+}
+
+/**
+ * Group ② — every applied edit, and beside the edits a semantic entry judges,
+ * that entry's headline marked **review**.
+ *
+ * The edit lines are the chain's, one per edit, unchanged. A review line is
+ * printed once under each RUN of consecutive edits by one conversion — the
+ * chain replays one conversion at a time, so a conversion's edits arrive
+ * together — and counts the edits above it that it judges. Once per run rather
+ * than once per edit: a real upgrade wrote 13 edits by one judged conversion,
+ * and repeating a paragraph-long judgment 13 times is the noise this report is
+ * ordered to cut. Nothing is lost by it — every edit line still names its
+ * conversion, and the review line says how many of the lines above it covers.
+ *
+ * The review line is a COPY of the entry's `[protocol N] surface → replacement`
+ * headline, not the entry: ③ still prints that entry in full, in its place, so
+ * its `why` and `verify` are found there by the same headline, and ③'s count
+ * and lines do not change (ADR-0087 D3, "never silence").
+ */
+function printAppliedEdits(result: MigrationChainResult): void {
+  const judges = judgesByConversion(result.todos);
+  console.log(chalk.bold(`  Applied ${result.applied.length} mechanical change(s):`));
+  let run = 0;
+  for (const [i, a] of result.applied.entries()) {
+    console.log(`    • ${a.path}: ${chalk.red(a.from)} → ${chalk.green(a.to)} ${chalk.dim(`(${a.conversionId})`)}`);
+    run += 1;
+    if (result.applied[i + 1]?.conversionId === a.conversionId) continue; // the run goes on
+    const subject = run === 1 ? 'the edit above' : `the ${run} edits above`;
+    for (const judge of judges.get(a.conversionId) ?? []) {
+      console.log(
+        `      ${chalk.yellow('↳ review')} ${subject} against the manual change `
+        + `[protocol ${judge.toMajor}] ${judge.surface} → ${judge.replacement}`,
+      );
+    }
+    run = 0;
+  }
+  console.log('');
+}
+
+/**
  * The human report of an authored-source run, in the order an upgrader acts on
  * it, each group under one header line that counts it (ADR-0087 D3):
  *
  *  ① the VERDICT and the REFUSALS — whether the migrated stack parses and, when
  *    it does not, every refusal left after the chain: what still blocks it;
- *  ② the APPLIED mechanical edits — the diff the chain has already made;
+ *  ② the APPLIED mechanical edits — the diff the chain has already made, with
+ *    the semantic entry that judges an edit printed beside it, marked review
+ *    (see {@link printAppliedEdits});
  *  ③ the SEMANTIC notices — every semantic entry of every hop crossed.
  *
  * ## Why this order
@@ -320,7 +387,8 @@ function printSchemaVerdict(report: MigrationReport): void {
  * silence": an entry may leave ③ only on a structured, stack-derived proof that
  * its surface is absent, and matching the prose of `surface` against the stack
  * is not one. So the groups MOVE and nothing else does: every line ② and ③
- * printed before is printed after, byte-identical and in chain order.
+ * printed before is printed after, byte-identical and in chain order. The one
+ * addition is ②'s review lines, each a copy of an entry ③ still prints.
  * `--json` is untouched — its keys, its values and the order of its arrays.
  */
 export function printMigrationReport(report: MigrationReport): void {
@@ -352,14 +420,8 @@ export function printMigrationReport(report: MigrationReport): void {
     return;
   }
 
-  // ② The mechanical rewrites (auto-applied).
-  if (result.applied.length > 0) {
-    console.log(chalk.bold(`  Applied ${result.applied.length} mechanical change(s):`));
-    for (const a of result.applied) {
-      console.log(`    • ${a.path}: ${chalk.red(a.from)} → ${chalk.green(a.to)} ${chalk.dim(`(${a.conversionId})`)}`);
-    }
-    console.log('');
-  }
+  // ② The mechanical rewrites (auto-applied), a judged edit's judge beside it.
+  if (result.applied.length > 0) printAppliedEdits(result);
 
   // Per-hop checkpoints.
   if (report.step) {

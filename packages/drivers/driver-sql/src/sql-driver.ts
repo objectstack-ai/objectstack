@@ -91,13 +91,7 @@ import {
   isMissingTableError,
 } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
-import {
-  nextUtcCalendarDay,
-  temporalStorageForm,
-  UNBOUNDED_ABOVE,
-  isUnboundedAbove,
-  type UnboundedAbove,
-} from '@objectstack/core';
+import { temporalStorageForm } from '@objectstack/core';
 import {
   applyIndexKeyParts,
   buildIndexName,
@@ -4402,9 +4396,10 @@ function unknownLogicalOperatorError(key: string, path: string, subtree?: unknow
  * same evaluation-order reason, same `INVALID_FILTER` envelope.
  *
  * Note what does NOT change with it: the emitter's `opValue === false` arm and
- * {@link nullValueSatisfiesOperator}'s `value === false` arm stay exactly as
- * they are. Once the gate holds, `true` and `false` are the only comparands that
- * reach either, so both tests are already exhaustive two-way choices — the
+ * the polarity table's `value === false` arm (this driver's
+ * `nullValueSatisfiesOperator` then; since #20822 the shared lowering's) stay
+ * exactly as they are. Once the gate holds, `true` and `false` are the only
+ * comparands that reach either, so both tests are already exhaustive two-way choices — the
  * lenient-vs-strict question #5347 had to answer for `$null` does not arise
  * here, because both spellings agree on the two surviving values.
  */
@@ -4628,8 +4623,9 @@ function emptyJsonListPredicate(
  *    inputs; this one was missing from the list).
  * 2. The `$not: { $ne: undefined }` row is this driver contradicting ITSELF:
  *    the `$ne` emitter reads `coerced == null` (LOOSE — so `undefined` compiled
- *    `IS NOT NULL`, a TOTAL predicate), while {@link operatorIsNullTotal} and
- *    {@link nullValueSatisfiesOperator} read `value === null` (STRICT — so they
+ *    `IS NOT NULL`, a TOTAL predicate), while its polarity tables
+ *    `operatorIsNullTotal` and `nullValueSatisfiesOperator` (deleted by #20822;
+ *    the shared lowering carries the rule now) read `value === null` (STRICT — so they
  *    judged the same leaf non-total AND satisfied by a NULL row). The guard
  *    then wrapped a total predicate in `d IS NULL OR d IS NOT NULL`, a
  *    tautology, whose negation is FALSE — the `[]` above. That is the #5298
@@ -4918,10 +4914,10 @@ function classifyFilterKey(
   // "First" is the whole design here, not a preference. Both defects #6050
   // measured live downstream of this line: the emitter hands an undefined bind
   // to knex (a bare `Undefined binding(s)` Error, outside ADR-0112), and the
-  // `$not` branch's {@link nullSafeNegationOperand} rewrite consults
-  // {@link operatorIsNullTotal} / {@link nullValueSatisfiesOperator}, whose
-  // `=== null` spelling disagrees with the `$ne` emitter's `== null` about
-  // exactly this value. `applyFilterCondition` runs the whole reduction before
+  // polarity tables of the `$not` rewrite this driver carried until #20822
+  // (the shared lowering's rule 3 now) read it `=== null`, disagreeing with
+  // the `$ne` emitter's `== null` about exactly this value.
+  // `applyFilterCondition` runs the whole reduction before
   // it reaches either, so a refusal raised here makes BOTH unreachable rather
   // than repaired — and the polarity tables never have to answer a question
   // nobody ruled on. See {@link undefinedComparandError} for the measured
@@ -5049,251 +5045,6 @@ function classifyFilterKey(
 
   // A field key always contributes a predicate.
   return 'clause';
-}
-
-// ── [#5146] NULL-safe `$not` ─────────────────────────────────────────────────
-
-/**
- * [#5146] What a single field constraint needs so its compiled SQL is TOTAL —
- * TRUE or FALSE for every row, never UNKNOWN.
- *
- * - `'none'`         — the predicate is already total (`IS NULL` / `IS NOT NULL`).
- * - `'requireValue'` — a NULL column does NOT satisfy it: `col IS NOT NULL AND (…)`.
- * - `'allowNull'`    — a NULL column DOES satisfy it: `col IS NULL OR (…)`.
- */
-type NullGuard = 'none' | 'requireValue' | 'allowNull';
-
-/**
- * [#5146] Does a NULL column satisfy this one operator, under the semantics the
- * JS backends (`driver-memory` `match`, `formula` `matchesFilterCondition`)
- * give it?
- *
- * They evaluate a missing/null field in ordinary two-valued JS: `undefined !==
- * 'won'` is simply `true`. This table is that answer, per operator — measured
- * against both, not assumed. The default is the large positive-comparison
- * family (`$gt`/`$in`/`$contains`/…), every member of which answers `false` for
- * a value that is not there.
- */
-function nullValueSatisfiesOperator(op: string, value: unknown): boolean {
-  switch (op) {
-    // `$eq: null` IS the null predicate; any other comparand is a value test.
-    //
-    // [#6050] These two arms are STRICT (`=== null`) while the `$ne` emitter
-    // used to be LOOSE (`== null`) — the #5298 invariant broken at its own
-    // definition, since a polarity table pins the spelling of its own emitter.
-    // The repair is the gate, not a third spelling: `reduceFilterKey` refuses
-    // an `undefined` comparand before this table is consulted, so `null` and
-    // real values are the only comparands left and the emitter now reads
-    // `=== null` too. Both spellings are exhaustive over the surviving domain,
-    // and they are the SAME spelling — which is what the invariant asks for.
-    case '$eq': return value === null;
-    case '$ne': return value !== null;
-    // [#5347] `$null` is now TOTAL over its declared domain: `reduceFilterKey`
-    // refuses a non-boolean comparand before this table is ever consulted, so
-    // the only values that reach here are `true` and `false`. The arm was
-    // `value !== false` — a lenient read written to mirror the emitter's own
-    // `opValue === false` identity test, because at the time BOTH had to agree
-    // about a third value that could arrive. Neither does any more, so the arm
-    // says what it means: a NULL column satisfies `$null` exactly when the
-    // caller asked for null.
-    //
-    // Tightened rather than left alone deliberately. `value !== false` and
-    // `value === true` are equivalent only while the refusal upstream holds; the
-    // lenient spelling would keep compiling if that gate were ever moved or
-    // removed, and would silently resume answering for shapes nobody ruled on.
-    // The strict spelling cannot — it is the same "declared = enforced" reflex
-    // the refusal itself is.
-    case '$null': return value === true;
-    // [#5369] The gate this arm's old comment said was missing now EXISTS:
-    // `reduceFilterKey` refuses a non-boolean `$exists` comparand beside the
-    // `$null` one, so `true` and `false` are the only values that reach here.
-    //
-    // The line itself is deliberately unchanged, and #5369's suggestion to
-    // "tighten it to `value === true`" is not applied — it points the wrong way.
-    // This table answers "does a NULL column SATISFY the operator", and a NULL
-    // column satisfies `$exists` exactly when the caller asked for `false`
-    // ("no value"). `$null: true` and `$exists: false` are the same question, so
-    // their arms are correctly each other's mirror, not each other's copy. With
-    // the gate holding, `value === false` is already an exhaustive two-way
-    // choice over the declared domain — the lenient-vs-strict distinction that
-    // made #5347 rewrite the `$null` arm does not exist here, because both
-    // spellings agree on both surviving values.
-    case '$exists': return value === false;
-    // [#20444] Null counts as empty on EVERY row of the ruled table, so a NULL
-    // column satisfies `$empty: true` and fails its complement. The walk refuses
-    // a non-boolean before this table is consulted.
-    case '$empty': return value === true;
-    // Negative-polarity set/substring tests: "not among" / "does not contain"
-    // hold vacuously for a value that is absent.
-    case '$nin': return true;
-    // `$notContains` is the one operator where the two JS backends disagree on a
-    // null-valued field (`driver-memory` answers false because `typeof null !==
-    // 'string'`; `formula` answers true). `formula` is followed here because it
-    // is what this driver already answers for the shape today, so the ruling on
-    // that disagreement stays where it belongs — the issue that records it —
-    // instead of being made silently by this rewrite.
-    case '$notContains': return true;
-    default: return false;
-  }
-}
-
-/** [#5146] Is this operator's compiled SQL already total for a NULL column? */
-function operatorIsNullTotal(op: string, value: unknown): boolean {
-  // [#5222] A `{ $field }` comparand on a scalar comparison compiles to a
-  // TOTAL column-to-column predicate — `applyCrossFieldComparison` writes both
-  // columns' nullness INTO the emitted SQL, so it is never UNKNOWN and `NOT`
-  // over it is the exact complement. It must not fall to the literal arms
-  // below: their 'requireValue' guard assumes a NULL target column FAILS the
-  // operator, which is false for `$eq: { $field }` (a both-NULL row MATCHES,
-  // the memory evaluator's answer), so the guard would flip `$not` on exactly
-  // the rows the null pins in the conformance suite exist to protect.
-  if (CROSS_FIELD_COMPARISON_OPERATORS.has(op) && fieldReferenceOf(value) !== null) return true;
-  switch (op) {
-    // Compile to `IS NULL` / `IS NOT NULL` — two-valued by construction.
-    case '$null':
-    case '$exists':
-    // [#20444] `$empty` spells its NULL case out in both polarities —
-    // `(col IS NULL OR …)` / `(col IS NOT NULL AND NOT …)`, the `…` FALSE and
-    // never NULL for a stored value ({@link emptyJsonListPredicate}) — so it
-    // is TRUE or FALSE for every row and `NOT` over it is the exact complement.
-    case '$empty':
-      return true;
-    // A null comparand makes these null PREDICATES too (see the `$eq`/`$ne`
-    // arms of the emitter below), not comparisons.
-    //
-    // [#6050] Same note as {@link nullValueSatisfiesOperator}'s `$eq`/`$ne`
-    // arms: this `=== null` and the emitter's test now read the same value set,
-    // because `undefined` is refused before either runs.
-    case '$eq':
-    case '$ne':
-      return value === null;
-    default:
-      return false;
-  }
-}
-
-/**
- * [#5146] The guard one field constraint needs. A constraint is the AND of its
- * operators, so it is total when every operator is, and a NULL column satisfies
- * it only when it satisfies all of them.
- */
-function nullGuardForFieldSpec(spec: unknown): NullGuard {
-  // `{ field: null }` compiles to `IS NULL` — already total.
-  if (spec === null) return 'none';
-  // Every comparand that is not an operator map — a scalar, a Date, an array, a
-  // binary value — is an implicit `=`; a NULL column fails it.
-  //
-  // [#19885] "Not an operator map" is {@link isFilterNode}'s reading, the one the
-  // emitter and the validating walk use. This test used to name the exceptions
-  // one by one (`Date`, array) and read every other object as a map, so a binary
-  // comparand was guarded by accident: a non-empty one's byte indices fell to
-  // the per-operator default below, and an EMPTY one had no entries, came out
-  // `'none'`, and `{ $not: { data: <empty buffer> } }` compiled to a bare
-  // `NOT (data = ?)` that dropped every NULL row.
-  if (!isFilterNode(spec)) return 'requireValue';
-  const entries = Object.entries(spec as Record<string, unknown>);
-  // [#5240, was #5146] The `entries.length === 0` escape that used to sit here —
-  // "`{ field: {} }` compiles to no SQL, so guarding it would turn a shape that
-  // emits nothing into a live `IS NULL` predicate, i.e. would RULE on #5240 from
-  // here" — is GONE, together with the ambiguity it was protecting. #5240 ruled
-  // the shape REFUSED, and `reduceFilterKey` raises that refusal while validating
-  // the tree, which `applyFilterCondition` does BEFORE its `$not` branch calls
-  // this rewrite. So an empty spec can no longer reach this function at all.
-  let total = true;
-  let nullSatisfies = true;
-  for (const [op, value] of entries) {
-    if (!operatorIsNullTotal(op, value)) total = false;
-    if (!nullValueSatisfiesOperator(op, value)) nullSatisfies = false;
-  }
-  if (total) return 'none';
-  return nullSatisfies ? 'allowNull' : 'requireValue';
-}
-
-/**
- * [#5146] Rewrite the operand of a `$not` so every leaf compiles to a TOTAL
- * predicate, which is what makes `NOT (…)` mean the same thing here as it does
- * in `driver-memory` / `formula`.
- *
- * # The defect
- *
- * SQL is three-valued: `NULL = 'won'` is UNKNOWN, `NOT UNKNOWN` is still
- * UNKNOWN, and a `WHERE` keeps only TRUE — so `{ $not: { stage: 'won' } }`
- * dropped every row whose `stage` is NULL. The JS backends evaluate the same
- * filter in two-valued logic (`undefined !== 'won'` → the row matches), so ONE
- * declared operator gave two different answers depending on which driver ran
- * it. On a CEL `!expr` read scope lowered by `cel-to-filter.ts` that is not a
- * count that differs — it is the SAME permission rule admitting a different
- * set of rows per backend. Ruled NULL-safe in #5146: "the column has no value"
- * counts as NOT satisfying the negated condition, matching the 2:1 majority.
- *
- * # Why the guard is pushed to the LEAF, not hung off the `NOT`
- *
- * The issue states the fix as `NOT (…) OR col IS NULL`, and for the flat shape
- * that motivates it the two are identical — `NOT (a IS NOT NULL AND a = 'won')`
- * is `NOT (a = 'won') OR a IS NULL`. They stop being identical as soon as the
- * operand nests: hoisting the guard to the top of a `$not` whose operand is a
- * `$or` re-admits rows the JS backends exclude (a NULL `a` would satisfy the
- * whole negation even when the `$or`'s OTHER branch is satisfied). Totalising
- * each leaf makes the rewrite compositional instead — De Morgan is sound over
- * two-valued leaves, so `$and`, `$or` and a nested `$not` all stay correct
- * without special cases.
- *
- * # Why polarity is per operator
- *
- * A blanket "OR col IS NULL" would also WIDEN the negative-polarity operators:
- * `{ $not: { a: { $ne: 5 } } }` means "a is 5", and both JS backends exclude a
- * NULL row from it (`null !== 5` holds, so the operand matches, so the negation
- * does not). Adding an unconditional null escape there would hand back exactly
- * the rows the filter excludes — the silent widening class this driver keeps
- * paying for (#2704, #5134). So each leaf is guarded in the direction its own
- * operator answers, per {@link nullValueSatisfiesOperator}.
- *
- * This rewrite only ever runs INSIDE a `$not`, and a POSITIVE comparison's SQL is
- * untouched by it or by anything else — `{ a: 1 }` still compiles to `a = 1`.
- *
- * [#5298] What changed since is the other half: the three operators that carry
- * their own negation (`$ne`, `$nin`, `$notContains`) are NULL-safe outside a
- * `$not` too, emitted directly by {@link SqlDriver.applyNullSafeNegative} rather
- * than through this rewrite. Both paths read the same polarity table and reach
- * the same answer; they stay separate because this one has to compose through De
- * Morgan over a whole operand tree, while that one guards a single leaf.
- *
- * A nested `$not` is deliberately left alone: its own branch totalises its
- * operand, and `NOT <total>` is itself total, so recursing into it here would
- * only stack a redundant guard on the same column.
- */
-function nullSafeNegationOperand(node: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  const guarded: unknown[] = [];
-  for (const [key, value] of Object.entries(node)) {
-    if ((key === '$and' || key === '$or') && Array.isArray(value)) {
-      out[key] = value.map((element) => nullSafeNegationOperand(element as Record<string, unknown>));
-      continue;
-    }
-    if (key.startsWith('$')) {
-      // `$not` (handled by its own branch) and anything else `$`-prefixed keep
-      // whatever this driver does with them today — the rewrite rules on NULL,
-      // not on the operator vocabulary.
-      out[key] = value;
-      continue;
-    }
-    const guard = nullGuardForFieldSpec(value);
-    if (guard === 'none') {
-      out[key] = value;
-    } else if (guard === 'requireValue') {
-      // `col IS NOT NULL AND (…)` — both conjuncts of the enclosing node.
-      guarded.push({ [key]: { $null: false } }, { [key]: value });
-    } else {
-      // `col IS NULL OR (…)` — one conjunct, so the OR binds tighter than the
-      // AND the node's keys form.
-      guarded.push({ $or: [{ [key]: { $null: true } }, { [key]: value }] });
-    }
-  }
-  if (guarded.length > 0) {
-    const existing = Array.isArray(out.$and) ? out.$and : [];
-    out.$and = [...existing, ...guarded];
-  }
-  return out;
 }
 
 // ── Introspection Types ──────────────────────────────────────────────────────
@@ -15436,100 +15187,6 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * The exclusive upper-bound instant for a bare calendar-day comparand on a
-   * `datetime` column — next day's midnight UTC, in this dialect's storage
-   * form — or `null` when the calendar-day reading does not apply.
-   *
-   * This is the missing half of the calendar-day convention (#3777). A bare
-   * `YYYY-MM-DD` anchors to midnight UTC ({@link storageDatetimeValue}), which
-   * is exactly right for a LOWER bound (`>= {today}` means "from the moment
-   * the day starts") and exactly wrong for an UPPER bound: `<= {today}` from a
-   * dashboard's date-range filter means "including today", but midnight
-   * anchoring turns it into "up to the first instant of today", silently
-   * dropping every row created after 00:00 — with `created_at` (a system
-   * `Field.datetime`) as the filter's default field, the default dashboard
-   * configuration loses the current day.
-   *
-   * The translation is operator-sensitive, so it lives at the comparison
-   * emitters (which know their operator) rather than inside the operator-blind
-   * {@link coerceFilterValue}: an upper-bound `$lte`/`<=`/`between`-max with a
-   * bare-day comparand compiles to the half-open `< next-day-midnight` — the
-   * same `[gte, lt)` shape the analytics drill ranges emit — never to an
-   * inclusive `23:59:59.999`, which re-opens the gap at whatever precision the
-   * dialect stores beyond milliseconds.
-   *
-   * Deliberately narrow, mirroring the semantics table on #3777:
-   *   - `date` / `time` / non-temporal columns → null (a bare day on a `date`
-   *     column is already whole-day-correct under `<=`);
-   *   - full ISO timestamps and `Date` objects → null (an instant comparand
-   *     keeps instant semantics — only the day-granular STRING carries
-   *     calendar-day intent);
-   *   - `$gte` / `$gt` / `$lt` keep their midnight anchoring (correct today).
-   *
-   * [#20600] `9999-12-31`, the last supported day, has no next day to stop
-   * before: every supported value is at most its last millisecond, so the
-   * spec's helper answers `UNBOUNDED_ABOVE` and this passes it on for the two
-   * emitters below to compile NO upper bound. It used to be the five-digit
-   * `'10000-01-01…'`, which a SQLite column (ISO text) sorts above every row,
-   * so `$lte '9999-12-31'` answered no rows there.
-   */
-  protected calendarDayExclusiveUpperBound(
-    table: string | null,
-    field: string,
-    value: unknown,
-  ): unknown | UnboundedAbove | null {
-    if (this.temporalFieldKind(table, field) !== 'datetime') return null;
-    const next = nextUtcCalendarDay(value);
-    if (next == null) return null;
-    if (isUnboundedAbove(next)) return UNBOUNDED_ABOVE;
-    return this.storageDatetimeValue(`${next}T00:00:00.000Z`);
-  }
-
-  /**
-   * Rewrite one upper-bound comparison for calendar-day intent: `$lte`/`<=`
-   * with a bare `YYYY-MM-DD` on a `datetime` column becomes `$lt`/`<` against
-   * {@link calendarDayExclusiveUpperBound}. Returns `null` — "not applicable,
-   * compile as-is" — for every other operator/comparand/column combination.
-   *
-   * [#20600] `UNBOUNDED_ABOVE` for the last supported day: the comparison has
-   * no bound to compile, and what it still asks is that the column has a value
-   * (a comparison never holds for NULL) — the caller compiles `IS NOT NULL`.
-   */
-  protected calendarDayUpperBoundRewrite(
-    table: string | null,
-    field: string,
-    op: string,
-    value: unknown,
-  ): { op: string; value: unknown } | UnboundedAbove | null {
-    if (op !== '$lte' && op !== '<=') return null;
-    const upper = this.calendarDayExclusiveUpperBound(table, field, value);
-    if (upper == null) return null;
-    if (isUnboundedAbove(upper)) return UNBOUNDED_ABOVE;
-    return { op: op === '$lte' ? '$lt' : '<', value: upper };
-  }
-
-  /**
-   * The `between` companion of {@link calendarDayUpperBoundRewrite}: a
-   * `[min, max]` range whose max is a bare calendar day on a `datetime` column
-   * decomposes into the half-open pair `>= min AND < next-day(max)` — knex's
-   * `whereBetween` is inclusive on both ends, so it inherits the same
-   * midnight-anchored upper bound `$lte` had. Returns `null` when the range is
-   * malformed (caller keeps its descriptive error) or the rewrite does not
-   * apply. [#20600] `upper` is `UNBOUNDED_ABOVE` when the max is the last
-   * supported day: the range keeps only its minimum.
-   */
-  protected calendarDayBetweenRewrite(
-    table: string | null,
-    field: string,
-    value: unknown,
-  ): { lower: unknown; upper: unknown | UnboundedAbove } | null {
-    if (!Array.isArray(value) || value.length !== 2) return null;
-    const upper = this.calendarDayExclusiveUpperBound(table, field, value[1]);
-    if (upper == null) return null;
-    return { lower: this.coerceFilterValue(table, field, value[0]), upper };
-  }
-
-  /**
    * Might this SQLite `Field.datetime` column still hold values written BEFORE
    * the canonical-UTC-text convention (#3912) — an INTEGER/REAL epoch from a
    * bound JS `Date`, a zone-naive `CURRENT_TIMESTAMP` string, an offset-bearing
@@ -16036,11 +15693,12 @@ export class SqlDriver implements IDataDriver {
    * Deliberately operator-blind — it translates FORM, never bound semantics.
    * A caller compiling an upper bound from a bare calendar day (`<= {today}`,
    * a `dateRange` end) must apply `nextUtcCalendarDay` from `@objectstack/core`
-   * and emit `<` — the half-open translation the driver's own `find()` path
-   * performs via {@link calendarDayUpperBoundRewrite} (#3777). Folding that in
-   * here would silently widen every `<=`-bound value whether or not the caller
-   * flips its operator, which is exactly the ambiguity the emitter-side rule
-   * avoids.
+   * and emit `<` — the half-open translation the shared lowering
+   * (`lowerFilterCondition`, `@objectstack/spec/data`) applies at the seams
+   * before a filter reaches `find()` (ADR-0053 D-D1, amended; #3777). Folding
+   * that in here would silently widen every `<=`-bound value whether or not the
+   * caller flips its operator, which is exactly the ambiguity an
+   * operator-sensitive rule avoids.
    */
   // [#17690] The contract declares this hook `unknown`-returning; the class
   // published a bare `any`, which is the same family as the promise-shaped
@@ -16221,7 +15879,7 @@ export class SqlDriver implements IDataDriver {
    * {@link SqlDriver.applyNullSafeNegative}) and fails every positive
    * operator, so `1 = 1` / `1 = 0` agree with the null polarity on every row —
    * there is no cell where the two rules disagree. Under `$not` the leaf is
-   * totalised first ({@link nullSafeNegationOperand}): `NOT (col IS NOT NULL
+   * totalised first (the shared lowering's rule 3, at the seams): `NOT (col IS NOT NULL
    * AND 1 = 0)` is TRUE for every row, which is what the JS faces answer for
    * `!contains` on a number, and `NOT (col IS NULL OR 1 = 1)` is FALSE for
    * every row, what they answer for `!notContains`. Complementarity holds
@@ -16276,8 +15934,8 @@ export class SqlDriver implements IDataDriver {
    *
    * Every predicate is TOTAL — TRUE or FALSE on every row, never UNKNOWN —
    * because both polarities spell the NULL case out and `L` is never NULL for a
-   * stored value. So a `$not` over `$empty` needs no guard
-   * ({@link operatorIsNullTotal} answers `true` for it) and `NOT (…)` is the
+   * stored value. So a `$not` over `$empty` needs no guard (the shared
+   * lowering's polarity table reads it as total) and `NOT (…)` is the
    * exact complement, with no three-valued-logic hole. Each predicate is one
    * knex group, so its `OR` can never re-associate with a sibling conjunct.
    *
@@ -16350,7 +16008,7 @@ export class SqlDriver implements IDataDriver {
    * asks whether the COMPARAND can be bound, this one whether the COLUMN can be
    * compared — and #7398 is the square of that grid that had nothing on it.
    *
-   * Placed BEFORE the calendar-day rewrites and before
+   * Placed BEFORE the comparand coercion and before
    * {@link SqlDriver.applyNormalizedComparison}, because a JSON column reaches
    * BOTH emitters and only one of them is the site the issue named. A
    * `multiple: true` datetime field on an external object (ADR-0015) has a
@@ -16839,10 +16497,16 @@ export class SqlDriver implements IDataDriver {
    *
    * # NULL-safe negation (#5146 `$not`, #5298 the negative operators)
    *
-   * `$not` negates a predicate that {@link nullSafeNegationOperand} has first
-   * made TOTAL, because SQL's `NOT UNKNOWN` is UNKNOWN and a `WHERE` drops it —
-   * which used to hide every row whose compared column was NULL, while
-   * `driver-memory` and `formula` returned those same rows.
+   * `$not` negates the operand it is handed. Every seamed read hands it an
+   * operand the shared lowering (`lowerFilterCondition`, `@objectstack/spec/data`)
+   * has already made TOTAL leaf by leaf — each leaf guarded in the direction its
+   * own operator answers for a row with no value — because SQL's `NOT UNKNOWN`
+   * is UNKNOWN and a `WHERE` drops it, which used to hide every row whose
+   * compared column was NULL while `driver-memory` and `formula` returned those
+   * same rows. [ADR-0053 D-D1 items 5 and 9, as amended — #20822] This driver's
+   * own copy of that rewrite (`nullSafeNegationOperand` and its polarity
+   * tables) is deleted; a caller that passes no seam gets the negation it wrote,
+   * three-valued.
    *
    * #5298 extended the same ruling to the non-negated path: `$ne`, `$nin` and
    * `$notContains` emit `(col IS NULL OR <test>)` via
@@ -16933,22 +16597,21 @@ export class SqlDriver implements IDataDriver {
         // group is FALSE and never reaches here (the node reduced to FALSE), and
         // a non-node operand was refused by the reduction, so `value` is a node.
         if (reduceFilterKey(key, value, 'filter', condition) === 'true') continue;
-        // #5146 — negate a TOTAL predicate, so a row whose column is NULL gets
-        // the same answer here as it does in driver-memory / formula instead of
-        // vanishing into SQL's UNKNOWN. See {@link nullSafeNegationOperand} for
-        // why the guard sits on each leaf rather than beside the `NOT`, and why
-        // its direction is per operator. The reduction above ran on the ORIGINAL
-        // operand; the rewrite preserves every verdict (each guarded conjunct
-        // still carries a field key, so a `'clause'` stays a `'clause'`).
-        const negated = nullSafeNegationOperand(value as Record<string, unknown>);
+        // #5146 — the operand is negated as handed. On every seamed read it is
+        // already TOTAL: the shared lowering guarded each leaf in the direction
+        // its operator answers for a row with no value (ADR-0053 D-D1, amended;
+        // the lowering's rule 3), so `NOT (…)` is its exact complement. This
+        // driver's own copy of that rewrite is deleted (#20822, item 5): a
+        // caller that passes no seam gets the three-valued `NOT` it wrote.
         const notMethod = logicalOp === 'or' ? 'orWhereNot' : 'whereNot';
         (builder as any)[notMethod]((qb: any) => {
-          // [#8220] `negated` is a REWRITE — its nodes are new objects the
-          // provenance resolver cannot find under `root`, so a cross-field
-          // refusal inside a `$not` resolves ambiguous and stays withheld,
-          // for the author too. Fail-closed by construction; the walk-side
-          // refusals (raised on the ORIGINAL nodes, eagerly) are unaffected.
-          this.withWithheldFilterLog(root, () => this.applyFilterCondition(qb, negated, 'and', table, root));
+          // [#8220] The operand is the caller's own node (a seam's lowering
+          // carries each rewritten node's provenance mark forward), so a
+          // refusal raised inside a `$not` resolves against `root` like any
+          // other; the walk-side refusals ran on the same nodes, eagerly.
+          this.withWithheldFilterLog(root, () =>
+            this.applyFilterCondition(qb, value as Record<string, unknown>, 'and', table, root),
+          );
         });
       } else if (isFilterNode(value)) {
         // [#19885] An OPERATOR MAP is a plain object — the walk's own reading
@@ -17021,47 +16684,25 @@ export class SqlDriver implements IDataDriver {
           }
           // [#20444] `$empty` — answered by the field's DECLARED row of the
           // ruled table, AFTER every refusal above (its non-boolean comparand
-          // was refused on the walk) and BEFORE the calendar-day rewrites,
-          // the comparand coercion and the normalised-column emitter: its
-          // flag is not a value of the column, so none of them applies.
+          // was refused on the walk) and BEFORE the comparand coercion and the
+          // normalised-column emitter: its flag is not a value of the column,
+          // so neither applies.
           if (rawOp === '$empty') {
             this.applyEmptyOperator(builder, logicalOp, table, localField, field, opValue === true, value);
             continue;
           }
-          // Calendar-day upper bounds first (#3777): `$lte` on a bare
-          // `YYYY-MM-DD` against a datetime column compiles half-open, and a
-          // `$between` whose max is a bare day decomposes into the same pair —
-          // grouped, so an `$or` branch stays one predicate.
-          if (rawOp === '$between') {
-            const dayRange = this.calendarDayBetweenRewrite(table, localField, opValue);
-            if (dayRange) {
-              // [#20600] A max on the last supported day bounds nothing: the
-              // range keeps its minimum alone.
-              const bounded = !isUnboundedAbove(dayRange.upper);
-              (builder as any)[method]((qb: any) => {
-                if (columnExpr) {
-                  this.applyNormalizedComparison(qb, 'and', columnExpr, '$gte', dayRange.lower);
-                  if (bounded) this.applyNormalizedComparison(qb, 'and', columnExpr, '$lt', dayRange.upper);
-                } else {
-                  qb.where(field, '>=', dayRange.lower);
-                  if (bounded) qb.andWhere(field, '<', dayRange.upper);
-                }
-              });
-              continue;
-            }
-          }
-          const rewrite = this.calendarDayUpperBoundRewrite(table, localField, rawOp, opValue);
-          if (isUnboundedAbove(rewrite)) {
-            // [#20600] `$lte` on the last supported day: no upper bound, so the
-            // comparison asks only that the column has a value — the `IS NOT
-            // NULL` the `$ne: null` arm below spells. The raw column, not
-            // `columnExpr`: a legacy-repair expression is NULL exactly when
-            // the column is.
-            (builder as any)[logicalOp === 'or' ? 'orWhereNotNull' : 'whereNotNull'](field);
-            continue;
-          }
-          const op = rewrite?.op ?? rawOp;
-          const coerced = rewrite ? rewrite.value : this.coerceFilterValue(table, localField, opValue);
+          // [ADR-0053 D-D1 items 5 and 9, as amended — #20822] No calendar-day
+          // rewrite here: a bare-day `$lte` / `$between` max is widened to the
+          // whole day ONCE, by the shared lowering (`lowerFilterCondition`,
+          // `@objectstack/spec/data`) at the seams, before this driver sees the
+          // filter — every seamed read hands this emitter `$lt` the next day in
+          // the calendar-string domain, which it converts to storage form like
+          // any comparand (D-A1, D-E3), and the last supported day as
+          // `{ $null: false }`. The copy this emitter kept (#3777, #20600) is
+          // deleted: a caller that passes no seam compiles the comparison it
+          // wrote, `<=` / BETWEEN against midnight.
+          const op = rawOp;
+          const coerced = this.coerceFilterValue(table, localField, opValue);
           if (columnExpr && this.applyNormalizedComparison(builder, logicalOp, columnExpr, op, coerced)) continue;
           switch (op) {
             case '$eq':
@@ -17076,7 +16717,8 @@ export class SqlDriver implements IDataDriver {
               // [#6050] The test was `coerced == null` — LOOSE, so it also
               // caught `undefined`, while the two polarity tables that must
               // pin THIS emitter's spelling (`operatorIsNullTotal`,
-              // `nullValueSatisfiesOperator`) read `=== null`. That split was
+              // `nullValueSatisfiesOperator` then; since #20822 the shared
+              // lowering's) read `=== null`. That split was
               // defect B: `{ $not: { d: { $ne: undefined } } }` compiled a
               // guarded tautology and answered `[]` where remote answered
               // `['3','4']`. Now that `undefined` is refused upstream the two
@@ -17312,7 +16954,8 @@ export class SqlDriver implements IDataDriver {
    * truth table into the predicate itself (`IS [NOT] NULL` conjuncts), which
    * buys the same property #5146 buys leaf-by-leaf for `$not`: a total
    * predicate's `NOT` is its exact complement, so the negation rewrite needs
-   * no guard here ({@link operatorIsNullTotal}'s cross-field arm) and every
+   * no guard here (the shared lowering's polarity table reads a `{ $field }`
+   * comparison as total) and every
    * combinator nesting composes. The cross-path conformance suite pins the
    * NULL rows on every operator, both polarities.
    *

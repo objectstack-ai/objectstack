@@ -348,6 +348,18 @@ export const ShowcaseTranslationBundle = {
         },
       },
     },
+    // Translated at birth, same rule as the widgets above: the done rate moved
+    // here from the delivery cube (#20943) as two new dataset measures, born
+    // under the ratchet. The task dataset's older labels predate it and stay in
+    // the frozen baseline.
+    datasets: {
+      showcase_task_metrics: {
+        measures: {
+          done_count: { label: 'Done Tasks' },
+          done_rate: { label: 'Done Rate' },
+        },
+      },
+    },
   },
   'zh-CN': {
     objects: {
@@ -1015,6 +1027,16 @@ export const ShowcaseTranslationBundle = {
             label: '任务状态',
             options: { backlog: '待办池', todo: '待处理', in_progress: '进行中', in_review: '审核中', done: '已完成' },
           },
+        },
+      },
+    },
+    // The done rate's two measures, translated at birth (#20943) — see the `en`
+    // block. The other task-dataset labels stay in the frozen baseline.
+    datasets: {
+      showcase_task_metrics: {
+        measures: {
+          done_count: { label: '已完成任务' },
+          done_rate: { label: '完成率' },
         },
       },
     },

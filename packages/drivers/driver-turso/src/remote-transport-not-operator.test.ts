@@ -5,7 +5,7 @@ import { RemoteTransport } from './remote-transport.js';
 import { TursoDriver } from './turso-driver.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
 import type { QueryAST } from '@objectstack/spec/data';
-import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
+import { lowerFilterCondition, markFilterSubtreeProvenance } from '@objectstack/spec/data';
 
 /**
  * Regression: the remote transport must compile the spec's THIRD logical
@@ -84,12 +84,11 @@ function transportWithCapturingClient() {
   };
   const t = new RemoteTransport();
   t.setClient(client as any);
-  // [#20039] The server-side half of a withheld refusal. Inside `$not` this
-  // transport compiles a REWRITE of the operand (the NULL-safe totalisation),
-  // whose nodes the provenance resolver cannot find under the query's root, so
-  // a refusal raised there is withheld even for an author-marked `where` —
-  // fail-closed by construction, as `driver-sql` documents for its own `$not`
-  // rewrite. The pins that read the naming half inside `$not` read it here.
+  // [#20039] The server-side half of a withheld refusal. [#20822] This
+  // transport no longer compiles a REWRITE of a `$not` operand (the NULL-safe
+  // totalisation is the shared lowering's, applied at the seams), so a refusal
+  // raised inside `$not` resolves against the caller's own marks like any
+  // other.
   const sink: string[] = [];
   t.setDiagnosticSink((m) => sink.push(m));
   return { t, calls, sink };
@@ -122,7 +121,7 @@ describe('RemoteTransport $not (#1076)', () => {
     it('compiles `$not: { stage: "won" }` to a negation, not to a field named $not', async () => {
       // Pre-fix: THREW `Filter on 'deal.$not' has an object comparand whose key
       // "stage" is not an operator`.
-      const call = await compile({ $not: { stage: 'won' } });
+      const call = await compile(seamed({ $not: { stage: 'won' } }));
       // [#5903] The `IS NOT NULL` conjunct is #5146's leaf-totalising guard: a
       // row with no `stage` does not satisfy `stage = 'won'`, so it must satisfy
       // the negation. Without it `NOT (NULL = ?)` is UNKNOWN and the row
@@ -151,7 +150,7 @@ describe('RemoteTransport $not (#1076)', () => {
     it('negates a multi-key inner condition as ONE group, like `whereNot` does', async () => {
       // `NOT (a AND b)`, never `NOT (a) AND b` — the inner object is one
       // condition and De Morgan is not the caller's intent.
-      const call = await compile({ $not: { stage: 'won', amount: 10 } });
+      const call = await compile(seamed({ $not: { stage: 'won', amount: 10 } }));
       // Each leaf is guarded independently and the four conjuncts stay inside
       // the ONE negated group — `NOT (a AND b)`, never `NOT (a) AND b`.
       expect(call.sql).toBe(
@@ -243,18 +242,19 @@ describe('RemoteTransport $not (#1076)', () => {
   describe('(c) nesting and double negation compile by recursion', () => {
     it('compiles `$not: { $not: {…} }` as two nested negations', async () => {
       // Pre-fix: THREW `Unsupported filter operator "$not" on 'deal.$not'`.
-      const call = await compile({ $not: { $not: { stage: 'won' } } });
-      // The INNER `$not` is left un-rewritten by the outer one on purpose: its
-      // own branch totalises its operand, and `NOT <total>` is itself total, so
-      // recursing would stack a redundant guard on the same column. The guard
-      // therefore appears exactly once, innermost.
+      const call = await compile(seamed({ $not: { $not: { stage: 'won' } } }));
+      // The guard appears exactly once, innermost: the shared lowering totalises
+      // the inner operand, and `NOT <total>` is itself total, so it stacks no
+      // redundant guard on the same column (#20822: it was this transport's own
+      // `$not` rewrite that made that choice, and the lowering's rule 3 makes
+      // the same one).
       expect(call.sql).toBe(`${BARE_SCAN} WHERE NOT (NOT ((("stage" IS NOT NULL) AND ("stage" = ?))))`);
       expect(call.args).toEqual(['won']);
       expectBindsBalanced(call);
     });
 
     it('compiles `$not` over a nested `$or`', async () => {
-      const call = await compile({ $not: { $or: [{ stage: 'won' }, { stage: 'lost' }] } });
+      const call = await compile(seamed({ $not: { $or: [{ stage: 'won' }, { stage: 'lost' }] } }));
       // De Morgan is sound over two-valued leaves, which is the whole reason the
       // guard rides each LEAF rather than the `NOT`: hoisting it above this
       // `$or` would let a NULL `stage` satisfy the negation even when the other
@@ -267,7 +267,7 @@ describe('RemoteTransport $not (#1076)', () => {
     });
 
     it('compiles `$not` over a nested `$and`', async () => {
-      const call = await compile({ $not: { $and: [{ stage: 'won' }, { amount: 10 }] } });
+      const call = await compile(seamed({ $not: { $and: [{ stage: 'won' }, { amount: 10 }] } }));
       expect(call.sql).toBe(
         `${BARE_SCAN} WHERE NOT ((((("stage" IS NOT NULL) AND ("stage" = ?))) AND ((("amount" IS NOT NULL) AND ("amount" = ?)))))`,
       );
@@ -275,7 +275,7 @@ describe('RemoteTransport $not (#1076)', () => {
     });
 
     it('carries operator maps through the negation with their binds in order', async () => {
-      const call = await compile({ $not: { amount: { $gte: 10, $lt: 100 } } });
+      const call = await compile(seamed({ $not: { amount: { $gte: 10, $lt: 100 } } }));
       // ONE guard for the whole field constraint, not one per operator: the
       // constraint is the AND of its operators, so a NULL column satisfies it
       // only if it satisfies all of them — and it satisfies neither bound.
@@ -301,7 +301,7 @@ describe('RemoteTransport $not (#1076)', () => {
       // What `cel-to-filter.ts` emits for `owner_id == user.id && !(stage ==
       // 'lost')`. Pre-fix the whole read THREW, so the scope was unusable on
       // Turso remote while working locally.
-      const call = await compile({ $and: [{ owner_id: 'u1' }, { $not: { stage: 'lost' } }] });
+      const call = await compile(seamed({ $and: [{ owner_id: 'u1' }, { $not: { stage: 'lost' } }] }));
       expect(call.sql).toBe(
         `${BARE_SCAN} WHERE (("owner_id" = ?) AND (NOT ((("stage" IS NOT NULL) AND ("stage" = ?)))))`,
       );
@@ -310,7 +310,7 @@ describe('RemoteTransport $not (#1076)', () => {
     });
 
     it('compiles a `$not` inside an `$or` branch', async () => {
-      const call = await compile({ $or: [{ $not: { stage: 'lost' } }, { owner_id: 'u1' }] });
+      const call = await compile(seamed({ $or: [{ $not: { stage: 'lost' } }, { owner_id: 'u1' }] }));
       expect(call.sql).toBe(
         `${BARE_SCAN} WHERE ((NOT ((("stage" IS NOT NULL) AND ("stage" = ?)))) OR ("owner_id" = ?))`,
       );
@@ -318,7 +318,7 @@ describe('RemoteTransport $not (#1076)', () => {
     });
 
     it('keeps a `$not` sibling of plain field keys at the same level', async () => {
-      const call = await compile({ owner_id: 'u1', $not: { stage: 'lost' } });
+      const call = await compile(seamed({ owner_id: 'u1', $not: { stage: 'lost' } }));
       // The guard stays INSIDE the negated group. This is the assertion that
       // fails if it were ever spliced into the node's bare ` AND ` join, where
       // a stray `OR` would bind looser than the AND and widen the whole filter.
@@ -411,13 +411,16 @@ describe('RemoteTransport $not (#1076)', () => {
         t.find('deal', { where: { $not: { amount: { $gt: { $field: 'budget' } } } } } as unknown as QueryAST),
       ).rejects.toThrow(/Cross-field comparison is not supported/);
       // #1073: a non-node element of a nested logical array.
-      // [#20039] Refused inside the `$not` rewrite, so withheld on the wire even
-      // for an author; the sink names the branch.
-      const { t: nested, sink } = transportWithCapturingClient();
+      // [#20039, #20822] Refused inside the `$not` operand the caller WROTE —
+      // this transport no longer compiles a rewrite of it (the NULL-safe
+      // totalisation is the shared lowering's, at the seams) — so the refusal
+      // resolves against the author's own mark and names the branch, as it does
+      // outside a `$not`. It used to be withheld even for an author, because
+      // the rewrite's nodes carried no mark.
+      const { t: nested } = transportWithCapturingClient();
       await expect(
         nested.find('deal', { where: own({ $not: { $or: [null] } }) } as unknown as QueryAST),
-      ).rejects.toThrow(/is not a filter condition object/);
-      expect(sink.join('\n')).toMatch(/\$or\[0\] on 'deal'/);
+      ).rejects.toThrow(/\$or\[0\] on 'deal'/);
     });
 
     it('executes no statement when it refuses', async () => {
@@ -436,7 +439,7 @@ describe('RemoteTransport $not (#1076)', () => {
   describe('(f) the same answers through every WHERE-building entry point', () => {
     it('negates on count / deleteMany / updateMany', async () => {
       const { t, calls } = transportWithCapturingClient();
-      const where = { $not: { stage: 'won' } };
+      const where = seamed({ $not: { stage: 'won' } });
       await t.count('deal', { where } as unknown as QueryAST);
       await t.deleteMany('deal', { where } as any);
       await t.updateMany('deal', { where } as any, { stage: 'lost' });
@@ -485,6 +488,28 @@ describe('RemoteTransport $not (#1076)', () => {
  * These run the compiled statements against a real SQLite database wearing the
  * libsql interface, the instrument #1066/#1073 used.
  */
+/** The declared field map of the `deal` object the real-rows block syncs. */
+const DEAL_FIELDS: Record<string, { type: string }> = {
+  stage: { type: 'string' },
+  owner_id: { type: 'string' },
+  amount: { type: 'number' },
+  closed_at: { type: 'datetime' },
+};
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5, 7 and 9, as amended] What a TYPED seam hands
+ * this driver: the filter through the shared lowering, reading the declared
+ * field map (`datetime` columns only for the whole-day rule; the NULL-polarity
+ * guards on every column). The remote face keeps no copy of either rule any
+ * more, so the real-rows cases below read the answer every seam-fed read gets;
+ * their expected rows are unchanged.
+ */
+const seamed = (where: unknown): unknown =>
+  lowerFilterCondition(where, {
+    isDatetimeColumn: (column) =>
+      Object.prototype.hasOwnProperty.call(DEAL_FIELDS, column) && DEAL_FIELDS[column]!.type === 'datetime',
+  });
+
 describe('TursoDriver remote — $not on real rows (#1076)', () => {
   let driver: TursoDriver;
   let stub: LibsqlSqliteStub;
@@ -494,15 +519,7 @@ describe('TursoDriver remote — $not on real rows (#1076)', () => {
     driver = new TursoDriver({ url: 'libsql://not-operator.turso.io', client: stub as never });
     await driver.connect();
     expect(driver.transportMode).toBe('remote');
-    await driver.syncSchema('deal', {
-      name: 'deal',
-      fields: {
-        stage: { type: 'string' },
-        owner_id: { type: 'string' },
-        amount: { type: 'number' },
-        closed_at: { type: 'datetime' },
-      },
-    });
+    await driver.syncSchema('deal', { name: 'deal', fields: DEAL_FIELDS });
     await driver.create('deal', { id: 'd_won', stage: 'won', owner_id: 'u1', amount: 10 });
     await driver.create('deal', { id: 'd_lost', stage: 'lost', owner_id: 'u1', amount: 20 });
     await driver.create('deal', { id: 'd_open', stage: 'open', owner_id: 'u2', amount: 30 });
@@ -517,7 +534,7 @@ describe('TursoDriver remote — $not on real rows (#1076)', () => {
   });
 
   const ids = async (where: unknown) =>
-    ((await driver.find('deal', { where } as unknown as QueryAST)) as any[]).map((r) => r.id).sort();
+    ((await driver.find('deal', { where: seamed(where) } as unknown as QueryAST)) as any[]).map((r) => r.id).sort();
 
   it('`$not: { stage: "won" }` returns the other rows, not a `no such column` error', async () => {
     // Pre-fix: threw before reaching SQLite; had it compiled, SQLite would have
@@ -589,6 +606,11 @@ describe('TursoDriver remote — $not on real rows (#1076)', () => {
     // `$not` reached the transport on the raw path, skipping the ADR-0053 D-E3
     // seam — which applies at every depth a condition can appear at.
     //
+    // [#20822] The rule is the shared lowering's now (`seamed`, above): it
+    // reaches every depth of the filter, `$not` included, before this driver
+    // sees it, and `toRemoteFilter` converts the lowered `$lt` bound to storage
+    // form at every depth. The answer is the one this case always pinned.
+    //
     // A bare `YYYY-MM-DD` upper bound on a `datetime` column compiles half-open
     // (`$lt` next-midnight, framework#3777) so the whole DAY is inside the
     // bound. Un-lowered it compares an instant against a bare day string and
@@ -630,7 +652,7 @@ describe('TursoDriver remote — $not on real rows (#1076)', () => {
     // Three since #5903 — `d_null` is inside the negation now, and a count that
     // disagreed with the list under it is exactly the local/remote split this
     // issue closed, wearing a total instead of a row set.
-    expect(await driver.count('deal', { where: { $not: { stage: 'won' } } })).toBe(3);
+    expect(await driver.count('deal', { where: seamed({ $not: { stage: 'won' } }) as QueryAST['where'] })).toBe(3);
     expect((await ids({ $not: { stage: 'won' } })).length).toBe(3);
     expect(await driver.count('deal', { where: { $not: {} } })).toBe(0);
   });

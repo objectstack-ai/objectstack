@@ -58,7 +58,18 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { SqlDriver } from './index.js';
 import type { FilterCondition } from '@objectstack/spec/data';
-import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
+import { lowerFilterCondition, markFilterSubtreeProvenance } from '@objectstack/spec/data';
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5 and 9, as amended] What a seam hands this
+ * driver: the filter through the shared lowering, whose rule 3 makes each
+ * `$not` leaf total in the direction its operator answers for a row with no
+ * value (#5146, #5298). The driver no longer carries its own copy of that
+ * rewrite, so the answers below are the ones every seamed read gets,
+ * unchanged. No column here is a declared `datetime`, so the whole-day rule has nothing
+ * to rewrite.
+ */
+const seamed = (where: unknown): unknown => lowerFilterCondition(where, { isDatetimeColumn: () => false });
 
 interface WireBearingError extends Error {
   code?: string;
@@ -91,14 +102,15 @@ describe('[#5347/#5348] SqlDriver refuses out-of-contract filter input', () => {
   const ids = async (where: unknown): Promise<string[]> => {
     const rows = await driver.find('deal', {
       fields: ['id'],
-      where: where as FilterCondition,
+      where: seamed(where) as FilterCondition,
     });
     return (rows as any[]).map((r) => String(r.id)).sort();
   };
 
   const refusalOf = async (where: unknown): Promise<WireBearingError> => {
     try {
-      await ids(where);
+      // A direct call: the refusals stand for a caller that passes no seam.
+      await driver.find('deal', { fields: ['id'], where: where as FilterCondition });
     } catch (e) {
       return e as WireBearingError;
     }
