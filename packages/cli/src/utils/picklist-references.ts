@@ -192,7 +192,7 @@ export function judgePicklistReferences(parsed: AnyRec): PicklistReferenceJudgem
   for (const judged of bodies) {
     for (const ref of referencesOf(judged)) {
       if (known.has(ref.picklist)) continue;
-      const names = `names picklist '${ref.picklist}', which no picklist in this stack declares`;
+      const names = `\`picklist: '${ref.picklist}'\` names no picklist this stack declares`;
       if (judged.outside.length === 0) {
         // `where` names the field and every printer leads the line with it, so
         // the message does not repeat it.
@@ -202,7 +202,7 @@ export function judgePicklistReferences(parsed: AnyRec): PicklistReferenceJudgem
           where: ref.where,
           path: ref.path,
           message:
-            `\`picklist\` ${names} (${quoteNames(declared)}), so the field has no list to take its ` +
+            `${names} (${quoteNames(declared)}), so the field has no list to take its ` +
             'options from.',
           hint:
             `Declare the list — \`picklists: [{ name: '${ref.picklist}', label, options }]\` in the stack, or a ` +
@@ -217,7 +217,7 @@ export function judgePicklistReferences(parsed: AnyRec): PicklistReferenceJudgem
           path: ref.path,
           // The notice printer shows no `where`, so this message names the field.
           message:
-            `${ref.where} ${names} — not judged: the package declaring the field depends on ` +
+            `${ref.where}: ${names} — not judged: the package declaring the field depends on ` +
             `${judged.outside.map((id) => `'${id}'`).join(', ')}, which this stack does not carry, ` +
             'and whose picklists this command cannot read.',
           hint:
