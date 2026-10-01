@@ -246,6 +246,18 @@ export class ApprovalsServicePlugin implements Plugin {
           ? sec.getReadableFields(object, context)
           : Promise.resolve(undefined);
       },
+      // [#20964] The masked-for-this-caller answer, from the same service: the
+      // read projection counts a masked field readable, so the service door
+      // narrows by both. A service without the member answers `undefined`
+      // here, which the redaction reads as "cannot tell" and fails closed on
+      // (`resolveReadableSnapshotFields`). The generic data door below is
+      // handed the service itself and reads the same member directly.
+      getQueryableFields: (object: string, context?: unknown) => {
+        const sec = fieldVisibility();
+        return sec && typeof sec.getQueryableFields === 'function'
+          ? sec.getQueryableFields(object, context)
+          : Promise.resolve(undefined);
+      },
     });
 
     // Record lock: block edits to a record while it has a pending request.
