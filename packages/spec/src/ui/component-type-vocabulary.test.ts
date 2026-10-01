@@ -137,9 +137,9 @@ describe('STRING_ARM_REGISTERED_TYPES ledger discipline', () => {
       // type — a ledger row there is dead weight.
       expect(hasReservedComponentNamespace(entry), entry).toBe(true);
       // An enum member or a map row is already known — a ledger row for one is
-      // a grandfather clause pretending to be an exemption. When
-      // `record:line_items` is measured into the map, this assertion forces
-      // its ledger row OUT in the same PR.
+      // a grandfather clause pretending to be an exemption. This assertion
+      // forced `record:line_items`'s ledger row OUT in the change that measured
+      // it into the map (#21142).
       expect(enumSet.has(entry), entry).toBe(false);
       expect(mapKeys.has(entry), entry).toBe(false);
     }
@@ -149,6 +149,23 @@ describe('STRING_ARM_REGISTERED_TYPES ledger discipline', () => {
     for (const entry of STRING_ARM_REGISTERED_TYPES) {
       expect(isKnownComponentType(entry), entry).toBe(true);
     }
+  });
+
+  /**
+   * #21142 — the ledger's one entry was measured into the map, and the
+   * discipline above forced it out. `record:line_items` stays KNOWN (the
+   * `component-type-unknown` rule still accepts it) through its row now, and
+   * it is still not an enum member: it reaches the type union through the open
+   * string arm, as `element:metadata_viewer` does. With the ledger empty the
+   * two loops above hold vacuously, which is why this pin names the type.
+   */
+  it('record:line_items is known through its ComponentPropsMap row, not the ledger', () => {
+    expect(STRING_ARM_REGISTERED_TYPES).not.toContain('record:line_items');
+    expect(Object.keys(ComponentPropsMap)).toContain('record:line_items');
+    expect(PageComponentType.options).not.toContain('record:line_items');
+    expect(hasReservedComponentNamespace('record:line_items')).toBe(true);
+    expect(isKnownComponentType('record:line_items')).toBe(true);
+    expect(KNOWN_COMPONENT_TYPE_CANDIDATES).toContain('record:line_items');
   });
 });
 
