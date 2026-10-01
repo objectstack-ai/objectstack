@@ -14900,8 +14900,9 @@ export class ObjectStackProtocolImplementation implements
      *
      * Kept under the REST door's 500-character client-message bound, past
      * which the tail is truncated. Characters before the item's name, save /
-     * removal: `flow` 411 / 404, `action` 380 / 373, `permission` 317 / 310 —
-     * so a name of up to 88 characters arrives whole for every row.
+     * removal: `flow` 411 / 404, `action` 365 / 358, `permission` 317 (its
+     * removal is the #6960 carve-out, never refused on this ground) — so a
+     * name of up to 88 characters arrives whole for every row (pinned).
      */
     private static readonly PACKAGED_BASE_REFUSAL_BY_REGIME: Readonly<
         Record<
