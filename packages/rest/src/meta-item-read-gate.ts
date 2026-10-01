@@ -68,6 +68,7 @@ import {
     organizationIdForMetaRead,
     type ObjectSchemaMaskPosture,
 } from '@objectstack/metadata-core';
+import { ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
 import { isEndpointMatchAuthority, selectServedEndpoints } from './served-endpoints.js';
 import { logError, logWarn } from './log.js';
 
@@ -1632,6 +1633,132 @@ export function isPublicAudienceRead(
     if (route !== 'list' && route !== 'item') return false;
     const folded = typeof type === 'string' ? pluralToSingular(type) : '';
     return folded === 'book' || folded === 'doc';
+}
+
+// ── The type-level read capability ────────────────────────────────────────────
+
+/**
+ * [#21087] The metadata types whose `/meta` READS require a platform
+ * capability — judged per TYPE, once, at each transport's `/meta` entry,
+ * before any store read; never per document.
+ *
+ * ## The rows, and why each capability
+ *
+ *  - `datasource` → `manage_platform_settings`. A datasource document is a
+ *    driver plus its connection configuration (host, port, database, the user
+ *    part of a URL, file paths) and the handle of its bound `sys_secret`. The
+ *    datasource family's own door — `GET /api/v1/datasources[/:name]`,
+ *    `admin-routes.ts` in `@objectstack/service-datasource`
+ *    (`DATASOURCE_ADMIN_CAPABILITY`) — serves exactly that configuration and
+ *    admits only this capability; its docblock records why a lower read gate
+ *    is wrong for this class of data. The `/meta` doors serve the same stored
+ *    document, so they admit the same callers.
+ *  - `external_catalog` → `manage_platform_settings`. The cached remote-schema
+ *    snapshot of a federated datasource: the same remote tables and columns
+ *    the federation family's read door (`GET /datasources/:name/external/tables`,
+ *    `FEDERATION_READ_CAPABILITY` in `./external-datasource-routes.ts`)
+ *    introspects live and admits only this capability for.
+ *
+ * Both rows follow the rule `FEDERATION_READ_CAPABILITY`'s docblock states for
+ * the federation twins: one operation reached through two mounted routes
+ * cannot admit two different sets of callers. ⛔ A row here names the
+ * capability the type's OWN door already requires — matched, never minted; a
+ * type with no such door has no row.
+ *
+ * ## Why per type, at the entry, and not an arm of the document gate
+ *
+ * Every document of a listed type is refused alike, so the verdict reads
+ * nothing but the caller and the type segment. Asked BEFORE the store read,
+ * the answer is the same for a name that exists and for one that does not, so
+ * the doors are no existence oracle — the property the datasource admin door
+ * has by refusing before its service is resolved. An arm of
+ * {@link createMetaItemReadGate} could not hold it: that gate runs after the
+ * fetch, and several doors answer absence before it is asked.
+ *
+ * ## Which requests
+ *
+ * Every READ — `GET` and `HEAD` — whose `:type` segment folds to a listed
+ * type, on every route shape: the list, the item read with each of its
+ * switches (`?state=draft`, `?preview=draft`, `?layers=`, `?package=`),
+ * `/published`, `/layers`, `/history`, `/audit`, `/diff` and `/references`.
+ * Uniform, for the reason the datasource admin door gives for gating even its
+ * static driver catalog: a family whose floor has one hole has to be read
+ * route by route. Writes are not judged here — the save door keeps its own
+ * admission (`metaWriteCapabilityVerdict`).
+ *
+ * Both transports ask {@link metaTypeReadRefusal} at their single `/meta`
+ * entry, right after the anonymous deny: `RestServer`'s guarded registrar
+ * (every route `registerMetadataEndpoints` mounts) and the runtime
+ * dispatcher's `handleMetadataRequest`. ⛔ A row added here reaches both; a
+ * check added in one transport alone is the split this module exists to close.
+ */
+export const META_TYPE_READ_CAPABILITIES: Readonly<Record<string, string>> = Object.freeze({
+    datasource: 'manage_platform_settings',
+    external_catalog: 'manage_platform_settings',
+});
+
+/**
+ * [#21087] Why a `/meta` read of a {@link META_TYPE_READ_CAPABILITIES} type is
+ * not served — DATA, written by each transport in its own envelope, like
+ * {@link MetaItemReadRefusal}. `401 UNAUTHENTICATED` (the shared anonymous-deny
+ * code) to a caller with no identity, `403 PERMISSION_DENIED` (the
+ * STANDARD-catalog code the datasource admin door answers) to one without the
+ * capability.
+ */
+export type MetaTypeReadRefusal =
+    | { status: 401; code: 'UNAUTHENTICATED'; message: string }
+    | { status: 403; code: 'PERMISSION_DENIED'; message: string };
+
+/**
+ * [#21087] THE type-level read admission of the `/meta` surface — see
+ * {@link META_TYPE_READ_CAPABILITIES} for the rows and the reasons.
+ *
+ * `method` is the request's verb (a transport that leaves it unset for a read
+ * passes `'GET'`), `type` the RAW `:type` segment — folded HERE, once, through
+ * both spellings the read paths resolve a type by (`canonicalMetaUrlType` and
+ * `pluralToSingular`), so `/meta/datasources` cannot fall outside the row
+ * `/meta/datasource` is in — and `caller` the request's resolved execution
+ * context.
+ *
+ * Answers `undefined` — go on, nothing sent — for a write, for an unlisted
+ * type, and for a caller whose resolved `systemPermissions` hold the row's
+ * capability. Otherwise the refusal. The message names the capability and
+ * nothing else: a refused caller learns which grant to ask for, never whether
+ * a name exists.
+ *
+ * ⛔ No `isSystem` arm. Both transports resolve a `/meta` caller from the
+ * request itself, and inbound HTTP never carries `isSystem`, so such an arm
+ * could only ever be dead — and the datasource admin door reads the held set
+ * alone, deliberately, so that the capability is the one policy. Admitting the
+ * same callers means asking the same question.
+ */
+export function metaTypeReadRefusal(
+    method: unknown,
+    type: unknown,
+    caller: unknown,
+): MetaTypeReadRefusal | undefined {
+    const verb = String(method ?? '').toUpperCase();
+    if (verb !== 'GET' && verb !== 'HEAD') return undefined;
+    if (typeof type !== 'string' || type.length === 0) return undefined;
+    const canonical = canonicalMetaUrlType(type);
+    const folded = Object.prototype.hasOwnProperty.call(META_TYPE_READ_CAPABILITIES, canonical)
+        ? canonical
+        : pluralToSingular(type);
+    if (!Object.prototype.hasOwnProperty.call(META_TYPE_READ_CAPABILITIES, folded)) return undefined;
+    const capability = META_TYPE_READ_CAPABILITIES[folded];
+    const ctx = caller && typeof caller === 'object'
+        ? caller as { userId?: unknown; systemPermissions?: unknown }
+        : undefined;
+    if (!ctx?.userId) {
+        return { status: ANONYMOUS_DENY_STATUS, code: ANONYMOUS_DENY_CODE, message: ANONYMOUS_DENY_MESSAGE };
+    }
+    const held = Array.isArray(ctx.systemPermissions) ? ctx.systemPermissions : [];
+    if (held.includes(capability)) return undefined;
+    return {
+        status: 403,
+        code: 'PERMISSION_DENIED',
+        message: `Reading ${folded} metadata requires the \`${capability}\` capability.`,
+    };
 }
 
 // ── The list route's unknown-type refusal ─────────────────────────────────────

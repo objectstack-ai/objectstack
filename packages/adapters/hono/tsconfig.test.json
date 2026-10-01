@@ -1,0 +1,75 @@
+// The TEST-layer type-check program (#20800 -- the last three packages of the
+// #4311 ledger, graduated by the #15048 / #15050 road: a sibling program named
+// by the `typecheck` script). `tsconfig.json` beside this one stays exactly as
+// it is: it is the BUILD config. `package.json`'s `typecheck` script NAMES this
+// sibling (`tsc --noEmit -p tsconfig.test.json`), because a config no script
+// invokes reads as coverage and delivers none.
+//
+// WHAT THE BUILD CONFIG ALREADY DID. `tsconfig.json` includes `src/**/*` with no
+// test exclusion, so the program that reads these tests always existed; the
+// package simply declared no `typecheck` script, so nothing ever ran it. That
+// is the `service-automation` / `service-cluster` shape, not the
+// exclude-and-compensate one, and AGENTS.md forbids ADDING such an exclusion.
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - MODULE SEMANTICS and `lib`, nothing else. vitest runs these files as ESM
+//     through esbuild on a Node that has the ES2022 builtins. `lib` keeps the
+//     build config's `DOM` / `DOM.Iterable` (a child's `lib` REPLACES the
+//     parent's, it does not merge) and adds ES2022 for the Node the suite runs
+//     on. The build leg of the script (`tsc --noEmit`) keeps the NodeNext
+//     reading of the same files.
+//   - STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`, `noUnusedParameters`,
+//     `noImplicitReturns`, `noFallthroughCasesInSwitch`, `rootDir`, `paths` and
+//     `types` are all INHERITED and none is re-declared. ⚠️ A child that declared
+//     its own `paths` would REPLACE the parent map, so this file declares none.
+//     Nothing here may loosen a type rule; if a test does not compile, that is
+//     the finding.
+//
+// MEASURED at f8178ffece (origin/main), the workspace closure built first
+// (`turbo run build --filter='@objectstack/hono^...'`), BEFORE any fix, once per
+// config (`tsc --noEmit --pretty false [--listFiles] -p <config>`):
+//
+//   program under this config     858 files (7 of them this package's `src`),
+//                                 all 5 of its `src/**/*.test.ts` in it
+//   BUILD config (tsconfig.json)  3  = TS2769 x2 + TS18046 x1
+//   THIS config                   3  = TS2769 x2 + TS18046 x1
+//
+// The two readings AGREE, so no config-tier pile; the 3 were code tier. All in
+// `hono.test.ts` (36, 69, 70): a bare `new Hono()` has Hono's default `Env`, which
+// declares no `Variables`, so `c.get('objectStack')` is typed as taking `never`
+// (TS2769 x2) and the `kernel` it returns is `unknown` (TS18046). The middleware
+// under test does `c.set('objectStack', kernel)`, so the two tests that read the
+// variable back now build their app as `new Hono<KernelEnv>()` with the variable
+// declared (`{ objectStack: { name: string } }`, the one field the test reads).
+// `objectStackMiddleware`'s `(c: any, next: any)` source signature was NOT touched.
+//
+// THESE 3 WERE NOT THE WHOLE PILE. With them fixed, THIS config reported 4 more:
+// TS2883 ("The inferred type of 'getDiscoveryInfo' cannot be named without a
+// reference to 'Procedure' from '.pnpm/@vitest+spy@4.1.11/...'") on the four
+// `vi.fn()` class fields of `src/__mocks__/runtime.ts`. tsc withholds
+// declaration-emit diagnostics while any semantic error stands, so the first
+// reading could not show them, and the BUILD config never shows them at all
+// (observed: exit 0 on the same file under NodeNext resolution; only this
+// config's `bundler` resolution reports it). The `DEBT` ledger's "3" was a count
+// of what the first config could see, not of what this layer holds. Repaired
+// at the cause, the same way as the others: the four fields are annotated
+// `Mock` (vitest's own mock type) instead of leaving the inferred type to name an
+// unexported pnpm-store path. No cast, no `@ts-expect-error`, no `src` change:
+// `src/__mocks__/runtime.ts` is a vitest alias target (`vitest.config.ts`), never
+// built or published (`tsup` enters `src/index.ts` alone).
+//
+// AFTER: 0 and 0. There is NO `test-typecheck-debt.json` beside this config, and
+// its ABSENCE is the zero: any error in any file here is red immediately, with no
+// ledger to be added to -- the same call `metadata-fs` and
+// `trigger-record-change` recorded.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

@@ -125,6 +125,13 @@ export * from './utils/temporal-comparand.js';
 // do not depend on each other, and each driver used to carry its own copy.
 export * from './utils/temporal-storage-form.js';
 
+// [#21007] …and the refusal a scalar comparison gets on a field stored as a
+// JSON column: the operator set and the words. `driver-sql` refuses it on
+// `where`, and `@objectstack/objectql` on the per-aggregation `filter` it
+// evaluates itself — one set and one sentence, here for the reason the entry
+// above gives.
+export * from './utils/json-column-operator-refusal.js';
+
 // [#12350 / ADR-0126 §4] THE activation-ledger row contract, parameterized by
 // `metadata_type`. Same reason as the two entries above: its consumers —
 // `@objectstack/objectql` (packaged actions) and

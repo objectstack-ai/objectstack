@@ -6,22 +6,23 @@
   "fixtures": {
     "$comment": "AREA-LEVEL standing fixtures. An item opts in with fixtures.provisioning = { use: \"<key>\", why: \"…\" }; the recipe is written ONCE here so several items do not carry drifting copies of the same call sequence. Recipes are runtime-provisioned (no repo file is touched, nothing to seed) and every call is grounded in framework source at the cited file:line — replay them literally, and if one 4xxs, re-read the citation before assuming the recipe rotted. Shape copied from qa-scratch-authz in areas/attachments-storage.json (#7716/#7670).",
     "qa-contributor-bound-member": {
-      "title": "A CONTRIBUTOR-BOUND member — an identity that reads a strict SUBSET of showcase_invoice rows (fresh sign-up + one sys_user_position row)",
+      "title": "A CONTRIBUTOR-BOUND member — an identity that reads a strict SUBSET of showcase_invoice rows (invited sign-up + one sys_user_position row)",
       "why": "Both-sides RLS needs a persona for whom a specific row is invisible while the object itself is readable. ⚠️ Neither seeded demo persona is that persona, and reaching for them is the trap this recipe closes — measured on 17.1.0 (#10257): Mei (phone.demo@example.com) holds NO position, so showcase_contributor never merges and showcase_invoice answers PERMISSION_DENIED — the OBJECT gate, no rows at all, not a subset; Ada (auditor.demo@example.com) holds `auditor` → showcase_auditor, which carries `showcase_invoice: { allowRead: true, viewAllRecords: true }` — VAMA bypasses record scope entirely, so she sees all 12 — also not a subset. The persona that IS a subset is a member bound to the `contributor` position: showcase_contributor grants read/create/edit on showcase_invoice while the `invoice_own_rows` RLS narrows selects to `owner == current_user.email`, and none of the seeded invoices are owned by a fresh sign-up. Nothing here needs a seed change or a repo file — the whole gap was that the recipe existed only as prose on one item, which is why a runner reached for the demo personas instead and recorded blocked(fixture).",
-      "provenance": "run #7629 (framework, 2026-08-11) drove search.rls-both-personas to 4/4 PASS on exactly this persona — 3 invoices visible to the member vs 15 to admin. Promoted from prose on that one item to a replayable area recipe by the 17.1.0 sweep (#10236 B1); the Mei/Ada measurements above are from #10257.",
+      "provenance": "run #7629 (framework, 2026-08-11) drove search.rls-both-personas to 4/4 PASS on exactly this persona — 3 invoices visible to the member vs 15 to admin. Promoted from prose on that one item to a replayable area recipe by the 17.1.0 sweep (#10236 B1); the Mei/Ada measurements above are from #10257. Step 1 re-pointed invite-first by #21060 after QA run #21056 met the invite_only default (403 SELF_REGISTRATION_CLOSED on an uninvited sign-up).",
       "app": "showcase",
       "requires": [
         "a stock dev boot — the position→permission-set bindings are created automatically at startup on `kernel:bootstrapped`, including ['contributor','showcase_contributor'] (examples/app-showcase/src/security/bind-position-sets.ts, POSITION_PERMISSION_SET_BINDINGS). ⛔ Do NOT hand-create a sys_position_permission_set row: it already exists, and a duplicate proves nothing about the merge",
         "system-context write access for the position binding (the sys_user_position insert) — the same pattern access-security.json's permission-set items already replay",
-        "an isolated boot (own port + file DB, dogfood §0); export OS_PORT=<port> as well as passing -p (RUNNER.md's connector self-URL fact) so unrelated flow noise does not pollute the run"
+        "an isolated boot (own port + file DB, dogfood §0); export OS_PORT=<port> as well as passing -p (RUNNER.md's connector self-URL fact) so unrelated flow noise does not pollute the run",
+        "an admin session to INVITE the step-1 address before step 1: POST /api/v1/auth/organization/invite-member {\"email\": \"<the step-1 address>\", \"role\": \"member\"}. The stock showcase declares no auth.audience, so its posture is the invite_only default, which answers an uninvited sign-up 403 SELF_REGISTRATION_CLOSED; a pending, unexpired sys_invitation row for the address is what admits it (an admin POST /api/v1/auth/admin/create-user is the other door, and answers mustChangePassword:true)"
       ],
       "sequence": [
         {
           "step": 1,
           "call": "POST /api/v1/auth/sign-up/email",
           "body": { "email": "qa-contributor@verify.test", "password": "<a fresh per-run password>", "name": "QA Contributor" },
-          "expect": "2xx with a session for a brand-new principal. This works on a stock dev boot — three identities were minted in one call each in #10257 — so the identity half needs no seed change. Use a UNIQUE email per run: a re-run against a live DB collides on the existing account.",
-          "source": "packages/plugins/plugin-auth (better-auth email sign-up); exercised end-to-end by access-security.record-share-grant-revoke, which was driven on minted A/B/C identities in #10257"
+          "expect": "2xx with a session for a brand-new principal — AFTER the admin invite in requires. Uninvited, a stock boot answers 403 SELF_REGISTRATION_CLOSED (the invite_only default; the three one-call mints #10257 recorded predate it). The identity half still needs no seed change. Use a UNIQUE email per run: a re-run against a live DB collides on the existing account.",
+          "source": "packages/plugins/plugin-auth (better-auth email sign-up; the invite_only gate admits an address holding a pending sys_invitation row); packages/spec/src/system/auth-config.zod.ts#AUDIENCE_POSTURES (invite_only is the undeclared default); exercised end-to-end by access-security.record-share-grant-revoke, which was driven on minted A/B/C identities in #10257"
         },
         {
           "step": 2,
@@ -44,7 +45,7 @@
         {
           "step": 5,
           "call": "give the member a row of their OWN: as the member, POST /api/v1/data/showcase_invoice (contributors hold allowCreate)",
-          "expect": "2xx, and that row IS visible to them on a re-read — turning the subset from empty into a proper non-empty one. This is what makes the restriction provably SUBTRACTIVE rather than a blackout; without it, zero-hits and no-access are indistinguishable.",
+          "expect": "2xx, and that row IS visible to them on a re-read — turning the subset from empty into a proper non-empty one. This is what makes the restriction provably SUBTRACTIVE rather than a blackout; without it, zero-hits and no-access are indistinguishable. Point the invoice's required `account` at a SEEDED account, never at one a consuming item later deletes: a required lookup turns set_null into restrict, so that delete answers 409 DELETE_RESTRICTED (records-forms.crud-roundtrip met it in QA run #21056).",
           "source": "ContributorPermissionSet.objects.showcase_invoice.allowCreate === true (permission-sets.ts); the seeded owner emails hold no credential, so borrowing a seeded owner is not an option — this is why the own-row is CREATED"
         }
       ],

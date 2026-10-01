@@ -890,7 +890,7 @@
       "title": "A non-admin reaches the full Approvals Inbox from the account app's Approvals entry",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P0",
       "surface": "browser",
       "personas": ["a NON-ADMIN business user who is a pending approver and has no Setup access"],
@@ -898,8 +898,8 @@
         "app": "showcase",
         "requires": [
           "a bundled console: packages/console/dist is absent in a fresh checkout — build it with `pnpm objectui:build` and confirm dist/.objectui-sha equals .objectui-sha before trusting anything in the browser (`pnpm check:console-sha` exits 0 when there is NO dist at all, so a green check does not prove a console is present)",
-          "a non-admin sign-in account holding only business positions (showcase: contributor + finance) — the seeded personas (Ada Auditor, Mei Phone) are sys_user rows with no better-auth account, so provision one at runtime",
-          "at least one pending request routed to that user (showcase: PATCH a draft invoice to status=sent + issued_on to launch showcase_invoice_signoff, whose finance/legal positions the persona holds)"
+          "a non-admin sign-in account holding only business positions (showcase: contributor + finance) — the seeded personas (Ada Auditor, Mei Phone) ARE loginable since #9308 (showcase123, examples/app-showcase/src/security/demo-personas.ts) but hold the wrong positions (Mei none, Ada auditor only), so provision one at runtime and invite each one first — the stock showcase declares no auth.audience, so the invite_only default answers an uninvited POST /api/v1/auth/sign-up/email 403 SELF_REGISTRATION_CLOSED; an admin POST /api/v1/auth/organization/invite-member for the address admits the sign-up (or admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true)",
+          "at least one pending request routed to that user (showcase: PATCH a draft invoice to status=sent + issued_on to launch showcase_invoice_signoff, whose finance/legal positions the persona holds). ⚠️ Launch a NEW one after the persona holds its positions: the sign-off requests seed-approval-demo.ts launches at boot were routed before the runtime persona held finance, so they never list it as a pending approver. Make that invoice one the persona OWNS — acceptance[5] needs a row whose record the persona can read"
         ]
       },
       "steps": [
@@ -920,7 +920,7 @@
           "evidence": "dist/.objectui-sha + the grep hit with surrounding bundle context"
         },
         {
-          "clause": "the entry renders the FULL inbox — tabs (待我审批 / 我发起的 / 全部), the request list and the drawer — not a component-not-found empty state",
+          "clause": "the entry renders the FULL inbox — tabs (en: My Pending / Submitted by me / All; zh-CN: 待我审批 / 我发起的 / 全部), the request list and the drawer — not a component-not-found empty state",
           "oracle": "screenshot",
           "verify": "screenshot the surface reached by clicking the nav entry; the tab strip and at least one request row must be visible. An empty state naming a missing component is a FAIL and means the side-effect import did not survive the bundle",
           "evidence": "screenshot + the landed URL"
@@ -946,13 +946,13 @@
         {
           "clause": "a record link in an inbox row keeps the CURRENT app segment — it never hard-codes setup or a foreign app",
           "oracle": "dom",
-          "verify": "after a screenshot confirms the list rendered, read the record link's href: it must be /apps/<the app the inbox is mounted in>/<objectName>/record/<recordId>. Landing on 'Record not found' is NOT automatically a routing failure — first check whether the approver can read that record at all (GET /api/v1/data/<object>/<id> as this persona); record-level invisibility is a separate finding, tracked at #7345",
+          "verify": "after a screenshot confirms the list rendered, read the record link's href: it must be /apps/<the app the inbox is mounted in>/<objectName>/record/<recordId>. ⚠️ Drive it on a row whose record this persona can READ — e.g. the persona-owned invoice from fixtures.requires: the inbox renders NO link at all for a record the viewer cannot open (href null, objectui ApprovalsInboxPage RecordCell), so an unreadable row cannot score this clause either way. Landing on 'Record not found' is NOT automatically a routing failure — first check whether the approver can read that record at all (GET /api/v1/data/<object>/<id> as this persona); record-level invisibility is a separate finding, tracked at #7345",
           "evidence": "the href + the persona's direct record read"
         },
         {
           "clause": "zh-CN wording is consistent: the nav entry reads 待我审批 and the inbox's tab / status vocabulary reads 待我审批 / 待审批",
           "oracle": "screenshot",
-          "verify": "set the console locale to zh and screenshot the nav entry and the inbox; nav label 待我审批, tab 待我审批, status badge 待审批",
+          "verify": "set the console language to 中文（中国） — code zh-CN, the language the showcase ships; the picker offers no bare zh entry here — and screenshot the nav entry and the inbox; nav label 待我审批, tab 待我审批, status badge 待审批",
           "evidence": "zh screenshots of nav + inbox"
         }
       ],
@@ -968,7 +968,8 @@
         "objectui apps/console/src/main.tsx + the approvals:inbox registration (objectui#4071)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-10", "change": "initial — the account-app entry had no checklist coverage; authored from the #7331 browser run that first drove it end to end against a dist built at pin 8aad9fd50b16", "ref": "#7331" }
+        { "revision": 1, "date": "2026-08-10", "change": "initial — the account-app entry had no checklist coverage; authored from the #7331 browser run that first drove it end to end against a dist built at pin 8aad9fd50b16", "ref": "#7331" },
+        { "revision": 2, "date": "2026-10-01", "change": "checklist-accuracy findings of QA run #21056: acceptance[6] names the zh-CN option (中文（中国）) — no bare zh exists; acceptance[1] gives the tab labels in both locales; acceptance[5] needs a row the persona can read, since unreadable rows render no link; fixtures.requires asks for a request launched after the persona holds finance (the boot-seeded ones were routed before). Also corrected while grounding: the seeded personas are loginable since #9308 — they hold the wrong positions, which is the real reason to provision one, invite-first under invite_only", "ref": "#21060" }
       ]
     },
     {
