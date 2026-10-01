@@ -61,11 +61,6 @@ import {
 // body column of `sys_metadata` / `sys_metadata_history` as a member is refused
 // here, on the one family seam, before any strategy runs.
 import { storedMetadataBodyAnalyticsRefusal } from './stored-metadata-body-refusal.js';
-// [#21177] The caller-content door refusal — a member the CALLER supplied at
-// query time whose text is not a column reference the admission can judge (an
-// inline dataset field expression, or a member spelling the authored cube does
-// not declare) is refused here, unconditionally and ahead of the field gate.
-import { assertDatasetContentJudgeable, assertQueryMembersJudgeable } from './caller-content-admission.js';
 // [#15768] The measure result-type rule — which aggregates return a value of
 // the aggregated field's own type, and which are numeric whatever they read.
 // Owned in its own module so the enumerated verdict per `AggregationFunction`
@@ -415,6 +410,21 @@ function resolveMemberSource(
 
 /** [#20917] A dotted identifier path: relationship hops, then one column — `NativeSQLStrategy`'s own test. */
 const IDENTIFIER_PATH = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$/;
+
+/**
+ * [#21177] Whether `sql` is a plain COLUMN REFERENCE the admission can attribute
+ * to a field — a bare identifier (`amount`), a relationship path ending in one
+ * (`account.region`), or `'*'` (the count wildcard, which reads no field value).
+ * The same grammar the field gate resolves with ({@link fieldsOfColumnSql}) and
+ * `@objectstack/spec`'s `CUBE_MEMBER_SQL` (the authored-cube contract since
+ * #20943). Anything else — whitespace, an operator, a paren, a quote, a subquery
+ * — is an expression this layer cannot attribute, so `NativeSQLStrategy` would
+ * compile it into its statement as written.
+ */
+function isColumnReferenceSql(sql: string): boolean {
+  const path = sql.trim();
+  return path === '*' || BARE_IDENTIFIER.test(path) || IDENTIFIER_PATH.test(path);
+}
 
 /**
  * [#20917] The fields a member's column `sql` reads, each on the object that
@@ -1658,21 +1668,6 @@ export class AnalyticsService implements IAnalyticsService {
       query.cube ? scope.getCube(query.cube) : undefined,
       query.cube ? reads.getDatasetScope(query.cube) : undefined,
     );
-    // [#21177] …and the caller-content refusal — also a hard product refusal,
-    // not a permission check, so it runs ahead of (and independent of) the
-    // field gate below whether or not a security provider is wired. A member
-    // the caller spelled that is not a column reference the admission can judge
-    // — a member the authored cube does not declare, compiled from the caller's
-    // own text — names no attributable field, so neither the object gate nor the
-    // field gate can judge what it reads; `NativeSQLStrategy` would compile it
-    // as written. It is an invalid request (`INVALID_FIELD` / 400), refused for
-    // every caller. A DECLARED member whose own `sql` is an expression is NOT
-    // caller content and is left to the field gate below (#20965). The inline
-    // dataset's own fields are the caller's text too, and are refused one step
-    // earlier, before compile (`answerDataset` → `assertDatasetContentJudgeable`).
-    // See `caller-content-admission.ts`.
-    const contentCube = query.cube ? scope.getCube(query.cube) : undefined;
-    if (contentCube) assertQueryMembersJudgeable(query, contentCube);
     // [#20917] …and the FIELD-level gate, right behind it and for the same
     // reason: every member the query names is judged here, once, so every
     // strategy — and the SQL echo — inherits the verdict by construction. The
@@ -2006,6 +2001,58 @@ export class AnalyticsService implements IAnalyticsService {
   }
 
   /**
+   * [#21177] An INLINE dataset's own dimension/measure `field` text is CALLER
+   * content at query time, and main does not judge it: {@link answerDataset}
+   * compiles the dataset into a cube whose members read as DECLARED, so a
+   * dimension/measure whose `field` is a raw expression resolves to a declared
+   * cube member whose `sql` is that expression — and #21156's
+   * {@link assertCallerMembersResolvable} leaves a DECLARED expression member to
+   * the field-level gate (#20965), which stands down with no security service and
+   * on an object its reader answers `undefined` for. In those tiers the
+   * expression reached `NativeSQLStrategy`'s statement as written.
+   *
+   * So the dataset's own `field` text is judged here, on the one judge: a `field`
+   * that is not a column reference is caller content the admission cannot
+   * attribute, so it is refused through main's {@link assertCallerMembersJudgeable}
+   * / {@link fieldReadUnjudgeableError} — `PERMISSION_DENIED` / 403, the SAME
+   * refusal #21156 reaches, no new error code — for EVERY caller (admin included)
+   * and whether or not a security provider is wired, BEFORE the dataset is
+   * compiled, so no caller expression reaches a strategy (the draft-preview branch
+   * included). It names the dimension/measure the caller spelled, never the
+   * `field` expression behind it.
+   *
+   * ## Boundary
+   *
+   * Only the dataset's OWN `field` text is caller content here. The dataset's
+   * `filter`, the selection's `runtimeFilter` and the query's members are lowered
+   * into the compiled query's `where` / member list by `DatasetExecutor` and are
+   * already judged by #21156 on the query path (`callCtx` →
+   * {@link assertCallerMembersResolvable}), so this gate does not re-judge them. A
+   * REGISTERED dataset's own field text is author text, queried by cube name
+   * through {@link query} and never through {@link answerDataset}; it stays with
+   * the field gate / the parse (#20943), exactly as #21156 leaves it.
+   *
+   * A derived measure references other measures BY NAME (the spec enforces that),
+   * so it carries no `field` to judge.
+   */
+  private assertInlineDatasetFieldsJudgeable(dataset: Dataset, context: ExecutionContext | undefined): void {
+    const object = typeof dataset.object === 'string' ? dataset.object : '';
+    const caller: NamedRead[] = [];
+    for (const d of dataset.dimensions ?? []) {
+      if (typeof d.field === 'string' && d.field !== '' && !isColumnReferenceSql(d.field)) {
+        caller.push({ object, member: d.name, expression: true, declared: false });
+      }
+    }
+    for (const m of dataset.measures ?? []) {
+      if ((m as { derived?: unknown }).derived) continue;
+      if (typeof m.field === 'string' && m.field !== '' && !isColumnReferenceSql(m.field)) {
+        caller.push({ object, member: m.name, expression: true, declared: false });
+      }
+    }
+    assertCallerMembersJudgeable(caller, this.logger, context);
+  }
+
+  /**
    * Resolve the read scope (tenant + RLS `FilterCondition`) for the base object
    * AND every object the query reads through a join or a relationship path,
    * keyed by object name. This is the async pre-pass that lets the synchronous
@@ -2322,15 +2369,12 @@ export class AnalyticsService implements IAnalyticsService {
     context?: ExecutionContext,
     options?: { previewDrafts?: boolean },
   ): Promise<AnalyticsResult> {
-    // [#21177] The inline dataset is caller content at query time: every
-    // dimension/measure `field`, the dataset's own filter and the selection's
-    // presentation filter are the caller's text, and a value that is not a
-    // column reference compiles into a strategy's statement as written. Refuse
-    // such a member here — `INVALID_FIELD` / 400, for every caller and whether
-    // or not a security provider is wired — BEFORE the dataset is compiled to a
-    // cube, so no caller expression ever reaches a strategy (the draft-preview
-    // branch below included). See `caller-content-admission.ts`.
-    assertDatasetContentJudgeable(dataset, selection);
+    // [#21177] The inline dataset's own dimension/measure `field` text is caller
+    // content at query time — refuse any that is not a column reference here,
+    // ahead of compile and the draft-preview branch, so no caller expression ever
+    // reaches a strategy (`PERMISSION_DENIED` / 403, the one judge, every tier).
+    // See {@link assertInlineDatasetFieldsJudgeable}.
+    this.assertInlineDatasetFieldsJudgeable(dataset, context);
     const compiled = this.compile(dataset);
     this.logger.debug(`[Analytics] queryDataset "${dataset.name}" (object=${dataset.object}, include=${(dataset.include ?? []).join(',') || '—'})`);
 

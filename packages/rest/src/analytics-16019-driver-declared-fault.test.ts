@@ -20,10 +20,11 @@
  * real `AnalyticsService` on the native-SQL strategy over a real better-sqlite3
  * `SqlDriver`, fed a dataset dimension whose expression called `translate()`, the
  * function SQLite lacks. That path is gone: #21177 refuses a caller-supplied
- * dimension/measure `field` that is not a column reference at the analytics door,
- * before any strategy or driver runs, so a raw `translate(...)` can no longer
- * reach the engine from caller content. The FIRST block now pins THAT — the door
- * refuses the expression `400 INVALID_FIELD` — beside a positive control that a
+ * inline-dataset dimension/measure `field` that is not a column reference at the
+ * analytics door, before any strategy or driver runs, so a raw `translate(...)`
+ * can no longer reach the engine from caller content. The FIRST block now pins
+ * THAT — the door refuses the expression `PERMISSION_DENIED` / 403, the one
+ * judge #21156 reaches (no new error code) — beside a positive control that a
  * legitimate dataset on declared fields is still served 200 by the real driver.
  *
  * The second block pins the ordering the ruling's execution notes name. A
@@ -47,8 +48,8 @@
  * producer's code); the neighbouring "phrase the heuristic does not know"
  * case stays GREEN, which is precisely why it could not stand in for this one.
  * The first block's leg: remove the caller-content gate and the expression
- * reaches the real driver again — the refusal flips from `400 INVALID_FIELD` to
- * the `500 DATABASE_ERROR` relay this file once asserted.
+ * reaches the real driver again — the refusal flips from `403 PERMISSION_DENIED`
+ * to the `500 DATABASE_ERROR` relay this file once asserted.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
@@ -216,19 +217,20 @@ describe('[#16019] a driver fault on the raw-SQL path reaches the caller by decl
     await driver.disconnect();
   });
 
-  it('[#21177] a caller-supplied dimension-field expression is refused 400 INVALID_FIELD at the door — before any strategy or driver runs', async () => {
+  it('[#21177] a caller-supplied dimension-field expression is refused 403 PERMISSION_DENIED at the door — before any strategy or driver runs', async () => {
     const route = buildRoute(async () => realAnalytics(driver));
     const res = await post(route, { dataset: expressionDataset, selection: { measures: ['account_count'], dimensions: ['folded_name'] } });
 
-    expect(res.statusCode).toBe(400);
-    expect(res.body.code).toBe('INVALID_FIELD');
-    // Caller text that names no attributable field is refused as invalid input,
+    expect(res.statusCode).toBe(403);
+    expect(res.body.code).toBe('PERMISSION_DENIED');
+    // Caller text that names no attributable field is refused at the door,
     // not evaluated — the driver never ran, so there is no driver fault line.
     expect(warned.filter((m) => m.includes('[sql-driver] DATABASE_ERROR'))).toHaveLength(0);
-    // ⛔ The refusal names the member, never the caller's expression text.
+    // ⛔ The refusal names the member and its object (both the caller's own
+    // input), never the caller's `field` expression text or the compiled statement.
     const body = JSON.stringify(res.body);
     expect(body).not.toMatch(/translate/i);
-    expect(body).not.toMatch(/SELECT|GROUP BY|crm_account/i);
+    expect(body).not.toMatch(/SELECT|GROUP BY/i);
   });
 
   it('POSITIVE CONTROL: a legitimate dataset on declared fields → 200 with rows', async () => {

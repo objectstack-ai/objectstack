@@ -312,10 +312,7 @@ const EXPRESSION_REFUSED: readonly ExpressionCase[] = [
   { label: 'a filtered expression member', query: { cube: 'fr_authored', measures: ['count'], where: { expression_flag: 1 } }, member: 'expression_flag' },
   { label: 'an expression member as an order key', query: { cube: 'fr_authored', measures: ['count'], dimensions: ['title'], order: { expression_flag: 'asc' } }, member: 'expression_flag' },
   { label: 'a declared member with no sql string', query: { cube: 'fr_no_sql', measures: ['count'], dimensions: ['bare'] }, member: 'bare' },
-  // [#21177] An UNDECLARED member the caller spells itself is CALLER content, not
-  // authored, and is refused one gate earlier — `INVALID_FIELD` / 400, for every
-  // caller — by the caller-content gate (`caller-content-admission*.test.ts`). The
-  // declared-member expression cases above are authored and stay the field gate's 403.
+  { label: 'a member the query names itself that is not a column reference', query: { cube: 'fr_authored', measures: ['count'], dimensions: [NAMED_EXPRESSION] }, member: NAMED_EXPRESSION },
 ];
 
 describe('[#20965] the field-level read gate — a member that names no field is refused, never stood down', () => {
@@ -331,19 +328,6 @@ describe('[#20965] the field-level read gate — a member that names no field is
   });
 
   describe.each(STRATEGY_PATHS)('$label', ({ capabilities }) => {
-    // [#21177] An undeclared member the caller spells itself is caller content:
-    // refused one gate earlier, `INVALID_FIELD` / 400 (not the field gate's 403),
-    // and for every caller — see `caller-content-admission-door.test.ts`.
-    it('a member the query names itself that is not a column reference is refused INVALID_FIELD / 400, before any strategy ran', async () => {
-      const { service, executed } = makeService({ capabilities, getReadableFields: readable });
-      const query = { cube: 'fr_authored', measures: ['count'], dimensions: [NAMED_EXPRESSION] };
-      for (const run of [() => service.query(query as never, CALLER), () => service.generateSql(query as never, CALLER)]) {
-        const refusal = await run().then(() => null, (e: unknown) => e as Record<string, unknown>);
-        expect(refusal).toMatchObject({ code: 'INVALID_FIELD', status: 400, member: NAMED_EXPRESSION });
-      }
-      expect(executed).toEqual([]);
-    });
-
     it.each(EXPRESSION_REFUSED)('$label: refused PERMISSION_DENIED / 403 on both doors, before any strategy ran, without the author\'s text', async ({ query, member }) => {
       const { service, executed } = makeService({ capabilities, getReadableFields: readable });
       for (const run of [() => service.query(query as never, CALLER), () => service.generateSql(query as never, CALLER)]) {
