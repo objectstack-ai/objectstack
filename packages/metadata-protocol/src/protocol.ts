@@ -190,6 +190,7 @@ import {
     redactStoredMetadataRow,
     redactStoredMetadataRows,
     storedMetadataBodyGroupingRefusal,
+    storedMetadataBodyPredicateRefusal,
     storedMetadataBodyProjection,
 } from './metadata-redaction.js';
 import type {
@@ -11695,6 +11696,25 @@ export class ObjectStackProtocolImplementation implements
         // unknown name keeps its own answer.
         const bodyGroupingRefusal = storedMetadataBodyGroupingRefusal(request.object, options.groupBy);
         if (bodyGroupingRefusal) throw bodyGroupingRefusal;
+        // [#21120] …and the FILTER / SORT half of the same family (maintainer
+        // ruling A): a predicate or an order key on the stored body column
+        // evaluates the body — a filter oracle that rebuilds a withheld
+        // credential by probing, or an order over the same bytes — so it is
+        // refused here, in the same shape as the grouping refusal, before the
+        // engine is asked. Field keys are collected the same way
+        // `assertFilterFieldsExist` reads them, so a nested-relation filter whose
+        // HEAD segment is the body column is caught too.
+        const aggregationFilterFields = Array.isArray(options.aggregations)
+            ? (options.aggregations as ReadonlyArray<{ filter?: unknown }>).flatMap((a) =>
+                  collectFilterFieldKeys(a?.filter))
+            : [];
+        const bodyPredicateRefusal = storedMetadataBodyPredicateRefusal(request.object, {
+            filterFields: [...collectFilterFieldKeys(options.where), ...aggregationFilterFields],
+            sortFields: Array.isArray(options.orderBy)
+                ? (options.orderBy as ReadonlyArray<{ field?: unknown }>).map((e) => e?.field)
+                : [],
+        });
+        if (bodyPredicateRefusal) throw bodyPredicateRefusal;
 
         // Route to engine.aggregate() when the query has GROUP BY / aggregations.
         // engine.find() does not do in-memory aggregation fallback, so without

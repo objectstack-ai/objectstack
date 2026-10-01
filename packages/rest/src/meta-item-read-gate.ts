@@ -1684,7 +1684,9 @@ export function isPublicAudienceRead(
  * Uniform, for the reason the datasource admin door gives for gating even its
  * static driver catalog: a family whose floor has one hole has to be read
  * route by route. Writes are not judged here — the save door keeps its own
- * admission (`metaWriteCapabilityVerdict`).
+ * admission (`metaWriteCapabilityVerdict`), and a write of a type whose own
+ * write door requires more is judged by the twin below
+ * ({@link metaTypeWriteRefusal}, #21124).
  *
  * Both transports ask {@link metaTypeReadRefusal} at their single `/meta`
  * entry, right after the anonymous deny: `RestServer`'s guarded registrar
@@ -1758,6 +1760,110 @@ export function metaTypeReadRefusal(
         status: 403,
         code: 'PERMISSION_DENIED',
         message: `Reading ${folded} metadata requires the \`${capability}\` capability.`,
+    };
+}
+
+// ── The type-level write capability ───────────────────────────────────────────
+
+/**
+ * [#21124] The metadata types whose `/meta` WRITES require a platform
+ * capability beyond the authoring admission every write door already asks
+ * (`metaWriteCapabilityVerdict`) — the write-side twin of
+ * {@link META_TYPE_READ_CAPABILITIES}, judged the same way: per TYPE, once, at
+ * each transport's `/meta` entry, before any handler resolves the protocol or
+ * writes the store; never per document.
+ *
+ * ## The row, and why the capability
+ *
+ *  - `datasource` → `manage_platform_settings`. The datasource family's own
+ *    write doors — `POST /api/v1/datasources`, `PATCH` and `DELETE
+ *    /api/v1/datasources/:name` (`admin-routes.ts` in
+ *    `@objectstack/service-datasource`, `DATASOURCE_ADMIN_CAPABILITY`) —
+ *    create, update and remove the same stored definition a `/meta` write of
+ *    this type persists, and admit only this capability. One operation reached
+ *    through two mounted doors cannot admit two different sets of callers.
+ *
+ * ## Why `external_catalog` has no row here
+ *
+ * Its READ row exists because its read door requires
+ * `manage_platform_settings`. Its WRITE door — `POST
+ * /datasources/:name/external/refresh-catalog` — requires
+ * `FEDERATION_WRITE_CAPABILITY` (`manage_metadata`, in
+ * `./external-datasource-routes.ts`), which every `/meta` write door already
+ * demands. ⛔ A row here names the capability the type's own WRITE door
+ * requires — matched, never minted; a type whose write door asks nothing beyond
+ * the authoring admission has no row.
+ *
+ * ## Which requests
+ *
+ * Every write verb — `PUT`, `POST`, `PATCH`, `DELETE` — whose `:type` segment
+ * folds to a listed type, on every route shape: the item save in each of its
+ * modes (a draft included), the reset, `/publish` and `/rollback`, and any
+ * write verb a transport answers on a read route. A route with no `:type`
+ * segment (`POST /meta/_migrate-stored`) is not judged here. The authoring
+ * admission still runs after this one: a holder of the capability is also
+ * asked for `manage_metadata` by the door itself, as before.
+ */
+export const META_TYPE_WRITE_CAPABILITIES: Readonly<Record<string, string>> = Object.freeze({
+    datasource: 'manage_platform_settings',
+});
+
+/** The verbs {@link metaTypeWriteRefusal} judges. */
+const META_WRITE_VERBS: ReadonlySet<string> = new Set(['PUT', 'POST', 'PATCH', 'DELETE']);
+
+/**
+ * [#21124] Why a `/meta` write of a {@link META_TYPE_WRITE_CAPABILITIES} type is
+ * not taken — the same two arms, envelope and codes as
+ * {@link MetaTypeReadRefusal}.
+ */
+export type MetaTypeWriteRefusal = MetaTypeReadRefusal;
+
+/**
+ * [#21124] THE type-level write admission of the `/meta` surface — see
+ * {@link META_TYPE_WRITE_CAPABILITIES} for the row and the reason.
+ *
+ * Same inputs and same folding as {@link metaTypeReadRefusal}: `method` the
+ * request's verb, `type` the RAW `:type` segment (folded here through
+ * `canonicalMetaUrlType` and `pluralToSingular`, so `/meta/datasources`
+ * cannot fall outside the row `/meta/datasource` is in), `caller` the
+ * request's resolved execution context.
+ *
+ * Answers `undefined` — go on, nothing sent — for a read verb, for an unlisted
+ * type, and for a caller whose resolved `systemPermissions` hold the row's
+ * capability. Otherwise the refusal, decided before the door resolves the
+ * protocol, so nothing is written and the answer is the same whether or not
+ * the named item exists. The message names the capability and nothing else.
+ *
+ * ⛔ No `isSystem` arm, for the reason {@link metaTypeReadRefusal} gives:
+ * inbound HTTP never carries `isSystem`, and the datasource admin door reads
+ * the held set alone.
+ */
+export function metaTypeWriteRefusal(
+    method: unknown,
+    type: unknown,
+    caller: unknown,
+): MetaTypeWriteRefusal | undefined {
+    const verb = String(method ?? '').toUpperCase();
+    if (!META_WRITE_VERBS.has(verb)) return undefined;
+    if (typeof type !== 'string' || type.length === 0) return undefined;
+    const canonical = canonicalMetaUrlType(type);
+    const folded = Object.prototype.hasOwnProperty.call(META_TYPE_WRITE_CAPABILITIES, canonical)
+        ? canonical
+        : pluralToSingular(type);
+    if (!Object.prototype.hasOwnProperty.call(META_TYPE_WRITE_CAPABILITIES, folded)) return undefined;
+    const capability = META_TYPE_WRITE_CAPABILITIES[folded];
+    const ctx = caller && typeof caller === 'object'
+        ? caller as { userId?: unknown; systemPermissions?: unknown }
+        : undefined;
+    if (!ctx?.userId) {
+        return { status: ANONYMOUS_DENY_STATUS, code: ANONYMOUS_DENY_CODE, message: ANONYMOUS_DENY_MESSAGE };
+    }
+    const held = Array.isArray(ctx.systemPermissions) ? ctx.systemPermissions : [];
+    if (held.includes(capability)) return undefined;
+    return {
+        status: 403,
+        code: 'PERMISSION_DENIED',
+        message: `Writing ${folded} metadata requires the \`${capability}\` capability.`,
     };
 }
 

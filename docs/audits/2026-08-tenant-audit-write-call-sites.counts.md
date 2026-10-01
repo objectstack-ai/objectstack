@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 218 |
+| Write call sites | 219 |
 | Object name statically decidable | 144 |
-| Object name chosen at run time | 74 |
+| Object name chosen at run time | 75 |
 | Against a tenancy-enabled object | 143 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 134 |
+| Threading a tenant context | 135 |
 | Provably carrying none | 17 |
 | …and decidably tenancy-enabled | 9 |
 | Options argument unreadable | 67 |
 | …and decidably tenancy-enabled | 34 |
-| Threading a decidably elevated context | 99 |
+| Threading a decidably elevated context | 100 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 102 |
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-09-25 at `62171c25e`.
+Measured on 2026-10-01 at `752173845`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 572 |
-| engine-shaped types recognised | 61 |
+| tracked non-test sources scanned | 586 |
+| engine-shaped types recognised | 64 |
 | declared objects in the registry | 115 |
-| same-named calls subtracted as non-engine | 144 |
+| same-named calls subtracted as non-engine | 145 |
 
 ## Every site
 
@@ -116,6 +116,7 @@ Measured on 2026-09-25 at `62171c25e`.
 | `packages/plugins/plugin-approvals/src/backfill-platform-row-organizations.ts` | `update` | `objectPlan.object` | undecidable | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-audit/src/auth-event-audit.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-audit/src/read-audit.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
+| `packages/plugins/plugin-audit/src/stored-metadata-body-migration.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/admin-import-users.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-auth/src/admin-import-users.ts` | `update` | `sys_user` | enabled | options unreadable | 2 |
 | `packages/plugins/plugin-auth/src/admin-set-user-manager.ts` | `update` | `sys_user` | enabled | context, elevation undecidable | 1 |

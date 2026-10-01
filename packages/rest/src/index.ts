@@ -118,6 +118,11 @@ export { refuseRepeatedQueryParams, repeatedQueryParamMessage } from './query-mu
 // `/meta` entry, before any store read (`metaTypeReadRefusal` over
 // `META_TYPE_READ_CAPABILITIES`): a datasource-family type is read under the
 // capability its own door requires.
+//
+// [#21124] …and its write-side twin (`metaTypeWriteRefusal` over
+// `META_TYPE_WRITE_CAPABILITIES`), asked at the same two entries before any
+// store write: a datasource definition is written under the capability the
+// datasource admin door requires.
 export {
     createMetaBookTreeAnswer,
     createMetaItemAnswer,
@@ -127,11 +132,13 @@ export {
     createMetaListAnswer,
     isPublicAudienceRead,
     META_TYPE_READ_CAPABILITIES,
+    META_TYPE_WRITE_CAPABILITIES,
     metaCallerOrganizationId,
     metaItemLayersDeprecationHeaders,
     metaReadOrganizationId,
     metaRequestLocale,
     metaTypeReadRefusal,
+    metaTypeWriteRefusal,
     projectMetaObjectSchema,
     refuseUnknownMetaListType,
     STORED_VERSION_DOOR_POLICY,
@@ -159,4 +166,5 @@ export type {
     MetaReadGatePolicy,
     MetaRequestHttp,
     MetaTypeReadRefusal,
+    MetaTypeWriteRefusal,
 } from './meta-item-read-gate.js';

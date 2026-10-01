@@ -41,9 +41,28 @@
  * pinyin (`zhangwei`) and initials (`zw`) hit CJK names. Purely additive:
  * `resolveSearchFields` still returns only source fields (the companion is
  * invisible to `$searchFields` overrides and to clients).
+ *
+ * [#21009] A field the object declares MULTI-VALUED (`isMultiValueField`: a
+ * `tags` / `multiselect` / `checkboxes` field, or a `select` / `lookup` /
+ * `user` / … declared `multiple: true`) is matched by MEMBERSHIP, `$contains`,
+ * never by `$icontains` or `$in`. Such a field is stored as a JSON array, and
+ * every operator but the membership pair is refused on it with `INVALID_FILTER`
+ * / 400 (`@objectstack/core`'s `JSON_COLUMN_INCOMPATIBLE_OPERATORS`) — so one
+ * multi-valued field in the resolved set used to fail the WHOLE search: a label
+ * term's `$in` was refused on every dialect, and the raw `$icontains` was
+ * refused too once the text family joined that set (before it, PostgreSQL
+ * answered it with a 500 and SQLite matched substrings of the serialized
+ * array). The label → value mapping still applies: each matched option value
+ * becomes one `$contains` clause in the term's `$or`, and a term matching no
+ * label — or a field with no options, such as `tags` or a multi-valued lookup
+ * — becomes `$contains: term`. The visible cost: a term must EQUAL a member,
+ * or match an option label, to hit a multi-valued field. The declaration is
+ * read from the field map the engine already passes in (`fields`), whose
+ * entries are the object's full field definitions — `multiple` included.
  */
 
 import {
+  isMultiValueField,
   resolveSearchFields,
   SEARCHABLE_ENUM_TYPES,
   type SearchFieldMeta,
@@ -98,7 +117,24 @@ function optionValuesMatching(meta: SearchFieldMeta, term: string): unknown[] {
   return out;
 }
 
+/**
+ * [#21009] Does the object declare this search field multi-valued? Asked of the
+ * field definition the engine handed in: `SearchFieldMeta` names only what the
+ * field RESOLUTION reads, but each entry of `fields` is the object's whole
+ * field definition, so its `multiple` flag is there to read.
+ */
+function isMultiValuedSearchField(meta: SearchFieldMeta): boolean {
+  const { type, multiple } = meta as SearchFieldMeta & { multiple?: unknown };
+  return typeof type === 'string' && isMultiValueField({ type, multiple: multiple === true });
+}
+
 function fieldClausesForTerm(field: string, term: string, meta: SearchFieldMeta): any[] {
+  // [#21009] Membership on a multi-valued field — see the module header.
+  if (isMultiValuedSearchField(meta)) {
+    const values = optionValuesMatching(meta, term).filter((v) => v !== null && v !== undefined);
+    if (values.length > 0) return values.map((v) => ({ [field]: { $contains: String(v) } }));
+    return [{ [field]: { $contains: term } }];
+  }
   if (SEARCHABLE_ENUM_TYPES.has(meta?.type ?? '')) {
     const values = optionValuesMatching(meta, term);
     // The label→value path is already case-insensitive in JS (see
