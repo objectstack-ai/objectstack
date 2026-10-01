@@ -32,6 +32,7 @@ import { strictUnknownKeyError } from '../shared/suggestions.zod';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { ACTION_TARGET_ALIASES } from './action-target-aliases';
 
 /**
  * Semantic near-misses — a different **word** for the same intent, usually
@@ -857,7 +858,10 @@ const actionObject = () => strictObject({
     title: 'label', displayName: 'label', text: 'label',
     object: 'objectName', entity: 'objectName',
     actionType: 'type',
-    url: 'target', endpoint: 'target', path: 'target', href: 'target',
+    // The executor-target family lives in ONE table the `action:button` /
+    // `action:icon` rows read too (`action-target-aliases.ts`), so the action
+    // and the blocks that run it print the same rename (#21005).
+    ...ACTION_TARGET_ALIASES,
     parameters: 'params', args: 'params', inputs: 'params', fields: 'params',
     confirm: 'confirmText', confirmation: 'confirmText', confirmMessage: 'confirmText',
     success: 'successMessage', successText: 'successMessage', toast: 'successMessage',

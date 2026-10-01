@@ -28,6 +28,7 @@ import {
   EmptyStateSchema,
 } from './view.zod';
 import { InlineActionSchema, ActionLocationSchema } from './action.zod';
+import { ACTION_TARGET_ALIASES } from './action-target-aliases';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 import { lazySchema } from '../shared/lazy-schema';
@@ -2929,8 +2930,22 @@ const BUTTON_PRIMITIVE_SIZES = ['default', 'sm', 'lg', 'icon'] as const;
  * - `visibleWhen` / `visibility` → `visible`: the `record:alert` pair. The
  *   renderer evaluates `visible` itself, so an author bringing the node
  *   spelling down into this bag is reaching for exactly that key.
+ * - `url` / `endpoint` / `path` / `href` → `target`: `ActionSchema`'s own
+ *   rename for the executor target, read from the one table both files share
+ *   (`ACTION_TARGET_ALIASES`, `action-target-aliases.ts`) so the rows and the
+ *   action print the same prescription. `endpoint` was a declared key of both
+ *   rows until #21005 — forwarded by the renderers, read by no console `api`
+ *   handler (those read `target` only), so an `endpoint` the rows accepted
+ *   called nothing. A stored one is rewritten to `target` by the D2
+ *   conversion `action-block-endpoint-to-target`. Without the table the rows
+ *   answered `path` with the edit-distance guess `patch`, which parses.
  */
-const ACTION_NODE_ALIASES = { type: 'actionType', visibleWhen: 'visible', visibility: 'visible' } as const;
+const ACTION_NODE_ALIASES = {
+  type: 'actionType',
+  visibleWhen: 'visible',
+  visibility: 'visible',
+  ...ACTION_TARGET_ALIASES,
+} as const;
 
 /**
  * Read-but-not-authorable keys shared by `action:button` and `action:icon`,
@@ -2972,18 +2987,26 @@ const ACTION_NODE_GUIDANCE = {
  *   list and an object is the static values. (A node-level object `params`
  *   outside `properties` is ignored with a development warning.)
  * - Forwarded to the runner (`:215-311`): `description`, `target`, `openIn`,
- *   `endpoint`, `method`, `bodyExtra`, `bodyShape`, `operation`, `patch`,
+ *   `method`, `bodyExtra`, `bodyShape`, `operation`, `patch`,
  *   `confirmText`, `successMessage`, `errorMessage`, `refreshAfter`,
  *   `undoable`, `recordIdField`, `locations`, `toast`, `resultDialog`,
  *   `onSuccess`, `objectName`.
  *
- * The registration's `inputs` (`:414-551`) publish twenty-seven of these
- * twenty-nine keys since objectui#11168 slice 1 (at `db11afd49` they published
- * seven, `:395-416`); the two left unpublished are `endpoint` and `undoable`,
- * each still forwarded (`:215-311`), on objectui's measurement that the
- * console's own `api` handler reads `target` and never `endpoint`, and that
- * the runner offers Undo only with a host row stash this block never writes.
- * It also publishes `className`, which is read but is a node key.
+ * NOT declared, though forwarded: `endpoint`. Both console runtimes register
+ * their own `api` handler, which reads `action.target || action.name` and
+ * never `endpoint`, so an `endpoint` written here reached the runner and
+ * called nothing. Refused since #21005 with `ActionSchema`'s rename onto
+ * `target` (`ACTION_NODE_ALIASES` above) — one concept, one spelling, one
+ * verdict on the action and on the block that runs it.
+ *
+ * The registration's `inputs` (`:414-551`) publish twenty-seven of the
+ * twenty-nine keys the renderer forwards or reads since objectui#11168 slice 1
+ * (at `db11afd49` they published seven, `:395-416`); the two left unpublished
+ * are `endpoint` (refused here, above) and `undoable`, each still forwarded
+ * (`:215-311`), on objectui's measurement that the console's own `api` handler
+ * reads `target` and never `endpoint`, and that the runner offers Undo only
+ * with a host row stash this block never writes. It also publishes
+ * `className`, which is read but is a node key.
  */
 export const ActionButtonPropsSchema = lazySchema(() => strictObject({
   surface: 'this `action:button`',
@@ -3016,7 +3039,6 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
     .describe('Executor target, forwarded to the runner: the URL, script name, flow name or API endpoint, per `actionType`'),
   openIn: z.enum(['self', 'new-tab']).optional()
     .describe('For a `url` action: `self` navigates in place, `new-tab` opens a new browser tab'),
-  endpoint: z.string().optional().describe('API endpoint for an `api` action, forwarded to the runner'),
   method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
   bodyExtra: z.unknown().optional().describe('Static request-body fields for an `api` action, forwarded to the runner'),
   bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
@@ -3066,9 +3088,12 @@ export type ActionButtonPropsParsed = z.infer<typeof ActionButtonPropsSchema>;
  *   renderer default `ghost`.
  * - `params` — `:143-146`, routed exactly as on `action:button`.
  * - Forwarded (`:160-208`): `actionType`, `name`, `target`, `openIn`,
- *   `endpoint`, `method`, `bodyExtra`, `bodyShape`, `operation`, `patch`,
+ *   `method`, `bodyExtra`, `bodyShape`, `operation`, `patch`,
  *   `confirmText`, `successMessage`, `errorMessage`, `refreshAfter`,
  *   `locations`, `toast`, `resultDialog`, `onSuccess`, `objectName`.
+ * - `endpoint` is forwarded too and NOT declared, for `action:button`'s
+ *   reason: no console `api` handler reads it. Refused with `ActionSchema`'s
+ *   rename onto `target`, through the same `ACTION_NODE_ALIASES` (#21005).
  */
 export const ActionIconPropsSchema = lazySchema(() => strictObject({
   surface: 'this `action:icon`',
@@ -3103,7 +3128,6 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
     .describe('Executor target, forwarded to the runner: the URL, script name, flow name or API endpoint, per `actionType`'),
   openIn: z.enum(['self', 'new-tab']).optional()
     .describe('For a `url` action: `self` navigates in place, `new-tab` opens a new browser tab'),
-  endpoint: z.string().optional().describe('API endpoint for an `api` action, forwarded to the runner'),
   method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
   bodyExtra: z.unknown().optional().describe('Static request-body fields for an `api` action, forwarded to the runner'),
   bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
