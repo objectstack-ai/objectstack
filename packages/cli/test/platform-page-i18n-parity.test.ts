@@ -288,10 +288,13 @@ const walkParityPage = (): Record<string, any> => ({
               'bare-component-id-string',
               null,
             ],
-            // NOT descended by `translatePage`: `body`/`footer` are a
-            // renderer-side back-compat fallback, not an authorable
-            // composition spelling.
+            // NOT descended by `translatePage`: `body` is the retired
+            // spelling (#5775) — a renderer-side back-compat fallback, not an
+            // authorable composition spelling.
             body: [{ id: 'card_body_child', type: 'object-metric', properties: { title: 'Body child' } }],
+            // DESCENDED since #20940 — `footer` is a declared, rendered slot,
+            // one of the positions spec's `pageComponentSlotPositions()`
+            // derives from the component rows.
             footer: [{ id: 'card_footer_child', type: 'object-metric', properties: { title: 'Footer child' } }],
             // DESCENDED since #16772 — a `page:tabs` / `page:accordion`
             // panel's `items[].children`, one level below the container.
@@ -375,19 +378,21 @@ describe('i18n-extract ↔ translatePage walk parity (#13109)', () => {
   it('pins the two sets by name, so a shape that stops being reachable is visible', () => {
     const page = walkParityPage();
     expect([...idsExtractorOffers(page)].sort()).toEqual([
-      'card', 'inner_flex', 'kpi_1', 'kpi_deep', 'kpi_label', 'nested_header', 'region_metric',
-      'slot_child', 'slot_list_child', 'tab_child',
+      'card', 'card_footer_child', 'inner_flex', 'kpi_1', 'kpi_deep', 'kpi_label', 'nested_header',
+      'region_metric', 'slot_child', 'slot_list_child', 'tab_child',
     ]);
-    // `card_body_child` and `card_footer_child` are absent from BOTH sides —
-    // the shapes `translatePage` does not descend. `tab_child`, `slot_child`
-    // and `slot_list_child` are present on BOTH sides since #16772 widened
-    // the shared walk to `items[].children` and to the `slots.<slot>` roots.
+    // `card_body_child` is absent from BOTH sides — the retired spelling
+    // `translatePage` does not descend. `card_footer_child` is present on BOTH
+    // sides since #20940 moved the shared walk onto the rows' one derived slot
+    // list, which names `footer`. `tab_child`, `slot_child` and
+    // `slot_list_child` are present on BOTH sides since #16772 widened the
+    // shared walk to `items[].children` and to the `slots.<slot>` roots.
     // `hdr` — the region-level `page:header` — is absent from BOTH sides since
     // the ruling. `nested_header` stays: a `page:header` inside a container is
     // reached by the id route only, so the id key is the only key it has.
     expect([...idsResolverApplies(page)].sort()).toEqual([
-      'card', 'inner_flex', 'kpi_1', 'kpi_deep', 'kpi_label', 'nested_header', 'region_metric',
-      'slot_child', 'slot_list_child', 'tab_child',
+      'card', 'card_footer_child', 'inner_flex', 'kpi_1', 'kpi_deep', 'kpi_label', 'nested_header',
+      'region_metric', 'slot_child', 'slot_list_child', 'tab_child',
     ]);
   });
 
