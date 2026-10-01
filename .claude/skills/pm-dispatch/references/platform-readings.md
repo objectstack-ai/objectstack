@@ -32,7 +32,7 @@
 - 它跑 `git merge` 的 merge-ort ⇒ 注册 `merge=os-regen` 的克隆照用驱动,未注册的退回文本合并。
 - 注册按克隆(`pnpm install` 的 prepare),服务端一个驱动都不跑 ⇒ 两侧答的不是同一个问题。
 - 驱动接手的路径上 exit 0 只说内容判断被推迟,⛔ 不是无冲突:它对内容什么都没说。
-- ⇒ 对照复现的是被测条件不只是命令:冲突证明从无驱动裸克隆 `clone --bare --shared` 探。
+- ⇒ 冲突证明探无驱动裸克隆,配方与读法见 `scripts/pm/os-regen-merge.sh`:exit 1 无树 id = 缺对象
 - ⛔ 永不用 `-c merge.os-regen.driver=` 覆盖:驱动不是被关掉而是跑失败,路由路径全报冲突。
 - 入队决策点才整对象 `get` 一次;挂了 flip 定点到点读,⛔ 不又查又等。
 - 状态核验用最小字段(search/list 加 `fields`)或等事件。
