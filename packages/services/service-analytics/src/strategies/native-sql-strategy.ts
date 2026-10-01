@@ -30,6 +30,11 @@ import { nextUtcCalendarDay, resolveAnalyticsDateRangeString, isUnboundedAbove }
 // [#20889] What each aggregate function ANSWERS, and the `'number'` presenter —
 // the rule `driver-sql`'s own `aggregate()` applies, defined once in core.
 import { AGGREGATE_ANSWER_KIND, presentAsNumber } from '@objectstack/core';
+// [#21042] What each aggregate's operand accumulates in, the PostgreSQL
+// boolean-aggregand cast, and the one column-class predicate both read — the
+// operand rule `driver-sql`'s own `aggregate()` applies, defined once in core.
+import { aggregandColumnClass, aggregandOperandSql } from '@objectstack/core';
+import { emptyGroupValueFor } from '@objectstack/spec/data';
 import { explicitDateRangeWindow } from '../date-range-array-arm.js';
 
 /**
@@ -660,6 +665,35 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
 
     const rows = await ctx.executeRawSql!(objectName, sql, params);
 
+    // [#21042, #15546] A measure whose aggregate answers NULL over nothing — SQL
+    // `SUM` over a group whose aggregand is NULL in every row, or over no row a
+    // measure-scoped filter admits — answers the identity the platform declares
+    // for that aggregate over NOTHING (`emptyGroupValueFor`, spec
+    // `data/aggregation-policy.ts`): summing nothing is `0`, a measured fact.
+    // The engine and the ObjectQL face fold it (`driver-sql`'s
+    // `foldEmptyAggregateAnswers`, the rows path); this face answered `null` for
+    // the same group. Read from the policy, never restated, for EVERY measure —
+    // a measure-scoped one carries its aggregate in the same `type` — so
+    // `avg` / `min` / `max` (no identity) and the expression metric types
+    // (`undefined` too) keep their NULL. Only `null` folds, before the
+    // presenter, in `driver-sql`'s order: an `undefined` would be a column
+    // never projected, a different defect that must stay visible. The dataset
+    // door's `DatasetExecutor` fill still runs after this and is idempotent on
+    // a folded row.
+    const folds: Array<readonly [string, number]> = [];
+    for (const member of query.measures ?? []) {
+      const identity = emptyGroupValueFor(this.lookupMember(cube, member, 'measure')?.type);
+      if (identity !== undefined) folds.push([member, identity]);
+    }
+    if (folds.length > 0 && Array.isArray(rows)) {
+      for (const row of rows) {
+        if (!row || typeof row !== 'object') continue;
+        for (const [member, identity] of folds) {
+          if (row[member] === null) row[member] = identity;
+        }
+      }
+    }
+
     // [#20889] A measure column `fields[]` declares `number` answers a number,
     // on every dialect. The SQL client hands an aggregate back as the wire type
     // of its expression: node-postgres parses `bigint` (`count`, `sum` over an
@@ -771,7 +805,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
               ctx,
             )
           : null;
-        const aggExpr = this.resolveMeasureSql(cube, measure, tableName, joins, predicate);
+        const aggExpr = this.resolveMeasureSql(cube, measure, tableName, joins, predicate, ctx);
         selectClauses.push(`${aggExpr} AS "${measure}"`);
       }
     }
@@ -1142,13 +1176,17 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
    * @param predicate - The measure's own scoped filter, already compiled to a
    *   SQL boolean (`null` = the measure declares none, or declares one that
    *   constrains nothing — `compileFilterNode`'s TRUE). #10298.
+   * @param ctx - [#21042] The host's answers this compile reads for the
+   *   aggregand: the column's declared shape (`declaredValueShape`) and the
+   *   dialect the statement runs on (`sqlDialect`).
    */
   private resolveMeasureSql(
     cube: Cube,
     member: string,
     parentTable: string,
     joins: StatementJoins,
-    predicate: string | null = null,
+    predicate: string | null,
+    ctx: StrategyContext,
   ): string {
     const measure = this.lookupMember(cube, member, 'measure') as
       | { sql: string; type: string }
@@ -1173,9 +1211,39 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       );
     }
 
-    const col = measure.sql === '*'
+    const column = measure.sql === '*'
       ? '*'
       : this.qualifyAndRegisterJoin(measure.sql, parentTable, joins, cube);
+
+    // [#21042] The OPERAND each aggregate wraps, per the engine's own policies
+    // (`aggregandOperandSql`, `@objectstack/core`, the rule `driver-sql`'s
+    // `aggregate()` applies): on PostgreSQL and MySQL `sum` over a fractional
+    // column and `avg` over every numeric or boolean one accumulate in double
+    // (#20387), and on PostgreSQL a boolean aggregand is cast to `int` for
+    // `sum` / `avg` / `min` / `max` (#11635), never for the counts. Without it
+    // this face added exact decimals where the engine adds doubles, and
+    // answered `500` for a boolean `sum` the engine answers. The column's
+    // class is the one predicate's, over the declaration the host relays for
+    // the object the column lives on — the base object, or the object a
+    // relationship path's last hop reads ({@link columnObjectOf}, the one hop
+    // resolver). An expression, a column the host cannot describe, or a host
+    // that names no dialect gets no class or no policy, and is aggregated as
+    // stored. The expression metric types are not aggregates and are never
+    // wrapped.
+    const col = column === '*' || !Object.prototype.hasOwnProperty.call(AGGREGATE_ANSWER_KIND, measure.type)
+      ? column
+      : aggregandOperandSql(
+          measure.type as AggregationFunction,
+          IDENTIFIER_PATH.test(measure.sql)
+            ? aggregandColumnClass(
+                declaredValueShapeResolver(ctx, columnObjectOf(cube, parentTable, measure.sql, joins.referenceOf))?.(
+                  measure.sql.slice(measure.sql.lastIndexOf('.') + 1),
+                ),
+              )
+            : undefined,
+          sqlDialectFor(ctx, parentTable),
+          column,
+        );
 
     if (predicate !== null) {
       const wrapConditional = CONDITIONAL_AGGREGATE_SQL[measure.type];

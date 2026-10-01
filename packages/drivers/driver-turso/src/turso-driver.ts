@@ -1772,6 +1772,17 @@ export class TursoDriver extends SqlDriver {
         this.declaredValueShape(object, field),
       );
 
+      // [#21178] The JSON-column rule, handed down the same way:
+      // `registerRemoteFieldMetadata` → `registerExternalObject` fills the SAME
+      // `jsonFields` registry the local compiler's gate and `$contains`
+      // membership read, keyed by object name, so a filter on a multi-value or
+      // structured-JSON field is refused, or answered by membership, alike on
+      // both transports (`turso-local-remote-json-column-parity` holds them to
+      // one answer).
+      this.remoteTransport.setJsonColumnResolver((object, field) =>
+        this.isJsonColumn(object, field),
+      );
+
       // [#7929] The server-side half of a REDACTED filter refusal. The remote
       // compiler withholds the operands of a cross-field comparison for the
       // same reason the inherited local one does — an RLS rule's columns are
