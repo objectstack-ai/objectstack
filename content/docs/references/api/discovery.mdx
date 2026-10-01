@@ -1,7 +1,7 @@
 ---
 title: Discovery schema — API Protocol reference
 navTitle: Discovery
-description: "Discovery schemas of the ObjectStack API Protocol: ApiRoutes, CapabilityDescriptor and 9 more — each property with its type, default and a TypeScript example."
+description: "Discovery schemas of the ObjectStack API Protocol: ApiRoutes, AuthFamilies and 10 more — each property with its type, default and a TypeScript example."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -13,8 +13,8 @@ description: "Discovery schemas of the ObjectStack API Protocol: ApiRoutes, Capa
 ## TypeScript Usage
 
 ```typescript
-import { ApiRoutesSchema, CapabilityDescriptorSchema, DiscoverySchema, DiscoveryEnvironmentSchema, EnvironmentTypeSchema, RouteHealthEntrySchema, RouteHealthReportSchema, ServiceInfoSchema, ServiceSelfInfoSchema, ServiceStatus, WellKnownCapabilitiesSchema } from '@objectstack/spec/api';
-import type { ApiRoutes, CapabilityDescriptor, DiscoveryEnvironment, EnvironmentType, RouteHealthEntry, RouteHealthReport, ServiceInfo, ServiceSelfInfo, ServiceStatus, WellKnownCapabilities } from '@objectstack/spec/api';
+import { ApiRoutesSchema, AuthFamiliesSchema, CapabilityDescriptorSchema, DiscoverySchema, DiscoveryEnvironmentSchema, EnvironmentTypeSchema, RouteHealthEntrySchema, RouteHealthReportSchema, ServiceInfoSchema, ServiceSelfInfoSchema, ServiceStatus, WellKnownCapabilitiesSchema } from '@objectstack/spec/api';
+import type { ApiRoutes, AuthFamilies, CapabilityDescriptor, DiscoveryEnvironment, EnvironmentType, RouteHealthEntry, RouteHealthReport, ServiceInfo, ServiceSelfInfo, ServiceStatus, WellKnownCapabilities } from '@objectstack/spec/api';
 
 // Validate data
 const result = ApiRoutesSchema.parse(data);
@@ -49,6 +49,19 @@ const result = ApiRoutesSchema.parse(data);
 
 ---
 
+## AuthFamilies
+
+Which optional better-auth route families are mounted under routes.auth
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **admin** | `boolean` | ✅ | Whether the better-auth admin family (`{routes.auth}`/admin/*: list-users, set-role, update-user, ban-user, …) is mounted. Same value as features.admin on GET `{routes.auth}`/config, read from the same source; false means those routes answer a plain 404 on this deployment. |
+
+
+---
+
 ## CapabilityDescriptor
 
 ### Properties
@@ -77,6 +90,7 @@ const result = ApiRoutesSchema.parse(data);
 | **capabilities** | `{ comments: object; automation: object; cron: object; search: object; … }` | ✅ | Hierarchical capability descriptors — the full WellKnownCapabilities vocabulary, every key present |
 | **schemaDiscovery** | `{ openapi?: string; jsonSchema?: string }` | optional | Schema discovery endpoints for API toolchain integration |
 | **scoping** | `{ enabled: boolean; resolution: Enum<'required' \| 'optional' \| 'auto'>; scoped: boolean; environmentId?: string }` | optional | Environment-scoping posture, added by the REST discovery endpoint |
+| **authFamilies** | `{ admin: boolean }` | optional | Which optional better-auth route families are mounted under routes.auth — the same source as GET `{routes.auth}`/config features; absent when no auth service answers |
 | **metadata** | `Record<string, any>` | optional | Custom metadata key-value pairs for extensibility |
 
 ### Nested Shape: `Discovery.routes`
@@ -147,6 +161,12 @@ const result = ApiRoutesSchema.parse(data);
 | **resolution** | `Enum<'required' \| 'optional' \| 'auto'>` | ✅ | How the environment id is resolved when scoping is enabled (mirrors RestApiConfig.projectResolution) |
 | **scoped** | `boolean` | ✅ | Whether THIS response was served from the environment-scoped mount |
 | **environmentId** | `string` | optional | The resolved environment id — present only on a scoped mount |
+
+### Nested Shape: `Discovery.authFamilies`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **admin** | `boolean` | ✅ | Whether the better-auth admin family (`{routes.auth}`/admin/*: list-users, set-role, update-user, ban-user, …) is mounted. Same value as features.admin on GET `{routes.auth}`/config, read from the same source; false means those routes answer a plain 404 on this deployment. |
 
 
 ---

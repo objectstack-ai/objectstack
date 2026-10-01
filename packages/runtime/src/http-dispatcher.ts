@@ -13,7 +13,7 @@ import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } f
 import { CoreServiceName, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
 import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { PrimaryDatasourceVerdict } from '@objectstack/objectql';
-import { readServiceSelfInfo, readChannelRoute, isSubscribableChannel, DispatcherErrorCode, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
+import { readServiceSelfInfo, readChannelRoute, readAuthFamilies, isSubscribableChannel, DispatcherErrorCode, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
 import type { ServiceInfo } from '@objectstack/spec/api';
 // [#20477] The caller's VETTED organization, read by the one helper `RestServer`
 // and the dispatcher's `/meta` doors share — imported, never restated.
@@ -1775,6 +1775,15 @@ export class HttpDispatcher {
         const hasComments = !!(objectqlSvc as { registry?: { getObject?: (n: string) => unknown } } | null)
             ?.registry?.getObject?.('sys_comment');
 
+        // [#21046] Which optional `/auth` route families are mounted — the auth
+        // service's OWN public-config answer, the object `GET /auth/config`
+        // serves, read through the one shared reader both discovery producers
+        // call (`readAuthFamilies`, `@objectstack/spec/api`). Nothing here
+        // re-derives "is the admin plugin on": a second derivation is how two
+        // machine-readable answers about one boot come apart. `undefined` (no
+        // auth service, or one that publishes no public config) emits no key.
+        const authFamilies = readAuthFamilies(authSvc);
+
         // Derive locale info from actual i18n service when available
         let locale = { default: 'en', supported: ['en'], timezone: 'UTC' };
         if (hasI18n && i18nSvc) {
@@ -2095,6 +2104,7 @@ export class HttpDispatcher {
                                     : svcUnavailable('search'),
             },
             locale,
+            ...(authFamilies ? { authFamilies } : {}),
         };
     }
 

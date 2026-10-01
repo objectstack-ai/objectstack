@@ -39,6 +39,9 @@ import {
 // here would be a second de-facto vocabulary that disagrees with the shared one
 // the day a driver is added -- the same argument the imports above make.
 import { isMissingTableError } from '@objectstack/types';
+// [#21081] The name the activity row declares its text provenance under, owned
+// by the read side that redacts by it.
+import { ACTIVITY_TEXT_SOURCES_KEY, type ActivityTextSources } from './activity-field-redaction.js';
 
 /**
  * Minimal structural view of `NotificationService.emit` (ADR-0030). Declared
@@ -249,15 +252,19 @@ function activityTypeFor(action: 'create' | 'update' | 'delete'): 'created' | 'u
 /**
  * Compute the human-readable record label from a record by trying common
  * label fields. Falls back to record id.
+ *
+ * [#21081] Also answers WHICH field the label was read from (`null` for the id
+ * fallback), so the activity row can declare it: the label is a field value,
+ * and the read side serves it only to a reader served that field.
  */
-function recordLabel(record: any, id: string): string {
-  if (!record || typeof record !== 'object') return id;
+function recordLabel(record: any, id: string): { text: string; field: string | null } {
+  if (!record || typeof record !== 'object') return { text: id, field: null };
   const candidates = ['name', 'subject', 'title', 'full_name', 'label', 'first_name', 'company', 'email'];
   for (const k of candidates) {
     const v = record[k];
-    if (typeof v === 'string' && v.trim()) return v.trim();
+    if (typeof v === 'string' && v.trim()) return { text: v.trim(), field: k };
   }
-  return id;
+  return { text: id, field: null };
 }
 
 /**
@@ -577,6 +584,10 @@ function planTrackedLookupReads(
  * option value was the single remaining untranslated token inside it
  * (`阶段: Proposal → Closed Won` on a zh-CN page). Filling it makes the string
  * uniformly localized instead of half-localized, which is the whole defect.
+ *
+ * [#21081] Returns the fields it rendered beside the text — the same loop
+ * answers both, so the activity row's declaration of where its summary came
+ * from cannot drift from what was rendered.
  */
 function renderTrackedChangeSummary(
   objectName: string,
@@ -585,9 +596,10 @@ function renderTrackedChangeSummary(
   newVals: Record<string, any> | null,
   translate: (key: string, params?: Record<string, unknown>) => string | undefined,
   lookupTitles?: Map<string, Map<string, string>>,
-): string | null {
+): { text: string; fields: string[] } | null {
   if (!fields || !newVals) return null;
   const parts: string[] = [];
+  const rendered: string[] = [];
   for (const key of Object.keys(newVals)) {
     const field = fields[key];
     if (!field || field.trackHistory !== true) continue;
@@ -610,8 +622,9 @@ function renderTrackedChangeSummary(
     );
     const to = displayFieldValue(field, newVals[key], titlesFor, optionLabelFor);
     parts.push(`${label}: ${from} → ${to}`);
+    rendered.push(key);
   }
-  return parts.length > 0 ? parts.join('; ') : null;
+  return parts.length > 0 ? { text: parts.join('; '), fields: rendered } : null;
 }
 
 /**
@@ -748,22 +761,29 @@ function planMilestoneTokenReads(
  * the fix. Pinned in `audit-option-label-summary.test.ts` as a WITH-LOCALE
  * milestone case, because the pre-existing seam case in
  * `audit-milestone-summary.test.ts` boots with no locale and cannot bite here.
+ *
+ * [#21081] Returns, beside the text, every key whose value a token actually
+ * interpolated — a token may name a field the update never changed, so the
+ * diff cannot answer where a milestone summary came from; only this can.
  */
 function renderMilestoneSummary(
   template: string,
   fields: Record<string, any> | undefined | null,
   after: Record<string, any> | null,
   lookupTitles?: Map<string, Map<string, string>>,
-): string {
-  return template.replace(milestoneTokenRe(), (_match: string, key: string) => {
+): { text: string; fields: string[] } {
+  const interpolated = new Set<string>();
+  const text = template.replace(milestoneTokenRe(), (_match: string, key: string) => {
     const v = after ? after[key] : undefined;
     if (v === null || v === undefined || v === '') return '';
+    interpolated.add(key);
     const field = fields ? fields[key] : undefined;
     if (!field) return String(v);
     const reference = referenceTargetForSummary(field);
     const titlesFor = reference ? lookupTitles?.get(reference) : undefined;
     return displayFieldValue(field, v, titlesFor);
   });
+  return { text, fields: [...interpolated] };
 }
 
 /**
@@ -1479,11 +1499,16 @@ export function installAuditWriters(
     // otherwise degrade to the bare id (#5504 names that exact symptom). The
     // mask still applies, so no credential value can reach a user-facing
     // activity summary through the label.
-    const label = recordLabel(
+    const { text: label, field: labelField } = recordLabel(
       ledgerView(ctx.object, after, { dropComputed: false }) ??
         ledgerView(ctx.object, before, { dropComputed: false }),
       recordId ?? '',
     );
+    // [#21081] Which parent fields each text column carries a value of — the
+    // declaration the read side redacts by (`activity-field-redaction.ts`). The
+    // label, and every summary that interpolates it, carry the label field.
+    const labelSources: string[] = labelField ? [labelField] : [];
+    let summarySources: string[] = labelSources;
     // Summaries are user-facing (the record Discussion feed and Setup
     // dashboards render them verbatim), so name the object by its display
     // label ("Semantic Zoo"), not its API name ("showcase_semantic_zoo"), and
@@ -1536,7 +1561,9 @@ export function installAuditWriters(
           api,
           planMilestoneTokenReads(milestone.template, summaryFields, afterView),
         );
-        summary = renderMilestoneSummary(milestone.template, summaryFields, afterView, lookupTitles);
+        const rendered = renderMilestoneSummary(milestone.template, summaryFields, afterView, lookupTitles);
+        summary = rendered.text;
+        summarySources = rendered.fields;
         if (milestone.type) activityType = milestone.type;
       } else {
         // [#7230] The read plan is built from the SAME masked views the summary
@@ -1546,19 +1573,25 @@ export function installAuditWriters(
           api,
           planTrackedLookupReads(summaryFields, oldValue, newValue),
         );
-        summary =
-          renderTrackedChangeSummary(
-            ctx.object,
-            summaryFields,
-            oldValue,
-            newValue,
-            translate,
-            lookupTitles,
-          ) ??
-          translate('messages.activityUpdated', { object: objectDisplay, label }) ??
-          `Updated ${objectDisplay} "${label}"`;
+        const tracked = renderTrackedChangeSummary(
+          ctx.object,
+          summaryFields,
+          oldValue,
+          newValue,
+          translate,
+          lookupTitles,
+        );
+        if (tracked) {
+          summary = tracked.text;
+          summarySources = tracked.fields;
+        } else {
+          summary =
+            translate('messages.activityUpdated', { object: objectDisplay, label }) ??
+            `Updated ${objectDisplay} "${label}"`;
+        }
       }
     }
+    const textSources: ActivityTextSources = { summary: summarySources, record_label: labelSources };
 
     const activityRow: Record<string, any> = {
       type: activityType,
@@ -1571,7 +1604,9 @@ export function installAuditWriters(
       object_name: ctx.object,
       record_id: recordId ?? null,
       record_label: label,
-      metadata: newValue || oldValue ? safeStringify({ old: oldValue, new: newValue }) : null,
+      // [#21081] The change, plus the declaration of where the text columns
+      // came from. The read side strips the declaration before serving.
+      metadata: safeStringify({ old: oldValue, new: newValue, [ACTIVITY_TEXT_SOURCES_KEY]: textSources }),
     };
     // Same rationale as auditRow: stamp the tenant column so RLS matches the
     // recipient's organization on read — but only when the (auto-injected)

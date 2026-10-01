@@ -298,7 +298,16 @@ describe('[#16337] §1 the three sites rest-server.ts names are canonical, by na
         // Belt to §1's braces: the class-wide assertions above would still pass
         // over a file that had lost these literals entirely.
         expect(REST_SERVER).toContain("orderBy: [{ field: 'created_at', order: 'desc' }],");
-        expect(REST_SERVER).toContain("orderBy: [{ field: displayFields[0], order: 'asc' }],");
+        // [#21062] The public picker's literal. Its order key is the picker's
+        // ONE key — the first display field the caller may query, by the
+        // security service's queryable answer — no longer `displayFields[0]`
+        // blindly; the literal it sits in is the same canonical QueryAST. The
+        // second line names where `key` comes from, so the first cannot be
+        // satisfied by some other `key` in the file.
+        expect(REST_SERVER).toContain("orderBy: [{ field: key, order: 'asc' }],");
+        expect(REST_SERVER).toContain(
+            'const key: string | undefined = queryable ? displayFields.find((f) => queryable.has(f)) : displayFields[0];',
+        );
         expect(REST_SERVER).toContain("fields: ['id', ...displayFields],");
         expect(REST_SERVER).toMatch(/expand: Object\.fromEntries\(/);
     });

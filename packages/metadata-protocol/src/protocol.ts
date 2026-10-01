@@ -99,7 +99,7 @@ import type {
 } from '@objectstack/spec/api';
 import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities, CapabilityDescriptor } from '@objectstack/spec/api';
 import type { ApiError, BatchOperationResult } from '@objectstack/spec/api';
-import { readServiceSelfInfo, readChannelRoute, isSubscribableChannel, CHANNEL_SURFACE_SLOTS, ErrorCode, standardErrorCodeForHttpStatus, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
+import { readServiceSelfInfo, readChannelRoute, readAuthFamilies, isSubscribableChannel, CHANNEL_SURFACE_SLOTS, ErrorCode, standardErrorCodeForHttpStatus, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
 import {
     parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, referenceTargetOf,
     AggregationFunction, DateGranularity, resolveSearchFieldResolution,
@@ -6821,6 +6821,16 @@ export class ObjectStackProtocolImplementation implements
         // consumer had a key that worked against both.
         const name = 'ObjectStack API';
 
+        // [#21046] Which optional `/auth` route families are mounted — the
+        // registered auth service's OWN public-config answer, the object
+        // `GET /auth/config` serves, through the one reader the runtime
+        // dispatcher's `getDiscoveryInfo()` calls too (`readAuthFamilies`,
+        // `@objectstack/spec/api`). This builder never re-derives "is the admin
+        // plugin on" itself. `undefined` — no `auth` service in this kernel
+        // (then no `routes.auth` either), or one that publishes no public
+        // config — emits no key; the REST `/discovery` passes the value through.
+        const authFamilies = readAuthFamilies(registeredServices.get('auth'));
+
         return {
             // [#11235] The serving system's identity, DERIVED — an injected
             // `OS_RUNTIME_VERSION` stamp, falling back to this package's own
@@ -6854,6 +6864,7 @@ export class ObjectStackProtocolImplementation implements
             locale,
             services,
             capabilities,
+            ...(authFamilies ? { authFamilies } : {}),
         };
     }
 

@@ -72,15 +72,37 @@ export interface ActivityParent {
   recordId: string;
 }
 
+/** The engine slice a `sys_activity` read middleware needs (this gate and the
+ * field redaction in `activity-field-redaction.ts`). */
+export interface ActivityMiddlewareEngine {
+  registerMiddleware?(
+    fn: (
+      ctx: CommentReadMiddlewareCtx & { ast?: Record<string, unknown>; result?: unknown },
+      next: () => Promise<void>,
+    ) => Promise<void>,
+    options?: { object?: string },
+  ): void;
+}
+
+/**
+ * The parent OBJECT an activity row names, or `null` when it names none this
+ * gate can authorize. One definition for both read seams over the stream.
+ */
+export function parseActivityParentObject(row: Record<string, unknown> | null | undefined): string | null {
+  const object = row?.object_name;
+  if (typeof object !== 'string' || !OBJECT_NAME_RE.test(object)) return null;
+  if (object === ACTIVITY_OBJECT) return null;
+  return object;
+}
+
 /**
  * Read the parent record an activity row names, or `null` when it names none
  * this gate can authorize — which every caller here treats as DENY.
  */
 export function parseActivityParent(row: Record<string, unknown> | null | undefined): ActivityParent | null {
-  const object = row?.object_name;
+  const object = parseActivityParentObject(row);
   const recordId = row?.record_id;
-  if (typeof object !== 'string' || !OBJECT_NAME_RE.test(object)) return null;
-  if (object === ACTIVITY_OBJECT) return null;
+  if (object === null) return null;
   if (typeof recordId !== 'string' && typeof recordId !== 'number') return null;
   if (String(recordId) === '') return null;
   return { object, recordId: String(recordId) };
