@@ -9,6 +9,7 @@ import { analyticsCarrierFilter } from './analytics-carrier-filter';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { I18nLabelSchema } from './i18n.zod';
 import { AggregationFunction, DateGranularity } from '../data/query.zod';
+import { ANALYTICS_COLUMN_PATH, ANALYTICS_COLUMN_REFERENCE } from '../data/analytics-column-reference';
 
 /**
  * Analytics Dataset — the one semantic layer (ADR-0021).
@@ -80,6 +81,53 @@ const DATASET_NO_SQL =
   + 'Joins are compiled from `Dataset.include` — you never write an ON clause.';
 
 /**
+ * A dataset dimension's and measure's `field` is a COLUMN REFERENCE, never a
+ * SQL expression (#21220; ADR-0021 "zero raw SQL / zero raw expressions",
+ * ADR-0049 enforce-or-remove) — the accept set the cube members it compiles to
+ * already hold (#20943), from the one shared declaration in
+ * `../data/analytics-column-reference.ts`: the dataset compiler copies `field`
+ * into the cube member's `sql` verbatim, so the two slots are one value.
+ *
+ * The module header said so from the start ("no raw SQL"), and the field's own
+ * description named a field or a relationship path, but the slot was a bare
+ * `z.string()` and parsed anything. The runtime has refused an expression
+ * `field` at the analytics dataset door since #21190 (`PERMISSION_DENIED` /
+ * 403, inline or saved), so an expression could be saved and never answered —
+ * declared, never enforced. That door stays, as defence in depth for a dataset
+ * that reaches the service without meeting this parse. It never judged an
+ * empty `field` (it skips one); a stored `count` measure with `field: ''` is
+ * repaired on load by the D2 conversion `dataset-count-measure-empty-field-removed`.
+ *
+ * A measure admits the row wildcard `'*'` (a count's `COUNT(*)`); a dimension
+ * does not — the restriction, and its measurement, are stated on
+ * {@link ANALYTICS_COLUMN_PATH}. An empty string is refused on both: on a
+ * measure the wildcard's spelling is `'*'` or no `field` at all, and on a
+ * dimension it names nothing to group by.
+ */
+const DATASET_FIELD_EXPRESSION_REFUSED =
+  'A SQL expression there names no single field, so no platform check can judge which fields it reads, '
+  + 'and the analytics dataset door refuses it on every query (ADR-0021: the dataset layer takes no raw SQL '
+  + 'and no raw expressions; ADR-0049 enforce-or-remove).';
+
+const DATASET_DIMENSION_FIELD_NOT_COLUMN =
+  '`dimensions[].field` is a column reference: a field of the dataset\'s object (`stage`), or a relationship '
+  + 'path ending in one (`account.region`) whose relationships are declared in `include`. '
+  + `${DATASET_FIELD_EXPRESSION_REFUSED} Group by the column itself. \`'*'\` is no dimension: it names every `
+  + 'column at once, which is not an axis. A bucket computed over a column\'s values (a CASE over them) has no '
+  + 'expression form in the dataset layer: keep the bucket as a field of the object and name that field here.';
+
+const DATASET_MEASURE_FIELD_NOT_COLUMN =
+  '`measures[].field` is a column reference: a field of the dataset\'s object (`amount`), a relationship path '
+  + 'ending in one (`account.amount`) whose relationships are declared in `include`, or `\'*\'` for a count; '
+  + `a count may also omit \`field\`. ${DATASET_FIELD_EXPRESSION_REFUSED} Name the column the measure `
+  + 'aggregates. A derived value is declared in the ADR-0021 form, where the platform judges every field it '
+  + 'reads: a conditional count or sum is a measure with its own structured `filter` '
+  + '(`{ name: \'done_count\', aggregate: \'count\', filter: { status: \'done\' } }`), and a ratio, sum, '
+  + 'difference or product of measures is `derived: { op, of: [...] }` over measures named in this dataset '
+  + '(`{ name: \'done_rate\', derived: { op: \'ratio\', of: [\'done_count\', \'task_count\'] }, format: '
+  + '\'0.0%\' }` — a 0–1 fraction, which the `%` pattern displays as a percentage).';
+
+/**
  * Dimension — a groupable axis (e.g. "region", "close_date by quarter").
  */
 export const DatasetDimensionSchema = lazySchema(() => strictObject({
@@ -121,8 +169,13 @@ export const DatasetDimensionSchema = lazySchema(() => strictObject({
    * ending in a field — e.g. `account.region` or `account.owner.region`
    * (ADR-0071 multi-hop). The join chain is DERIVED from the relationship(s)
    * declared in `Dataset.include`; the author never writes a predicate.
+   * A column reference only (#21220, see `DATASET_FIELD_EXPRESSION_REFUSED`):
+   * a SQL expression, `'*'` or an empty string is refused at parse.
    */
-  field: z.string().describe('Base field, or `relationship[.relationship].field` path').meta({ title: 'Field' }),
+  field: z.string()
+    .regex(ANALYTICS_COLUMN_PATH, { error: () => DATASET_DIMENSION_FIELD_NOT_COLUMN })
+    .describe('Base field, or `relationship[.relationship].field` path. A column reference, never a SQL expression.')
+    .meta({ title: 'Field' }),
   type: z.enum(['string', 'number', 'date', 'boolean', 'lookup']).optional().meta({ title: 'Type' }),
   /** Default bucketing for date dimensions (day/week/month/quarter/year). */
   dateGranularity: DateGranularity.optional().meta({ title: 'Date Granularity' }),
@@ -185,8 +238,17 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
   /** Aggregation function — reuses the canonical query.zod enum. */
   aggregate: AggregationFunction.optional().describe('Aggregation (sum/avg/count/...); omit when `derived` is set')
     .meta({ title: 'Aggregate' }),
-  /** Base field, or `relationship[.relationship].field` path. Optional for `count` (count(*)). */
-  field: z.string().optional().describe('Aggregated field; optional for count(*)').meta({ title: 'Field' }),
+  /**
+   * Base field, or `relationship[.relationship].field` path, or `'*'`. Optional
+   * for `count` (count(*)). A column reference only (#21220, see
+   * `DATASET_FIELD_EXPRESSION_REFUSED`): a SQL expression or an empty string is
+   * refused at parse.
+   */
+  field: z.string()
+    .regex(ANALYTICS_COLUMN_REFERENCE, { error: () => DATASET_MEASURE_FIELD_NOT_COLUMN })
+    .optional()
+    .describe('Aggregated field: a base field, a relationship path, or "*"; optional for count(*). Never a SQL expression.')
+    .meta({ title: 'Field' }),
   /**
    * Measure-scoped filter (e.g. only won deals for "won_amount"). [#20080] A
    * list in the equality slot inside a nested relation is refused on save, as

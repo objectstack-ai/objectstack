@@ -22,6 +22,7 @@ import { DateGranularity } from './query.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { retiredKey } from '../shared/retired-key';
+import { ANALYTICS_COLUMN_REFERENCE } from './analytics-column-reference';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 export const AggregationMetricType = z.enum([
   'count', 
@@ -215,6 +216,12 @@ const CUBE_DIMENSION_NAME_REMOVED = cubeMemberNameRemoved('dimensions.<dimension
  * Schema carries the same rule as a `pattern`: a document validated against
  * `json-schema/**` is judged as the parse judges it.
  *
+ * The pattern itself is declared ONCE, in `./analytics-column-reference.ts`
+ * ({@link ANALYTICS_COLUMN_REFERENCE}), and this binding is that one `RegExp`:
+ * the dataset layer's `field` — which the dataset compiler copies into a cube
+ * member's `sql` verbatim — takes the same accept set from the same module
+ * (#21220), so the two slots cannot drift apart.
+ *
  * Refused at parse: everything else — `CASE WHEN …`, `SUM(…) / COUNT(*)`, a
  * quoted identifier, a `$`-prefixed spelling, an empty string. Such a value
  * names no single field, so no platform check could judge which fields it
@@ -237,7 +244,7 @@ const CUBE_DIMENSION_NAME_REMOVED = cubeMemberNameRemoved('dimensions.<dimension
  * cube that met this parse, and their deletion is the services lane's
  * follow-up, not this schema's.
  */
-const CUBE_MEMBER_SQL = /^(?:\*|[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)$/;
+const CUBE_MEMBER_SQL = ANALYTICS_COLUMN_REFERENCE;
 
 const CUBE_MEMBER_SQL_RETIRED =
   'A SQL expression there was retired in @objectstack/spec 17 (ADR-0021 zero raw expressions; '

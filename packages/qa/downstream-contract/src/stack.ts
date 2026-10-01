@@ -16,7 +16,7 @@ export const ContractStack = defineStack({
     version: '1.0.0',
     type: 'app',
     name: 'Downstream Contract',
-    description: 'Frozen third-party consumer gating spec backward compatibility (#2035).',
+    description: 'Frozen third-party consumer gating spec backward compatibility: a spec change that needs this fixture edited to stay green is breaking.',
   },
   objects: [Account],
   views: [AccountViews],

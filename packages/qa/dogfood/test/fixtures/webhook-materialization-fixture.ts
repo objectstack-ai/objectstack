@@ -52,7 +52,7 @@ export const webhookFixtureStack = defineStack({
     version: '0.0.0',
     type: 'app',
     name: 'Webhook Materialization Fixture',
-    description: 'Single-object app that authors one webhook to prove stack `webhooks:` entries materialize into dispatchable sys_webhook rows (ADR-0054, #3461).',
+    description: 'Single-object app that authors one webhook to prove stack `webhooks:` entries materialize into dispatchable sys_webhook rows (ADR-0054).',
   },
   objects: [WmTask],
   webhooks: [wmTaskChanged],

@@ -26,6 +26,15 @@
  * through `query()`, where #21156 leaves its members to the existing gates). The
  * `/analytics/query` door's own caller members are #21156's and are pinned in
  * `caller-member-column-reference-gate.test.ts` / `field-read-admission-gate.test.ts`.
+ *
+ * [#21220] Since then the CONTRACT refuses the same `field` text at parse:
+ * `DatasetSchema` holds a dimension's and measure's `field` to a column reference,
+ * so the route's own `DatasetSchema.parse` answers such a dataset `400` before it
+ * reaches this door. The door stays as defence in depth for a dataset that reaches
+ * `queryDataset` WITHOUT meeting that parse — a row stored before the narrowing,
+ * handed over as read (the build probe's dashboard-widget path does exactly that).
+ * The expression fixtures here are therefore built UNPARSED, the way such a row
+ * arrives, and one case asserts the parse refuses them; the controls still parse.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -90,21 +99,39 @@ const PROVIDERS: ReadonlyArray<{ label: string; provider?: ReadableFields; ctx: 
 /** An expression that reads another object's column — not attributable to any field. */
 const EXPRESSION = `(SELECT secret FROM ${OTHER})`;
 
+const DATASET_BASE = {
+  name: 'id_ds', label: 'DS', object: BASE,
+  dimensions: [{ name: 'status', field: 'status', type: 'string' }],
+  measures: [{ name: 'total', aggregate: 'sum', field: 'amount' }],
+};
+
+/** A dataset that met the contract's parse — the controls. */
 function datasetWith(overrides: Record<string, unknown>) {
-  return DatasetSchema.parse({
-    name: 'id_ds', label: 'DS', object: BASE,
-    dimensions: [{ name: 'status', field: 'status', type: 'string' }],
-    measures: [{ name: 'total', aggregate: 'sum', field: 'amount' }],
-    ...overrides,
-  });
+  return DatasetSchema.parse({ ...DATASET_BASE, ...overrides });
+}
+
+/**
+ * [#21220] A dataset whose `field` the contract now refuses, built UNPARSED — the
+ * shape a row stored before the narrowing still has when it is read back and
+ * handed to `queryDataset`.
+ */
+function storedDatasetWith(overrides: Record<string, unknown>) {
+  return { ...DATASET_BASE, ...overrides };
 }
 
 describe('[#21177] inline-dataset `field` admission — the dataset door', () => {
+  it('[#21220] the contract refuses both expression fixtures at parse — the door below is defence in depth', () => {
+    const dimension = DatasetSchema.safeParse(storedDatasetWith({ dimensions: [{ name: 'leaked', field: EXPRESSION, type: 'string' }] }));
+    const measure = DatasetSchema.safeParse(storedDatasetWith({ measures: [{ name: 'leaked', aggregate: 'sum', field: `amount + ${EXPRESSION}` }] }));
+    expect(dimension.success ? [] : dimension.error.issues.map((i) => [i.code, i.path])).toEqual([['invalid_format', ['dimensions', 0, 'field']]]);
+    expect(measure.success ? [] : measure.error.issues.map((i) => [i.code, i.path])).toEqual([['invalid_format', ['measures', 0, 'field']]]);
+  });
+
   describe.each(STRATEGY_PATHS)('$label', ({ capabilities }) => {
     describe.each(PROVIDERS)('$label', ({ provider, ctx }) => {
       it('refuses a dimension-field expression — PERMISSION_DENIED / 403, strategy never called', async () => {
         const { service, executed } = makeService({ capabilities, getReadableFields: provider });
-        const dataset = datasetWith({ dimensions: [{ name: 'leaked', field: EXPRESSION, type: 'string' }] });
+        const dataset = storedDatasetWith({ dimensions: [{ name: 'leaked', field: EXPRESSION, type: 'string' }] });
         const err = await service.queryDataset(dataset as never, { dimensions: ['leaked'], measures: ['total'] } as never, ctx)
           .then(() => null, (e) => e as Record<string, unknown>);
         expect(err).toMatchObject({ code: 'PERMISSION_DENIED', status: 403, member: 'leaked' });
@@ -116,7 +143,7 @@ describe('[#21177] inline-dataset `field` admission — the dataset door', () =>
 
       it('refuses a measure-field expression', async () => {
         const { service, executed } = makeService({ capabilities, getReadableFields: provider });
-        const dataset = datasetWith({ measures: [{ name: 'leaked', aggregate: 'sum', field: `amount + ${EXPRESSION}` }] });
+        const dataset = storedDatasetWith({ measures: [{ name: 'leaked', aggregate: 'sum', field: `amount + ${EXPRESSION}` }] });
         const err = await service.queryDataset(dataset as never, { dimensions: ['status'], measures: ['leaked'] } as never, ctx)
           .then(() => null, (e) => e as Record<string, unknown>);
         expect(err).toMatchObject({ code: 'PERMISSION_DENIED', status: 403, member: 'leaked' });
