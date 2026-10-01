@@ -277,7 +277,7 @@ describe('[#20914] the engine\'s aggregate door asks the aggregate × field-type
       expect(judge({ fields: { f: { type: 'object' } } }, agg(fn, 'f')), fn).not.toThrow();
       expect(judge({ fields: { f: { type: 'string' } } }, agg(fn, 'f')), fn).not.toThrow();
       expect(judge({ fields: { f: {} } }, agg(fn, 'f')), fn).not.toThrow();
-      expect(judge(PROBE, [...agg(fn), { function: fn, field: '*' }, null, 7]), fn).not.toThrow();
+      expect(judge(PROBE, [{ function: fn, alias: 'v' }, { function: fn, field: '*' }, null, 7]), fn).not.toThrow();
     }
     expect(judge(PROBE, agg('median', 'meta'))).not.toThrow();
     expect(judge(PROBE, agg('toString', 'meta'))).not.toThrow();
