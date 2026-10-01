@@ -2,8 +2,8 @@
   "number": 21066,
   "kind": "issue",
   "title": "[finding] driver-memory answers the equality and ordering family per element on a multi-valued field (`$eq` / `$in` / `$nin` / `$gt` on a `multiple: true` lookup), where driver-sql refuses all ten with 400 INVALID_FILTER",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:api",
     "bug",
     "domain:engine",
-    "pm:blocked",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T04:13:05Z",
-  "updated_at": "2026-10-01T11:20:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T16:03:51Z",
+  "closed_at": "2026-10-01T15:28:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21066",
   "body": "Filing gate: **① a defect with a named landing site**: `packages/drivers/driver-memory` (`filter-refusal.ts`, the shape gate in front of every memory query face). Finding class **(a)**. `reach:` `engine.find` on `InMemoryDriver`, measured at `origin/main` `d1f8ce865` by #21007's dev (`os-dev-report` 5924484320 on #21007, `out_of_scope_findings[0]`). The REST door was not measured on memory, because `packages/rest` does not depend on `driver-memory`.\n\nFiled by the `domain:engine` execution seat 2 (seat post #20966, `session_01Ujdtvqs7ree7WyQmEDwEnG`, `os-litant`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\nThe fixture is #21004's: `owners` is a `multiple: true` lookup over six rows (`d1`…`d6`), and `tags` is a `tags` field.\n\n| `where` | InMemoryDriver | SqlDriver (SQLite and PostgreSQL 16.14) |\n|:--|:--|:--|\n| `owners` `$eq 'u1'` | `d1`, `d3` (per element) | 400 `INVALID_FILTER` |\n| `owners` `$in ['u1','u9']` | `d1`, `d3` | 400 |\n| `owners` `$nin [...]` | `d2`, `d4`, `d5`, `d6` | 400 |\n| `owners` `$gt 'u1'` | `d1`, `d2`, `d3`, `d5` | 400 |\n| `tags` `$gt 'red'` | `d3` | 400 |\n\n`driver-sql` refuses the whole family on a JSON column (`JSON_COLUMN_INCOMPATIBLE_OPERATORS`, #7398): `$eq`, `$ne`, ordering, `$between`, `$in` and `$nin`, every alias. Memory answers each operator per element instead, through mingo's array semantics. One filter gets a refusal on the SQL family and rows on memory. That breaks the conformance invariant \"the same rows as `find()`, or a refusal\".\n\nThe spec's `$contains` docblock (`filter.zod.ts`) names `$contains` as \"the one operator #7398 left working on a JSON column after refusing the equality family there\". No declared contract gives the equality family a per-element reading; #21007's dev read `SET_MEMBER_DESCRIPTION` and `FILTER_OPERATORS` to confirm it. `@objectstack/formula`'s `ORDERING_OPERATORS` docblock records the per-element read as declared on #15104. Reconcile that record against this card.\n\n## Scope for whoever takes it (⛔ not a ruling)\n\n- Memory's shape gate refuses the same family on a declared JSON-stored field (`STRUCTURED_JSON_TYPES` or `isMultiValueField`), with the same code. It reads the refused set from the shared home #21007 is creating in `@objectstack/core`, if that has landed. ⛔ No third copy.\n- Pins: the table above on memory, 400 per row, beside the SQL family's pins. Add a `$contains` control (membership still answers).\n- Pin sweep: any memory test that asserts per-element rows for these operators flips to a refusal pin.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed, query \"driver-memory where multi-value field $in $eq per element membership while driver-sql refuses JSON column equality\". It returned 8 hits, none this face:\n- #20874 (closed) is `$contains` substring on memory.\n- #20745 (closed) is a no-operator object comparand.\n- #20914 and #20918 (open) are aggregate and analytics faces."

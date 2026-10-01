@@ -1,0 +1,33 @@
+{
+  "number": 21205,
+  "kind": "pull_request",
+  "title": "docs(skills): the dashboards rule stops teaching unread widget options extras",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "needs-user-decision",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T16:26:39Z",
+  "updated_at": "2026-10-01T16:55:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21205",
+  "body": "Part of #21131\n\nThis is the governed half of the card (`skills/**`, Tier H). The code half is PR #21204, and this PR is its docs-only companion. Land it after #21204 or together with it: the new sentence about the `os validate` warning is true from the moment #21204 lands.\n\n## What this does\n\n`skills/objectstack-ui/rules/dashboards.md` stops teaching widget `options` keys that no renderer reads. It points to the homes that `DashboardWidgetOptionsSchema`'s doc comment names.\n\n- **About `:185`, the worked example.** `options: { icon: 'DollarSign' }` becomes `colorVariant: 'success'`. On a dataset-bound widget, `icon` in `options` styles nothing, while `colorVariant` is the declared accent. The comment now says that the measure's own `format` + `currency` drive the number.\n- **About `:341`, the `options` paragraph.** It said \"presentation extras (`icon`, `trend`, `density`, …) pass through untouched\" and that a typo is \"an author-time type error\". It now says the following:\n  - a dataset-bound widget reads no key outside the five;\n  - `os validate` warns on each such key (`unconsumed-widget-option`);\n  - presentation lives on the measure (`format` / `currency`), on `colorVariant` and on `chartConfig`;\n  - a typo such as `sortDirection` parses and draws that warning.\n\n  The typo claim was measured: a `tsc --noEmit` probe against the built spec accepts `options: { sortDirection: 'desc' }`, while it rejects `sortOrder: 'sideways'` (TS2322).\n- **About `:254`, the `compareTo` metric bullet.** It said \"Authors should not hand-author `options.trend` when `compareTo` is set; the renderer wins\", which implies `options.trend` works when `compareTo` is not set. It now says `options.trend` reaches no renderer on a dataset-bound widget, and that `compareTo` is the trend. This is the same unread-extra sentence class, in the same file.\n\n## Line and token readings\n\nBudget: at most 0 net lines in `skills/**`. Met: +8 / -8.\n\n| reading | before (`cb45469e`) | after (`b5b45306`) |\n| :--- | ---: | ---: |\n| `skills/objectstack-ui/rules/dashboards.md`, lines | 468 | 468 |\n| `skills/objectstack-ui/rules/dashboards.md`, tokens (`check-skills-token-ratchet` unit, ceiling 6252) | 6211 | 6234 (+23) |\n| whole package, the sum of all 10 `skills/**/SKILL.md`, lines | 4395 | 4395 |\n| whole package, the sum of all 10 `skills/**/SKILL.md`, tokens | 52090 | 52090 |\n| `skills/objectstack-ui/**/*.md` (9 files), lines | 2109 | 2109 |\n| shipped bundle total, tokens (gate's own line) | 154116 | 154139 |\n\nThe +23 tokens are the longer sentences that name the declared homes. They fit under the file's existing ceiling (headroom 18 after this change). No ceiling moved, and no line was bought by re-wrapping.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` at `b5b45306` derived 23 families. All 23 were run, every one exited 0, and `--ran` reconciled 23 derived, 23 run, 0 NOT-MEASURED. The run covered `check-skills-token-ratchet`, `check:skill-compatibility`, `check:skill-frame-sync`, `check:skill-identifier-liveness`, `check:doc-authoring`, `check:nul-bytes` and `check:pm-governed-merges`. `check:doc-formula-expressions` first answered exit 3 (prerequisite: `formula` and `lint` not built in this worktree). After that build it answered exit 0.\n\nNo changeset: nothing under `skills/` is in any package's `files[]`. Measured: the old paragraph's text has zero hits in the built `spec`, `cli`, `create-objectstack` and `lint` outputs and in `spec/prompts` and `spec/llms.txt`. The positive control, `validateDashboardWidgetOptions`, is found in `packages/lint/dist`.\n\n## Acceptance notes\n\n- Tier H: this PR waits for the maintainer's click, and no seat readies, queues or arms it.\n- Not touched, noted: the same file's Cartesian `compareTo` bullet says to override per series with `series.dashArray` / `series.opacity`. On a dashboard widget, `chartConfig.series` is refused by name (`content/docs/ui/dashboards.mdx`, \"What `chartConfig` does not carry\"). That is a different key family from this card's.\n\n## 维护者速读(草稿)\n\n**改了什么**:只改了对外发布的 skill 文件 `skills/objectstack-ui/rules/dashboards.md` 里三处文字。它原来教 AI 在仪表盘组件的 `options` 里写 `icon`、`trend` 这类\"展示用额外键\",现在改成:这些键在绑定数据集的组件上不会被任何渲染器读取。展示应写到已声明的位置,即度量的 `format` / `currency`、组件的 `colorVariant` 和 `chartConfig`。净行数为 0。\n\n**为什么改**:AI 照着 skill 写元数据,写出来的键能通过校验,页面上却什么效果都没有。CRM 和 Todo 两个示例应用就曾因此带着无效键发布。代码半边(PR #21204)已让 `os validate` 对这类键按名告警,教材也要同步纠正,否则 AI 会继续批量写错。\n\n**风险与代价(含回滚)**:纯文档改动,不影响任何发布包,也不改运行时行为。token 增加 23(该文件仍在上限之内)。回滚就是还原这一个文件。需要注意:文中\"`os validate` 会告警\"这句话要等 #21204 合入后才成立,建议与它同时或在它之后合入。\n\n**席位意见**:\n\n**你要做的**:确认措辞后批准并合入本 PR(Tier H,只能由你点击)。建议在 #21204 合入之后操作。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UtnxvdiN376GF3sgXwAw4d)_\n"
+}

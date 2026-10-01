@@ -2,8 +2,8 @@
   "number": 20701,
   "kind": "issue",
   "title": "rest(import): a column for a formula field passes the dry run, then fails the row at commit with the driver's SQL error, where the create door answers 400 INVALID_FIELD",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:records",
     "bug",
     "domain:engine",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-litant"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T18:30:51Z",
-  "updated_at": "2026-10-01T13:30:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T18:14:51Z",
+  "closed_at": "2026-10-01T18:09:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 29,
+  "comments": 36,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20701",
   "body": "**What.** `POST /api/v1/data/:object/import` (`packages/rest/src/rest-server.ts`, around `:9058`; runner `packages/rest/src/import-runner.ts`) treats a column mapped to a `formula` field differently at each step:\n- **Dry run:** it answers ok with 0 errors.\n- **Commit:** the row fails with code `SQLITE_ERROR` and the driver's text, for example `table proj has no column named doubled`.\n- **Create door:** `POST /api/v1/data/:object` with the same key answers `400 INVALID_FIELD`, through the protocol's field check (`packages/metadata-protocol/src/protocol.ts`, the `INVALID_FIELD` arm near `:9551`).\n\nSo the preview promises a row that the commit then fails, and the failure carries a driver message instead of the field-level code the create door gives.\n\n**Measured by.** The #18386 dev (report `5894515898`, out-of-scope finding 1) ran it on real ObjectQL, `ObjectStackProtocolImplementation` and `better-sqlite3` `:memory:` at `6bff748bbd`, with a non-system context. `domain:spec` seat 5 located the import route, the runner and the create door's `INVALID_FIELD` arm on `main` `14f80e2395`. It did not re-run the probe.\n\n**Reach.** Any import whose file has a column matching a formula field's name. The #18386 template work excludes formula columns from the downloadable template, but a hand-made file or an old template still reaches this path.\n\n**Open.** Where the refusal belongs: the import's own prepare step, as a per-row `INVALID_FIELD` in both the dry run and the commit, or a shared field check that both doors call. This card does not choose.\n\nFiled by `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`). It is unlabelled, for triage.\n\nDedupe words: `import formula column SQLITE_ERROR` · `import dry run commit disagree computed field` · `import INVALID_FIELD formula`\n\nBlocked-by: #20922\n"

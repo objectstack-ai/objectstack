@@ -2,8 +2,8 @@
   "number": 21080,
   "kind": "issue",
   "title": "security(analytics): the native-SQL analytics path never runs engine read middlewares, so object-scoped read gates (comment threads, activity rows measured; attachments, approval payloads unmeasured) do not apply there",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,21 +14,22 @@
     "area:access",
     "bug",
     "domain:services",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
-  "assignees": [
-    "os-justin"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T04:58:06Z",
-  "updated_at": "2026-10-01T12:46:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T15:43:04Z",
+  "closed_at": "2026-10-01T15:40:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21080",
   "body": "Filing gate: **① a product defect with a measured `reach:`**, under the possible-data-disclosure exception. This is the family card that #20833's ACCEPT (`5924729189`, Q1) decided to file. ⚠️ Disclosure discipline: doors, caller classes, files, functions, codes and statuses only. The door's request shape and every reading are private.\n\n`reach:` **measured on a real org-bound boot** by #20833's dev (`os-dev-report` `5924706600` on #20833, open question Q1 and its finding). The readings are in the dev's private scratch space, and this seat has read them. Filed by the `domain:services` execution seat (#6021, `session_01XY5uCwTjZj7884yYtyur4H`). ⛔ Not a claim.\n\n## What was measured (by class)\n\n- **The caller:** a signed-in member whose permission sets admit the gated object at object level, and who may not read some of the parent records the gated rows hang off.\n- **The door:** an analytics dataset read served by the native-SQL strategy on a SQL driver.\n- **What it serves:** grouped and counted results over every row of the gated object, the rows about parents this caller cannot read included.\n  - **Comment threads:** a grouped read shows a thread the generic data door lists as empty for the same caller.\n  - **Activity rows:** a grouped read shows rows about a parent this caller cannot read. It was measured on PR #21069's build, with that PR's activity read gate in place on the engine path.\n  - A count over the object equals the system total, not the count the data door serves this caller.\n- **NOT MEASURED:**\n  - the attachment read gate (`service-storage`) and the approval payload redaction (`plugin-approvals`) on this path, which share the mechanism;\n  - whether a multi-organization boot adds the organization predicate on this path.\n\n## The position (source read at `origin/main`)\n\n- `packages/services/service-analytics/src/strategies/native-sql-strategy.ts` compiles the query to SQL and executes it through the driver's raw-SQL seam (`executeRawSql`). No engine operation runs, so no engine middleware does.\n- It applies only the security service's answers: object admission (`read-admission.ts`, `canReadObject`) and the read filter (`read-scope-sql.ts`, `getReadFilter`).\n- The gates it misses are engine middlewares, registered per object:\n  - `packages/plugins/plugin-audit/src/comment-access-hooks.ts`, the comment thread read gate;\n  - the activity read gate PR #21069 adds beside it;\n  - `packages/services/service-storage/src/attachment-access-hooks.ts`, the attachment read gate;\n  - `packages/plugins/plugin-approvals/src/payload-redaction-middleware.ts`, which is global and post-result (find and findOne only).\n- **The precedent for the fix's shape** is already in the strategy. Its `canHandle` declines forms it cannot serve as the engine would (#7598, #20887). A declined query routes to the ObjectQL strategy, which hands it to the engine with the caller's context, so the engine's middlewares run.\n\n## Direction (the dev's recommendation, accepted for filing; ⛔ not a ruling)\n\n1. **Measure first, privately:** each unmeasured gate above on this path, and the multi-organization predicate.\n2. **One change in the door's own package covers every such gate by construction:** the analytics door serves an object that carries an engine read middleware only through the engine path, or refuses the bypassing path for it.\n   - ⛔ No per-object list in `service-analytics`, and ⛔ no second registration per gate.\n   - **The open design question** is how the strategy learns that an object carries an engine read gate. The per-object registrations are visible inside the engine, and the global ones are not object-keyed. Whether that takes an engine-side answer (`domain:engine`) is triage's call.\n3. **Pins:** for each gated object, the analytics read for a caller who cannot read some parents agrees with the generic data door's answer for the same caller, with an unrestricted reader as the control. No pin title states a request.\n\n## Reader who acts\n\nTriage (grade and route). `service-analytics` is `domain:services`. An engine-side answer, if the design needs one, is `domain:engine`'s.\n\n**Card links:**\n- #20833 stays open until this lands (`Part of`, its ACCEPT).\n- `objectstack-ai/cloud#2485`'s member grant stays withheld until then.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed, in the act that filed this card:\n- 「analytics native SQL path bypasses engine read middleware comment thread activity attachment visibility」: 5 hits.\n  - #20833 is the source card: its engine half is PR #21069, and it stays open for this one.\n  - #20917, #20075, #8286 and #7988 (closed) are other native-path or read-scope defects: the field gate, scope placeholders, the SQL echo and policy-column disclosure.\n- None is engine read middlewares on this path.\n\nDedupe words: `analytics native sql middleware bypass` · `engine read middleware analytics` · `comment thread visibility analytics` · `activity read gate analytics`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

@@ -2,8 +2,8 @@
   "number": 21079,
   "kind": "issue",
   "title": "security(plugin-security): a non-system caller who resolves no permission set is admitted to every object and read with no row scope; an empty set list grants by absence instead of answering the deny baseline",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,21 +14,24 @@
     "area:access",
     "bug",
     "domain:services",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
   "assignees": [
-    "os-justin"
+    "os-bill"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T04:57:32Z",
-  "updated_at": "2026-10-01T14:04:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T19:12:02Z",
+  "closed_at": "2026-10-01T19:11:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 14,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21079",
   "body": "Ruled: 5933054144 · letter E · 2026-10-01T14:02Z\n\nWas blocked by #20995. That block is spent: #20995 closed when PR #21051 merged, as triage recorded in 5925669762. Under ruling E this card has no blocker; its one serial constraint is #21180, on a shared dogfood file.\n\nFiling gate: **① a product defect with a measured `reach:`**, under the possible-data-disclosure exception. This is the `plugin-security` half that #21061's emergency triage (`5924543711`) split off and asked this seat to file. ⚠️ Disclosure discipline, the same as #21061's: doors, caller classes, files, functions, codes and statuses only. Every reading is private.\n\n`reach:` **measured** by #20995's dev during that card's reach step (`os-dev-report` `5924254306` on #20995, `out_of_scope_findings` F1). The readings are in the dev's private scratch space, and this seat has read them. Filed by the `domain:services` execution seat (#6021, `session_01XY5uCwTjZj7884yYtyur4H`). ⛔ Not a claim.\n\n## What was measured (by class)\n\n- **The caller class:** a non-system caller that carries a principal (the guest envelope, a picker context, or a user id) and whose permission-set resolution returns **no set**. Measured members:\n  - an unauthenticated request carried as the guest envelope;\n  - a picker context on a deployment with no guest set registered;\n  - a signed-in user on an embedder that disables the baseline (a constructor option; `objectstack serve` never passes it).\n- **What it gets:** on the measured boots, object-level admission to objects no set grants. The row-scope skip is read from source (below), ⛔ not measured.\n  - The unauthenticated member: aggregates over any object at the analytics cube-read door. #21061 closes that door with the authentication its siblings apply.\n  - The signed-in member on the baseline-disabled embedder: the record doors answer `200` for objects no set names, the record and list doors included.\n  - The engine itself, with no route in between: a read as the picker context or the guest envelope is admitted.\n- **Why #21061's door gate does not close the class:** the door gate refuses the unauthenticated caller at one door. Every door that serves a principal with no set still reaches the same early returns, the doors that carry a guest by design included.\n\n## The positions (source read at `origin/main`, cited by #21061's grade)\n\nIn `packages/plugins/plugin-security/src/security-plugin.ts`:\n- **Object admission:**\n  - the engine middleware's step 2 CRUD gate runs only under a non-empty set list;\n  - `canReadObject` returns `true` for an empty set list;\n  - `canWriteObject` (the organization wall alone) and `canExport` carry a zero-set arm too.\n- **Row scope:**\n  - for an empty set list, `computeLayeredRlsFilter` collects no policy, so its first layer compiles to no filter;\n  - `getReadFilter` then returns the sharing predicate alone, which constrains only objects whose sharing model is private;\n  - step 2.6's depth stash and `checkAuthoredRowWrite` (`'abstain'`) also stand down for an empty set list.\n\nADR-0056 D2 says an unauthenticated principal gets the deny baseline, not \"no checks\". ADR-0090 D9 says a guest holds the `guest` position and nothing else.\n\n## Direction (from #21061's grade; ⛔ not a ruling)\n\n1. **Measure first, privately:** which doors and callers this class reaches on a stock boot and on a baseline-disabled embedder, and what each known consequence below costs.\n2. **One answer per layer:** for a non-system caller that carries a principal, an empty set list is the deny baseline.\n   - At object admission, step 2's guard and the zero-set arms of `canReadObject`, `canWriteObject` and `canExport` read that one answer.\n   - At the row scope, `getReadFilter`'s zero-set path answers the deny sentinel, as its failure paths already do.\n   - ⛔ No door-specific copy of the rule. ⛔ The principal-less context (no positions, no sets, no user id) is out of scope; ADR-0096 stages it separately.\n3. **Known consequences, to measure and state in the PR:**\n   - a picker context on a deployment with no guest set is admitted today only by the absence of sets, and would be refused (the neighbour #21062 owns that door);\n   - a signed-in caller on an embedder that disables the baseline loses the everything-default;\n   - the `ISecurityService` docblocks in `packages/spec/src/contracts/security-service.ts` that state the zero-set answers belong to `domain:spec`. A change to them is a contract-lane edit, and the field-level zero-set answer is #21063's.\n4. **Pins:** a zero-set caller of each measured member is refused object admission and gets the deny scope, with a signed-in member resolving a set as the control. No pin title states a request.\n\n**Why `Blocked-by: #20995`:** PR #21051 (#20995) holds `security-plugin.ts` and is in the merge queue. This card also changes every door's zero-set answer, so it measures on top of #20995's merge.\n\n## Reader who acts\n\nTriage (grade and route), then the `domain:services` seat. `plugin-security` is `domain:services`.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed, in the act that filed this card:\n- 「zero permission sets caller admitted object admission canReadObject empty set deny baseline row scope」: 9 hits.\n  - #21061 is the parent: the door half, which split this half off.\n  - #20027, #20001 and #7608 (closed) are other mechanisms: a shipped set's blanket on identity objects, a baseline set's grant, and the plane where the baseline applies.\n  - #16870, #13926, #4376, #6603 and #4669 (closed) are unrelated permission-set or read-scope defects.\n- None is this class's object admission or row scope in `plugin-security`.\n- Neighbours: #20995 (this class's field masking, PR #21051), #21063 (this class's capability-gated fields) and #21062 (the picker door).\n\nDedupe words: `zero permission sets object admission` · `empty set list deny baseline` · `no-set caller row scope` · `canReadObject zero-set arm`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n"

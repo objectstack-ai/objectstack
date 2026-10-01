@@ -2,8 +2,8 @@
   "number": 21125,
   "kind": "issue",
   "title": "cli: move to the @oclif/core 5 line, with plugin-help 7 and plugin-plugins 7 in the same commit (replaces Dependabot #21034, #21031, #21035)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,7 @@
   "labels": [
     "area:devpath",
     "dependencies",
-    "domain:cli",
-    "pm:dispatched"
+    "domain:cli"
   ],
   "assignees": [
     "os-bill"
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T07:58:57Z",
-  "updated_at": "2026-10-01T13:30:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T18:03:56Z",
+  "closed_at": "2026-10-01T18:03:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21125",
   "body": "Filing-gate class: ③ maintainer-directed task.\nBody last written 2026-10-01T13:28Z: unblocked. #21094 closed `completed` when PR #21162 merged as `f3b16fc2f3`. The area rule was re-derived with no new blocker, and the card was dispatched in the same act.\nRouting: the maintainer direct-dispatch channel (`session_018gA1pE6eJtwHhqx72G8U9X`) routes this card to `domain:cli` and `area:devpath`; triage grades the priority.\nActing reader: the maintainer direct-dispatch session (`Seat: domain:devx#3`). The maintainer directed it 「相关卡片你使用项目经理技能派发处理」, and it dispatches one `os-dev`.\nDedup: a semantic issue search (\"upgrade @oclif/core to version 5 for the cli\") returned 0. I also listed 789 objectstack issues over REST (open, plus the most recently updated closed) and grepped them for `oclif/core` 5, `plugin-help` 7, `plugin-plugins` 7, #21034, #21031 and #21035. The only hit was #21094, which names those PRs only in its serial-constraints note. No card covers this upgrade.\n\n## Maintainer ruling (verbatim)\n\n> 三组大版本升级:同意\n> * oclif:关三个 PR,立卡(推荐)。\n\nGiven in session `session_018gA1pE6eJtwHhqx72G8U9X` on 2026-10-01, in reply to the seat's risk read of the open Dependabot major bumps.\n\n## Why one card instead of the three Dependabot PRs\n\nAll three Dependabot PRs are closed in favour of this card.\n- **They are coupled.** `@oclif/plugin-help@7.0.2` and `@oclif/plugin-plugins@7.0.3` both depend on `@oclif/core` `^5.0.0` (measured with `npm view`). Landing any one of the three alone leaves two copies of `@oclif/core` in the lockfile. The pairs also conflict with each other in `pnpm-lock.yaml`.\n- **Each Dependabot lockfile carries unrelated movement**, including `nodemailer` going DOWN from 10.0.12 to 10.0.11. That downgrade is in every npm Dependabot PR opened on 2026-10-01.\n- **#21034 has no changeset**, yet `@oclif/core` is a production dependency of the published `@objectstack/cli`.\n- **Code risk measured on #21034's CI is low.** The only breaking change upstream states is \"require Node >=22\", which matches `packages/cli` `engines` (`>=22.0.0`). The CLI's Test Core shards were green on core 5.1.2.\n\n## What to do\n\n1. **One commit bumps all three:** `@oclif/core` `^5.1.2` in `dependencies`, and `@oclif/plugin-help` `^7.0.2` and `@oclif/plugin-plugins` `^7.0.3` in `devDependencies`, all in `packages/cli/package.json`.\n2. **Regenerate `pnpm-lock.yaml`** with the repo's tooling, starting from `origin/main`. Never edit it by hand.\n   - Acceptance: exactly one `@oclif/core` copy at 5.x.\n   - Acceptance: no resolved version goes DOWN against the merge base (`nodemailer` stays at 10.0.12 or later).\n   - Acceptance: only the oclif subtree moves.\n3. **Re-measure what the code says was measured on 4.13.3 — a ruling gated on a premise.**\n   - Premise (falsifiable; verify it FIRST): every behaviour the tree records as measured against `@oclif/core@4.13.3` holds on 5.1.2.\n   - Re-check command: `git grep -n \"4\\.13\\.3\" -- packages/cli scripts ':!**/CHANGELOG.md'`\n   - It gives 17 lines at `origin/main` `5e470f8c1c`.\n   - The ones that state a measurement are in `packages/cli/bin/run.js` and `bin/run-dev.js` (inlined `execute()`), `packages/cli/src/utils/port-contract.ts` (the parser's integer handling, and the #12673 re-measure), and `scripts/check-cli-test-child-env.mjs` (`isProd()` and the ts-path skip).\n   - Also in the set: the literal `'module: @oclif/core@4.13.3'` in `packages/cli/test/unbuilt-workspace-lead.test.ts`, and the comment in `scripts/check-cli-command-ids.mjs`.\n   - If the premise holds, update each site to the version actually measured.\n   - ⛔ If any of them no longer holds, do not force it. Stop and report the fork with the differing measurement.\n4. **Changeset:** add a `patch` changeset for `@objectstack/cli`, which is in the fixed group. It should say that the exported Command classes now build on `@oclif/core` 5 and that Node 22 or later is required.\n5. **Apply `needs:pack-smoke` to the PR**, so the packed tarball's install and run is tested. That job is opt-in and was skipped on all three Dependabot PRs.\n\n## Out of scope (a separate maintainer question)\n\n`packages/cli/package.json` lists both plugins in `oclif.plugins`, but only as `devDependencies`. oclif loads `oclif.plugins` only from `dependencies`, so neither plugin ever loads, and `os help` and `os plugins` are not registered commands. Whether to remove those entries or make the plugins real dependencies is put to the maintainer separately. ⛔ This card does not change it.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n"

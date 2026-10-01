@@ -1,0 +1,37 @@
+{
+  "number": 21193,
+  "kind": "issue",
+  "title": "turbo: build hashes do not cover five root inputs the builds read (tsup-drop-sources-content, scaffold policy + cli init.ts, three build-time check scripts) — stage-2 precondition of the remote cache",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "domain:spec",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T15:27:35Z",
+  "updated_at": "2026-10-01T16:48:29Z",
+  "closed_at": "2026-10-01T16:48:29Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21193",
+  "body": "Sub-issue of #21186: finding F1 from its stage-1 report, comment 5934558577. **It is the stage-2 precondition.** The remote cache stays off on this repo until this lands, and PR #21191 is held as a draft until then.\n\nFiling gate: ③, a maintainer direct assignment, carried by the #21186 dispatch. The class-a finding was measured by the dev in that report.\nDedupe: I searched open issues for `tsup-drop-sources-content`, `SCAFFOLD_TYPESCRIPT_RANGE` and `build inputs undeclared turbo hash`. The only relevant hit is #21186 itself.\n\n## Reading (measured on tree `27af454881`, turbo 2.11.5)\n\n`build` task hashes do not cover root files that the builds read:\n\n| file | what reads it | build hashes moved by a one-line edit |\n|:--|:--|--:|\n| `scripts/tsup-drop-sources-content.mjs` | the root tsup config and 21 package tsup configs; it shapes every `.map` | **0 / 72** |\n| `scripts/sync-scaffold-emission-policy.mjs` and `packages/cli/src/commands/init.ts` | `create-objectstack#build` (its first command writes the template that tsup copies to `dist/templates`) | `create-objectstack#build` does **not** move |\n| `scripts/check-dev-prereqs.mjs` | a stamp written into dist | **0** |\n| `scripts/check-regen-pending.mjs` | build-time check | **0** |\n| `scripts/check-dts-emitted.mjs` | build-time check (affects the verdict) | **0** |\n\n**Controls move.** The root `tsup.config.ts` moves 72/72, and `packages/create-objectstack/tsup.config.ts` moves its own task.\n\n**Output changed while the hash stayed put.** Changing `SCAFFOLD_TYPESCRIPT_RANGE` in `init.ts` from `^5.3.0` to `^5.9.0` writes `^5.9.0` into the dist template, but `create-objectstack#build` stays `840dbe274b784226`.\n\n## Why now\n\nToday the only writer of the replayed build cache is the actions/cache seed. It is saved on push to `main`, so it only ever holds trees that passed every gate.\n\nThe remote cache (#21186) adds writers that do not meet that bar:\n- `merge_group` trees, including ones a later gate dequeues;\n- objectstack-ai/cloud, which replays these entries at older pins. Its framework build hashes match this repo's 72/72.\n\nA stale replay would then reach every run and cloud's billed CI.\n\n## Scope\n\n- Declare these inputs on the `build` task family in `turbo.json`, using task-level `inputs` with `$TURBO_ROOT$/…` or `$TURBO_DEFAULT$`. Use `globalDependencies` only if you can justify it, because it would also move every `test` hash.\n- `create-objectstack#build` needs its cross-package input (`packages/cli/src/commands/init.ts`, or whichever narrower file carries the template policy).\n- Use your judgement on the check scripts. If a build script runs the file and its verdict or output can change the build's result, the file is an input.\n- ⛔ Do not touch `remoteCache`, `ci.yml` or the test task inputs, except where a declaration is shared by construction. Declare any such case in the report.\n\n## Acceptance\n\n- Re-run the #21186 probe: edit one line of each file in the table, and **every row now moves** its build hash(es). Keep the controls (they still move), plus a negative control: an unrelated file moves nothing new.\n- `turbo run build --dry=json` before and after shows the hash changes are exactly the expected set.\n- After this lands, #21186's stage 2 can proceed (PR #21191 leaves draft).\n"
+}
