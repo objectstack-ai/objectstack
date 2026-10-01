@@ -70,7 +70,9 @@
  * `AnalyticsService` in `analytics-automation-json-erasure.test.ts`, where
  * `analytics` is the SERVICE, not the client. That is a producer call and no
  * part of the SDK caller population, so every row carries its receiver and the
- * ledger classifies it `NOT_SDK`.
+ * ledger classifies it `NOT_SDK`. [#20897] driver-memory's refusal suite does
+ * the same on its own cube service (`MemoryAnalyticsService` bound to
+ * `analytics`), so it carries a `NOT_SDK` row too.
  *
  * ## The verdicts
  *
@@ -473,6 +475,12 @@ const LEDGER: readonly LedgerRow[] = [
         method: 'analytics.query', receiver: 'service', count: 1, verdict: 'NOT_SDK',
         why: 'the real AnalyticsService, called to assert the SDK value equals what the producer returned',
     },
+    // ── a producer face outside the SDK: driver-memory's cube service ────────
+    {
+        file: 'packages/drivers/driver-memory/src/memory-exists-non-boolean-refusal.test.ts',
+        method: 'analytics.query', receiver: 'service', count: 2, verdict: 'NOT_SDK',
+        why: 'a MemoryAnalyticsService bound to `analytics`, called directly (no HTTP, no dispatcher envelope) to assert the cube face refuses a non-boolean $exists and answers find()\'s rows for true / false',
+    },
     {
         file: 'packages/client/src/analytics-automation-json-erasure.test.ts',
         method: 'analytics.meta', receiver: 'sdk', count: 2, verdict: 'PAYLOAD_DEPENDENT',
@@ -670,8 +678,17 @@ describe('#13079 §2 — positive controls on the matcher itself', () => {
         // method, so a literal-embedded site lands HERE first, as a phantom
         // producer call. That makes this the assertion most likely to break
         // for a reason that has nothing to do with receivers.
-        expect(service.length, literalNote()).toBe(1);
-        expect(service[0]?.file).toBe('packages/client/src/analytics-automation-json-erasure.test.ts');
+        // [#20897] Two producer faces call `analytics.query` bare: the real
+        // AnalyticsService behind the SDK, and driver-memory's cube service
+        // (`MemoryAnalyticsService`) in its own refusal suite. Neither receiver
+        // is the client, and every site is pinned by file.
+        expect(service.length, literalNote()).toBe(3);
+        expect(service.map((s) => s.file)).toEqual([
+            'packages/client/src/analytics-automation-json-erasure.test.ts',
+            'packages/drivers/driver-memory/src/memory-exists-non-boolean-refusal.test.ts',
+            'packages/drivers/driver-memory/src/memory-exists-non-boolean-refusal.test.ts',
+        ]);
+        expect(service.every((s) => s.method === 'analytics.query')).toBe(true);
     });
 });
 
@@ -716,10 +733,10 @@ describe('#13079 §3 — every call site is classified', () => {
         expect(production, literalNote()).toEqual([]);
     });
 
-    it('records the split: 18 payload pins, 10 result-insensitive, 1 not-SDK', () => {
+    it('records the split: 18 payload pins, 10 result-insensitive, 3 not-SDK', () => {
         expect(verdictTotal('PAYLOAD_DEPENDENT')).toBe(18);
         expect(verdictTotal('RESULT_INSENSITIVE')).toBe(10);
-        expect(verdictTotal('NOT_SDK')).toBe(1);
+        expect(verdictTotal('NOT_SDK')).toBe(3);
         // The three above are LEDGER sums and cannot move on a census reading;
         // this one is census-derived, so it carries the note. [#13874]
         expect(sdkSites.length, literalNote()).toBe(28);
