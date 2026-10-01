@@ -5505,6 +5505,37 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'sources (pure lossless delete — it never had an effect on this surface to lose).',
   },
   {
+    id: 'form-view-subform-columns-closed',
+    order: 54,
+    text:
+      'It also closes the form view\'s inline grid columns: `subforms[].columns`, on `view.form` '
+      + 'and on `formViews` entries, was `z.array(z.any())` while a relationship field\'s '
+      + '`inlineColumns` was already the strict `InlineGridColumnSchema`, so a mis-keyed column '
+      + 'published clean and drew a blank grid column, and `scale` on a currency column, which the '
+      + 'other carrier refuses under the maintainer\'s rulings of 2026-09-23 (option B) and '
+      + '2026-09-24 (option 乙), published green. The carrier now references that schema, so both '
+      + 'carriers are judged by it, with its own prescriptions. The D2 conversion '
+      + '`form-view-subform-columns-canonicalized` respells a `{ field }` column as `{ name }`, the '
+      + 'respelling `field-column-lists-canonicalized` makes on `inlineColumns`: it rewrites stored '
+      + 'rows and assembled artifacts and lists the edit under `os migrate meta`, and it is retired '
+      + 'from the load path, so an author writing `field` meets the refusal. A view saved with a '
+      + 'failing column is refused with the column schema\'s prescription, and a stored row carrying '
+      + 'one is diagnosed at rehydration; neither is stripped, because which column an unknown key '
+      + 'or a mixed `field`/`name` entry meant is the author\'s call, and a conversion that dropped '
+      + 'the key would accept at load what the parse now refuses. Its D3 record is the semantic '
+      + 'entry `form-view-subform-columns-closed`. On both carriers, the reach of '
+      + '`inline-grid-column-currency-scale-refused` extends to a column that declares no `type`: '
+      + 'such a column takes its type from the child field, which the column schema cannot see, '
+      + 'when the console hydrates it, so `defineStack`\'s cross-reference check re-parses a column '
+      + 'whose `name` is a `currency` field of the child object as the type it renders as, and the '
+      + 'refusal of its `scale` is the column schema\'s own. Reach: the child object must be '
+      + 'declared in the same stack; a column naming no field of it, or a subform whose child '
+      + 'object comes from another package, is not judged there. It has no D2 conversion, for the '
+      + 'declared-type entry\'s reason: deleting the key is the migration, and a conversion that '
+      + 'dropped it would accept it at load, the grace window ruling B refused. Its D3 record is '
+      + 'the semantic entry `inline-grid-column-identity-only-currency-scale-refused`.',
+  },
+  {
     id: 'list-view-page-mount-retired',
     order: 27,
     text:
