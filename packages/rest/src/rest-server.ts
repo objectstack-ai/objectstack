@@ -201,7 +201,6 @@ import {
     isApiOperationAllowed,
     API_PRIMITIVES,
     DATA_ACTION_TO_API_OPERATION,
-    referenceTargetOf,
 } from '@objectstack/spec/data';
 // [#8013] The SHARED envelope writer (#3973), aliased. [#9098] The alias no
 // longer exists to dodge a NAME collision — the local responder this used to
@@ -346,8 +345,6 @@ import {
     type ExportFieldMeta,
 } from './export-format.js';
 import { runImport } from '@objectstack/core';
-// [#16581] The public picker's authoring-dialect → parser-grammar lowering.
-import { lowerViewFilterRules } from './view-filter-rule-lowering.js';
 import { prepareImportRequest } from './import-prepare.js';
 // [#17551] The `POST …/analytics/dataset/query` door parse — the half of the
 // analytics family this route never had. See the module header for the
@@ -10717,18 +10714,17 @@ export class RestServer {
                     } catch (e: any) {
                         logError('[REST] Public form schema load failed:', e);
                     }
-                    // Anonymous public forms must NEVER include a lookup or
-                    // master-detail field unless the form designer has
-                    // explicitly opted-in via `publicPicker` on that field's
-                    // section entry (mirroring Airtable's "Allow linking to
-                    // existing records" toggle). Strip non-conforming
-                    // lookups defensively here so a stray spec mistake can
-                    // never expose unrestricted record search to the
-                    // internet — the related `/forms/:slug/lookup/:field`
-                    // endpoint also re-validates `publicPicker` server-side.
+                    // Anonymous public forms NEVER include a lookup, master-detail
+                    // or user field. [#21180] This used to be an opt-in — a
+                    // per-field picker block on the section entry kept the field
+                    // and opened an anonymous record-search route for it. Ruling
+                    // E on #21079 (comment 5933054144) retired the picker and
+                    // deleted that route, so the strip below is now
+                    // unconditional: no declaration can put record search on the
+                    // internet through a public form.
                     const safeForm = (() => {
                         if (!match.form || !Array.isArray(match.form.sections)) return match.form;
-                        const allow = (name: string, cfg: any): boolean => {
+                        const allow = (name: string): boolean => {
                             // [#3022] A declared server-managed anchor (e.g. a
                             // FormView listing `owner_id`) is a spec mistake —
                             // drop it from the rendered sections so the form
@@ -10738,17 +10734,14 @@ export class RestServer {
                             const t = def?.type;
                             // `user` is a lookup specialized to sys_user — same risk as a
                             // raw lookup: surfacing it on an anonymous public form would
-                            // expose unrestricted user search to the internet. Gate it
-                            // behind the same `publicPicker` opt-in.
-                            if (t !== 'lookup' && t !== 'master_detail' && t !== 'user') return true;
-                            return !!cfg?.publicPicker;
+                            // expose unrestricted user search to the internet.
+                            return t !== 'lookup' && t !== 'master_detail' && t !== 'user';
                         };
                         const sections = match.form.sections.map((sec: any) => {
                             const fields = (sec?.fields ?? []).filter((f: any) => {
                                 const name = typeof f === 'string' ? f : f?.field;
                                 if (!name) return false;
-                                const cfg = typeof f === 'string' ? {} : f;
-                                return allow(name, cfg);
+                                return allow(name);
                             });
                             return { ...sec, fields };
                         });
@@ -10906,369 +10899,6 @@ export class RestServer {
             },
             metadata: {
                 summary: 'Submit an anonymous public form',
-                tags: ['forms', 'public'],
-            },
-        });
-
-        // GET /forms/:slug/lookup/:field — scoped picker for public-form
-        // lookup widgets. Mirrors Airtable's per-form linked-record search:
-        // the field MUST be declared in the form spec with an explicit
-        // `publicPicker` block; otherwise the request is rejected with 403.
-        // Records are projected to `publicPicker.displayFields`, capped at
-        // `publicPicker.maxResults` (hard ceiling 50), and pre-filtered by
-        // `publicPicker.filter`. Anonymous visitors can search but cannot
-        // enumerate / paginate, so a leaked endpoint cannot exfiltrate the
-        // table.
-        this.routeManager.register({
-            method: 'GET',
-            path: `${basePath}/forms/:slug/lookup/:field`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const slug = String(req.params?.slug ?? '').trim();
-                    const fieldName = String(req.params?.field ?? '').trim();
-                    if (!slug || !fieldName) {
-                        res.status(400).json({ code: 'INVALID_REQUEST', error: 'slug and field are required' });
-                        return;
-                    }
-                    const match = await resolveFormBySlug(environmentId, req, slug);
-                    if (!match) {
-                        res.status(404).json({
-                            code: 'FORM_NOT_FOUND',
-                            error: `No public form configured at /forms/${slug}`,
-                        });
-                        return;
-                    }
-
-                    // Locate the field config and require an opt-in
-                    // `publicPicker` block. Without it the lookup is
-                    // considered private — return 403, not 404, so a
-                    // misconfigured form is loud rather than silent.
-                    // [#3022] Server-managed anchors are unwritable on this
-                    // surface (the submit route strips them), so a picker on
-                    // one (e.g. a declared `owner_id` + `publicPicker`, which
-                    // would open anonymous sys_user search) is refused outright.
-                    let fieldCfg: any = null;
-                    if (!PUBLIC_FORM_SERVER_MANAGED_FIELDS.has(fieldName)) {
-                        for (const sec of match.form?.sections ?? []) {
-                            for (const f of sec?.fields ?? []) {
-                                const name = typeof f === 'string' ? f : f?.field;
-                                if (name === fieldName) {
-                                    fieldCfg = typeof f === 'string' ? {} : f;
-                                    break;
-                                }
-                            }
-                            if (fieldCfg) break;
-                        }
-                    }
-                    const picker = fieldCfg?.publicPicker;
-                    if (!picker) {
-                        res.status(403).json({
-                            code: 'LOOKUP_NOT_PUBLIC',
-                            error: `Field "${fieldName}" is not enabled for public lookup on this form`,
-                        });
-                        return;
-                    }
-
-                    // Resolve the referenced object — prefer the explicit
-                    // `publicPicker.object` override, fall back to the
-                    // field def on the parent object.
-                    const p = await this.resolveProtocol(environmentId, req);
-                    let referenceObject: string | undefined = picker.object;
-                    if (!referenceObject && typeof (p as any).getMetaItems === 'function') {
-                        // [#18550] The field def is HOISTED out of the fetch's
-                        // swallow and the carrier is read after it, deliberately.
-                        // The `catch` below exists for the metadata fetch — a
-                        // protocol that cannot answer leaves `referenceObject`
-                        // unset and the route answers `500 LOOKUP_TARGET_MISSING`
-                        // — and an unreadable carrier read INSIDE it would be
-                        // swallowed by it and land on that same envelope, which
-                        // is the conflation this card exists to end: "no target
-                        // is declared" and "the declared target cannot be read"
-                        // want different fixes from whoever owns the metadata.
-                        let fieldDef: unknown;
-                        try {
-                            const objectsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
-                                type: 'object',
-                                ...(environmentId ? { environmentId } : {}),
-                            };
-                            const r: any = await p.getMetaItems(objectsRequest);
-                            const items: any[] = Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : [];
-                            const obj = items.find((o: any) => o?.name === match.object);
-                            // [#7486] Resolve the target from the canonical key — and, since
-                            // [#12920], from it ALONE. `reference` is the spelling `FieldSchema`
-                            // accepts, so it is the only spelling a field def can legitimately
-                            // carry.
-                            //
-                            // ⛔ [#12920] This read used to be a four-spelling tolerant chain
-                            // (`reference ?? referenceTo ?? target ?? options.objectName`). It was
-                            // RETIRED by ruling — director seat summon #20, decision batch #107
-                            // item 5, 2026-09-09, maintainer verbatim 「其他同意」 = option A —
-                            // executing the stance recorded 2026-08-30, verbatim 「折叠即契约」:
-                            // the spec spelling IS the contract, and a stored row spelling the
-                            // target the old way is a PRODUCER defect, not a shape this route
-                            // accommodates. The prerequisite that had held execution — whether any
-                            // live deployment holds alias-spelled rows — was answered by the
-                            // maintainer: none to preserve.
-                            //
-                            // Wire-visible consequence, deliberate: a stored def spelling the
-                            // target `referenceTo` / `target` / `options.objectName` now resolves
-                            // NOTHING here, and the route answers `500 LOOKUP_TARGET_MISSING`
-                            // instead of searching the aliased object. Pinned, in both directions,
-                            // in `public-form-lookup-picker.test.ts`.
-                            //
-                            // ⛔ Do not re-widen this read, here or in any sibling consumer —
-                            // widening it back is how the platform came to answer the same
-                            // question differently per consumer. Nothing upstream folds for you:
-                            // [#13137] `data/field.zod.ts`'s `aliases` table is a RENAME HINT ON A
-                            // REJECTED KEY, not a normaliser (`strictObject` consults it solely
-                            // from the `unrecognized_keys` path — the semantics are stated in
-                            // `spec/src/shared/strict-object.ts`), so `relatedTo` / `referenceTo` /
-                            // `target` / `targetObject` / `lookupObject` are REFUSED by
-                            // `FieldSchema`, answered with *"Did you mean `referenceTo` →
-                            // `reference`?"*, and never rewritten. The one place an alias IS
-                            // tolerated is the ADR-0087 conversion layer (`fieldReferenceToAlias`),
-                            // replayed on stored-row rehydration — declared, tested and removable
-                            // on a schedule, which a `??` arm here never was.
-                            //
-                            // [#18550] The canonical-key read itself now happens just BELOW this
-                            // `catch`, through the one arbiter — see there for why it moved.
-                            fieldDef = obj?.fields?.[fieldName];
-                        } catch {/* ignore */}
-                        // [#19289] The arbiter is `referenceTargetOf`, ⛔ not
-                        // `referenceCarrierOf`. This read has NO type gate — it
-                        // resolves whatever field the picker names — so a
-                        // `{ type: 'user' }` field reaches it, and for that type
-                        // the carrier is not the target:
-                        // `IMPLICIT_REFERENCE_TARGETS` declares it a CONSTANT OF
-                        // THE TYPE (`sys_user`) and metadata authored without
-                        // `reference` "fully specified, not under-specified".
-                        // Reading the carrier answered a spec-complete field
-                        // `500 LOOKUP_TARGET_MISSING`, so opening the picker on
-                        // a "responsible person" column returned an error page.
-                        // ⛔ This is NOT a re-widening of the #12920 narrowing
-                        // below: no alias is re-admitted and no `??` chain
-                        // returns. `referenceTargetOf` reads the canonical key
-                        // through `referenceCarrierOf` and supplies the type's
-                        // own constant only where the spec declares one — a
-                        // stored def spelling the target `referenceTo` /
-                        // `target` / `options.objectName` still resolves NOTHING
-                        // here and still answers `500`.
-                        //
-                        // ABSENCE stays silent and unchanged for the types that
-                        // have no constant: a `lookup` / `master_detail` with
-                        // `undefined` / `null` / `''` still answers `undefined`,
-                        // so the route falls to the `LOOKUP_TARGET_MISSING`
-                        // refusal below exactly as before. UNREADABILITY throws
-                        // past this handler's outer `catch`, which classifies and
-                        // LOGS it (`mapDataError` + `logError`) rather than
-                        // reporting a missing target — and it also stops an
-                        // object-valued carrier from being forwarded as
-                        // `query.object` into `findData`.
-                        referenceObject = referenceTargetOf(fieldDef);
-                    }
-                    if (!referenceObject) {
-                        res.status(500).json({
-                            code: 'LOOKUP_TARGET_MISSING',
-                            error: `Could not resolve referenced object for "${fieldName}"`,
-                        });
-                        return;
-                    }
-
-                    const displayFields: string[] = Array.isArray(picker.displayFields) && picker.displayFields.length > 0
-                        ? picker.displayFields.slice(0, 5)
-                        : ['name'];
-                    const hardCap = 50;
-                    const maxResults = Math.min(Math.max(1, Number(picker.maxResults) || 20), hardCap);
-                    // [#6877] Same `String(array)` join as `/search`: the
-                    // picker searched for `'a,b'` and showed an empty list.
-                    if (refuseRepeatedQueryParams(req, res, ['q'])) return;
-                    const q = String(req.query?.q ?? '').trim().slice(0, 100);
-
-                    const context: any = {
-                        permissions: ['guest_portal'],
-                        anonymous: true,
-                    };
-
-                    // [#21062] The picker's ONE key — the field the search
-                    // predicate below matches and the order further down sorts
-                    // by — is the first display field THIS CALLER MAY QUERY ON,
-                    // by the security service's published answer
-                    // (`getQueryableFields`, #20935), not blindly the first
-                    // display field. A field whose masking rule applies to the
-                    // caller is SERVED (projected, its value masked) and is NOT
-                    // queryable: a `contains` probe on it rebuilds the masked
-                    // value row by row, and an order on it ranks rows by the
-                    // value the mask hides, so the engine refuses both with
-                    // `403 PERMISSION_DENIED`. Keyed blindly, a picker whose
-                    // first display field is masked answered that 403 to every
-                    // caller the rule applies to, on every request.
-                    //
-                    // ⛔ No second derivation of masking here: the answer is the
-                    // security service's, computed by the derivation the
-                    // engine's predicate guard refuses from, and this door only
-                    // reads it. Three states:
-                    //   - no security service: this deployment has no
-                    //     field-level security, nothing is masked, and the first
-                    //     display field stays the key;
-                    //   - an answer: the key is the first display field in it;
-                    //   - a service that cannot give it (the method is absent,
-                    //     or answered `undefined`): the contract's fallback
-                    //     (`ISecurityService.getQueryableFields`) — every display
-                    //     field whose DECLARATION carries a `maskingRule` is
-                    //     passed over, whoever the caller is. A declaration that
-                    //     cannot be read admits no display field.
-                    // No display field queryable → the engine's own refusal for
-                    // those fields, its words and its envelope, before the engine
-                    // is asked: the picker never searches or sorts on a field the
-                    // caller may not query.
-                    const security = await this.resolveSecurityService(environmentId, req);
-                    const queryableAnswer = async (): Promise<readonly string[]> => {
-                        const answer = typeof security?.getQueryableFields === 'function'
-                            ? await security.getQueryableFields(referenceObject, context)
-                            : undefined;
-                        if (answer !== undefined) return answer;
-                        const declared: any = typeof (p as any).getMetaItem === 'function'
-                            ? (await (p as any).getMetaItem({
-                                type: 'object',
-                                name: referenceObject,
-                                ...(environmentId ? { environmentId } : {}),
-                            }))?.item?.fields
-                            : undefined;
-                        if (!declared || typeof declared !== 'object') return [];
-                        const declarationOf = (f: string): any => (Array.isArray(declared)
-                            ? declared.find((d: any) => d?.name === f)
-                            : declared[f]);
-                        return displayFields.filter((f) => declarationOf(f)?.maskingRule == null);
-                    };
-                    const queryable: ReadonlySet<string> | undefined = security
-                        ? new Set(await queryableAnswer())
-                        : undefined;
-                    const key: string | undefined = queryable ? displayFields.find((f) => queryable.has(f)) : displayFields[0];
-                    if (key === undefined) {
-                        const refused = displayFields.filter((f) => !queryable?.has(f));
-                        const denied: any = new Error(
-                            `[Security] Access denied: query on '${referenceObject}' references field(s) not readable by the caller: `
-                            + `${refused.join(', ')}. Filtering, sorting, grouping, or aggregating by a hidden field `
-                            + `would leak its values (filter oracle) — remove these predicates or grant field read access.`,
-                        );
-                        denied.name = 'PermissionDeniedError';
-                        denied.code = 'PERMISSION_DENIED';
-                        denied.statusCode = 403;
-                        const mapped = mapDataError(denied);
-                        res.status(mapped.status).json(mapped.body);
-                        return;
-                    }
-
-                    // Compose filters: form-defined static filter first,
-                    // then the search predicate on the key above. The
-                    // search predicate uses `contains` so non-indexed
-                    // columns still work.
-                    //
-                    // [#16581] …and then LOWER the composed rows to the filter
-                    // grammar the ingress parses. BOTH halves are the authoring
-                    // dialect `FormFieldPublicPickerSchema.filter` declares
-                    // (`{field, operator, value}`) — the declared rows because
-                    // an author wrote them, the search row because this route
-                    // built it in the same shape — and the normalizer refuses
-                    // that shape with `400 INVALID_FILTER`. So the endpoint
-                    // answered 400 for EVERY non-empty search, with or without a
-                    // declared `publicPicker.filter`; only the degenerate
-                    // no-filter call could succeed. `lowerViewFilterRules` is
-                    // the one-way translation (authoring dialect →
-                    // `FilterArray`) and lives at this door because this is the
-                    // door that speaks both; ⛔ the repair the ruling excludes
-                    // is teaching `findData` a second dialect.
-                    const rules: any[] = [];
-                    if (Array.isArray(picker.filter)) rules.push(...picker.filter);
-                    if (q) rules.push({ field: key, operator: 'contains', value: q });
-                    const filters = lowerViewFilterRules(rules);
-
-                    const pickerRequest: ServerScopedDataRequest<FindDataRequest> = {
-                        object: referenceObject,
-                        // [#16337] Canonical QueryAST: `filters` → `where`,
-                        // `select` → `fields`, `sort` → `orderBy`. The normalizer
-                        // folds each of those aliases onto exactly these keys and
-                        // moves the value verbatim, so this is a spelling change
-                        // and nothing else.
-                        //
-                        // ⚠️ The VALUE on `where` is a `FilterArray`, not a
-                        // `FilterCondition`. #16337 left `ViewFilterRule` OBJECTS
-                        // here — the dialect `FormFieldPublicPickerSchema.filter`
-                        // declares — which the ingress refuses with
-                        // `400 INVALID_FILTER`; #16581 lowers them above, so what
-                        // arrives is the declared array grammar the normalizer
-                        // parses. `FilterCondition`'s `[key: string]: any` index
-                        // signature is why an array compiles against the slot at
-                        // all; that the value is now a filter the ingress ACCEPTS
-                        // is measured end-to-end, not asserted by the type.
-                        query: {
-                            object: referenceObject,
-                            limit: maxResults,
-                            offset: 0,
-                            where: filters,
-                            fields: ['id', ...displayFields],
-                            // [#7485] Ordering is FIXED — the key above (the
-                            // first display field the caller may query on,
-                            // #21062), ascending. This used to read `picker.sort`, a key
-                            // `FormFieldPublicPickerSchema` (#7467) deliberately
-                            // never declared: enforced by the route, authorable
-                            // nowhere. The maintainer ruled retire-the-read over
-                            // declare-the-key — zero measured pull for a
-                            // permanently-maintained public key on an
-                            // UNAUTHENTICATED surface. A pre-schema stored row
-                            // still carrying `sort` is IGNORED, not an error.
-                            orderBy: [{ field: key, order: 'asc' }],
-                        },
-                        ...(environmentId ? { environmentId } : {}),
-                        context,
-                    };
-                    const result: any = await p.findData(pickerRequest);
-
-                    // Project the response server-side too — never trust
-                    // that the driver respected `select`.
-                    //
-                    // [#16581] `records` FIRST, which is the key `findData`
-                    // actually returns (`{ object, records, total, hasMore }`)
-                    // and the order the other three read sites in this file
-                    // already use. This one read `data` / `items` and NOT
-                    // `records`, so against the real protocol it matched
-                    // nothing and the picker answered `200 {"data":[]}` — an
-                    // empty list for every search. Invisible until the filter
-                    // above stopped 400ing, and invisible to the sibling suite
-                    // because its `findData` double answers `{ data }`, a shape
-                    // the protocol does not produce. The legacy aliases stay so
-                    // those doubles and alternate protocols keep working.
-                    const rows: any[] = Array.isArray(result?.records) ? result.records
-                        : Array.isArray(result?.data) ? result.data
-                            : Array.isArray(result?.items) ? result.items
-                                : Array.isArray(result?.rows) ? result.rows
-                                    : Array.isArray(result) ? result : [];
-                    const projected = rows.slice(0, maxResults).map((row: any) => {
-                        const out: any = { id: row?.id };
-                        for (const f of displayFields) {
-                            if (row && Object.prototype.hasOwnProperty.call(row, f)) out[f] = row[f];
-                        }
-                        return out;
-                    });
-                    res.json({
-                        data: projected,
-                        total: projected.length,
-                        truncated: rows.length >= maxResults,
-                        displayFields,
-                    });
-                } catch (error: any) {
-                    const mapped = mapDataError(error);
-                    // Distinct message (this is not the "unhandled" channel),
-                    // same shared verdict — see `isExpectedRouteError`.
-                    if (!isExpectedRouteError(mapped.status, mapped.body)) {
-                        logError('[REST] Public form lookup error:', error);
-                    }
-                    res.status(mapped.status).json(mapped.body);
-                }
-            },
-            metadata: {
-                summary: 'Scoped lookup picker for a public form field (anonymous)',
                 tags: ['forms', 'public'],
             },
         });

@@ -1392,7 +1392,7 @@
       "title": "Anonymous public form renders the whitelist only and its submit strips forged anchors; the inquiry lands via publicFormGrant",
       "since": "v15.1",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1444,10 +1444,10 @@
           "evidence": "the 201 + the landed row"
         },
         {
-          "clause": "a non-whitelisted lookup picker is refused: anon GET /forms/contact-us/lookup/owner_id answers 403 LOOKUP_NOT_PUBLIC — the form cannot open an anonymous sys_user search the submit would refuse",
+          "clause": "there is no anonymous record search: the rendered sections carry no lookup / master_detail / user field whatever the form declares, and anon GET /forms/contact-us/lookup/owner_id answers what any unregistered path answers (404 ENDPOINT_NOT_FOUND) — the anonymous lookup-picker route was retired",
           "oracle": "api",
-          "verify": "the lookup route status 403 + code LOOKUP_NOT_PUBLIC (public-form-routes.test.ts lookup case)",
-          "evidence": "the lookup trace"
+          "verify": "the old picker path status 404 + error.code ENDPOINT_NOT_FOUND, identical to a never-registered sibling path (public-form-routes.test.ts [#21180] cases)",
+          "evidence": "the lookup-path trace"
         },
         {
           "clause": "submitBehavior renders: after an anonymous submit the browser shows the thank-you panel (submitBehavior kind 'thank-you')",
@@ -1474,8 +1474,8 @@
         "examples/app-showcase/src/ui/views/inquiry.view.ts#formViews (formViews.contact: allowAnonymous, publicLink '/forms/contact-us', whitelist, submitBehavior)",
         "examples/app-showcase/src/data/objects/inquiry.object.ts#sharingModel (sharingModel private, publicFormGrant docblock, server-controlled status/source)",
         "examples/app-showcase/src/data/hooks/index.ts (guest-defaults stamping)",
-        "packages/rest/src/rest-route-ledger.ts (forms family: GET /forms/:slug, POST /forms/:slug/submit, GET /forms/:slug/lookup/:field)",
-        "packages/rest/src/public-form-routes.test.ts#__proto__ (#3022 anchor-enforcement: whitelist strip, __proto__ guard, publicFormGrant, LOOKUP_NOT_PUBLIC)",
+        "packages/rest/src/rest-route-ledger.ts (forms family: GET /forms/:slug, POST /forms/:slug/submit)",
+        "packages/rest/src/public-form-routes.test.ts#__proto__ (#3022 anchor-enforcement: whitelist strip, __proto__ guard, publicFormGrant; #21180 unconditional lookup/master_detail/user strip and the retired picker route)",
         "ADR-0056 Option A, #3022/#3036/#3004"
       ],
       "history": [
@@ -1484,6 +1484,12 @@
           "date": "2026-08-08",
           "change": "new — merges the console/routes/ui/docs anonymous public-form rows into one item: whitelist-only render, forged-anchor strip on submit, publicFormGrant landing, non-whitelisted lookup refusal, unpublish-kills-link",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-01",
+          "change": "the lookup-refusal clause becomes the route's absence: ruling E retired the anonymous public-form lookup picker, so lookup / master_detail / user fields are always stripped from the anonymous rendering and GET /forms/:slug/lookup/:field is no longer registered (#21180)",
+          "ref": "claude/issue-21180-retire-public-picker"
         }
       ]
     },

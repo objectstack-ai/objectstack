@@ -107,15 +107,9 @@ The submit's authorization no longer depends on this set — the
 declaration-derived `publicFormGrant` (see the note above) is what permits the
 insert. For the submit you only need a `guest_portal` permission set if you rely
 on the legacy back-compat path (e.g. an older runtime, or object hooks that
-branch on the `guest_portal` permission). A form that declares a public picker
-(see *the public picker* below) is different: the picker's search runs under
-this set and nothing else, so without one that grants read on the picker's
-target object the picker answers `403 PERMISSION_DENIED` — the ADR-0056 D2 deny
-baseline refuses a caller that resolves no permission set. When present the set
-is attached to the anonymous context, so keep it INSERT-only on the form's
-target object — the guest-safe shape (ADR-0090 D9) — and remember that any read
-you grant a picker's target object is readable by every anonymous visitor
-through that picker.
+branch on the `guest_portal` permission). When present the set is attached to
+the anonymous context, so keep it INSERT-only on the form's target object — the
+guest-safe shape (ADR-0090 D9).
 
 {/* os:check */}
 ```ts
@@ -241,65 +235,22 @@ Errors:
 
 The companion `GET /api/v1/forms/:slug` route returns `500 FORM_RESOLVE_FAILED` if form resolution itself throws.
 
-### `GET /api/v1/forms/:slug/lookup/:field` — the public picker
+### Lookup, master-detail and `user` fields
 
-Lookup, master-detail and `user` fields are **stripped from a public form by
-default** — surfacing one to anonymous visitors means exposing a record search
-to the internet, so it is opt-in per field, like Airtable's "Allow linking to
-existing records" toggle. The opt-in is a `publicPicker` block on the field's
-entry in `sections[].fields[]` (declarable since #7467):
+An anonymous public form does not offer record search. `GET /api/v1/forms/:slug`
+leaves every `lookup`, `master_detail` and `user` field off the rendered
+`sections`, whatever the form declares — surfacing one would mean letting an
+anonymous visitor search existing records on the internet. There is no anonymous
+lookup route.
 
-```ts
-sections: [{
-  name: 'about_you',
-  label: 'About you',
-  fields: [
-    'company',
-    { field: 'owner', publicPicker: { displayFields: ['name'], maxResults: 10 } },
-  ],
-}]
-```
-
-| `publicPicker` key | Meaning |
-|---|---|
-| `displayFields` | Fields projected into each result row (plus `id`); the visitor's `q` is `contains`-matched against the **first** entry. At most 5; omitted → `['name']`. |
-| `maxResults` | Rows per request, integer 1–50 (default 20). 50 is a hard server ceiling; there is **no pagination** on this surface (`offset` is pinned to 0), so a leaked endpoint cannot enumerate the table. |
-| `filter` | Static pre-filter rows (same `{ field, operator, value }` dialect as list-view filters), ANDed ahead of the visitor's search. |
-| `object` | The object to search. Optional — omit it and the server resolves the target from the field's own definition on the parent object: its `reference` key, or — for a field type whose target is fixed by the TYPE rather than chosen by the author (`user`, whose constant is `sys_user`) — that constant. Those two are the only sources, and a `user` field authored without `reference` is fully specified, not under-specified (#19289). A stored row spelling the target `referenceTo` / `target` / `options.objectName` is **not** resolved, because `FieldSchema` accepts no spelling but `reference`: on a `lookup` / `master_detail` the route then answers `500 LOOKUP_TARGET_MISSING`, and on a `user` field the type's own constant answers instead — the alias contributes nothing either way. That key is also **read through the one carrier accessor**, so a stored row whose `reference` holds something other than a string (an object, an array) is refused rather than searched — see the error table below. Declare it only to search something other than what the field points at. |
-
-Those four keys are the whole block. It admits exactly what the route enforces
-— an unknown subkey, a 6th display field, or `maxResults: 51` is a **parse
-error at authoring time**, not a silently-adjusted request.
-
-Result **ordering is fixed**: the first `displayFields` entry, ascending. It is
-not configurable — `publicPicker.sort` is an unknown subkey, and #7485 retired
-the route's read of one — so a picker's rows arrive in one predictable order
-whatever the target object's own default ordering is.
-
-```bash
-curl 'http://localhost:3000/api/v1/forms/contact-us/lookup/owner?q=ada'
-```
-
-```json
-{ "data": [{ "id": "usr_1", "name": "Ada Lovelace" }],
-  "total": 1, "truncated": false, "displayFields": ["name"] }
-```
-
-Errors:
-
-| Status | Code | When |
-|---|---|---|
-| `400 INVALID_REQUEST` | missing / blank slug or field |
-| `403 LOOKUP_NOT_PUBLIC` | the field has no `publicPicker` block — the deliberate loud default (#3022); also any server-managed anchor (`owner_id`, `organization_id`, …), which never gets a picker even if one is declared |
-| `403 PERMISSION_DENIED` | the deployment registers no `guest_portal` set that grants read on the picker's target object, so the search context resolves no permission set and is refused at object admission — the ADR-0056 D2 deny baseline. The picker's declaration bounds what is searched and projected; it never grants the read itself |
-| `404 FORM_NOT_FOUND` | slug not registered on any `sharing.allowAnonymous: true` view |
-| `500 LOOKUP_TARGET_MISSING` | the referenced object could not be resolved from either `publicPicker.object` or the field definition — the field names no target object at all (or its object metadata is unreachable). Until #7486 this also fired for a perfectly well-formed field, because the fallback read only the legacy spellings and not the canonical `reference`; declaring `object` was the workaround and is no longer needed. |
-| `500 INTERNAL_ERROR` | the field def **declares** a target this route cannot READ — a stored `reference` holding an object or an array rather than the object name `FieldSchema` declares. ⚠️ Deliberately **not** `LOOKUP_TARGET_MISSING`: "nothing names the target" and "the named target is unreadable" want different fixes from whoever owns the metadata, so they get different answers. The unreadable carrier is named in full in the server log (it is withheld from the response body, as every fault's text is); the picker's search never runs. |
+- To let a visitor choose from a fixed list, use a `select` field with static `options`.
+- To let a visitor pick an existing record, put the form behind sign-in — an
+  internal form (section 6) renders lookup fields with the signed-in user's access.
 
 ### Auth model
 
-- None of the three routes calls `enforceAuth`, so they work under the always-on anonymous-deny default (there is no `requireAuth` knob to configure since v17).
-- The execution context the **submit** route hands to ObjectQL is `{ publicFormGrant: { object }, permissions: ['guest_portal'], anonymous: true }` with no `userId`. The Security plugin honors `publicFormGrant` first — a create + read-back grant scoped to exactly the declared object — so authorization holds even without a `guest_portal` profile. `permissions: ['guest_portal']` is retained for back-compat. The **lookup** route's search context is `{ permissions: ['guest_portal'], anonymous: true }` — no `publicFormGrant` (it reads the picker's target object, not the form's), so the picker declaration bounds what the search matches and projects, and the deployment's `guest_portal` set is what authorizes it: with no such set granting read on the target object, the search context resolves no permission set and is refused at object admission (`403 PERMISSION_DENIED`, the ADR-0056 D2 deny baseline).
+- Neither route calls `enforceAuth`, so both work under the always-on anonymous-deny default (there is no `requireAuth` knob to configure since v17).
+- The execution context the **submit** route hands to ObjectQL is `{ publicFormGrant: { object }, permissions: ['guest_portal'], anonymous: true }` with no `userId`. The Security plugin honors `publicFormGrant` first — a create + read-back grant scoped to exactly the declared object — so authorization holds even without a `guest_portal` profile. `permissions: ['guest_portal']` is retained for back-compat.
 - No CSRF or auth header is needed; embed the form on any domain.
 
 ## 5. Embedding from a front-end

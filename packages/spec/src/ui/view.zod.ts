@@ -3148,94 +3148,32 @@ export const FormSelectOptionSchema = lazySchema(() => {
  * so a closed parent said nothing about it.
  */
 /**
- * [#7467] Public-lookup opt-in for a lookup / `master_detail` / `user` field on
- * an ANONYMOUS public form.
+ * [#21180] Prescription for the retired `publicPicker` block on a form field
+ * (ADR-0087 D2, immediate retirement, no alias window).
  *
- * This block GATES the REST public-lookup capability: `GET
- * /forms/:slug/lookup/:field` answers a picker search only for a field whose
- * form declaration carries `publicPicker`. Without it the route answers `403
- * LOOKUP_NOT_PUBLIC` — loud by design (#3022), so a misconfigured form is a
- * visible refusal rather than a silently empty picker. The public-form resolve
- * route enforces the same opt-in from the other side: an undeclared
- * lookup/master_detail/user field is stripped from the rendered sections, so an
- * anonymous form can never expose unrestricted record search by accident.
+ * The block opted a lookup / `master_detail` / `user` field on an ANONYMOUS
+ * public form into a record-search picker served by an unauthenticated route
+ * (`GET /forms/:slug/lookup/:field`). The maintainer's ruling E on #21079
+ * (comment 5933054144) retired the capability outright and reversed the
+ * #7467 ruling that had declared the key: anonymous public forms no longer
+ * take lookup, `master_detail` or `user` fields at all, and the route is
+ * deleted. What survives is the resolve route's strip, now unconditional —
+ * those three field types are always left off the anonymous rendering — so a
+ * form cannot expose record search to the internet by any declaration.
  *
- * Until #7467 this key was ENFORCED but declared nowhere — the mirror image of
- * ADR-0049's "declared ≠ enforced": `FormFieldSchema` is strict (ADR-0089 D3a),
- * so every authoring path refused a form carrying a picker and the capability
- * was unreachable. Declaring it is the maintainer-ruled direction (option 1 of
- * that card's fork).
- *
- * Every key below mirrors a read the route actually performs
- * (`packages/rest/src/rest-server.ts`, `GET /forms/:slug/lookup/:field`
- * handler), and NOTHING else: this block opens an unauthenticated search
- * surface, so the schema deliberately admits no option the route does not
- * enforce. The route's own hard bounds are encoded rather than restated in
- * prose — `displayFields` beyond the first 5 are never projected (the route
- * slices), a `maxResults` above 50 is never honored (the route clamps), so
- * authoring either is refused here instead of silently meaning less than it
- * says. Anonymous visitors can search but cannot paginate (`offset` is pinned
- * to 0 server-side), which is what keeps a leaked endpoint from enumerating
- * the table.
- *
- * @example Opt a lookup field into the public picker
- * { field: 'owner', publicPicker: { displayFields: ['name'], maxResults: 10 } }
+ * The key stays in the shape as a {@link retiredKey} tombstone so `tsc` types
+ * it `never` and the parse refuses it with this text instead of a bare
+ * unrecognized-key report; `form-field-public-picker-removed`
+ * (`conversions/registry.ts`) strips it from stored sources.
  */
-export const FormFieldPublicPickerSchema = lazySchema(() => strictObject({
-  surface: 'this public picker configuration',
-  history: VIEW_HISTORY,
-}, {
-  /**
-   * Projection: the fields returned for each picker row (plus `id`), and the
-   * search target — the visitor's `q` is matched with `contains` against the
-   * FIRST entry. The route projects at most 5 and defaults to `['name']` when
-   * omitted, so more than 5 (or an empty list) is refused here rather than
-   * silently truncated / silently replaced.
-   */
-  displayFields: z.array(z.string()).min(1).max(5).optional().describe(
-    'Fields projected into each picker result (with `id`); the visitor\'s search matches '
-    + '`contains` on the first entry. At most 5 (the route projects no more); omitted → [\'name\'].',
-  ),
-  /**
-   * Per-request result cap. The route clamps to a hard ceiling of 50 and
-   * defaults to 20; anonymous visitors cannot paginate, so this bounds what a
-   * single request can pull. Values the route would never honor (0, negatives,
-   * fractions, > 50) are refused at authoring time.
-   */
-  maxResults: z.number().int().min(1).max(50).optional().describe(
-    'Maximum rows a lookup returns (default 20, hard ceiling 50 — the route clamps; anonymous '
-    + 'visitors cannot paginate past it).',
-  ),
-  /**
-   * Static pre-filter, ANDed ahead of the visitor's search predicate. Same
-   * rule dialect as every other view filter (`ViewFilterRuleSchema`) — the
-   * route composes these rows with its own `{ field, operator: 'contains',
-   * value: q }` search row in one filters list.
-   */
-  filter: z.array(ViewFilterRuleSchema).optional().describe(
-    'Static pre-filter rows ANDed ahead of the visitor\'s search (e.g. only active records are '
-    + 'searchable). Same `{ field, operator, value }` dialect as list-view filters.',
-  ),
-  /**
-   * Referenced-object override. Omitted, the route resolves the target from
-   * the field definition on the parent object (`reference`); set it only when
-   * that resolution is wrong for this form.
-   *
-   * `reference` is the key `FieldSchema` accepts — `referenceTo` is only a
-   * rejected alias it lists so a failed parse can offer a rename hint, so an
-   * author following the old spelling of this sentence had their whole object
-   * metadata refused at parse.
-   */
-  object: z.string().optional().describe(
-    'Referenced-object override for the picker search; omitted → resolved from the `reference` '
-    + 'key on the field definition.',
-  ),
-}).describe('Public-lookup opt-in: enables GET /forms/:slug/lookup/:field for this field on an anonymous public form (without it the route answers 403 LOOKUP_NOT_PUBLIC).'));
-
-/** Authoring shape of {@link FormFieldPublicPickerSchema}. */
-export type FormFieldPublicPicker = z.input<typeof FormFieldPublicPickerSchema>;
-/** Post-parse shape of {@link FormFieldPublicPicker} — filter-rule operator aliases folded (ADR-0122). */
-export type FormFieldPublicPickerParsed = z.infer<typeof FormFieldPublicPickerSchema>;
+const FORM_FIELD_PUBLIC_PICKER_RETIRED =
+  '`view.form.sections[].fields[].publicPicker` was removed in @objectstack/spec 17.6.0 (ADR-0087 D2) '
+  + '— an anonymous public form no longer offers record search: lookup, `master_detail` and `user` '
+  + 'fields are always left off the anonymous rendering, and the anonymous record-search route '
+  + '(`GET /forms/:slug/lookup/:field`) no longer exists. Delete the key (the whole `publicPicker` '
+  + 'block). To let a visitor choose from a fixed list, use a `select` field with static `options`; '
+  + 'to let them pick an existing record, put the form behind sign-in. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
 const FormFieldBaseSchema = lazySchema(() => {
   const shape = {
@@ -3275,17 +3213,12 @@ const FormFieldBaseSchema = lazySchema(() => {
   reference: z.string().optional().describe('Target object name for lookup/master_detail fields'),
 
   /**
-   * [#7467] Public-lookup opt-in (lookup / master_detail / user fields on an
-   * anonymous public form). Gates `GET /forms/:slug/lookup/:field` — absent,
-   * the route answers 403 LOOKUP_NOT_PUBLIC (loud by design, #3022) and the
-   * resolve route strips the field from the rendered sections. See
-   * {@link FormFieldPublicPickerSchema}.
+   * [#21180] RETIRED — the anonymous public-form record-search picker. See
+   * {@link FORM_FIELD_PUBLIC_PICKER_RETIRED}: the parse refuses the key with
+   * that prescription, and a public form's lookup / `master_detail` / `user`
+   * fields are always left off its anonymous rendering.
    */
-  publicPicker: FormFieldPublicPickerSchema.optional().describe(
-    'Opt this field into the anonymous public-form lookup picker (GET /forms/:slug/lookup/:field). '
-    + 'Without it the route answers 403 LOOKUP_NOT_PUBLIC and the field is stripped from the '
-    + 'rendered public form.',
-  ),
+  publicPicker: retiredKey(FORM_FIELD_PUBLIC_PICKER_RETIRED),
   
   /** Text constraints */
   // #12174 — the form-field row's constraint keys converge on the value shape
