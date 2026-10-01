@@ -543,7 +543,7 @@ export function portDriftError(
       + 'That row is `resolveAuthBaseUrl(boundPort).baseOrigin` (`serve.ts`), so a child carrying '
       + 'OS_AUTH_URL, BETTER_AUTH_URL or OS_BASE_URL prints THAT origin instead of the address it '
       + 'bound — and this read-back channel goes with it.\n'
-      + '⛔ Reported rather than skipped on purpose (#12525): a silent skip here is the same '
+      + '⛔ Reported rather than skipped on purpose: a silent skip here is the same '
       + 'false green the read-back exists to remove.\n'
       + `--- child output ---\n${output}`,
     );
@@ -566,7 +566,8 @@ export function portDriftError(
       `ANNOUNCED PORT 0 on \`${what}\`: the child was asked for port 0 — a request for a `
       + 'kernel-assigned port — and its ready banner names `http://localhost:0`, which is not '
       + 'an address anything can listen on.\n'
-      + 'The banner is built from the port `serve.ts` PUBLISHES, so this is the #13062 defect: '
+      + 'The banner is built from the port `serve.ts` PUBLISHES, which must be the port it BOUND, so '
+      + 'this is a regression: '
       + 'the requested port announced in place of the bound one. The same wrong number reaches '
       + 'the `objectstack:listening` IPC message and `runtime.<environment>.json`.\n'
       + `--- child output ---\n${output}`,
