@@ -55,6 +55,7 @@ const PROBE = {
     meta: { name: 'meta', type: 'json' },
     labels: { name: 'labels', type: 'tags' },
     picks: { name: 'picks', type: 'select', multiple: true, options: OPTIONS },
+    owners: { name: 'owners', type: 'lookup', multiple: true, reference: 'aggregate_type_target' },
     ship_to: { name: 'ship_to', type: 'address' },
   },
 };
@@ -139,6 +140,19 @@ describe('[#20914] the engine\'s aggregate door asks the aggregate × field-type
       expect(err!.message, label).toContain(`${fn} ${ACCEPTS_MIN_MAX}`);
     }
     expect(reads, 'every refusal precedes the driver').toHaveLength(0);
+  });
+
+  it('refuses max over a multi-valued lookup under a groupBy — the shape measured as 500 on PostgreSQL, the serialized text on SQLite and the array in memory — no read', async () => {
+    const query = { groupBy: ['title'], aggregations: [{ function: 'max', field: 'owners', alias: 'm' }] } as EngineAggregateOptions;
+    const err = await refusalOf(engine.aggregate(OBJECT, query));
+    expect(envelopeOf(err)).toEqual(ENVELOPE);
+    expect({ field: err?.field, fields: err?.fields, param: err?.param })
+      .toEqual({ field: 'owners', fields: ['owners'], param: 'aggregations' });
+    expect(err!.message).toMatch(new RegExp(
+      `^aggregate\\('${OBJECT}'\\): aggregations\\[0\\]\\.field takes the max of 'owners', a declared lookup field with multiple: true — a multi-value field, which the engine does not take the max of\\. The query was NOT run\\.`,
+    ));
+    expect(err!.message).toContain(`max ${ACCEPTS_MIN_MAX}`);
+    expect(reads, 'the refusal precedes the driver').toHaveLength(0);
   });
 
   it('refuses the other refused pairs of the judged rows the same way — avg over a datetime, max over a text (the string-class row as ruled)', async () => {

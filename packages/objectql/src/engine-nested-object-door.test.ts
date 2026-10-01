@@ -276,10 +276,6 @@ describe('[#20745] a no-operator object beneath a relation, structured-JSON or p
   it('refuses it in having over a relation or JSON column, naming the aggregated column — no read', async () => {
     const cases: ReadonlyArray<readonly [EngineAggregateOptions, string, string, string]> = [
       [{ groupBy: ['owner'], aggregations: [{ function: 'count', alias: 'n' }], having: { owner: { region: 'NA' } } }, 'owner', 'lookup', 'nested-relation form'],
-      [{ groupBy: ['title'], aggregations: [{ function: 'max', field: 'boss', alias: 'top' }], having: { top: { region: 'NA' } } }, 'top', 'master_detail', 'nested-relation form'],
-      // [#20783] A JSON column reaches `having` as a `max` of a json field: a
-      // json GROUPBY is refused one door earlier (`engine-group-by-json-door.test.ts`).
-      [{ groupBy: ['title'], aggregations: [{ function: 'max', field: 'meta', alias: 'top_meta' }], having: { top_meta: { a: 1 } } }, 'top_meta', 'json', 'whole-value match'],
     ] as ReadonlyArray<readonly [EngineAggregateOptions, string, string, string]>;
     for (const [query, column, type, words] of cases) {
       reads.length = 0;
@@ -289,6 +285,28 @@ describe('[#20745] a no-operator object beneath a relation, structured-JSON or p
       expect(err!.message, column).toContain(`the aggregated column '${column}', which carries a ${type} value`);
       expect(err!.message, column).toContain(words);
       expect(reads, column).toHaveLength(0);
+    }
+  });
+
+  it('[#20914] a max over a relation or JSON field never reaches having: the aggregate door refuses the pair one door earlier — no read', async () => {
+    // These two queries used to reach `having` with an aggregated column that
+    // carries a master_detail / json value. The aggregate × field-type table
+    // refuses `max` over both types, and the engine's aggregate door asks it
+    // before any filter door runs — as a json GROUPBY is refused one door
+    // earlier (`engine-group-by-json-door.test.ts`).
+    const cases: ReadonlyArray<readonly [EngineAggregateOptions, string, string]> = [
+      [{ groupBy: ['title'], aggregations: [{ function: 'max', field: 'boss', alias: 'top' }], having: { top: { region: 'NA' } } }, 'boss', 'master_detail field'],
+      [{ groupBy: ['title'], aggregations: [{ function: 'max', field: 'meta', alias: 'top_meta' }], having: { top_meta: { a: 1 } } }, 'meta', 'json field — a structured-JSON value'],
+    ] as ReadonlyArray<readonly [EngineAggregateOptions, string, string]>;
+    for (const [query, field, declared] of cases) {
+      reads.length = 0;
+      const err = await refusalOf(engine.aggregate(OBJECT, query));
+      expect(envelopeOf(err), field).toEqual({ code: 'INVALID_FIELD', status: 400 });
+      expect(err!.message, field).toContain(
+        `aggregations[0].field takes the max of '${field}', a declared ${declared}, which the engine does not take the max of. The query was NOT run.`,
+      );
+      expect(err!.message, field).not.toContain('at having.');
+      expect(reads, field).toHaveLength(0);
     }
   });
 
