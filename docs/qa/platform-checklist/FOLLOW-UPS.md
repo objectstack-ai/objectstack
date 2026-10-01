@@ -280,6 +280,14 @@ declares exactly `.` and `./logger`. Do not re-derive the subpath.
 | D14 | `MigrationRecoveryPlugin` is composed by NO boot path — `serve.ts` auto-registers `PlatformObjectsPlugin` but never the recovery plugin; standalone-stack, default-host, the showcase config, and the migrate CLI boot all omit it; only its unit test instantiates it. Interrupted-migration detection therefore never runs on any shipped boot, while `sys-migration-journal.object.ts` argues recovery must need "zero host wiring" | `packages/runtime/src/index.ts` (exported); `serve.ts` (what IS auto-registered) | platform-core.interrupted-migration-boot-report (fixtures an explicit registration; knownGap names the composition hole) | correctness/composition — safe to file |
 | D15 | `extract-hook-body.ts`'s header promises "the build fails… no silent fallback" on a forbidden pattern, but the DEFAULT `os build` catches every extraction error and silently falls back to the.mjs bundle (`lower-callables.ts`), printing the warnings nowhere; only `--strict-body` (`compile.ts`) produces the worded refusals with exit 1. `hook-bodies.mdx` documents the warn-and-bundle default, so code comment and docs disagree with each other | `extract-hook-body.ts` vs `lower-callables.ts`, `compile.ts` | cli.hook-body-extraction-gates (default-path silent-fallback encoded as expected-fail contradiction clause) | correctness — safe to file |
 
+⚠️ **Handle collision on D11 (#21060).** The D11 row above is the two-factor `get-totp-uri`
+re-reveal. It is **not** the private handle D11 that `access-security.rls-both-sides`
+clause 5 and `access-security.owd-sharing-matrix` clause 4 cite. That handle names a
+security-sensitive defect delivered to the maintainer privately (#7463), and it is
+deliberately not reproduced in this file. The two numbers collided when this table continued
+the D-series. Cite the item and its clause, never the bare handle, and never read one D11 as
+the other.
+
 Two design notes captured inside items rather than as defect rows: `sys_user.mfa_required_at`
 is stamped lazily and never cleared anywhere in source, so post-disable re-gating branches on
 a pre-existing stamp (identity-auth.two-factor-disable-lifecycle, design-note clause); and

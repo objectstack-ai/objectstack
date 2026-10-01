@@ -1,15 +1,18 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { afterAll, describe, it, expect } from 'vitest';
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PermissionSetSchema } from '@objectstack/spec/security';
+import { ViewSchema } from '@objectstack/spec/ui';
 import {
   authorWarnedProperties,
   lintLivenessProperties,
   LIVENESS_DEAD_PROPERTY,
   LIVENESS_EXPERIMENTAL_PROPERTY,
   LIVENESS_LEDGER_UNREADABLE,
+  LIVENESS_LIVE_ELSEWHERE_PROPERTY,
   // #10262 test seam — package-internal (not re-exported by `src/index.ts`, not
   // in the package's `exports` map). See the block below `getNested` in the
   // source for why this ONE property is tested off the ledger.
@@ -36,6 +39,9 @@ import {
 
 const objStack = (obj: Record<string, unknown>) => ({ objects: [{ name: 'widget', ...obj }] });
 const paths = (findings: { message: string }[]) => findings.map((f) => f.message);
+/** The rule id of the finding about `path`, or `undefined` when the rule said nothing about it. */
+const ruleOf = (findings: { message: string; rule: string }[], path: string) =>
+  findings.find((f) => f.message.includes(`sets \`${path}\``))?.rule;
 
 describe('lintLivenessProperties', () => {
   // NOTE: as of #2377 the object- and field-level dead+authorWarn surface is
@@ -92,12 +98,16 @@ describe('lintLivenessProperties', () => {
   // block. These run against the REAL ledgers, so they double as contract
   // tests for those markings.
 
-  // flow.errorHandling.fallbackNodeId and nodes[].outputSchema left the warn
-  // list with the #3896 close-out sweep: the keys were REMOVED from the
-  // schema (retiredKey tombstones carry the prescription at parse), so the
-  // advisory warn's job is done by a hard error and the ledger entries this
-  // lint keyed on are gone. Same shape as tool.permissions below.
-  it('retired flow keys no longer warn — the strict parse owns them now', () => {
+  // flow.errorHandling.fallbackNodeId and nodes[].outputSchema were REMOVED in
+  // the #3896 close-out sweep: `retiredKey` tombstones refuse them at parse with
+  // the prescription, so every door that parses (`os validate`, `os build`, the
+  // runtime publish gate) stops before this rule runs. Their ledger rows keep
+  // the `dead` verdict, and since #16094 (decision batch #60, option A) a `dead`
+  // verdict warns without an `authorWarn` opt-in — so the rule, handed an
+  // UNPARSED stack (`os lint` does not Zod-parse), grades them dead. Until
+  // #16094 this pin asserted silence; the silence was the opt-in's, not the
+  // tombstone's.
+  it('retired flow keys are graded dead when the rule is handed an unparsed stack', () => {
     const findings = lintLivenessProperties({
       flows: [{
         name: 'f1',
@@ -105,8 +115,8 @@ describe('lintLivenessProperties', () => {
         nodes: [{ id: 'n2', outputSchema: { type: 'object' } }],
       }],
     });
-    expect(findings.some((x) => x.message.includes('errorHandling.fallbackNodeId'))).toBe(false);
-    expect(findings.some((x) => x.message.includes('nodes.outputSchema'))).toBe(false);
+    expect(ruleOf(findings, 'errorHandling.fallbackNodeId')).toBe(LIVENESS_DEAD_PROPERTY);
+    expect(ruleOf(findings, 'nodes.outputSchema')).toBe(LIVENESS_DEAD_PROPERTY);
   });
 
   it('warns on an experimental prop with no authorWarn of its own (agent.memory)', () => {
@@ -160,12 +170,13 @@ describe('lintLivenessProperties', () => {
 
   // ── view (#2998 Track B) ──────────────────────────────────────────────────
 
-  // list.responsive / form.defaultSort left the warn list with the #3896
-  // close-out sweep (keys REMOVED, strict parse owns them). form.data is the
-  // sweep's one CORRECTION: the removal attempt broke the build — defineForm
-  // writes data.provider='schema' on every metadata form — so its ledger
-  // entry flipped to live and it must not warn either.
-  it('retired/corrected view keys no longer warn', () => {
+  // list.responsive / form.defaultSort were REMOVED by the #3896 close-out
+  // sweep (tombstones refuse them at parse); their rows stay `dead`, so handed
+  // an unparsed stack the rule grades them dead (#16094 — see the flow pin
+  // above). form.data is the sweep's one CORRECTION: the removal attempt broke
+  // the build — defineForm writes data.provider='schema' on every metadata
+  // form — so its ledger entry flipped to live and it must stay silent.
+  it('retired view keys are graded dead; the corrected live key stays silent', () => {
     const findings = lintLivenessProperties({
       views: [{
         object: 'task',
@@ -178,27 +189,27 @@ describe('lintLivenessProperties', () => {
         },
       }],
     });
-    const msgs = paths(findings);
-    expect(msgs.some((m) => m.includes('list.responsive'))).toBe(false);
-    expect(msgs.some((m) => m.includes('form.defaultSort'))).toBe(false);
-    expect(msgs.some((m) => m.includes('form.data'))).toBe(false);
+    expect(ruleOf(findings, 'list.responsive')).toBe(LIVENESS_DEAD_PROPERTY);
+    expect(ruleOf(findings, 'form.defaultSort')).toBe(LIVENESS_DEAD_PROPERTY);
+    expect(paths(findings).some((m) => m.includes('form.data'))).toBe(false);
   });
 
   // list.striped / list.bordered / list.virtualScroll left the surface with
   // the #7176 retirement (pass-through-only; keys REMOVED, the strict parse
-  // owns them now). Their ledger rows are dead WITHOUT authorWarn, so the
-  // advisory lint must stay silent — the tombstone's rejection is the channel.
-  it('the #7176 pass-through-only list keys do not warn (the strict parse owns them now)', () => {
+  // refuses them). Their ledger rows are dead WITHOUT authorWarn, which kept
+  // this rule silent until #16094 made the `dead` verdict warn on its own. At a
+  // parsing door the tombstone's rejection still comes first; handed an
+  // unparsed stack, the rule now grades them dead.
+  it('the #7176 pass-through-only list keys are graded dead when the rule is handed an unparsed stack', () => {
     const findings = lintLivenessProperties({
       views: [{
         object: 'task',
         list: { type: 'grid', striped: true, bordered: true, virtualScroll: true },
       }],
     });
-    const msgs = paths(findings);
-    expect(msgs.some((m) => m.includes('list.striped'))).toBe(false);
-    expect(msgs.some((m) => m.includes('list.bordered'))).toBe(false);
-    expect(msgs.some((m) => m.includes('list.virtualScroll'))).toBe(false);
+    for (const key of ['list.striped', 'list.bordered', 'list.virtualScroll']) {
+      expect(ruleOf(findings, key), key).toBe(LIVENESS_DEAD_PROPERTY);
+    }
   });
 
   it('stays silent on a clean grid view', () => {
@@ -503,23 +514,27 @@ describe('lintLivenessProperties', () => {
     // it is a silence pin rather than a positive assertion on a fixture that
     // would pass on a broken walk.
 
-    // ── #5010: four of these keys are RETIRED, so this lint must go quiet ─────
+    // ── #5010: four of these keys are RETIRED; their rows stay `dead` ────────
     //
-    // This lint is ledger-driven by design: it warns on rows carrying
-    // `authorWarn`. When a key is retired the row keeps its `dead` verdict (the
-    // tombstone keeps the key in the walked shape) but drops `authorWarn`,
-    // because the advisory has been replaced by something strictly louder — a
-    // `tsc` error and a parse error carrying the prescription.
+    // When a key is retired the row keeps its `dead` verdict (the tombstone
+    // keeps the key in the walked shape) and drops `authorWarn` and its old
+    // "move the affordance" hint: the advisory was replaced by something
+    // strictly louder — a `tsc` error and a parse error carrying the
+    // prescription — and every door that parses stops there, before this rule.
     //
-    // Asserting the SILENCE is the point. A retired key that still warned here
-    // would tell an author to "move the affordance" for a key they cannot
-    // author at all, and would double-report every real occurrence.
+    // Until #16094 these pins asserted SILENCE, because a `dead` row warned only
+    // when it opted in. Decision batch #60, option A, made the `dead` verdict
+    // itself the warning, so the rule — handed an unparsed stack, as `os lint`
+    // hands it — grades a retired key dead. The row warns only by its verdict,
+    // so the hint is the `dead` default, never the row's note (the #16094
+    // author-facing block at the bottom of this file). Pinned per key, so a row
+    // that leaves the ledger or changes verdict shows up by name.
     it.each(['actionUrl', 'actionType', 'actionIcon', 'aria'])(
-      'no longer warns on the retired `%s` — the strict parse owns it now (#5010)',
+      'grades the retired `%s` dead when handed an unparsed stack (#5010, #16094)',
       (key) => {
         const value = key === 'aria' ? { ariaLabel: 'Total pipeline' } : 'x';
         const findings = lintLivenessProperties(dash({ [key]: value }));
-        expect(findings.map((f) => f.message).some((m) => m.includes(`widgets.${key}`))).toBe(false);
+        expect(ruleOf(findings, `widgets.${key}`)).toBe(LIVENESS_DEAD_PROPERTY);
       },
     );
 
@@ -534,6 +549,9 @@ describe('lintLivenessProperties', () => {
     // property that IS still `authorWarn` (`object.externalSharingModel`, the
     // last one in tree) in the SAME call: same process, same ledger load, one
     // warning and not six.
+    // Since #16094 the retired keys warn, so this one call also proves the
+    // dashboard walk is registered and running: the `colorVariant` silence sits
+    // beside four findings from the same walk, same widget, same ledger load.
     it('the dashboard silence is a real verdict, not a lint that stopped loading ledgers', () => {
       const findings = lintLivenessProperties({
         objects: [{ name: 'widget', externalSharingModel: 'read' }],
@@ -547,9 +565,10 @@ describe('lintLivenessProperties', () => {
       });
       const messages = findings.map((f) => f.message);
       expect(messages.some((m) => m.includes('externalSharingModel'))).toBe(true);
-      for (const quiet of ['actionUrl', 'actionType', 'actionIcon', 'aria', 'colorVariant']) {
-        expect(messages.some((m) => m.includes(`widgets.${quiet}`))).toBe(false);
+      for (const retired of ['actionUrl', 'actionType', 'actionIcon', 'aria']) {
+        expect(ruleOf(findings, `widgets.${retired}`), retired).toBe(LIVENESS_DEAD_PROPERTY);
       }
+      expect(messages.some((m) => m.includes('widgets.colorVariant'))).toBe(false);
     });
 
     it('stays silent on a widget built entirely from live keys', () => {
@@ -1207,21 +1226,23 @@ describe('dead / experimental / planned / live-elsewhere verdicts are distinct, 
     expect(hintOf({ status: 'live-elsewhere', authorWarn: true })).toContain('sibling repo');
   });
 
-  // NEGATIVE CONTROL, on the REAL ledger, through the production path. The card
-  // is a fuse, not a fire: `shouldWarn()` gates entry to `describe()`, and the
-  // shipped `manifest.runtime` row does not carry `authorWarn`, so nothing
-  // reaches the new branch today. This pin holds that reading honest in both
-  // directions — if the row ever opts in, this goes red and the reviewer should
-  // UPDATE THIS PIN (the branch above is what makes that flip safe), never
-  // remove the branch.
+  // REAL LEDGER. Until #16094 this was the NEGATIVE control — "the fuse,
+  // unlit": `shouldWarn()` admitted a `live-elsewhere` row only on an
+  // `authorWarn` opt-in, and the shipped `manifest.runtime` row carries none,
+  // so nothing reached the branch above. Decision batch #60, option A, lit it:
+  // the verdict itself is the warning. The pin is turned around rather than
+  // deleted, so a ledger change that empties the warned set for this verdict
+  // goes red here by name.
   //
   // Anti-vacuity: `authorWarnedProperties('manifest')` would also be empty if
   // the ledger were unreadable, so the guard is that `shippedLedgerStatuses()`
   // sees `live-elsewhere` at all — the ONE row carrying it lives in that very
-  // file, so seeing the status proves the file was read.
-  it('REAL LEDGER: the live-elsewhere row exists and does NOT warn yet (the fuse, unlit)', () => {
+  // file, so seeing the status proves the file was read. The end-to-end half
+  // of this verdict — and why `os lint` still cannot produce it — is the
+  // `#16094` block at the bottom of this file.
+  it('REAL LEDGER: the live-elsewhere row exists and is warned without an opt-in (the fuse, lit)', () => {
     expect(shippedLedgerStatuses().has('live-elsewhere')).toBe(true);
-    expect(authorWarnedProperties('manifest').has('runtime')).toBe(false);
+    expect(authorWarnedProperties('manifest').has('runtime')).toBe(true);
   });
 
   // ── COVERAGE (#14057): describe() answers for every status the ledgers ship.
@@ -1432,11 +1453,14 @@ describe('the object/field walk, against a synthetic ledger directory (#19268)',
   // If `field.json` ever warns again these two flip, and the block above
   // ("field walk: a malformed `fields` array …") can take its real subject back
   // — but this block keeps working either way, which is the point.
-  it('the SHIPPED field ledger warns on nothing — which is why the walk needs a subject of its own', () => {
-    // `picklist` was the last warned row (`planned` + `authorWarn`) and left
-    // when the server began resolving picklist references (`live`); the
-    // synthetic slot below is warned by nothing shipped either.
-    expect([...authorWarnedProperties('field')]).toEqual([]);
+  it('the SHIPPED field ledger warns on no stable subject — which is why the walk needs a subject of its own', () => {
+    // `picklist` was the last opted-in row (`planned` + `authorWarn`) and left
+    // when the server began resolving picklist references (`live`). What is
+    // left is `conditionalRequired`, a `retiredKey` tombstone whose `dead` row
+    // warns on its own since #16094 — but a parse refuses it first, so it is no
+    // subject for #11385 either. The synthetic slot below is warned by nothing
+    // shipped.
+    expect([...authorWarnedProperties('field')]).toEqual(['conditionalRequired']);
     expect(
       lintLivenessProperties({
         objects: [{ name: 'widget', fields: [{ name: 'a', synthWarnedSlot: true }] }],
@@ -1583,5 +1607,222 @@ describe('a per-type ledger that could not be READ is reported once (#19276)', (
     expect(
       lintLivenessProperties({}).filter((f) => f.rule === LIVENESS_LEDGER_UNREADABLE),
     ).toEqual([]);
+  });
+});
+
+// ── #16094: both remaining rule ids, produced against the SHIPPED ledgers ────
+//
+// Decision batch #60, option A: a `dead` or `live-elsewhere` verdict is itself
+// the author-facing warning. Before it, `liveness-dead-property` and
+// `liveness-live-elsewhere-property` were unreachable — `describe()` mapped
+// both verdicts, but not one `dead` or `live-elsewhere` row opted into
+// `authorWarn`, so `shouldWarn()` never let either through. #14057 fixed the
+// mapping and not the reach; nothing went red, because nothing tested the reach.
+// These pins test it, against the real ledgers, so a ledger change that leaves
+// either id with no reachable row fails here by name.
+describe('the dead and live-elsewhere verdicts warn on their own (#16094)', () => {
+  // `rowLevelSecurity.label` / `.description` are `dead` rows (no mounted
+  // surface draws a policy's label or description) that an author really
+  // writes: the fixture parses through the shipped `PermissionSetSchema`, so
+  // neither key is a tombstone. If either row changes verdict, re-subject this
+  // pin to another `dead` row of a type the walk visits; if none is left, the
+  // rule id is unreachable again and that is what this pin exists to say.
+  const permissionSet = {
+    name: 'fx_reader',
+    label: 'Fx Reader',
+    objects: { fx_account: { allowRead: true, readScope: 'org' } },
+    rowLevelSecurity: [
+      // The first policy authors neither dead key, so the findings below can
+      // only come from the second: the dotted path fans out past index 0.
+      { name: 'fx_any_rows', object: 'fx_account', operation: 'select', using: 'name == current_user.email' },
+      {
+        name: 'fx_own_rows',
+        label: 'Own rows',
+        description: 'Readers see their own rows.',
+        object: 'fx_account',
+        operation: 'select',
+        using: 'name == current_user.email',
+      },
+    ],
+  };
+
+  it('the fixture is authorable — it parses through the shipped schema (the keys are not tombstones)', () => {
+    expect(PermissionSetSchema.safeParse(permissionSet).success).toBe(true);
+  });
+
+  it('END TO END: an authored dead key produces liveness-dead-property, and the live keys beside it stay silent', () => {
+    const findings = lintLivenessProperties({ permissions: [permissionSet] });
+    expect(ruleOf(findings, 'rowLevelSecurity.label')).toBe(LIVENESS_DEAD_PROPERTY);
+    expect(ruleOf(findings, 'rowLevelSecurity.description')).toBe(LIVENESS_DEAD_PROPERTY);
+    // `live` is silent — same policy, same ledger load, so this is a verdict
+    // and not a walk that never ran.
+    for (const live of ['rowLevelSecurity.name', 'rowLevelSecurity.object', 'rowLevelSecurity.operation', 'rowLevelSecurity.using']) {
+      expect(ruleOf(findings, live), live).toBeUndefined();
+    }
+    expect(findings.map((f) => f.where)).toEqual(["permission 'fx_reader'", "permission 'fx_reader'"]);
+  });
+
+  // The control the triage notes asked for: a TOMBSTONED key is still refused
+  // at parse, so every door that parses stops before this rule. What the flip
+  // adds for such a key is the rule's verdict when it IS handed an unparsed
+  // stack (the `#7176` pin above), not a second report at a parsing door.
+  it('CONTROL: a tombstoned dead key is refused at parse by the shipped schema', () => {
+    const parsed = ViewSchema.safeParse({
+      object: 'fx_account',
+      list: { type: 'grid', striped: true, data: { provider: 'object', object: 'fx_account' }, columns: [{ field: 'name' }] },
+    });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues.map((i) => i.path.join('.'))).toContain('list.striped');
+  });
+
+  // `manifest.runtime` is the one `live-elsewhere` row. The verdict now admits
+  // it and `describe()` maps it to its own rule id with a keep-it reading — both
+  // asserted on the SHIPPED row, read from the directory the rule itself reads.
+  it('the shipped live-elsewhere row is admitted and graded liveness-live-elsewhere-property', () => {
+    const ledger = JSON.parse(readFileSync(join(shippedLedgerDir(), 'manifest.json'), 'utf8'));
+    const row = ledger.props.runtime;
+    expect(row.status).toBe('live-elsewhere');
+    expect(authorWarnedProperties('manifest').has('runtime')).toBe(true);
+    const findings = checkItemAgainstWarnMap('manifest', { runtime: 'sandbox' }, 'manifest', [['runtime', row]]);
+    expect(findings.map((f) => f.rule)).toEqual([LIVENESS_LIVE_ELSEWHERE_PROPERTY]);
+    expect(findings[0].message).not.toContain('liveness: dead');
+  });
+
+  // ⚠️ The END-TO-END half the ruling asked for does not exist yet, and this
+  // pin says so rather than hiding it: no walk in `lintLivenessProperties`
+  // visits `manifest` (it is neither in TYPE_COLLECTIONS nor one of the bespoke
+  // walks — `stack.manifest` is a single object, not a collection), so `os
+  // lint` produces `liveness-live-elsewhere-property` for no stack. The same
+  // absence is why this flip does not surface `manifest.integrity`, a `dead`
+  // row whose map `os plugin publish` reads and refuses on — a warning there
+  // would call a key inert while a gate acts on it. Adding a manifest walk turns
+  // this red; re-judge `manifest.integrity`'s verdict before turning it green.
+  it('the walk visits no manifest, so neither manifest row reaches an author through this rule', () => {
+    const findings = lintLivenessProperties({
+      manifest: { id: 'com.example.fx', version: '1.0.0', runtime: 'sandbox', integrity: { 'index.js': 'sha256-x' } },
+    });
+    expect(ruleOf(findings, 'runtime')).toBeUndefined();
+    expect(ruleOf(findings, 'integrity')).toBeUndefined();
+  });
+});
+
+// ── #16094, the author-facing half: a verdict-triggered row never shows its note ──
+//
+// A row admitted ONLY by the ruled verdicts (`dead` / `live-elsewhere`, no
+// `authorWarn`) never chose to address an author, and its `note` is maintainer
+// evidence — measured across the shipped ledgers when the ruling landed, 80 of
+// the 105 newly warned entries' notes cite a tracker id, and three of the four
+// an author can reach say the row was deliberately not warned. AGENTS.md keeps
+// tracker numbers out of anything an author is shown. So such a row shows its
+// `authorHint`, else the verdict's default hint; a row that opted in, and an
+// `experimental` row, keep the hint they had before the ruling, byte for byte.
+describe('the hint a verdict-triggered row shows an author (#16094)', () => {
+  type ShippedRow = { type: string; path: string; entry: Record<string, unknown> };
+
+  /** Every shipped row at the depth the warn map reads (props + one level of `children`). */
+  function shippedRows(): ShippedRow[] {
+    const rows: ShippedRow[] = [];
+    const dir = shippedLedgerDir();
+    for (const file of readdirSync(dir).filter((f) => f.endsWith('.json')).sort()) {
+      const type = file.replace(/\.json$/, '');
+      const ledger = JSON.parse(readFileSync(join(dir, file), 'utf8'));
+      const isRow = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+      for (const [key, entry] of Object.entries((ledger.props ?? {}) as Record<string, unknown>)) {
+        if (!isRow(entry)) continue;
+        for (const [ck, centry] of Object.entries((entry.children ?? {}) as Record<string, unknown>)) {
+          if (isRow(centry)) rows.push({ type, path: `${key}.${ck}`, entry: centry });
+        }
+        rows.push({ type, path: key, entry });
+      }
+    }
+    return rows;
+  }
+
+  /** An item that authors exactly `path` (one level of nesting at most). */
+  const itemAuthoring = (path: string): Record<string, unknown> => {
+    const [head, child] = path.split('.');
+    return child === undefined ? { name: 'probe', [head]: 'x' } : { name: 'probe', [head]: { [child]: 'x' } };
+  };
+
+  const hintFor = (row: ShippedRow) => {
+    const findings = checkItemAgainstWarnMap(row.type, itemAuthoring(row.path), `${row.type} 'probe'`, [[row.path, row.entry]]);
+    expect(findings, `${row.type}/${row.path} produced no finding`).toHaveLength(1);
+    return findings[0].hint;
+  };
+
+  const TRACKER_ID = /#\d+/;
+  const gizmoEntry = (entry: Record<string, unknown>) => new Map([['gizmo', entry]]);
+
+  it('REAL LEDGER: no verdict-triggered row shows its note, and no such hint carries a tracker id', () => {
+    const triggered = shippedRows().filter(
+      (r) => r.entry.authorWarn !== true && (r.entry.status === 'dead' || r.entry.status === 'live-elsewhere'),
+    );
+    // Anti-vacuity: both verdicts are present, and at least one of these notes
+    // DOES carry a tracker id — so the leak this pin forbids is a real one.
+    expect(triggered.some((r) => r.entry.status === 'dead')).toBe(true);
+    expect(triggered.some((r) => r.entry.status === 'live-elsewhere')).toBe(true);
+    expect(triggered.some((r) => typeof r.entry.note === 'string' && TRACKER_ID.test(r.entry.note))).toBe(true);
+    for (const row of triggered) {
+      const hint = hintFor(row);
+      const where = `${row.type}/${row.path}`;
+      if (typeof row.entry.authorHint === 'string') {
+        expect(hint, where).toBe(row.entry.authorHint);
+      } else if (typeof row.entry.note === 'string') {
+        expect(hint, where).not.toBe(row.entry.note);
+      }
+      expect(TRACKER_ID.test(hint), `${where} hint carries a tracker id`).toBe(false);
+    }
+  });
+
+  it('CONTROL, REAL LEDGER: every row that warned before the ruling keeps its hint byte for byte', () => {
+    // A `live` row that opts in is outside this population: `describe()` throws
+    // on it before and after the ruling (the COVERAGE pin above holds that it
+    // stays loud), so it has no hint to keep.
+    const before = shippedRows().filter(
+      (r) => (r.entry.authorWarn === true || r.entry.status === 'experimental') && r.entry.status !== 'live',
+    );
+    // Anti-vacuity: an opted-in row and an experimental row both fall back to
+    // their note today, so the control would see a change in either.
+    expect(before.some((r) => r.entry.authorWarn === true && r.entry.authorHint === undefined && typeof r.entry.note === 'string')).toBe(true);
+    expect(before.some((r) => r.entry.status === 'experimental' && r.entry.authorHint === undefined && typeof r.entry.note === 'string')).toBe(true);
+    for (const row of before) {
+      const expected = row.entry.authorHint ?? row.entry.note;
+      if (typeof expected !== 'string') continue; // only the default remains — unchanged by construction
+      expect(hintFor(row), `${row.type}/${row.path}`).toBe(expected);
+    }
+  });
+
+  it('SYNTHETIC: the opt-in, not the verdict, decides whether the note may be shown', () => {
+    const hintOf = (entry: Record<string, unknown>) =>
+      checkItemAgainstWarnMap('gadget', { name: 'g1', gizmo: 'x' }, "gadget 'g1'", gizmoEntry(entry))[0].hint;
+    const deadDefault = hintOf({ status: 'dead' });
+    const elsewhereDefault = hintOf({ status: 'live-elsewhere' });
+    // Verdict-triggered: authorHint wins, otherwise the default — never the note.
+    expect(hintOf({ status: 'dead', note: 'N #123' })).toBe(deadDefault);
+    expect(hintOf({ status: 'live-elsewhere', note: 'N #123' })).toBe(elsewhereDefault);
+    expect(hintOf({ status: 'dead', authorHint: 'H', note: 'N' })).toBe('H');
+    // Opted in: today's precedence, unchanged — the note is shown.
+    expect(hintOf({ status: 'dead', authorWarn: true, note: 'N' })).toBe('N');
+    expect(hintOf({ status: 'live-elsewhere', authorWarn: true, note: 'N' })).toBe('N');
+    // Experimental needs no opt-in and keeps its note, as before the ruling.
+    expect(hintOf({ status: 'experimental', note: 'N' })).toBe('N');
+  });
+
+  it('END TO END: the authored dead RLS keys show the dead default hint, not the ledger note', () => {
+    const ledger = JSON.parse(readFileSync(join(shippedLedgerDir(), 'permission.json'), 'utf8'));
+    const rls = ledger.props.rowLevelSecurity.children;
+    const findings = lintLivenessProperties({
+      permissions: [{
+        name: 'fx_reader',
+        rowLevelSecurity: [{ name: 'p', label: 'Own rows', description: 'Readers see their own rows.', object: 'fx_account' }],
+      }],
+    });
+    const deadDefault = checkItemAgainstWarnMap('gadget', { name: 'g1', gizmo: 'x' }, "gadget 'g1'", gizmoEntry({ status: 'dead' }))[0].hint;
+    for (const key of ['label', 'description']) {
+      const f = findings.find((x) => x.message.includes(`sets \`rowLevelSecurity.${key}\``));
+      expect(f, key).toBeDefined();
+      expect(f!.hint, key).not.toBe(rls[key].note);
+      expect(f!.hint, key).toBe(deadDefault);
+    }
   });
 });

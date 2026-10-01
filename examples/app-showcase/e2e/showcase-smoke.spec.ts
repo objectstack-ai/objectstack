@@ -16,6 +16,16 @@ declare const process: { env: Record<string, string | undefined> };
 
 const APP = process.env.SHOWCASE_APP || 'com.example.showcase';
 const base = (seg: string) => `/_console/apps/${APP}/${seg}`;
+/**
+ * An `ObjectNavItem.filters` slice, spelled the way objectui's nav renderer
+ * builds its href: the bare data surface (`/:objectName/data`) with one
+ * `filter[<field>]=<value>` search param per entry, URLSearchParams-encoded.
+ */
+const slice = (objectName: string, filters: Record<string, string>) => {
+  const usp = new URLSearchParams();
+  for (const [field, value] of Object.entries(filters)) usp.set(`filter[${field}]`, value);
+  return base(`${objectName}/data?${usp.toString()}`);
+};
 
 const SURFACES: { name: string; path: string; chart?: boolean }[] = [
   { name: 'Capability Map', path: base('page/showcase_capability_map') },
@@ -49,7 +59,40 @@ const SURFACES: { name: string; path: string; chart?: boolean }[] = [
   { name: 'Team Schedule', path: base('page/showcase_task_schedule') },
   { name: 'Activity Timeline', path: base('page/showcase_task_timeline') },
   { name: 'Work Map', path: base('page/showcase_task_map') },
+  // [#21060] The 18 served destinations the list above did not reach. Measured
+  // against `showcase_app`'s navigation (src/ui/apps/index.ts): 49 leaf items,
+  // 31 of them listed above, and these 18 hand-walked clean by QA run #21056.
+  // Names are the nav labels, except where a label repeats one above.
+  { name: 'Page Authoring', path: base('page/showcase_start_here') },
+  { name: 'Contacts', path: base('showcase_contact') },
+  { name: 'Expense Reports', path: base('showcase_expense_report') },
+  { name: 'Business Units', path: base('showcase_business_unit') },
+  { name: 'Cascading Select', path: base('showcase_cascade') },
+  { name: 'In-Progress Tasks', path: slice('showcase_task', { status: 'in_progress' }) },
+  { name: 'Urgent Tasks', path: slice('showcase_task', { priority: 'urgent' }) },
+  { name: 'In-Review Tasks', path: slice('showcase_task', { status: 'in_review' }) },
+  { name: 'Revenue Pulse', path: base('dashboard/showcase_revenue_pulse'), chart: true },
+  { name: 'Task List', path: base('showcase_task/view/tabular') },
+  { name: 'Hours by Status (Chart)', path: base('report/showcase_hours_by_status_chart'), chart: true },
+  { name: 'Styling Gallery', path: base('page/showcase_styling_gallery') },
+  { name: 'Page Variables', path: base('page/showcase_page_variables') },
+  { name: 'Contact Form', path: base('page/showcase_contact_form') },
+  { name: 'Command Center (JSX)', path: base('page/showcase_command_center_jsx') },
+  { name: 'CRM Workbench', path: base('page/showcase_crm_workbench') },
+  { name: 'Task Desk', path: base('page/showcase_task_desk') },
+  { name: 'Renewals Pipeline', path: base('page/showcase_renewals_pipeline') },
 ];
+
+/**
+ * The console's boot splash — objectui app-shell's `LoadingScreen`, which the
+ * shell also renders as a `Suspense` fallback INSIDE its `<main>` — reads
+ * "Initializing application…" under the default locale. Its text is not empty,
+ * so a check of "main has text" passed on a surface that had not rendered at
+ * all: QA run #21056 read the splash as the FIRST `<main>` text on 22 of 49
+ * surfaces. The wait below treats the splash as not-yet-rendered, and the
+ * assertions refuse a surface that is still on it at the deadline.
+ */
+const BOOT_SPLASH = /Initializing application/i;
 
 /**
  * The budget every wait in this file spends, measured from the start of the
@@ -103,10 +146,14 @@ for (const surface of SURFACES) {
 
     // Replaces the fixed 1500 ms settle with a wait on the thing the assertion
     // below actually needs — rendered main content — on the same deadline.
-    const mainText = await pollUntil(
-      async () => ((await main.innerText().catch(() => '')) || '').trim(),
-      deadline,
-    );
+    // [#21060] Rendered means past the boot splash, not merely non-empty: the
+    // splash is text too. The last sample is kept whatever it was, so a surface
+    // stuck on the splash fails as exactly that rather than as "no content".
+    let mainText = '';
+    await pollUntil(async () => {
+      mainText = ((await main.innerText().catch(() => '')) || '').trim();
+      return mainText.length > 0 && !BOOT_SPLASH.test(mainText);
+    }, deadline);
 
     let chartBox: { width: number; height: number } | null = null;
     if (surface.chart) {
@@ -134,6 +181,7 @@ for (const surface of SURFACES) {
       `leaked placeholder on ${surface.name}`,
     ).toHaveCount(0);
     expect(mainText.length, `${surface.name} rendered no main content`).toBeGreaterThan(0);
+    expect(mainText, `${surface.name} never got past the boot splash`).not.toMatch(BOOT_SPLASH);
 
     if (surface.chart) {
       expect(

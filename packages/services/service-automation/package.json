@@ -40,7 +40,7 @@
     "@objectstack/refd-timer-testkit": "workspace:*",
     "@objectstack/service-job": "workspace:*",
     "@objectstack/service-messaging": "workspace:*",
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.6.3",
     "tsx": "^4.23.12",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"

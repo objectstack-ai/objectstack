@@ -9,14 +9,15 @@
       "title": "os dev boots to healthy with a loginable seeded admin, honest DB selection, reported port shifts, and a staleness warning",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P0",
       "surface": "cli",
       "personas": ["operator (local shell)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a free non-default port (lsof -nP -iTCP:<port> -sTCP:LISTEN empty first — dogfood skill §0) and a scratch DB path under /tmp/<run>/"
+          "a free non-default port (lsof -nP -iTCP:<port> -sTCP:LISTEN empty first — dogfood skill §0) and a scratch DB path under /tmp/<run>/",
+          "⚠️ an app directory NO other runner boots, for steps[4], steps[6] and steps[7]: each writes into the directory it runs in. steps[4] bumps a tracked source file's mtime, so every other runner booting that tree reads its artifact as stale — and an `os dev` already running there is watching `objectstack.config.ts, src` and rebuilds and restarts on the change; steps[6] creates the unified default DB under .objectstack/data/ in it; steps[7] plants a legacy dev.db. Use your own worktree, or a worktree copy of examples/app-showcase (the same prescription cli.build-own-contract carries), and discard it after"
         ]
       },
       "steps": [
@@ -28,7 +29,7 @@
         "with instance A still running, boot instance B on the same requested port and capture the '↪ server bound to port <actual> (requested <requested>)' line",
         "run once with NONE of --database/--fresh/env-db set and no config-declared default datasource, and record the printed Database line (must be the project-anchored UNIFIED default file:<cwd>/.objectstack/data/objectstack.db); then run with `--fresh` and record the '🧪 Fresh OS_HOME' tempdir line (its DB is the SAME unified filename under the ephemeral home) and its deletion on exit",
         "legacy compat-read: in a scratch project whose .objectstack/data holds a legacy dev.db and NO objectstack.db, boot with nothing chosen and capture both the Database line (must resolve to the legacy file — never a fresh empty objectstack.db beside it) and the one loud notice line naming that file and how to converge on the unified name",
-        "capture `echo $?` after every terminated invocation"
+        "capture `echo $?` after every terminated invocation, against the expected codes: Ctrl-C/SIGINT ends a plain `os dev` with its serve child's exit code — 0 on a clean shutdown (the parent follows `code ?? 0`, packages/cli/src/utils/dev-restart.ts#ServeRestartCoordinator); a `--fresh` run's own SIGINT handler deletes the tempdir and exits 130 (SIGTERM 143); the no-config case of steps[3] exits 1"
       ],
       "acceptance": [
         {
@@ -40,7 +41,7 @@
         {
           "clause": "--seed-admin provisions the FIXED well-known dev admin (admin@objectos.ai / admin123) loginable via the real auth endpoint, and the seed is idempotent — a later boot with a different --admin-password does NOT overwrite the existing account",
           "oracle": "api",
-          "verify": "login succeeds with the original credentials after the changed-password restart (flag contract: 'it acts only while no account holds the seed address and no local password login exists anywhere, never overwrites an existing account')",
+          "verify": "login succeeds with the original credentials after the changed-password restart (flag contract: 'it acts only while no account holds the seed address and no local password login exists anywhere, never overwrites an existing account'). ⚠️ The `🔑 Dev admin: …` banner row is NOT seeding evidence: plugin-auth re-arms it on every later dev boot while the account still holds the default password (auth-plugin.ts maybeReportExistingSeedAdmin), so it reprints on boots that seeded nothing — judge the seed by the auth responses only",
           "evidence": "the two auth responses"
         },
         {
@@ -97,7 +98,13 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new area item: the os dev boot contract read directly out of dev.ts (DB-selection matrix as variants, seed idempotency, port-shift reporting, #5148 staleness warning, #5594 fresh-isolation carve-out) plus the dogfood skill's boot shapes", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-11", "change": "text refresh only, no property change: the DB-selection clause, step, variants and sources named the retired resolveDefaultDevDbUrl helper and the .objectstack/data/dev.db default, both superseded by #6469's unified <state dir>/data/objectstack.db resolved through the shared resolveProjectDatabaseUrl (dev's seam is now resolveDevDatabase). Re-derived from dev.ts + resolve-project-database.ts: added the config-datasource and legacy compat-read tiers as variants, a step and negative for the legacy dev.db notice, and the pin test to sources. The load-bearing assertion is UNCHANGED in substance — nothing-chosen still defaults to a PERSISTENT project-anchored sqlite file, never :memory:", "ref": "#7650" }
+        { "revision": 2, "date": "2026-08-11", "change": "text refresh only, no property change: the DB-selection clause, step, variants and sources named the retired resolveDefaultDevDbUrl helper and the .objectstack/data/dev.db default, both superseded by #6469's unified <state dir>/data/objectstack.db resolved through the shared resolveProjectDatabaseUrl (dev's seam is now resolveDevDatabase). Re-derived from dev.ts + resolve-project-database.ts: added the config-datasource and legacy compat-read tiers as variants, a step and negative for the legacy dev.db notice, and the pin test to sources. The load-bearing assertion is UNCHANGED in substance — nothing-chosen still defaults to a PERSISTENT project-anchored sqlite file, never :memory:", "ref": "#7650" },
+        {
+          "revision": 3,
+          "date": "2026-10-01",
+          "change": "checklist-accuracy findings of QA run #21056: steps[4], [6] and [7] write into the app directory they run in and are unsafe on a tree parallel runners share — requires now prescribes an unshared app directory; steps[8] names the expected exit codes (SIGINT 0 for plain dev, 130 for --fresh); acceptance[1] says the Dev admin banner row reprints on later boots and is not seeding evidence",
+          "ref": "#21060"
+        }
       ]
     },
     {

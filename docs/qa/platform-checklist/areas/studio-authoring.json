@@ -9,7 +9,7 @@
       "title": "The first-run authoring loop closes: package → object → record → app → publish → end-user, zero code, zero restarts",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P0",
       "surface": "mixed",
       "personas": ["admin (seeded admin@objectos.ai)", "end user (same account driving the published app)"],
@@ -20,38 +20,38 @@
         ],
         "knownGaps": [
           "publish fires in ONE click with no confirmation and the Changes panel lists items without field-level diff (audit finding 3, ADR-0016 §3.6 step 4 open) — do NOT assert a review/confirm step exists; its absence is a logged UX gap, not a run failure",
-          "a new app scaffolds ZERO nav items (audit finding 6) — the manual Interfaces → Add nav item → bind-to-object wiring in the steps IS the current contract; do not expect the just-built object to be pre-wired",
+          "SUPERSEDED (QA run #21056): a new app no longer scaffolds zero nav items — the Create-app dialog seeds the app's navigation from the package's objects behind a checkbox that defaults ON (objectui StudioDesignSurface appAddObjects, objectui#2262). With it on, step 5's nav item already exists and the Interfaces step confirms it rather than builds it; only with it unticked does the manual wiring remain the contract. Do not expect zero items",
           "mixed-language Studio chrome (audit finding 4) is asserted by i18n.studio-follows-app-locale — locale consistency is that item's business, not this one's"
         ]
       },
       "steps": [
         "boot the showcase example (objectstack dev --ui --seed-admin -p <port> -d file:/tmp/<run>/data.db), sign in as admin@objectos.ai/admin123, and note the boot timestamp in the server log (the zero-restart clause reads it later)",
-        "Home → 'Build an app' → Studio landing → create a NEW writable package (维修中心 / com.example.repairs) via the new-package wizard",
-        "Data pillar → new object 'Repair Ticket' (the identifier auto-suggests repair_ticket from the display name) → add a picklist field Status with 3 values → Save draft",
+        "Home → 'Build an app' → Studio landing → create a NEW writable package (维修中心 / com.example.repairs, namespace repairs) via the new-package wizard",
+        "Data pillar → new object 'Repair Ticket' (the identifier auto-suggests repair_ticket from the display name, and the dialog PREFIXES it with the package namespace, so the object is named repairs_repair_ticket — the name every later step and clause uses (framework#2694, objectui StudioDesignSurface prefixObjectName). The dialog also carries an OWD (sharing model) choice, pre-selected to the platform's recommended baseline: confirm or change it before Create) → add a picklist field Status with 3 values → Save draft",
         "open the Changes panel and Publish ('Published all drafts in this package (one atomic release)')",
         "create a record in the runtime-faithful Records grid with a Status value chosen",
-        "Create app 'Repair Center' (identifier auto-suggested) → Interfaces pillar → add a nav item bound to repair_ticket → Publish",
+        "Create app 'Repair Center' (identifier auto-suggested) → Interfaces pillar → add a nav item bound to repairs_repair_ticket → Publish",
         "return Home: the launcher must show Repair Center; open it and drive the end-user list",
-        "verify server truth after each publish: GET /api/v1/meta/object/repair_ticket, GET /api/v1/data/repair_ticket, GET /api/v1/meta/app?id=<the new app NAME, e.g. repair_center> — ?id= matches the App document name, NOT the package id com.example.repairs; fetch /api/v1/meta/app with no query first to read the name the wizard actually minted",
-        "negative probe: on the READ-ONLY com.example.showcase package, attempt 'New object' (or 'Add field') and drive the save through to the server; capture the server response"
+        "verify server truth after each publish: GET /api/v1/meta/object/repairs_repair_ticket, GET /api/v1/data/repairs_repair_ticket, GET /api/v1/meta/app?id=<the new app NAME, e.g. repair_center> — ?id= matches the App document name, NOT the package id com.example.repairs; fetch /api/v1/meta/app with no query first to read the name the wizard actually minted",
+        "negative probe: on the READ-ONLY com.example.showcase package there is no gesture to drive — the console HIDES New object and Add field there (objectui StudioDesignSurface gates them on !readOnly) — so the probe is a FORGED request: send the authoring write the gesture would have made straight to the metadata write door against that package, and capture the server response (QA run #21056 read 422 WRITABLE_PACKAGE_REQUIRED and 403 ITEM_LOCKED)"
       ],
       "acceptance": [
         {
           "clause": "package create round-trips and the package switcher lists the new writable package without a page reload",
           "oracle": "network",
-          "verify": "the create POST succeeds and the switcher shows the package in the same session (pinned by objectui e2e/live/studio-object-designer.spec.ts test F1)",
+          "verify": "the create POST succeeds and the switcher shows the package in the same session (objectui e2e/live/studio-object-designer.spec.ts test F1 is meant to pin it, but ⚠️ at the pinned objectui (.objectui-sha) it targets testids package-id-input / package-name-input that no source file declares, so it cannot be cited as a pass here; drive the clause by hand — and note the new-package wizard's own state, objectui#11327)",
           "evidence": "the create request/response + switcher screenshot"
         },
         {
-          "clause": "the published object is server-real: the meta read returns repair_ticket with the authored picklist field carrying exactly the 3 authored options — never ticked off the designer repaint",
+          "clause": "the published object is server-real: the meta read returns repairs_repair_ticket with the authored picklist field carrying exactly the 3 authored options — never ticked off the designer repaint",
           "oracle": "api",
-          "verify": "GET /api/v1/meta/object/repair_ticket body contains the Status field with its 3 options",
+          "verify": "GET /api/v1/meta/object/repairs_repair_ticket body contains the Status field with its 3 options",
           "evidence": "the meta read"
         },
         {
           "clause": "the record entered in the Studio Records grid persists to the data plane",
           "oracle": "api",
-          "verify": "GET /api/v1/data/repair_ticket lists the record with the chosen Status value stored under the field's API name",
+          "verify": "GET /api/v1/data/repairs_repair_ticket lists the record with the chosen Status value stored under the field's API name",
           "evidence": "the data read"
         },
         {
@@ -86,7 +86,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new area item: the full first-run authoring loop, grounded step-by-step in the 2026-07 Studio dogfood audit ('The loop closes'), with the audit's open UX findings carried as knownGaps instead of asserted", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-18", "change": "corrected the ?id= spelling in step 8 and clause 4, which said <new app id> in an item whose step 2 creates the package com.example.repairs — inviting the package-id spelling that answers with an empty items array (#9334's class). Found by grounding rather than from a report: this item was not on the #9334 list. ⚠️ The card's other instruction for this item — drop any inherited 'Studio is not installed' assumption (#9453 CF-4) — needed NO edit: the item never carried one. It has no blocked marker, no such knownGap, and its steps drive the App Builder directly; the assumption lived in the wave briefing and the run records, not here", "ref": "#9386" }
+        { "revision": 2, "date": "2026-08-18", "change": "corrected the ?id= spelling in step 8 and clause 4, which said <new app id> in an item whose step 2 creates the package com.example.repairs — inviting the package-id spelling that answers with an empty items array (#9334's class). Found by grounding rather than from a report: this item was not on the #9334 list. ⚠️ The card's other instruction for this item — drop any inherited 'Studio is not installed' assumption (#9453 CF-4) — needed NO edit: the item never carried one. It has no blocked marker, no such knownGap, and its steps drive the App Builder directly; the assumption lived in the wave briefing and the run records, not here", "ref": "#9386" },
+        { "revision": 3, "date": "2026-10-01", "change": "checklist-accuracy findings of QA run #21056, each grounded in objectui at the pin: the object is named repairs_repair_ticket (the dialog prefixes the package namespace), and every step and clause now uses that name; the New object dialog carries a pre-selected OWD choice; the zero-nav-items knownGap is superseded (the Create-app scaffold checkbox defaults on); steps[8]'s probe is a forged request because the console hides authoring on a read-only package; acceptance[0]'s cited objectui pin targets testids absent at the pin", "ref": "#21060" }
       ]
     },
     {

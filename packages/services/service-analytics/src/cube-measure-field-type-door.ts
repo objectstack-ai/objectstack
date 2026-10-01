@@ -1,0 +1,169 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * [#21044] The cube door's measure × field-type judgment: a `measures` entry
+ * whose aggregate `AGGREGATE_FIELD_TYPE_COMPATIBILITY` (`@objectstack/spec/
+ * data`) refuses for its column's declared type is refused `INVALID_FIELD` /
+ * 400, ahead of strategy selection — the table the dataset door executes at
+ * compile, asked at the door every cube query passes.
+ *
+ * ## The shape this closes
+ *
+ * Measured through `POST /api/v1/analytics/query` on the real dispatcher route,
+ * at `2821e9f15b`, a configured cube over two rows (`note` `x` / `y`):
+ *
+ * | measure | face | SQLite | PostgreSQL 16.13 |
+ * |:--|:--|:--|:--|
+ * | `max` / `min` over `text`, `max` over `select` | `NativeSQLStrategy` | 200, the text (`"y"`), `fields[]` `number` | the same |
+ * | the same | `ObjectQLStrategy` | 400 `INVALID_FIELD`, the engine's door | the same |
+ * | `sum` over `text` | both | 200, `0`, `fields[]` `number` | 500 `DATABASE_ERROR` |
+ * | `avg` over `text` | `NativeSQLStrategy` | 200, `0` | 500 `DATABASE_ERROR` |
+ * | `avg` over `text` | `ObjectQLStrategy` | 400 `INVALID_FIELD`, the engine's door | the same |
+ *
+ * The dataset door refuses every one of these pairs at compile
+ * (`DATASET_INVALID` / 400, `dataset-compiler.ts`); the engine's aggregate door
+ * refuses some of them on the ObjectQL face, after the strategy has begun (it
+ * holds its `sum` row); the native face asked nothing. So one cube answered the
+ * same query by which strategy the driver selected and which dialect it spoke —
+ * a text value under a column described `number`, a plausible `0`, a 400 or a
+ * 500.
+ *
+ * ## Where it stands
+ *
+ * In `AnalyticsService.ensureCube`, on every path out of it, right after the
+ * #20807 / #20912 door (`structured-json-dimension-door.ts`): ahead of
+ * `callCtx` and strategy selection, for `query()` (the `/analytics/query`
+ * door, and every query a dataset selection runs through `DatasetExecutor`)
+ * and for `generateSql()` (the `/analytics/sql` dry run) alike. One door ahead
+ * of both strategies gives one answer on every driver, and nothing is read
+ * before it answers.
+ *
+ * ## What it judges
+ *
+ * - Every `measures` entry that resolves to a cube measure whose `type` is an
+ *   `AggregationFunction` row of the table — every row, as the dataset door
+ *   judges every row (decision batch #127), with no scope condition on top of
+ *   the table (`count_distinct` through its own door, below) — and an authored measure, a suffix-inferred one (`note_max`)
+ *   and a compiled dataset's are one population. The member is resolved by the
+ *   CALLER's resolver (the same one `withDeclaredMeasureFormats` reads), never
+ *   a second one here.
+ * - The measure's column is its `sql` when that is a bare identifier: a column
+ *   of the cube's own object, whose declaration the door already reads
+ *   (`sourceFieldMeta`).
+ * - The verdict is `isAggregateCompatibleWithFieldType`'s. ⛔ No row is
+ *   restated here: the accepted set the words name is read off the exported
+ *   table, so a row changed in the spec changes this refusal in the same
+ *   commit.
+ *
+ * `count_distinct` is judged by its own door (#20912, the module named above),
+ * which asks the same row AND the declaration half the per-type row cannot see
+ * (`isMultiValueField`): one verdict per pair, never two doors with two
+ * wordings. The `sum` / `avg` / `min` / `max` rows accept no multi-capable
+ * type, so the declaration half adds nothing to them, and `count` accepts every
+ * type.
+ *
+ * ## Not judged — "cannot answer, do not block", the dataset door's tiers
+ *
+ * - A host that wires no `sourceFieldMeta`, or a cube whose `sql` is not a
+ *   bare object name (the caller stands down for both).
+ * - A member that resolves to no declared measure (the source-field gate's).
+ * - A measure type outside the table's vocabulary: the expression metric types
+ *   (`number` / `string` / `boolean`).
+ * - A RELATIONSHIP-PATH column (`account.name`): the declaration the door
+ *   reads is the base object's, so it would answer about a different column of
+ *   the same name, or about nothing. The spec module says exactly this ("a
+ *   consumer that cannot resolve a field's type must NOT call the predicate
+ *   with a guess").
+ * - A column the declaration hook cannot resolve, or a type outside
+ *   `FieldType` (a driver-internal alias): the table is fail-closed on
+ *   vocabulary, and refusing on it would refuse a pair nobody declared.
+ *
+ * ## The envelope, and why it is not the dataset door's code
+ *
+ * `INVALID_FIELD` / 400 through `invalidMemberError` (ADR-0112), with the
+ * column and its object attached, as the #20912 door attaches them. The
+ * dataset door answers the same pair `DATASET_INVALID`, which is a verdict
+ * about a dataset DOCUMENT (`dataset-refusal.ts`'s header): this door's caller
+ * sent no dataset, and a verdict about ONE MEMBER the request named is the
+ * `INVALID_FIELD` family — the code the cube door's three source-field gates,
+ * its #20912 `count_distinct` door and the engine's aggregate door already
+ * answer, the last one for this very pair on the ObjectQL face. The dataset
+ * door never reaches this one for a pair it refuses: it refuses at compile.
+ */
+
+import {
+  AGGREGATE_FIELD_TYPE_COMPATIBILITY,
+  FieldType,
+  isAggregateCompatibleWithFieldType,
+} from '@objectstack/spec/data';
+import type { AnalyticsQuery } from '@objectstack/spec/contracts';
+import { invalidMemberError } from './dataset-refusal.js';
+
+/** The declared `FieldType` vocabulary — the only types the table can answer for. */
+const DECLARED_FIELD_TYPES: ReadonlySet<string> = new Set(FieldType.options);
+
+/** The aggregates this door judges: every row of the table but `count_distinct`, whose own door judges it. */
+const isJudgedAggregate = (type: unknown): type is keyof typeof AGGREGATE_FIELD_TYPE_COMPATIBILITY =>
+  typeof type === 'string'
+  && type !== 'count_distinct'
+  && Object.prototype.hasOwnProperty.call(AGGREGATE_FIELD_TYPE_COMPATIBILITY, type);
+
+/**
+ * WHY the pair has no backend-independent answer, chosen by what the aggregate
+ * does with the values — an explanation, never a verdict, and the LAST sentence
+ * of the words, so a door that bounds a 4xx message cuts it first.
+ */
+const reasonFor = (aggregate: string): string =>
+  aggregate === 'min' || aggregate === 'max'
+    ? 'String order is collation-dependent and some stored forms have no order at all, so each SQL '
+      + 'dialect would pick its own value.'
+    : 'Each SQL dialect would coerce the stored form to a number or fail, so the answer would depend on '
+      + 'the backend.';
+
+/**
+ * Refuse the first `measures` entry of `query` whose aggregate the table
+ * refuses for its column's declared type — `INVALID_FIELD` / 400. See the
+ * module header.
+ *
+ * @param baseObject - The object `cube.sql` names (the caller has checked it is
+ *   a bare object name).
+ * @param measureOf - The cube measure a `measures` entry resolves to, by the
+ *   caller's resolver: its `type`, and the base-object `column` it aggregates
+ *   (`null` when its `sql` is not a bare identifier) — or `undefined` when the
+ *   entry resolves to no declared measure.
+ * @param declaredTypeOf - The declared `FieldType` of a column on an object, or
+ *   `undefined` when nothing authoritative answers.
+ *
+ * The words put the verdict first, then that the query did not run, then the
+ * accepted set read off the table, then the reason: a door that bounds a 4xx
+ * message keeps the front of it.
+ */
+export function assertCubeMeasureFieldTypesAccepted(
+  query: AnalyticsQuery,
+  cubeName: string,
+  baseObject: string,
+  measureOf: (member: string) => { type: unknown; column: string | null } | undefined,
+  declaredTypeOf: (object: string, field: string) => string | undefined,
+): void {
+  for (const member of query.measures ?? []) {
+    const measure = measureOf(member);
+    if (!measure?.column) continue;
+    const aggregate = measure.type;
+    if (!isJudgedAggregate(aggregate)) continue;
+    const column = measure.column;
+    const declared = declaredTypeOf(baseObject, column);
+    if (typeof declared !== 'string' || !DECLARED_FIELD_TYPES.has(declared)) continue;
+    if (isAggregateCompatibleWithFieldType(aggregate, declared)) continue;
+
+    const err = invalidMemberError(
+      `Measure '${member}' on cube '${cubeName}' takes the ${aggregate} of field '${column}', which object `
+      + `'${baseObject}' declares as ${declared}: ${aggregate} does not accept that type, so the query was NOT `
+      + `run. ${aggregate} accepts ${AGGREGATE_FIELD_TYPE_COMPATIBILITY[aggregate].join(', ')}; aggregate a `
+      + `field of one of those types, or count the rows with count. ${reasonFor(aggregate)}`,
+      { member, param: 'measures', cube: cubeName },
+    ) as Error & { field?: string; object?: string };
+    err.field = column;
+    err.object = baseObject;
+    throw err;
+  }
+}

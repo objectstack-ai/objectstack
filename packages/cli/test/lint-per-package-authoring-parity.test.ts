@@ -151,13 +151,18 @@ const ordersObjects = [{
     account: { name: 'account', type: 'lookup', label: 'Account', reference: 'pp_account' },
   },
 }];
+// The containers bind by \`object\` and carry no \`name\` / \`label\` of their own:
+// both keys are \`dead\` in the view ledger, and since #16094 each draws a
+// union-run \`liveness-dead-property\` warning, which would break the "union
+// raises NOTHING" premise this fixture exists to hold. The list's own \`label\`
+// is live and stays.
 const ordersViews = [
   {
-    name: 'pp_account', label: 'Account List', object: 'pp_account',
+    object: 'pp_account',
     list: { label: 'Account List', columns: ['name', 'industry'] },
   },
   {
-    name: 'pp_order', label: 'Order List', object: 'pp_order',
+    object: 'pp_order',
     list: { label: 'Order List', columns: ['name', 'account'] },
   },
 ];
