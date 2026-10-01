@@ -268,6 +268,33 @@ contradicts it, and correct it here when it does.
      upload is broken". ⛔ Do not drive any storage/upload surface from an injected
      token: **sign in through the form** so both halves exist.
 
+- **A stock showcase boot refuses self-registration — no item can mint a member by
+  "fresh sign-up".** The showcase declares no `auth.audience`, so its posture is the
+  `invite_only` default (`packages/plugins/plugin-auth/src/audience-posture.ts`:
+  `resolveAudience` — undeclared ⇒ `invite_only`; the migration entry
+  `audience-posture-default-invite-only` records the flip), and
+  `POST /api/v1/auth/sign-up/email` for an address holding no pending invitation answers
+  **`403 SELF_REGISTRATION_CLOSED`** (`decideAudienceAdmission` in the same file; the code
+  is in the ADR-0112 ledger, `error-code-ledger.zod.ts`). QA run #21056 met it on every
+  member persona it needed. Two doors mint one instead:
+  1. **Invite, then sign up.** As admin, `POST /api/v1/auth/organization/invite-member`
+     with `{"email": "EMAIL", "role": "member"}`; a pending, unexpired `sys_invitation`
+     row for that address is what admits the following `sign-up/email`
+     (`packages/plugins/plugin-auth/src/auth-manager.ts`, `hasPendingInvitationFor`).
+  2. **Admin create.** `POST /api/v1/auth/admin/create-user`, which answers
+     `mustChangePassword: true` by default
+     (`packages/plugins/plugin-auth/src/admin-user-endpoints.ts`, `runAdminCreateUser`);
+     have the persona `POST /api/v1/auth/change-password` before driving it.
+
+  The worked example is the shared recipe `search:qa-contributor-bound-member`
+  (`areas/search.json`), whose `requires` carries the invite ahead of its step-1 sign-up.
+  Wherever an item still says "fresh sign-up", read it as an identity minted one of these
+  two ways. ⛔ Do not record a member clause `blocked(fixture)` on the strength of the 403,
+  and do not file it: the refusal is the posture working. The seeded demo personas
+  (`examples/app-showcase/src/security/demo-personas.ts`, password `showcase123`) are
+  loginable already, but they hold fixed positions, so they fit only where an item names
+  them.
+
 - **A cold tree cannot boot the app from the console-build recipe alone.**
   `pnpm objectui:build` runs `scripts/build-console.sh`, which builds the **console**, not
   the framework CLI. On a fresh tree `packages/cli` has no `dist`, and the bare binary
