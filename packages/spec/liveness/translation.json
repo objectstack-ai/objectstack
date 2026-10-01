@@ -31,22 +31,22 @@
       "note": "the largest group, fully live: label/pluralLabel/description (translateObject), fields.{label,help,placeholder,options}, _views (resolveViewLabel + empty-state copy), _actions (label/confirmText/successMessage/params/resultDialog — object-scoped first, then globalActions fallback), _sections (objectui record:details section labels). Served through REST translateMetaItem(s) and the /api/v1/i18n endpoints; objectui re-resolves client-side via the spec-translations transform. 2026-08-28: RE-ANCHORED (commit 8f10a79f7) and REPOINTED — this entry named SIX positions in i18n-resolver.ts and only the first, `:735`, was parsable as a citation at all; it had rotted onto `widgets?: WidgetLike[]` in the `DashboardLike` INTERFACE. The other five (`:751`, `:159`, `:197`, `:873`, `:900`) were bare line suffixes with no path in front of them, so they were never resolved, bounded or key-checked by anything — the largest instance in this batch of the class `flow.status` and `dashboard.widgets.suppressWarnings` also carried. The five anchors above are the five distinct group readers, named. Re-closed by hand against 8cb96ec41."
     },
     "picklists": {
-      "status": "planned",
-      "verifiedAt": "2026-09-30",
+      "status": "live",
+      "verifiedAt": "2026-10-01",
       "evidence": "packages/spec/src/system/i18n-resolver.ts#translatePicklist (a served `picklist` item: `picklists.<name>.label` and `.options.<value>`, registered in METADATA_DOCUMENT_TRANSLATORS); packages/spec/src/system/i18n-resolver.ts#translateObject (a picklist-bound field inherits `picklists.<name>.options.<value>` after its own field-level entry)",
-      "note": "Declared with the spec layer of the picklist kind (#19518), resolvers in the same change. `planned`, not `live`, because the PRODUCER half is missing: nothing serves a picklist item or a picklist-bound field with its options resolved until the runtime layer (#19519) lands, so both resolvers are reachable only from tests today. Flip to `live` when #19519's resolved serve reaches them.",
+      "note": "Both resolvers are reached on the real /meta read path: the ObjectQL registry serves a picklist-bound field with the list's resolved options (`packages/objectql/src/registry.ts#resolvePicklistOptions`), which `translateObject` relabels per request locale, and the artifact door registers `picklists:` as items, which `translatePicklist` relabels. Driven end to end by `packages/qa/dogfood/test/picklist-shared-across-objects.dogfood.test.ts`.",
       "children": {
         "label": {
-          "status": "planned",
-          "verifiedAt": "2026-09-30",
+          "status": "live",
+          "verifiedAt": "2026-10-01",
           "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupPicklistLabel (`picklists.<name>.label`, read by translatePicklist)",
-          "note": "The list's own display name — the served picklist item, which nothing serves until #19519."
+          "note": "The list's own display name on the served picklist item (`GET /meta/picklist/<name>`)."
         },
         "options": {
-          "status": "planned",
-          "verifiedAt": "2026-09-30",
+          "status": "live",
+          "verifiedAt": "2026-10-01",
           "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupPicklistOption (`picklists.<name>.options.<value>`, read by translatePicklist and by translateObject for a field whose `picklist` names the list)",
-          "note": "Option labels, translated once and inherited by every referencing field; a field-level `objects.<o>.fields.<f>.options` entry stays the more specific and wins. Reached once #19519 serves the resolved options."
+          "note": "Option labels, translated once and inherited by every referencing field; a field-level `objects.<o>.fields.<f>.options` entry stays the more specific and wins."
         }
       }
     },

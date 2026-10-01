@@ -192,6 +192,7 @@ describe('picklist — the additive merge refuses a repeated value', () => {
     const err: any = (() => {
       try { engine.registerApp({ id: 'com.test.dup', name: 'dup', picklistExtensions: [{ extend: 'industry', options: [{ label: 'Fintech', value: 'finance' }] }] }); }
       catch (e) { return e; }
+      return undefined;
     })();
     expect(err).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
     expect(err.message).toContain("Picklist 'industry' would carry the value 'finance' twice");

@@ -174,4 +174,19 @@ describe('dogfood: one shared picklist, two objects, a package extension', () =>
     // …and the default-language read is untouched by the other locale's catalog.
     expect((await metaIn(undefined, 'dfp_lead'))?.fields?.industry?.options?.[2]?.label).toBe('Healthcare');
   });
+
+  it('the list itself is served as a `picklist` item, its label translated per locale', async () => {
+    const read = async (locale: string | undefined) => {
+      const res = await stack.api('/meta/picklist/industry', {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}`, ...(locale ? { 'Accept-Language': locale } : {}) },
+      });
+      expect(res.status, 'GET /meta/picklist/industry').toBe(200);
+      const body: any = await res.json();
+      expect(body?.item?.name, JSON.stringify(body).slice(0, 300)).toBe('industry');
+      return body.item;
+    };
+    expect((await read(undefined)).label).toBe('Industry');
+    expect((await read('zh-CN')).label).toBe('行业');
+  });
 });
