@@ -59,6 +59,11 @@ import {
 // body column of `sys_metadata` / `sys_metadata_history` as a member is refused
 // here, on the one family seam, before any strategy runs.
 import { storedMetadataBodyAnalyticsRefusal } from './stored-metadata-body-refusal.js';
+// [#21177] The caller-content door refusal — a member the CALLER supplied at
+// query time whose text is not a column reference the admission can judge (an
+// inline dataset field expression, or a member spelling the authored cube does
+// not declare) is refused here, unconditionally and ahead of the field gate.
+import { assertDatasetContentJudgeable, assertQueryMembersJudgeable } from './caller-content-admission.js';
 // [#15768] The measure result-type rule — which aggregates return a value of
 // the aggregated field's own type, and which are numeric whatever they read.
 // Owned in its own module so the enumerated verdict per `AggregationFunction`
@@ -1617,6 +1622,21 @@ export class AnalyticsService implements IAnalyticsService {
       query.cube ? scope.getCube(query.cube) : undefined,
       query.cube ? reads.getDatasetScope(query.cube) : undefined,
     );
+    // [#21177] …and the caller-content refusal — also a hard product refusal,
+    // not a permission check, so it runs ahead of (and independent of) the
+    // field gate below whether or not a security provider is wired. A member
+    // the caller spelled that is not a column reference the admission can judge
+    // — a member the authored cube does not declare, compiled from the caller's
+    // own text — names no attributable field, so neither the object gate nor the
+    // field gate can judge what it reads; `NativeSQLStrategy` would compile it
+    // as written. It is an invalid request (`INVALID_FIELD` / 400), refused for
+    // every caller. A DECLARED member whose own `sql` is an expression is NOT
+    // caller content and is left to the field gate below (#20965). The inline
+    // dataset's own fields are the caller's text too, and are refused one step
+    // earlier, before compile (`answerDataset` → `assertDatasetContentJudgeable`).
+    // See `caller-content-admission.ts`.
+    const contentCube = query.cube ? scope.getCube(query.cube) : undefined;
+    if (contentCube) assertQueryMembersJudgeable(query, contentCube);
     // [#20917] …and the FIELD-level gate, right behind it and for the same
     // reason: every member the query names is judged here, once, so every
     // strategy — and the SQL echo — inherits the verdict by construction. The
@@ -2175,6 +2195,15 @@ export class AnalyticsService implements IAnalyticsService {
     context?: ExecutionContext,
     options?: { previewDrafts?: boolean },
   ): Promise<AnalyticsResult> {
+    // [#21177] The inline dataset is caller content at query time: every
+    // dimension/measure `field`, the dataset's own filter and the selection's
+    // presentation filter are the caller's text, and a value that is not a
+    // column reference compiles into a strategy's statement as written. Refuse
+    // such a member here — `INVALID_FIELD` / 400, for every caller and whether
+    // or not a security provider is wired — BEFORE the dataset is compiled to a
+    // cube, so no caller expression ever reaches a strategy (the draft-preview
+    // branch below included). See `caller-content-admission.ts`.
+    assertDatasetContentJudgeable(dataset, selection);
     const compiled = this.compile(dataset);
     this.logger.debug(`[Analytics] queryDataset "${dataset.name}" (object=${dataset.object}, include=${(dataset.include ?? []).join(',') || '—'})`);
 
