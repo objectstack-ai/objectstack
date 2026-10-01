@@ -148,6 +148,18 @@ export interface NamedExpression {
   readonly object: string;
   readonly member: string;
   readonly expression: true;
+  /**
+   * [#21156] Whether the member the query named resolves to a DECLARED cube
+   * member (its `sql` is the expression) or to NOTHING the cube declares (the
+   * member's own spelling is the expression — caller-supplied text). The cube
+   * read here is the one that existed BEFORE ad-hoc inference, so an inferred
+   * cube's minted members — every one of which is caller text — read as
+   * `false`. The caller-supplied kind is refused in EVERY tier
+   * ({@link assertCallerMembersJudgeable}); the declared kind is the author's
+   * cube `sql`, refused only where the field gate judges (#21153) and left to
+   * the parse (#20943) otherwise.
+   */
+  readonly declared: boolean;
 }
 
 /** What a query reads, as the gate judges it: a field, or a member that names none. */
@@ -312,6 +324,52 @@ export async function assertNamedFieldsReadable(
           `the verdict the engine reaches for the same fields`,
       );
       throw fieldReadDeniedError(object, refused, role);
+    }
+  }
+}
+
+/**
+ * [#21156] Refuse a CALLER-NAMED member that is neither a declared member of
+ * the cube nor a column reference — in EVERY tier, ahead of the field-level
+ * read gate and before any strategy compiles it.
+ *
+ * ## Why this is separate from {@link assertNamedFieldsReadable}
+ *
+ * That gate judges READABILITY, and it is a no-op in the two tiers where the
+ * caller-supplied kind of {@link NamedExpression} is dangerous: a deployment
+ * with no security service wires no reader, and an object the reader answers
+ * `undefined` for is skipped (`continue`). In both, a member whose text is not
+ * a column reference reached the native statement as written — `NativeSQLStrategy`
+ * emits an unrecognised `sql` verbatim, into the grouping and filter positions.
+ * This gate closes that by asking a question that needs no provider at all:
+ * does the member name a column (a field, a relationship path, or `'*'`) or a
+ * member the cube's author declared? If neither, it names nothing any gate can
+ * judge, so the query is refused fail-closed, whoever the caller is.
+ *
+ * ## One judge, one shape
+ *
+ * The refusal is {@link fieldReadUnjudgeableError} — `PERMISSION_DENIED` / 403,
+ * the SAME refusal #21153 reaches where the field gate judges the object — so a
+ * caller sees one answer for this class in every tier, not a second one. ⛔ No
+ * new error code, and the declared-expression kind is NOT refused here (it is
+ * the author's cube `sql`, judged by #21153 where the gate applies and by the
+ * parse #20943 otherwise), so the declared-cube paths do not regress.
+ */
+export function assertCallerMembersJudgeable(
+  named: readonly NamedRead[],
+  logger?: AdmissionLogger,
+  context?: ExecutionContext,
+): void {
+  for (const read of named) {
+    if (isNamedExpression(read) && !read.declared) {
+      logger?.warn(
+        `[Analytics] field-level read admission refused caller-named member "${read.member}" ` +
+          `on "${read.object}" ` +
+          `(user ${String((context as { userId?: unknown } | undefined)?.userId ?? 'unknown')}) — ` +
+          `it is not a column reference and names no declared member, so no field it reads can be ` +
+          `judged, in any tier (fail-closed)`,
+      );
+      throw fieldReadUnjudgeableError(read.object, read.member);
     }
   }
 }
