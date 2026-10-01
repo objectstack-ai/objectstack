@@ -178,6 +178,41 @@ jobs:
     # mis-routed diagnoses on 2026-08-17 alone (#9258, PRs #9256/#9291).
     name: Lint & Repo Gates
     runs-on: ubuntu-latest
+    # ⭐ JOB WALL — measured, and the only wall this job has. No step in this
+    # workflow runs under `scripts/run-with-stall-guard.mjs` (if one ever does,
+    # `pnpm check:stall-guard-budget` holds its cap under this number), so a
+    # step that stops producing output — a build, an install, a network read
+    # that never answers — is ended by nothing else. Without the key GitHub's
+    # default is 360 minutes, and this is the longest REQUIRED check in every
+    # merge-queue group. The queue does not wait that long: ruleset 12119582
+    # (`main`) treats a required check that has not reported within 60 minutes
+    # (`check_response_timeout_minutes`) as failed and removes the entry — with
+    # no red check, and no `Merge Queue Triage` comment either (that workflow
+    # fires on a `failure` conclusion only, and it watches `CI`, not this
+    # workflow) — while the hung job holds a runner for up to five more hours,
+    # still `in_progress`. With the wall, a hung run ends `cancelled`, carrying
+    # GitHub's failure annotation "The job has exceeded the maximum execution
+    # time of …", before the queue's own window closes.
+    #
+    # Measured: p50 15.8 / p99 32.6 / max 32.7 minutes (n = 81); a docs-only
+    # change runs it in about 7–11, a code change in 25–33. The window, for
+    # every job in this file: the 100 most recent completed runs of this
+    # workflow, 2026-10-01T00:23Z → 03:24Z (96 runs read, 525 successful job
+    # rows), job `started_at` → `completed_at` from the jobs API.
+    #
+    # The rule, for every job in this file: about 2× the measured maximum,
+    # rounded to a 5-minute grain, never below 10 minutes, never above the
+    # queue's 60-minute window. Here the window binds, not 2× (2 × 32.7 =
+    # 65.4), and the cap is placed BELOW it, at 55: this job's clock starts
+    # only once a runner picks it up, after the queue's has started, so the
+    # five minutes are room for that pickup, and 55 still leaves 22 minutes
+    # (1.7×) over the measured maximum. Above 60 the stretch between the queue
+    # removing an entry and this check turning `cancelled` only grows, so when
+    # the measured maximum nears the wall the remedy is a faster job (or the
+    # queue's own setting, which is the maintainer's) — never a higher number
+    # here. Re-measure over a fresh window before changing any value in this
+    # file.
+    timeout-minutes: 55
     permissions:
       contents: read
       # ⭐ Read-only, and it buys exactly one thing: the LAST step of this job
@@ -5099,6 +5134,13 @@ jobs:
   typecheck-source-gates:
     name: Type Check · source gates
     runs-on: ubuntu-latest
+    # JOB WALL — why every job here has one, the measurement window and the
+    # rule: the `lint` job's `timeout-minutes` comment.
+    # Measured: p50 3.2 / p99 3.5 / max 3.7 minutes (n = 94); 10 is 2.7×
+    # the maximum.
+    # A lane stopped by its wall ends `cancelled`, which the required
+    # `TypeScript Type Check` aggregate at the bottom of this file fails on.
+    timeout-minutes: 10
     permissions:
       contents: read
 
@@ -5885,6 +5927,13 @@ jobs:
   typecheck-workspace:
     name: Type Check · workspace
     runs-on: ubuntu-latest
+    # JOB WALL — why every job here has one, the measurement window and the
+    # rule: the `lint` job's `timeout-minutes` comment.
+    # Measured: p50 13.0 / p99 16.0 / max 16.0 minutes (n = 86); 2 × 16.0 =
+    # 32, 30 on the grain.
+    # A lane stopped by its wall ends `cancelled`, which the required
+    # `TypeScript Type Check` aggregate at the bottom of this file fails on.
+    timeout-minutes: 30
     permissions:
       contents: read
 
@@ -6092,6 +6141,12 @@ jobs:
   typecheck-debt:
     name: Type Check · debt ledger
     runs-on: ubuntu-latest
+    # JOB WALL — why every job here has one, the measurement window and the
+    # rule: the `lint` job's `timeout-minutes` comment.
+    # Measured: p50 5.8 / p99 7.4 / max 7.5 minutes (n = 92); 2 × 7.5 = 15.
+    # A lane stopped by its wall ends `cancelled`, which the required
+    # `TypeScript Type Check` aggregate at the bottom of this file fails on.
+    timeout-minutes: 15
     permissions:
       contents: read
 
@@ -6322,6 +6377,13 @@ jobs:
   typecheck-consumers:
     name: Type Check · consumer gates
     runs-on: ubuntu-latest
+    # JOB WALL — why every job here has one, the measurement window and the
+    # rule: the `lint` job's `timeout-minutes` comment.
+    # Measured: p50 7.7 / p99 10.1 / max 10.1 minutes (n = 87); 2 × 10.1 =
+    # 20.2, 20 on the grain.
+    # A lane stopped by its wall ends `cancelled`, which the required
+    # `TypeScript Type Check` aggregate at the bottom of this file fails on.
+    timeout-minutes: 20
     permissions:
       contents: read
 

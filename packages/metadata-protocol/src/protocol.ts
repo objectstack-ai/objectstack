@@ -9035,7 +9035,10 @@ export class ObjectStackProtocolImplementation implements
      * Phase 3a-layered-get: return the 3 layers of a metadata item
      * separately — `code` (artifact-loaded baseline), `overlay` (per-org
      * customisation row, if any), and `effective` (what `getMetaItem`
-     * would return, i.e. overlay-wins merge).
+     * would return, i.e. overlay-wins merge — except for a flow name the
+     * loader ships, where `getMetaItem` serves the loader's body, so
+     * `effective` is the code layer and a stored row of that name is
+     * reported in `overlay` as a shadowed layer, #21002).
      *
      * Drives the "Code default vs Overlay vs Effective" diff tab in the
      * generic Metadata Resource Edit page. Admins can see exactly what
@@ -9369,7 +9372,31 @@ export class ObjectStackProtocolImplementation implements
         // the tenant actually stored: a code-declared extension is not a tenant
         // customisation, and #7556 drew that boundary deliberately (the same
         // reason `governServedItem` is called here and never on `overlay`).
-        const effectiveBase: unknown | null = overlay !== null
+        //
+        // ── [#21002, #20761 ruling rule 1, ADR-0126 §2 / §3] A shipped FLOW name ──
+        //
+        // `flow` is Regime C: the packaged base is locked, "⛔ Never silent
+        // override, never an overlay read path". For a flow name the loader's
+        // set holds, the flattened view (#20913) and {@link getMetaItem}
+        // (#20946) serve the loader's body, and a stored row of that name is
+        // neither merged into the package's slot nor lets it stand in for it.
+        // `effective` is "what `getMetaItem` would return", so for such a name
+        // it is the CODE layer, decided by the SAME stored-row predicate,
+        // {@link isShippedFlowName}, judged by NAME — ⛔ no fourth precedence
+        // path of this method's own. Overlay-wins here served the stored body
+        // as the effective layer while the lock and provenance flags (resolved
+        // from `code` first, below) named the package.
+        //
+        // The stored row is still REPORTED: `overlay` / `overlayScope` keep the
+        // row as stored, a shadowed layer of its own scope beside the effective
+        // one, never the effective layer itself. The code layer needs no
+        // registry-half call ({@link isStoredFlowEntryOfShippedName}): it reads
+        // the loader's set (`lookupArtifactItem`, blind to tenant-authored rows)
+        // before the registry's bare slot, and a shipped name is by definition
+        // one that set holds. Every other type, and a flow name no managed
+        // package ships, keeps overlay-wins. What becomes of the stored rows
+        // themselves (keep, refuse, migrate) is not decided here.
+        const effectiveBase: unknown | null = overlay !== null && !this.isShippedFlowName(request.type, request.name)
             ? this.foldObjectExtendersFromRegistry(request.type, request.name, overlay)
             : code;
         const effective: unknown | null = this.governServedObject(request.type, effectiveBase);

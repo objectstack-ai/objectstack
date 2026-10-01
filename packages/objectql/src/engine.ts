@@ -49,8 +49,11 @@ import { MAX_BULK_PER_ROW_HOOK_ROWS, resolveBulkPerRowHookBudget } from '@object
 import { ActionActivationProjection, type ActionActivationRow, type ActionActivationStore } from './action-activation.js';
 import { assertListComparandShapes, assertFilterIsMaterializable, invalidFilterError } from './filter-comparand-shape.js';
 import {
+  assertHavingResolvedTemporalTokensInRange,
   assertHavingTemporalComparandsInterpretable,
+  assertResolvedTemporalTokensInRange,
   assertTemporalComparandsInterpretable,
+  type ResolvedTokenJudge,
 } from './temporal-comparand-door.js';
 import { assertTextOperatorTargetsAreStringCapable } from './text-operator-declared-type-door.js';
 import {
@@ -1165,13 +1168,38 @@ function lowerWhereFilterArray<T extends object | undefined>(
  * context carries no value for throws `FILTER_TOKEN_UNRESOLVED`. Neither ever
  * resolves to `null` (see `@objectstack/core`'s `filter-tokens.ts`).
  *
- * Returns the input by reference when it holds no placeholder.
+ * [#20844] …and judges what resolved: `judgeResolved` is the position's
+ * {@link ResolvedTokenJudge}, handed the condition before and after, and a
+ * date macro that resolved outside its column's years is refused there
+ * (`INVALID_FILTER` / 400). Required, so no position resolves without it; the
+ * resolver is field-agnostic, so the column's kind comes from the position.
+ *
+ * Returns the input by reference when it holds no placeholder, and then
+ * judges nothing.
  */
 function resolveWhereFilterTokens<W>(
   where: W,
   context: Parameters<typeof filterTokenContextFrom>[0],
+  judgeResolved: ResolvedTokenJudge,
 ): W {
-  return resolveFilterTokens(where, filterTokenContextFrom(context));
+  const resolved = resolveFilterTokens(where, filterTokenContextFrom(context));
+  if (resolved !== where) judgeResolved(where, resolved);
+  return resolved;
+}
+
+/**
+ * [#20844] The `where` position's {@link ResolvedTokenJudge}: each key's kind
+ * is its declared field's in `schema`. `path` roots the refusal, as the door's
+ * does — `aggregations[i].filter` for a per-aggregation filter.
+ */
+function whereResolvedTokenJudge(
+  object: string,
+  operation: string,
+  schema: unknown,
+  path = 'where',
+): ResolvedTokenJudge {
+  return (written, resolved) =>
+    assertResolvedTemporalTokensInRange(object, operation, schema, written, resolved, path);
 }
 
 /**
@@ -1201,14 +1229,18 @@ function resolveWhereFilterTokens<W>(
  * field map has no declarations to read, and there the rule applies
  * type-blind (item 7's other half).
  *
+ * [#20844] `judgeResolved` is the position's other declared-type reader: the
+ * year range of what resolved ({@link resolveWhereFilterTokens}).
+ *
  * Returns the input by reference when nothing resolved and nothing lowered.
  */
 function resolveThenLowerWhere<W>(
   where: W,
   context: Parameters<typeof filterTokenContextFrom>[0],
   lowering: FilterLoweringOptions,
+  judgeResolved: ResolvedTokenJudge,
 ): W {
-  return lowerFilterCondition(resolveWhereFilterTokens(where, context), lowering);
+  return lowerFilterCondition(resolveWhereFilterTokens(where, context, judgeResolved), lowering);
 }
 
 /**
@@ -1276,7 +1308,8 @@ function admissionRefusalOf(
  *    (#20351) → `normalizeFilterComparandTypes`, or (array form) `isFilterAST`
  *    → `parseFilterAST` → the same four field-map doors on the lowered
  *    condition.
- * 2. {@link resolveWhereFilterTokens}: the placeholder resolver.
+ * 2. {@link resolveWhereFilterTokens}: the placeholder resolver, and [#20844]
+ *    the year range of each date macro it resolved.
  *
  * [#20802] Execution then lowers each nested-relation condition by READING
  * the related object (`ObjectQL.lowerRelationConditions`); that read admits the
@@ -1314,7 +1347,9 @@ function judgeWhereAdmission(
 ): EngineFilterJudgement {
   try {
     const admitted = lowerWhereFilterArray(object, operation, { where }, schema, schemaOf);
-    const resolved = resolveWhereFilterTokens(admitted.where, context);
+    const resolved = resolveWhereFilterTokens(
+      admitted.where, context, whereResolvedTokenJudge(object, operation, schema),
+    );
     // [#20802] Each nested-relation condition the door admitted: execution
     // reads the related object with it (`ObjectQL.lowerRelationConditions`),
     // and that read admits it through the related object's own doors and
@@ -11291,7 +11326,15 @@ export class ObjectQL implements IObjectQLEngine {
     if (!ast || ast[position] == null) return;
     // [#20157] Through the stage function the judge also calls.
     if (position === 'having') {
-      ast[position] = resolveThenLowerWhere(ast[position], execCtx, lowering);
+      // [#20844] The year range of a resolved date macro, by each aggregated
+      // column's class — the reading the `having` temporal door takes. Built
+      // only when something resolved.
+      ast[position] = resolveThenLowerWhere(ast[position], execCtx, lowering, (written, resolved) => {
+        const fields = (this._registry.getObject(ast.object) as { fields?: Record<string, unknown> } | undefined)?.fields;
+        assertHavingResolvedTemporalTokensInRange(
+          ast.object, written, resolved, aggregatedRowColumnClasses(ast.groupBy, ast.aggregations, fields), ast,
+        );
+      });
       return;
     }
     // [#20802] `where` serves the nested-relation form: resolve, then lower
@@ -11322,7 +11365,9 @@ export class ObjectQL implements IObjectQLEngine {
     execCtx: ExecutionContext | undefined,
     lowering: FilterLoweringOptions,
   ): Promise<W> {
-    const resolved = resolveWhereFilterTokens(where, execCtx);
+    const resolved = resolveWhereFilterTokens(
+      where, execCtx, whereResolvedTokenJudge(object, operation, this._registry.getObject(object)),
+    );
     const related = await this.lowerRelationConditions(object, operation, resolved, execCtx);
     return lowerFilterCondition(related, lowering);
   }
@@ -17252,10 +17297,13 @@ export class ObjectQL implements IObjectQLEngine {
       {
           const astAggs = (opCtx.ast as QueryAST).aggregations;
           if (Array.isArray(astAggs) && astAggs.some((a) => (a as { filter?: unknown })?.filter != null)) {
-              (opCtx.ast as QueryAST).aggregations = astAggs.map((a) => {
+              (opCtx.ast as QueryAST).aggregations = astAggs.map((a, i) => {
                   const f = (a as { filter?: unknown })?.filter;
                   if (f == null) return a;
-                  const resolved = resolveThenLowerWhere(f as any, opCtx.context, rowLowering);
+                  const resolved = resolveThenLowerWhere(
+                      f as any, opCtx.context, rowLowering,
+                      whereResolvedTokenJudge(object, 'aggregate', this._registry.getObject(object), `aggregations[${i}].filter`),
+                  );
                   return resolved === f ? a : { ...(a as object), filter: resolved } as typeof a;
               });
           }
@@ -17267,8 +17315,9 @@ export class ObjectQL implements IObjectQLEngine {
       // one call covers the native and the rows path, before any driver read.
       // After every `having` door above, as `where`'s resolution follows its
       // doors: the temporal door steps around a `{placeholder}` exactly as
-      // `where`'s does (so, as there, the resolved value is not judged again),
-      // and the other doors judged a string that resolves to a string.
+      // `where`'s does (so, as there, the resolved value is judged only for
+      // its year, by the resolution stage — #20844), and the other doors
+      // judged a string that resolves to a string.
       {
           const havingColumnTypes = aggregatedRowColumnTypes(query.groupBy, query.aggregations, declaredFields);
           await this.resolveWhereTokens(

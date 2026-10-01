@@ -328,6 +328,24 @@ const EMPTY_REQUIRED_PERMISSIONS: NormalizedRequiredPermissions = Object.freeze(
 }) as NormalizedRequiredPermissions;
 
 /**
+ * [#20995] A context that carries NO principal: no position, no named
+ * permission set and no user id. The engine middleware hands an operation
+ * under such a context straight to `next()` before it resolves anything, and
+ * the field projections answer the full field set for it — both read THIS
+ * predicate, so they cannot disagree about who is handed through.
+ *
+ * Every other non-system context reaches the gates, including one whose
+ * positions or named sets resolve to nothing: that caller resolves no
+ * permission set, holds no capability, and is the one
+ * {@link SecurityPlugin.resolveCallerPosture} gives the object's masking rules.
+ */
+function isPrincipalLessContext(context: any): boolean {
+  const positions = context?.positions ?? [];
+  const explicitPermissionSets = context?.permissions ?? [];
+  return positions.length === 0 && explicitPermissionSets.length === 0 && !context?.userId;
+}
+
+/**
  * [#5492] Knobs on the layered RLS computation. Both are COMPOSITION
  * instructions rather than policy switches: the caller has already consulted an
  * authority that owns a write-widening mechanism, and is telling this layer
@@ -2139,12 +2157,9 @@ export class SecurityPlugin implements Plugin {
 
       // Skip security checks if no positions AND no explicit permission sets
       // AND no userId (anonymous/unauthenticated). The auth middleware
-      // should handle authentication separately.
-      if (
-        positions.length === 0 &&
-        explicitPermissionSets.length === 0 &&
-        !opCtx.context?.userId
-      ) {
+      // should handle authentication separately. [#20995] The field
+      // projections read the same predicate for the same hand-off.
+      if (isPrincipalLessContext(opCtx.context)) {
         return next();
       }
 
@@ -2219,15 +2234,10 @@ export class SecurityPlugin implements Plugin {
 
       // [ADR-0066 D2/D3] Resolve the object's security posture (private flag,
       // platform-global flag, capability contract) once for the checks below.
-      const secMeta =
-        permissionSets.length > 0
-          ? await this.getObjectSecurityMeta(opCtx.object)
-          // [#10401] `unresolvedCause` is spelled out rather than omitted so this
-          // stand-in and the real posture share one readable shape — the throw
-          // site below reads the key off the union. `undefined` is correct here:
-          // this branch declares `unresolved: false` by fiat (no permission sets
-          // were resolved, so no posture was read), and there is no cause.
-          : { isPrivate: false, tenancyDisabled: false, isBetterAuthManaged: false, requiredPermissions: EMPTY_REQUIRED_PERMISSIONS, fieldRequiredPermissions: {} as Record<string, string[]>, fieldMaskingRules: {} as Record<string, FieldMaskingRule>, unresolved: false, unresolvedCause: undefined as UnresolvedPostureCause | undefined };
+      // [#20995] For a caller who resolved NO permission set this is the
+      // stand-in that carries the object's masking rules and nothing else —
+      // see resolveCallerPosture, which the field projections read too.
+      const secMeta = await this.resolveCallerPosture(opCtx.object, permissionSets);
 
       // [#3545] Fail CLOSED when the object's own posture could not be resolved.
       // #3545 accepted the API-exposure gate's fail-open on unresolvable metadata
@@ -2244,8 +2254,10 @@ export class SecurityPlugin implements Plugin {
       //
       // Blast radius is bounded to exactly the risky case: system/boot writes
       // (`isSystem`) and principal-less/anonymous contexts short-circuited above,
-      // so reaching here means an AUTHENTICATED principal with resolved grants
-      // asking for an object whose declaration is missing. Cold start therefore
+      // so reaching here means a principal asking for an object whose
+      // declaration is missing — one with resolved grants, or [#20995] one
+      // resolving none, whose masking rules come from this same posture and are
+      // unknown while it is unreadable. Cold start therefore
       // does NOT trip this — that window is served by the earlier short-circuits,
       // not by the permissive default — which is why the tiered decision recorded
       // for the exposure gate (transient unavailability → fail open) can stay
@@ -2858,11 +2870,12 @@ export class SecurityPlugin implements Plugin {
       // as 2.5: silent drops hide the boundary from honest clients). Callers
       // who hold the field's unmask capabilities are exempt by construction
       // (computePartialMaskRules returns nothing for them), so a privileged
-      // import of literally-starred data stays possible.
+      // import of literally-starred data stays possible. [#20995] Not gated on
+      // a resolved set: a caller who resolves none is served the mask too, so
+      // its echo is refused like anyone's.
       if (
         (opCtx.operation === 'insert' || opCtx.operation === 'update') &&
-        opCtx.data &&
-        permissionSets.length > 0
+        opCtx.data
       ) {
         const echoRules = this.computePartialMaskRules(secMeta, permissionSets, delegatorSets);
         if (Object.keys(echoRules).length > 0) {
@@ -2885,7 +2898,9 @@ export class SecurityPlugin implements Plugin {
       // FLS-unreadable field is rejected fail-closed with the offending names
       // (mirrors the write gate in 2.5). `where`-filter probing is a
       // platform-wide class shared with find() and is not widened here.
-      if (opCtx.operation === 'aggregate' && permissionSets.length > 0) {
+      // [#20995] Not gated on a resolved set, as step 2.9 never was: for a
+      // caller who resolves none the map is its masked fields alone.
+      if (opCtx.operation === 'aggregate') {
         // The field map (ADR-0066 D3 `requiredPermissions` AND-gate, ADR-0090
         // D10 delegator intersection — a field the agent may read but the
         // delegator may not stays forbidden) with every masked-for-this-caller
@@ -5420,10 +5435,12 @@ export class SecurityPlugin implements Plugin {
    * `member_default`) instead of falling open to the full field set.
    *
    * Why the two differ rather than converge. `getReadableFields` mirrors the
-   * engine middleware, which skips its whole gate for a caller with no
+   * engine middleware, which skips its grant-based gates for a caller with no
    * permission sets — reporting a narrowing the data path would not enforce is
    * its own kind of drift, so on the DATA plane falling open is the correct,
-   * drift-free answer. The metadata plane has no such symmetry to preserve: the
+   * drift-free answer. ([#20995] The object's masking rules do reach that
+   * caller, but a masked field is a served column, so the read answer is still
+   * the full set.) The metadata plane has no such symmetry to preserve: the
    * question there is disclosure, and ADR-0106 D7 rules that a public/guest
    * deployment's schema exposure must be a deliberate permission-set decision
    * rather than an accidental everything-default. Anonymous callers on a
@@ -5495,9 +5512,12 @@ export class SecurityPlugin implements Plugin {
    *
    * The settled answers are the projection's ({@link resolveProjectionFieldMask}):
    * `undefined` when the schema cannot be resolved; the full set for a system
-   * context and for a caller with no permission sets (the middleware then
-   * skips both guards, and no masking rule reaches it); `[]` on an
-   * unresolvable posture or a dangling delegator (fail closed).
+   * context and for a principal-less one (the middleware hands both straight
+   * through); `[]` on an unresolvable posture or a dangling delegator (fail
+   * closed). [#20995] A caller who resolves NO permission set is not settled
+   * early: it holds no capability, so every masking rule reaches it and its
+   * masked fields are not queryable, as both guards refuse them
+   * ({@link resolveCallerPosture}).
    */
   async getQueryableFields(object: string, context?: any): Promise<string[] | undefined> {
     const mask = await this.resolveProjectionFieldMask(object, context, { fallbackOnEmptySets: false });
@@ -5508,7 +5528,8 @@ export class SecurityPlugin implements Plugin {
 
   /**
    * The derivation both field projections share: the schema's field universe,
-   * the caller's permission sets, the evaluator's field map with the ADR-0066
+   * the caller's permission sets, the posture its gates read
+   * ({@link resolveCallerPosture}), the evaluator's field map with the ADR-0066
    * D3 `requiredPermissions` fold, and the ADR-0090 D10 delegator intersection
    * — the steps, in order, that the middleware's read mask and its step 2.5
    * write gate each take. A case that settles the answer before any mask
@@ -5548,15 +5569,21 @@ export class SecurityPlugin implements Plugin {
       // the same two-step `/auth/me/permissions` performs.
       permissionSets = await this.resolveFallbackPermissionSets(context);
     }
-    // No sets resolved (e.g. unauthenticated) → no field mask applies, exactly
-    // as the middleware (getFieldPermissions([]) === {} → nothing deleted).
-    if (permissionSets.length === 0) return { kind: 'answer', fields: allFields };
+    // [#20995] A principal-less context is handed straight through by the
+    // middleware, so no field gate reaches it: the full set, read off the SAME
+    // predicate. A caller who resolved no set but carries a principal is NOT
+    // this case — it reaches the gates, and the object's masking rules reach it
+    // (resolveCallerPosture), so it falls through to the mask below.
+    if (permissionSets.length === 0 && isPrincipalLessContext(context)) {
+      return { kind: 'answer', fields: allFields };
+    }
 
-    const secMeta = await this.getObjectSecurityMeta(objectName);
+    const secMeta = await this.resolveCallerPosture(objectName, permissionSets);
     // [#3545] Posture unresolvable → expose no columns, the same fail-closed
     // stance this method already takes on a dangling delegator below. The
     // per-field capability contract (`fieldRequiredPermissions`) would otherwise
-    // default to empty and silently unmask every capability-gated column.
+    // default to empty and silently unmask every capability-gated column, and
+    // [#20995] the masking rules a caller with no set is held to are unknown.
     if (secMeta.unresolved) return { kind: 'answer', fields: [] };
     const basePerms = this.permissionEvaluator.getFieldPermissions(objectName, permissionSets);
     let fieldPerms = this.foldFieldRequiredPermissions(basePerms, secMeta.fieldRequiredPermissions, permissionSets);
@@ -5564,10 +5591,13 @@ export class SecurityPlugin implements Plugin {
     // [ADR-0090 D10] On an on-behalf-of request the projection must NOT widen
     // past the DELEGATOR's — intersect the delegator's field mask too. A
     // dangling delegator fails CLOSED (expose no columns), the same fail-closed
-    // stance the CRUD middleware takes on a 'missing' delegator.
+    // stance the CRUD middleware takes on a 'missing' delegator. [#20995] Asked
+    // only when the caller resolved a set, as the middleware asks it: a caller
+    // who resolved none reaches here only for its masking rules, and every one
+    // of them already applies to it.
     let delBasePerms: Record<string, { readable: boolean; editable: boolean }> | null = null;
     let delegatorSets: PermissionSet[] | null = null;
-    if (context?.onBehalfOf?.userId) {
+    if (permissionSets.length > 0 && context?.onBehalfOf?.userId) {
       const del = await resolveDelegatorContext(this.ql, context);
       if (del.kind === 'missing') return { kind: 'answer', fields: [] };
       if (del.kind === 'resolved') {
@@ -5588,6 +5618,56 @@ export class SecurityPlugin implements Plugin {
       readQueryGuardPerms: () => this.computeQueryGuardFieldPerms(
         objectName, secMeta, permissionSets, delegatorSets,
       ),
+    };
+  }
+
+  /**
+   * [#20995] The object posture a caller's gates read — ONE place, read by the
+   * engine middleware and by {@link resolveProjectionFieldMask} alike, so the
+   * result masker, the two query guards, the masked-echo refusal and the
+   * published field projections cannot answer one caller two ways.
+   *
+   * A caller who resolved at least one permission set reads the posture as it
+   * is ({@link getObjectSecurityMeta}). A caller who resolved NONE — and still
+   * carries a principal; a principal-less context ({@link isPrincipalLessContext})
+   * never reaches a gate — reads a stand-in: every grant-based narrowing at
+   * rest (no capability contract, no capability-gated field, `isPrivate` and
+   * the tenancy flags `false`), EXCEPT two things carried from the posture:
+   *
+   *  - **The masking rules.** `maskingRule` applies to "every non-system caller
+   *    unless the field's `requiredPermissions` are ALL held", and this caller
+   *    holds nothing, so {@link computePartialMaskRules} applies every rule to
+   *    it: the field is served masked and is not queryable. The stand-in used
+   *    to carry no rule at all, so every reader answered "stored and
+   *    queryable" for this caller.
+   *  - **Whether the posture resolved.** The rules come from it, so an
+   *    unreadable posture leaves them unknown and fails closed for this caller
+   *    exactly as for any other (#3545).
+   *
+   * ⛔ Deliberately NOT carried: the per-field capability fold and the object's
+   * capability contract. Those narrow by what a caller holds through its sets,
+   * and the data-plane read projection's answer for a caller with no set — the
+   * full field set — is stated by the service contract. Masking does not move
+   * that answer (a masked field is a served column); the capability fold would.
+   */
+  private async resolveCallerPosture(
+    object: string,
+    permissionSets: PermissionSet[],
+  ): Promise<ObjectSecurityMeta> {
+    const posture = await this.getObjectSecurityMeta(object);
+    if (permissionSets.length > 0) return posture;
+    return {
+      isPrivate: false,
+      tenancyDisabled: false,
+      isBetterAuthManaged: false,
+      tenantAnchorIsPhantom: false,
+      owdOpensRowWrites: false,
+      requiredPermissions: EMPTY_REQUIRED_PERMISSIONS,
+      fieldRequiredPermissions: {},
+      fieldMaskingRules: posture.fieldMaskingRules,
+      unresolved: posture.unresolved,
+      // [#10401] Explanation only, and present only on the refusing path.
+      unresolvedCause: posture.unresolvedCause,
     };
   }
 
