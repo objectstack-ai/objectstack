@@ -525,9 +525,10 @@ describe('lintLivenessProperties', () => {
     // Until #16094 these pins asserted SILENCE, because a `dead` row warned only
     // when it opted in. Decision batch #60, option A, made the `dead` verdict
     // itself the warning, so the rule — handed an unparsed stack, as `os lint`
-    // hands it — grades a retired key dead (the row's note, which records the
-    // removal, is the hint). Pinned per key, so a row that leaves the ledger or
-    // changes verdict shows up by name.
+    // hands it — grades a retired key dead. The row warns only by its verdict,
+    // so the hint is the `dead` default, never the row's note (the #16094
+    // author-facing block at the bottom of this file). Pinned per key, so a row
+    // that leaves the ledger or changes verdict shows up by name.
     it.each(['actionUrl', 'actionType', 'actionIcon', 'aria'])(
       'grades the retired `%s` dead when handed an unparsed stack (#5010, #16094)',
       (key) => {
