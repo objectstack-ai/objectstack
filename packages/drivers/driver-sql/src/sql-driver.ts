@@ -7347,6 +7347,56 @@ export class SqlDriver implements IDataDriver {
       .digest('hex');
   }
 
+  // ── The sequence semantics a second face shares, stated once ──────────────
+  //
+  // `TursoDriver`'s REMOTE face issues record numbers over `@libsql/client`
+  // rather than through this class's Knex transaction, and an embedded-replica
+  // face and a remote face can point at ONE database. Two faces computing a
+  // different counter key, a different tenant bucket or a different data-table
+  // bootstrap would hand out colliding numbers on that database, so each rule
+  // below is a `protected` member that face CALLS — never a copy it keeps. The
+  // members are small on purpose: they are the whole of what decides which
+  // counter a value is drawn from and where a cold counter starts.
+
+  /** The sequence-counter table's name, for a face that spells its own statements against it. */
+  protected get sequencesTableName(): string {
+    return SEQUENCES_TABLE;
+  }
+
+  /** How many times a write re-seeds and retries on a provable autonumber collision (#5495). */
+  protected get autoNumberCollisionRetries(): number {
+    return AUTONUMBER_COLLISION_RETRIES;
+  }
+
+  /**
+   * The tenant bucket a counter row is keyed by: the row's tenant when the
+   * object HAS a tenant column and the row carries one, else the platform
+   * bucket `GLOBAL_TENANT`. One spelling for the issue path, the re-seed path
+   * and the counter identity, which used to carry it three times.
+   */
+  protected resolveSequenceTenantId(tenantField: string | null, tenantId: string | null): string {
+    return tenantField && tenantId ? String(tenantId) : GLOBAL_TENANT;
+  }
+
+  /**
+   * The column definitions of the `key_hash`-keyed sequences table — the ONE
+   * place the shape is spelled. {@link createSequencesTable} runs it through a
+   * live connection; a face with no Knex connection compiles the same builder
+   * to text (`knex.schema.createTable(name, t => this.defineSequencesTable(t)).toSQL()`)
+   * and sends that, so both faces create byte-for-byte the same table.
+   */
+  protected defineSequencesTable(t: Knex.CreateTableBuilder): void {
+    t.string('key_hash', 64).notNullable().primary();
+    t.string('object').notNullable();
+    t.string('tenant_id').notNullable();
+    t.string('field').notNullable();
+    // Non-indexed, so it is free of the PK length limit — a long `{plan_no}`
+    // composite scope fits. 1024 is far above any realistic rendered prefix.
+    t.string('scope', 1024).notNullable().defaultTo('');
+    t.bigInteger('last_value').notNullable().defaultTo(0);
+    t.timestamp('updated_at').defaultTo(this.knex.fn.now());
+  }
+
   /**
    * Create the current `key_hash`-keyed sequences table shape. `runner` is the
    * connection the DDL runs on (a fresh pooled connection by default, or the
@@ -7356,17 +7406,7 @@ export class SqlDriver implements IDataDriver {
     table: string,
     runner: Knex | Knex.Transaction = this.knex,
   ): Promise<void> {
-    await runner.schema.createTable(table, (t) => {
-      t.string('key_hash', 64).notNullable().primary();
-      t.string('object').notNullable();
-      t.string('tenant_id').notNullable();
-      t.string('field').notNullable();
-      // Non-indexed, so it is free of the PK length limit — a long `{plan_no}`
-      // composite scope fits. 1024 is far above any realistic rendered prefix.
-      t.string('scope', 1024).notNullable().defaultTo('');
-      t.bigInteger('last_value').notNullable().defaultTo(0);
-      t.timestamp('updated_at').defaultTo(this.knex.fn.now());
-    });
+    await runner.schema.createTable(table, (t) => this.defineSequencesTable(t));
   }
 
   /**
@@ -7497,16 +7537,34 @@ export class SqlDriver implements IDataDriver {
     tenantId: string | null,
     suffix = '',
   ): Promise<number> {
-    const escapedPrefix = prefix.replace(/([\\%_])/g, '\\$1');
-    let builder = queryRunner(tableName).select(field).where(field, 'like', `${escapedPrefix}%`).whereNotNull(field);
+    let builder = queryRunner(tableName).select(field).where(field, 'like', `${this.escapeLikePrefix(prefix)}%`).whereNotNull(field);
     if (tenantField && tenantId !== null) {
       builder = builder.where(tenantField, tenantId);
     }
     const rows = await builder;
+    return this.maxAutonumberCounter((rows as any[]).map((r) => (r as any)[field]), prefix, suffix);
+  }
+
+  /**
+   * The rendered prefix as a `LIKE` anchor: `\`, `%` and `_` escaped with a
+   * backslash, so a prefix is matched literally. The predicate's pre-filter
+   * only — {@link maxAutonumberCounter} re-checks the prefix per row.
+   */
+  protected escapeLikePrefix(prefix: string): string {
+    return prefix.replace(/([\\%_])/g, '\\$1');
+  }
+
+  /**
+   * The bootstrap reading itself — the highest counter among the stored values
+   * of one counter's partition, under the anchored / unanchored rules the
+   * {@link scanMaxNumericTail} docblock states. Separated from the statement
+   * that fetches the values so a face that fetches them through another
+   * transport reads them by this one rule rather than by a copy of it.
+   */
+  protected maxAutonumberCounter(values: Iterable<unknown>, prefix: string, suffix: string): number {
     let maxN = 0;
     const anchored = prefix !== '' || suffix !== '';
-    for (const r of rows as any[]) {
-      const v: string = (r as any)[field];
+    for (const v of values) {
       if (typeof v !== 'string') continue;
       let n: number;
       if (anchored) {
@@ -7647,7 +7705,7 @@ export class SqlDriver implements IDataDriver {
     // locking on a second one (SQLite pool max=1). `initObjects` normally warms
     // this up front, making the call a no-op — this only bites the lazy path.
     await this.ensureSequencesTable(parentTrx);
-    const resolvedTenantId = tenantField && tenantId ? String(tenantId) : GLOBAL_TENANT;
+    const resolvedTenantId = this.resolveSequenceTenantId(tenantField, tenantId);
     if (scope !== '' && !this.sequencesHasKeyHash) {
       // The legacy sequences table could not be migrated to the key_hash shape,
       // so it cannot represent per-scope counters. Fail with a clear, actionable
@@ -7907,8 +7965,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected async resyncSequenceToDataMax(reservation: AutoNumberReservation): Promise<void> {
     await this.ensureSequencesTable();
-    const resolvedTenantId =
-      reservation.tenantField && reservation.tenantId ? String(reservation.tenantId) : GLOBAL_TENANT;
+    const resolvedTenantId = this.resolveSequenceTenantId(reservation.tenantField, reservation.tenantId);
     const key = this.sequencesHasKeyHash
       ? { key_hash: this.sequenceKeyHash(reservation.tableName, resolvedTenantId, reservation.field, reservation.scope) }
       : { object: reservation.tableName, tenant_id: resolvedTenantId, field: reservation.field };
@@ -7942,8 +7999,7 @@ export class SqlDriver implements IDataDriver {
    * that drew from it. See {@link bulkCreate}.
    */
   protected autoNumberCounterKey(reservation: AutoNumberReservation): string {
-    const resolvedTenantId =
-      reservation.tenantField && reservation.tenantId ? String(reservation.tenantId) : GLOBAL_TENANT;
+    const resolvedTenantId = this.resolveSequenceTenantId(reservation.tenantField, reservation.tenantId);
     return this.sequenceKeyHash(reservation.tableName, resolvedTenantId, reservation.field, reservation.scope);
   }
 

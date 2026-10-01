@@ -15,9 +15,11 @@
  * What is pinned here is the CONTRACT — the shape, its closed door and the
  * keys it deliberately does not carry. The pull executor
  * (`@objectstack/service-automation`'s `pullConnectorSource`, #20919) reads
- * the binding, so the ledger rows are `live`; nothing schedules a pull until
- * the `job` stage lands, so the container keeps `authorWarn`
- * (`liveness/mapping.json`), which the last block pins.
+ * the binding, so the ledger rows are `live` and carry no `authorWarn`
+ * (`liveness/mapping.json`) — a warned `live` row made the author-side lint
+ * throw, so `os validate` / `os lint` crashed on every stack authoring the
+ * binding (#21127). Nothing schedules a pull until the `job` stage lands, and
+ * the key's own description says so. The last block pins both.
  */
 
 import fs from 'node:fs';
@@ -175,10 +177,10 @@ describe('mapping.connectorSource — the closed door and what it does not carry
   });
 });
 
-describe('mapping.connectorSource — executed when a job drives it, scheduled by nothing yet: the ledger says so', () => {
+describe('mapping.connectorSource — executed when a job drives it, scheduled by nothing yet: the ledger and the schema say so', () => {
   const LEDGER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../liveness/mapping.json');
 
-  it('every key of the binding is `live`, citing the executor, and the container still warns the author', () => {
+  it('every key of the binding is `live`, citing the executor, and no row of it opts into an author warning', () => {
     type Row = { status: string; evidence?: string; authorWarn?: boolean; authorHint?: string; children?: Record<string, Row> };
     const ledger = JSON.parse(fs.readFileSync(LEDGER, 'utf8')) as { props: Record<string, Row> };
     const EXECUTOR = 'packages/services/service-automation/src/connector-pull.ts#pullConnectorSource';
@@ -186,9 +188,20 @@ describe('mapping.connectorSource — executed when a job drives it, scheduled b
     expect(row, 'connectorSource must have a ledger row').toBeDefined();
     expect(row!.status).toBe('live');
     expect(row!.evidence).toContain(EXECUTOR);
-    // Nothing schedules a pull until the `job` stage lands, so the warning stays.
-    expect(row!.authorWarn).toBe(true);
-    expect(row!.authorHint).toContain('nothing schedules it');
+    // A `live` row carries no `authorWarn`: the author-side lint has no verdict
+    // for one and throws, so authoring the binding crashed `os validate` and
+    // `os lint` (#21127). The scheduling caveat lives on the description.
+    expect(row!.authorWarn).toBeUndefined();
+    expect(row!.authorHint).toBeUndefined();
+    const warned: string[] = [];
+    const walk = (rows: Record<string, Row>, prefix: string) => {
+      for (const [key, r] of Object.entries(rows)) {
+        if (r.authorWarn !== undefined || r.authorHint !== undefined) warned.push(`${prefix}${key}`);
+        if (r.children) walk(r.children, `${prefix}${key}.`);
+      }
+    };
+    walk({ connectorSource: row! }, '');
+    expect(warned, 'a row of the binding carries an author warning').toEqual([]);
     const children = row!.children!;
     expect(Object.keys(children).sort()).toEqual(['action', 'connector', 'input', 'recordsPath', 'watermark']);
     for (const [key, child] of Object.entries(children)) {

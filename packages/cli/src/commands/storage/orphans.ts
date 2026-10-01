@@ -170,8 +170,8 @@ export default class StorageOrphans extends Command {
         printSuccess('Nothing stranded on this deployment.');
       } else {
         printInfo(
-          'Reporting only. Reclaiming these bytes is a separate, deliberately deferred decision — ' +
-            'see issue #10950.',
+          'Reporting only. Reclaiming these bytes was decided against: deletes no longer strand files, ' +
+            'and files stranded before that fix are left in place.',
         );
       }
       console.log(chalk.dim(`  ${timer.display()}`));

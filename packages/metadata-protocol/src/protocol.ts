@@ -84,6 +84,11 @@ import {
     // ObjectStackProtocolImplementation.tenantAuthoredWriteRefusal} to tell a
     // body that CLAIMS to be code-shipped from one that does not.
     isCodeArtifactBody,
+    // [#21059] The tenant marker the hydrator writes on every stored row it
+    // registers (ADR-0010 `_provenance: 'org'`) — read by
+    // {@link ObjectStackProtocolImplementation.getMetaItemLayered}'s code-layer
+    // fallback so a hydrated row is never answered as the code layer.
+    isTenantAuthored,
 } from '@objectstack/metadata-core';
 // [#5532] One vocabulary of "which driver read errors are benign", shared with
 // `sys-metadata-repository.ts` in this package and with `DatabaseLoader` in
@@ -9274,11 +9279,37 @@ export class ObjectStackProtocolImplementation implements
             // Prefer the artifact-only lookup so an overlay row hydrated
             // into the registry's plain key can't masquerade as the "code
             // default" layer; fall back to getItem for runtime-only items.
+            //
+            // [#21059] …and "runtime-only" is held to what it says. The plain
+            // key is one slot for two populations: an item registered at
+            // runtime with no package, and a stored row the hydrator put there
+            // ({@link hydrateOverlayIntoRegistry}, the boot `object` limb of
+            // {@link loadMetaFromDb}). For a name no package ships the
+            // artifact lookup misses, so `getItem` answered the hydrated row
+            // and the code layer became the stored body — but only once a
+            // hydration had run, so the same read answered `code: null` before
+            // it. The spec's layer 1 is "`null` when no artifact ships this
+            // item (it exists only as an overlay)", and #5707 / #5840 allow a
+            // layer only from a read that happened: a stored row is the overlay
+            // read below, never an artifact read.
+            //
+            // The discriminator is the tenant marker the hydrator ALREADY
+            // writes on every row it registers — ADR-0010 `_provenance: 'org'`,
+            // read through {@link isTenantAuthored}. ⛔ No new marker. A body
+            // that carries package-provenance stamps under a name no package
+            // ships is the same row: the hydrator restates its authorship over
+            // whatever its bytes claim, and a stamp is not an artifact read, so
+            // `resolveLockState` below reads this item's code layer as `null`
+            // too (triage's ruling, overturnable by the maintainer). A
+            // runtime-registered item with no package carries no tenant marker
+            // and keeps its code layer.
+            const runtimeOnly = (item: unknown): unknown =>
+                item !== undefined && isTenantAuthored(item) ? undefined : item;
             let regItem = this.lookupArtifactItem(request.type, request.name, request.packageId)
-                ?? this.engine.registry.getItem(request.type, request.name, request.packageId);
+                ?? runtimeOnly(this.engine.registry.getItem(request.type, request.name, request.packageId));
             if (regItem === undefined) {
                 const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
-                if (alt) regItem = this.engine.registry.getItem(alt, request.name, request.packageId);
+                if (alt) regItem = runtimeOnly(this.engine.registry.getItem(alt, request.name, request.packageId));
             }
             if (regItem !== undefined) code = regItem;
         }

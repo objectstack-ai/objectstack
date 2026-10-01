@@ -41,7 +41,7 @@ describe('resyncSkipExplanationLine — the runtime-output half of #9184', () =>
     expect(line).not.toBeNull();
     expect(line).toContain('admin');
     expect(line).toContain('user');
-    expect(line).toContain('#8692');
+    expect(line).toContain("before the seeder began stamping its default sets 'platform'");
   });
 
   it('fires identically for a PARTIAL skip — same trigger as the summary, not `resynced === 0`', () => {

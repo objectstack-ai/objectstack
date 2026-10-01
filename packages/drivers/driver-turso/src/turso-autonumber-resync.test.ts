@@ -20,29 +20,35 @@
  *    autonumber into the remote transport later cannot silently inherit this
  *    file's green.
  *
- * # ⚠️ [#6944] What that pin says now — rewritten, not deleted
+ * # ⚠️ [#6944 → #21113] What that pin says now — rewritten twice, never deleted
  *
  * When this file was written the remote face was SILENTLY ABSENT: a create
  * resolved and left NULL in the slot. The pin below said exactly that —
  * `RemoteTransport` carries no autonumber surface at all. #6944 carried out
  * triage's disposition B and made that face refuse LOUDLY instead
- * (`NOT_IMPLEMENTED`/501), raised on `TursoDriver` rather than on the transport,
- * because `RemoteTransport.create(object, data)` cannot see a field type.
+ * (`NOT_IMPLEMENTED`/501), raised on `TursoDriver` rather than on the
+ * transport, because `RemoteTransport.create(object, data)` cannot see a
+ * field type. #21113 then opened the appetite door disposition B had kept shut
+ * (measured demand on the hosted product) and made that face ISSUE the number
+ * — again on `TursoDriver`, for the same reason, from the same persistent
+ * `_objectstack_sequences` counter this file's LOCAL half re-seeds.
  *
- * So the shape moved from ABSENT to EXPLICITLY REFUSED, and this pin had two
- * wrong options and one right one:
+ * So the shape moved ABSENT → EXPLICITLY REFUSED → GENERATED, and at each step
+ * this pin had two wrong options and one right one:
  *
- *   - DELETE it — and lose the only guard that stops a future half-implementation
+ *   - DELETE it — and lose the only guard that stops a half-implementation
  *     landing quietly inside the transport;
- *   - LEAVE it unchanged — and keep a green assertion whose surrounding claim,
- *     "that face simply doesn't have this", is no longer the whole truth.
+ *   - LEAVE it unchanged — and keep a green assertion whose surrounding claim
+ *     is no longer the whole truth.
  *
- * It is therefore rewritten to pin BOTH halves of the fact as it now stands: the
- * transport still carries no autonumber surface (the original guard, verbatim),
- * and the driver now answers with a wire identity instead of writing nothing
- * (the new fact). The refusal's own suite is
- * `turso-remote-autonumber-refusal.test.ts`; what belongs here is only the
- * boundary this file's LOCAL half is held against.
+ * It is therefore rewritten to pin BOTH halves of the fact as it now stands:
+ * the transport still carries no autonumber surface (the original guard,
+ * verbatim), and the driver now issues the number AND re-seeds on this face
+ * too — the very defect this file is about, which the remote face "neither had
+ * nor received" while it issued nothing. The generation's own suite is
+ * `turso-remote-autonumber-generation.test.ts`; what belongs here is only the
+ * boundary this file's LOCAL half is held against, and the remote half of the
+ * same re-seed.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -90,28 +96,30 @@ describe('[#5495] TursoDriver autonumber re-seed', () => {
     expect(created.case_number).toBe('CASE-00031');
   });
 
-  it('REMOTE: the transport that bypasses this path still has no autonumber machinery to re-seed', async () => {
+  it('REMOTE: the transport still has no autonumber machinery of its own', async () => {
     const remote = new TursoDriver({ url: 'libsql://example.turso.io', authToken: 'placeholder' });
     expect(remote.transportMode).toBe('remote');
 
     // The boundary, stated as a fact about the code rather than about a live
-    // connection: `RemoteTransport` has no autonumber surface at all. #6944 did
-    // not add one — it refused one layer up — so this half is unchanged, and it
-    // remains what a future half-implementation inside the transport has to go
-    // through.
+    // connection: `RemoteTransport` has no autonumber surface at all. Neither
+    // #6944 nor #21113 added one — both acted one layer up, on the driver,
+    // which hands the transport a row already carrying its number — so this
+    // half is unchanged, and it remains what a future half-implementation
+    // inside the transport has to go through.
     const transportSurface = Object.getOwnPropertyNames(
       Object.getPrototypeOf((remote as any).remoteTransport),
     );
     expect(transportSurface.some((m) => /autonumber|sequence/i.test(m))).toBe(false);
   });
 
-  it('REMOTE: [#6944] and having none, it refuses the create rather than writing nothing', async () => {
-    // The other half of the same boundary, and the half that moved. Needs a
-    // client because the refusal reads `autoNumberFields`, which only remote
-    // schema-sync populates — the same registration `find()` depends on.
+  it('REMOTE: [#21113] and the driver issues the number on this face too — and re-seeds it after a seed replay', async () => {
+    // The other half of the same boundary, and the half that moved twice.
+    // Needs a client because generation reads `autoNumberFields`, which only
+    // remote schema-sync populates — the same registration `find()` depends on.
+    const stub = makeLibsqlSqliteStub();
     const remote = new TursoDriver({
       url: 'libsql://example.turso.io',
-      client: makeLibsqlSqliteStub() as never,
+      client: stub as never,
     });
     await remote.connect();
     await remote.initObjects([
@@ -125,19 +133,19 @@ describe('[#5495] TursoDriver autonumber re-seed', () => {
       } as any,
     ]);
 
-    // ⚠️ `code` AND `status`, never a bare `toThrow` (ADR-0112, #6144): the
-    // point of this pin is the wire identity, and a bare throw assertion would
-    // be satisfied by any error a later refactor happens to raise here.
-    const err = await remote
-      .create('crm_case', { organization_id: 'orgA', title: 'first' })
-      .then(
-        (row) => {
-          throw new Error(`expected a refusal, got ${JSON.stringify(row)}`);
-        },
-        (e) => e as Error & { code?: string; status?: number },
-      );
-    expect(err.code).toBe('NOT_IMPLEMENTED');
-    expect(err.status).toBe(501);
+    const first = await remote.create('crm_case', { organization_id: 'orgA', title: 'first' });
+    expect(first.case_number).toBe('CASE-00001');
+
+    // The LOCAL half's scenario, on the remote face: rows 2..30 land by a path
+    // that never enters `fillAutoNumberFields`, so the counter sits at 1 while
+    // the table holds 30. The next create is served, at 31, on the first call.
+    const insert = stub.raw.prepare(
+      'insert into "crm_case" ("id", "organization_id", "case_number", "title") values (?, ?, ?, ?)',
+    );
+    for (let n = 2; n <= 30; n++) insert.run(`bypass-${n}`, 'orgA', `CASE-${String(n).padStart(5, '0')}`, `row ${n}`);
+
+    const created = await remote.create('crm_case', { organization_id: 'orgA', title: 'after the replay' });
+    expect(created.case_number).toBe('CASE-00031');
 
     await remote.disconnect();
   });

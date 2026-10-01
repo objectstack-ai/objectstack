@@ -78,8 +78,22 @@
  * context-less programmatic calls are not redacted, as for the read gate.
  */
 
-import type { ISecurityService } from '@objectstack/spec/contracts';
 import { parseActivityParentObject, type ActivityMiddlewareEngine } from './activity-read-visibility.js';
+import {
+  dropUnservedKeys,
+  ensureJudgedColumnsProjected,
+  isRecord,
+  servedFieldsPerRead,
+  type FieldRedactionLogger,
+  type FieldVisibilitySource,
+} from './served-fields.js';
+
+/**
+ * The served-unmasked composition lives in `served-fields.ts`, shared with the
+ * compliance ledger's redaction (#21155); re-exported here so this seam's
+ * public names are unchanged.
+ */
+export { resolveServedFields } from './served-fields.js';
 
 const ACTIVITY_OBJECT = 'sys_activity';
 const SYSTEM_CTX = { isSystem: true } as const;
@@ -106,69 +120,9 @@ type TextColumn = (typeof TEXT_COLUMNS)[number];
 const VALUE_BEARING_COLUMNS = ['summary', 'record_label', 'metadata'] as const;
 
 /** The slice of the security contract this seam asks — the REAL interface. */
-export type ActivityFieldVisibilitySource = Pick<ISecurityService, 'getReadableFields' | 'getQueryableFields'>;
+export type ActivityFieldVisibilitySource = FieldVisibilitySource;
 
-export interface ActivityRedactionLogger {
-  warn(msg: string, meta?: unknown): void;
-}
-
-/**
- * The fields of `object` this reader is served UNMASKED, or `undefined` when
- * this seam must not narrow.
- *
- * The same composition `plugin-approvals` serves its snapshot with
- * (`resolveReadableSnapshotFields`, #20964), asked as the reader:
- *
- *  - no service, no object, or a read projection that answers `undefined` or
- *    throws → `undefined`: the contract's "no answer", the data plane's own
- *    fallback, and so not a reason to blank the stream;
- *  - otherwise the read projection intersected with `getQueryableFields`.
- *    When THAT answer cannot be had (absent member, `undefined`, a throw) the
- *    contract obliges the consumer not to read its absence as "nothing is
- *    masked": the read projection reports every masked field readable. So the
- *    answer is `[]` — no field is served.
- */
-export async function resolveServedFields(
-  security: Partial<ActivityFieldVisibilitySource> | undefined,
-  object: string | undefined,
-  context: unknown,
-  logger?: ActivityRedactionLogger,
-): Promise<string[] | undefined> {
-  if (!security || typeof security.getReadableFields !== 'function') return undefined;
-  const name = String(object ?? '').trim();
-  if (!name) return undefined;
-  let readable: string[] | undefined;
-  try {
-    readable = await security.getReadableFields(name, context as never);
-  } catch (err) {
-    logger?.warn(
-      `[audit] activity field redaction: readable fields of '${name}' could not be resolved — ` +
-        `serving its activity rows unnarrowed (${(err as Error)?.message ?? err})`,
-    );
-    return undefined;
-  }
-  if (readable === undefined) return undefined;
-
-  let unmasked: string[] | undefined;
-  let reason = 'the security service has no masked-for-this-caller answer (getQueryableFields)';
-  if (typeof security.getQueryableFields === 'function') {
-    try {
-      unmasked = await security.getQueryableFields(name, context as never);
-      if (unmasked === undefined) reason = 'getQueryableFields answered undefined';
-    } catch (err) {
-      reason = `getQueryableFields threw: ${(err as Error)?.message ?? err}`;
-    }
-  }
-  if (unmasked === undefined) {
-    logger?.warn(
-      `[audit] activity field redaction: cannot tell which fields of '${name}' are masked for this caller — ` +
-        `serving no field value of it (fail closed): ${reason}`,
-    );
-    return [];
-  }
-  const keep = new Set(unmasked.map(String));
-  return readable.filter((f) => keep.has(String(f)));
-}
+export type ActivityRedactionLogger = FieldRedactionLogger;
 
 /** Parse a stored `metadata` string; anything but a JSON object is not ours. */
 function parseMetadata(raw: unknown): Record<string, unknown> | null {
@@ -180,9 +134,6 @@ function parseMetadata(raw: unknown): Record<string, unknown> | null {
     return null;
   }
 }
-
-const isRecord = (v: unknown): v is Record<string, unknown> =>
-  !!v && typeof v === 'object' && !Array.isArray(v);
 
 /**
  * Where a row's text came from:
@@ -229,12 +180,7 @@ export async function redactActivityRows(
   const list = (Array.isArray(rows) ? rows : rows ? [rows] : []) as unknown[];
   if (list.length === 0) return;
   // One answer per parent object per read, never one per row.
-  const served = new Map<string, Promise<string[] | undefined>>();
-  const servedFor = (object: string) => {
-    let p = served.get(object);
-    if (!p) served.set(object, (p = resolveServedFields(security, object, context, logger)));
-    return p;
-  };
+  const servedFor = servedFieldsPerRead(security, context, logger, 'activity field redaction');
   const restricted = new Map<string, Promise<boolean>>();
   /** Is this reader served fewer fields of `object` than the system is? */
   const restrictedOn = (object: string, servedSet: Set<string>) => {
@@ -278,13 +224,7 @@ export async function redactActivityRows(
       let changed = false;
       for (const side of ['old', 'new'] as const) {
         const snapshot = metadata[side];
-        if (!isRecord(snapshot)) continue;
-        for (const key of Object.keys(snapshot)) {
-          if (!servedSet.has(key)) {
-            delete snapshot[key];
-            changed = true;
-          }
-        }
+        if (isRecord(snapshot) && dropUnservedKeys(snapshot, servedSet)) changed = true;
       }
       if (ACTIVITY_TEXT_SOURCES_KEY in metadata) {
         delete metadata[ACTIVITY_TEXT_SOURCES_KEY];
@@ -309,22 +249,9 @@ export async function redactActivityRows(
 /**
  * The text columns' provenance lives in `metadata`, and the parent in
  * `object_name`; a projection that names a value-bearing column without them
- * gets them added for the read and removed from what is served. Returns the
- * columns it added.
+ * gets them added for the read and removed from what is served.
  */
-function ensureProjected(ast: Record<string, unknown> | undefined): string[] {
-  const fields = ast?.fields;
-  if (!Array.isArray(fields) || fields.length === 0) return [];
-  if (!fields.some((f) => (VALUE_BEARING_COLUMNS as readonly string[]).includes(String(f)))) return [];
-  const added: string[] = [];
-  for (const col of ['object_name', 'metadata']) {
-    if (!fields.includes(col)) {
-      fields.push(col);
-      added.push(col);
-    }
-  }
-  return added;
-}
+const JUDGED_BY = ['object_name', 'metadata'] as const;
 
 /**
  * Install the `sys_activity` field-redaction middleware. `getSecurity` is
@@ -342,7 +269,7 @@ export function installActivityFieldRedaction(
       if ((ctx.operation !== 'find' && ctx.operation !== 'findOne') || !ctx.context || ctx.context.isSystem) {
         return next();
       }
-      const added = ensureProjected(ctx.ast);
+      const added = ensureJudgedColumnsProjected(ctx.ast, VALUE_BEARING_COLUMNS, JUDGED_BY);
       await next();
       const list = (Array.isArray(ctx.result) ? ctx.result : ctx.result ? [ctx.result] : []) as unknown[];
       try {

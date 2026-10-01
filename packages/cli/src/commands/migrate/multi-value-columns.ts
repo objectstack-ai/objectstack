@@ -329,7 +329,8 @@ async function confirm(question: string): Promise<boolean> {
  */
 export default class MigrateMultiValueColumns extends Command {
   static override description =
-    'Migrate a stale varchar/text column to json where the field declares multiple: true (#11535). ' +
+    'Migrate a stale varchar/text column to json where the field declares multiple: true; boot and ' +
+    'os migrate plan only report such a column and never alter it unattended. ' +
     'Dry-run by default: prints the exact statements and the database they would run against, and writes nothing.';
 
   static override examples = [

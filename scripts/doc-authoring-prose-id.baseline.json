@@ -1,67 +1,4 @@
 {
- "packages/cli/src/commands/compile.ts": {
-  "#3366": 1,
-  "#3786": 1
- },
- "packages/cli/src/commands/db/clean.ts": {
-  "#6469": 1
- },
- "packages/cli/src/commands/dev.ts": {
-  "#5148": 1
- },
- "packages/cli/src/commands/doctor.ts": {
-  "#2377": 1,
-  "#5397": 1,
-  "#5673": 1
- },
- "packages/cli/src/commands/meta/resync.ts": {
-  "#2705": 1,
-  "#8692": 1
- },
- "packages/cli/src/commands/migrate/duplicates.ts": {
-  "#8686": 1,
-  "#8725": 1,
-  "#8928": 1
- },
- "packages/cli/src/commands/migrate/multi-value-columns.ts": {
-  "#11535": 1
- },
- "packages/cli/src/commands/migrate/recorded-by.ts": {
-  "#4556": 1
- },
- "packages/cli/src/commands/migrate/summary-nulls.ts": {
-  "#5749": 1
- },
- "packages/cli/src/commands/serve.ts": {
-  "#111": 1,
-  "#3963": 1,
-  "#444": 1,
-  "#4719": 1,
-  "#4818": 1,
-  "#666": 1
- },
- "packages/cli/src/commands/storage/orphans.ts": {
-  "#10950": 1
- },
- "packages/cli/src/commands/validate.ts": {
-  "#3366": 1
- },
- "packages/cli/src/utils/i18n-extract.ts": {
-  "#12069": 1,
-  "#8765": 1
- },
- "packages/cli/src/utils/storage-driver.ts": {
-  "#3276": 2
- },
- "packages/cli/test/helpers/serve-process.ts": {
-  "#12525": 1,
-  "#13062": 1
- },
- "packages/cloud-connection/src/cloud-connection-route-ledger.ts": {
-  "#11863": 1,
-  "#8976": 4,
-  "#9011": 1
- },
  "packages/connectors/connector-mcp/src/mcp-provider.ts": {
   "#3055": 2
  },
@@ -752,10 +689,6 @@
  },
  "packages/triggers/trigger-record-change/src/record-change-trigger.ts": {
   "#3457": 1
- },
- "packages/types/src/node.ts": {
-  "#10943": 1,
-  "#4719": 1
  },
  "packages/verify/src/harness.ts": {
   "#4719": 1

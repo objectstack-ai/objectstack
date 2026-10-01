@@ -1595,11 +1595,21 @@ export class RemoteTransport {
     return rows[0] ?? null;
   }
 
+  /**
+   * `insertOnlyColumns` — columns written on the INSERT leg and left alone on
+   * the MERGE leg, so a value the caller (or the driver, on its behalf) put on
+   * the row for a NEW row never overwrites the one an existing row already
+   * holds. The transport is told WHICH columns, not WHY: the driver decides
+   * from the schema it holds and this class does not (the same division
+   * `setFilterColumnSql` and `setTenantFieldResolver` draw). A column named
+   * here that is also a merge key is simply a merge key.
+   */
   async upsert(
     object: string,
     data: Record<string, unknown>,
     conflictKeys?: string[],
     table: string = object,
+    insertOnlyColumns: readonly string[] = [],
   ): Promise<Record<string, unknown>> {
     await this.ensureConnected();
 
@@ -1618,7 +1628,7 @@ export class RemoteTransport {
     const mergeKeys = conflictKeys && conflictKeys.length > 0 ? conflictKeys : ['id'];
 
     // Build ON CONFLICT ... DO UPDATE SET
-    const updateCols = columns.filter((c) => !mergeKeys.includes(c));
+    const updateCols = columns.filter((c) => !mergeKeys.includes(c) && !insertOnlyColumns.includes(c));
     const updateClauses = updateCols.map((col) => `"${col}" = excluded."${col}"`).join(', ');
 
     let sql = `INSERT INTO ${this.tableSql(table)} (${columns.map((c) => `"${c}"`).join(', ')}) VALUES (${placeholders})`;
