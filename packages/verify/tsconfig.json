@@ -16,8 +16,9 @@
     // its collections through). Without this rule its types resolve through the
     // workspace link to `dist/*.d.ts` — a build artifact — so this package's
     // type verdict would be a function of build state rather than of the source
-    // in the checkout, which `check:type-source-resolution` refuses (its
-    // registry is shrink-only; widening it is not the fix).
+    // in the checkout, which `check:type-source-resolution` refused (its
+    // registry was shrink-only; widening it was not the fix) until it was
+    // retired on 2026-09-18 (#18373); no gate checks this rule now.
     //
     // Bare name, no star: core publishes a second subpath (`./logger`) that
     // deliberately keeps resolving through its own `exports` map, and a star

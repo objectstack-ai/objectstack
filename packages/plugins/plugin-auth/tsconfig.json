@@ -21,9 +21,10 @@
     // `exports` map — `dist/index.d.ts`, a BUILD ARTIFACT — so this package's
     // typecheck would render a verdict about the last `pnpm build` rather than
     // about the producer's source in the checkout, which
-    // `check:type-source-resolution` refuses (its header states why the
-    // dangerous case is a typecheck that PASSES). ONE rule for the bare name
-    // only: this package imports no `@objectstack/service-messaging/*` subpath
+    // `check:type-source-resolution` refused — the dangerous case being a
+    // typecheck that PASSES against a stale `dist` — until it was retired on
+    // 2026-09-18 (#18373); no gate checks this rule now. ONE rule for the bare
+    // name only: this package imports no `@objectstack/service-messaging/*` subpath
     // — that package declares none — and a `paths` target matching nothing on
     // disk would silently fall back to node resolution.
     "paths": {
@@ -36,8 +37,8 @@
       // map rather than declaring its own, and `@objectstack/formula` publishes
       // no subpath in its `exports`, so a subpath rule would match nothing on
       // disk and fall back to node resolution. Without it tsc resolves the
-      // specifier to `dist/index.d.ts` — a BUILD ARTIFACT — which
-      // `check:type-source-resolution` refuses.
+      // specifier to `dist/index.d.ts` — a BUILD ARTIFACT — which the
+      // since-retired `check:type-source-resolution` refused.
       "@objectstack/formula": ["../../formula/src/index.ts"],
       "@objectstack/service-messaging": ["../../services/service-messaging/src/index.ts"]
     }
