@@ -235,11 +235,18 @@ describe('[#21154] a query over the ledger snapshots by a reader withheld a pare
     });
   }
 
-  it('a filter that pins no parent object is refused for every non-system reader, the control included', async () => {
-    for (const ctx of [MASKED_READER, UNSERVED_READER, CONTROL]) {
+  it('a filter that pins no parent object is refused for a reader withheld a field of any object the ledger can concern', async () => {
+    for (const ctx of [MASKED_READER, UNSERVED_READER]) {
       await expectRefused(find(ctx, contains('new_value', V.masked2, null)), predicateWords(['new_value']));
       await expectRefused(find(ctx, contains('new_value', V.none, null)), predicateWords(['new_value']));
     }
+  });
+
+  it('control: a reader served every field of every object the ledger can concern filters and searches it with no parent named, as before', async () => {
+    expect((await find(CONTROL, contains('new_value', V.masked2, null))).length).toBeGreaterThan(0);
+    expect(await find(CONTROL, contains('new_value', V.none, null))).toHaveLength(0);
+    expect((await find(CONTROL, {}, { search: V.masked2 })).length).toBeGreaterThan(0);
+    expect(await find(CONTROL, {}, { search: V.none })).toHaveLength(0);
   });
 
   it('control: the unrestricted reader filters, groups and sorts by both snapshot columns of a pinned parent, as before', async () => {

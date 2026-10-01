@@ -37,6 +37,9 @@
 //   a filter that names no parent object.
 // - The same reader filters the text of a parent it is served in full, as
 //   before; the control filters every column of a pinned parent, as before.
+// - The platform admin, served every field of every object these rows can
+//   concern, filters and searches all three members with no parent named, as
+//   before.
 //
 // Fixtures are synthetic. ⚠️ No test title states a value or a column.
 // `@objectstack/plugin-audit` resolves through its BUILT output here (a ledgered
@@ -244,6 +247,7 @@ describe('[#21154] a query over activity text or the approval snapshot, by a rea
       extraPlugins: [new AuditPlugin(), new RecordChangeTriggerPlugin(), new ApprovalsServicePlugin()],
     });
     ql = await stack.kernel.getServiceAsync('objectql');
+    token.admin = await stack.signIn();
     const idOf = async (object: string, where: Record<string, unknown>) =>
       String((await ql.findOne(object, { where, context: { isSystem: true } }))?.id ?? '');
 
@@ -419,17 +423,32 @@ describe('[#21154] a query over activity text or the approval snapshot, by a rea
     });
   }
 
-  it('a filter that names no parent object is refused for every reader, the control included', async () => {
-    for (const who of [...CLASSES, 'control']) {
+  it('a filter that names no parent object is refused for every reader of a restricted class', async () => {
+    for (const who of CLASSES) {
       expectRefused(await list(who, 'sys_activity', { summary: { $contains: STORED.masked[1] } }), predicateWords('sys_activity', 'summary'));
       expectRefused(await list(who, 'sys_approval_request', { payload_json: { $contains: SNAP.masked } }), predicateWords('sys_approval_request', 'payload_json'));
     }
   });
 
-  it('a ledger filter that names no parent object is refused for every reader, the control included', async () => {
-    for (const who of [...CLASSES, 'control']) {
+  it('a ledger filter that names no parent object is refused for every reader of a restricted class', async () => {
+    for (const who of CLASSES) {
       expectRefused(await list(who, 'sys_audit_log', { new_value: { $contains: STORED.masked[1] } }), predicateWords('sys_audit_log', 'new_value'));
     }
+  });
+
+  it('control: the platform admin filters the activity stream, the ledger and the approval snapshot with no parent named, as before', async () => {
+    const answered = async (object: string, where: unknown, extra = '') => {
+      const a = await list('admin', object, where, extra);
+      expect(a.status, a.text).toBe(200);
+      return a.rows;
+    };
+    expect(await answered('sys_activity', { summary: { $contains: STORED.masked[1] } })).toBeGreaterThan(0);
+    expect(await answered('sys_activity', { summary: { $contains: NOMATCH } })).toBe(0);
+    expect(await answered('sys_audit_log', { new_value: { $contains: STORED.masked[1] } })).toBeGreaterThan(0);
+    expect(await answered('sys_audit_log', { new_value: { $contains: NOMATCH } })).toBe(0);
+    expect(await answered('sys_audit_log', {}, `&$search=${encodeURIComponent(STORED.masked[1])}`)).toBeGreaterThan(0);
+    expect(await answered('sys_approval_request', { payload_json: { $contains: SNAP.masked } })).toBe(1);
+    expect(await answered('sys_approval_request', { payload_json: { $contains: NOMATCH } })).toBe(0);
   });
 
   it('control: the unmasking reader filters and groups by every column of a pinned parent, as before', async () => {

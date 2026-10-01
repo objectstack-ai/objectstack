@@ -294,11 +294,11 @@ describe('[#21154] a query over the activity text by a reader withheld a parent 
     });
   }
 
-  // ── the parent must be pinned ───────────────────────────────────────────
+  // ── a query that pins no parent ─────────────────────────────────────────
 
-  it('a filter that pins no parent object is refused for every non-system reader, the control included', async () => {
+  it('a filter that pins no parent object is refused for a reader withheld a field of any object the stream can concern', async () => {
     const c = READER_CASES[0].cases[0];
-    for (const ctx of [MASKED_READER, UNSERVED_READER, CONTROL]) {
+    for (const ctx of [MASKED_READER, UNSERVED_READER, NO_QUERYABLE_READER]) {
       await expectRefused(find(ctx, contains(c, c.stored, false)), predicateWords(['summary']));
       await expectRefused(find(ctx, contains(c, V.none, false)), predicateWords(['summary']));
     }
@@ -306,9 +306,17 @@ describe('[#21154] a query over the activity text by a reader withheld a parent 
 
   it('a parent named only inside an alternative is not a pin', async () => {
     await expectRefused(
-      find(CONTROL, { $or: [{ object_name: ITEM }], summary: { $contains: V.masked2 } }),
+      find(MASKED_READER, { $or: [{ object_name: ITEM }], summary: { $contains: V.masked2 } }),
       predicateWords(['summary']),
     );
+  });
+
+  it('control: a reader served every field of every object the stream can concern filters and searches it with no parent named, as before', async () => {
+    const c = READER_CASES[0].cases[0];
+    expect((await find(CONTROL, contains(c, c.stored, false))).length).toBeGreaterThan(0);
+    expect(await find(CONTROL, contains(c, V.none, false))).toHaveLength(0);
+    expect((await find(CONTROL, {}, { search: c.stored })).length).toBeGreaterThan(0);
+    expect(await find(CONTROL, {}, { search: V.none })).toHaveLength(0);
   });
 
   // ── the controls ────────────────────────────────────────────────────────

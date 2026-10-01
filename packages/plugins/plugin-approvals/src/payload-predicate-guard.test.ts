@@ -202,11 +202,16 @@ describe('[#21154] a query over the approval snapshot by a reader withheld a sub
     });
   }
 
-  it('a filter that pins no subject object is refused for every non-system reader, the control included', async () => {
-    for (const reader of [MASKED_READER, UNSERVED_READER, CONTROL]) {
+  it('a filter that pins no subject object is refused for a reader withheld a field of any object a snapshot can concern', async () => {
+    for (const reader of [MASKED_READER, UNSERVED_READER]) {
       await expectRefused(find(reader, contains(V.masked, null)), predicateWords);
       await expectRefused(find(reader, contains(V.none, null)), predicateWords);
     }
+  });
+
+  it('control: a reader served every field of every object a snapshot can concern filters it with no subject named, as before', async () => {
+    expect(await find(CONTROL, contains(V.masked, null))).toHaveLength(1);
+    expect(await find(CONTROL, contains(V.none, null))).toHaveLength(0);
   });
 
   it('control: the unrestricted reader filters and groups by the snapshot of a pinned subject, as before', async () => {
