@@ -230,7 +230,25 @@ export class S3StorageAdapter implements IStorageService {
           );
         }
         const { S3Client } = s3Mod;
-        const clientOpts: any = { region: this.region };
+        const clientOpts: any = {
+          region: this.region,
+          // Flexible checksums only where the operation REQUIRES one. The SDK
+          // default (`WHEN_SUPPORTED`) stamps a CRC32 into every PutObject it
+          // prepares, and a presign prepares the command with NO body — so the
+          // signed upload URL would bake in `x-amz-checksum-crc32=AAAAAA==`
+          // (the CRC32 of an empty body) and `x-amz-sdk-checksum-algorithm`. A
+          // store that enforces a query-signed checksum then refuses every
+          // browser PUT with a checksum mismatch, while server-side `upload()`
+          // keeps working: presign answers 200 and the object never lands.
+          // None of the commands this adapter issues is checksum-required.
+          // `responseChecksumValidation` is the other half: it is what bakes
+          // `x-amz-checksum-mode=ENABLED` into a presigned GET, and what makes
+          // `download()` validate a response checksum. The two are set TOGETHER
+          // on purpose: the response option alone puts a CRC32 on the GET URL.
+          // Pinned in `s3-storage-adapter.presign-checksum.test.ts`.
+          requestChecksumCalculation: 'WHEN_REQUIRED',
+          responseChecksumValidation: 'WHEN_REQUIRED',
+        };
         if (this.endpoint) clientOpts.endpoint = this.endpoint;
         if (this.forcePathStyle) clientOpts.forcePathStyle = true;
         if (this.options.accessKeyId && this.options.secretAccessKey) {
