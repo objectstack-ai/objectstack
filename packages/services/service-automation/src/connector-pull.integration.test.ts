@@ -31,6 +31,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ConnectorRestPlugin } from '../../../connectors/connector-rest/src/index.js';
 import { AutomationServicePlugin } from './plugin.js';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import type { ConnectorPullProtocol } from './connector-pull.js';
 
 const CONTACT = {
@@ -86,6 +87,9 @@ function startFixture(pages: Array<Array<Record<string, unknown>>>): Promise<{ s
     });
 }
 
+type InsertOptions = NonNullable<Parameters<ObjectQL['insert']>[2]>;
+type UpdateOptions = NonNullable<Parameters<ObjectQL['update']>[2]>;
+
 /** The import runner's protocol surface over a real ObjectQL engine, plus the metadata read. */
 function protocolOver(ql: ObjectQL): ConnectorPullProtocol {
     return {
@@ -98,14 +102,17 @@ function protocolOver(ql: ObjectQL): ConnectorPullProtocol {
             return undefined;
         },
         async findData({ object, query, context }) {
-            const { object: _omit, ...rest } = (query ?? {}) as Record<string, unknown>;
-            return { object, records: await ql.find(object, { ...rest, context } as any) };
+            const { object: _omit, ...rest } = (query ?? {}) as EngineQueryOptions & { object?: string };
+            const options: EngineQueryOptions = { ...rest, context: context as EngineQueryOptions['context'] };
+            return { object, records: await ql.find(object, options) };
         },
         async createData({ object, data, context }) {
-            return ql.insert(object, data, { context } as any);
+            const options: InsertOptions = { context: context as InsertOptions['context'] };
+            return ql.insert(object, data, options);
         },
         async updateData({ object, id, data, context }) {
-            return ql.update(object, data, { where: { id }, context } as any) as Promise<any>;
+            const options: UpdateOptions = { where: { id }, context: context as UpdateOptions['context'] };
+            return ql.update(object, data, options);
         },
     };
 }
@@ -180,7 +187,7 @@ describe('[#20919] connector pull, end to end through a real rest connector', ()
         expect({ pulled: second.pulled, created: second.summary.created, updated: second.summary.updated })
             .toEqual({ pulled: 2, created: 1, updated: 1 });
 
-        const rows = await ql.find('contact', { orderBy: [{ field: 'external_id', order: 'asc' }], context: SYSTEM } as any);
+        const rows = await ql.find('contact', { orderBy: [{ field: 'external_id', order: 'asc' }], context: SYSTEM });
         expect(rows.map((r: any) => ({ external_id: r.external_id, name: r.name, synced_at: r.synced_at }))).toEqual([
             { external_id: 'c1', name: 'Ada', synced_at: '2026-01-01T00:00:00.000Z' },
             { external_id: 'c2', name: 'Grace Hopper', synced_at: '2026-01-03T00:00:00.000Z' },

@@ -8,7 +8,7 @@
  * own discriminator (`reason`), never the message prose, and every case also
  * asserts that no write reached the protocol: a refusal that half-wrote is the
  * silent failure this executor exists to prevent. The end-to-end pull through
- * a real `rest` connector lives in `connector-pull.e2e.test.ts`.
+ * a real `rest` connector lives in `connector-pull.integration.test.ts`.
  */
 
 import { describe, it, expect, vi } from 'vitest';

@@ -1226,7 +1226,7 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     },
   },
   '@objectstack/service-automation': {
-    // src/connector-pull.e2e.test.ts (#20919) drives the connector sync
+    // src/connector-pull.integration.test.ts (#20919) drives the connector sync
     // executor through the REAL `rest` provider, imported from
     // `connector-rest`'s source by relative path: that package already
     // dev-depends on this one, so a manifest edge back would close a cycle.
