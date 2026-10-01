@@ -24191,15 +24191,21 @@ export class ObjectStackProtocolImplementation implements
      *      (so the package survives a restart; that service re-hydrates these
      *      rows back into the registry on boot).
      *
-     * The DB write is best-effort and non-fatal: when the `package` service is
-     * absent the package is still registered in-memory and visible for the
-     * lifetime of the process — and that in-memory-only branch STAYS, as the
-     * documented degraded path for reduced hosts (#17676 ruling A' item 2,
-     * decision batch #125 item 2). ⛔ It is not a bug to delete: a host that
-     * mounts no provider (`objectstack serve --preset minimal`, a metadata-only
-     * embedding) must still be able to install a package for the life of its
-     * process, and the `warn` below is what keeps the degradation from being
-     * silent.
+     * When the `package` service is ABSENT the package is still registered
+     * in-memory and visible for the lifetime of the process — and that
+     * in-memory-only branch STAYS, as the documented degraded path for reduced
+     * hosts (#17676 ruling A' item 2, decision batch #125 item 2). ⛔ It is not
+     * a bug to delete: a host that mounts no provider (`objectstack serve
+     * --preset minimal`, a metadata-only embedding) must still be able to
+     * install a package for the life of its process, and the `warn` below is
+     * what keeps the degradation from being silent.
+     *
+     * [#21243] When the service is PRESENT and its write fails, the install
+     * FAILS: the registry write is undone and the failure is thrown (see
+     * {@link packagePersistFailureError}), so the process never holds a package
+     * the store does not. It used to answer success with a `console.warn`, and
+     * on MySQL — where `sys_packages` was never created — every install and
+     * edit answered 201 / 200 and was gone after the next restart.
      *
      * Which capability OWNS the service is no longer `marketplace`: ruling A'
      * item 1 split the persistence half — the `sys_packages` container and the
@@ -24319,6 +24325,11 @@ export class ObjectStackProtocolImplementation implements
         // only); an unparsed range never causes a false rejection.
         assertProtocolCompat(manifest);
 
+        // [#21243] What the registry holds for this id BEFORE the write, so a
+        // failed persist below can put exactly that back. Read here because the
+        // install REPLACES the row object (and may register the namespace).
+        const undoInstall = this.packageInstallUndo(manifest);
+
         let pkg = this.engine.registry.installPackage(manifest as any, request.settings);
 
         // [#19277] HONOUR `enableOnInstall` — the key THIS request contract
@@ -24377,33 +24388,27 @@ export class ObjectStackProtocolImplementation implements
             if (disabled) pkg = disabled;
         }
 
-        // Best-effort durable persistence to `sys_packages` (non-fatal by
-        // design — without the `package` service the install stays visible
-        // for the process lifetime) — but never SILENT: a skipped persist is
-        // a restart-loss, so it must at least leave a trace.
-        try {
-            const services = this.getServicesRegistry?.();
-            const pkgSvc = services?.get('package') as
-                | { publish?: (data: { manifest: unknown; metadata: unknown }) => Promise<{ success?: boolean; error?: string } | unknown> }
-                | undefined;
-            if (pkgSvc?.publish) {
-                const out = (await pkgSvc.publish({ manifest, metadata: {} })) as
-                    | { success?: boolean; error?: string }
-                    | undefined;
-                if (out && out.success === false) {
-                    console.warn(
-                        `[protocol.installPackage] sys_packages persist FAILED for '${manifest?.id}': ${out.error ?? 'unknown error'} — package will not survive a restart`,
-                    );
-                }
-            } else {
-                console.warn(
-                    `[protocol.installPackage] no 'package' service — '${manifest?.id}' registered in-memory only (will not survive a restart)`,
-                );
+        // Durable persistence to `sys_packages`. Without the `package` service
+        // the install stays visible for the process lifetime (the documented
+        // degraded path above), never SILENTLY: a skipped persist is a
+        // restart-loss, so it leaves a trace.
+        //
+        // [#21243] WITH the service, a failed persist is the install's failure.
+        // Both halves, in this order: the registry write is undone FIRST, so
+        // that by the time the caller reads the error nothing in this process
+        // claims a package the store refused; then the failure is thrown. The
+        // `catch` that used to sit here turned both a thrown and a returned
+        // failure into a `console.warn` and an answer of success.
+        const pkgSvc = this.packagePersistService();
+        if (pkgSvc) {
+            const failure = await persistPackageManifest(pkgSvc, manifest);
+            if (failure) {
+                undoInstall();
+                throw packagePersistFailureError(failure.cause, manifest.id, 'install');
             }
-        } catch (e) {
-            // Non-fatal: registry write already succeeded; log and continue.
+        } else {
             console.warn(
-                `[protocol.installPackage] sys_packages persist skipped for '${manifest?.id}': ${(e as Error)?.message}`,
+                `[protocol.installPackage] no 'package' service — '${manifest?.id}' registered in-memory only (will not survive a restart)`,
             );
         }
 
@@ -24415,9 +24420,12 @@ export class ObjectStackProtocolImplementation implements
      * durable half of `PATCH /packages/:id`. Merges the patch into the registry
      * (preserving lifecycle state — see {@link SchemaRegistry.updatePackageManifest})
      * then re-persists the merged manifest to `sys_packages` via the `package`
-     * service so the edit survives a restart. Persistence is best-effort and
-     * non-fatal (matching `installPackage`): the registry write already
-     * succeeded, so a persist failure is logged, never thrown.
+     * service so the edit survives a restart.
+     *
+     * [#21243] A failed persist FAILS the edit, exactly as it fails
+     * `installPackage`: the registry row is put back to what it held before the
+     * patch, then the failure is thrown. It used to be logged and answered as
+     * success, so the edit lived until the next restart and then vanished.
      *
      * The service-absent branch below is the same documented degraded path
      * #17676 ruling A' item 2 keeps — see `installPackage`'s note for which
@@ -24427,34 +24435,199 @@ export class ObjectStackProtocolImplementation implements
         packageId: string;
         patch: { name?: string; description?: string; version?: string };
     }): Promise<{ package: any; message: string }> {
+        // [#21243] The row as it stood before the patch — copied, because
+        // `updatePackageManifest` edits the row and its manifest IN PLACE.
+        const prior = snapshotPackageRow(this.engine.registry.getPackage?.(request.packageId));
         const pkg = this.engine.registry.updatePackageManifest(request.packageId, request.patch);
         if (!pkg) {
             throw Object.assign(new Error(`Package '${request.packageId}' not found`), { statusCode: 404 });
         }
-        try {
-            const services = this.getServicesRegistry?.();
-            const pkgSvc = services?.get('package') as
-                | { publish?: (data: { manifest: unknown; metadata: unknown }) => Promise<{ success?: boolean; error?: string } | unknown> }
-                | undefined;
-            if (pkgSvc?.publish) {
-                const out = (await pkgSvc.publish({ manifest: (pkg as any).manifest, metadata: {} })) as
-                    | { success?: boolean; error?: string }
-                    | undefined;
-                if (out && out.success === false) {
-                    console.warn(
-                        `[protocol.updatePackage] sys_packages persist FAILED for '${request.packageId}': ${out.error ?? 'unknown error'} — the edit will not survive a restart`,
-                    );
-                }
-            } else {
-                console.warn(
-                    `[protocol.updatePackage] no 'package' service — '${request.packageId}' edited in-memory only (will not survive a restart)`,
-                );
+        const pkgSvc = this.packagePersistService();
+        if (pkgSvc) {
+            const failure = await persistPackageManifest(pkgSvc, (pkg as any).manifest);
+            if (failure) {
+                if (prior) restorePackageRow(pkg, prior);
+                throw packagePersistFailureError(failure.cause, request.packageId, 'update');
             }
-        } catch (e) {
+        } else {
             console.warn(
-                `[protocol.updatePackage] sys_packages persist skipped for '${request.packageId}': ${(e as Error)?.message}`,
+                `[protocol.updatePackage] no 'package' service — '${request.packageId}' edited in-memory only (will not survive a restart)`,
             );
         }
         return { package: pkg as any, message: `Updated package: ${request.packageId}` };
+    }
+
+    /**
+     * [#21243] The `package` service's write half, or `undefined` when this
+     * host composes none (the documented degraded path of
+     * {@link installPackage}).
+     */
+    private packagePersistService(): PackagePersistService | undefined {
+        const svc = this.getServicesRegistry?.()?.get('package') as Partial<PackagePersistService> | undefined;
+        return typeof svc?.publish === 'function' ? (svc as PackagePersistService) : undefined;
+    }
+
+    /**
+     * [#21243] Capture what the registry holds for `manifest.id` BEFORE
+     * {@link installPackage} writes, and return the function that puts it back.
+     *
+     * Three facts are captured, because the registry's `installPackage` moves
+     * three: the row (it REPLACES the row object, keeping only the lifecycle
+     * fields of a prior one), the namespace ownership (it registers
+     * `manifest.namespace` → `manifest.id`), and — through the `enableOnInstall`
+     * arms — the lifecycle fields of the new row.
+     *
+     * The undo is precise rather than an uninstall. `uninstallPackage` also
+     * withdraws every object and item registered under the id, and those can
+     * exist without a package row — `sys_metadata` rows hydrate on their own,
+     * which is exactly the state a database that never stored the package row
+     * is left in. Undoing a failed install must not take them with it.
+     *
+     *  - **No prior row:** the row this install created is withdrawn.
+     *  - **A prior row:** the row object the registry now holds gets the prior
+     *    row's content back, field for field (the prior object itself is
+     *    untouched — the install built a new one).
+     *  - **The namespace:** released only when this install is what registered
+     *    it; a namespace the id already owned stays owned.
+     */
+    private packageInstallUndo(manifest: { id: string; namespace?: unknown }): () => void {
+        const registry = this.engine.registry;
+        const priorRow = registry.getPackage?.(manifest.id);
+        const namespace = typeof manifest.namespace === 'string' && manifest.namespace !== ''
+            ? manifest.namespace
+            : undefined;
+        const owners = namespace === undefined ? undefined : registry.getNamespaceOwners?.(namespace);
+        // An owner list the registry cannot give is no evidence the id did not
+        // own the namespace, and releasing one it did own would hand the
+        // namespace to the next package that asks.
+        const namespaceWasOwned = !Array.isArray(owners) || owners.includes(manifest.id);
+        return () => {
+            if (priorRow === undefined) {
+                registry.unregisterItem('package', manifest.id);
+            } else {
+                const current = registry.getPackage(manifest.id);
+                if (current !== undefined && current !== priorRow) restorePackageRow(current, priorRow);
+            }
+            if (namespace !== undefined && !namespaceWasOwned) {
+                registry.unregisterNamespace(namespace, manifest.id);
+            }
+        };
+    }
+}
+
+/**
+ * [#21243] The write half of the `package` service that
+ * {@link ObjectStackProtocolImplementation.installPackage} and
+ * {@link ObjectStackProtocolImplementation.updatePackage} call — named by
+ * shape, because this package depends on no `service-package`.
+ *
+ * `publish` reports a failure on one of two channels
+ * (`PackagePublishResult`, `packages/services/service-package/src/index.ts`):
+ * RETURNED `{ success: false, driverFault }` when the INSERT broke, or THROWN
+ * when the failure declared its own HTTP answer.
+ */
+interface PackagePersistService {
+    publish(data: { manifest: unknown; metadata: unknown }): Promise<unknown>;
+}
+
+/**
+ * [#21243] Write `manifest` to `sys_packages`, and say whether it failed.
+ *
+ * `undefined` means the write landed. Otherwise `cause` is what the failure
+ * WAS — the thrown value, or the returned `{ success: false, … }` outcome —
+ * wrapped so that a thrown `undefined` still reads as a failure.
+ */
+async function persistPackageManifest(
+    svc: PackagePersistService,
+    manifest: unknown,
+): Promise<{ cause: unknown } | undefined> {
+    let out: unknown;
+    try {
+        out = await svc.publish({ manifest, metadata: {} });
+    } catch (cause) {
+        return { cause };
+    }
+    if (typeof out === 'object' && out !== null && (out as { success?: unknown }).success === false) {
+        return { cause: out };
+    }
+    return undefined;
+}
+
+/**
+ * [#21243] The sentence a caller reads when a package write was refused by the
+ * store and undone. It quotes nothing but the caller's own package id — the
+ * driver's words stay on `cause` and in the server log.
+ */
+function packagePersistFailureMessage(packageId: string, verb: 'install' | 'update'): string {
+    return verb === 'install'
+        ? `Package '${packageId}' was not installed: the package registry could not store it, so it would `
+            + 'not survive a restart, and nothing was registered. The reason is in the server log.'
+        : `The edit to package '${packageId}' was not applied: the package registry could not store it, so it `
+            + 'would not survive a restart, and the previous manifest is restored. The reason is in the server log.';
+}
+
+/**
+ * [#21243] The error a package install or edit answers when its
+ * `sys_packages` write failed. The vocabulary is this file's own, reused:
+ *
+ *  - **A declared 4xx is a refusal** and leaves untouched — the producer's own
+ *    status, code and sentence (the #8016 rule every package door applies,
+ *    and {@link declaresClientRefusal}'s reason for quoting a 4xx at all). Read
+ *    through `resolveThrownHttpError`, so `status` and `statusCode` both count.
+ *  - **Everything else is a store fault**, re-wrapped the way
+ *    `deleteMetaItem` re-wraps a failed store write: `status` 500 (a 5xx the
+ *    producer declared is kept), the producer's code only when it is
+ *    catalogued ({@link carryCatalogedErrorCode}), the original on `cause`, and
+ *    a sentence that quotes nothing. A live SQL driver stamps
+ *    `DATABASE_ERROR` on a refused raw statement, so the door answers
+ *    `500 DATABASE_ERROR`; a returned `driverFault` declares nothing, so the
+ *    door derives `INTERNAL_ERROR` from the 500. No code is minted.
+ */
+function packagePersistFailureError(cause: unknown, packageId: string, verb: 'install' | 'update'): Error {
+    const { declaredStatus } = resolveThrownHttpError(cause);
+    if (declaredStatus !== undefined && declaredStatus >= 400 && declaredStatus < 500) return cause as Error;
+    const err = new Error(packagePersistFailureMessage(packageId, verb)) as Error & {
+        status?: number;
+        cause?: unknown;
+    };
+    err.status = declaredStatus !== undefined && declaredStatus >= 500 ? declaredStatus : 500;
+    err.cause = cause;
+    carryCatalogedErrorCode(err, cause);
+    return err;
+}
+
+/**
+ * [#21243] A copy of a registry package row deep enough to undo
+ * `updatePackageManifest`, which edits the row and its `manifest` in place.
+ */
+function snapshotPackageRow(row: unknown): Record<string, unknown> | undefined {
+    if (typeof row !== 'object' || row === null) return undefined;
+    const copy: Record<string, unknown> = { ...(row as Record<string, unknown>) };
+    const manifest = copy.manifest;
+    if (typeof manifest === 'object' && manifest !== null) copy.manifest = { ...(manifest as Record<string, unknown>) };
+    return copy;
+}
+
+/**
+ * [#21243] Put `prior`'s content back into the registry's row object, IN
+ * PLACE — the registry hands out and keeps that object, so replacing it would
+ * restore nothing. The `manifest` is restored in place too when both sides
+ * carry one, for the same reason.
+ */
+function restorePackageRow(target: Record<string, unknown>, prior: Record<string, unknown>): void {
+    const assignInPlace = (into: Record<string, unknown>, from: Record<string, unknown>) => {
+        for (const key of Object.keys(into)) if (!(key in from)) delete into[key];
+        Object.assign(into, from);
+    };
+    const targetManifest = target.manifest;
+    const priorManifest = prior.manifest;
+    assignInPlace(target, prior);
+    if (
+        typeof targetManifest === 'object' && targetManifest !== null
+        && typeof priorManifest === 'object' && priorManifest !== null
+        && targetManifest !== priorManifest
+    ) {
+        assignInPlace(targetManifest as Record<string, unknown>, priorManifest as Record<string, unknown>);
+        target.manifest = targetManifest;
     }
 }
