@@ -151,7 +151,7 @@ describe('multi-tenant mode (env-registry + per-env kernel auth)', () => {
     it('install forwards to the control plane install action for an authenticated session', async () => {
         const rawApp = makeRawApp();
         const { ctx, fireKernelReady } = makeCtx({ rawApp, services: mtServices('user-1') });
-        const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ success: true, data: { installed: true } }), { status: 200 }));
+        const fetchSpy = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ success: true, data: { installed: true } }), { status: 200 }));
         vi.stubGlobal('fetch', fetchSpy);
         await new CloudConnectionPlugin({ controlPlaneUrl: 'http://cloud.test', controlPlaneApiKey: 'svc-key' }).start(ctx as any);
         await fireKernelReady();
@@ -180,7 +180,7 @@ describe('multi-tenant mode (env-registry + per-env kernel auth)', () => {
         const rawApp = makeRawApp();
         const { ctx, fireKernelReady } = makeCtx({ rawApp, services: mtServices('user-1') });
         const items = [{ id: 'pkg_a', manifest_id: 'com.acme.crm' }];
-        const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ success: true, data: { items } }), { status: 200 }));
+        const fetchSpy = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ success: true, data: { items } }), { status: 200 }));
         vi.stubGlobal('fetch', fetchSpy);
         await new CloudConnectionPlugin({ controlPlaneUrl: 'http://cloud.test', controlPlaneApiKey: 'svc-key' }).start(ctx as any);
         await fireKernelReady();
@@ -206,7 +206,7 @@ describe('single-environment mode (host auth, fixed env id)', () => {
     it('uses the configured environment id + the host kernel auth session', async () => {
         const rawApp = makeRawApp();
         const { ctx, fireKernelReady } = makeCtx({ rawApp, services: { auth: sessionAuth('admin-1') } });
-        const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ success: true, data: { packages: [{ id: 'p1' }] } }), { status: 200 }));
+        const fetchSpy = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ success: true, data: { packages: [{ id: 'p1' }] } }), { status: 200 }));
         vi.stubGlobal('fetch', fetchSpy);
         await new CloudConnectionPlugin({
             singleEnvironment: true,

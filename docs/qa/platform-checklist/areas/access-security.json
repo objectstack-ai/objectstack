@@ -9,7 +9,7 @@
       "title": "Row-level security: restricted member sees only their rows; admin sees all",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -24,7 +24,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated (own port + file DB per dogfood skill §0); sign in as admin; sign up members A and B (fresh emails) — both hold only the everyone baseline showcase_member_default",
+        "boot showcase isolated (own port + file DB per dogfood skill §0); sign in as admin; sign up members A and B (fresh emails; invite each one first — the stock showcase declares no auth.audience, so the invite_only default answers an uninvited POST /api/v1/auth/sign-up/email 403 SELF_REGISTRATION_CLOSED; an admin POST /api/v1/auth/organization/invite-member for the address admits the sign-up (or admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true)) — both hold only the everyone baseline showcase_member_default",
         "as A: POST /api/v1/data/showcase_private_note {\"title\": \"A note 1\"} and a second note; as B: POST one note — capture the returned ids",
         "as A: GET /api/v1/data/showcase_private_note (list); as B: same; capture both record sets",
         "as A: GET /api/v1/data/showcase_private_note/<B's id> (foreign by-id read); as A: PATCH /api/v1/data/showcase_private_note/<B's id> {\"body\": \"forged\"} (foreign by-id write)",
@@ -64,7 +64,7 @@
           "evidence": "formatRlsReport output"
         },
         {
-          "clause": "skipped objects in the verify report are each explainable (no plain-text probe field / blocked fixture) — a skip hiding a hole is the #3415 seed-defect class; this clause is ALSO the CANONICAL home of the standing expected-fail probe for the security-sensitive defect held privately under the FOLLOW-UPS handle D11",
+          "clause": "skipped objects in the verify report are each explainable (no plain-text probe field / blocked fixture) — a skip hiding a hole is the #3415 seed-defect class; this clause is ALSO the CANONICAL home of the standing expected-fail probe for the security-sensitive defect held privately under the handle D11 (#7463) — ⚠ NOT the public D11 row of FOLLOW-UPS.md §7c (the two-factor get-totp-uri re-reveal), an unrelated defect that later took the same number",
           "oracle": "test",
           "verify": "for each status:'skipped' row, the detail names the benign reason; spot-check one skipped object by hand with the by-id read/write probe. ⚠ The D11 write-up was delivered to the maintainer PRIVATELY under the ruling recorded on #7463 (same handling as D1) and is deliberately not reproduced in this repo's FOLLOW-UPS.md, in run record #7637, or here — judge the spot-check against that private write-up and its private fix card, never tick this clause green over it, and never restate the defect in a public run issue",
           "evidence": "report detail lines + the spot-check trace"
@@ -72,8 +72,8 @@
       ],
       "negative": [
         "the foreign by-id write must not silently succeed: a 2xx on the forged PATCH, or a 4xx that still mutated the row (verified by the admin re-read), is a FAIL even though every list looked correctly filtered",
-        "the private D11 defect is recorded ONCE, here: access-security.owd-sharing-matrix clause 4 reaches the same defect through the controlled_by_parent path and cross-references this clause, so a run carries the verdict on THIS item only — recording it on both double-counts one defect (#7687)",
-        "⚠ naming collision, never conflate the two: the private FOLLOW-UPS handle D11 is unrelated to 'ADR-0090 D11', the external-OWD authoring clause cited by access-security.owd-save-gate — two different things sharing two characters"
+        "the private D11 defect is recorded ONCE, here (acceptance[5], a run record's A6): access-security.owd-sharing-matrix clause 4 (acceptance[4], a run record's A5) reaches the same defect through the controlled_by_parent path and cross-references this clause, so a run carries the verdict on THIS item only — recording it on both double-counts one defect (#7687)",
+        "⚠ naming collision, never conflate them: the private handle D11 is unrelated to 'ADR-0090 D11', the external-OWD authoring clause cited by access-security.owd-save-gate, AND to the public D11 row of FOLLOW-UPS.md §7c (the two-factor get-totp-uri re-reveal) — three different things sharing one name. Cite this item and its clause, never the bare handle"
       ],
       "traps": [
         "wrong-persona"
@@ -109,7 +109,13 @@
           "change": "dedupe of the private D11 defect (#7637 found it on this item's clause 5 AND on owd-sharing-matrix clause 4, one defect counted twice): clause 5 becomes the CANONICAL expected-fail probe, non-disclosing and referenced by the FOLLOW-UPS D11 handle only, with a negative pinning the one-count rule and the ADR-0090-D11 naming collision; owd-sharing-matrix clause 4 now cross-references here",
           "ref": "#7687"
         },
-        { "revision": 4, "date": "2026-08-18", "change": "named the --rls flag on step 7 and clause 4. runRlsProofs runs only behind it (packages/cli/src/commands/verify.ts: rls: Flags.boolean({ default: false }), proofs and report both inside if (flags.rls)), so bare `objectstack verify` emits no RLS section — two rounds cited plain verify believing they had consulted an RLS oracle (#9334)", "ref": "#9386" }
+        { "revision": 4, "date": "2026-08-18", "change": "named the --rls flag on step 7 and clause 4. runRlsProofs runs only behind it (packages/cli/src/commands/verify.ts: rls: Flags.boolean({ default: false }), proofs and report both inside if (flags.rls)), so bare `objectstack verify` emits no RLS section — two rounds cited plain verify believing they had consulted an RLS oracle (#9334)", "ref": "#9386" },
+        {
+          "revision": 5,
+          "date": "2026-10-01",
+          "change": "checklist-accuracy findings of QA run #21056. The private handle D11 collided with the public D11 row FOLLOW-UPS.md §7c later assigned to an unrelated two-factor defect; clause 5 and the naming-collision negative now say so (FOLLOW-UPS §7c carries the same note), still non-disclosing. Numbering, for every cross-reference here and in this item's history: \"clause N\" counts from 0 (acceptance[N]); run records number clauses from 1, so clause 5 here is a run record's A6. steps[0] mints A and B invite-first under the invite_only default",
+          "ref": "#21060"
+        }
       ]
     },
     {
@@ -117,7 +123,7 @@
       "title": "Write-path guards: readonly strip, owner_id forge/transfer denied, bulk validation",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -133,7 +139,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; admin session + two members Alice and Bob (fresh sign-ups); resolve their sys_user ids via the data API or objectql",
+        "boot showcase isolated; admin session + two members Alice and Bob (fresh sign-ups — invite each one first — the stock showcase declares no auth.audience, so the invite_only default answers an uninvited POST /api/v1/auth/sign-up/email 403 SELF_REGISTRATION_CLOSED; an admin POST /api/v1/auth/organization/invite-member for the address admits the sign-up (or admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true)); resolve their sys_user ids via the data API or objectql",
         "as admin (contact create is admin-side in the stock matrix): POST /api/v1/data/showcase_contact {\"name\": \"RO probe\", \"email\": \"ro-probe@verify.test\", \"lead_score\": 10} — forging the readonly field on INSERT; GET the row back",
         "PATCH the same contact with {\"lead_score\": 99}; GET again",
         "as Alice: POST /api/v1/data/showcase_private_note {\"title\": \"planted\", \"owner_id\": \"<Bob's id>\"} (insert forge); then POST a note with {\"owner_id\": \"<Alice's own id>\"} (explicit self-owner); then PATCH her own note with {\"owner_id\": \"<Bob's id>\"} (transfer) and with {\"owner_id\": null} (disown)",
@@ -173,10 +179,10 @@
           "evidence": "the reads"
         },
         {
-          "clause": "readonlyWhen locks hold at the API on the locked state: paid invoice's tax_rate and its lines' quantity/unit_price/product are not writable, and a bulk update touching any locked row drops the field for the batch (#3042)",
+          "clause": "readonlyWhen locks hold at the API on the locked state: paid invoice's tax_rate and its lines' quantity/unit_price/product are not writable, and a bulk update is judged PER ROW — the locked field is dropped only from the rows whose own (or parent's) state locks it, reported on that row as results[i].droppedFields (reason readonly_when), while the same field on an unlocked row in the same batch is applied (#3042)",
           "oracle": "api",
-          "verify": "post-write reads show the locked fields unchanged on the paid invoice and its lines",
-          "evidence": "write payloads + re-reads"
+          "verify": "post-write reads show the locked fields unchanged on the paid invoice and its lines; in a mixed updateMany, the locked row's results[i].droppedFields names the field with reason readonly_when, the unlocked row carries none and re-reads changed",
+          "evidence": "write payloads + per-row results + re-reads"
         },
         {
           "clause": "bulk update evaluates validation rules PER ROW (the #3106 updateMany gap must not reproduce): violating rows rejected/skipped, compliant rows applied — one mixed batch shows both outcomes",
@@ -216,6 +222,12 @@
           "date": "2026-08-07",
           "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-01",
+          "change": "checklist-accuracy findings of QA run #21056. acceptance[5] said a bulk update touching a locked row drops the field for the batch; updateMany runs engine.update per row with its own drop listener (metadata-protocol updateManyData), so only the locked row loses the field and the report is per row, results[i].droppedFields. steps[0] mints the members invite-first under the invite_only default",
+          "ref": "#21060"
         }
       ]
     },
@@ -400,32 +412,35 @@
       "title": "CRUD × permission-set matrix: every access-matrix.json row holds — allowed verbs succeed, withheld verbs 403, VAMA bounded",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P0",
       "surface": "api",
       "personas": [
         "admin",
-        "one fresh member per permission set under test (set granted via a sys_user_permission_set row, as showcase-permission-zoo.dogfood.test.ts does)",
+        "one fresh member per permission set under test (set granted via a sys_user_permission_set row, as showcase-permission-zoo.dogfood.test.ts does) — invited first, see steps[0]",
         "a second member as the foreign-row owner"
       ],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "examples/app-showcase/access-matrix.json — it IS the expectation table (31 permission-set × object rows)",
-          "seeded permission sets showcase_contributor/manager/executive/auditor/ops/member_default/guest_portal/field_ops_delegate (security bootstrap)"
+          "examples/app-showcase/access-matrix.json — it IS the expectation table (47 permission-set × object rows at revision 4: 41 showcase_* rows plus 6 showcase_field_ops_delegate × sys_* rows; recount from the file each run)",
+          "seeded permission sets showcase_contributor/manager/executive/auditor/ops/member_default/guest_portal/field_ops_delegate/client_liaison (security bootstrap)"
         ],
         "knownGaps": [
-          "every authenticated member ALSO holds the everyone baseline showcase_member_default additively (ADR-0090 D5) — the effective expectation per cell is the UNION of the tested set's row and the baseline's row for that object; compute the union before judging a cell, or a baseline-granted read will look like a matrix violation. Measured on the committed table: 9 of the 100 showcase_* cells are granted ONLY by the baseline (showcase_auditor and showcase_executive can CREATE an inquiry and create+edit a private note; guest_portal can READ an inquiry; showcase_manager and showcase_ops can CREATE an inquiry). showcase-crud-persona-matrix.dogfood.test.ts computes the union and asserts those 9 as allowed.",
-          "access-matrix.json is the APP's declared matrix; the platform's own baseline permission sets are additionally in force and grant some sys_* surface the app matrix never mentions (measured: a plain member reads /data/sys_user 200, self-scoped). So the absence of a row is NOT a prediction of denial on sys_* objects, and the automated sweep judges the showcase_* rows only — see automated.ref."
+          "every authenticated member ALSO holds the everyone baseline showcase_member_default additively (ADR-0090 D5) — the effective expectation per cell is the UNION of the tested set's row and the baseline's row for that object; compute the union before judging a cell, or a baseline-granted read will look like a matrix violation. Measured on the committed table: 9 of the 164 showcase_* cells (41 rows × 4 verbs at revision 4) are granted ONLY by the baseline (showcase_auditor and showcase_executive can CREATE an inquiry and create+edit a private note; guest_portal can READ an inquiry; showcase_manager and showcase_ops can CREATE an inquiry). showcase-crud-persona-matrix.dogfood.test.ts computes the union and asserts those 9 as allowed.",
+          "access-matrix.json is the APP's declared matrix; the platform's own baseline permission sets are additionally in force and grant some sys_* surface the app matrix never mentions (measured: a plain member reads /data/sys_user 200, self-scoped). So the absence of a row is NOT a prediction of denial on sys_* objects, and the automated sweep judges the showcase_* rows only — see automated.ref.",
+          "clause 5 (guest_portal create-without-read) is UNOBSERVABLE on a stock boot — record it blocked(fixture), never pass or fail. The guest anchor ships unbound (binding guest → showcase_guest_portal is an admin action; the app only ships the capability, permission-sets.ts GuestPortalPermissionSet), a member persona holding the set also holds the baseline's read on showcase_inquiry, and QA run #21056 measured REST anonymous create AND read both answering 401 even with the anchor bound. The only anonymous create lane is the public form (publicFormGrant on the inquiry form view, ADR-0056 Option A), whose grant is create plus read-back of the row it created — a different contract from this clause's",
+          "sys_user create and delete answer 405 OBJECT_API_METHOD_NOT_ALLOWED for EVERY caller, admin included: sys_user declares apiMethods ['get','list','update','bulk'] (identity writes belong to better-auth, ADR-0092), and the API-exposure gate answers before any permission is judged. Score those two delegate × sys_user cells against 405, not 403"
         ]
       },
       "steps": [
-        "boot showcase isolated; admin session; for each permission set in access-matrix.json create a fresh member (unique email) and grant exactly that set by inserting the sys_user_permission_set row (system context), mirroring showcase-permission-zoo.dogfood.test.ts",
+        "boot showcase isolated; admin session; for each permission set in access-matrix.json create a fresh member (unique email) and grant exactly that set by inserting the sys_user_permission_set row (system context), mirroring showcase-permission-zoo.dogfood.test.ts. ⚠️ the stock showcase declares no auth.audience, so its posture is the invite_only default and an uninvited POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: mint each member by an admin POST /api/v1/auth/organization/invite-member for that address first (a pending sys_invitation row admits the sign-up), or by an admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true",
         "as admin (or a helper member), seed one FOREIGN-owned probe row per object under test (e.g. a showcase_private_note, showcase_inquiry, showcase_invoice + line, showcase_announcement owned by someone other than the persona)",
         "for every row of access-matrix.json drive all four verbs as that persona: POST /api/v1/data/<object> {minimal valid payload}, GET /api/v1/data/<object> + GET /api/v1/data/<object>/<probe id>, PATCH /api/v1/data/<object>/<own or probe id>, DELETE /api/v1/data/<object>/<id> — capture status + error.code for each cell",
         "for rows with viewAllRecords:true (auditor on showcase_inquiry/showcase_invoice/showcase_invoice_line/showcase_private_note): GET the foreign probe by id and list; for the SAME objects re-run as a persona whose row says viewAllRecords:false",
         "for rows with modifyAllRecords:true (ops on showcase_announcement): PATCH the foreign-owned announcement; re-run the same PATCH as member_default (modifyAllRecords:false)",
-        "for the guest_portal row pair on showcase_inquiry (create:true, read:false): POST an inquiry as that persona, then GET the list and the created id",
+        "for the guest_portal row pair on showcase_inquiry (create:true, read:false): record clause 5 blocked(fixture) per knownGaps — a member holding the set reads inquiries through the baseline, and REST anonymous answers 401 to both verbs",
+        "for the 6 showcase_field_ops_delegate × sys_* rows, drive the delegate by hand; for its sys_user_position edit and delete cells, probe a row the DELEGATE created — a row another principal created meets the platform's write ownership floor (member_default owner_only_writes / owner_only_deletes, created_by == current_user.id), so its verdict does not read the delegate's grant",
         "record the full verb × set × object verdict matrix and diff it against access-matrix.json (unioned with the baseline per the known gap above)"
       ],
       "acceptance": [
@@ -436,9 +451,9 @@
           "evidence": "the verdict matrix + spot re-reads"
         },
         {
-          "clause": "every withheld cell is DENIED SERVER-SIDE with the ledgered code: verbs marked false answer 403 with error.code PERMISSION_DENIED (rest-server maps explicit security denials to 403 PERMISSION_DENIED) — UI absence never counts (ADR-0124 D1)",
+          "clause": "every withheld cell is DENIED SERVER-SIDE with the ledgered code: verbs marked false answer 403 with error.code PERMISSION_DENIED (rest-server maps explicit security denials to 403 PERMISSION_DENIED) — except a verb the object does not expose over the API at all, which answers 405 OBJECT_API_METHOD_NOT_ALLOWED for every caller (sys_user create and delete) — UI absence never counts (ADR-0124 D1)",
           "oracle": "api",
-          "verify": "per-cell status 403 and body code PERMISSION_DENIED; capture any cell answering a different code for triage",
+          "verify": "per-cell status 403 and body code PERMISSION_DENIED (405 + OBJECT_API_METHOD_NOT_ALLOWED on the sys_user create and delete cells, for the admin control too); capture any cell answering a different code for triage",
           "evidence": "the verdict matrix"
         },
         {
@@ -468,7 +483,7 @@
         {
           "clause": "every variant (permission set) is driven over EVERY object row access-matrix.json lists for it, and the run record carries one verdict per cell — a set skipped or an object row skipped makes the item at best partial",
           "oracle": "api",
-          "verify": "verdict matrix dimensions match access-matrix.json entries (31 rows × 4 verbs at revision-time; recount from the file each run)",
+          "verify": "verdict matrix dimensions match access-matrix.json entries (47 rows × 4 verbs at revision 4: the 41 showcase_* rows are 164 cells, 87 effective-allow and 77 effective-deny after the baseline union; recount from the file each run)",
           "evidence": "the matrix artifact"
         }
       ],
@@ -484,11 +499,12 @@
         "showcase_ops",
         "showcase_member_default",
         "showcase_guest_portal",
-        "showcase_field_ops_delegate"
+        "showcase_field_ops_delegate",
+        "showcase_client_liaison"
       ],
       "automated": {
         "kind": "verify",
-        "ref": "packages/verify/src/verify.ts (runCrudVerification) + packages/verify/src/rls.ts (runRlsProofs) — `objectstack verify --rls` for the OBJECT-level CRUD and cross-owner RLS half (the flag is load-bearing: bare verify prints no RLS section) + packages/qa/dogfood/test/showcase-crud-persona-matrix.dogfood.test.ts for the PERSONA-grained cells: all 25 showcase_* rows of access-matrix.json driven over all four verbs by one fresh member per permission set — 100 cells, 50 effective-allow and 50 effective-deny, each judged against the BASELINE-UNIONED expectation (row OR showcase_member_default row, ADR-0090 D5), which is also asserted as load-bearing on the 9 cells whose only grant is the baseline. Reaches clauses 0, 1, 2, 3, 4 and 6 for those rows; every denial is checked to be 403 PERMISSION_DENIED specifically, every allow to persist, and an admin payload control runs first so a persona 403 cannot be a 400 in disguise. STILL MANUAL: (a) the 6 showcase_field_ops_delegate x sys_* rows — the platform's OWN baseline sets grant part of that surface independently of the app matrix (measured: a member holding nothing but the app baseline reads /data/sys_user 200, self-scoped, though the matrix lists sys_user read only for the delegate), and the delegate's sys_user_position writes are decided by the ADR-0090 D12 adminScope subtree gate that showcase-permission-zoo.dogfood.test.ts already pins on both sides — a raw cell verdict there would be false in one direction or the other; (b) clause 5's guest-anchor intake asymmetry (guest_portal create-without-read) — NOT observable on a member persona at all, because the everyone baseline grants read on showcase_inquiry and capability is a union, so the member-persona expectation is READ ALLOWED; the asymmetry lives on the unauthenticated guest anchor, a different admission lane."
+        "ref": "packages/verify/src/verify.ts (runCrudVerification) + packages/verify/src/rls.ts (runRlsProofs) — `objectstack verify --rls` for the OBJECT-level CRUD and cross-owner RLS half (the flag is load-bearing: bare verify prints no RLS section) + packages/qa/dogfood/test/showcase-crud-persona-matrix.dogfood.test.ts for the PERSONA-grained cells: every showcase_* row of access-matrix.json (41 at revision 4) driven over all four verbs by one fresh member per permission set — 164 cells, 87 effective-allow and 77 effective-deny, each judged against the BASELINE-UNIONED expectation (row OR showcase_member_default row, ADR-0090 D5), which is also asserted as load-bearing on the 9 cells whose only grant is the baseline. Reaches clauses 0, 1, 2, 3, 4 and 6 for those rows; every denial is checked to be 403 PERMISSION_DENIED specifically, every allow to persist, and an admin payload control runs first so a persona 403 cannot be a 400 in disguise. STILL MANUAL: (a) the 6 showcase_field_ops_delegate x sys_* rows — the platform's OWN baseline sets grant part of that surface independently of the app matrix (measured: a member holding nothing but the app baseline reads /data/sys_user 200, self-scoped, though the matrix lists sys_user read only for the delegate), and the delegate's sys_user_position writes are decided by the ADR-0090 D12 adminScope subtree gate that showcase-permission-zoo.dogfood.test.ts pins on both sides ON THE VERIFY HARNESS — a raw cell verdict there would be false in one direction or the other. ⚠️ That pin does not vouch for a dev boot: QA run #21056 measured the same in-subtree assignment answering 403 'outside the delegated subtree' on a stock dev boot (verifier-confirmed product defect, tracked at #21057), so drive those cells by hand and score them against the live answer; (b) clause 5's guest-anchor intake asymmetry (guest_portal create-without-read) — NOT observable on a member persona at all, because the everyone baseline grants read on showcase_inquiry and capability is a union, so the member-persona expectation is READ ALLOWED; the asymmetry lives on the unauthenticated guest anchor, a different admission lane."
       },
       "traps": [
         "wrong-persona",
@@ -513,6 +529,12 @@
           "date": "2026-08-18",
           "change": "persona-grained cells pinned (QA run #9401 scored this item partial: verify proves object-level CRUD + cross-owner RLS, never the persona x cell matrix). automated.ref now names the dogfood sweep over the 25 showcase_* rows and states precisely what stays manual — the 6 sys_* delegate rows, whose verdicts are not plain cells, and clause 5's guest-anchor asymmetry, which a member persona structurally cannot observe. knownGaps records the measured baseline-union flip count and the fact that a missing row is not a prediction of denial on sys_* objects",
           "ref": "#9481"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-01",
+          "change": "checklist-accuracy findings of QA run #21056. Counts re-measured from access-matrix.json: 47 rows (41 showcase_* + 6 delegate sys_*), the pin's 164 cells split 87 allow / 77 deny, the same 9 baseline-only cells; showcase_client_liaison joined the variants and the seeded-set list. acceptance[1] names the 405 OBJECT_API_METHOD_NOT_ALLOWED sys_user create/delete cells (sys_user apiMethods). Clause 5 recorded unobservable on a stock boot (knownGaps; steps[5]). automated.ref no longer reads the permission-zoo pin as vouching for the dev boot's delegate cells (#21057). steps[0] mints members invite-first under the invite_only default; a new step names the ownership-floor trap on the delegate's edit/delete probes",
+          "ref": "#21060"
         }
       ]
     },
@@ -521,7 +543,7 @@
       "title": "Sharing-model / OWD matrix: private, public_read, public_read_write, controlled_by_parent each enforce their declared baseline",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -576,7 +598,7 @@
         {
           "clause": "controlled_by_parent: line access derives from the master (ADR-0055) — C2 cannot list, read by id, or PATCH C1's line (C1's invoice is outside C2's owner-RLS read set); C1 reads and writes their own line by id",
           "oracle": "api",
-          "verify": "C2's three denials (list excludes, by-id non-200, PATCH >=400 + unchanged) and C1's 2xx pair; no line-level rule is authored — derivation is the only mechanism in play. ⚠ DEDUPE: C2's by-id probes reach the SAME security-sensitive defect that access-security.rls-both-sides clause 5 carries canonically under the private FOLLOW-UPS handle D11 (#7463 ruling; nothing about it is described in this ledger, in run record #7637, or here). Record the verdict THERE and cross-reference it from here — one defect, one count (#7687). Not the same thing as 'ADR-0090 D11'",
+          "verify": "C2's three denials (list excludes, by-id non-200, PATCH >=400 + unchanged) and C1's 2xx pair; no line-level rule is authored — derivation is the only mechanism in play. ⚠ DEDUPE: C2's by-id probes reach the SAME security-sensitive defect that access-security.rls-both-sides clause 5 (acceptance[5], a run record's A6) carries canonically under the private handle D11 — not FOLLOW-UPS.md §7c's public D11 row, an unrelated defect (#7463 ruling; nothing about it is described in this ledger, in run record #7637, or here). Record the verdict THERE and cross-reference it from here — one defect, one count (#7687). Not the same thing as 'ADR-0090 D11'",
           "evidence": "all traces"
         },
         {
@@ -614,7 +636,7 @@
         "examples/app-showcase/access-matrix.json#sharingModel (sharingModel column)",
         "ADR-0055",
         "authz-conformance.matrix.ts rows owd-private / owd-public-read / controlled-by-parent",
-        "cross-ref access-security.rls-both-sides clause 5 — canonical home of the private D11 expected-fail probe (#7637, #7463 ruling)"
+        "cross-ref access-security.rls-both-sides clause 5 (acceptance[5], a run record's A6) — canonical home of the private D11 expected-fail probe (#7637, #7463 ruling); not FOLLOW-UPS.md §7c's public D11"
       ],
       "history": [
         {
@@ -628,6 +650,12 @@
           "date": "2026-08-11",
           "change": "dedupe of the private D11 defect: clause 4's by-id probes reach the same defect as rls-both-sides clause 5, so this clause now CROSS-REFERENCES that canonical home instead of carrying a second statement of it — #7637 recorded one defect on two items; the text stays non-disclosing and names only the FOLLOW-UPS D11 handle",
           "ref": "#7687"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-01",
+          "change": "cross-reference disambiguation from QA run #21056: the private handle D11 is not FOLLOW-UPS.md §7c's public D11 row (an unrelated two-factor defect that took the same number), and clause numbers here count from 0 — this item's clause 4 is a run record's A5, rls-both-sides clause 5 is its A6. Non-disclosing as before",
+          "ref": "#21060"
         }
       ]
     },
@@ -838,7 +866,7 @@
       "title": "Anonymous requests to every mounted API family answer 401 UNAUTHENTICATED — uniformly, before any resource resolution",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -918,7 +946,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/showcase-anonymous-deny-surfaces.dogfood.test.ts"
+        "ref": "packages/qa/dogfood/test/showcase-anonymous-deny-surfaces.dogfood.test.ts — drives all seven variant families: data, meta (read and the five write doors), actions, automation, analytics (cube read, SQL echo and meta, the two body-carrying faces also with a malformed body — #21061), batch (POST /batch with the empty operation list) and security-explain (GET /security/explain), each anonymous 401 classified into exactly one declared envelope family, with a member contrast proving each route is registered. Batch and security-explain joined at revision 2; before that they were checked by hand only"
       },
       "traps": [
         "dispatcher-vs-hono-route"
@@ -944,6 +972,12 @@
           "date": "2026-10-01",
           "change": "analytics variant — the three analytics dispatcher faces join the probe set with an anonymous leg (well-formed and malformed body), a signed-in member leg, and the dispatcher-wrapper family; the title's every-mounted-family claim covered a family the steps never drove",
           "ref": "#21061"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-01",
+          "change": "the pin now covers POST /batch and GET /security/explain (QA run #21056 measured both 401 rest-flat live; the pin drove four of the six variant families). automated.ref names what the pin drives",
+          "ref": "#21060"
         }
       ]
     },

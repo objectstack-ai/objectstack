@@ -150,6 +150,10 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { currentPerfTiming, perfNow, type PerfTiming } from '@objectstack/observability';
+// [#21007] The JSON-column gate's operator set and refusal text — shared with
+// `@objectstack/objectql`'s per-aggregation `filter`, which refuses the same
+// operators on the same declared fields. See {@link jsonColumnOperatorError}.
+import { JSON_COLUMN_INCOMPATIBLE_OPERATORS, jsonColumnOperatorRefusalText } from '@objectstack/core';
 
 /**
  * [#20768] The async scope of a driver's own PRE-DDL question: the ADR-0104
@@ -3294,108 +3298,43 @@ function unrenderableTextComparandError(
 }
 
 /**
- * [#7398] Operators whose SQL lowering compares a column's STORED SCALAR to a
- * value — every spelling either of this driver's two comparison emitters
- * answers ({@link SqlDriver.applyFilterCondition}'s plain-column switch and
- * {@link SqlDriver.applyNormalizedComparison}'s normalised arms).
- *
- * The bare infix forms are here for the same reason they are in
- * {@link SCALAR_COMPARAND_OPERATORS}: `applyNormalizedComparison` really does
- * answer `in` / `nin` / `not_in` / `notin` / `=` / `<>` / `>` …, so a filter
- * spelled that way against a normalised column compiles, and a gate that only
- * knew the `$`-forms would leave the failure alive at a different spelling —
- * the lesson #5234 already paid for in this file.
- *
- * `$between` is included although the card's minimum set stopped at the four
- * ordering comparisons: it IS `>= AND <=` (this driver even decomposes a
- * calendar-day `$between` into `$gte`/`$lt` a few lines above the emitter), so
- * refusing the halves and compiling the compound would be the same wrong answer
- * at one more spelling.
- *
- * Deliberately ABSENT, and this is the load-bearing half of the set: the `LIKE`
- * family (`$contains`, `$notContains`, `$startsWith`, `$endsWith`,
- * `$icontains`) and the null predicates (`$null`, `$exists`). `$contains` is
- * the ONLY working membership spelling on a JSON-array column and downstream
- * code depends on it (#7398's own tables), while `IS NULL` asks about the
- * column's presence, which is a well-formed question whatever the column holds.
+ * [#7398] The column-type gate's operator set — `JSON_COLUMN_INCOMPATIBLE_OPERATORS`
+ * — and the words of its refusal live in `@objectstack/core`
+ * (`json-column-operator-refusal.ts`) since #21007, imported above under the
+ * same name, unchanged. They moved there because `@objectstack/objectql`
+ * evaluates a per-aggregation `filter` itself and now refuses the same operators
+ * on the same declared fields: one set and one sentence for both faces, rather
+ * than a copy each. The reasoning behind every member and every sentence is in
+ * that module's docblocks.
  */
-const JSON_COLUMN_INCOMPATIBLE_OPERATORS: ReadonlySet<string> = new Set([
-  '$eq', '=', '==',
-  '$ne', '!=', '<>',
-  '$gt', '>', '$gte', '>=', '$lt', '<', '$lte', '<=',
-  '$in', 'in',
-  '$nin', 'nin', 'not_in', 'notin',
-  '$between', 'between',
-]);
 
 /**
  * [#7398] A scalar-comparison operator met a column this driver stores as JSON
- * TEXT, so the comparison can never mean what the caller wrote.
- *
- * The mechanism is one line of SQL. A `multiple: true` field is stored as the
- * serialization `["U1","U2"]`, so `members in ('U1')` is FALSE — the text
- * genuinely is not equal to that id — and `members not in ('U1')` is TRUE. The
- * measured consequences on the issue's fixture, one row whose `members`
- * contains `U1`:
- *
- * - `$in` / `$eq` / bare equality → **0 rows**, fail-CLOSED. Silent, and a
- *   `200` with an empty array is byte-identical to a query that legitimately
- *   matched nothing, so no caller has anything to key on.
- * - `$nin` / `$ne` → **the row it was asked to exclude**, fail-OPEN. That is
- *   the dangerous half and the reason this is a refusal rather than a
- *   documented footgun: an exclusion that silently stops excluding WIDENS a
- *   result set, the direction #3948 / #4209 / #5347 all ruled outranks a
- *   narrowing one. The issue's downstream delete-guard
- *   (`{ assignees: { $in: memberIds } }`) never fired once since it shipped.
- * - The ordering comparisons are not even uniformly empty: `$lte` matched,
- *   because `["usr_…"` sorts below `usr_…` on the leading `[`. A lexicographic
- *   compare over a serialization is a wrong answer, not a narrow one.
+ * TEXT, so the comparison can never mean what the caller wrote — the measured
+ * consequences are on {@link jsonColumnOperatorRefusalText}.
  *
  * ADR-0112 class 1 — a caller mistake, so `INVALID_FILTER` / 400, the same
  * envelope {@link unsupportedFilterError} gives the unknown-operator refusal
- * one arm over. The message states the filter WAS NOT APPLIED for the reason
- * that wording exists on the comparand-shape refusals: "no rows" is a
- * legitimate answer to a legitimate query, so a caller must be told that this
- * one was never asked.
+ * one arm over.
  *
  * The prescription is `$contains` (and an `$or` of `$contains` for any-of)
- * because that is the only spelling that works today — it lowers to
- * `LIKE '%v%'` over the serialization. That it works at all is incidental
- * rather than designed, which is the issue's ask 2 (`$overlaps` /
- * `$containsAny`); ask 2 is a closed-spec-set question and is deliberately not
- * answered here.
+ * because that is the membership spelling on such a column (the spec's
+ * `$contains` docblock); a closed-spec-set `$overlaps` / `$containsAny` is the
+ * issue's ask 2 and is deliberately not answered here.
  *
  * [#8197] The most reachable member of {@link refusalSubtree}'s family, and the
  * one the card led with: a CEL permission rule over a multi-select field lowers
  * to exactly this membership test, so the column this gate names is the
  * administrator's. The prescription survives redaction with PLACEHOLDER names —
  * the SHAPE is the repair, and the shape names nothing.
+ *
+ * [#21007] The TEXT is `@objectstack/core`'s, byte for byte what this builder
+ * spelled before the move; the CONSTRUCTOR stays here, because the #8220
+ * provenance seam it goes through is this driver's.
  */
 function jsonColumnOperatorError(field: string, op: string, bare: boolean, subtree?: unknown): Error {
-  const spelling = bare
-    ? `The bare equality spelling { "${field}": value }`
-    : `Operator "${op}"`;
-  const on = bare ? '' : ` on field "${field}"`;
-  return withheldFilterError(
-    `A constraint in this filter WAS NOT APPLIED: it aims a scalar comparison operator at a ` +
-      `field this driver stores as a JSON TEXT column (e.g. ["a","b"]), and such an operator ` +
-      `compares that whole serialized text against a single value — it can never equal one ` +
-      `member. Use "$contains" for membership ({ "FIELD": { "$contains": "a" } }), or an $or of ` +
-      `"$contains" for any-of ({ "$or": [{ "FIELD": { "$contains": "a" } }, ` +
-      `{ "FIELD": { "$contains": "b" } }] }). Refused rather than compiled because the answer ` +
-      `was silently wrong in BOTH directions: $in/$eq matched nothing, while $nin/$ne returned ` +
-      `the very rows they were asked to exclude. The field and the operator this filter ` +
-      `used are withheld from the message; the full diagnostic is in the server log.`,
-    `${spelling}${on} WAS NOT APPLIED: "${field}" is a multi-value (or otherwise JSON-valued) ` +
-      `field, stored by this driver as a JSON TEXT column (e.g. ["a","b"]), and "${op}" compares ` +
-      `that whole serialized text against a single value — it can never equal one member. ` +
-      `Use "$contains" for membership ({ "${field}": { "$contains": "a" } }), or an $or of ` +
-      `"$contains" for any-of ({ "$or": [{ "${field}": { "$contains": "a" } }, ` +
-      `{ "${field}": { "$contains": "b" } }] }). Refused rather than compiled because the answer ` +
-      `was silently wrong in BOTH directions: $in/$eq matched nothing, while $nin/$ne returned ` +
-      `the very rows they were asked to exclude.`,
-    subtree,
-  );
+  const { message, diagnostic } = jsonColumnOperatorRefusalText(field, op, bare);
+  return withheldFilterError(message, diagnostic, subtree);
 }
 
 /** A short, non-throwing rendering of an offending comparand for the message. */

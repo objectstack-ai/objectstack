@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import type { MetricsRegistry } from '../contracts.js';
 import {
     NoopMetricsRegistry,
     InMemoryMetricsRegistry,
@@ -9,7 +10,7 @@ import {
 
 describe('NoopMetricsRegistry', () => {
     it('discards observations without throwing', () => {
-        const m = new NoopMetricsRegistry();
+        const m: MetricsRegistry = new NoopMetricsRegistry();
         expect(() => {
             m.counter('x');
             m.histogram('y', 42);

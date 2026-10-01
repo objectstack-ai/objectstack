@@ -579,6 +579,52 @@ export function isUsableSduiManifest(value: unknown): value is SduiManifest {
     return isRec(value) && isRec(value.components);
 }
 
+/**
+ * The plugin namespaces a manifest's components carry — the deployment's
+ * answer to "which plugins does the console this deployment serves load".
+ * The one derivation both moments of ADR-0080 §5's plugin-presence check read:
+ * the save door's `requires` judgement ({@link findHtmlPageSourceGaps}) and the
+ * load-time report ({@link findPageRequiresAbsentFromManifest}).
+ */
+function manifestNamespaces(manifest: SduiManifest): Set<string> {
+    return new Set(
+        Object.values(manifest.components)
+            .map((c) => c?.namespace)
+            .filter((ns): ns is string => typeof ns === 'string'),
+    );
+}
+
+/**
+ * The load half of ADR-0080 §5 ("`requires` is inferred at parse and validated
+ * at save **and** load — plugin presence"): the namespaces a stored page's
+ * `requires` names that no component in the deployment's manifest carries,
+ * i.e. the plugins it needs that the console this deployment serves does not
+ * load. Each name once, in the order the page lists them; `[]` when every one
+ * is present.
+ *
+ * `null` when nothing was judged — not a page, no `requires` list, or no
+ * usable manifest. That last case is the save door's posture on the same
+ * host: with no manifest registered nothing is compiled or checked, and the
+ * host that registered nothing is the one that says so at boot.
+ *
+ * Kind-agnostic on purpose: what is judged is the declaration itself (a
+ * namespace the page says it needs), not the source it was derived from, so a
+ * load needs no compile. A page whose source names a component no manifest
+ * carries never gets this far as an html page on a host with a manifest — the
+ * save door refuses it.
+ */
+export function findPageRequiresAbsentFromManifest(
+    type: string,
+    body: unknown,
+    sduiManifest: unknown,
+): string[] | null {
+    if (type !== 'page' || !isRec(body) || !isUsableSduiManifest(sduiManifest)) return null;
+    const declared = body.requires;
+    if (!Array.isArray(declared)) return null;
+    const provided = manifestNamespaces(sduiManifest);
+    return [...new Set(declared.filter((ns): ns is string => typeof ns === 'string' && !provided.has(ns)))];
+}
+
 /** The compile of one html page body, or `undefined` when the save door does not compile it. */
 function compileHtmlPage(
     type: string,
@@ -638,14 +684,10 @@ export function findHtmlPageSourceGaps(args: {
         return findings;
     }
 
-    const manifestNamespaces = new Set(
-        Object.values((args.sduiManifest as SduiManifest).components)
-            .map((c) => c?.namespace)
-            .filter((ns): ns is string => typeof ns === 'string'),
-    );
+    const provided = manifestNamespaces(args.sduiManifest as SduiManifest);
     const used = new Set(result.requires);
-    const unprovided = declaredNames.filter((ns) => !manifestNamespaces.has(ns));
-    const unused = declaredNames.filter((ns) => manifestNamespaces.has(ns) && !used.has(ns));
+    const unprovided = declaredNames.filter((ns) => !provided.has(ns));
+    const unused = declaredNames.filter((ns) => provided.has(ns) && !used.has(ns));
     const missing = result.requires.filter((ns) => !declaredNames.includes(ns));
     const clauses = [
         ...unprovided.map((ns) => `'${ns}' is a namespace no component in this deployment's manifest carries`),
@@ -673,6 +715,12 @@ export function findHtmlPageSourceGaps(args: {
  * disagrees. The last two are refusals on a publish and are left as written on
  * a draft (drafts are not gated, #4463 D1), so the draft's own publish refuses
  * them rather than a stamp silently replacing what the author wrote.
+ *
+ * The draft → active promotion applies the same function to the promoted
+ * body, so the active row a publish writes carries what an active save of
+ * that body would have stored — never the draft's own stamp, which was
+ * computed against whatever manifest the host had at the draft's save (or
+ * none at all).
  */
 export function stampHtmlPageRequires(type: string, body: unknown, sduiManifest: unknown): unknown {
     const compiled = compileHtmlPage(type, body, sduiManifest);

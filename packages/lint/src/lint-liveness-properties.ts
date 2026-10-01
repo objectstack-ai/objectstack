@@ -16,12 +16,16 @@
  * — under a verdict-specific rule id (`describe()` below is the one place that
  * mapping lives; #11384). It NEVER fails the build.
  *
- * Signal over noise is the whole point, so the ledger opts in per entry via
- * `"authorWarn": true` (+ an optional `"authorHint"`). A property being merely
- * `dead` is NOT enough — plenty of dead props are benign display/doc metadata.
- * Only entries an author would be *misled* by are marked. Booleans warn only when
- * set truthy (so schema defaults like `enable.searchable` never trip it); object/
- * string/array props warn when present at all.
+ * Which rows warn is decided by the row's VERDICT, not by a per-row opt-in:
+ * `dead`, `live-elsewhere` and `experimental` warn on their own, because the
+ * verdict itself is the author-facing warning (#16094, decision batch #60,
+ * option A). `planned` and `live` warn only when the row opts in via
+ * `"authorWarn": true`. The hint is the row's `"authorHint"`; failing that, a
+ * row that opted in (or an `experimental` one) shows its ledger `note`, while a
+ * row warning only by its `dead` / `live-elsewhere` verdict shows the verdict's
+ * default hint and never its note (see `isVerdictTriggered`). Booleans warn
+ * only when set truthy (so schema defaults like `enable.searchable` never trip
+ * it); object/string/array props warn when present at all.
  */
 
 import { createRequire } from 'node:module';
@@ -153,10 +157,41 @@ function loadWarnMap(dir: string, type: string): WarnMapLoad {
   return { map };
 }
 
-/** An entry warns when explicitly opted in, OR when it's experimental (a declared-but-unenforced guarantee). */
+/**
+ * The verdicts that warn an author with no per-row opt-in (#16094, decision
+ * batch #60, option A): a `dead` or `live-elsewhere` verdict IS the warning,
+ * exactly as `experimental` always was. Until that ruling only `experimental`
+ * was here, and both other rule ids were unreachable: across the shipped
+ * ledgers not one `dead` or `live-elsewhere` row set `authorWarn`.
+ *
+ * `planned` is deliberately absent: a planned key is one the platform asks
+ * authors to write, so it warns only where its row opts in.
+ */
+const RULED_VERDICTS: ReadonlySet<string> = new Set(['dead', 'live-elsewhere']);
+const VERDICTS_THAT_WARN: ReadonlySet<string> = new Set([...RULED_VERDICTS, 'experimental']);
+
+/** An entry warns when its verdict warns on its own, OR when the row explicitly opts in. */
 function shouldWarn(entry: LedgerEntry | undefined): boolean {
   if (!entry) return false;
-  return entry.authorWarn === true || entry.status === 'experimental';
+  return (typeof entry.status === 'string' && VERDICTS_THAT_WARN.has(entry.status)) || entry.authorWarn === true;
+}
+
+/**
+ * Is this row warning ONLY because of its ruled verdict — `dead` or
+ * `live-elsewhere`, with no `authorWarn` opt-in?
+ *
+ * Such a row never chose to address an author, so its `note` was written for
+ * the ledger's maintainers: audit prose, measured commit shas, tracker ids. A
+ * finding shows an author what the row WROTE for authors (`authorHint`) or the
+ * verdict's own default hint, never that note. AGENTS.md keeps tracker numbers
+ * out of anything an author is shown, and the ruling is what began routing these
+ * rows to authors, so the hint selection in `checkItem` closes the door it
+ * opened. A row that opts in with `authorWarn`, and an `experimental` row, keep
+ * the hint they had before the ruling (`authorHint`, else `note`, else the
+ * default) byte for byte.
+ */
+function isVerdictTriggered(entry: LedgerEntry): boolean {
+  return entry.authorWarn !== true && typeof entry.status === 'string' && RULED_VERDICTS.has(entry.status);
 }
 
 /** A value that signals authoring intent: booleans only when truthy; everything else when present. */
@@ -190,10 +225,12 @@ function isAuthored(value: unknown): boolean {
  * its own rule id, and its default hint points the author at the ledger row's
  * `evidence` — the enforcer's address — rather than at a delete key.
  *
- * Each verdict below also carries its own DEFAULT hint (used only when the
- * ledger entry has neither `authorHint` nor `note`): the `dead` default says
- * "Remove it"; `planned`'s and `live-elsewhere`'s must not, because removing a
- * planned or elsewhere-enforced property is exactly the wrong author action.
+ * Each verdict below also carries its own DEFAULT hint (used when the ledger
+ * entry has no `authorHint` and either has no `note` or warns only by its
+ * `dead` / `live-elsewhere` verdict — see `isVerdictTriggered`): the `dead`
+ * default says "Remove it"; `planned`'s and `live-elsewhere`'s must not,
+ * because removing a planned or elsewhere-enforced property is exactly the
+ * wrong author action.
  *
  * Unknown status: `LedgerEntry.status` is a plain `string` (see the interface
  * above) because the ledger's status vocabulary is DOCUMENTED, not
@@ -208,9 +245,9 @@ function isAuthored(value: unknown): boolean {
  * ({@link shippedLedgerStatuses}) instead of from that prose.
  *
  * An entry only reaches `describe()` once `shouldWarn()` has already said yes
- * (`authorWarn: true`, or `status === 'experimental'`), so `live` can in
- * principle arrive here too (an entry marked `authorWarn: true` on a `live`
- * row would be a ledger authoring mistake, not a user error). Before this fix
+ * (a `dead` / `live-elsewhere` / `experimental` verdict, or `authorWarn: true`),
+ * so `live` can in principle arrive here too (an entry marked `authorWarn: true`
+ * on a `live` row would be a ledger authoring mistake, not a user error). Before this fix
  * every one of those unrecognised cases fell silently into the `dead` branch —
  * exactly the defect class #11384 reports, just with a different trigger — so
  * the boundary below is LOUD on purpose: a status this function does not
@@ -387,7 +424,7 @@ function checkItem(
     for (const value of values instanceof Array ? values : [values]) {
       if (!isAuthored(value)) continue;
       const { kind, rule, defaultHint } = describe(entry);
-      const hint = entry.authorHint ?? entry.note ?? defaultHint;
+      const hint = entry.authorHint ?? (isVerdictTriggered(entry) ? undefined : entry.note) ?? defaultHint;
       findings.push({
         where: whereBase,
         message: `sets \`${path}\` but this ${type} property ${kind}.`,
@@ -495,8 +532,8 @@ const TYPE_COLLECTIONS: Array<{ type: string; key: string }> = [
   { type: 'view', key: 'views' },
   { type: 'webhook', key: 'webhooks' },
   // #4487. Note what adding a TYPE costs versus adding a warned property: the
-  // doc below is right that coverage grows by marking entries `authorWarn` —
-  // but only WITHIN a type already listed here. A newly governed type needs its
+  // doc below is right that coverage grows with the ledger's own verdicts (and
+  // `authorWarn` opt-ins) — but only WITHIN a type already listed here. A newly governed type needs its
   // collection registered or its ledger warns nobody, which would leave the
   // ledger correct and silent: the exact shape this lint exists to prevent.
   { type: 'datasource', key: 'datasources' },
@@ -702,8 +739,9 @@ export function lintLivenessPropertiesFromLedgerDir(dir: string, stack: AnyRec):
  * bespoke nesting, and translation bundles walk their locale entries (#11288);
  * the remaining types are flat stack collections. Container properties fan out
  * over arrays (each flow node, each dataset measure). The
- * mechanism stays ledger-driven — coverage grows by marking more entries
- * `authorWarn` rather than touching this code.
+ * mechanism stays ledger-driven — coverage grows with the ledger's verdicts
+ * (`dead` / `live-elsewhere` / `experimental`) and its `authorWarn` opt-ins
+ * rather than with edits to this code, within the types the walk visits.
  *
  * One finding it raises is not about the metadata at all: if a per-type ledger
  * is missing or unparseable, that type's warnings are all switched off, and

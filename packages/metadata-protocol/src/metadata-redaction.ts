@@ -562,3 +562,168 @@ function planCarryForward<T>(type: string, incoming: T, stored: unknown): { out:
         kept = next;
     }
 }
+
+// ---------------------------------------------------------------------------
+// The generic data door: stored metadata ROWS, not metadata items (#21086)
+// ---------------------------------------------------------------------------
+
+/**
+ * [#21086] The system objects whose `metadata` column stores one serialized
+ * metadata BODY, of the type the same row's `type` column names — the table
+ * every `/meta` read exit rehydrates from (`sys_metadata`) and its version
+ * snapshots (`sys_metadata_history`).
+ *
+ * Both are served by the generic data door as well (`apiMethods: ['get',
+ * 'list']`, for the Setup grids and the read-only "All Metadata" surface), and
+ * that door is a READ EXIT for the stored body exactly like `/meta` is: a row
+ * read there carries the same credential material {@link redactMetadataItem}
+ * withholds from every `/meta` answer. So the door serves the body through the
+ * same registry lookup, the same redactor, and nothing else — one definition of
+ * what a credential is, applied at one more exit, never a second rule set.
+ *
+ * Keyed by the canonical object name. The registry resolves an object only by
+ * that name (`computeFQN` is the identity), so a request that reaches either
+ * table spells it this way.
+ *
+ * ⛔ The generic door has no write path into either table (`apiMethods` admits
+ * no write verb; `sys_metadata_history` is append-only), so a redacted body
+ * read here can never be PUT back — no carry-forward inverse is owed, which is
+ * what makes a pure read projection a complete answer on this door.
+ */
+const STORED_METADATA_BODY_OBJECTS: ReadonlySet<string> = new Set(['sys_metadata', 'sys_metadata_history']);
+
+/** The column holding the serialized body, on every {@link STORED_METADATA_BODY_OBJECTS} member. */
+const STORED_BODY_COLUMN = 'metadata';
+
+/** The column naming the body's metadata type — what selects its redactor. */
+const STORED_TYPE_COLUMN = 'type';
+
+/** Whether `object`'s rows carry a stored metadata body the generic data door must project. */
+export function isStoredMetadataBodyObject(object: string): boolean {
+    return STORED_METADATA_BODY_OBJECTS.has(object);
+}
+
+/**
+ * The projection to hand the engine for a read of `object`, given the caller's
+ * own (`fields`, already normalized to an array or absent).
+ *
+ * The redactor is chosen by the row's `type`, so a projection that names the
+ * body column but not the type column would leave the door nothing to choose
+ * with. The type column is read too in that case, and `addedType` tells the
+ * caller to take it back off the served rows ({@link redactStoredMetadataRow}'s
+ * `dropType`) — the caller gets exactly the columns it named. Every other
+ * projection, and every object outside the set, passes through unchanged.
+ */
+export function storedMetadataBodyProjection(
+    object: string,
+    fields: unknown,
+): { fields: unknown; addedType: boolean } {
+    if (!isStoredMetadataBodyObject(object) || !Array.isArray(fields)) return { fields, addedType: false };
+    if (!fields.includes(STORED_BODY_COLUMN) || fields.includes(STORED_TYPE_COLUMN)) {
+        return { fields, addedType: false };
+    }
+    return { fields: [...fields, STORED_TYPE_COLUMN], addedType: true };
+}
+
+/**
+ * Serve one row of a {@link STORED_METADATA_BODY_OBJECTS} table: its stored
+ * body becomes the body's type's read projection — the same object
+ * {@link redactMetadataItem} serves on `/meta` — and every other column is left
+ * as the engine returned it.
+ *
+ * The body column holds serialized JSON (a `textarea`); a driver that hands it
+ * back already parsed is served in the shape it arrived in. A row whose body
+ * needed no redaction is returned BY REFERENCE, so its stored bytes reach the
+ * caller unchanged; a redacted body is re-serialized, and only then.
+ *
+ * Fails closed on the two rows it cannot judge, by omitting the body rather
+ * than serving it: a body with no `type` beside it (no redactor can be chosen;
+ * {@link storedMetadataBodyProjection} keeps the door's own reads from reaching
+ * this), and a body that does not parse while its type HAS a redactor (the
+ * redactor cannot run, so nothing proves the body clean). A body whose type
+ * registers no redactor is served as stored, parseable or not — absence of a
+ * redactor is a fact about the type, the same reading `/meta` gives it.
+ *
+ * ⛔ Not caught: a throwing redactor fails the read, as on every `/meta` exit
+ * ({@link redactMetadataItem} takes that position and says why).
+ */
+export function redactStoredMetadataRow<T>(object: string, row: T, opts?: { dropType?: boolean }): T {
+    if (!isStoredMetadataBodyObject(object) || !isPlainRecord(row)) return row;
+    const dropType = opts?.dropType === true;
+    const strip = (record: Record<string, unknown>): Record<string, unknown> => {
+        if (!dropType) return record;
+        const { [STORED_TYPE_COLUMN]: _type, ...rest } = record;
+        return rest;
+    };
+    const withheld = (): T => {
+        const { [STORED_BODY_COLUMN]: _body, ...rest } = row;
+        return strip(rest) as T;
+    };
+
+    const body = row[STORED_BODY_COLUMN];
+    if (body === undefined || body === null) return (dropType ? strip(row) : row) as T;
+    const type = row[STORED_TYPE_COLUMN];
+    if (typeof type !== 'string' || type === '') return withheld();
+    if (!hasMetadataRedactor(type)) return (dropType ? strip(row) : row) as T;
+
+    let parsed: unknown = body;
+    if (typeof body === 'string') {
+        try {
+            parsed = JSON.parse(body);
+        } catch {
+            return withheld();
+        }
+    }
+    const served = redactMetadataItem(type, parsed);
+    if (served === parsed) return (dropType ? strip(row) : row) as T;
+    return strip({
+        ...row,
+        [STORED_BODY_COLUMN]: typeof body === 'string' ? JSON.stringify(served) : served,
+    }) as T;
+}
+
+/** {@link redactStoredMetadataRow} over the rows of one read. Non-array input passes through. */
+export function redactStoredMetadataRows<T>(object: string, rows: T[], opts?: { dropType?: boolean }): T[] {
+    if (!Array.isArray(rows) || !isStoredMetadataBodyObject(object)) return rows;
+    return rows.map((row) => redactStoredMetadataRow(object, row, opts));
+}
+
+/**
+ * The refusal for a `groupBy` that names the stored body column of a
+ * {@link STORED_METADATA_BODY_OBJECTS} table, or `undefined` when there is
+ * none to make.
+ *
+ * A grouped answer serves each group's KEY, and here the key would be a whole
+ * stored body. It cannot be projected: the redactor is chosen per row by
+ * `type`, while a group key stands for every row that shares it, and a key
+ * rewritten after grouping no longer names the rows it counts. So the
+ * grouping is refused before the engine is asked, the posture the engine's own
+ * credential-aggregation guard takes for the same reason. `INVALID_FIELD` /
+ * 400, the code a refused grouping target already answers, located at the
+ * entry (`groupBy[i]`, or `groupBy[i].field` for the object form).
+ */
+export function storedMetadataBodyGroupingRefusal(object: string, groupBy: unknown): Error | undefined {
+    if (!isStoredMetadataBodyObject(object) || !Array.isArray(groupBy)) return undefined;
+    for (let i = 0; i < groupBy.length; i += 1) {
+        const entry = groupBy[i];
+        const objectForm = isPlainRecord(entry);
+        const field = objectForm ? entry.field : entry;
+        if (field !== STORED_BODY_COLUMN) continue;
+        const position = objectForm ? `groupBy[${i}].field` : `groupBy[${i}]`;
+        const err: any = new Error(
+            `Cannot group '${object}' by '${STORED_BODY_COLUMN}' (${position}): the query was not run. `
+            + `Each group key would be a whole stored metadata body, which this door serves only as `
+            + `its type's read projection, with stored credential material withheld, and a group key `
+            + `cannot be projected without changing which rows it counts. Group by '${STORED_TYPE_COLUMN}', `
+            + `'name' or another scalar column instead, and read the bodies with a plain list.`,
+        );
+        err.code = 'INVALID_FIELD';
+        err.status = 400;
+        err.field = STORED_BODY_COLUMN;
+        err.fields = [STORED_BODY_COLUMN];
+        err.object = object;
+        err.param = 'groupBy';
+        return err;
+    }
+    return undefined;
+}
