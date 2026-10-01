@@ -174,7 +174,8 @@
         "$TURBO_ROOT$/scripts/check-route-envelope.mjs",
         "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
         "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
-        "$TURBO_ROOT$/scripts/**"
+        "$TURBO_ROOT$/scripts/**",
+        "$TURBO_ROOT$/packages/drivers/driver-memory/src/memory-exists-non-boolean-refusal.test.ts"
       ]
     },
     "@objectstack/lint#test": {
