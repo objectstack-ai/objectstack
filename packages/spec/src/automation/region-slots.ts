@@ -32,10 +32,9 @@
  * which is consumer logic rather than protocol (Prime Directive #2). Only the
  * fact they all need — *this* table — is shared.
  *
- * Deliberately **import-free**: `spec/conversions/walk.ts` is a pure shape
- * walker that takes no schema dependency, and this module has to be usable from
- * there. It is data, not schema; `control-flow.zod.ts` is what maps a slot onto
- * the Zod schema its value parses as.
+ * Deliberately **import-free**: this module has to be usable from
+ * `spec/conversions/walk.ts`. It is data, not schema; `control-flow.zod.ts` is
+ * what maps a slot onto the Zod schema its value parses as.
  */
 
 /** How many regions a slot holds. */

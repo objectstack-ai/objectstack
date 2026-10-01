@@ -285,7 +285,8 @@ describe('[#6125] what the sweep deliberately leaves alone', () => {
     // either. The one deliberate divergence from `driver-sql`'s twin.
     const err = refusalFor({ owner: { manager_id: undefined } });
     expect(err?.code).toBe('READ_SCOPE_COMPILE_FAILED');
-    expect(String(err?.message)).toContain('has a nested/relation value');
+    // [#20887] Its own refusal, in the words that name the route serving the form.
+    expect(String(err?.message)).toContain('carries a nested-relation condition');
   });
 
   it('the boolean identities still reduce — the refusal is not reached through them', () => {

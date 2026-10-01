@@ -70,6 +70,7 @@ import {
   collectFilterLeaves,
   lowerAnalyticsWhere,
   conjunctFieldKeys,
+  findNestedRelationCondition,
   NO_DATETIME_COLUMNS,
 } from './strategies/filter-normalizer.js';
 import { findCrossFieldComparand } from './comparand-shape.js';
@@ -3024,8 +3025,9 @@ export class AnalyticsService implements IAnalyticsService {
    * predicate. This is deliberate and is the whole reason this gate is not a
    * second filter-tree walker: a hand-rolled walk would have to re-derive
    * `$and`/`$or`/`$not` recursion, `$`-prefixed operator keys, `$between`
-   * lowering, the nested-relation dot flattening (`{owner: {region: 'NA'}}` →
-   * member `owner.region`) and the #5334 array lowering, and every divergence
+   * lowering, the nested-relation condition (`{owner: {region: 'NA'}}` names
+   * the member `owner`, since #20887 carried as written for the engine) and the
+   * #5334 array lowering, and every divergence
    * would show up as "the field the gate saw" not being "the column that reached
    * SQL" — in either direction (a phantom rejection, or a hole).
    * `collectFilterLeaves` discards structure, which is exactly right here:
@@ -3342,6 +3344,9 @@ export class AnalyticsService implements IAnalyticsService {
     // `queryCapabilities` by hand. Cheap to say, and the alternative is a dead
     // end that reads like a misconfiguration.
     const crossField = findCrossFieldComparand(lowerAnalyticsWhereQuietly(query));
+    // [#20887] …and the second such decline: the nested-relation form, which
+    // `NativeSQLStrategy` routes to the engine path for the same reason.
+    const nested = crossField ? null : findNestedRelationCondition(lowerAnalyticsWhereQuietly(query));
     throw new Error(
       `[Analytics] No strategy can handle query for cube "${query.cube}". ` +
       `Checked: ${this.strategies.map(s => s.name).join(', ')}${skip?.size ? ` (skipped at runtime: ${[...skip].map((s) => s.name).join(', ')})` : ''}. ` +
@@ -3354,6 +3359,15 @@ export class AnalyticsService implements IAnalyticsService {
           `deployment: supply an \`executeAggregate\` bridge (the plugin auto-wires one from the ` +
           `engine), or compare against a literal value. Every other query on this cube is ` +
           `unaffected. `
+        : '') +
+      (nested
+        ? `This query's filter carries a nested-relation condition on "${nested.field}" ` +
+          `({ "${nested.field}": { … } }), and NativeSQLStrategy DECLINES it so that it routes to the ` +
+          `ObjectQL engine path — the engine reads the related object as the caller, with that ` +
+          `object's field permissions and a cap. No such path is configured here: supply an ` +
+          `\`executeAggregate\` bridge (the plugin auto-wires one from the engine), or match ` +
+          `"${nested.field}" against ids you hold ({ "${nested.field}": { "$in": [ID, …] } }). Every ` +
+          `other query on this cube is unaffected. `
         : '') +
       'Ensure a compatible driver is configured or a fallback service is registered.',
     );

@@ -70,7 +70,13 @@ describe('walkPageComponents — where components actually live', () => {
     ]);
   });
 
-  it('recurses through properties.items[].children, body and footer', () => {
+  it('recurses through properties.items[].children and footer — not the retired body (#20940)', () => {
+    // The positions are spec's `pageComponentSlotPositions()`, authorable
+    // entries only. `page:card.body` is the spelling #5775 tombstoned (ruling
+    // 2026-08-06: one composition key, `children`); the renderers still read
+    // it for stored documents, but an author who writes it is refused by the
+    // tombstone, and the sub-tree under a refused key is not walked as
+    // authored. `footer` is a declared slot and is walked.
     expect(
       paths({
         regions: [
@@ -87,7 +93,6 @@ describe('walkPageComponents — where components actually live', () => {
       'pages[0].regions[0].components[0]',
       'pages[0].regions[0].components[0].properties.items[0].children[0]',
       'pages[0].regions[0].components[1]',
-      'pages[0].regions[0].components[1].properties.body[0]',
       'pages[0].regions[0].components[1].properties.footer[0]',
     ]);
   });
@@ -182,18 +187,16 @@ describe('walkPageComponents — cycle guard', () => {
   });
 
   it('guards every descended slot, not just `properties.children`', () => {
-    // items[].children (`page:tabs`), body and footer (`page:card`) all recurse
-    // through the same `visit`, so each needs the guard to hold.
+    // items[].children (`page:tabs`) and footer (`page:card`) recurse through
+    // the same `visit` as `children`, so each needs the guard to hold. (The
+    // retired `body` is not descended at all — see the recursion case above.)
     const viaItems: Record<string, unknown> = { type: 'tabs', properties: {} };
     (viaItems.properties as Record<string, unknown>).items = [{ children: [viaItems] }];
-
-    const viaBody: Record<string, unknown> = { type: 'card', properties: {} };
-    (viaBody.properties as Record<string, unknown>).body = [viaBody];
 
     const viaFooter: Record<string, unknown> = { type: 'card', properties: {} };
     (viaFooter.properties as Record<string, unknown>).footer = [viaFooter];
 
-    for (const node of [viaItems, viaBody, viaFooter]) {
+    for (const node of [viaItems, viaFooter]) {
       expect(paths({ regions: [{ name: 'main', components: [node] }] })).toHaveLength(1);
     }
   });

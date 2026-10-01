@@ -55,11 +55,12 @@
  * driver's SOURCE — so its verdict was about the checkout. A bare
  * `@objectstack/driver-turso` specifier would instead resolve through the
  * package's `exports` map to the BUILT `dist`, turning a source pin into a
- * verdict about the last `pnpm build`. Two declarations keep it a source pin,
- * and each is enforced by its own gate: an anchored `resolve.alias` entry in
- * this package's `vitest.config.ts` (`check:test-source-alias`) and a `paths`
- * rule in its `tsconfig.json` (`check:type-source-resolution`). Both carry the
- * reasoning at the site.
+ * verdict about the last `pnpm build`. Two declarations keep it a source pin:
+ * an anchored `resolve.alias` entry in this package's `vitest.config.ts`,
+ * enforced by `check:test-source-alias`, and a `paths` rule in its
+ * `tsconfig.json`, which `check:type-source-resolution` enforced until it was
+ * retired on 2026-09-18 (#18373) — no gate enforces that one now. Both carry
+ * the reasoning at the site.
  */
 
 import { describe, it, expect } from 'vitest';

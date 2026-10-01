@@ -1904,13 +1904,19 @@ describe('translatePage — nested `properties.children` descent (#12961)', () =
       expect((card(out).properties.items as any[])[0].label).toBe('Details');
     });
 
-    it('still does not descend into `footer` — the other back-compat spelling (#5775)', () => {
+    it('descends into `footer` — a declared, rendered slot, not a back-compat spelling (#20940)', () => {
+      // `PageCardProps.footer` is declared "Card footer components (slot)" and
+      // objectui's `PageCardRenderer` draws it under the body. It used to sit
+      // beside `body` here as "the other back-compat spelling", so its copy
+      // stayed in the source language while `os lint` judged the same node.
+      // The descent now reads the rows' one derived slot list
+      // (`pageComponentSlotPositions()`), which names `footer` and not `body`.
       const out = translatePage(
         nestedUnder({ footer: [{ type: 'object-metric', id: 'kpi_deals_won', properties: { label: 'Deals Won' } }] }),
         kpiBundle,
         { locale: 'zh-CN' },
       );
-      expect((card(out).properties.footer as any[])[0].properties.label).toBe('Deals Won');
+      expect((card(out).properties.footer as any[])[0].properties.label).toBe('赢单数');
     });
 
     it('keeps the page-name header route region-level', () => {
@@ -2129,6 +2135,7 @@ import {
   walkAddressedPageComponents,
   type AddressedPageComponentContext,
 } from './i18n-resolver';
+import { ComponentPropsMap } from '../ui/component.zod';
 
 describe('walkAddressedPageComponents (#13218)', () => {
   /** Enumeration-style consumption: what the walk reports, in visit order. */
@@ -2193,7 +2200,7 @@ describe('walkAddressedPageComponents (#13218)', () => {
     ]);
   });
 
-  it('descends properties.children AND properties.items[].children — body and footer stay unvisited (#16772)', () => {
+  it('descends properties.children, properties.footer AND properties.items[].children — body stays unvisited (#16772, #20940)', () => {
     const doc: any = {
       regions: [{
         name: 'main',
@@ -2209,13 +2216,48 @@ describe('walkAddressedPageComponents (#13218)', () => {
         }],
       }],
     };
-    // `children` first, then the panels — both one level below the container;
-    // `body` / `footer` are the renderer's back-compat fallback and are still
-    // not an authorable composition spelling.
+    // The authorable entries of `pageComponentSlotPositions()`, in its order:
+    // `children`, then the declared `footer` slot (#20940), then the panels —
+    // all one level below the container. `body` is the tombstoned spelling
+    // (#5775): the renderer's back-compat fallback, not an authorable one.
     expect(trace(doc)).toEqual([
       { id: 'card', nested: false, depth: 0, addressed: true },
       { id: 'in_children', nested: true, depth: 1, addressed: true },
+      { id: 'in_footer', nested: true, depth: 1, addressed: true },
       { id: 'in_items', nested: true, depth: 1, addressed: true },
+    ]);
+  });
+
+  it('hands a malformed node in a `page:card` footer to the visitor, so a consumer that judges what the walk visits judges it (#20940)', () => {
+    // The consumer shape objectui's validator has: judge each visited node's
+    // props against its `ComponentPropsMap` row. Before #20940 the footer was
+    // not descended, so the typo'd card below came back judged by nobody —
+    // while `os lint`, walking its own list, did judge it.
+    const doc: any = {
+      regions: [{
+        name: 'main',
+        components: [{
+          id: 'summary',
+          type: 'page:card',
+          properties: {
+            title: 'Summary',
+            children: [{ id: 'body_card', type: 'page:card', properties: { title: 'Body' } }],
+            footer: [{ id: 'footer_card', type: 'page:card', properties: { title: 'Totals', bordred: false } }],
+          },
+        }],
+      }],
+    };
+    const rows = ComponentPropsMap as unknown as Record<string, { safeParse(v: unknown): { success: boolean } }>;
+    const judged: { id: string | undefined; nested: boolean; clean: boolean }[] = [];
+    walkAddressedPageComponents(doc, (component, { id, nested }) => {
+      const row = rows[component.type as string];
+      if (row) judged.push({ id, nested, clean: row.safeParse(component.properties ?? {}).success });
+      return component;
+    });
+    expect(judged).toEqual([
+      { id: 'summary', nested: false, clean: true },
+      { id: 'body_card', nested: true, clean: true },
+      { id: 'footer_card', nested: true, clean: false },
     ]);
   });
 

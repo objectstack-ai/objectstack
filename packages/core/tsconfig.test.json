@@ -49,8 +49,9 @@
 //     declared its own `paths` would REPLACE this map rather than merge into it,
 //     silently sending that specifier back to `dist/` — i.e. making this layer's
 //     verdict a function of build state rather than of the source in the
-//     checkout, which `check:type-source-resolution` refuses. This file declares
-//     no `paths` at all, so the rule stands.
+//     checkout, which `check:type-source-resolution` refused until it was
+//     retired on 2026-09-18 (#18373). This file declares no `paths` at all, so
+//     the rule stands.
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {

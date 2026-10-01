@@ -455,7 +455,7 @@ describe('[#5297] read-scope `$not` — boolean identities and NULL safety', () 
 
     it('a nested relation / bare array / zero-operator spec inside a `$not` still THROWS', () => {
       expect(() => compileScopedFilterToSql({ $not: { account: { region: 'NA' } } } as FilterCondition, ALIAS))
-        .toThrowError(/nested\/relation value/);
+        .toThrowError(/carries a nested-relation condition/);
       expect(() => compileScopedFilterToSql({ $not: { stage: ['won'] } } as FilterCondition, ALIAS))
         .toThrowError(/bare array value/);
       expect(() => compileScopedFilterToSql({ $not: { stage: {} } } as FilterCondition, ALIAS))

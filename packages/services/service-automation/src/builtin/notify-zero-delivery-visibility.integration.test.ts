@@ -40,12 +40,14 @@
  *     a maintainer ruling. `pnpm check:driver-memory-census` refuses a new
  *     binding and says in as many words that adding a ledger entry to silence
  *     it is not this author's call.
- *   - `@objectstack/driver-sqlite-wasm` (the migrate route) is outside this
+ *   - `@objectstack/driver-sqlite-wasm` (the migrate route) was outside this
  *     package's SHRINK-ONLY type-source registry, and
- *     `pnpm check:type-source-resolution` states that widening it is not the
- *     fix and that `paths` is the measured-wrong tool here (this package's
- *     `rootDir` is `src`, which is the TS6059 shape that gate names). Its own
- *     remedy for that case is "do NOT take the dependency".
+ *     `pnpm check:type-source-resolution` stated that widening it was not the
+ *     fix and that `paths` was the measured-wrong tool here (this package's
+ *     `rootDir` is `src`, which is the TS6059 shape that gate named). Its own
+ *     remedy for that case was "do NOT take the dependency". That gate and its
+ *     registry were retired on 2026-09-18 (#18373); this bullet records why the
+ *     arm below was built.
  *
  * So the second arm is an in-process `IDataEngine` — the same CLASS of store as
  * the mingo driver (in-process, non-SQL, no schema sync) — stood up here rather
@@ -179,8 +181,9 @@ type DriverKind = 'in-process' | 'sqlite';
 /**
  * The `sys_member` / `sys_notification` shapes this harness needs, declared as
  * fixtures rather than imported from `@objectstack/platform-objects` — that
- * package is outside this package's shrink-only type-source registry (see the
- * deviation note in the header), and only two columns of each are load-bearing
+ * package was outside this package's shrink-only type-source registry, which
+ * has since been retired with its gate (see the deviation note in the header),
+ * and only two columns of each are load-bearing
  * here anyway: what `RecipientResolver.resolveRole` filters on, and what
  * `MessagingService.writeEvent` inserts.
  */
