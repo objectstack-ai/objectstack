@@ -14,6 +14,12 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectKernel, type PluginContext } from '@objectstack/core';
 import { ObjectQLPlugin } from './plugin.js';
+import type { ObjectQL } from './engine.js';
+
+/** The slice of the `manifest` service these cases call. */
+interface ManifestService {
+  register(artifact: unknown): Promise<void> | void;
+}
 
 const kernels: ObjectKernel[] = [];
 afterEach(async () => {
@@ -29,7 +35,7 @@ function registering(name: string, artifacts: unknown[]) {
     name,
     dependencies: ['com.objectstack.engine.objectql'],
     init: async (ctx: PluginContext) => {
-      const manifest = ctx.getService<{ register(a: unknown): unknown }>('manifest');
+      const manifest = ctx.getService<ManifestService>('manifest');
       for (const artifact of artifacts) await manifest.register(artifact);
     },
   };
@@ -40,6 +46,11 @@ function kernelWith(...plugins: any[]) {
   kernels.push(kernel);
   return { kernel, use: async () => { for (const p of plugins) await kernel.use(p); } };
 }
+
+/** The option values a registered object's field is served with. */
+const servedValues = (ql: ObjectQL, object: string, field: string): unknown[] =>
+  ((ql.registry.getObject(object)?.fields?.[field] as { options?: Array<{ value: unknown }> } | undefined)?.options ?? [])
+    .map((o) => o.value);
 
 const INDUSTRY = { name: 'industry', label: 'Industry', options: [{ label: 'Technology', value: 'technology' }] };
 const ACCOUNT = {
@@ -76,18 +87,18 @@ describe('the picklist boot audit', () => {
     );
     await use();
     await kernel.bootstrap();
-    const ql: any = kernel.getService('objectql');
-    expect(ql.registry.getObject('pb_account').fields.industry.options.map((o: any) => o.value)).toEqual(['technology']);
+    const ql = kernel.getService<ObjectQL>('objectql');
+    expect(servedValues(ql, 'pb_account', 'industry')).toEqual(['technology']);
   });
 
   it('after the boot, an artifact naming an unknown list is refused before ANY of it registers', async () => {
     const { kernel, use } = kernelWith(new ObjectQLPlugin());
     await use();
     await kernel.bootstrap();
-    const manifest: any = kernel.getService('manifest');
+    const manifest = kernel.getService<ManifestService>('manifest');
     expect(() => manifest.register({ id: 'com.test.late', name: 'late', objects: [ACCOUNT] }))
       .toThrow(/field 'pb_account\.industry' \(package 'com\.test\.late'\) references picklist 'industry'/);
-    const ql: any = kernel.getService('objectql');
+    const ql = kernel.getService<ObjectQL>('objectql');
     expect(ql.registry.getObject('pb_account')).toBeUndefined();
   });
 
@@ -95,10 +106,10 @@ describe('the picklist boot audit', () => {
     const { kernel, use } = kernelWith(new ObjectQLPlugin());
     await use();
     await kernel.bootstrap();
-    const manifest: any = kernel.getService('manifest');
+    const manifest = kernel.getService<ManifestService>('manifest');
     expect(() => manifest.register({ id: 'com.test.late', name: 'late', picklistExtensions: [{ extend: 'industy', options: [{ label: 'X', value: 'x' }] }] }))
       .toThrow(/extends picklist 'industy'/);
-    const ql: any = kernel.getService('objectql');
+    const ql = kernel.getService<ObjectQL>('objectql');
     expect(ql.registry.findOrphanPicklistExtensions()).toEqual([]);
   });
 
@@ -106,15 +117,15 @@ describe('the picklist boot audit', () => {
     const { kernel, use } = kernelWith(new ObjectQLPlugin(), registering('lists', [{ id: 'com.test.boot.lists', name: 'lists', picklists: [INDUSTRY] }]));
     await use();
     await kernel.bootstrap();
-    const manifest: any = kernel.getService('manifest');
+    const manifest = kernel.getService<ManifestService>('manifest');
     await manifest.register({ id: 'com.test.late', name: 'late', objects: [ACCOUNT] });
     await manifest.register({
       id: 'com.test.late2', name: 'late2',
       picklists: [{ name: 'tier', label: 'Tier', options: [{ label: 'Gold', value: 'gold' }] }],
       objects: [{ name: 'pb_member', fields: { tier: { name: 'tier', type: 'select', picklist: 'tier' } } }],
     });
-    const ql: any = kernel.getService('objectql');
-    expect(ql.registry.getObject('pb_account').fields.industry.options.map((o: any) => o.value)).toEqual(['technology']);
-    expect(ql.registry.getObject('pb_member').fields.tier.options.map((o: any) => o.value)).toEqual(['gold']);
+    const ql = kernel.getService<ObjectQL>('objectql');
+    expect(servedValues(ql, 'pb_account', 'industry')).toEqual(['technology']);
+    expect(servedValues(ql, 'pb_member', 'tier')).toEqual(['gold']);
   });
 });
