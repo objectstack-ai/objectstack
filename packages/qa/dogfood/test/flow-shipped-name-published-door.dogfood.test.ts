@@ -1,10 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // [#21002, #20761 ruling rule 1, ADR-0126 §2, ADR-0131 D6] For a flow name the
-// loader ships from a managed package, BOTH published-snapshot doors — the REST
-// route and its runtime-dispatcher twin — answer the loader's body once a stored
-// row of that name is at rest, the body the layered read reports as effective.
-// Over the real showcase composition, on a database file, across a cold boot.
+// loader ships from a managed package, the published-snapshot door answers the
+// loader's body once a stored row of that name is at rest — the body the layered
+// read reports as effective. Over the real showcase composition, on a database
+// file, across a cold boot.
 //
 // ## What was broken
 //
@@ -18,25 +18,24 @@
 // ## The ruling these cases pin (triage, scoped by the decision, not by type)
 //
 // When the predicate decided the effective layer — the loader's body over a
-// stored row — both doors serve that effective layer. In every other case they
+// stored row — the doors serve that effective layer. In every other case they
 // serve exactly what they served before. So:
 //
-//   - a shipped flow name with a stored row: both doors answer the loader's
+//   - a shipped flow name with a stored row: the door answers the loader's
 //     body, the same body the layered read reports as effective;
-//   - a flow name no managed package ships, with a stored row: both doors still
-//     answer the stored body (control);
+//   - a flow name no managed package ships, with a stored row: the door still
+//     answers the stored body (control);
 //   - an `object` with a published stored row, whose effective layer differs
 //     from its stored layer by folding and governance (not by the predicate):
-//     both doors still answer the stored layer, unchanged (control).
+//     the door still answers the stored layer, unchanged (control).
 //
-// ## Why the dispatcher twin is driven in-process
+// ## Why only the REST door is booted here
 //
-// This composition serves `/meta` through the REST route; the dispatcher's
-// `/meta` domain is reached on hosts that mount the dispatcher's catch-all.
-// `HttpDispatcher` is protocol-neutral, so the twin is driven directly over the
-// SAME booted kernel, with the signed-in caller's bearer token resolved by the
-// dispatcher's own identity step — the REST path minus HTTP, as
-// `@objectstack/verify`'s handle drives it.
+// This composition serves `/meta` through the REST route alone; the
+// dispatcher's `/meta` domain is reached only on hosts that mount the
+// dispatcher's catch-all, which this harness does not. Its twin of this door is
+// pinned with the real protocol and the real `HttpDispatcher` in
+// `packages/runtime/src/domains/meta-published-runtime-publish.test.ts`.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
@@ -49,7 +48,6 @@ import { fileURLToPath } from 'node:url';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { HttpDispatcher, type HttpProtocolContext } from '../../../runtime/src/http-dispatcher.js';
 
 /** Package-relative connector refs resolve against the cwd — see the sibling boots. */
 const SHOWCASE_DIR = fileURLToPath(new URL('../../../../examples/app-showcase/', import.meta.url));
@@ -73,7 +71,6 @@ const CUSTOMER_LABEL = 'Customer flow 21002 pub';
 const OBJECT_LABEL = 'Widget 21002 pub';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
-const API_ORIGIN = 'http://localhost:3000/api/v1';
 
 interface FlowBody {
     name?: string;
@@ -136,10 +133,9 @@ function storedBodyFrom(loader: FlowBody | null): Record<string, unknown> {
     return body;
 }
 
-describe('both published-snapshot doors answer the loader\'s body for a shipped flow name with a stored row, across a cold boot (showcase)', () => {
+describe('the published-snapshot door answers the loader\'s body for a shipped flow name with a stored row, across a cold boot (showcase)', () => {
     let stack: VerifyStack;
     let token: string;
-    let dispatcher: HttpDispatcher;
     let prevCwd: string;
     let dir: string;
     let dbFile: string;
@@ -154,21 +150,7 @@ describe('both published-snapshot doors answer the loader\'s body for a shipped 
         const body: unknown = await res.json().catch(() => ({}));
         return { status: res.status, doc: body as Record<string, unknown> };
     };
-    /** The same read on the dispatcher twin — the served document is the envelope's `data`. */
-    const dispatcherPublished = async (type: string, name: string) => {
-        const path = `/meta/${type}/${name}/published`;
-        const ctx: HttpProtocolContext = {
-            request: {
-                method: 'GET',
-                url: `${API_ORIGIN}${path}`,
-                headers: { authorization: `Bearer ${token}`, accept: 'application/json' },
-            },
-        };
-        const result = await dispatcher.dispatch('GET', path, undefined, {}, ctx);
-        const body = result.response?.body as { data?: unknown } | undefined;
-        return { handled: result.handled, status: result.response?.status, doc: body?.data as Record<string, unknown> };
-    };
-    /** `GET /meta/:type/:name/layers` — the three-layer answer both doors read. */
+    /** `GET /meta/:type/:name/layers` — the three-layer answer the door reads. */
     const layers = async (type: string, name: string) => {
         const res = await stack.apiAs(token, 'GET', `/meta/${type}/${name}/layers`);
         const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
@@ -220,7 +202,6 @@ describe('both published-snapshot doors answer the loader\'s body for a shipped 
         // The measured boot: cold, on the same file.
         stack = await boot(dbFile);
         token = await stack.signIn();
-        dispatcher = new HttpDispatcher(stack.kernel as unknown as ConstructorParameters<typeof HttpDispatcher>[0]);
     }, 360_000);
 
     afterAll(async () => {
@@ -258,43 +239,26 @@ describe('both published-snapshot doors answer the loader\'s body for a shipped 
         expect(nodeIds(read.doc)).not.toContain(STORED_NODE);
     });
 
-    it('the dispatcher published door answers the loader\'s body for a shipped flow name with a stored row', async () => {
-        const read = await dispatcherPublished('flow', SUBJECT);
-
-        expect(read.handled).toBe(true);
-        expect(read.status).toBe(200);
-        expect(labelOf(read.doc)).toBe(labelOf(loader[SUBJECT]));
-        expect(nodeIds(read.doc)).toEqual(nodeIds(loader[SUBJECT]));
-        expect(nodeIds(read.doc)).not.toContain(STORED_NODE);
-    });
-
-    it('both published doors serve the body the layered read reports as effective', async () => {
+    it('the published door serves the body the layered read reports as effective', async () => {
         const layered = await layers('flow', SUBJECT);
         const rest = await restPublished('flow', SUBJECT);
-        const twin = await dispatcherPublished('flow', SUBJECT);
 
         expect(rest.doc).toEqual(layered.doc.effective);
-        expect(twin.doc).toEqual(layered.doc.effective);
     });
 
-    it('control: a flow name no managed package ships keeps its stored body on both published doors', async () => {
+    it('control: a flow name no managed package ships keeps its stored body on the published door', async () => {
         const layered = await layers('flow', CUSTOMER);
         const rest = await restPublished('flow', CUSTOMER);
-        const twin = await dispatcherPublished('flow', CUSTOMER);
 
         expect(layered.doc.overlayScope).toBe('env');
         expect(rest.status).toBe(200);
-        expect(twin.status).toBe(200);
         expect(labelOf(rest.doc)).toBe(CUSTOMER_LABEL);
-        expect(labelOf(twin.doc)).toBe(CUSTOMER_LABEL);
         expect(rest.doc).toEqual(layered.doc.overlay);
-        expect(twin.doc).toEqual(layered.doc.overlay);
     });
 
-    it('control: an object\'s published stored layer is served unchanged on both doors, not its effective layer', async () => {
+    it('control: an object\'s published stored layer is served unchanged, not its effective layer', async () => {
         const layered = await layers('object', OBJECT_NAME);
         const rest = await restPublished('object', OBJECT_NAME);
-        const twin = await dispatcherPublished('object', OBJECT_NAME);
 
         expect(layered.status).toBe(200);
         // The control discriminates: this object's effective layer is NOT its
@@ -303,9 +267,7 @@ describe('both published-snapshot doors answer the loader\'s body for a shipped 
         expect(layered.doc.effective).not.toEqual(layered.doc.overlay);
 
         expect(rest.status).toBe(200);
-        expect(twin.status).toBe(200);
         expect(labelOf(rest.doc)).toBe(OBJECT_LABEL);
         expect(rest.doc).toEqual(layered.doc.overlay);
-        expect(twin.doc).toEqual(rest.doc);
     });
 });
