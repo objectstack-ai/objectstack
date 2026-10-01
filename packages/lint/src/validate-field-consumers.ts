@@ -617,7 +617,18 @@ function creditDerivedInlineGrid(
   for (const { name } of columns) {
     if (ledger.declares(childObject, name)) ledger.record(childObject, name, { root, path, kind: 'display' });
   }
-  if (rowForm) creditDerivedRowForm(ledger, childObject, fields, relationshipField, rowForm.inlineMode, columns, root, path);
+  if (rowForm === undefined) return;
+  creditDerivedRowForm(ledger, childObject, fields, relationshipField, rowForm.inlineMode, columns, root, path);
+}
+
+/**
+ * [#21091] An inline collection's form factor when it is DECLARED — `grid` or
+ * `form`, the values `inlineEdit` and a detail entry's `inlineMode` both name.
+ * Anything else (`true`, absent) leaves it to the renderer to resolve, which
+ * this rule does not reproduce: `undefined`.
+ */
+function formFactorOf(v: unknown): 'grid' | 'form' | undefined {
+  return v === 'grid' || v === 'form' ? v : undefined;
 }
 
 /**
@@ -682,7 +693,7 @@ function creditAuthoredRowForm(
 ): void {
   const formFields = entry[CHILD_ENTRY_FORM_FIELDS_KEY];
   if (!Array.isArray(formFields)) return;
-  const inlineMode = entry.inlineMode === 'grid' || entry.inlineMode === 'form' ? entry.inlineMode : undefined;
+  const inlineMode = formFactorOf(entry.inlineMode);
   const relationshipField = strName(entry.relationshipField);
   const childFields = childObject === undefined ? undefined : ledger.fieldMapByObject.get(childObject);
   const columns = hasAuthoredColumns(entry.columns)
@@ -793,9 +804,10 @@ function walk(
     // [#21091] With no authored `formFields` either, its per-row expand form
     // draws the derived fields; an authored list replaces them.
     if (!hasAuthoredColumns(rec.columns)) {
-      const inlineMode = rec.inlineMode === 'grid' || rec.inlineMode === 'form' ? rec.inlineMode : undefined;
-      const rowForm = Array.isArray(rec[CHILD_ENTRY_FORM_FIELDS_KEY]) ? undefined : { inlineMode };
-      creditDerivedInlineGrid(ledger, childObject, strName(rec.relationshipField), rowForm, root, `${path}.childObject`);
+      const authoredRowForm = Array.isArray(rec[CHILD_ENTRY_FORM_FIELDS_KEY]);
+      const rowForm = authoredRowForm ? undefined : { inlineMode: formFactorOf(rec.inlineMode) };
+      const relationshipField = strName(rec.relationshipField);
+      creditDerivedInlineGrid(ledger, childObject, relationshipField, rowForm, root, `${path}.childObject`);
     }
     // [#21091] An authored row form, read against the child.
     creditAuthoredRowForm(ledger, rec, childObject, root, `${path}.${CHILD_ENTRY_FORM_FIELDS_KEY}`);
@@ -902,8 +914,8 @@ function walkObject(ledger: ConsumerLedger, obj: AnyRec, objectName: string, obj
         // [#21091] The derived grid's per-row expand form draws more of THIS
         // object. An explicit `grid` / `form` is the form factor; `true` is
         // the renderer's smart default, which this rule does not resolve.
-        const inlineMode = field.inlineEdit === 'grid' || field.inlineEdit === 'form' ? field.inlineEdit : undefined;
-        creditDerivedInlineGrid(ledger, objectName, fieldName, { inlineMode }, 'objects', `${fieldPath}.inlineEdit`);
+        const rowForm = { inlineMode: formFactorOf(field.inlineEdit) };
+        creditDerivedInlineGrid(ledger, objectName, fieldName, rowForm, 'objects', `${fieldPath}.inlineEdit`);
       }
     }
     for (const [key, value] of Object.entries(field)) {
