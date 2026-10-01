@@ -26,6 +26,13 @@ import { ValidationError } from '@objectstack/objectql';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 
+// [#21061] The analytics domain refuses an anonymous caller first (ADR-0056 D2),
+// so this harness signs its caller in: an `auth` slot in the shape
+// `resolveExecutionContext` reads answers a session for every request. Only
+// identity is stubbed; the route, the service and every expectation are
+// unchanged. Anonymity is pinned in `domains/analytics-anonymous-deny.test.ts`.
+const SIGNED_IN_AUTH = { api: { getSession: async () => ({ user: { id: 'usr_analytics_caller' } }) } };
+
 const FIELDS = [
     { field: 'email', code: 'invalid_email' as const, message: 'email must be a valid email address' },
     { field: 'name', code: 'required' as const, message: 'name is required' },
@@ -91,8 +98,8 @@ async function analyticsQuery(thrown: unknown) {
         generateSql: async () => ({ sql: null }),
     };
     const kernel = {
-        getService: (n: string) => (n === 'analytics' ? analytics : undefined),
-        getServiceAsync: async (n: string) => (n === 'analytics' ? analytics : undefined),
+        getService: (n: string) => (n === 'analytics' ? analytics : n === 'auth' ? SIGNED_IN_AUTH : undefined),
+        getServiceAsync: async (n: string) => (n === 'analytics' ? analytics : n === 'auth' ? SIGNED_IN_AUTH : undefined),
     };
     const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
     await plugin.start?.({
@@ -163,8 +170,8 @@ async function postAnalyticsBody(body: unknown) {
     const query = vi.fn(async () => ({ rows: [] }));
     const analytics = { query, getMeta: async () => ({ cubes: [] }), generateSql: async () => ({ sql: null }) };
     const kernel = {
-        getService: (n: string) => (n === 'analytics' ? analytics : undefined),
-        getServiceAsync: async (n: string) => (n === 'analytics' ? analytics : undefined),
+        getService: (n: string) => (n === 'analytics' ? analytics : n === 'auth' ? SIGNED_IN_AUTH : undefined),
+        getServiceAsync: async (n: string) => (n === 'analytics' ? analytics : n === 'auth' ? SIGNED_IN_AUTH : undefined),
     };
     const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
     await plugin.start?.({

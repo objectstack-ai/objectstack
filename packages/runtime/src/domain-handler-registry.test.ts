@@ -163,7 +163,13 @@ describe('HttpDispatcher domain registry (D11 step ③)', () => {
             query: vi.fn().mockResolvedValue({ rows: [{ n: 1 }] }),
             analyticsQuery: vi.fn().mockResolvedValue({ rows: [{ n: 1 }] }),
         };
-        const result = await makeDispatcher({ analytics }).dispatch(
+        // [#21061] `/analytics` stands on the anonymous-deny floor now, so the
+        // bridge is exercised by a signed-in caller — the resolution seam is
+        // stubbed exactly as the `/packages` block below does. Anonymity itself
+        // is pinned in `domains/analytics-anonymous-deny.test.ts`.
+        const dispatcher = makeDispatcher({ analytics });
+        (dispatcher as any).timedResolveExecutionContext = async () => ({ userId: 'u_analytics', isSystem: false });
+        const result = await dispatcher.dispatch(
             'POST', '/analytics/query', { cube: 'orders', measures: ['count'] }, {}, {} as any,
         );
         expect(result.handled).toBe(true);
