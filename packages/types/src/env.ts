@@ -268,8 +268,9 @@ export function resolveScheduledWorkEnabled(): boolean {
  * nothing binds there at all: reporting a declaration requirement for a flow
  * that is not going to arm either way would put the operator on the authoring
  * remedy for a deployment decision. The OFF state has its own reason —
- * {@link SCHEDULED_WORK_DISABLED_REASON} — and it is the one that must be
- * reported.
+ * {@link scheduledWorkDisabledReason} answers it, and on this resolver's
+ * reading that is always {@link SCHEDULED_WORK_DISABLED_REASON} — and it is
+ * the one that must be reported.
  *
  * ⚠️ `runOwnership` is NOT gated on the switch the way that boolean is, and the
  * OFF row above says "the posture's rule" rather than a value for exactly that
@@ -347,6 +348,30 @@ export interface ScheduledWorkPolicy {
    * evidence that a run exists.
    */
   readonly runOwnership: ScheduledRunOwnership;
+  /**
+   * [#21110] The HOST's own sentence for why scheduled work is OFF on this
+   * kernel — its cause and its remedy, in terms the reader of the status door
+   * can act on (a plan, an entitlement). Read only when {@link enabled} is
+   * `false`, and only through {@link scheduledWorkDisabledReason}, whose answer
+   * every refusal site reports: the engine's bind log, the reason it records
+   * for its binding audit and `/_status` row, and both schedule triggers' own
+   * refusal.
+   *
+   * Absent, the reason is {@link SCHEDULED_WORK_DISABLED_REASON}, byte for
+   * byte — the deployment sentence, which names
+   * `OS_AUTOMATION_SCHEDULED_WORK_ENABLED` as the cause and setting it as the
+   * remedy. That is right when the deployment switch IS the cause, and wrong
+   * when a host turned this kernel off for a reason of its own: the reader is
+   * told to set a variable that is already set, and that they cannot set.
+   *
+   * ⛔ Not a remedy for the deployment path, and not a way to reword it.
+   * {@link resolveScheduledWorkPolicy} never sets it, so the environment switch
+   * keeps exactly one sentence, and a host whose OFF comes from that switch
+   * leaves this unset. Set it only on a policy the HOST decided, as a whole,
+   * non-empty sentence: it is shown verbatim where the deployment sentence
+   * would otherwise be.
+   */
+  readonly hostDisabledReason?: string;
 }
 
 /**
@@ -383,6 +408,15 @@ export function resolveScheduledWorkPolicy(): ScheduledWorkPolicy {
  * OFF — so the bind refusal, the engine's binding audit, the CLI startup
  * summary and the flow status door cannot drift about WHY a flow is not armed.
  *
+ * [#21110] It is the DEPLOYMENT's sentence: it names the switch as the cause
+ * and setting it as the remedy. A host-injected per-kernel policy may carry
+ * its own {@link ScheduledWorkPolicy.hostDisabledReason}, so a refusal site
+ * reads {@link scheduledWorkDisabledReason} rather than this constant — which
+ * answers this sentence, unchanged, whenever the policy carries no reason of
+ * its own. A zero-argument reader of the switch itself — the declarative
+ * `defineJob` gate in `@objectstack/runtime` — only ever sees the deployment's
+ * answer, so it quotes this constant directly.
+ *
  * ⚠️ [#18235] Studio's own door carries it now: `GET /automation/_status`
  * answers `FlowRuntimeState` rows (`@objectstack/spec`
  * `contracts/automation-service.ts`), and their optional `reason` holds this
@@ -404,6 +438,23 @@ export const SCHEDULED_WORK_DISABLED_REASON =
   + `fixing: set ${SCHEDULED_WORK_ENV}=true to run package-authored scheduled work on this `
   + `deployment. It is OFF by default in every posture — a clock-driven workload's cost is a `
   + `fact about the deployment, not about the flow.`;
+
+/**
+ * [#21110] WHY package-authored scheduled work is not armed under `policy`, in
+ * one sentence: the host's {@link ScheduledWorkPolicy.hostDisabledReason} when
+ * the policy carries one, else {@link SCHEDULED_WORK_DISABLED_REASON}.
+ *
+ * The ONE answer. The engine's bind log, the reason it records for its binding
+ * audit and the `/_status` row, and both schedule triggers' own refusal all
+ * read it — ⛔ never the constant directly, which would report the deployment
+ * switch as the cause on a kernel whose host turned scheduled work off for a
+ * reason of its own. Meaningful only for a policy with `enabled: false`. Read
+ * the policy ONCE and hand that same reading here: a resolver that moves
+ * between two calls must not pair one reading's verdict with another's reason.
+ */
+export function scheduledWorkDisabledReason(policy: ScheduledWorkPolicy): string {
+  return policy.hostDisabledReason ?? SCHEDULED_WORK_DISABLED_REASON;
+}
 
 /**
  * The env variable naming the deployment's PLATFORM OWNER account
