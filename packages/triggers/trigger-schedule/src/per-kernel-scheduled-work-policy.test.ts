@@ -37,6 +37,7 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import { AutomationServicePlugin } from '@objectstack/service-automation';
 import {
     SCHEDULED_WORK_DISABLED_REASON,
+    SCHEDULED_WORK_ENV,
     type ScheduledWorkPolicy,
 } from '@objectstack/types';
 import type { JobSchedule, JobHandler } from '@objectstack/spec/contracts';
@@ -126,6 +127,7 @@ function fakeObjectqlPlugin(flows: unknown[]): Plugin {
 
 interface AutomationSurface {
     getTriggerBindingAudit(): Array<{ flowName: string; reason: string }>;
+    getFlowRuntimeStates(): Array<{ name: string; bound: boolean; reason?: string }>;
 }
 
 async function bootKernel(scheduledWorkPolicy: ScheduledWorkPolicy | undefined) {
@@ -288,5 +290,114 @@ describe('#19834 — the triggers\' own gate reads the per-kernel policy', () =>
         armed.start(binding, async () => {});
         await flush();
         expect(on.names).toEqual([SWEEP_JOB]);
+    });
+});
+
+// ─── [#21110] a host-injected OFF reports the HOST's reason ─────────
+//
+// Measured before this change, on a real boot with the host policy
+// `enabled: false` and `OS_AUTOMATION_SCHEDULED_WORK_ENABLED='true'`: the
+// `/_status` reason, the binding audit and the bind log each told the reader to
+// set the variable that was already set. The host's reason now reaches every
+// surface; a policy with no reason keeps the deployment sentence.
+
+const HOST_REASON = 'Scheduled flows are not included in the Free plan; upgrade the plan to run them.';
+const HOST_OFF: ScheduledWorkPolicy = { ...OFF, hostDisabledReason: HOST_REASON };
+
+describe("#21110 ACCEPTANCE — a host-injected OFF reports the host's reason, deployment switch ON", () => {
+    withScheduledWorkOn('single');
+
+    it('arms nothing, and the audit and the /_status rows carry the host reason for both flows', async () => {
+        const off = await bootKernel(HOST_OFF);
+        try {
+            expect(off.scheduled).toEqual([]);
+            const audit = off.automation.getTriggerBindingAudit();
+            expect(audit.map((a) => [a.flowName, a.reason]).sort()).toEqual([
+                ['nightly_digest', HOST_REASON],
+                ['renewal_alert', HOST_REASON],
+            ]);
+            const rows = off.automation
+                .getFlowRuntimeStates()
+                .filter((r) => r.name === 'nightly_digest' || r.name === 'renewal_alert');
+            expect(rows).toHaveLength(2);
+            for (const row of rows) {
+                expect(row.bound).toBe(false);
+                expect(row.reason).toBe(HOST_REASON);
+                expect(row.reason).not.toContain(SCHEDULED_WORK_ENV);
+            }
+        } finally {
+            await off.kernel.shutdown();
+        }
+    });
+});
+
+describe("#21110 — the triggers' own refusal reads the host reason", () => {
+    withScheduledWorkOn('single');
+
+    it('ScheduleTrigger: a host-OFF policy with a reason refuses with that reason, not the deployment sentence', async () => {
+        const off = jobs();
+        const logger = recordingLogger();
+        const trigger = new ScheduleTrigger(() => off.service, logger, undefined, undefined, {
+            scheduledWorkPolicy: HOST_OFF,
+        });
+        let thrown: unknown;
+        try {
+            trigger.start({ flowName: 'nightly_digest', schedule: { type: 'cron', expression: '0 8 * * *' } }, async () => {});
+        } catch (e) {
+            thrown = e;
+        }
+        // The subject is WHICH sentence is reported, so the pins are the host
+        // reason's presence and the deployment variable's absence — the
+        // refusal's own framing words are not pinned.
+        expect(thrown).toBeInstanceOf(Error);
+        expect((thrown as Error).message).toContain(HOST_REASON);
+        expect((thrown as Error).message).not.toContain(SCHEDULED_WORK_ENV);
+        expect(logger.infos).toHaveLength(1);
+        expect(logger.infos[0]).toContain(HOST_REASON);
+        expect(logger.infos[0]).not.toContain(SCHEDULED_WORK_ENV);
+        await flush();
+        expect(off.names).toEqual([]);
+    });
+
+    it('TimeRelativeTrigger: a host-OFF policy with a reason refuses with that reason, not the deployment sentence', async () => {
+        const off = jobs();
+        const logger = recordingLogger();
+        const engine = { async find() { return []; }, getObject: (name: string) => ({ name }) };
+        const trigger = new TimeRelativeTrigger(() => off.service, () => engine, logger, undefined, undefined, {
+            scheduledWorkPolicy: HOST_OFF,
+        });
+        const binding = {
+            flowName: 'renewal_alert',
+            object: 'contract',
+            config: { timeRelative: { object: 'contract', dateField: 'end_date', withinDays: 30 } },
+        };
+        let thrown: unknown;
+        try {
+            trigger.start(binding, async () => {});
+        } catch (e) {
+            thrown = e;
+        }
+        expect(thrown).toBeInstanceOf(Error);
+        expect((thrown as Error).message).toContain(HOST_REASON);
+        expect((thrown as Error).message).not.toContain(SCHEDULED_WORK_ENV);
+        expect(logger.infos).toHaveLength(1);
+        expect(logger.infos[0]).toContain(HOST_REASON);
+        expect(logger.infos[0]).not.toContain(SCHEDULED_WORK_ENV);
+        await flush();
+        expect(off.names).toEqual([]);
+    });
+
+    it('a host-OFF policy with NO reason keeps the deployment sentence', () => {
+        const trigger = new ScheduleTrigger(() => jobs().service, recordingLogger(), undefined, undefined, {
+            scheduledWorkPolicy: OFF,
+        });
+        let thrown: unknown;
+        try {
+            trigger.start({ flowName: 'nightly_digest', schedule: { type: 'cron', expression: '0 8 * * *' } }, async () => {});
+        } catch (e) {
+            thrown = e;
+        }
+        expect(thrown).toBeInstanceOf(Error);
+        expect((thrown as Error).message).toContain(SCHEDULED_WORK_DISABLED_REASON);
     });
 });

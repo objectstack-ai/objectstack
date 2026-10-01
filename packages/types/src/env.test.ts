@@ -13,6 +13,8 @@ import {
   resolveMultiOrgEnabled,
   resolveScheduledWorkEnabled,
   resolveScheduledWorkPolicy,
+  scheduledWorkDisabledReason,
+  type ScheduledWorkPolicy,
   resolveSearchPinyinEnabled,
   resolveSandboxTimeoutMs,
   resolveOrgMembershipLimit,
@@ -637,5 +639,58 @@ describe('resolveScheduledWorkPolicy (#17396 ruling G, #18378 ruling A′ — th
     expect(() => resolveScheduledWorkPolicy()).toThrow(/Invalid OS_TENANCY_POSTURE/);
     delete process.env[SCHEDULED_WORK_ENV];
     expect(() => resolveScheduledWorkPolicy()).toThrow(/Invalid OS_TENANCY_POSTURE/);
+  });
+});
+
+/**
+ * [#21110] The ONE answer to "why is scheduled work not armed under this
+ * policy?" — what the engine's bind log, its binding audit and `/_status` row,
+ * and both schedule triggers' own refusal report.
+ *
+ * A host that turns one kernel off for a reason of its own (a plan) used to be
+ * reported with the deployment sentence, which names a variable the reader
+ * cannot set and that is already set. The host's reason now wins when the
+ * policy carries one; without one, the deployment sentence is kept byte for
+ * byte.
+ */
+describe('scheduledWorkDisabledReason (#21110 — a host-injected OFF carries its own reason)', () => {
+  const HOST_OFF: ScheduledWorkPolicy = {
+    enabled: false,
+    posture: 'single',
+    requiresActingOrganization: false,
+    runOwnership: 'unscoped',
+  };
+  const HOST_REASON = 'Scheduled flows are not included in the Free plan; upgrade the plan to run them.';
+
+  it("a host policy that carries a reason answers the host's sentence, verbatim", () => {
+    const reason = scheduledWorkDisabledReason({ ...HOST_OFF, hostDisabledReason: HOST_REASON });
+    expect(reason).toBe(HOST_REASON);
+    expect(reason, 'the host reason must not be wrapped in the deployment sentence').not.toContain(SCHEDULED_WORK_ENV);
+  });
+
+  it('a host policy with NO reason keeps the deployment sentence, byte for byte', () => {
+    expect(scheduledWorkDisabledReason(HOST_OFF)).toBe(SCHEDULED_WORK_DISABLED_REASON);
+  });
+
+  describe("the deployment's own reading", () => {
+    const originalSwitch = process.env[SCHEDULED_WORK_ENV];
+    const originalPosture = process.env.OS_TENANCY_POSTURE;
+    afterEach(() => {
+      if (originalSwitch === undefined) delete process.env[SCHEDULED_WORK_ENV];
+      else process.env[SCHEDULED_WORK_ENV] = originalSwitch;
+      if (originalPosture === undefined) delete process.env.OS_TENANCY_POSTURE;
+      else process.env.OS_TENANCY_POSTURE = originalPosture;
+    });
+
+    it('never carries a host reason, so the unset switch reports the deployment sentence (the control)', () => {
+      delete process.env[SCHEDULED_WORK_ENV];
+      delete process.env.OS_TENANCY_POSTURE;
+      const policy = resolveScheduledWorkPolicy();
+      expect(policy.enabled).toBe(false);
+      // By key presence, not by value: `toEqual` reads an `undefined` member as
+      // absent, and this pin is about the resolver never minting the key.
+      expect(Object.keys(policy)).not.toContain('hostDisabledReason');
+      expect(scheduledWorkDisabledReason(policy)).toBe(SCHEDULED_WORK_DISABLED_REASON);
+    });
   });
 });
