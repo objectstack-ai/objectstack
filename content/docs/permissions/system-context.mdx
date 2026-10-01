@@ -10,7 +10,7 @@ the seed loader replaying package fixtures, a plugin's boot reconciler, a
 service self-write, a migration.
 
 This page is **the authority** for what that flag actually does. It exists
-because the flag is not one concept: it is a single boolean read at **110
+because the flag is not one concept: it is a single boolean read at **111
 distinct sites across 19 packages**, and knowing three of those behaviours gives
 no hint that the other hundred-and-four exist. Every documented app-side bug
 traced to `isSystem` had the same shape — the metadata was complete and correct,
@@ -138,7 +138,7 @@ that silently does not happen.
 
 ### 3. Sharing (`plugin-sharing`)
 
-The largest single consumer — **17 of the 110 sites**.
+The largest single consumer — **17 of the 111 sites**.
 
 | # | Behaviour when `isSystem` | What you get / what you lose | Anchor |
 |:--|:---|:---|:---|
@@ -161,7 +161,7 @@ The largest single consumer — **17 of the 110 sites**.
 | 42 | Delegation write guard bypassed | plugin-approvals | Get: service / seed / import may write delegation rows naming another delegator | `packages/plugins/plugin-approvals/src/lifecycle-hooks.ts#bindDelegationWriteGuard` |
 | 43 | Approval actor / submitter / pending-approver checks bypassed (8 sites) | plugin-approvals | Get: approve, reject, recall, reassign without being a pending approver or the submitter | `packages/plugins/plugin-approvals/src/approval-service.ts#isOverrideActor`, `#resolveActor`, `#sendBack`, `#resubmit`, `#reassign`, `#remind`, `#requestInfo`, `#comment` |
 | 44 | Attachment access hooks return early (insert + update + delete, and the read AST) | service-storage | Lose: attachment visibility scoping | `packages/services/service-storage/src/attachment-access-hooks.ts#installAttachmentAccessHooks`, `#installAttachmentReadVisibility` |
-| 45 | Comment access hooks return early (insert + update + delete, and the read AST), and so do the activity read gate (its read AST) and the activity field redaction (the rows a read serves) | plugin-audit | Get: the whole activity row on `find` / `findOne` — the audit writer and the read gate's own pre-scan. Lose: comment visibility scoping, the narrowing of `sys_activity` to rows whose parent record the caller can read, and the redaction of a parent field's value from an activity row's text and recorded change | `packages/plugins/plugin-audit/src/comment-access-hooks.ts#installCommentAccessHooks`, `#installCommentReadVisibility`, `packages/plugins/plugin-audit/src/activity-read-visibility.ts#installActivityReadVisibility`, `packages/plugins/plugin-audit/src/activity-field-redaction.ts#installActivityFieldRedaction` |
+| 45 | Comment access hooks return early (insert + update + delete, and the read AST), and so do the activity read gate (its read AST), the activity field redaction and the audit-log field redaction (the rows a read serves) | plugin-audit | Get: the whole activity row on `find` / `findOne` — the audit writer and the read gate's own pre-scan — and the whole `sys_audit_log` row, its before/after snapshots included. Lose: comment visibility scoping, the narrowing of `sys_activity` to rows whose parent record the caller can read, and the redaction of a parent field's value from an activity row's text and recorded change and from a ledger row's before/after snapshots | `packages/plugins/plugin-audit/src/comment-access-hooks.ts#installCommentAccessHooks`, `#installCommentReadVisibility`, `packages/plugins/plugin-audit/src/activity-read-visibility.ts#installActivityReadVisibility`, `packages/plugins/plugin-audit/src/activity-field-redaction.ts#installActivityFieldRedaction`, `packages/plugins/plugin-audit/src/audit-log-field-redaction.ts#installAuditLogFieldRedaction` |
 | 46 | Knowledge search returns hits unfiltered | service-knowledge | Lose: the permission filter over search results | `packages/services/service-knowledge/src/knowledge-service.ts#applyPermissionFilter` |
 
 ### 5. Actions, metadata plane, provenance, the organization wall
@@ -281,7 +281,7 @@ Ownership injection, `readonly` bypass and sharing materialisation are
 independent decisions, and a seed loader plausibly wants the first two but not
 the third. The concept is nevertheless **staying as one boolean**:
 
-- **Shipped semantics.** `isSystem` is a published contract with 110 read sites
+- **Shipped semantics.** `isSystem` is a published contract with 111 read sites
   in 19 packages. Splitting it is a breaking contract change across all of them.
   (The ruling was taken when the census read 80 sites in 18 packages; the count
   has grown, which strengthens rather than weakens the argument.)
@@ -355,16 +355,16 @@ still holds equal to the census on every pull request:
 | Appearances of the bare identifier `isSystem` in non-test sources | 813 | — |
 | — parsed as a declaration | 22 | ✅ |
 | — parsed as an object-literal / type key (producers and option objects) | 310 | — |
-| — parsed as a property **read** | 116 | ✅ |
+| — parsed as a property **read** | 117 | ✅ |
 | — parsed in some other syntactic position (a local, a cast, a conditional) | 9 | ✅ |
 | — the remainder: text inside comments and string literals | 358 | — |
 | Of those reads: reads of one of the unrelated metadata fields | 6 | ✅ |
-| Of those reads: reads of `ExecutionContext.isSystem` | **110** | ✅ |
-| — behaviour-bearing (rows 1–61 above) | 107 | ✅ |
+| Of those reads: reads of `ExecutionContext.isSystem` | **111** | ✅ |
+| — behaviour-bearing (rows 1–61 above) | 108 | ✅ |
 | — carry the flag onward only (rows 62–64 above) | 3 | ✅ |
 | Packages containing at least one elevation read | **19** | ✅ |
-| Files containing at least one elevation read | 48 | ✅ |
-| — the distinct symbols those reads live in — what this page anchors | 93 | ✅ |
+| Files containing at least one elevation read | 49 | ✅ |
+| — the distinct symbols those reads live in — what this page anchors | 94 | ✅ |
 | — of those files, the ones holding more than one read in one symbol | 8 | ✅ |
 
 The six rows marked — are a **dated decomposition, not a live claim**: they were
@@ -428,7 +428,7 @@ same resolver, and the same registration shape, that holds `docs/adr/**`.
 Renaming a symbol is now a loud red instead of a silent misdirection.
 
 ⚠️ **The precision that costs, priced here rather than buried.** A symbol anchor
-cannot say WHICH read inside a function it means, and **8** of the **48**
+cannot say WHICH read inside a function it means, and **8** of the **49**
 anchored files hold more than one read inside a single symbol. So the population
 check runs per file at symbol granularity: every file the census finds a read in
 must be anchored, and the set of symbols this page cites into that file must

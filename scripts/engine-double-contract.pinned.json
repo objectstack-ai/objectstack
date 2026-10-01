@@ -732,6 +732,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.layered-code-unshipped-name.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.legacy-overlay-delete.test.ts",
       "verb": "delete",
       "pinned": 2
@@ -2458,6 +2463,16 @@
     },
     {
       "file": "packages/plugins/plugin-approvals/src/team-member-org-screen.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-audit/src/stored-metadata-body-migration.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-audit/src/stored-metadata-body-migration.test.ts",
       "verb": "update",
       "pinned": 1
     },

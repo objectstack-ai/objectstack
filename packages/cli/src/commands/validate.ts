@@ -686,7 +686,7 @@ export default class Validate extends Command {
         );
       }
 
-      if (!flags.json) printStep('Checking capability providers (#3366)...');
+      if (!flags.json) printStep('Checking that every required capability has a provider installable in this edition...');
       const capProviderPreflight = preflightRequiredCapabilities({
         requires: Array.isArray((config as { requires?: unknown[] }).requires)
           ? ((config as { requires?: unknown[] }).requires as unknown[])

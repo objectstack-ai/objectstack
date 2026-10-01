@@ -27,11 +27,22 @@ import { resolveStorageCapabilityArg, resolveStorageLocalRootEnv } from '../comm
  *    swap the adapter out from under the root the operator named.
  */
 export async function buildDataMigrationPlugins(
-  opts: { storage?: boolean; automation?: boolean } = {},
+  opts: { storage?: boolean; automation?: boolean; audit?: boolean } = {},
 ): Promise<unknown[]> {
   const plugins: unknown[] = [];
   const { PlatformObjectsPlugin } = await import('@objectstack/platform-objects/plugin');
   plugins.push(new PlatformObjectsPlugin());
+  if (opts.audit === true) {
+    // [#21120] `os migrate audit-metadata-bodies` reads and rewrites
+    // `sys_audit_log` / `sys_activity` rows, so their schema must be
+    // registered — those objects are plugin-audit's, not platform-objects'.
+    // The plugin's own write hooks exclude both tables (`SKIP_OBJECTS`), so
+    // arming it cannot recurse on the rewrite; nothing else here is armed, the
+    // same "a migration is not a second server" discipline the automation arm
+    // takes above.
+    const { AuditPlugin } = await import('@objectstack/plugin-audit');
+    plugins.push(new AuditPlugin());
+  }
   if (opts.automation === true) {
     // `os migrate meta --stored` needs the automation ENGINE, never the
     // automation RUNTIME (#4454). Flow-node conversions carry ADR-0078's

@@ -23,14 +23,14 @@
     "@objectstack/core": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
-    "mongodb": "^7.5.0",
+    "mongodb": "^7.6.0",
     "nanoid": "^6.0.1"
   },
   "devDependencies": {
     "@objectstack/objectql": "workspace:*",
     "@types/node": "^26.6.3",
     "mongodb-memory-server": "^11.3.0",
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },

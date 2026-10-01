@@ -810,6 +810,19 @@ export default defineConfig({
         find: /^@objectstack\/driver-sqlite-wasm$/,
         replacement: path.resolve(__dirname, '../drivers/driver-sqlite-wasm/src/index.ts'),
       },
+      // [#21120] `utils/data-migration-plugins.ts` now reaches
+      // `@objectstack/plugin-audit` (the `audit: true` arm boots `AuditPlugin`
+      // so `os migrate audit-metadata-bodies` can read/rewrite the audit
+      // tables), and `migrate/meta.stored-flow-resolution.integration.test.ts`
+      // imports that module. Resolved to source for the reason its neighbours
+      // give: a test that reaches a sibling package must be a verdict about the
+      // checkout, not about the last build. Anchored (plugin-audit publishes
+      // only `"."`). `check:test-source-alias` names this import and is the gate
+      // that fails without the entry.
+      {
+        find: /^@objectstack\/plugin-audit$/,
+        replacement: path.resolve(__dirname, '../plugins/plugin-audit/src/index.ts'),
+      },
     ],
   },
   test: {

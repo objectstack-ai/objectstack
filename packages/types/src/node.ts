@@ -380,7 +380,8 @@ function undeclaredMessage(
     ? ''
     : '\n  (the caller did not pass `fallbackImport`, so that fallback resolved from\n' +
       "  @objectstack/types, which can see only its own dependencies — a caller that\n" +
-      '  needs its own resolution passes `{ fallbackImport: (s) => import(s) }`, #10943)';
+      '  needs its own resolution passes `{ fallbackImport: (s) => import(s) }`, so the\n' +
+      '  fallback resolves from the caller instead)';
   return (
     `Cannot find package '${packageName}': the host app does not declare it.\n` +
     `  host app: ${hostRoot}\n` +
@@ -389,7 +390,7 @@ function undeclaredMessage(
       : `  checked: ${HOST_DECLARATION_FIELDS.join(', ')}\n`) +
     `\n  Declare it in that app's package.json and install it, e.g.\n` +
     `      cd ${hostRoot} && pnpm add ${packageName}\n` +
-    '\n  Being merely REACHABLE is not enough and is rejected on purpose (#4719):\n' +
+    '\n  Being merely REACHABLE is not enough and is rejected on purpose:\n' +
     '  a package hoisted into a workspace store — which is what NODE_PATH points\n' +
     "  at in every pnpm bin shim — used to resolve here regardless of the app's\n" +
     '  package.json, so the same app booted or refused depending on how the\n' +

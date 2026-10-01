@@ -855,10 +855,11 @@ export async function collectDuplicateIdentifierReport(
 
 export default class MigrateDuplicates extends Command {
   static override description =
-    'Report business identifiers already minted twice across the organization partitions (#8928), ' +
-    'and the rows blocking the kernel:ready NULL-safe index tightenings (#8725). ' +
+    'Report business identifiers already minted twice across the organization partitions, ' +
+    'and the rows blocking the kernel:ready NULL-safe index tightenings, which os migrate plan does not report. ' +
     'Read-only inventory as JSON on stdout — never renumbers, deduplicates or rewrites anything. ' +
-    'Run it BEFORE the #8686 tenancy backfill: the repair overwrites the evidence.';
+    "Run it BEFORE the boot-time backfill that stamps untenanted seed rows with the install's organization: " +
+    'the repair overwrites the evidence.';
 
   static override examples = [
     '$ os migrate duplicates',

@@ -263,9 +263,12 @@ const ctx = (activeOrganizationId?: string): any => ({
     // dropped). The dispatcher's `/meta` doors scope by THIS value — the vetted
     // one `RestServer`'s doors read — never the claim as stored, so a case whose
     // session has an active organization hands the same one in here.
+    // [#21124] `manage_platform_settings` too: the URL-contract case below drives
+    // every registered type, and a `datasource` write is admitted only with it
+    // (`metaTypeWriteRefusal`, the type-level write admission).
     executionContext: {
         userId: 'usr_1',
-        systemPermissions: ['manage_metadata'],
+        systemPermissions: ['manage_metadata', 'manage_platform_settings'],
         ...(activeOrganizationId ? { tenantId: activeOrganizationId } : {}),
     },
 });

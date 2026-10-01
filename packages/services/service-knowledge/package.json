@@ -31,7 +31,7 @@
   "devDependencies": {
     "@objectstack/objectql": "workspace:*",
     "@types/node": "^26.6.3",
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },

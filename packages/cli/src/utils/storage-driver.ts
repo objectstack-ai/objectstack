@@ -146,7 +146,7 @@ function missingUrlMessage(kind: BuiltinDriverId): string {
     + `URL was given, and ${kind} has no local default to fall back on — its database lives on a `
     + 'server or endpoint this process cannot guess. Set OS_DATABASE_URL (or --database) to it — '
     + `e.g. ${example}. Booting on a guessed default instead would connect you `
-    + 'to a database you never named, and every write would land in the wrong place (#3276).'
+    + 'to a database you never named, and every write would land in the wrong place.'
   );
 }
 
@@ -346,7 +346,7 @@ export function resolveStorageDefinition(
       `Unsupported driver "${driverType}" (OS_DATABASE_DRIVER / --database-driver). `
         + `Supported drivers: ${DATABASE_DRIVER_SELECTION_ALIASES.join(', ')}. `
         + 'Booting on the SQLite default instead would silently ignore the driver you asked for '
-        + 'and write into a local database (#3276). Fix the value, or leave the driver unset to '
+        + 'and write into a local database. Fix the value, or leave the driver unset to '
         + 'let the database URL scheme select it.',
       // NOT a driver kind — `driverType` here is the operator's raw token, and a
       // caller enumerating kinds must not count it as one.

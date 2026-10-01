@@ -36,7 +36,7 @@
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
     "exceljs": "^4.4.0",
-    "zod": "^4.6.1"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@objectstack/driver-sql": "workspace:*",
@@ -48,7 +48,7 @@
     "@objectstack/service-analytics": "workspace:*",
     "@objectstack/service-datasource": "workspace:*",
     "@types/node": "^26.6.3",
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },

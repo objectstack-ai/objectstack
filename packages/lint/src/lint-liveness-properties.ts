@@ -20,10 +20,9 @@
  * `dead`, `live-elsewhere` and `experimental` warn on their own, because the
  * verdict itself is the author-facing warning (#16094, decision batch #60,
  * option A). `planned` and `live` warn only when the row opts in via
- * `"authorWarn": true`. The hint is the row's `"authorHint"`; failing that, a
- * row that opted in (or an `experimental` one) shows its ledger `note`, while a
- * row warning only by its `dead` / `live-elsewhere` verdict shows the verdict's
- * default hint and never its note (see `isVerdictTriggered`). Booleans warn
+ * `"authorWarn": true`. The hint is the row's `"authorHint"`; failing that, the
+ * verdict's default hint (see `describe`). Never the row's ledger `note`, for
+ * any row class: that text is written for the ledger's maintainers. Booleans warn
  * only when set truthy (so schema defaults like `enable.searchable` never trip
  * it); object/string/array props warn when present at all.
  */
@@ -176,24 +175,6 @@ function shouldWarn(entry: LedgerEntry | undefined): boolean {
   return (typeof entry.status === 'string' && VERDICTS_THAT_WARN.has(entry.status)) || entry.authorWarn === true;
 }
 
-/**
- * Is this row warning ONLY because of its ruled verdict — `dead` or
- * `live-elsewhere`, with no `authorWarn` opt-in?
- *
- * Such a row never chose to address an author, so its `note` was written for
- * the ledger's maintainers: audit prose, measured commit shas, tracker ids. A
- * finding shows an author what the row WROTE for authors (`authorHint`) or the
- * verdict's own default hint, never that note. AGENTS.md keeps tracker numbers
- * out of anything an author is shown, and the ruling is what began routing these
- * rows to authors, so the hint selection in `checkItem` closes the door it
- * opened. A row that opts in with `authorWarn`, and an `experimental` row, keep
- * the hint they had before the ruling (`authorHint`, else `note`, else the
- * default) byte for byte.
- */
-function isVerdictTriggered(entry: LedgerEntry): boolean {
-  return entry.authorWarn !== true && typeof entry.status === 'string' && RULED_VERDICTS.has(entry.status);
-}
-
 /** A value that signals authoring intent: booleans only when truthy; everything else when present. */
 function isAuthored(value: unknown): boolean {
   if (value === undefined || value === null) return false;
@@ -226,8 +207,8 @@ function isAuthored(value: unknown): boolean {
  * `evidence` — the enforcer's address — rather than at a delete key.
  *
  * Each verdict below also carries its own DEFAULT hint (used when the ledger
- * entry has no `authorHint` and either has no `note` or warns only by its
- * `dead` / `live-elsewhere` verdict — see `isVerdictTriggered`): the `dead`
+ * entry has no `authorHint`; the row's `note` is never shown to an author, since
+ * it is written for the ledger's maintainers): the `dead`
  * default says "Remove it"; `planned`'s and `live-elsewhere`'s must not,
  * because removing a planned or elsewhere-enforced property is exactly the
  * wrong author action.
@@ -424,7 +405,9 @@ function checkItem(
     for (const value of values instanceof Array ? values : [values]) {
       if (!isAuthored(value)) continue;
       const { kind, rule, defaultHint } = describe(entry);
-      const hint = entry.authorHint ?? (isVerdictTriggered(entry) ? undefined : entry.note) ?? defaultHint;
+      // Author-facing text is `authorHint` or the verdict's default — never the
+      // row's `note`, which is maintainer prose (audit evidence, tracker ids).
+      const hint = entry.authorHint ?? defaultHint;
       findings.push({
         where: whereBase,
         message: `sets \`${path}\` but this ${type} property ${kind}.`,

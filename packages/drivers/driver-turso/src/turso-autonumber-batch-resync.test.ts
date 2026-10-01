@@ -15,33 +15,37 @@
  *  - **LOCAL (and replica, same local engine)** falls through to
  *    `super.bulkCreate` / `super.upsert` and with them the re-seed. Asserted
  *    below on rows.
- *  - **REMOTE** hands the batch to `RemoteTransport.bulkCreate`, which builds
- *    its own INSERT and never enters `fillAutoNumberFields` — so it has neither
- *    the defect nor the fix. On that face `auto_number` is only a column-type
- *    mapping and no sequence machinery exists to be stale; the boundary is
- *    pinned as an ASSERTION rather than a comment, so wiring autonumber into
- *    the remote transport later cannot silently inherit this file's green.
- *    (That gap was #6944's, not this card's — and #6944 has since answered it.)
+ *  - **REMOTE** used to hand the batch to `RemoteTransport.bulkCreate`, which
+ *    builds its own INSERT and never entered `fillAutoNumberFields` — so it had
+ *    neither the defect nor the fix: on that face `auto_number` was only a
+ *    column-type mapping and no sequence machinery existed to be stale. The
+ *    boundary was pinned as an ASSERTION rather than a comment, so wiring
+ *    autonumber into the remote transport later could not silently inherit
+ *    this file's green. (That gap was #6944's; #6944 answered it with a
+ *    refusal, and #21113 answered it with generation.)
  *
- * # ⚠️ [#6944] The pin below was rewritten, not deleted
+ * # ⚠️ [#6944 → #21113] The pin below was rewritten twice, never deleted
  *
  * This file's REMOTE case pinned an ABSENCE: `RemoteTransport` has no autonumber
  * surface on the batch path any more than on the single-row one, and a remote
  * `bulkCreate` therefore resolved with `[null, null]` in the slots. #6944
  * carried out triage's disposition B and made that face refuse LOUDLY
  * (`NOT_IMPLEMENTED`/501), raised on `TursoDriver` because
- * `RemoteTransport.create(object, data)` cannot see a field type. The absence
- * half is still true and still worth guarding; the "and therefore nothing
- * happens" half is not.
+ * `RemoteTransport.create(object, data)` cannot see a field type. #21113 then
+ * opened the appetite door (measured demand on the hosted product) and made
+ * the driver ISSUE the numbers on this face, one row at a time through its own
+ * `create` — the transport still sees no field type and still gets a row that
+ * already carries its number. The absence half is still true and still worth
+ * guarding; "and therefore nothing happens" is not, and neither is "and
+ * therefore it refuses".
  *
  * Deleting the pin would remove the guard against a silent half-implementation
  * inside the transport; leaving it untouched would keep a green assertion
  * standing next to a claim that no longer holds. So it keeps the surface probe
- * verbatim and gains the refusal — asserted on `bulkCreate` specifically,
- * because Turso OVERRIDES it and `RemoteTransport.bulkCreate` loops its OWN
- * `create`, so "`create` refuses" is not on its own an answer about this path
- * either. The refusal's own suite is
- * `turso-remote-autonumber-refusal.test.ts`.
+ * verbatim and gains the generation AND the re-seed — asserted on `bulkCreate`
+ * specifically, because Turso OVERRIDES it, so "`create` generates" is not on
+ * its own an answer about this path. The generation's own suite is
+ * `turso-remote-autonumber-generation.test.ts`.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -131,15 +135,16 @@ describe('[#6943] TursoDriver batch/upsert autonumber re-seed', () => {
     expect(merged.title).toBe('edited');
   });
 
-  it('REMOTE: the transport that bypasses this path still has no autonumber machinery to re-seed', async () => {
+  it('REMOTE: the transport still has no autonumber machinery of its own, on the batch path either', async () => {
     const remote = new TursoDriver({ url: 'libsql://example.turso.io', authToken: 'placeholder' });
     expect(remote.transportMode).toBe('remote');
 
     // The boundary, stated as a fact about the code rather than about a live
     // connection: `RemoteTransport` has no autonumber surface at all, on the
-    // batch path any more than the single-row one. #6944 did not add one — it
-    // refused one layer up — so this half is unchanged, and it remains what a
-    // future half-implementation inside the transport has to go through.
+    // batch path any more than the single-row one. Neither #6944 nor #21113
+    // added one — both acted one layer up, on the driver — so this half is
+    // unchanged, and it remains what a future half-implementation inside the
+    // transport has to go through.
     const transportSurface = Object.getOwnPropertyNames(
       Object.getPrototypeOf((remote as any).remoteTransport),
     );
@@ -147,10 +152,11 @@ describe('[#6943] TursoDriver batch/upsert autonumber re-seed', () => {
     expect(transportSurface.some((m) => /autonumber|sequence/i.test(m))).toBe(false);
   });
 
-  it('REMOTE: [#6944] and having none, it refuses the batch rather than writing nothing', async () => {
+  it('REMOTE: [#21113] and the driver numbers the batch on this face too — and re-seeds it after a seed replay', async () => {
+    const stub = makeLibsqlSqliteStub();
     const remote = new TursoDriver({
       url: 'libsql://example.turso.io',
-      client: makeLibsqlSqliteStub() as never,
+      client: stub as never,
     });
     await remote.connect();
     await remote.initObjects([
@@ -164,20 +170,27 @@ describe('[#6943] TursoDriver batch/upsert autonumber re-seed', () => {
       } as any,
     ]);
 
-    // ⚠️ `code` AND `status`, never a bare `toThrow` (ADR-0112, #6144).
-    const err = await remote
-      .bulkCreate('crm_case', [
-        { organization_id: 'orgA', title: 'b1' },
-        { organization_id: 'orgA', title: 'b2' },
-      ])
-      .then(
-        (rows) => {
-          throw new Error(`expected a refusal, got ${JSON.stringify(rows)}`);
-        },
-        (e) => e as Error & { code?: string; status?: number },
-      );
-    expect(err.code).toBe('NOT_IMPLEMENTED');
-    expect(err.status).toBe(501);
+    const first = await remote.bulkCreate('crm_case', [
+      { organization_id: 'orgA', title: 'b1' },
+      { organization_id: 'orgA', title: 'b2' },
+    ]);
+    expect((first as any[]).map((r) => r.case_number)).toEqual(['CASE-00001', 'CASE-00002']);
+
+    // The LOCAL half's scenario, on the remote face: rows 3..10 land by a path
+    // that never enters `fillAutoNumberFields`, so the counter sits at 2 while
+    // the table holds 10. The next batch is served above it, on the first call.
+    const insert = stub.raw.prepare(
+      'insert into "crm_case" ("id", "organization_id", "case_number", "title") values (?, ?, ?, ?)',
+    );
+    for (let n = 3; n <= 10; n++) insert.run(`bypass-${n}`, 'orgA', `CASE-${String(n).padStart(5, '0')}`, `row ${n}`);
+
+    const after = await remote.bulkCreate('crm_case', [
+      { organization_id: 'orgA', title: 'b3' },
+      { organization_id: 'orgA', title: 'b4' },
+    ]);
+    expect((after as any[]).map((r) => r.case_number)).toEqual(['CASE-00011', 'CASE-00012']);
+    const count = (stub.raw.prepare('select count(*) as c from "crm_case"').all() as Array<{ c: number }>)[0].c;
+    expect(count).toBe(12);
 
     await remote.disconnect();
   });
