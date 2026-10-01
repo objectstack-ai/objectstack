@@ -24,7 +24,7 @@ outcomeMessages: {
 - Keys are snake_case outcome names; values are `I18nLabel`s. A key that is not snake_case is refused at its own path (`invalid_key`).
 - The key is valid on `type: 'api'` and `type: 'script'` actions only, the two types with a success payload that can carry an `outcome`. It is refused with a prescription on `url` / `modal` / `flow` / `form`, beside `resultDialog` (which suppresses the success toast), and beside `operation: 'update'` (no handler, so no outcome).
 - `successMessage` and each outcome message may interpolate `${result.*}`, the server-response scope `onSuccess.navigate` already declares. This is not a new dialect.
-- The console picks `outcomeMessages[result.outcome]`, falls back to `successMessage`, and then to its default text. That reader ships in the console's next release. Until then the key is accepted, validated, translated and extracted, and the liveness ledger grades it `planned`, so `os lint` tells an author who writes it that it is not shown yet.
+- The console picks `outcomeMessages[result.outcome]`, falls back to `successMessage`, and then to its default text. The console does not read it yet. Until it does, the key is accepted, validated, translated and extracted, and the liveness ledger grades it `planned`, so `os lint` tells an author who writes it that it is not shown yet.
 
 **Translation.** `TranslationData` carries the copy beside `successMessage`: `objects.OBJECT._actions.ACTION.outcomeMessages.OUTCOME` and `globalActions.ACTION.outcomeMessages.OUTCOME`. Outcome keys there are snake_case too. `translateAction` overlays them per outcome (object-scoped first, then global) and only for outcomes the action declares. `os i18n extract` emits one key per declared outcome.
 
