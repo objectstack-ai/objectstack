@@ -46,6 +46,11 @@ import { BUCKET_GRANULARITIES } from '@objectstack/core';
 // refusal can tell a value the contract never declared apart from one it
 // declares and this backend cannot label.
 import { RETIRED_SUB_DAY_INTERVALS, TimeUpdateInterval } from '@objectstack/spec/data';
+// [#21066] The scalar-comparison family a JSON-stored field refuses, and the
+// words of that refusal — the ONE set and sentence `driver-sql`'s `where` and
+// `@objectstack/objectql`'s per-aggregation `filter` already read (#21007), so
+// this driver's faces refuse the same operators in the same words.
+import { JSON_COLUMN_INCOMPATIBLE_OPERATORS, jsonColumnOperatorRefusalText } from '@objectstack/core';
 import { StandardErrorCode } from '@objectstack/spec/api';
 
 /**
@@ -821,6 +826,91 @@ export function arrayComparandError(field: string, value: unknown, path: string,
   );
 }
 
+/**
+ * [#21066] What the shape gate is told about the DECLARED fields a filter names.
+ *
+ * Every other rule on the walk reads the filter alone. This one cannot: whether
+ * `{ owners: { $in: ['u1'] } }` is a well-formed question depends on how
+ * `owners` is STORED, which is declared metadata the calling face holds and the
+ * filter does not carry. So the face hands the walk the two things it needs, and
+ * the walk keeps deciding everything in one pass, before any face evaluates.
+ *
+ * Omitted (the default) ⇒ no field is judged JSON-stored, which is the answer
+ * for a face holding no declarations: the walk does not guess a storage shape
+ * from a name or a value.
+ */
+export interface FilterFieldDeclarations {
+  /**
+   * Is `field`, as the filter spells it, DECLARED JSON-stored on the object
+   * being read — a structured-JSON type or a multi-valued field? A field the
+   * face holds no declaration for answers `false`.
+   */
+  readonly isJsonStoredField: (field: string) => boolean;
+  /**
+   * Handed the withheld half of a refusal — the field and the operator named,
+   * with the position in the filter — just before the refusal is thrown, so the
+   * face writes it to its server log. The caller is told only that it is there.
+   */
+  readonly reportWithheld: (diagnostic: string) => void;
+}
+
+/**
+ * [#21066] The server-log line for a withheld filter diagnostic, one wording
+ * for every face of this package.
+ */
+export function withheldFilterLogLine(diagnostic: string): string {
+  return (
+    `[driver-memory] INVALID_FILTER — refusal detail withheld from the response. ` +
+    `Full diagnostic: ${diagnostic}`
+  );
+}
+
+/**
+ * [#21066] A scalar comparison — the equality and ordering family, `$between`,
+ * `$in` / `$nin`, or implicit equality — aimed at a field DECLARED JSON-stored.
+ *
+ * ## What this driver answered instead
+ *
+ * Each operator, PER ELEMENT: mingo applies a scalar comparison to every member
+ * of an array value, so on six rows whose `owners` (a `multiple: true` lookup)
+ * hold `['u1','u2']`, `['u2']`, `['u3','u1']`, `[]`, `['u10']` and `null`,
+ * `{ owners: { $eq: 'u1' } }` and `$in ['u1','u9']` returned the two rows
+ * holding `u1`, `$nin` the other four, and `$gt 'u1'` four rows by comparing
+ * each member as text. `driver-sql` refuses every one of those filters with
+ * `INVALID_FILTER` / 400 on every dialect (#7398), and so does the engine's
+ * per-aggregation `filter` (#21007). One filter, rows on this driver and a
+ * refusal on the SQL family, breaks the conformance invariant every backend is
+ * held to — the same rows as `find()`, or a refusal — and it is the worse
+ * direction for a test double: an application's tests pass here on a filter
+ * its production backend refuses.
+ *
+ * No declared contract gives the family a per-element reading: the spec's
+ * `$contains` docblock names `$contains` as the membership spelling on such a
+ * column and the one operator the equality family's refusal left working, and
+ * that is what the refusal prescribes.
+ *
+ * ## The words, and what they withhold
+ *
+ * The set and the sentence are `@objectstack/core`'s, read rather than copied —
+ * the text `driver-sql` refuses with, byte for byte. The message names neither
+ * the field nor the operator (on a read scope the predicate is an
+ * administrator's), and says the full diagnostic is in the server log; the
+ * diagnostic, prefixed with the position in the filter, goes to
+ * `reportWithheld` just before the refusal is thrown, so that sentence is true
+ * here too. The constructor is this package's, as each face keeps its own.
+ */
+export function jsonStoredFieldOperatorError(
+  field: string,
+  op: string,
+  bare: boolean,
+  path: string,
+  reportWithheld: (diagnostic: string) => void,
+): Error {
+  const { message, diagnostic } = jsonColumnOperatorRefusalText(field, op, bare);
+  reportWithheld(`At ${path}: ${diagnostic}`);
+  return unsupportedFilterError(message);
+}
+
 /** [#5324] `$and`/`$or` take a list of nodes; anything else is refused. */
 export function filterNodeListExpectedError(key: string, value: unknown, path: string): Error {
   return unsupportedFilterError(
@@ -890,11 +980,23 @@ export function filterNodeExpectedError(value: unknown, path: string): Error {
  * deliberately: on a face that cannot compile `$or` at all, reporting that its
  * operand should have been an array would send the author to fix the wrong
  * thing, then refuse the corrected filter anyway.
+ *
+ * ## What `declarations` adds (#21066)
+ *
+ * The one rule on this walk that reads the DECLARATION rather than the filter:
+ * a scalar comparison aimed at a field declared JSON-stored is refused (see
+ * {@link jsonStoredFieldOperatorError}). It is a MEANING the filter would get
+ * wrong rather than a shape, and it lives here anyway, because here is where
+ * every face of this package already stops a filter before evaluating it — on
+ * the whole tree at once, `$not` and every `$or` branch included, so the
+ * refusal cannot depend on which row reaches which arm. Omitted ⇒ nothing is
+ * judged JSON-stored (see {@link FilterFieldDeclarations}).
  */
 export function assertFilterConditionShape(
   node: unknown,
   path: string,
   capabilities: FilterFaceCapabilities = DRIVER_FILTER_CAPABILITIES,
+  declarations?: FilterFieldDeclarations,
 ): void {
   if (!isFilterNode(node)) return;
   for (const [key, value] of Object.entries(node)) {
@@ -905,18 +1007,18 @@ export function assertFilterConditionShape(
       value.forEach((child, index) => {
         const childPath = `${here}[${index}]`;
         if (!isFilterNode(child)) throw filterNodeExpectedError(child, childPath);
-        assertFilterConditionShape(child, childPath, capabilities);
+        assertFilterConditionShape(child, childPath, capabilities, declarations);
       });
       continue;
     }
     if (key === '$not') {
       if (!capabilities.combinators.has(key)) throw uncompilableCombinatorError(key, here, capabilities);
       if (!isFilterNode(value)) throw filterNodeExpectedError(value, here);
-      assertFilterConditionShape(value, here, capabilities);
+      assertFilterConditionShape(value, here, capabilities, declarations);
       continue;
     }
     if (key.startsWith('$')) throw unknownLogicalOperatorError(key, here);
-    assertFieldConstraintShape(key, value, here, capabilities);
+    assertFieldConstraintShape(key, value, here, capabilities, declarations);
   }
 }
 
@@ -936,13 +1038,25 @@ function assertFieldConstraintShape(
   spec: unknown,
   path: string,
   capabilities: FilterFaceCapabilities,
+  declarations: FilterFieldDeclarations | undefined,
 ): void {
   // [#16810] The IMPLICIT-equality position, checked before the plain-object
   // test below because an array is not a filter node and would otherwise leave
   // this walk unjudged — which is how it reached the matcher's `==` arm and the
   // live path's deep equality with nobody reconciling the two.
   if (Array.isArray(spec)) throw arrayComparandError(field, spec, path);
-  if (!isFilterNode(spec)) return;
+  if (!isFilterNode(spec)) {
+    // [#21066] The bare `{ field: value }` spelling IS equality, and on a
+    // declared JSON-stored field it is refused as `$eq` is — reported as `=`,
+    // bare, as `driver-sql` reports it — whatever the comparand, `null`
+    // included, because `driver-sql`'s `where` refuses that one too. After the
+    // array refusal above, the order `driver-sql` takes (its comparand gate,
+    // then its column-type gate).
+    if (declarations?.isJsonStoredField(field)) {
+      throw jsonStoredFieldOperatorError(field, '=', true, path, declarations.reportWithheld);
+    }
+    return;
+  }
   // [#5240] The zero-operator constraint keeps its own predicate rather than an
   // inlined `keys.length === 0`, so the reasoning for what does and does not
   // count as one (a `Date` enumerates to nothing but is a comparand) stays
@@ -1027,6 +1141,18 @@ function assertFieldConstraintShape(
       if (hasNulInLikePattern(spec[op] as string)) {
         throw nulLikePatternError(field, op, spec[op] as string, `${path}.${op}`);
       }
+    }
+    // [#21066] The column-type question, after every comparand-shape rule above
+    // — the order `driver-sql` takes, so a malformed `$between` or an array
+    // under `$eq` is still told what is wrong with its COMPARAND first. The set
+    // is the shared one, so `$contains` / `$notContains` (membership), the null
+    // predicates and `$empty` keep answering on such a field.
+    if (
+      declarations &&
+      JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op) &&
+      declarations.isJsonStoredField(field)
+    ) {
+      throw jsonStoredFieldOperatorError(field, op, false, `${path}.${op}`, declarations.reportWithheld);
     }
   }
   // [#5702] The `$options`-without-`$regex` companion check that stood here is

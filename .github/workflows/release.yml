@@ -1507,13 +1507,38 @@ jobs:
       - name: Build
         run: pnpm run build
 
-      # This key hashes the pin and the build script. ci.yml's Console Pin Gate
-      # (#4290) hashes a SUPERSET: those two, the probe scripts and the spec's
-      # entry layout (#20765). So the two workflows no longer share dist entries,
-      # and each one builds its own on a miss. Keeping this key narrower is
-      # deliberate. Following ci.yml would rebuild the console on every Version
-      # Packages merge, and publishing a cached console whose spec content lags
-      # is the existing cache design.
+      - name: Read the spec's declared zod range (Console dist key input)
+        id: spec-zod
+        # Fails rather than keying on an empty or `undefined` range: a key that
+        # silently stopped carrying the range would restore across a zod move.
+        run: |
+          node -e '
+            const range = require("./packages/spec/package.json").dependencies?.zod;
+            if (typeof range !== "string" || range.trim() === "") {
+              console.error("packages/spec/package.json declares no dependencies.zod, so the Console dist key cannot carry it.");
+              process.exit(1);
+            }
+            console.log("range=" + range.trim());
+          ' >> "$GITHUB_OUTPUT"
+
+      # This key hashes the pin and the build script, and carries the spec's
+      # DECLARED zod range (the step above). ci.yml's Console Pin Gate (#4290)
+      # hashes a SUPERSET of the files: those two, the probe scripts and the
+      # spec's entry layout (#20765). So the two workflows no longer share dist
+      # entries, and each one builds its own on a miss. Keeping this key narrower
+      # is deliberate.
+      # Following ci.yml would rebuild the console on every Version Packages
+      # merge, and publishing a cached console whose spec content lags is the
+      # existing cache design.
+      #
+      # The zod range is the one spec input the cached dist is NOT allowed to
+      # lag (#21108). The console bundles a single zod instance, the console's
+      # own copy, and its build refuses a console zod outside the injected spec's
+      # declared `zod` range (objectui#11353). A dist restored after that range
+      # moved would publish a console the build never judged against it. The
+      # range is read out of packages/spec/package.json, not hashed with it: the
+      # file's `version` moves on every Version Packages merge, and hashing the
+      # whole file would turn every publish into a cold console rebuild.
       #
       # Split restore/save, matching ci.yml, and not the combined actions/cache
       # action: the combined form's post-step saves even when the job FAILED,
@@ -1526,7 +1551,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: packages/console/dist
-          key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}
+          key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}-zod-${{ steps.spec-zod.outputs.range }}
 
       - name: Build vendored @objectstack/console SPA
         # Clones objectstack-ai/objectui at the SHA pinned in .objectui-sha,
@@ -1550,7 +1575,7 @@ jobs:
       # (no dist, or a dist no build ever stamped) is wrong on a publish lane.
       - name: Verify the restored Console dist bundles this tree's spec
         env:
-          CONSOLE_DIST_CACHE_KEY: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}
+          CONSOLE_DIST_CACHE_KEY: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}-zod-${{ steps.spec-zod.outputs.range }}
         run: pnpm check:console-injection --require-stamp
 
       # Reached only with every console assertion above green: Actions steps
@@ -1562,7 +1587,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: packages/console/dist
-          key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}
+          key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}-zod-${{ steps.spec-zod.outputs.range }}
 
       - name: Downstream backward-compat smoke (live hotcrm)
         # Pre-publish gate (#2035): the about-to-publish @objectstack/spec must

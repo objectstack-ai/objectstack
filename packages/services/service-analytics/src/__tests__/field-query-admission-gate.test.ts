@@ -207,6 +207,9 @@ function fakeEngine() {
         return [];
       },
       // The registry's declarations: the masked fields carry a `maskingRule`.
+      // [#21080] The engine this double models answers which objects carry a
+      // middleware registered for them; none of this file's objects does.
+      hasObjectMiddleware: () => false,
       getObject: (name: string) =>
         FIELDS[name]
           ? {
