@@ -2462,6 +2462,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-audit/src/stored-metadata-body-migration.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/accept-invitation-adopt-membership.test.ts",
       "verb": "delete",
       "pinned": 1

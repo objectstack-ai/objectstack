@@ -8,6 +8,12 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+// [engine-double-contract] A fake engine's findOne must refuse exactly what
+// ObjectQL.findOne refuses — opened with the producer's own predicate, not a
+// hand-mirrored check. `@objectstack/metadata-core` owns it (plugin-audit
+// already depends on metadata-core; objectql does not depend on plugin-audit,
+// so either source is legal and metadata-core is the shorter edge).
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import {
   migrateStoredMetadataBodyCopies,
   planAuditRowPatch,
@@ -107,10 +113,10 @@ describe('migrateStoredMetadataBodyCopies (driven)', () => {
         return rows[object] ?? [];
       },
       async findOne(object: string, query: Record<string, unknown>) {
+        // Refuse exactly what the real engine refuses (a non-selective findOne).
+        assertEngineFindOnePredicate(object, query);
         if (object !== 'sys_metadata') return undefined;
-        const filters = (query as { filters?: unknown[][] }).filters ?? [];
-        const idEq = filters.find((f) => f[0] === 'id');
-        const id = idEq?.[2];
+        const id = (query as { where?: { id?: unknown } }).where?.id;
         return (rows.sys_metadata ?? []).find((r) => r.id === id);
       },
       async update(object: string, id: string, data: Record<string, unknown>) {

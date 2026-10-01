@@ -207,7 +207,7 @@ export async function migrateStoredMetadataBodyCopies(
     let type: string | undefined;
     try {
       const finder = engine.findOne ?? engine.find;
-      const found = await finder.call(engine, 'sys_metadata', { filters: [['id', '=', recordId]] }, { context: SYSTEM_CTX });
+      const found = await finder.call(engine, 'sys_metadata', { where: { id: recordId } }, { context: SYSTEM_CTX });
       const row = Array.isArray(found) || (found && typeof found === 'object' && 'records' in (found as object))
         ? asArray(found)[0]
         : (found as Record<string, unknown> | undefined);
@@ -226,7 +226,7 @@ export async function migrateStoredMetadataBodyCopies(
     try {
       const result = await engine.find(
         object,
-        { filters: [['object_name', 'in', [...isStoredMetadataBodyObjectNames()]]] },
+        { where: { object_name: { $in: [...isStoredMetadataBodyObjectNames()] } } },
         { context: SYSTEM_CTX },
       );
       rows = asArray(result);
