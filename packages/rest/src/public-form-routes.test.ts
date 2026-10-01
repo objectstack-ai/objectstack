@@ -484,7 +484,7 @@ describe('[#21180] GET /forms/:slug/lookup/:field is gone — it answers what an
     rest.registerRoutes();
     server.installNotFoundSeam();
     const res: Response = await server.getRawApp().fetch(new Request(`http://local${path}`));
-    return { status: res.status, body: await res.json(), findData: protocol.findData };
+    return { status: res.status, body: (await res.json()) as any, findData: protocol.findData };
   }
 
   it('no route is registered for the path', () => {
