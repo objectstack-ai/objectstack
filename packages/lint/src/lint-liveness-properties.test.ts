@@ -1453,12 +1453,13 @@ describe('the object/field walk, against a synthetic ledger directory (#19268)',
   // ("field walk: a malformed `fields` array …") can take its real subject back
   // — but this block keeps working either way, which is the point.
   it('the SHIPPED field ledger warns on no stable subject — which is why the walk needs a subject of its own', () => {
-    // `picklist` is `planned` + `authorWarn` until the server resolves picklist
-    // references; `conditionalRequired` is a `retiredKey` tombstone whose `dead`
-    // row warns on its own since #16094, but a parse refuses it first, so it is
-    // no subject for #11385 either. The synthetic slot below is still warned by
-    // nothing shipped.
-    expect([...authorWarnedProperties('field')].sort()).toEqual(['conditionalRequired', 'picklist']);
+    // `picklist` was the last opted-in row (`planned` + `authorWarn`) and left
+    // when the server began resolving picklist references (`live`). What is
+    // left is `conditionalRequired`, a `retiredKey` tombstone whose `dead` row
+    // warns on its own since #16094 — but a parse refuses it first, so it is no
+    // subject for #11385 either. The synthetic slot below is warned by nothing
+    // shipped.
+    expect([...authorWarnedProperties('field')]).toEqual(['conditionalRequired']);
     expect(
       lintLivenessProperties({
         objects: [{ name: 'widget', fields: [{ name: 'a', synthWarnedSlot: true }] }],

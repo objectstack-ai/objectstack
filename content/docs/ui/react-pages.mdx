@@ -86,6 +86,7 @@ builds for it:
 | The data blocks | One wrapper component per **public, non-container** registered block. |
 | `Block` | Escape hatch — render any registered component by type. |
 | `useAdapter` | The live data source: `find` / `findOne` / `create` / `update`. |
+| `useDataInvalidation` | The data-invalidation bus reader: `useDataInvalidation('object')` returns a number that moves when a write to that object is reported on the bus. Name it in the dependencies of the effect that reads through `useAdapter` — see [Live data](#live-data). |
 | `data`, `variables`, `page` | The page's data, its `variables` map, and its own schema. |
 
 **On the `react` tier only.** A `kind:'html'` page's source is parsed and never evaluated,
@@ -175,6 +176,7 @@ options are OData-shaped — `$filter`, `$top`, `$skip`, `$select`, `$orderby`, 
 ```jsx
 function Page() {
   const adapter = useAdapter();
+  const changed = useDataInvalidation('showcase_invoice');
   const [rows, setRows] = React.useState([]);
 
   React.useEffect(() => {
@@ -187,11 +189,16 @@ function Page() {
       if (alive) setRows(result.data);
     })();
     return () => { alive = false; };
-  }, [adapter]);
+  }, [adapter, changed]);
 
   return <ul>{rows.map((r) => <li key={r.id}>{r.name}</li>)}</ul>;
 }
 ```
+
+`changed` is in the dependency array so the page's own read follows the data: when a page
+action elsewhere writes `showcase_invoice`, the write is reported on the data-invalidation
+bus (the same bus `<ListView>` refreshes from), the nonce moves, and the effect runs again
+in place — the page is not remounted, so its own state survives.
 
 `find()` always resolves to the same envelope — a `QueryResult` carrying the rows
 under `data`. A backend that answers with a bare array is folded into that envelope
