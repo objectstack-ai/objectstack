@@ -240,6 +240,7 @@ when needed.
 2. **Visibility default for CLI-created packages.** `private` (owner org
    only) — consistent with `sys_package.visibility` default. Explicit
    `objectstack package publish --marketplace` flow to escalate.
+   **Resolved (2026-09-30, #20892): closed as `org`, not `private`.** Maintainer ruling 「同意」 on the director's letter A, recorded on #20900 as comment 5921191703: the create-time default is `org`, and `PackageSchema.visibility` declares `.default('org')` (`packages/spec/src/marketplace/package.zod.ts`, landed in `32d3b3c76e`). The entry above is kept as the position the question was opened with.
 3. **Multi-package envs in Studio.** The current "Environment detail" page
    assumes one artifact. Phase B+ updates it to list installations and
    show per-package versions.
