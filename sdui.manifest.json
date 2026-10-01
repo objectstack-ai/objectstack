@@ -293,10 +293,9 @@
           "type": "enum",
           "enum": [
             "vertical",
-            "horizontal",
-            "inline",
-            "grid"
-          ]
+            "horizontal"
+          ],
+          "description": "Label placement: `vertical` puts each label above its field (the default), `horizontal` beside it."
         },
         {
           "name": "columns",
@@ -693,6 +692,11 @@
           "description": "Per-card style rules, each evaluated against that card’s own record. Two member dialects are accepted: the native `{ field, operator, value, backgroundColor?, borderColor? }` and the spec CEL `{ condition, backgroundColor?, borderColor? }`. A matching rule colours that card alone. A rule comparing a relation field sees the stored foreign key rather than the expanded record."
         },
         {
+          "name": "navigation",
+          "type": "object",
+          "description": "What a card click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. With the key ABSENT a click opens the record in a drawer. `mode` is an overlay (`drawer`, `modal`, `split`, `popover`), `new_window`, `page` or `none`; write it whenever the block is written, because a block without `mode` takes the spec’s `page` default and `page` opens nothing on a board no parent view navigates for. `openNewTab: true` opens the record page in a new tab and outranks the mode, `preventNavigation: true` opens nothing, and `size` sets the overlay width. A click handler from a parent view outranks the whole key."
+        },
+        {
           "name": "dataSource",
           "type": "object",
           "binding": "object",
@@ -707,7 +711,7 @@
         {
           "name": "objectName",
           "type": "string",
-          "description": "ObjectQL object name. The record source is one of `data`, `staticData` and `objectName`; the `object-calendar` schema refuses a block that declares none of them."
+          "description": "ObjectQL object name. The record source is one of `data`, `staticData` and `objectName`; the `object-calendar` schema refuses a block that declares none of them, unless the node's `dataSource.object` names the object, which then lands on this key."
         },
         {
           "name": "calendar",
@@ -755,6 +759,11 @@
           "description": "External loading state, honoured ONLY alongside an array `data`: it then replaces the calendar with its loading placeholder. On a calendar fed by `staticData` or by `objectName` it is dropped, because that calendar owns its own loading state."
         },
         {
+          "name": "navigation",
+          "type": "object",
+          "description": "What an event click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. With the key ABSENT a click opens the record in a drawer. `mode` is an overlay (`drawer`, `modal`, `split`, `popover`), `new_window`, `page` or `none`; write it whenever the block is written, because a block without `mode` takes the spec’s `page` default and `page` opens nothing on a calendar no parent view navigates for. `openNewTab: true` opens the record page in a new tab and outranks the mode, `preventNavigation: true` opens nothing, and `size` sets the overlay width. An overlay mode wins over a parent view’s click handler; any other mode hands the click to it."
+        },
+        {
           "name": "dataSource",
           "type": "object",
           "binding": "object",
@@ -769,7 +778,7 @@
         {
           "name": "objectName",
           "type": "string",
-          "description": "ObjectQL object name. The record source is one of `data`, `staticData` and `objectName`; the `object-gantt` schema refuses a block that declares none of them."
+          "description": "ObjectQL object name. The record source is one of `data`, `staticData` and `objectName`; the `object-gantt` schema refuses a block that declares none of them, unless the node's `dataSource.object` names the object, which then lands on this key."
         },
         {
           "name": "gantt",
@@ -833,6 +842,11 @@
           "description": "Entry order in `[{ field, order }]` form, ordering the records the timeline fetches. Lowered to `$orderby` on the same query."
         },
         {
+          "name": "navigation",
+          "type": "object",
+          "description": "What an entry click opens — the `{ mode, size, openNewTab, preventNavigation }` block a list view declares. Write it with `mode`: with the key ABSENT, or with a block that omits `mode` (it takes the spec’s `page` default), a click opens nothing on a timeline no parent view navigates for. `drawer`, `modal` and `popover` open the entry’s record in that overlay; `new_window` opens the record page in a new tab; `page`, `none` and `split` open nothing here, because the timeline hands the split shell no main panel. `openNewTab: true` opens the record page in a new tab and outranks the mode, `preventNavigation: true` opens nothing, and `size` sets the overlay width. A click handler from a parent view outranks the whole key."
+        },
+        {
           "name": "dataSource",
           "type": "object",
           "binding": "object",
@@ -847,7 +861,7 @@
         {
           "name": "objectName",
           "type": "string",
-          "description": "ObjectQL object name. The record source is one of `data`, `staticData` and `objectName`; the `object-map` schema refuses a block that declares none of them."
+          "description": "ObjectQL object name. The record source is one of `data`, `staticData` and `objectName`, or the node’s `dataSource` binding; the `object-map` schema refuses a block that declares none of them."
         },
         {
           "name": "map",
@@ -1576,7 +1590,7 @@
           "name": "requiredPermissions",
           "type": "array",
           "of": "string",
-          "description": "Hide the whole bar unless the user holds these permissions"
+          "description": "[ADR-0066] Capabilities the user must ALL hold — names that permission sets grant through `systemPermissions`, not object actions: `read` or `update` here is an ordinary capability name, not the object's read or edit permission. When the client has resolved the user's capabilities and any of these is missing, this block does not render its content; wherever it would otherwise render, an insufficient-permissions notice takes its place. Presentation only: it authorises nothing, and the data API still serves the same data to the same user. A client that cannot resolve the user's capabilities (no permission provider, or one that does not report `systemPermissions`) renders this block as if they were held — it fails open."
         },
         {
           "name": "location",
@@ -1831,11 +1845,19 @@
           "name": "variant",
           "type": "enum",
           "enum": [
-            "heading",
-            "subheading",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
             "body",
-            "caption"
-          ]
+            "caption",
+            "overline",
+            "heading",
+            "subheading"
+          ],
+          "description": "One of the nine text styles ui:text uses: h1-h6 (rendered as that heading level), body, caption or overline. heading and subheading are earlier spellings the contract still accepts and renders as h2 and h3; write h2 or h3 instead."
         },
         {
           "name": "align",
@@ -1968,16 +1990,23 @@
         {
           "name": "items",
           "type": "array",
-          "required": true,
-          "description": "Term/description pairs [{ term, description }]"
+          "of": "object",
+          "description": "Term/description pairs [{ term, description }], in order: `term` is the row label, `description` is shown as-is (an object as JSON, an omitted one as an em dash). Omitted or empty renders the \"No details\" state"
         },
         {
           "name": "columns",
           "type": "enum",
           "enum": [
-            "1",
-            "2"
-          ]
+            {
+              "label": "1",
+              "value": 1
+            },
+            {
+              "label": "2",
+              "value": 2
+            }
+          ],
+          "description": "Grid columns from the small breakpoint up: the NUMBER 1 or 2 (default 1)"
         },
         {
           "name": "inline",
@@ -2003,15 +2032,19 @@
         {
           "name": "fields",
           "type": "array",
-          "description": "Columns per row — bare names or { field, label? }"
+          "description": "Fields shown after the title on each line, in order: a bare field name, or `{ field }`"
         },
         {
           "name": "filter",
-          "type": "array"
+          "type": "array",
+          "of": "object",
+          "description": "Filter rules `[{ field, operator, value }]`. A string `value` may be a context token such as `{current_user_id}`, resolved before the query"
         },
         {
           "name": "sort",
-          "type": "array"
+          "type": "array",
+          "of": "object",
+          "description": "Sort order `[{ field, order }]`, applied in list order"
         },
         {
           "name": "limit",
@@ -2075,10 +2108,13 @@
           "name": "size",
           "type": "enum",
           "enum": [
+            "default",
             "sm",
             "md",
-            "lg"
-          ]
+            "lg",
+            "icon"
+          ],
+          "description": "Button size: the Button primitive's `default`, `sm`, `lg` or `icon`, plus `md`, which renders as `default` (default: `default`)"
         },
         {
           "name": "className",
