@@ -312,6 +312,9 @@ const WRITE_KEYS: ReadonlySet<string> = new Set([
  * component or an array of them. A component carries none of a child entry's
  * keys at its own level (they sit under its `properties`), so reading it as an
  * entry credits nothing and skips nothing.
+ *
+ * One page block is a single entry rather than a list of them:
+ * {@link CHILD_ENTRY_COMPONENT_TYPES}.
  */
 const CHILD_COLLECTION_KEYS: ReadonlySet<string> = new Set(['subforms', 'details']);
 
@@ -335,6 +338,30 @@ const CHILD_ENTRY_FIELD_KEYS: ReadonlySet<string> = new Set(['amountField', 'rel
  * walk, which would read it against the parent.
  */
 const CHILD_ENTRY_FORM_FIELDS_KEY = 'formFields';
+
+/**
+ * [#21091] Page component types whose `properties` IS one child collection
+ * entry. `record:line_items` (objectui `plugin-form/src/LineItemsPanel.tsx`,
+ * read at the `.objectui-sha` pin `31971ff1e28f`) lists the rows of
+ * `childObject` whose `relationshipField` holds the record the page is on,
+ * draws its authored `columns` over them, sums `amountField` across them and
+ * writes the sum to the parent's `totalField` — the keys and meanings of a
+ * `subforms` entry, read off the block's raw props.
+ *
+ * Unlike a `subforms` or `details` entry it derives nothing: with no authored
+ * `columns` it draws no column, and it offers no per-row expand form. So it is
+ * read as a {@link ChildEntryKind} `panel`: the authored columns and the
+ * {@link CHILD_ENTRY_FIELD_KEYS} against the child, nothing derived.
+ */
+const CHILD_ENTRY_COMPONENT_TYPES: ReadonlySet<string> = new Set(['record:line_items']);
+
+/**
+ * How a child collection entry draws its child: a `collection` (a `subforms`
+ * or `details` entry) derives its grid and row form when they are not
+ * authored; a `panel` ({@link CHILD_ENTRY_COMPONENT_TYPES}) draws only what
+ * is authored.
+ */
+type ChildEntryKind = 'collection' | 'panel';
 
 /**
  * Keys whose value is a literal from some other vocabulary, never a field
@@ -777,6 +804,7 @@ function walk(
   path: string,
   segments: readonly string[],
   leafKey: string,
+  entryKind?: ChildEntryKind,
 ): void {
   if (node === null || node === undefined) return;
   if (typeof node === 'function') {
@@ -796,21 +824,24 @@ function walk(
   const inner = contextOf(ledger, rec, ctx);
   // [#20929] An entry of a child collection: its grid draws `childObject`'s
   // fields, whatever object the enclosing view is bound to.
-  const childEntry = CHILD_COLLECTION_KEYS.has(leafKey);
-  if (childEntry) {
+  const childEntry: ChildEntryKind | undefined = CHILD_COLLECTION_KEYS.has(leafKey) ? 'collection' : entryKind;
+  if (childEntry !== undefined) {
     const childObject = strName(rec.childObject);
     creditInlineGridColumns(ledger, rec.columns, childObject, 'display', root, `${path}.columns`);
     // [#20951] With no authored columns, the grid draws the derived ones.
     // [#21091] With no authored `formFields` either, its per-row expand form
-    // draws the derived fields; an authored list replaces them.
-    if (!hasAuthoredColumns(rec.columns)) {
+    // draws the derived fields; an authored list replaces them. A `panel`
+    // derives neither.
+    if (childEntry === 'collection' && !hasAuthoredColumns(rec.columns)) {
       const authoredRowForm = Array.isArray(rec[CHILD_ENTRY_FORM_FIELDS_KEY]);
       const rowForm = authoredRowForm ? undefined : { inlineMode: formFactorOf(rec.inlineMode) };
       const relationshipField = strName(rec.relationshipField);
       creditDerivedInlineGrid(ledger, childObject, relationshipField, rowForm, root, `${path}.childObject`);
     }
     // [#21091] An authored row form, read against the child.
-    creditAuthoredRowForm(ledger, rec, childObject, root, `${path}.${CHILD_ENTRY_FORM_FIELDS_KEY}`);
+    if (childEntry === 'collection') {
+      creditAuthoredRowForm(ledger, rec, childObject, root, `${path}.${CHILD_ENTRY_FORM_FIELDS_KEY}`);
+    }
     // [#20951] The child-field keys, each read against the child — and only
     // there, which is why the loop below skips them.
     for (const key of CHILD_ENTRY_FIELD_KEYS) {
@@ -818,7 +849,8 @@ function walk(
     }
   }
   for (const [key, value] of Object.entries(rec)) {
-    if (childEntry && (CHILD_ENTRY_FIELD_KEYS.has(key) || key === CHILD_ENTRY_FORM_FIELDS_KEY)) continue;
+    if (childEntry !== undefined && CHILD_ENTRY_FIELD_KEYS.has(key)) continue;
+    if (childEntry === 'collection' && key === CHILD_ENTRY_FORM_FIELDS_KEY) continue;
     const childPath = `${path}.${key}`;
     const childSegments = [...segments, key];
     // A predicate map spells the field as its KEY (`{ is_active: true }`); a
@@ -836,7 +868,9 @@ function walk(
     // A map KEYED by object name — `translations[].en.objects.crm_x`,
     // `permissions[].objects.crm_x` — names its object in a position no
     // `object:` lookup reaches.
-    walk(ledger, value, ledger.isObject(key) ? key : inner, root, childPath, childSegments, key);
+    // [#21091] A `record:line_items` block's `properties` is a child entry.
+    const panel = key === 'properties' && typeof rec.type === 'string' && CHILD_ENTRY_COMPONENT_TYPES.has(rec.type);
+    walk(ledger, value, ledger.isObject(key) ? key : inner, root, childPath, childSegments, key, panel ? 'panel' : undefined);
   }
 }
 

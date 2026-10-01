@@ -1099,6 +1099,51 @@ describe('[#21091] validateFieldConsumers — an inline collection reads its joi
   });
 
   /**
+   * Position 4 — a `record:line_items` page block. Its `properties` is one
+   * child entry: objectui's `LineItemsPanel` lists the `childObject` rows
+   * whose `relationshipField` holds the page's record, draws the authored
+   * `columns`, sums `amountField` and writes the sum to the parent's
+   * `totalField`. It derives no column and offers no row form.
+   */
+  describe('position 4: a `record:line_items` block reads its columns and child keys against its `childObject`', () => {
+    const block = (properties: AnyRec): AnyRec => ({
+      ...stack(LOOKUP),
+      pages: [{
+        name: 'ord_record',
+        type: 'record',
+        object: 'ord',
+        regions: [{ name: 'main', components: [{ type: 'record:line_items', properties }] }],
+      }],
+    });
+    const UNREAD = {
+      'ord.notes': 'inert',
+      'itm.qty': 'inert',
+      'itm.notes': 'inert',
+      'itm.spec': 'inert',
+      'itm.frozen': 'inert',
+      'itm.secret': 'inert',
+      'itm.ord': 'inert',
+    };
+
+    it('baseline: a block with no columns and no keys reads nothing, and derives nothing', () => {
+      expect(verdicts(block({ childObject: 'itm' }))).toEqual(UNREAD);
+    });
+
+    it('its authored columns, `relationshipField` and `amountField` credit the CHILD; the parent twin stays reported', () => {
+      const properties = { childObject: 'itm', relationshipField: 'ord', columns: [{ name: 'qty' }, { name: 'notes' }], amountField: 'spec' };
+      expect(verdicts(block(properties))).toEqual({ 'ord.notes': 'inert', 'itm.frozen': 'inert', 'itm.secret': 'inert' });
+    });
+
+    it('control: the same properties under a component type that is no child entry credit no child column', () => {
+      const s = block({ childObject: 'itm', columns: [{ name: 'qty' }] });
+      const page = (s.pages as AnyRec[])[0];
+      const region = (page.regions as AnyRec[])[0];
+      (region.components as AnyRec[])[0].type = 'record:details';
+      expect(verdicts(s)['itm.qty']).toBe('inert');
+    });
+  });
+
+  /**
    * The family's closing check, one row per position the card enumerates:
    * after it, `field-no-consumers` reports no inert verdict on any of these,
    * and the control — a child field nothing draws or names — stays inert in
@@ -1117,6 +1162,19 @@ describe('[#21091] validateFieldConsumers — an inline collection reads its joi
       ['an authored `inlineColumns` member', stack({ ...LOOKUP, inlineEdit: 'grid', inlineColumns: [{ name: 'notes' }] }), 'itm.notes'],
       ['an authored `subforms[].columns` member', stack(LOOKUP, form({ childObject: 'itm', columns: [{ name: 'spec' }] })), 'itm.spec'],
       ["a detail entry's authored `formFields` member", stack(LOOKUP, { details: [{ childObject: 'itm', columns: [{ name: 'qty' }], formFields: ['frozen'] }] }), 'itm.frozen'],
+      [
+        'a `record:line_items` block\'s column',
+        {
+          ...stack(LOOKUP),
+          pages: [{
+            name: 'ord_record',
+            type: 'record',
+            object: 'ord',
+            regions: [{ name: 'main', components: [{ type: 'record:line_items', properties: { childObject: 'itm', relationshipField: 'ord', columns: [{ name: 'notes' }] } }] }],
+          }],
+        },
+        'itm.notes',
+      ],
     ];
 
     it.each(rows)('%s is not reported', (_label, s, key) => {
