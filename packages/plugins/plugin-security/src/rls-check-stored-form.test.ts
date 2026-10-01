@@ -18,6 +18,17 @@
  * | `record.start_time == '09:00'` | `'09:00:00'` | 403 | `09:00:00` | shown |
  * | `record.due_at == '2026-01-05T10:00:00Z'` | `'2026-01-05T18:00:00+08:00'` | 403 | `2026-01-05T10:00:00.000Z` | shown |
  *
+ * [#21238] The same holds for a lone scalar written to a declared multi-valued
+ * column, which the write door stores as a one-member list (`tags`, and a
+ * `select` flagged `multiple`; the insert, a by-id update and a predicate
+ * update). Measured on `main` before the fold:
+ *
+ * | `check` | written | write, before | stored | read |
+ * |---|---|---|---|---|
+ * | `record.tags.contains('x')` | `'x'` | 403 | `["x"]` | shown |
+ * | `!record.tags.contains('x')` | `'x'` | admitted | `["x"]` | hidden |
+ * | `record.tags.contains('x')`, a by-id update | `'x'` | 403 | `["x"]` | shown |
+ *
  * ## formula's whole-day copy is out of reach here
  *
  * `@objectstack/formula`'s matcher carries its own copy of the whole-day upper
@@ -39,7 +50,13 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
-import { declaredTemporalColumns, storedFormCheckFilter, storedFormImage } from './rls-check-stored-form.js';
+import {
+  declaredMultiValueColumns,
+  declaredTemporalColumns,
+  storedFormCheckFilter,
+  storedFormCheckJudge,
+  storedFormImage,
+} from './rls-check-stored-form.js';
 
 /** A plain object — a filter node or an operator map. */
 function isPlain(value: unknown): value is Record<string, unknown> {
@@ -221,7 +238,7 @@ describe("formula's whole-day copy is out of reach in this file", () => {
 });
 
 for (const [driverName, makeDriver] of DRIVERS) {
-  describe(`${driverName}: the write check and the read give one answer for one temporal row`, () => {
+  describe(`${driverName}: the write check and the read give one answer for one stored row`, () => {
     for (const cell of CELLS) {
       const verdict = cell.admitted ? 'admitted and shown' : 'refused 403 and hidden';
       it(`${cell.predicate}, ${cell.column} written as ${show(cell.value)}: ${verdict}`, async () => {
@@ -319,5 +336,54 @@ describe('the stored-form step reads the declaration, never the values', () => {
     const image = { title: '2026-01-05T15:00:00Z', due_on: '2026-01-05' };
     expect(storedFormImage(image, COLUMNS)).toBe(image);
     expect(storedFormImage({ due_on: new Date('2026-01-05T15:00:00Z') }, COLUMNS)).toEqual({ due_on: '2026-01-05' });
+  });
+});
+
+describe('[#21238] the multi-valued half reads the declaration, never the values', () => {
+  const DECLARED = {
+    fields: {
+      tags: { type: 'tags', multiple: false },
+      labels: { type: 'multiselect', multiple: false },
+      owners: { type: 'select', multiple: true },
+      watchers: { type: 'user', multiple: true },
+      status: { type: 'select', multiple: false },
+      owner: { type: 'lookup', multiple: false },
+      title: { type: 'text', multiple: false },
+      due_on: { type: 'date', multiple: false },
+    },
+  };
+  const MULTI = declaredMultiValueColumns(DECLARED);
+  const TEMPORAL = declaredTemporalColumns(DECLARED);
+
+  it('names exactly the declared multi-valued columns, and none without a declaration', () => {
+    expect([...MULTI]).toEqual(['tags', 'labels', 'owners', 'watchers']);
+    expect(declaredMultiValueColumns(undefined).size).toBe(0);
+  });
+
+  it('stores a lone scalar on a multi-valued column as a one-member list, and nothing else', () => {
+    const image = { tags: 'x', owners: 'x', labels: ['a'], watchers: '', status: 'x', owner: 'x', title: 'x', due_on: '2026-01-05T15:00:00Z' };
+    const before = JSON.stringify(image);
+    const stored = storedFormImage(image, TEMPORAL, MULTI);
+    expect(stored).toEqual({ tags: ['x'], owners: ['x'], labels: ['a'], watchers: '', status: 'x', owner: 'x', title: 'x', due_on: '2026-01-05' });
+    expect(stored.labels).toBe(image.labels);
+    expect(JSON.stringify(image)).toBe(before);
+    const settled = { tags: ['x'], title: 'x', owners: null };
+    expect(storedFormImage(settled, TEMPORAL, MULTI)).toBe(settled);
+  });
+
+  it('gives a lone scalar the verdict its stored list gets, and leaves the comparands as written', () => {
+    for (const part of [
+      { tags: { $contains: 'x' } },
+      { $not: { tags: { $contains: 'x' } } },
+      { tags: { $notContains: 'x' } },
+      { $or: [{ tags: { $contains: 'y' } }, { owners: { $contains: 'x' } }] },
+    ]) {
+      const judge = storedFormCheckJudge([part], DECLARED);
+      expect(judge({ tags: 'x', owners: 'x' })).toBe(judge({ tags: ['x'], owners: ['x'] }));
+      expect(judge({ tags: 'xy', owners: 'xy' })).toBe(judge({ tags: ['xy'], owners: ['xy'] }));
+      expect(storedFormCheckFilter(part, TEMPORAL)).toBe(part);
+    }
+    const contains = storedFormCheckJudge([{ tags: { $contains: 'x' } }], DECLARED);
+    expect([contains({ tags: 'x' }), contains({ tags: 'xy' })]).toEqual([true, false]);
   });
 });
