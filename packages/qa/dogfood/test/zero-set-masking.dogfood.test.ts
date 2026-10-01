@@ -5,19 +5,20 @@
 //
 // `maskingRule` declares itself for "every non-system caller unless the
 // field's `requiredPermissions` are ALL held". A caller who resolves no
-// permission set holds nothing, so the rule applies to it. Two doors that
-// produce that caller on a real composition are driven here:
+// permission set holds nothing, so the rule applies to it. The door that
+// produces that caller on a real composition is driven here: the record door,
+// for a signed-in user on a deployment whose baseline is switched off
+// (`fallbackPermissionSet: null`) and who holds no grant.
 //
-//  - the public form's lookup picker, which serves the referenced object's
-//    declared display fields to a visitor with no session, on a deployment
-//    that registers no profile for public forms; and
-//  - the record door, for a signed-in user on a deployment whose baseline is
-//    switched off (`fallbackPermissionSet: null`) and who holds no grant.
+// [#21180] There used to be a second door — the public form's anonymous lookup
+// picker, serving the referenced object's display fields to a visitor with no
+// session. Ruling E on #21079 (comment 5933054144) retired the picker and
+// deleted its route, so that case and the public form it booted left with it.
 //
 // What is asserted, by class: the scene is real (a system read carries the
 // stored value); the field is served masked, never stored; a field with no
-// rule beside it is served as stored (the door really served the row); and,
-// on the record door, a predicate on the masked field is refused.
+// rule beside it is served as stored (the door really served the row); and a
+// predicate on the masked field is refused.
 //
 // `bootStack` with the real `SecurityPlugin`, `ObjectQL`, SQL driver, REST and
 // auth layers. `@objectstack/plugin-security` resolves to its BUILT output
@@ -26,12 +27,11 @@
 
 import { describe, it, expect } from 'vitest';
 import { bootStack } from '@objectstack/verify';
-import { defineStack, defineView } from '@objectstack/spec';
+import { defineStack } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { SecurityPlugin } from '@objectstack/plugin-security';
 
 const CONTACT = 'zsmask_contact';
-const INQUIRY = 'zsmask_inquiry';
 const KEY = 'zsmask_code';
 /** Synthetic stored values. */
 const STORED = 'SYNTH5150VALUE';
@@ -49,40 +49,6 @@ const ZsmaskContact = ObjectSchema.create({
   },
 });
 
-const ZsmaskInquiry = ObjectSchema.create({
-  name: INQUIRY,
-  label: 'Zero-set Mask Inquiry',
-  pluralLabel: 'Zero-set Mask Inquiries',
-  sharingModel: 'public_read_write',
-  fields: {
-    subject: Field.text({ label: 'Subject', required: true }),
-    contact: Field.lookup(CONTACT, { label: 'Contact' }),
-  },
-});
-
-const data = { provider: 'object' as const, object: INQUIRY };
-const ZsmaskInquiryViews = defineView({
-  list: { label: 'Inquiries', type: 'grid', data, columns: [{ field: 'subject' }] },
-  formViews: {
-    intake: {
-      type: 'simple',
-      data,
-      sections: [
-        {
-          name: 'intake',
-          label: 'Intake',
-          columns: 1,
-          fields: [
-            { field: 'subject', required: true },
-            { field: 'contact', publicPicker: { displayFields: ['name', KEY] } },
-          ],
-        },
-      ],
-      sharing: { enabled: true, allowAnonymous: true, publicLink: '/forms/zsmask-intake' },
-    },
-  },
-});
-
 const zsmaskStack = defineStack({
   manifest: {
     id: 'com.dogfood.zero-set-mask',
@@ -90,10 +56,9 @@ const zsmaskStack = defineStack({
     version: '0.0.0',
     type: 'app',
     name: 'Zero-set Mask Fixture',
-    description: 'One object with one masked field, and a public form whose picker displays it.',
+    description: 'One object with one masked field.',
   },
-  objects: [ZsmaskContact, ZsmaskInquiry],
-  views: [ZsmaskInquiryViews],
+  objects: [ZsmaskContact],
 });
 
 type Stack = Parameters<typeof bootStack>[0];
@@ -116,25 +81,6 @@ function expectMasked(value: unknown): void {
 }
 
 describe('[#20995] a masked field is served masked to a caller who resolves no permission set', () => {
-  it(
-    'on the public form lookup door, to a visitor with no session',
-    async () => {
-      const stack = await bootStack(zsmaskStack as unknown as Stack);
-      try {
-        await seedContact(stack);
-        const res = await stack.api('/forms/zsmask-intake/lookup/contact');
-        expect(res.status).toBe(200);
-        const body = (await res.json()) as { data: Array<Record<string, unknown>> };
-        expect(body.data).toHaveLength(1);
-        expect(body.data[0].name, 'the door served the row').toBe(NAME);
-        expectMasked(body.data[0][KEY]);
-      } finally {
-        await stack.stop();
-      }
-    },
-    120_000,
-  );
-
   it(
     'on the record door, to a signed-in user holding no grant on a deployment with no baseline',
     async () => {

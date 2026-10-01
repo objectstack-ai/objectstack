@@ -121,20 +121,11 @@ import { indexObjectGraph, recordsOf, resolveFieldPath, type ObjectGraph } from 
  *   page's `object` when absent — the binding `validate-page-field-bindings`
  *   already makes there (#19791);
  * - a lookup field's `lookupFilters` → that field's `reference`, else NOTHING:
- *   the picker queries the REFERENCED object, so like the public-lookup picker
- *   below it must never fall through to the object that owns the field (a
- *   `relatedListFilter` on the same field keeps binding to the owner, whose
- *   rows it filters) (#19791);
- * - `publicPicker.object`, else the enclosing form field's `reference`
- *   resolved on the view's object, else NOTHING — a form field's public-lookup
- *   picker (`FormFieldPublicPickerSchema`) queries the REFERENCED object, so
- *   its `filter` must never fall through to the parent form object (#16106
- *   review finding B1: that fall-through was a false refusal wherever the two
- *   objects share a field name with differing types). That reader claims the
- *   position by POSITION, not by key name: only where the enclosing record is
- *   a form field (`field`, required on `FormFieldBaseSchema`). A node that
- *   merely spells the same key somewhere else is bound by the ordinary
- *   readers below instead of inheriting this one's unjudged exit (#16403);
+ *   the picker queries the REFERENCED object, so it must never fall through to
+ *   the object that owns the field (a `relatedListFilter` on the same field
+ *   keeps binding to the owner, whose rows it filters) (#19791). [#21180] The
+ *   form field's anonymous public-lookup picker, the other claiming reader of
+ *   this shape, left with the retired key it read;
  * - and, under `objects`, the object itself — its list views, tabs and
  *   `relatedListFilter` (the filter runs over the CHILD rows, i.e. the object
  *   that owns the field).
@@ -390,15 +381,6 @@ function ancestorsOf(
 }
 
 /**
- * The key under which a form field carries its public-lookup picker
- * (`FormFieldPublicPickerSchema`, `ui/view.zod.ts`). Its `filter` is a static
- * pre-filter the public-lookup route runs on the REFERENCED object —
- * `picker.object` when written, else the field definition's `reference` —
- * never on the form's own object.
- */
-const PUBLIC_PICKER_KEY = 'publicPicker';
-
-/**
  * [#19791] The filter key of a lookup field's picker filter
  * (`FieldSchema.lookupFilters`). The console lowers each `{ field, operator,
  * value }` entry to a Mongo `$filter` on the REFERENCED object — the field's
@@ -426,18 +408,16 @@ function boundObjectOf(
   stack: AnyRec,
   path: string,
   datasets: ReadonlyMap<string, AnyRec>,
-  graph: ObjectGraph,
 ): string | undefined {
   const located = ancestorsOf(stack, path);
   if (!located) return undefined;
 
-  // [#19791] A lookup field's picker filter is a CLAIMING reader, for the
-  // #16106 B1 reason the public-lookup picker below is one: its conditions
-  // address the REFERENCED object, so the position binds to the enclosing
-  // field's literal `reference` and to NOTHING otherwise. Falling through to
-  // the owning object would be a false refusal wherever the two objects share
-  // a field name with differing types. Unbound leaves arm 2 silent on this
-  // subtree only; arm 1 still judges it.
+  // [#19791] A lookup field's picker filter is a CLAIMING reader (the #16106 B1
+  // reason): its conditions address the REFERENCED object, so the position
+  // binds to the enclosing field's literal `reference` and to NOTHING
+  // otherwise. Falling through to the owning object would be a false refusal
+  // wherever the two objects share a field name with differing types. Unbound
+  // leaves arm 2 silent on this subtree only; arm 1 still judges it.
   if (located.filterKey === LOOKUP_FILTERS_KEY) {
     const field = located.chain[located.chain.length - 1].node;
     return Object.prototype.hasOwnProperty.call(field, LOOKUP_FILTERS_KEY)
@@ -445,7 +425,7 @@ function boundObjectOf(
       : undefined;
   }
 
-  return bindAncestors(located.collection, located.chain, located.chain.length - 1, datasets, graph);
+  return bindAncestors(located.collection, located.chain, located.chain.length - 1, datasets);
 }
 
 /** The reader loop behind {@link boundObjectOf}, from ancestor `from` outward. */
@@ -454,45 +434,9 @@ function bindAncestors(
   chain: readonly Ancestor[],
   from: number,
   datasets: ReadonlyMap<string, AnyRec>,
-  graph: ObjectGraph,
 ): string | undefined {
   for (let i = from; i >= 0; i--) {
     const { key, node: r } = chain[i];
-
-    // [#16106 B1] A form field's `publicPicker` is a CLAIMING reader: the
-    // picker queries the referenced object, so the position binds to
-    // `picker.object`, else to the `reference` of the enclosing form field
-    // resolved on the view's own object — and to NOTHING otherwise. Falling
-    // through to the view's `data.object` (the parent form object) bound the
-    // filter to the wrong object and produced a FALSE refusal wherever the
-    // parent and the referenced object share a field name with differing
-    // types (a `date` on the parent, a `select` whose option value is a
-    // preset name on the referenced object).
-    //
-    // [#16403] The branch is entered by POSITION, never by key NAME alone.
-    // `publicPicker` is declared in exactly ONE place — `FormFieldBaseSchema`
-    // (`ui/view.zod.ts`), where the enclosing record is a form field and its
-    // `field` is REQUIRED — so the enclosing `field` identifies the position,
-    // and it is the same read the branch already has to make. Matching on the
-    // key alone would hand this reader every future node that happens to spell
-    // `publicPicker`, at any depth on any of the eight surfaces, because
-    // `scanForFilters` recognises a filter by key rather than by declared
-    // carrier; such a node would leave through this reader's `undefined` exit
-    // and take its whole filter subtree out of arm 2 SILENTLY. Under-reporting
-    // is the only failure direction this arm may have, so that hole could
-    // never VIOLATE the invariant — it would quietly spend it, where no test
-    // asking "was the invariant violated?" can see it. Outside the declared
-    // position the node falls through to the ordinary nearest-ancestor readers
-    // below, exactly like every other key this walk does not recognise.
-    const formField = key === PUBLIC_PICKER_KEY ? strName(chain[i - 1]?.node.field) : undefined;
-    if (formField) {
-      const override = literalObjectName(r.object);
-      if (override) return override;
-      const formObject = bindAncestors(collection, chain, i - 2, datasets, graph);
-      if (!formObject) return undefined;
-      const verdict = resolveFieldPath(graph, formObject, formField);
-      return verdict?.kind === 'ok' ? strName(verdict.meta?.reference) : undefined;
-    }
 
     // [#19791] A list page's `interfaceConfig` names its object `source`. Read
     // at that one position — the page's own config, directly under the
@@ -776,7 +720,7 @@ export function validatePresetComparands(
   }
 
   walkAuthoredFilters(stack, PRESET_COMPARAND_SURFACES, ({ value, path, where }) => {
-    const isTemporal = temporalFieldOracle(graph, boundObjectOf(stack, path, datasets, graph));
+    const isTemporal = temporalFieldOracle(graph, boundObjectOf(stack, path, datasets));
     judgeFilterValue(value, path, where, out, 0, isTemporal);
   });
 

@@ -14,14 +14,15 @@
  *   - `GET  /forms/:slug`               published an EMPTY field schema (#6601)
  *   - `POST /forms/:slug/submit`        computed an empty `allowedFields` and
  *                                       refused the submit outright (#6920)
- *   - `GET  /forms/:slug/lookup/:field` answered 403 for every field (#3022)
+ *   - the anonymous lookup-picker route answered 403 for every field (#3022)
  *
  * The first two clear on the stored-row path and are pinned below. The THIRD
- * cleared later, in two steps: the fold reached its `sections` walk on this
- * card, and #7467 made the route's `publicPicker` opt-in spec-declarable (it
- * used to be refused 422 at `saveMetaItem`, so no stored row could carry one).
- * What was pinned here as a `BOUNDARY: STILL 403` case is now the flipped
- * pin below: a stored form carrying a picker gets a real lookup answer.
+ * cleared later (#7467 made its per-field opt-in declarable, and a flipped pin
+ * here showed a stored form getting a real lookup answer) and then left
+ * entirely: [#21180] ruling E on #21079 retired the anonymous picker and
+ * deleted the route, so there is no third route to pin — the resolve route's
+ * unconditional strip of lookup / master_detail / user fields is pinned in
+ * `public-form-routes.test.ts`.
  *
  * ⛔ The fix is NOT `?? match.form?.groups` here. The #6926 guardrail stands: a
  * lenient consumer is where AI-authored metadata errors hide, and it leaves the
@@ -114,15 +115,7 @@ async function persistedBody(name: string, item: unknown): Promise<any> {
 const SHARING = { allowAnonymous: true, publicLink: '/forms/contact' };
 const DATA = { provider: 'object', object: 'lead' };
 
-/**
- * The section every case declares.
- *
- * It carries NO `publicPicker`, which — since #7467 declared that key — is a
- * choice rather than a necessity (when this file was written the schema
- * refused the key outright, so no stored row could carry one). A picker-less
- * field keeps the lookup route at 403, which the flipped case below contrasts
- * against its own picker-carrying fixture.
- */
+/** The section every case declares. */
 const SECTION = {
     label: 'About you',
     fields: ['company', { field: 'owner' }],
@@ -184,11 +177,6 @@ function routesOver(storedView: any) {
             return [];
         }),
         createData,
-        // The lookup route's search, once it gets past the 403. The route reads
-        // `result.data` (or `result.items`) — the flipped #7467 case below
-        // asserts the projected rows, so the stub answers in that shape.
-        queryData: vi.fn().mockResolvedValue({ data: [{ id: 'usr_1', name: 'Ada' }] }),
-        findData: vi.fn().mockResolvedValue({ data: [{ id: 'usr_1', name: 'Ada' }] }),
     };
     const rest = new RestServer(mockServer() as any, protocol, { api: { requireAuth: false } } as any);
     (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
@@ -199,7 +187,6 @@ function routesOver(storedView: any) {
         createData,
         resolve: find('GET', '/forms/:slug'),
         submit: find('POST', '/forms/:slug/submit'),
-        lookup: find('GET', '/forms/:slug/lookup/:field'),
     };
 }
 
@@ -232,46 +219,8 @@ describe('#7134 a Studio-saved form authored with `groups` no longer degrades on
         expect(createData.mock.calls[0][0].data).toEqual({ company: 'Acme', owner: 'usr_1' });
     });
 
-    it('FLIPPED [#7467]: the lookup route answers — a stored form carrying a publicPicker gets real data', async () => {
-        // This case was born as `BOUNDARY: the lookup route is STILL 403 — for
-        // a different reason`: #7134 listed the lookup route's blanket 403 as
-        // the third degradation, the fold reached its `sections` walk (the two
-        // routes above are the same walk, and they changed), but the route's
-        // `publicPicker` opt-in was declared in NO schema — `ViewMetadataSchema`
-        // is strict, so a form carrying one was refused 422 by `saveMetaItem`
-        // and could never reach a row. The original assertion said so and was
-        // annotated to be revisited the day a spec-side home landed.
-        //
-        // #7467 landed it (maintainer ruling: declare — `FormFieldSchema.
-        // publicPicker`, mirroring exactly what this route reads), so this is
-        // the revisit: the SAME real write path now persists the picker, the
-        // SAME real route handler gets past the 403, and the third degradation
-        // clears end-to-end. `object` is declared on the picker because the
-        // route's field-def fallback reads only legacy spellings — #7486.
-        //
-        // The picker-less half of the old pin is not lost: a stored form whose
-        // field declares no picker still answers 403, pinned in
-        // `public-form-lookup-picker.test.ts` (the opt-in stays an opt-in).
-        const withPicker = {
-            ...studioForm('groups'),
-            config: {
-                type: 'simple', data: DATA, sharing: SHARING,
-                groups: [{
-                    label: 'About you',
-                    fields: ['company', { field: 'owner', publicPicker: { displayFields: ['name'], object: 'sys_user' } }],
-                }],
-            },
-        };
-        const { lookup } = routesOver(await persistedBody('lead.contact', withPicker));
-        const res = mockRes();
-        await lookup.handler({ params: { slug: 'contact', field: 'owner' }, query: {} } as any, res);
-        expect(res.statusCode).toBe(200);
-        expect(res.body.data).toEqual([{ id: 'usr_1', name: 'Ada' }]);
-        expect(res.body.displayFields).toEqual(['name']);
-    });
-
     it('the stored row itself is the canonical spelling — nothing here reads `groups`', async () => {
-        // The claim under all three routes above, stated directly: the fix is
+        // The claim under both routes above, stated directly: the fix is
         // that the ROW changed, not that `rest-server.ts` learned a second key.
         const stored = await persistedBody('lead.contact', studioForm('groups'));
         expect(stored.config).not.toHaveProperty('groups');

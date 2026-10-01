@@ -23,14 +23,21 @@
  * all along — Prime Directive #12's failure mode, on the door Studio uses.
  *
  * It is not a `publicPicker` quirk. The four bodies in `MISDIRECTED` below are
- * four different ViewItem-branch failures — a picker subkey, an unknown
- * form-field key, a bad field enum, a typo'd column summary — and on `main` all
- * four surfaced that same container text, because the cause is structural: the
+ * four different ViewItem-branch failures — and on `main` all four surfaced
+ * that same container text, because the cause is structural: the
  * shared ranking scores a branch by `[issue count, carries unrecognized_keys]`,
  * the container branch always reports exactly ONE root `unrecognized_keys`
  * (`viewKind`/`config` are not container keys), and the ViewItem branch reports
  * exactly ONE nested `invalid_union` whose real key sits a level below where the
  * tiebreak looks.
+ *
+ * [#21180] The measured repro rode on `publicPicker`, which ruling E on #21079
+ * retired (comment 5933054144): the key is now a `retiredKey()` tombstone, so a
+ * subkey inside it can no longer be "unknown". The nested-subkey case moved to
+ * `keyField`, the other strict block a form field carries, and the retired key
+ * ITSELF became a case of its own — its prescription must reach the author
+ * through this door too, not the container text. The picker-carrying ACCEPTED
+ * body moved to REFUSED (§3), the one deliberate verdict move since #7741.
  *
  * ## What this file pins
  *
@@ -124,14 +131,14 @@ function rendered(body: unknown): string {
  */
 const MISDIRECTED: Array<[string, unknown, string]> = [
   [
-    'the card\'s repro — an unknown `publicPicker` subkey',
-    formItem({ field: 'owner', publicPicker: { displayFields: ['name'], sort: [{ field: 'email', order: 'desc' }] } }),
+    'the card\'s repro, on `keyField` — an unknown subkey inside a nested form-field block',
+    formItem({ field: 'owner', keyField: { field: 'name', sort: [{ field: 'email', order: 'desc' }] } }),
     'sort',
   ],
   [
-    '#7467\'s `offset` case, through the union door this time',
-    formItem({ field: 'owner', publicPicker: { displayFields: ['name'], offset: 10 } }),
-    'offset',
+    '[#21180] the retired `publicPicker` key itself — its prescription, not the container text',
+    formItem({ field: 'owner', publicPicker: { displayFields: ['name'] } }),
+    'publicPicker',
   ],
   [
     'an unknown key on the form FIELD itself',
@@ -177,7 +184,7 @@ describe('[#7510] a ViewItem-branch failure surfaces the ViewItem branch', () =>
   it('the byte-identical body minus the bad subkey still saves', () => {
     // The card's own control: this is what makes the rejection a diagnostic
     // problem rather than an acceptance one.
-    const r = ViewMetadataSchema.safeParse(formItem({ field: 'owner', publicPicker: { displayFields: ['name'] } }));
+    const r = ViewMetadataSchema.safeParse(formItem({ field: 'owner', keyField: { field: 'name' } }));
     expect(r.success, JSON.stringify((r as any).error?.issues)).toBe(true);
   });
 });
@@ -212,7 +219,7 @@ describe('[#7510] the container diagnostic still belongs to containers', () => {
 });
 
 describe('[#7510] the union\'s error payload is focused, never reshaped', () => {
-  const CLAIMED = formItem({ field: 'owner', publicPicker: { displayFields: ['name'], sort: [] } });
+  const CLAIMED = formItem({ field: 'owner', keyField: { field: 'name', sort: [] } });
 
   it('keeps four branches, in position — a positional consumer still finds its member', () => {
     const issue = ViewMetadataSchema.safeParse(CLAIMED).error!.issues[0] as unknown as {
@@ -263,8 +270,14 @@ describe('[#7510] ⛔ the acceptance face did not move', () => {
   // now, and their unbound originals are pinned as REFUSED below. #7510's own
   // claim — focusing never changes a verdict — is unaffected and still pinned
   // by the rest of this corpus.
+  //
+  // [#21180] A second deliberate, RULED move (ruling E on #21079): the form
+  // field's `publicPicker` is retired, so the picker-carrying body that opened
+  // this list is now REFUSED (pinned below, with the MISDIRECTED case that
+  // shows its prescription reaching the author). Its slot here is taken by the
+  // same form item with a `keyField` block, the nested control.
   const ACCEPTED: unknown[] = [
-    formItem({ field: 'owner', publicPicker: { displayFields: ['name'] } }),
+    formItem({ field: 'owner', keyField: { field: 'name' } }),
     { name: 'crm_lead.all', object: 'crm_lead', viewKind: 'list', config: { type: 'grid', columns: ['name'] } },
     { object: 'crm_lead', list: { type: 'grid', columns: ['name'] } },
     { object: 'crm_lead', formViews: { my: { type: 'simple' } } },
@@ -279,6 +292,8 @@ describe('[#7510] ⛔ the acceptance face did not move', () => {
     [{ type: 'simple' }, ['invalid_union']],
     [{ isPinned: true }, ['invalid_union']],
     [MISDIRECTED[0]![1], ['invalid_union']],
+    // [#21180] the retired picker key, refused by its tombstone.
+    [MISDIRECTED[1]![1], ['invalid_union']],
     [MISDIRECTED[3]![1], ['invalid_union']],
     [{ name: 'a.b', object: 'a', viewKind: 'chart', config: { type: 'grid', columns: ['name'] } }, ['invalid_union']],
     [{ object: 'crm_lead', listViews: {} }, ['custom']],
