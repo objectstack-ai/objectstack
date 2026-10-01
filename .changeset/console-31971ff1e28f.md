@@ -2,7 +2,7 @@
 "@objectstack/console": minor
 ---
 
-Console (objectui) refreshed to `31971ff1e28f`. Frontend changes in this range:
+Console (objectui) refreshed to `31971ff1e28f`. This pin carries objectui#11353 (objectui `31971ff1e`): the console bundles one zod instance again, so the Studio's spec-derived forms render their fields — the New Package dialog creates a package and the dashboard and report inspectors show the spec schema. The previous pin shipped objectui's zod 4.4.3 beside the injected spec's 4.6.1. That commit carries no objectui changeset, so it is listed under "declared nowhere" below. Frontend changes in this range:
 
 Derived from the changesets objectui declared over the range — 56 releasing of 58 changesets added across 44 non-merge commits; omitted: 2 release-nothing changesets, 3 commits carrying no changeset (they ship no package code).
 
@@ -71,6 +71,29 @@ Derived from the changesets objectui declared over the range — 56 releasing of
 - _(no changeset)_ ci(half-state-patrol): call objectstack's composite action pinned to a sha, with the no-anchor opt-in (objectui#11174) (#11332) (objectui `2c274e3a8`)
 - _(no changeset)_ docs: layout.md names the object-grid object with objectName, and flex.mdx teaches the four direction values (objectui#11298) (#11314) (objectui `0c6f9bbd7`)
 
-<!-- adr-0087: TODO — the pin bump cannot answer this; a human must (objectstack#6494) -->
+<!-- adr-0087: not-required (no-migration-prescription)
+     This diff moves `.objectui-sha` and the artefacts that travel with it: this console
+     changeset, `sdui.manifest.json` + `scripts/sdui-manifest.record.json`, the re-recorded
+     `packages/sdui-parser/objectui-lockstep.json` (no port owed: both parser copies agree on
+     all 25 codes at the new pin), and the re-measured pin citations in `packages/spec/src`,
+     which carry their own `@objectstack/spec` patch changeset. It adds, removes or renames no
+     ObjectStack-authorable key: no Zod schema, no spec declaration and no stored
+     `sys_metadata` shape moves in it, so `objectstack migrate meta` has nothing here to
+     rewrite, and this body carries no FROM/TO prescription of its own.
+     The 12 declared-breaking entries listed above are objectui's OWN package surfaces, each
+     already carrying its upstream record: `db0beb2aa`, `e3782d26e`, `997ce38cb` and
+     `5262f7dd3` (objectui's validator for `object-gantt`, `object-form`, `object-map` and
+     `object-chart` refuses the flat spelling and reads the `properties` bag, the shape
+     `@objectstack/spec`'s `ComponentPropsMap` rows already declare), `770cc5ba4` (objectui's
+     navigation resolver props), `cd5b19a7e` (objectui's `ActionGroup` TypeScript interface),
+     `582edef1c` (objectui's own `object-grid` `showFilters`, which no ObjectStack shape ever
+     declared), `1563d3e10` (objectui's Studio field designer and metadata write guard), and
+     three that mirror an ObjectStack-authorable key already retired and registered on this
+     side: `f3c2bb0f9` (`ui/ChartConfig:aria`), `02f1813f8` (`ui/Page:assignedProfiles`) and
+     `e2271568f` (`ui/Action:aria`). Where an entry mirrors an ObjectStack key, the ledger
+     entry belongs to the `packages/spec` PR that lands the retirement, never to the pin bump.
+     Scope of the claim, stated rather than implied: it is a claim about THIS diff, not a
+     per-entry re-measurement of the 12 upstream declared-breaking entries.
+-->
 
 objectui range: `e420df310f5b...31971ff1e28f`

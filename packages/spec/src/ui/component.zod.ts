@@ -970,7 +970,15 @@ export const PageCardProps = strictObject({
  * declarations identical.
  *
  * Each clause is read off the objectui pin this repo builds against
- * (`.objectui-sha` = `e420df310f5b`, re-read there 2026-09-30: across the hop
+ * (`.objectui-sha` = `31971ff1e28f`, re-read there 2026-10-01: across the hop
+ * from `e420df310f5b` `record-details.tsx`, `record-highlights.tsx` and the
+ * three `permissions` files are byte-identical, so NO anchor in those five
+ * moved; `record-related-list.tsx` changed one docblock line above the gate
+ * (objectui#11270's `record_related` row actions, +3/-2) and
+ * `record-quick-actions.tsx` rewrote its fail-closed docblock to say the bar
+ * is replaced by the notice rather than hidden (objectui#10224, +8/-2), so
+ * every anchor in those two MOVED with its cited text byte-identical, by 1
+ * and by 6. At `e420df310f5b`, 2026-09-30: across the hop
  * from `db11afd4967c` `record-quick-actions.tsx` and `usePermissions.ts` are
  * byte-identical, `MePermissionsProvider.tsx` and `PermissionProvider.tsx` each
  * gained one `effectiveObjects` member below every cited line (objectui#4421),
@@ -1000,22 +1008,22 @@ export const PageCardProps = strictObject({
  *
  * 1. CAPABILITIES, NOT OBJECT ACTIONS. Every block gates through
  *    `perms.hasCapabilities(required)` — `record-details.tsx:244`,
- *    `record-highlights.tsx:102`, `record-related-list.tsx:364`,
- *    `record-quick-actions.tsx:267` — and never `perms.can(objectName, …)`;
+ *    `record-highlights.tsx:102`, `record-related-list.tsx:365`,
+ *    `record-quick-actions.tsx:273` — and never `perms.can(objectName, …)`;
  *    each renderer's docblock states the capability "is not object-scoped"
  *    (`record-details.tsx:233`, `record-highlights.tsx:81`,
- *    `record-related-list.tsx:351`, `record-quick-actions.tsx:256`). `read`
+ *    `record-related-list.tsx:352`, `record-quick-actions.tsx:262`). `read`
  *    is looked up in the capability set like any other name.
  * 2. ALL OF THEM. `MePermissionsProvider.tsx:416` is
  *    `required.every((p) => held.has(p))`.
  * 3. THE OUTCOME. Each block returns a `role="status"` "Insufficient
  *    permissions to view …" notice instead of its content —
  *    `record-details.tsx:244-252`, `record-highlights.tsx:160-173`,
- *    `record-related-list.tsx:364-372`, `record-quick-actions.tsx:267-275`.
+ *    `record-related-list.tsx:365-373`, `record-quick-actions.tsx:273-281`.
  *    Checks that already withhold the content run first on two of them (no
  *    record bound, `record-details.tsx:188`; no object,
- *    `record-related-list.tsx:297`; the related object's read gate,
- *    `record-related-list.tsx:315`), which is why the text says "wherever it
+ *    `record-related-list.tsx:298`; the related object's read gate,
+ *    `record-related-list.tsx:316`), which is why the text says "wherever it
  *    would otherwise render" rather than promising the notice unconditionally.
  * 4. PRESENTATION ONLY. The gate is renderer code: nothing in this repo's
  *    server packages reads a page component's `requiredPermissions`. The data
@@ -2351,11 +2359,12 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * the button.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `e420df310`; re-derived at that pin 2026-09-30 —
+   * (`.objectui-sha` = `31971ff1e`; re-derived at that pin 2026-10-01 —
    * `button.tsx`, `lib/lazy-icon.tsx`, `renderers/action/resolve-icon.ts` and the
-   * generated `lucide-record-icon-names.ts` are all byte-identical to `db11afd49`
+   * generated `lucide-record-icon-names.ts` are all byte-identical to `e420df310`
    * across the hop onto this pin, so every anchor below holds unmoved and was
-   * re-checked in place; they were byte-identical to `dd3f7e1be` across the hop
+   * re-checked in place; they were byte-identical to `db11afd49` across the hop
+   * onto `e420df310` (2026-09-30), and byte-identical to `dd3f7e1be` across the hop
    * onto `db11afd49` (2026-09-29) as well. At `dd3f7e1be` (2026-09-28)
    * `button.tsx` and `lib/lazy-icon.tsx` are byte-identical to `f8a9d0fb0`
    * (`git diff --quiet`); `resolve-icon.ts` changed on this hop (+42/-17,
@@ -2824,9 +2833,16 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
  * had no row for — `action:button`, `action:group`, `action:menu`,
  * `action:icon`, `element:definition-list`, `element:repeater`
  * (`core/src/registry/public-blocks.ts:117-122` at the pin this repo builds
- * against, `.objectui-sha` = `e420df310`; first measured at `.objectui-sha`
+ * against, `.objectui-sha` = `31971ff1e`; first measured at `.objectui-sha`
  * pin `f8a9d0fb0`, every read point below re-derived at the current pin
- * 2026-09-30: `public-blocks.ts`, `auto-trigger.ts` and `static-params.ts` are
+ * 2026-10-01: `public-blocks.ts`, `auto-trigger.ts`, `static-params.ts`,
+ * `action-group.tsx`, `action-menu.tsx` and `action-icon.tsx` are
+ * byte-identical to `e420df310`, so their anchors held unmoved, and
+ * `action-button.tsx` changed only inside its registration (+9/-1,
+ * objectui#11168 slice 2: the `size` input now publishes the five sizes its
+ * row declares, where it published `sm` / `md` / `lg`), so every read point
+ * in it held unmoved and the `inputs` range grew `414-551` -> `414-559`. At
+ * `e420df310` (2026-09-30): `public-blocks.ts`, `auto-trigger.ts` and `static-params.ts` are
  * byte-identical to `db11afd49`, and all four `action-*.tsx` renderers changed
  * — objectui#11168 slice 1 rewrote every registration's `inputs` to publish
  * the keys the block path honours, objectui#11212 made each `visible` gate
@@ -2985,9 +3001,10 @@ const ACTION_NODE_GUIDANCE = {
  *   `undoable`, `recordIdField`, `locations`, `toast`, `resultDialog`,
  *   `onSuccess`, `objectName`.
  *
- * The registration's `inputs` (`:414-551`) publish twenty-seven of these
+ * The registration's `inputs` (`:414-559`) publish twenty-seven of these
  * twenty-nine keys since objectui#11168 slice 1 (at `db11afd49` they published
- * seven, `:395-416`); the two left unpublished are `endpoint` and `undoable`,
+ * seven, `:395-416`), and since slice 2 the `size` input publishes the same
+ * five values this row declares (`default`, `sm`, `md`, `lg`, `icon`); the two left unpublished are `endpoint` and `undoable`,
  * each still forwarded (`:215-311`), on objectui's measurement that the
  * console's own `api` handler reads `target` and never `endpoint`, and that
  * the runner offers Undo only with a host row stash this block never writes.
@@ -3900,11 +3917,12 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * same record for the metric tile.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `e420df310`; re-derived at that pin 2026-09-30 —
+   * (`.objectui-sha` = `31971ff1e`; re-derived at that pin 2026-10-01 —
    * `plugin-dashboard/src/index.tsx`, `ObjectMetricWidget.tsx`,
    * `MetricWidget.tsx`, `MetricCard.tsx` and `lazy-icon.tsx` are all
-   * byte-identical to `db11afd49`, so every anchor below holds unmoved and was
-   * re-read in place. At `db11afd49` (2026-09-29)
+   * byte-identical to `e420df310`, so every anchor below holds unmoved and was
+   * re-read in place; they were byte-identical to `db11afd49` across the hop
+   * onto `e420df310` (2026-09-30) as well. At `db11afd49` (2026-09-29)
    * `MetricWidget.tsx` and `lazy-icon.tsx` are byte-identical to `dd3f7e1be`;
    * `ObjectMetricWidget.tsx` changed in one comment line (`:321`), so `:230` and
    * `:595` did not move; `plugin-dashboard/src/index.tsx` gained the

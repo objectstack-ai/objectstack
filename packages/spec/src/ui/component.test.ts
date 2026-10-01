@@ -3483,7 +3483,16 @@ describe('#7751 — object-* block props schemas', () => {
 // #16503 — the spec half of objectui#8172 (decision batch #68, 2026-09-07,
 // option A: the contract declares the capability that already ships, is
 // documented and is in use). Measured at the objectui pin this repo builds
-// against (`.objectui-sha` = `e420df310`; re-measured there 2026-09-30 —
+// against (`.objectui-sha` = `31971ff1e`; re-measured there 2026-10-01 —
+// `plugin-kanban/src/types.ts` is byte-identical to `e420df310` and still
+// declares no `limit`; `ObjectKanban.tsx` changed only in the comment above
+// its `navigation` read (objectui#8652), below both anchors, so `:722` and
+// `:97` did not move; `index.tsx` changed below the mapping (objectui#8652's
+// `navigation` input), which did not move from `487-491`; `objectql.ts`
+// MOVED the member `4430` -> `4588` byte-identical, still inside
+// `ObjectKanbanSchema`; and `plugin-kanban.mdx` gained a `navigation`
+// Properties row below the `limit` row and still teaches `limit: 250`. At
+// `e420df310`, re-measured there 2026-09-30 —
 // `plugin-kanban/src/types.ts` is byte-identical to `db11afd49` and still
 // declares no `limit`; the other four files changed, so their anchors were
 // re-READ. `ObjectKanban.tsx` changed at BOTH anchors: objectui#9853 renamed
@@ -3531,7 +3540,7 @@ describe('#7751 — object-* block props schemas', () => {
 // `OBJECT_KANBAN_DATA_SOURCE`, ⚠️ `KanbanSchema` is RETIRED at this pin and
 // `plugin-kanban/src/types.ts` declares the member no more — the published
 // twin is `ObjectKanbanSchema`, declaring `limit?: number` at
-// `packages/types/src/objectql.ts:4430` — and `content/docs/plugins/plugin-kanban.mdx`
+// `packages/types/src/objectql.ts:4588` — and `content/docs/plugins/plugin-kanban.mdx`
 // teaches `limit: 250` with a Properties row. The strict map refused the key by
 // name — the same `unrecognized_keys` verdict as the `bogusProp` control — so an
 // author following the published docs wrote a node the save gate rejected.
@@ -3592,7 +3601,13 @@ describe('ObjectKanbanPropsSchema limit — the row cap four objectui faces alre
 // on the React-host `kanban-ui` block). Unlike `limit` above — a key four
 // objectui faces already implemented, so the spec was the half that was wrong
 // — `quickAdd` was FORWARDED and never read: at the pin this repo builds
-// against (`.objectui-sha` = `e420df310`; re-measured there 2026-09-30 —
+// against (`.objectui-sha` = `31971ff1e`; re-measured there 2026-10-01 —
+// `KanbanImpl.tsx` and `KanbanBoardCore.tsx` are byte-identical to
+// `e420df310`, so `:621`, `:634`, `:78` and `:111-112` did not move and were
+// re-read in place; `ObjectKanban.tsx` changed only in the comment above its
+// `navigation` read (objectui#8652), above the spread, which MOVED `1641` ->
+// `1639` with its line byte-identical; and the counts re-read the same, 2 /
+// 2 / 11. At `e420df310`, re-measured there 2026-09-30 —
 // `KanbanImpl.tsx` is byte-identical to `db11afd49`, so `:621` and `:634` did
 // not move and were re-read in place; `ObjectKanban.tsx` changed, carrying
 // objectui's own half of this retirement: objectui#8285 stopped forwarding
@@ -3620,7 +3635,7 @@ describe('ObjectKanbanPropsSchema limit — the row cap four objectui faces alre
 // below it, not the spread; at `f8a9d0fb0` (2026-09-24) it
 // had MOVED `1563` -> `1578` the same way (objectui#10068's `$orderby`); both
 // files were byte-identical across the hop onto `62597c588`, and every anchor
-// was re-READ at `87af769e9` 2026-09-20) `ObjectKanban.tsx:1641`
+// was re-READ at `87af769e9` 2026-09-20) `ObjectKanban.tsx:1639`
 // spreads the
 // authored bag into `KanbanBoardCore` (into `KanbanRenderer` until
 // objectui#11234, which reads the pair off it no more) and `KanbanImpl` gates the affordance on
