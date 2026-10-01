@@ -229,12 +229,14 @@ async function signalParent(command: Command, signal: NodeJS.Signals): Promise<v
   expect(fate, `os ${command} did not exit within ${EXIT_TIMEOUT_MS}ms of ${signal}.\n${output()}`)
     .not.toBe('timeout');
 
-  expect(
+  // Soft, both: the two readings are independent facts, and a regression
+  // should report each of them rather than stop at the first.
+  expect.soft(
     children.filter(isAlive),
     `os ${command}: ${signal} to the parent left its serve child running (orphaned, ` +
       `reparented to init).\n--- output ---\n${output()}`,
   ).toEqual([]);
-  expect(
+  expect.soft(
     portIsFree(port),
     `os ${command}: ${signal} to the parent left port ${port} bound.\n--- output ---\n${output()}`,
   ).toBe(true);
