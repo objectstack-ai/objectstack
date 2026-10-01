@@ -245,8 +245,9 @@ const CLI_PACKAGE_JSON = fileURLToPath(new URL('../package.json', import.meta.ur
  * `compilerOptions.paths` to EVERY specifier it resolves — including this
  * CLI's own. Ten in-tree directories carry such a rule, written for tsc so a
  * `typecheck` grades against a producer's source rather than its last build
- * (`check:type-source-resolution` requires them), and #11094 named the runtime
- * half "a latent runtime redirect for any tsx-honouring tool". Run this shim
+ * (`check:type-source-resolution` required them until it was retired on
+ * 2026-09-18, #18373), and #11094 named the runtime half "a latent runtime
+ * redirect for any tsx-honouring tool". Run this shim
  * from one of them and the CLI's imports are re-routed:
  *
  *     cd examples/app-multi-package

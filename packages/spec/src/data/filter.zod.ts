@@ -1012,17 +1012,21 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  *   SQLite. Measured on better-sqlite3, live PostgreSQL 16.13 and live MySQL
  *   8.0.46 over one fixture whose rows make substring and membership disagree.
  *   `driver-sqlite-wasm` and `driver-turso` inherit it.
- * - **`driver-memory` — DOES NOT ANSWER IT YET, and reads `multiple: true`
- *   two ways of its own.** Measured on the same fixture: its live query path
- *   matches a stored array by substring PER ELEMENT (so `['redwood']` answers
- *   `$contains: 'red'`, the same over-match the SQL family just lost) and
- *   answers NOTHING at all for a `multiple: true` NUMBER, while its reference
- *   matcher answers no array at all. That whole axis — every non-equality arm
- *   over a stored array, in both directions — was measured on a tracking card
- *   that recorded the semantics as undecided; this ruling is the decision it
- *   was missing. ⚠️ So an application whose tests run on the in-memory double
- *   and whose production runs SQL still gets two answers from one filter here.
- *   That card is gone: measure `driver-memory` for the open set, ⛔ not this text.
+ * - **`driver-memory` — ANSWERS the membership contract, on every face.** Its
+ *   live query path (both filter spellings) and its analytics face fork on the
+ *   field's DECLARED storage shape, read from the schema `syncSchema` recorded
+ *   (`STRUCTURED_JSON_TYPES`, or `isMultiValueField`): membership there, the
+ *   substring test on a scalar column. Measured over `driver-sql`'s own
+ *   fixture, row for row: `['redwood']` no longer answers `'red'`, `['u10']` no
+ *   longer answers `'u1'`, and the stored number `1` answers `'1'`. The
+ *   analytics face's SQL echo renders SQLite's `json_each` construct for the
+ *   same question. A field with no recorded declaration keeps the substring
+ *   reading, as a table `driver-sql` was never told about does.
+ *
+ * Only `$contains` / `$notContains` are ruled here. The other text operators
+ * over a stored array are not: measured on the same fixture, `$startsWith`
+ * still answers per element on `driver-memory` and over the serialized text on
+ * SQLite, so those two backends still disagree there.
  *
  * The comparand stays a STRING on every column ({@link CONTAINS_DESCRIPTION}),
  * so a member that is stored as a JSON number or boolean is named by its text:
@@ -1039,7 +1043,6 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  * @see https://github.com/objectstack-ai/objectstack/issues/6520 (the JS faces — landed)
  * @see https://github.com/objectstack-ai/objectstack/issues/17590 (the membership reading — the SQL family landed)
  * @see https://github.com/objectstack-ai/objectstack/issues/7398 (the refusal whose prescription this spelling is)
- * @see https://github.com/objectstack-ai/objectstack/issues/17286 (driver-memory's stored-array axis — open)
  */
 /**
  * The comparand contract the four CASE-SENSITIVE members of this family share

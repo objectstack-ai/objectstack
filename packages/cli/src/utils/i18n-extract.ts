@@ -932,9 +932,10 @@ function walkObjectSections(config: any, out: ExpectedEntry[]): void {
   // private copy. That walk exists precisely because duplicating it produced a
   // dead rule once already (#3583): components hang off `regions[].components`
   // AND `slots.<slot>` (which may be a bare component, not an array), sub-trees
-  // live inside the untyped `properties` bag (`page:tabs` →
-  // `properties.items[].children`, `page:card` → `properties.body`/`.footer`),
-  // and source-authored pages (`kind: 'html' | 'react' | 'jsx'`) hold only a
+  // live inside the untyped `properties` bag at the positions spec's
+  // `pageComponentSlotPositions()` derives (`page:tabs` →
+  // `properties.items[].children`, `page:card` → `properties.footer`, every
+  // container → `properties.children`), and source-authored pages (`kind: 'html' | 'react' | 'jsx'`) hold only a
   // DERIVED region cache that the author never wrote — scaffolding translation
   // keys off that cache would invent an authoring surface.
   //
@@ -1099,8 +1100,10 @@ export function authorWarnedTranslationGroups(): ReadonlySet<string> {
  * WALK — which components carry those keys — is `walkAddressedPageComponents`,
  * the same traversal `translatePage` itself runs (commit c45d8e6b4, completing the key
  * list's precedent). The walk owns the roots (`regions[].components[]` AND
- * `slots.<slot>`), the descent (`properties.children` AND a panel's
- * `properties.items[].children`, depth-capped, cycle-guarded) and the ruled
+ * `slots.<slot>`), the descent (the authorable slot positions spec derives
+ * from the component rows — `properties.children`, a card's
+ * `properties.footer`, a panel's `properties.items[].children` — depth-capped,
+ * cycle-guarded) and the ruled
  * collision arbitration (commit 901355c3b: root level wins outright; among nested
  * components, document-order first sighting) — this function used to
  * hand-mirror all five and now owns none of them. What it still owns:
@@ -1113,15 +1116,14 @@ export function authorWarnedTranslationGroups(): ReadonlySet<string> {
  *   - the `label` either/or: `label` may be authored on the component itself
  *     or in its props — the same either/or `translatePage` resolves back onto.
  *
- * ⛔ Deliberately NOT `@objectstack/lint`'s `walkPageComponents`, which is
- * WIDER than the resolver in two ways (`properties.body`, `properties.footer`
- * — `page:card`'s slots, which the resolver leaves undescended as a renderer
- * back-compat fallback rather than an authorable spelling; `slots.<slot>`
- * roots and `properties.items[].children` were the other two until #16772
- * brought both into the shared walk) and NARROWER in one (it skips
- * `kind: 'html' | 'react' | 'jsx'` pages, which `translatePage` walks) —
- * either direction of that mismatch is one half of the failure pair
- * `PAGE_COMPONENT_COPY_KEYS`' own JSDoc names.
+ * ⛔ Deliberately NOT `@objectstack/lint`'s `walkPageComponents`. Its descent
+ * is no longer WIDER than the resolver's — since #20940 both read spec's one
+ * derived slot list, and `page:card`'s `properties.body` / `.footer` were the
+ * last positions lint walked and the resolver did not (`slots.<slot>` roots
+ * and `properties.items[].children` closed at #16772) — but it is still
+ * NARROWER in one way (it skips `kind: 'html' | 'react' | 'jsx'` pages, which
+ * `translatePage` walks), and a mismatch in either direction is one half of
+ * the failure pair `PAGE_COMPONENT_COPY_KEYS`' own JSDoc names.
  */
 function emitPageComponentCopy(out: ExpectedEntry[], page: any, name: string): void {
   walkAddressedPageComponents(page, (component, { id, nested, addressed }) => {

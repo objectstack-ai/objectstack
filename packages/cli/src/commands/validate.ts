@@ -64,6 +64,10 @@ import type { PermissionSetNameCollisionDiagnostic } from '@objectstack/plugin-s
 // over the parsed stack the way the load path registers it. The verdict is
 // `@objectstack/objectql`'s; see the module header.
 import { findViewContainerNameRefusals } from '../utils/view-container-names.js';
+// A field `picklist` that names no picklist the stack declares — refused, or
+// reported when the declaring package depends on packages outside the stack.
+// Walked the way the load path registers, like the refusal above.
+import { judgePicklistReferences, printPicklistReferenceNotices } from '../utils/picklist-references.js';
 
 export default class Validate extends Command {
   static override description =
@@ -166,6 +170,13 @@ export default class Validate extends Command {
     // of a project without a manifest is unchanged on both faces. `os compile`
     // computes the identical record, so the residue pin keeps holding.
     let jsxGateNotices: ReturnType<typeof resolveJsxGateManifest>['notices'] = [];
+    // The `info` records of a field `picklist` reference that resolves nowhere
+    // in the stack while the declaring package depends on packages outside it
+    // (step 2d). Same class as the notice above — reports, never refuses, and
+    // is NOT in the `warnings` list `--strict` reads: the reference may be
+    // right, and `--strict` failing on it would refuse a correct stack. `os
+    // compile` computes the identical records, so the residue pin keeps holding.
+    let picklistReferenceNotices: ReturnType<typeof judgePicklistReferences>['notices'] = [];
     const warningsSoFar = () => [
       ...ruleAdvisories,
       ...docWarnings,
@@ -184,6 +195,8 @@ export default class Validate extends Command {
       ...permissionSetCollisionWarnings,
       // [#20113] APPENDED for the same reason, one member later again.
       ...jsxGateNotices,
+      // APPENDED for the same reason, one member later again.
+      ...picklistReferenceNotices,
     ];
     // [commit 79cf692b0] The ADR-0087 D2 conversion notices, hoisted for the SAME reason
     // and under the SAME ruling as the five lists above — one field over. The
@@ -404,6 +417,46 @@ export default class Validate extends Command {
           containerNameRefusals.map((r) => r.message),
           { noun: 'view-container refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
         );
+        this.exit(1);
+      }
+
+      // 2d. A field `picklist` that names no picklist the stack declares is
+      //     REFUSED, naming the field and the list. `FieldSchema` judges the
+      //     name's spelling only, so a misspelt reference parsed, passed this
+      //     door at exit 0 and reached the runtime as a choice with nothing to
+      //     choose — the silence a NAMED list exists to remove.
+      //
+      //     The walk is the load path's (see `utils/picklist-references.ts`):
+      //     each `packages[]` body's fields, or the top level's when there is
+      //     no `packages[]`, resolved against every picklist the stack declares.
+      //     A reference that resolves nowhere is refused only when the
+      //     declaring package depends on no package outside the stack; when it
+      //     does, the list may live there, and this command cannot read it — so
+      //     that case is an `info` notice, printed here and carried in
+      //     `warningsSoFar()`, never gating.
+      //
+      //     Right after the parse, ahead of the rule table, for the reason
+      //     step 2c gives. `os build` runs the same call at its step 3a-bis.
+      const picklistJudgement = judgePicklistReferences(result.data as Record<string, unknown>);
+      picklistReferenceNotices = [...picklistJudgement.notices];
+      if (!flags.json) printPicklistReferenceNotices(picklistReferenceNotices);
+      if (picklistJudgement.refusals.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: picklistJudgement.refusals,
+            // Every exit carries the lists the run has computed so far — the
+            // pre-parse ones and the notices above.
+            warnings: warningsSoFar(),
+            conversions: conversionNotices,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        const n = picklistJudgement.refusals.length;
+        console.log('');
+        printError(`A field names a picklist this stack does not declare (${n} reference${n > 1 ? 's' : ''})`);
+        printAuthoringRuleErrors(picklistJudgement.refusals, { remedy: JSON_FULL_LIST_REMEDY });
         this.exit(1);
       }
 

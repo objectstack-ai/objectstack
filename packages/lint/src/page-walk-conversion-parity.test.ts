@@ -1,33 +1,49 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The two page-component walkers must reach the same components (#6775).
+ * The platform's page-component walkers must reach the same components
+ * (#6775, #20940).
  *
- * There are two of them and there has to be: `walkPageComponents` (here) yields
- * nodes for the lint rules to judge, and `mapPageComponents`
- * (`@objectstack/spec`'s conversion layer) rewrites them copy-on-write. What
- * must NOT differ is which components each one arrives at — a conversion that
- * reaches less than the rule judging its result normalizes part of a corpus and
- * leaves the rest looking converted, which is exactly what #6775 measured:
- * `page-header-subtitle-alias` rewrote a header in a region and skipped the
- * identical header in a slot or inside a card, with no diagnostic from any
- * layer (the props bag is unvalidated on the load path, and that key has no
- * tombstone to fall back on).
+ * There are three and there has to be: `walkPageComponents` (here) yields
+ * nodes for the lint rules to judge, `mapPageComponents` (`@objectstack/spec`'s
+ * conversion layer) rewrites them copy-on-write, and the exported
+ * `walkAddressedPageComponents` (`@objectstack/spec/system`) hands them to
+ * `translatePage`, the CLI extractor and objectui's validator. What must NOT
+ * differ is which components each one arrives at:
  *
- * This file is the only place that can see both, since `@objectstack/lint`
- * depends on `@objectstack/spec` and not the other way round. The parity is
- * asserted BEHAVIOURALLY — every position this walk yields is a position a
- * conversion notice names — rather than by comparing implementations, so it
- * keeps holding if either walk is rewritten.
+ *   - a conversion that reaches less than the rule judging its result
+ *     normalizes part of a corpus and leaves the rest looking converted —
+ *     what #6775 measured: `page-header-subtitle-alias` rewrote a header in a
+ *     region and skipped the identical header in a slot or inside a card;
+ *   - an exported walk that reaches less than lint leaves a node judged by
+ *     `os lint` and by nobody downstream — what #20940 measured: a card's
+ *     `footer` was walked here and skipped by every consumer of the exported
+ *     walk, because each walk kept its own list of positions.
  *
- * One difference is deliberate and pinned below: source-authored pages
- * (`kind: 'html' | 'react' | 'jsx'`) are skipped here and visited there. Lint
- * skips them so it does not report findings about a DERIVED region cache the
- * author never wrote; a conversion still has to normalize that cache, or a
- * stored page rehydrates in a shape the runtime no longer serves.
+ * All three now read ONE list, spec's `pageComponentSlotPositions()`, derived
+ * from the component rows. This file is the only place that can see all
+ * three, since `@objectstack/lint` depends on `@objectstack/spec` and not the
+ * other way round. The parity is asserted BEHAVIOURALLY — which probes each
+ * walk reaches on one fixture page — rather than by comparing implementations,
+ * so it keeps holding if any walk is rewritten.
+ *
+ * Two differences are deliberate and pinned below, and both make the
+ * conversion walker reach MORE:
+ *
+ *   - a RETIRED slot spelling (`page:card.body`, tombstoned by #5775) is
+ *     descended by the conversion walker and by neither authoring walk — the
+ *     renderers still read it for stored documents, which are the conversion
+ *     walker's population, and it is not an authorable spelling;
+ *   - source-authored pages (`kind: 'html' | 'react' | 'jsx'`) are skipped
+ *     here and visited there. Lint skips them so it does not report findings
+ *     about a DERIVED region cache the author never wrote; a conversion still
+ *     has to normalize that cache, or a stored page rehydrates in a shape the
+ *     runtime no longer serves.
  */
 
 import { applyConversions } from '@objectstack/spec';
+import { walkAddressedPageComponents } from '@objectstack/spec/system';
+import { pageComponentSlotPositions } from '@objectstack/spec/ui';
 import { describe, expect, it } from 'vitest';
 
 import { walkPageComponents } from './page-walk.js';
@@ -43,8 +59,9 @@ const probe = (title: string) => ({ type: 'page:header', properties: { title, de
 /**
  * Every authoring position in one page: both region slots, a single-component
  * slot and an array slot, and each container a component nests a sub-tree in
- * (`children`, `items[].children`, `body`, `footer`), including two levels of
- * nesting.
+ * (`children`, `items[].children`, `footer` — and the retired `body`),
+ * including two levels of nesting. Every probe's title is unique, so a title
+ * names the position it sits at.
  */
 const page = {
   name: 'parity',
@@ -64,7 +81,7 @@ const page = {
           type: 'page:card',
           properties: {
             body: [probe('card body')],
-            footer: [{ type: 'page:section', properties: { children: [probe('two deep')] } }],
+            footer: [probe('card footer'), { type: 'page:section', properties: { children: [probe('two deep')] } }],
           },
         },
       ],
@@ -102,6 +119,27 @@ const convertedProbePaths = () => {
   return paths.map((p) => p.replace(/\.properties\.subtitle$/, ''));
 };
 
+/** The probe a `pages[0]…` path names on the fixture page — its title. */
+const probeTitleAt = (path: string): string => {
+  const steps = path.replace(/^pages\[0\]\.?/, '').replace(/\]/g, '').split(/[.[]/).filter(Boolean);
+  const node = steps.reduce<any>((at, step) => at?.[/^\d+$/.test(step) ? Number(step) : step], page);
+  return node?.properties?.title;
+};
+
+/** The probes each of the three walks reaches, by title. */
+const reachedBy = () => ({
+  lint: new Set(walkedProbePaths().map(probeTitleAt)),
+  conversion: new Set(convertedProbePaths().map(probeTitleAt)),
+  exportedWalk: (() => {
+    const titles = new Set<string>();
+    walkAddressedPageComponents(structuredClone(page) as Parameters<typeof walkAddressedPageComponents>[0], (component) => {
+      if (component.type === 'page:header') titles.add(component.properties?.title as string);
+      return component;
+    });
+    return titles;
+  })(),
+});
+
 describe('#6775 — walkPageComponents and the conversion walk reach the same components', () => {
   it('the probe sits at every position the lint walk knows about', () => {
     // Guards the fixture itself: if a container shape is added to the lint walk
@@ -110,18 +148,24 @@ describe('#6775 — walkPageComponents and the conversion walk reach the same co
       'pages[0].regions[0].components[0]',
       'pages[0].regions[0].components[1].properties.children[0]',
       'pages[0].regions[0].components[2].properties.items[0].children[0]',
-      'pages[0].regions[0].components[3].properties.body[0]',
-      'pages[0].regions[0].components[3].properties.footer[0].properties.children[0]',
+      'pages[0].regions[0].components[3].properties.footer[0]',
+      'pages[0].regions[0].components[3].properties.footer[1].properties.children[0]',
       'pages[0].slots.header',
       'pages[0].slots.details[0]',
       'pages[0].slots.details[1]',
     ]);
   });
 
-  it('a conversion rewrites the probe at every one of them, spelling the same paths', () => {
-    // Order-insensitive: the two walks are free to visit in different orders,
-    // but neither may reach a component the other cannot.
-    expect(new Set(convertedProbePaths())).toEqual(new Set(walkedProbePaths()));
+  it('a conversion rewrites the probe at every one of them, spelling the same paths — and at the retired `body` besides', () => {
+    // Order-insensitive: the walks are free to visit in different orders, but
+    // the conversion walker may not miss a component lint judges. What it
+    // reaches BEYOND lint is exactly the retired spelling's probe.
+    const walked = new Set(walkedProbePaths());
+    const converted = new Set(convertedProbePaths());
+    expect([...walked].filter((p) => !converted.has(p))).toEqual([]);
+    expect([...converted].filter((p) => !walked.has(p))).toEqual([
+      'pages[0].regions[0].components[3].properties.body[0]',
+    ]);
   });
 
   it('source-authored pages are the one deliberate difference', () => {
@@ -141,5 +185,33 @@ describe('#6775 — walkPageComponents and the conversion walk reach the same co
       },
     );
     expect(notices).toEqual(['pages[0].regions[0].components[0].properties.subtitle']);
+  });
+});
+
+describe('#20940 — the three page walks read one slot list and reach the same positions', () => {
+  it('lint, the exported walk and the conversion walker reach the same probes on one page — the retired spelling aside', () => {
+    const { lint, exportedWalk, conversion } = reachedBy();
+    // Guards the fixture: a walk reaching nothing would agree with another
+    // reaching nothing.
+    expect([...lint].sort()).toEqual([
+      'array slot 0', 'array slot 1', 'card footer', 'children', 'region', 'single slot', 'tab panel', 'two deep',
+    ]);
+    // The two authoring walks: identical, `card footer` and `two deep`
+    // (under the footer) included — the pair #20940 found apart.
+    expect([...exportedWalk].sort()).toEqual([...lint].sort());
+    // The conversion walker: the same, plus exactly the probe under a
+    // position the list marks retired.
+    expect([...conversion].filter((title) => !lint.has(title))).toEqual(['card body']);
+    expect([...lint].filter((title) => !conversion.has(title))).toEqual([]);
+  });
+
+  it('the difference IS the list\'s retired entries — no walk keeps a position of its own', () => {
+    const positions = pageComponentSlotPositions();
+    expect(positions.filter((p) => p.retired).map((p) => p.key)).toEqual(['body']);
+    // Every authorable position has a probe on the fixture page, so the
+    // equality above covers the whole list, not a sample of it.
+    const authorable = positions.filter((p) => !p.retired)
+      .map(({ key, panelKey }) => (panelKey === undefined ? key : `${key}[].${panelKey}`));
+    expect(authorable).toEqual(['children', 'footer', 'items[].children']);
   });
 });

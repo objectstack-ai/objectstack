@@ -264,7 +264,8 @@ describe('[#20010] the neighbouring shapes compile exactly as before', () => {
     ['$eq: null — the same predicate', { stage: { $eq: null } }, leaf('stage', 'notSet', [])],
     ['$ne: null — has a value', { stage: { $ne: null } }, leaf('stage', 'set', [])],
     ["$contains: null — LIKE '%null%' (#5526)", { stage: { $contains: null } }, leaf('stage', 'contains', [null])],
-    ['a nested-relation scalar', { acct: { amt: 5 } }, leaf('acct.amt', 'equals', [5])],
+    // [#20887] Accepted, and carried as written for the engine (it used to flatten to `acct.amt`).
+    ['a nested-relation scalar', { acct: { amt: 5 } }, { kind: 'relation', member: 'acct', condition: { amt: 5 } }],
   ];
 
   for (const [name, where, expected] of ACCEPTED) {

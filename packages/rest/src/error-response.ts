@@ -1813,12 +1813,22 @@ function classifyDataError(error: any, object?: string): { status: number; body:
     if (notNull) {
         const field = notNull[1];
         // The metadata required-check (`record-validator`) runs BEFORE the
-        // driver, so a NOT NULL violation that reaches this far means metadata
-        // did NOT consider the field required — i.e. the physical column has
-        // drifted from metadata (#2186), not a genuine missing-required-field.
+        // driver and judges `required` only; nothing before the driver reads
+        // `storage.notNull`. ADR-0113 D1 / D2 keep the write contract
+        // (`required`) and the column constraint (`storage.notNull`) apart on
+        // purpose, so a NOT NULL violation that reaches this far is NOT by itself
+        // evidence of drift: an object that declares `storage: { notNull: true }`
+        // without `required` lands here on a healthy schema, and `os migrate`
+        // changes nothing for it. Drift (#2186) is the other way in: the column
+        // is NOT NULL and the metadata declares neither. This branch sees the
+        // driver's text and the object's name, never the field map, and telling
+        // the two apart would take a registry read, so the `hint` leads with the
+        // remedy that holds for both (the column requires a value: provide it, or
+        // declare the field `required`) and names drift only as the case that is
+        // conditional on the declaration.
         // We keep the `VALIDATION_FAILED` / `required` envelope for back-compat
-        // (form UIs key off it) but add an actionable `hint` so the message
-        // stops being misleading.
+        // (form UIs key off it); `code`, `status`, `fields` and the sentence
+        // are the same for both.
         return {
             status: 400,
             body: {
@@ -1826,8 +1836,9 @@ function classifyDataError(error: any, object?: string): { status: number; body:
                 code: 'VALIDATION_FAILED',
                 fields: [{ field, code: 'required', message: `${field} is required` }],
                 hint:
-                    `If '${field}' is optional in your object metadata, the database column is still NOT NULL — ` +
-                    `the physical schema has drifted from metadata. Run 'os migrate' to reconcile ` +
+                    `The database column for '${field}' requires a value: provide it, or declare the field \`required\` in the object metadata. ` +
+                    `If the object declares neither \`required\` nor \`storage: { notNull: true }\` for '${field}', ` +
+                    `the physical schema has drifted from metadata instead: run 'os migrate' to reconcile ` +
                     `(or reset the dev database).`,
                 ...(object ? { object } : {}),
             },

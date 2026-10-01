@@ -56,6 +56,7 @@
  */
 
 import { mapFlowNodeList } from '../conversions/walk.js';
+import { pageComponentSlotPositions } from '../ui/component.zod.js';
 
 import type {
   PlatformTranslationBundle,
@@ -1784,9 +1785,11 @@ function lookupPageComponentCopy(
 }
 
 /**
- * How many levels of composition nesting — `properties.children` (commit 901355c3b) and
- * `properties.items[].children` (#16772), each panel costing one level —
- * {@link walkAddressedPageComponents} descends below root level.
+ * How many levels of composition nesting — every authorable slot position
+ * `pageComponentSlotPositions()` names: `properties.children` (commit 901355c3b),
+ * `properties.items[].children` (#16772) and `properties.footer` (#20940), each
+ * panel costing one level — {@link walkAddressedPageComponents} descends below
+ * root level.
  * Authored page trees run three or four deep in practice, so the cap is not a
  * limit any real document meets — it exists because `children` is authored
  * data, and a walk that never throws must still be finite on a pathological
@@ -1824,9 +1827,11 @@ export interface AddressedPageComponentContext {
    */
   id: string | undefined;
   /**
-   * `true` below root level — the component was reached through a container's
-   * declared `properties.children`, or through a `properties.items[].children`
-   * panel of a `page:tabs` / `page:accordion` (#16772).
+   * `true` below root level — the component was reached through one of a
+   * container's authorable slot positions (`pageComponentSlotPositions()`):
+   * `properties.children`, a `page:card`'s `properties.footer` (#20940), or a
+   * `properties.items[].children` panel of a `page:tabs` / `page:accordion`
+   * (#16772).
    */
   nested: boolean;
   /**
@@ -1874,15 +1879,23 @@ export type AddressedPageRoots = Pick<PageLike, 'regions' | 'slots'>;
  *     such a page had exactly two addressable keys (`label`, `description`)
  *     however many components it authored. Regions first, then the slots in
  *     authored key order; both are ROOT level (depth `0`, `nested: false`);
- *   - descent: a container's declared `properties.children` (#5775, the one
- *     composition key) AND a `page:tabs` / `page:accordion` panel's
- *     `properties.items[].children` (#16772 — the panel object itself is not
- *     a component and is not visited; its `children` sit one level below the
- *     tabs node, exactly as a `children` entry would). Both are matched by
+ *   - descent: every AUTHORABLE slot position `pageComponentSlotPositions()`
+ *     (`ui/component.zod.ts`) derives from the component rows — the list this
+ *     walk shares with the ADR-0087 conversion walker and lint's
+ *     `walkPageComponents`, so the three cannot disagree about where a
+ *     sub-tree hangs (#20940). Today: a container's `properties.children`
+ *     (#5775, the one composition key), a `page:card`'s `properties.footer`
+ *     (a declared, rendered slot distinct from `children` — #20940; before it
+ *     a node there was judged by `os lint` and skipped here), and a
+ *     `page:tabs` / `page:accordion` panel's `properties.items[].children`
+ *     (#16772 — the panel object itself is not a component and is not
+ *     visited; its `children` sit one level below the tabs node, exactly as a
+ *     `children` entry would), visited in that order. All are matched by
  *     SHAPE, not by component type, because `properties` is an open bag and
- *     custom component types are legal. `body` / `footer` are deliberately
- *     still not descended — a renderer-side back-compat fallback for stored
- *     documents, not an authorable spelling;
+ *     custom component types are legal. A RETIRED spelling (`page:card.body`,
+ *     tombstoned by #5775 under the 2026-08-06 ruling) is deliberately not
+ *     descended — a renderer-side back-compat fallback for stored documents,
+ *     not an authorable spelling;
  *   - the descent is depth-capped ({@link MAX_NESTED_COMPONENT_DEPTH},
  *     module-private — the walk is the contract, the number is its safety
  *     property);
@@ -1894,14 +1907,14 @@ export type AddressedPageRoots = Pick<PageLike, 'regions' | 'slots'>;
  * The visitor is called for EVERY component the walk reaches (addressed or
  * not), parent before children, siblings in document order. Its return value
  * REPLACES the node in the rebuilt root trees the walk returns; after the
- * visitor runs, the walk re-attaches the node's rebuilt `children` array (and
- * rebuilt `items[].children` arrays) in place of the existing keys, so the
- * visitor never needs to recurse itself. Enumeration-only consumers return
- * the component unchanged and ignore the walk's return value. The input
- * document is never mutated. Entries of `children` that are not component
- * objects (bare id strings, `null` — the slot is `z.array(z.unknown())`) pass
- * through unvisited; a region or slot whose shape is off-spec is returned
- * as-is.
+ * visitor runs, the walk re-attaches the node's rebuilt slot arrays (`children`,
+ * `footer`, and the panel list `items` with each panel's `children` rebuilt)
+ * in place of the existing keys, so the visitor never needs to recurse itself.
+ * Enumeration-only consumers return the component unchanged and ignore the
+ * walk's return value. The input document is never mutated. Entries of a slot
+ * that are not component objects (bare id strings, `null` — every slot is
+ * `z.array(z.unknown())`) pass through unvisited; a region or slot whose shape
+ * is off-spec is returned as-is.
  *
  * Returns the rebuilt {@link AddressedPageRoots} — `regions` and `slots`, each
  * present exactly when present on the input.
@@ -1952,48 +1965,56 @@ export function walkAddressedPageComponents(
   // and the collision ledger above is what decides between them.
   const ancestors = new Set<PageComponentLike>();
 
+  // The slot positions this walk descends: the AUTHORABLE entries of the one
+  // list the component rows derive (#20940), read once per walk. A retired
+  // spelling (`page:card.body`) is not among them — see the docblock above.
+  const slotPositions = pageComponentSlotPositions().filter((position) => !position.retired);
+
+  /** Is `entry` a panel of a panel list — an object carrying `panelKey`'s array? */
+  const isPanel = (entry: unknown, panelKey: string): entry is Record<string, unknown> =>
+    !!entry && typeof entry === 'object' && !Array.isArray(entry)
+      && Array.isArray((entry as Record<string, unknown>)[panelKey]);
+
   /**
-   * The component's rebuilt composition slots — `properties.children` and
-   * `properties.items` (each panel's `children` rebuilt) — or `undefined` for
-   * a slot there is nothing to descend into, so a component without either is
-   * returned untouched rather than gaining an invented `properties` bag.
+   * The component's rebuilt composition slots — one entry per slot key the
+   * component carries (`properties.children`, `properties.footer`, and the
+   * panel list `properties.items` with each panel's `children` rebuilt) — or
+   * `undefined` when there is nothing to descend into, so a component without
+   * any is returned untouched rather than gaining an invented `properties` bag.
+   * A panel list is descended (and rebuilt WHOLE) only when at least one of
+   * its entries is a panel; anything else in it (an option row of some other
+   * component, a bare string) passes through untouched.
    */
   const walkComposition = (
     component: PageComponentLike,
     depth: number,
-  ): { children?: unknown[]; items?: unknown[] } | undefined => {
+  ): Record<string, unknown[]> | undefined => {
     if (depth >= MAX_NESTED_COMPONENT_DEPTH) return undefined;
     const props = component.properties;
     if (!props || typeof props !== 'object' || Array.isArray(props)) return undefined;
-    const { children, items } = props as Record<string, unknown>;
-    const hasChildren = Array.isArray(children);
-    // A panel is descended when it is an object carrying a `children` array;
-    // anything else in `items` (an option row of some other component, a bare
-    // string) passes through untouched, and `items` is only rebuilt when at
-    // least one panel was descended.
-    const panels = Array.isArray(items)
-      ? items.map((item) =>
-          item && typeof item === 'object' && !Array.isArray(item)
-            && Array.isArray((item as Record<string, unknown>).children))
-      : undefined;
-    const hasPanels = panels !== undefined && panels.some(Boolean);
-    if (!hasChildren && !hasPanels) return undefined;
+    const bag = props as Record<string, unknown>;
+    const present = slotPositions.filter(({ key, panelKey }) => {
+      const list = bag[key];
+      if (!Array.isArray(list)) return false;
+      return panelKey === undefined || list.some((entry) => isPanel(entry, panelKey));
+    });
+    if (present.length === 0) return undefined;
     ancestors.add(component);
     try {
-      const rebuilt: { children?: unknown[]; items?: unknown[] } = {};
-      if (hasChildren) {
-        rebuilt.children = children.map((child) => visitComponent(child as PageComponentLike, depth + 1));
-      }
-      if (hasPanels) {
-        rebuilt.items = (items as unknown[]).map((item, index) => {
-          if (!panels![index]) return item;
-          const panel = item as Record<string, unknown>;
-          return {
-            ...panel,
-            children: (panel.children as unknown[]).map((child) =>
-              visitComponent(child as PageComponentLike, depth + 1)),
-          };
-        });
+      const rebuilt: Record<string, unknown[]> = {};
+      for (const { key, panelKey } of present) {
+        // Read the list already rebuilt for this key when two positions share
+        // it (two panel keys on one panel list), so they compose.
+        const list = rebuilt[key] ?? (bag[key] as unknown[]);
+        rebuilt[key] = panelKey === undefined
+          ? list.map((child) => visitComponent(child as PageComponentLike, depth + 1))
+          : list.map((entry) => (isPanel(entry, panelKey)
+            ? {
+                ...entry,
+                [panelKey]: (entry[panelKey] as unknown[]).map((child) =>
+                  visitComponent(child as PageComponentLike, depth + 1)),
+              }
+            : entry));
       }
       return rebuilt;
     } finally {
@@ -2019,14 +2040,15 @@ export function walkAddressedPageComponents(
     // consumer that emits in visit order emits in document order. The rebuilt
     // composition slots land on the RETURNED node afterwards, and they are
     // rebuilt from the ORIGINAL component, never from `next`. The walk owns
-    // two `properties` keys, each only when the ORIGINAL node carries it:
-    // `children` (rebuilt entry by entry), and — on a node carrying at least
-    // one panel (an `items` entry with a `children` array) — the WHOLE `items`
-    // array, panels rebuilt and every other entry carried across exactly as it
-    // was authored. So a visitor's edit to any other `items[*]` key (a panel's
-    // own `label`, say) is overwritten; on a node with no panel `items` is not
-    // rebuilt at all and such an edit stands. Everything else the visitor
-    // returns — every other `properties` key, every top-level key — is kept.
+    // the `properties` keys of its slot positions, each only when the ORIGINAL
+    // node carries it: a direct slot (`children`, `footer`) rebuilt entry by
+    // entry, and — on a node carrying at least one panel (an `items` entry
+    // with a `children` array) — the WHOLE panel list, panels rebuilt and
+    // every other entry carried across exactly as it was authored. So a
+    // visitor's edit to any other `items[*]` key (a panel's own `label`, say)
+    // is overwritten; on a node with no panel `items` is not rebuilt at all
+    // and such an edit stands. Everything else the visitor returns — every
+    // other `properties` key, every top-level key — is kept.
     let next = visit(component, { id, nested, depth, addressed });
 
     const rebuilt = walkComposition(component, depth);
@@ -2162,9 +2184,10 @@ export function translatePage<T extends PageLike>(
 
   // The traversal — roots, descent, depth cap, cycle guard, collision
   // arbitration — is the shared walk (commit c45d8e6b4). This visitor owns only the
-  // per-component overlay; the walk re-attaches each node's translated
-  // `children` after the visitor returns, so the overlay never contends with
-  // the descent for a key (`children` is not a copy key).
+  // per-component overlay; the walk re-attaches each node's translated slot
+  // arrays (`children`, `footer`, panel `items`) after the visitor returns, so
+  // the overlay never contends with the descent for a key (no slot key is a
+  // copy key).
   const { regions, slots } = walkAddressedPageComponents(doc, (component, { nested, id, addressed }) => {
     // Per-component copy (#6080) — addressed by the component's own id, and
     // applied before the page-name route below. `addressed` carries the ruled

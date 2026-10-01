@@ -1596,6 +1596,14 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       return;
     }
 
+    if (node.kind === 'relation') {
+      // [#20887] Its own conjunct, never merged into the field's entry: an
+      // operator beside it on the same field would make one mixed object the
+      // engine refuses, where the author wrote two constraints.
+      conjuncts.push(this.relationCondition(node));
+      return;
+    }
+
     if (node.kind === 'and') {
       for (const child of node.children) this.applyFilterNode(child, cube, filter, conjuncts);
       return;
@@ -1625,6 +1633,8 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       return node.value ? null : { $not: {} };
     }
 
+    if (node.kind === 'relation') return this.relationCondition(node);
+
     if (node.kind === 'not') {
       const inner = this.filterNodeToCondition(node.child, cube);
       // `NOT TRUE ≡ FALSE` — a negation of nothing is the zero-row filter, not
@@ -1652,6 +1662,25 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   }
 
   /**
+   * [#20887] A nested-relation condition as the engine reads it — the author's
+   * `{ owner: { region: 'NA' } }`, beneath the relation field it was written
+   * under. The engine answers it (#20802's ruling, lowered at the #5930 seam):
+   * in `where` it reads the related object AS THE CALLER — the context this
+   * strategy forwards with the aggregate — with the related object's row scope
+   * and field permissions, and matches the relation against the ids, refusing
+   * past its cap; at an aggregation's own `filter` it refuses the form. This
+   * strategy judges none of that: one rule, the engine's.
+   *
+   * The key is the field of the queried object the author named, not a cube
+   * member resolved through `resolveFieldName`: the form names "a relation field
+   * on the queried object" (the ruling's words), and the engine judges it
+   * against that object's declared fields.
+   */
+  private relationCondition(node: Extract<NormalizedFilterNode, { kind: 'relation' }>): Record<string, unknown> {
+    return { [node.member]: node.condition };
+  }
+
+  /**
    * Render a normalized filter node as the display SQL `/analytics/sql`
    * echoes. Values still bind as `$n` placeholders — the echo travels to the
    * browser, so a comparand is never inlined.
@@ -1674,6 +1703,25 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
 
     if (node.kind === 'const') {
       return node.value ? SQL_CONST_TRUE : SQL_CONST_FALSE;
+    }
+
+    if (node.kind === 'relation') {
+      // [#20887] The echo DECLINES the nested-relation form, the way it
+      // declines a cross-field comparison (#7598's echo ruling: one consistent,
+      // loud answer, never a half-rendering). What runs is a read of the
+      // related object as the caller, then a match against the ids it
+      // returned; no statement this renderer can print reproduces that — a
+      // JOIN would name rows the caller's field permissions and the engine's
+      // cap never let through. `execute()` swallows the echo's refusal, so the
+      // query face still answers; only the dry-run face refuses.
+      throw invalidFilterError(
+        `[analytics] cannot render display SQL for the nested-relation condition on "${node.member}" ` +
+        `({ "${node.member}": { … } }). The query itself is answered by the engine: it reads the ` +
+        `related object as the caller, with that object's row scope and field permissions, and ` +
+        `matches "${node.member}" against the ids it returns, refusing a match past its cap. No ` +
+        `statement printed here reproduces that read. Run the query itself (/analytics/query) for ` +
+        `its rows.`,
+      );
     }
 
     if (node.kind === 'leaf') {

@@ -78,8 +78,9 @@
  * ⛔ The fixture is a STRING written into the consumer directory, not a `.ts`
  * file under `test/`. A file there is compiled by this package's own
  * `tsconfig.test.json`, where the same import resolves through the workspace —
- * i.e. to a build artifact, which `check:type-source-resolution` refuses — so
- * checking it in would answer a different question under the same name.
+ * i.e. to a build artifact, which `check:type-source-resolution` refused until
+ * it was retired on 2026-09-18 (#18373) — so checking it in would answer a
+ * different question under the same name.
  *
  * ## What this file deliberately does NOT do
  *
