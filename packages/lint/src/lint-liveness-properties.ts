@@ -20,10 +20,12 @@
  * `dead`, `live-elsewhere` and `experimental` warn on their own, because the
  * verdict itself is the author-facing warning (#16094, decision batch #60,
  * option A). `planned` and `live` warn only when the row opts in via
- * `"authorWarn": true`; any row may carry an `"authorHint"` that replaces the
- * ledger `note` as the hint. Booleans warn only when set truthy (so schema
- * defaults like `enable.searchable` never trip it); object/string/array props
- * warn when present at all.
+ * `"authorWarn": true`. The hint is the row's `"authorHint"`; failing that, a
+ * row that opted in (or an `experimental` one) shows its ledger `note`, while a
+ * row warning only by its `dead` / `live-elsewhere` verdict shows the verdict's
+ * default hint and never its note (see `isVerdictTriggered`). Booleans warn
+ * only when set truthy (so schema defaults like `enable.searchable` never trip
+ * it); object/string/array props warn when present at all.
  */
 
 import { createRequire } from 'node:module';
@@ -165,12 +167,31 @@ function loadWarnMap(dir: string, type: string): WarnMapLoad {
  * `planned` is deliberately absent: a planned key is one the platform asks
  * authors to write, so it warns only where its row opts in.
  */
-const VERDICTS_THAT_WARN: ReadonlySet<string> = new Set(['dead', 'live-elsewhere', 'experimental']);
+const RULED_VERDICTS: ReadonlySet<string> = new Set(['dead', 'live-elsewhere']);
+const VERDICTS_THAT_WARN: ReadonlySet<string> = new Set([...RULED_VERDICTS, 'experimental']);
 
 /** An entry warns when its verdict warns on its own, OR when the row explicitly opts in. */
 function shouldWarn(entry: LedgerEntry | undefined): boolean {
   if (!entry) return false;
   return (typeof entry.status === 'string' && VERDICTS_THAT_WARN.has(entry.status)) || entry.authorWarn === true;
+}
+
+/**
+ * Is this row warning ONLY because of its ruled verdict — `dead` or
+ * `live-elsewhere`, with no `authorWarn` opt-in?
+ *
+ * Such a row never chose to address an author, so its `note` was written for
+ * the ledger's maintainers: audit prose, measured commit shas, tracker ids. A
+ * finding shows an author what the row WROTE for authors (`authorHint`) or the
+ * verdict's own default hint, never that note. AGENTS.md keeps tracker numbers
+ * out of anything an author is shown, and the ruling is what began routing these
+ * rows to authors, so the hint selection in `checkItem` closes the door it
+ * opened. A row that opts in with `authorWarn`, and an `experimental` row, keep
+ * the hint they had before the ruling (`authorHint`, else `note`, else the
+ * default) byte for byte.
+ */
+function isVerdictTriggered(entry: LedgerEntry): boolean {
+  return entry.authorWarn !== true && typeof entry.status === 'string' && RULED_VERDICTS.has(entry.status);
 }
 
 /** A value that signals authoring intent: booleans only when truthy; everything else when present. */
@@ -204,10 +225,12 @@ function isAuthored(value: unknown): boolean {
  * its own rule id, and its default hint points the author at the ledger row's
  * `evidence` — the enforcer's address — rather than at a delete key.
  *
- * Each verdict below also carries its own DEFAULT hint (used only when the
- * ledger entry has neither `authorHint` nor `note`): the `dead` default says
- * "Remove it"; `planned`'s and `live-elsewhere`'s must not, because removing a
- * planned or elsewhere-enforced property is exactly the wrong author action.
+ * Each verdict below also carries its own DEFAULT hint (used when the ledger
+ * entry has no `authorHint` and either has no `note` or warns only by its
+ * `dead` / `live-elsewhere` verdict — see `isVerdictTriggered`): the `dead`
+ * default says "Remove it"; `planned`'s and `live-elsewhere`'s must not,
+ * because removing a planned or elsewhere-enforced property is exactly the
+ * wrong author action.
  *
  * Unknown status: `LedgerEntry.status` is a plain `string` (see the interface
  * above) because the ledger's status vocabulary is DOCUMENTED, not
@@ -401,7 +424,7 @@ function checkItem(
     for (const value of values instanceof Array ? values : [values]) {
       if (!isAuthored(value)) continue;
       const { kind, rule, defaultHint } = describe(entry);
-      const hint = entry.authorHint ?? entry.note ?? defaultHint;
+      const hint = entry.authorHint ?? (isVerdictTriggered(entry) ? undefined : entry.note) ?? defaultHint;
       findings.push({
         where: whereBase,
         message: `sets \`${path}\` but this ${type} property ${kind}.`,

@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { afterAll, describe, it, expect } from 'vitest';
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PermissionSetSchema } from '@objectstack/spec/security';
@@ -1701,5 +1701,121 @@ describe('the dead and live-elsewhere verdicts warn on their own (#16094)', () =
     });
     expect(ruleOf(findings, 'runtime')).toBeUndefined();
     expect(ruleOf(findings, 'integrity')).toBeUndefined();
+  });
+});
+
+// ── #16094, the author-facing half: a verdict-triggered row never shows its note ──
+//
+// A row admitted ONLY by the ruled verdicts (`dead` / `live-elsewhere`, no
+// `authorWarn`) never chose to address an author, and its `note` is maintainer
+// evidence — measured across the shipped ledgers when the ruling landed, 80 of
+// the 105 newly warned entries' notes cite a tracker id, and three of the four
+// an author can reach say the row was deliberately not warned. AGENTS.md keeps
+// tracker numbers out of anything an author is shown. So such a row shows its
+// `authorHint`, else the verdict's default hint; a row that opted in, and an
+// `experimental` row, keep the hint they had before the ruling, byte for byte.
+describe('the hint a verdict-triggered row shows an author (#16094)', () => {
+  type ShippedRow = { type: string; path: string; entry: Record<string, unknown> };
+
+  /** Every shipped row at the depth the warn map reads (props + one level of `children`). */
+  function shippedRows(): ShippedRow[] {
+    const rows: ShippedRow[] = [];
+    const dir = shippedLedgerDir();
+    for (const file of readdirSync(dir).filter((f) => f.endsWith('.json')).sort()) {
+      const type = file.replace(/\.json$/, '');
+      const ledger = JSON.parse(readFileSync(join(dir, file), 'utf8'));
+      const isRow = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+      for (const [key, entry] of Object.entries((ledger.props ?? {}) as Record<string, unknown>)) {
+        if (!isRow(entry)) continue;
+        for (const [ck, centry] of Object.entries((entry.children ?? {}) as Record<string, unknown>)) {
+          if (isRow(centry)) rows.push({ type, path: `${key}.${ck}`, entry: centry });
+        }
+        rows.push({ type, path: key, entry });
+      }
+    }
+    return rows;
+  }
+
+  /** An item that authors exactly `path` (one level of nesting at most). */
+  const itemAuthoring = (path: string): Record<string, unknown> => {
+    const [head, child] = path.split('.');
+    return child === undefined ? { name: 'probe', [head]: 'x' } : { name: 'probe', [head]: { [child]: 'x' } };
+  };
+
+  const hintFor = (row: ShippedRow) => {
+    const findings = checkItemAgainstWarnMap(row.type, itemAuthoring(row.path), `${row.type} 'probe'`, [[row.path, row.entry]]);
+    expect(findings, `${row.type}/${row.path} produced no finding`).toHaveLength(1);
+    return findings[0].hint;
+  };
+
+  const TRACKER_ID = /#\d+/;
+  const gizmoEntry = (entry: Record<string, unknown>) => new Map([['gizmo', entry]]);
+
+  it('REAL LEDGER: no verdict-triggered row shows its note, and no such hint carries a tracker id', () => {
+    const triggered = shippedRows().filter(
+      (r) => r.entry.authorWarn !== true && (r.entry.status === 'dead' || r.entry.status === 'live-elsewhere'),
+    );
+    // Anti-vacuity: both verdicts are present, and at least one of these notes
+    // DOES carry a tracker id — so the leak this pin forbids is a real one.
+    expect(triggered.some((r) => r.entry.status === 'dead')).toBe(true);
+    expect(triggered.some((r) => r.entry.status === 'live-elsewhere')).toBe(true);
+    expect(triggered.some((r) => typeof r.entry.note === 'string' && TRACKER_ID.test(r.entry.note))).toBe(true);
+    for (const row of triggered) {
+      const hint = hintFor(row);
+      const where = `${row.type}/${row.path}`;
+      if (typeof row.entry.authorHint === 'string') {
+        expect(hint, where).toBe(row.entry.authorHint);
+      } else if (typeof row.entry.note === 'string') {
+        expect(hint, where).not.toBe(row.entry.note);
+      }
+      expect(TRACKER_ID.test(hint), `${where} hint carries a tracker id`).toBe(false);
+    }
+  });
+
+  it('CONTROL, REAL LEDGER: every row that warned before the ruling keeps its hint byte for byte', () => {
+    const before = shippedRows().filter((r) => r.entry.authorWarn === true || r.entry.status === 'experimental');
+    // Anti-vacuity: an opted-in row and an experimental row both fall back to
+    // their note today, so the control would see a change in either.
+    expect(before.some((r) => r.entry.authorWarn === true && r.entry.authorHint === undefined && typeof r.entry.note === 'string')).toBe(true);
+    expect(before.some((r) => r.entry.status === 'experimental' && r.entry.authorHint === undefined && typeof r.entry.note === 'string')).toBe(true);
+    for (const row of before) {
+      const expected = row.entry.authorHint ?? row.entry.note;
+      if (typeof expected !== 'string') continue; // only the default remains — unchanged by construction
+      expect(hintFor(row), `${row.type}/${row.path}`).toBe(expected);
+    }
+  });
+
+  it('SYNTHETIC: the opt-in, not the verdict, decides whether the note may be shown', () => {
+    const hintOf = (entry: Record<string, unknown>) =>
+      checkItemAgainstWarnMap('gadget', { name: 'g1', gizmo: 'x' }, "gadget 'g1'", gizmoEntry(entry))[0].hint;
+    const deadDefault = hintOf({ status: 'dead' });
+    const elsewhereDefault = hintOf({ status: 'live-elsewhere' });
+    // Verdict-triggered: authorHint wins, otherwise the default — never the note.
+    expect(hintOf({ status: 'dead', note: 'N #123' })).toBe(deadDefault);
+    expect(hintOf({ status: 'live-elsewhere', note: 'N #123' })).toBe(elsewhereDefault);
+    expect(hintOf({ status: 'dead', authorHint: 'H', note: 'N' })).toBe('H');
+    // Opted in: today's precedence, unchanged — the note is shown.
+    expect(hintOf({ status: 'dead', authorWarn: true, note: 'N' })).toBe('N');
+    expect(hintOf({ status: 'live-elsewhere', authorWarn: true, note: 'N' })).toBe('N');
+    // Experimental needs no opt-in and keeps its note, as before the ruling.
+    expect(hintOf({ status: 'experimental', note: 'N' })).toBe('N');
+  });
+
+  it('END TO END: the authored dead RLS keys show the dead default hint, not the ledger note', () => {
+    const ledger = JSON.parse(readFileSync(join(shippedLedgerDir(), 'permission.json'), 'utf8'));
+    const rls = ledger.props.rowLevelSecurity.children;
+    const findings = lintLivenessProperties({
+      permissions: [{
+        name: 'fx_reader',
+        rowLevelSecurity: [{ name: 'p', label: 'Own rows', description: 'Readers see their own rows.', object: 'fx_account' }],
+      }],
+    });
+    const deadDefault = checkItemAgainstWarnMap('gadget', { name: 'g1', gizmo: 'x' }, "gadget 'g1'", gizmoEntry({ status: 'dead' }))[0].hint;
+    for (const key of ['label', 'description']) {
+      const f = findings.find((x) => x.message.includes(`sets \`rowLevelSecurity.${key}\``));
+      expect(f, key).toBeDefined();
+      expect(f!.hint, key).not.toBe(rls[key].note);
+      expect(f!.hint, key).toBe(deadDefault);
+    }
   });
 });

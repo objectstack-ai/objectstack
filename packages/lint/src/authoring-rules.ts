@@ -1494,9 +1494,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
       })),
   },
   // The spec-liveness loop on the author side: a property the ledger marks
-  // dead-and-misleading or experimental is set hopefully and does nothing.
-  // Ledger-driven (entries opt in via `authorWarn`), so it is high-signal and
-  // never fatal.
+  // dead, live-elsewhere or experimental is set hopefully and does nothing
+  // here. Ledger-driven (those verdicts warn on their own; any other row only
+  // when it opts in via `authorWarn`), and never fatal.
   {
     name: 'lintLivenessProperties',
     tier: 'advisory',
