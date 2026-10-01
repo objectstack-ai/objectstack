@@ -1110,6 +1110,45 @@ function rawStatementFaultError(cause: unknown): Error {
 }
 
 /**
+ * [#21227] The refusal {@link SqlDriver.readBackInsertedRows} raises when an
+ * INSERT was accepted but a row it wrote is not there to be read back.
+ *
+ * `create` and `bulkCreate` answer the stored record (`IDataDriver.create`).
+ * On a dialect whose INSERT returns no rows the driver reads what it wrote
+ * back by the id it wrote, and only a row removed between the two statements
+ * (a concurrent delete, a trigger) can be missing. There is then no stored
+ * record to answer. Answering the caller's payload in its place would look
+ * like a success while answering a row that is not stored, and would hide a
+ * read-back keyed on the wrong column for good, so the door refuses instead.
+ *
+ * `DATABASE_ERROR` / 500, the pair this file's other terminals declare for a
+ * fault the request did not cause. The message is composed and names only the
+ * object the caller passed. The ids, which are the driver's own values (the
+ * caller's `id` / `_id` or a minted nanoid, never a business column), travel
+ * under a non-enumerable `cause` for the server log, as in
+ * {@link backendStatementFaultError}.
+ */
+function insertedRowsNotReadBackError(object: string, missingIds: unknown[], writtenCount: number): Error {
+  const err = new Error(
+    `The database accepted the insert into object '${object}', but ${missingIds.length} of its ` +
+      `${writtenCount} row(s) could not be read back by the id this driver wrote, so the stored ` +
+      'record cannot be answered. This database returns no rows from an INSERT, so the driver ' +
+      'reads each written row back by its id, and a row removed between the two statements (a ' +
+      'concurrent delete or a trigger) leaves nothing to read. The write was not retried, because ' +
+      're-issuing it could duplicate a row that did land.',
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.DATABASE_ERROR;
+  err.status = 500;
+  Object.defineProperty(err, 'cause', {
+    value: new Error(`no row carries the written id(s) ${JSON.stringify(missingIds)} after the insert`),
+    enumerable: false,
+    writable: true,
+    configurable: true,
+  });
+  return err;
+}
+
+/**
  * [#9354] How long a widening ALTER waits for a metadata lock, in seconds.
  *
  * Named for the seam it arrived on; since #9542 it governs BOTH callers of
@@ -5880,6 +5919,38 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * [#21227] Whether this dialect's `INSERT … RETURNING *` answers the rows it
+   * STORED.
+   *
+   * `create` and `bulkCreate` answer the inserted record (`IDataDriver.create`).
+   * Where this is true they take it from the statement, in one round trip.
+   * Where it is false the statement answers no rows, and both doors read back
+   * what they wrote, by the ids they wrote ({@link readBackInsertedRows}).
+   *
+   * True for the SQLite and PostgreSQL families. knex compiles `RETURNING` for
+   * both, and the row it answers is the stored one, server-side column defaults
+   * included (measured on better-sqlite3 and on live PostgreSQL 16.14).
+   *
+   * False for the MySQL family, which has no `RETURNING`. knex's MySQL compiler
+   * drops the clause with a `.returning() is not supported by mysql` warning and
+   * answers `[insertId]`: ONE element whatever the row count, and `0` for this
+   * driver's string primary key. Measured on live MySQL 8.0.46 before this
+   * change: `create` answered `0`, a three-row `bulkCreate` answered `[0]`, and
+   * every row was stored. The auth adapter answers what `create` answers, so
+   * sign-up failed on MySQL with the user row stored and no account row.
+   *
+   * False, too, for a client this driver recognises as neither family (a Client
+   * constructor, a wire-only spelling such as `redshift`): reading back is
+   * correct on every dialect, and `RETURNING` is only the shortcut a dialect
+   * known to answer the stored row is given. The SQLite and PostgreSQL doors
+   * therefore pay no extra round trip, and the MySQL doors pay one SELECT per
+   * statement (per `create`, and per `bulkCreate` batch).
+   */
+  protected get insertReturnsStoredRows(): boolean {
+    return this.isSqlite || this.isPostgres;
+  }
+
+  /**
    * Per-granularity native SQL bucket support, computed from dialect.
    *
    * Must match `bucketDateValue()` in @objectstack/objectql exactly:
@@ -7191,10 +7262,15 @@ export class SqlDriver implements IDataDriver {
 
   /**
    * [#15267] Declared as `IDataDriver.create()` declares it: the inserted
-   * record, `formatOutput(...)` over the `returning('*')` row. The annotation
+   * record, `formatOutput(...)` over the stored row. The annotation
    * used to be an explicit `Promise<any>`, so the published `.d.ts` let a
    * caller read any member off the result; it is the contract's type now,
    * pinned by `sql-driver-doors-declared-types.test.ts`.
+   *
+   * [#21227] The stored row comes from the statement's own `returning('*')`
+   * where the dialect answers one, and from {@link readBackInsertedRows}
+   * where it does not ({@link insertReturnsStoredRows}: the MySQL family). The
+   * type was the contract's all along; on MySQL the VALUE was the insert id.
    */
   async create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown>> {
     const { _id, ...rest } = data;
@@ -7235,8 +7311,11 @@ export class SqlDriver implements IDataDriver {
       this.stampInsertTimestamps(object, formatted);
 
       try {
-        const result = await builder.insert(formatted).returning('*');
-        return this.formatOutput(object, result[0]);
+        if (this.insertReturnsStoredRows) {
+          const result = await builder.insert(formatted).returning('*');
+          return this.formatOutput(object, result[0]);
+        }
+        await builder.insert(formatted);
       } catch (error) {
         // #11627: on a table whose UNIQUE index is carried by a hash shadow,
         // `ER_DUP_ENTRY` quotes a binary digest and names the shadow index, so
@@ -7261,8 +7340,106 @@ export class SqlDriver implements IDataDriver {
           // rather than burning a second number for nothing.
           delete toInsert[reservation.field];
         }
+        continue;
       }
+
+      // [#21227] Reached only when the INSERT landed and answered no rows. The
+      // read sits OUTSIDE the try on purpose: a fault in it is not an insert
+      // failure, so it must never reach the collision re-seed above, whose
+      // retry would re-issue a write that already landed.
+      const [stored] = await this.readBackInsertedRows(
+        object,
+        this.rotationWriteTarget(object) ?? object,
+        [toInsert],
+        options,
+      );
+      return stored;
     }
+  }
+
+  /**
+   * [#21227] Read back the rows an INSERT on this call just wrote, by the ids
+   * it wrote: what `create` and `bulkCreate` answer on a dialect whose INSERT
+   * answers no rows ({@link insertReturnsStoredRows}).
+   *
+   * One row per written row, in the written order (`IN (…)` promises no
+   * order), each through `formatOutput()`, the same presentation
+   * `returning('*')` gets on the other dialects and `update`'s own read-back
+   * gets on every dialect.
+   *
+   * # The read key: the written id, which this driver always holds
+   *
+   * Every row reaches the INSERT carrying the id this driver gave it: the
+   * caller's `id`, else its `_id`, else a nanoid minted in `create` /
+   * `bulkCreate` before the statement is built. The id is never asked of the
+   * database, so no insert id is read: the managed `id` column is a
+   * `varchar(255)` PRIMARY KEY with no AUTO_INCREMENT, and the insert id
+   * MySQL reports for it is `0`. The column is resolved through
+   * {@link remoteColumn}, so an external object whose `columnMap` renames
+   * `id` is read by its physical column, as its INSERT was written.
+   *
+   * # The table: the write target
+   *
+   * The table the statement wrote, a rotation shard included, so the read
+   * looks where the row landed rather than at the base name.
+   *
+   * # Tenant scope: the tenants the rows were WRITTEN under
+   *
+   * Routed through {@link applyTenantScope} like every read door in this class
+   * (`check:tenant-chokepoint`), scoped as `upsert`'s identity probe
+   * (`assertMergeLandedOnSuppliedIdentity`) scopes its own read: to the tenant
+   * each row was written under. On an ordinary tenanted call that is the
+   * caller's org, which `injectTenantOnInsert` stamped. On an admin write that
+   * names a tenant in the row data (a documented authority: explicit values
+   * are never overwritten), a read scoped to the caller's ACTIVE org would miss
+   * a row that really landed. A batch may name several tenants, so the scope is
+   * their union through `tenantIds`, which `applyTenantScope` already compiles
+   * as `IN (…) OR IS NULL`; the caller's own `tenantIds` membership set is
+   * replaced, not widened. With no tenant field, or no tenant on the rows and
+   * none on the call, `applyTenantScope` leaves the read unscoped by its own
+   * contract. The ids are this call's own and `id` is the PRIMARY KEY, so the
+   * read cannot answer a row this call did not write, in any organization.
+   *
+   * # A row that is not there
+   *
+   * Refused with {@link insertedRowsNotReadBackError}, never answered with the
+   * payload: see that function for why.
+   */
+  private async readBackInsertedRows(
+    object: string,
+    writeTable: string,
+    written: Record<string, any>[],
+    options?: DriverOptions,
+  ): Promise<Record<string, unknown>[]> {
+    if (written.length === 0) return [];
+    const idColumn = this.remoteColumn(object, 'id', 'id');
+    const tenantField = this.resolveTenantField(object);
+    const writtenTenants = tenantField
+      ? [
+          ...new Set(
+            written
+              .map((row) => row[tenantField])
+              .filter((value) => value !== undefined && value !== null && value !== '')
+              .map(String),
+          ),
+        ]
+      : [];
+    const scopeOptions: DriverOptions = {
+      ...options,
+      tenantId: writtenTenants[0] ?? options?.tenantId,
+      tenantIds: writtenTenants.length > 0 ? writtenTenants : undefined,
+    };
+    const builder = this.getBuilder(writeTable, options);
+    this.applyTenantScope(builder, object, scopeOptions);
+    const stored: Record<string, any>[] = await builder.whereIn(
+      idColumn,
+      written.map((row) => row.id),
+    );
+    const byId = new Map<string, Record<string, any>>();
+    for (const row of stored) byId.set(String(row[idColumn]), row);
+    const missing = written.filter((row) => !byId.has(String(row.id))).map((row) => row.id);
+    if (missing.length > 0) throw insertedRowsNotReadBackError(object, missing, written.length);
+    return written.map((row) => this.formatOutput(object, byId.get(String(row.id))));
   }
 
   /**
@@ -9529,13 +9706,16 @@ export class SqlDriver implements IDataDriver {
       const builder = this.getBuilder(this.rotationWriteTarget(object) ?? object, options);
 
       try {
-        const result = await builder.insert(formattedRows).returning('*');
-        // Read-back parity with create(): JSON columns come back as their stored
-        // strings from `returning('*')` — decode them so batch callers see the
-        // same shapes single-insert callers do.
-        return Array.isArray(result)
-          ? result.map((r) => this.formatOutput(object, r))
-          : result;
+        if (this.insertReturnsStoredRows) {
+          const result = await builder.insert(formattedRows).returning('*');
+          // Read-back parity with create(): JSON columns come back as their stored
+          // strings from `returning('*')` — decode them so batch callers see the
+          // same shapes single-insert callers do.
+          return Array.isArray(result)
+            ? result.map((r) => this.formatOutput(object, r))
+            : result;
+        }
+        await builder.insert(formattedRows);
       } catch (error) {
         if (!mayRetry || attempt >= AUTONUMBER_COLLISION_RETRIES) throw error;
         const colliding = await this.collidingAutoNumberReservations(error, reservationsPerRow.flat(), options);
@@ -9567,7 +9747,20 @@ export class SqlDriver implements IDataDriver {
             if (stale.has(this.autoNumberCounterKey(reservation))) delete rows[i][reservation.field];
           }
         }
+        continue;
       }
+
+      // [#21227] Reached only when the INSERT landed and answered no rows (the
+      // MySQL family answered `[insertId]`: one element for the whole batch,
+      // which the engine's one-result-per-row guard then refused after every
+      // row had been stored). ONE read for the batch, by the ids written, in
+      // the written order. Outside the try for the reason `create` gives.
+      return this.readBackInsertedRows(
+        object,
+        this.rotationWriteTarget(object) ?? object,
+        rows,
+        options,
+      );
     }
   }
 

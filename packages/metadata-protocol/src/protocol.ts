@@ -1295,10 +1295,11 @@ export function graftNormalizedOperators(authored: unknown, parsed: unknown): un
  * `saveMeta` persists the authored body verbatim (deliberately: `parsed.data`
  * strips the Studio-only auxiliary fields that ride along with an overlay). A
  * Studio-saved public form therefore reached every `sections`-reading consumer
- * still spelled `groups`, and `packages/rest`'s three `/forms/:slug` routes
- * degrade on exactly that: an empty published field schema, an empty
- * `allowedFields` whitelist on submit (#6920), and `403 LOOKUP_NOT_PUBLIC` for
- * every field. Same shape of gap as {@link graftNormalizedOperators}, and the
+ * still spelled `groups`, and `packages/rest`'s `/forms/:slug` routes degraded
+ * on exactly that: an empty published field schema, an empty `allowedFields`
+ * whitelist on submit (#6920), and a 403 for every field on the anonymous
+ * lookup picker (a route since retired, #21180). Same shape of gap as
+ * {@link graftNormalizedOperators}, and the
  * same consequence — while saves keep minting the authored spelling, the alias
  * can never be retired and the objectui-side folds cannot be removed.
  *

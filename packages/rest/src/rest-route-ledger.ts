@@ -386,8 +386,6 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
     note: 'anonymous public-form spec resolution — browser form runner, not authenticated SDK surface' },
   { route: 'POST /api/v1/forms/:slug/submit', family: 'forms', source: 'route-manager', disposition: 'public',
     note: 'anonymous public-form submission' },
-  { route: 'GET /api/v1/forms/:slug/lookup/:field', family: 'forms', source: 'route-manager', disposition: 'public',
-    note: 'anonymous scoped lookup picker (publicPicker-gated)' },
 
   // ── analytics (semantic layer) ────────────────────────────────────────────
   { route: 'POST /api/v1/analytics/dataset/query', family: 'analytics', source: 'route-manager', disposition: 'sdk', client: 'analytics.queryDataset' },
