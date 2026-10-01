@@ -41,8 +41,11 @@
  * Every action is validated AGAIN here (defence in depth: the executor trusts
  * the validator's rule, not the step that ran it), then its requests are
  * issued in order with the App token: REST calls straight from the op table;
- * the pull-request GraphQL ops resolve the pull's node id with one GET first;
- * a `transfer` reads the issue (refusing a pull request, or a card that no
+ * the pull-request GraphQL ops resolve the pull's node id with one GET first,
+ * and land only when the answer's `pullRequest` SHOWS the state the op table
+ * declares for them (`PR_LANDED_STATE` in `ops.mjs`) — a 200 with `data` and
+ * no `errors` whose pull is not in that state is a FAILED action naming what
+ * the answer showed, exactly as a REST 4xx is; a `transfer` reads the issue (refusing a pull request, or a card that no
  * longer answers from the source — already moved) and the target repository,
  * then sends `transferIssue` with both node ids and accepts only an answer
  * that places the card on the target. A transfer that fails prints the
@@ -85,7 +88,7 @@ import { isEntrypoint } from '../../invoked-as.mjs';
 import { scrub } from '../fleet-token.mjs';
 import { classifyHttp } from '../label-write.mjs';
 import { EXIT_WRITE_PACE_REFUSED, isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from '../write-pace.mjs';
-import { OPS, PERMISSIONS, transferRemedy } from './ops.mjs';
+import { OPS, PERMISSIONS, PR_LANDED_STATE, transferRemedy } from './ops.mjs';
 import { PAYLOAD_ENV, refusalText, tokenRepositoriesOf, validatePayload } from './validate.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
@@ -131,7 +134,12 @@ export function repoOfIssue(json) {
   return m ? m[1] : null;
 }
 
-/** Did this answer land the request? A 404 on a directed label DELETE is the label already being gone. */
+/**
+ * Did this answer land the request? A 404 on a directed label DELETE is the label already being gone.
+ * A pull-request mutation lands only when its answer SHOWS the state the op table declares for it
+ * (`PR_LANDED_STATE`, carried on the descriptor as `landed`) — a 200 with `data` and no `errors` is
+ * the platform accepting the request, not the pull being in that state.
+ */
 export function requestLanded(req, { status, json } = {}) {
   if (req.graphql) {
     if (status !== 200 || !json || typeof json !== 'object') return { ok: false, why: `HTTP ${status}` };
@@ -144,11 +152,31 @@ export function requestLanded(req, { status, json } = {}) {
       if (!moved || !Number.isInteger(moved.number)) return { ok: false, why: 'GraphQL: the answer carries no transferred issue' };
       if (String(where ?? '').toLowerCase() !== req.graphql.target_repo.toLowerCase()) return { ok: false, why: `GraphQL: the answer places the issue on ${where ?? 'no repository'}, not ${req.graphql.target_repo}` };
     }
+    if (req.graphql.pull !== undefined) {
+      const landed = req.graphql.landed;
+      if (!landed || typeof landed.holds !== 'function') return { ok: false, why: `the op table declares no landed state for ${req.graphql.mutation}, so its answer cannot be judged — a 200 alone is not a landing` };
+      const pr = json.data[req.graphql.mutation]?.pullRequest;
+      if (!pr || typeof pr !== 'object') return { ok: false, why: 'GraphQL: the answer carries no pullRequest' };
+      if (!landed.holds(pr)) return { ok: false, why: `GraphQL: HTTP 200 with no errors, but the answer shows ${pullStateText(pr)} — the op asked for ${landed.wants}` };
+    }
     return { ok: true, why: '' };
   }
   if (status >= 200 && status < 300) return { ok: true, why: '' };
   if (status === 404 && req.idempotent404) return { ok: true, why: 'already absent', idempotent: true };
   return { ok: false, why: `HTTP ${status}${typeof json?.message === 'string' ? ` — ${json.message}` : ''}` };
+}
+
+/**
+ * A pull request's state as a mutation answered it — every field the row selected, so a failure names
+ * what came back and a landing names how (armed, or already in the merge queue).
+ */
+export function pullStateText(pr) {
+  const bits = [`#${pr.number}`];
+  if (typeof pr.isDraft === 'boolean') bits.push(pr.isDraft ? 'draft' : 'ready');
+  if ('autoMergeRequest' in pr) bits.push(pr.autoMergeRequest ? `auto-merge ${pr.autoMergeRequest.mergeMethod ?? ''}`.trim() : 'auto-merge off');
+  if (typeof pr.isInMergeQueue === 'boolean') bits.push(pr.isInMergeQueue ? 'in the merge queue' : 'not in the merge queue');
+  if (typeof pr.isMergeQueueEnabled === 'boolean') bits.push(pr.isMergeQueueEnabled ? 'its base has a merge queue' : 'its base has no merge queue');
+  return bits.join(' · ');
 }
 
 /** The one thing a seat needs from an answer: the id / number / url of what was written. */
@@ -158,10 +186,7 @@ export function resultOf(req, json) {
     if (moved) return [`#${moved.number}`, moved.url, moved.repository?.nameWithOwner ? `(now on ${moved.repository.nameWithOwner})` : ''].filter(Boolean).join(' ');
     const pr = json?.data?.[req.graphql.mutation]?.pullRequest;
     if (!pr) return 'ok';
-    const bits = [`#${pr.number}`];
-    if (typeof pr.isDraft === 'boolean') bits.push(pr.isDraft ? 'draft' : 'ready');
-    if ('autoMergeRequest' in pr) bits.push(pr.autoMergeRequest ? `auto-merge ${pr.autoMergeRequest.mergeMethod ?? ''}`.trim() : 'auto-merge off');
-    return bits.join(' · ');
+    return pullStateText(pr);
   }
   if (Array.isArray(json)) return `${json.length} label(s) now on the issue`;
   if (!json || typeof json !== 'object') return 'ok';
@@ -362,13 +387,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the run: actions in order, stop at the first failure, later actions never attempted': 6,
   'the idempotent removal: a 404 on a directed label DELETE is success': 2,
   'the GraphQL ops: the node id first, then the mutation; an errors array is a failure': 5,
+  'the PR-state landing: a 200 lands only when the answer SHOWS the state the op asked for — armed or queued for auto-merge, off for its disable, ready and draft for the flips': 12,
   'the summary: request, sender and role, session, target, one row per request': 5,
   'redaction: the token reaches no summary line, log line or error': 3,
   'the wiring: both halves around every write verb, on the roster': 4,
   'the CLI: environment inputs, the payload refusal, the exit ladder': 7,
   'the transfer: the sender gated on BOTH repositories, both node ids first, a pull or a moved card refused before the mutation, landing only on the target, the remedy on failure': 11,
 });
-const SELF_TEST_BATTERY_FLOOR = 10;
+const SELF_TEST_BATTERY_FLOOR = 11;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -530,6 +556,49 @@ export async function selfTest() {
       t('a pull whose node id cannot be read is a failed action with no mutation sent', [noNode.exit, noNode.seen.some((s) => s.call === 'POST /graphql')], [EXIT_ACTION_FAILED, false]);
     }
 
+    // ── the PR-state landing ────────────────────────────────────────────────
+    battery('the PR-state landing: a 200 lands only when the answer SHOWS the state the op asked for — armed or queued for auto-merge, off for its disable, ready and draft for the flips');
+    {
+      const pull = { [`GET /repos/${REPO}/pulls/21`]: { status: 200, json: { number: 21, node_id: 'PR_kwDO21' } } };
+      const answer = (mutation, pr) => ({ ...allowed, ...pull, 'POST /graphql': { status: 200, json: { data: { [mutation]: { pullRequest: { number: 21, ...pr } } } } } });
+      const enable = (pr, actions = [{ op: 'automerge_enable', pull: 21 }]) => run(base(actions), answer('enablePullRequestAutoMerge', pr), { file: paceFile });
+
+      // The shape the card measured: 200, no errors, nothing armed, nothing queued — and a later action behind it.
+      const unarmed = await run(base([{ op: 'automerge_enable', pull: 21 }, { op: 'comment', issue: 21, body: 'after' }]), {
+        ...answer('enablePullRequestAutoMerge', { autoMergeRequest: null, isInMergeQueue: false, isMergeQueueEnabled: false }),
+        [`POST /repos/${REPO}/issues/21/comments`]: { status: 201, json: { id: 9 } },
+      });
+      t('⛔ automerge_enable answered 200 with no errors, no autoMergeRequest and the pull not queued is a FAILED action (exit 5)', [unarmed.exit, unarmed.rows[0]?.status], [EXIT_ACTION_FAILED, 200]);
+      t('…whose row names what the answer showed and what was asked for', [unarmed.rows[0]?.result.startsWith('FAILED'), ['auto-merge off', 'not in the merge queue', 'its base has no merge queue', 'auto-merge armed'].every((s) => unarmed.rows[0]?.result.includes(s))], [true, true], unarmed.rows[0]?.result);
+      t('…and the stroke stops there: the later action is never attempted, and the summary says so', [writes(unarmed.seen).map((s) => s.call), unarmed.summary.includes('stopped at action 1 (`automerge_enable`)')], [['POST /graphql'], true]);
+
+      const armed = await enable({ autoMergeRequest: { enabledAt: 'now', mergeMethod: 'SQUASH' }, isInMergeQueue: false, isMergeQueueEnabled: false });
+      t('the happy path still lands: armed on a base with no merge queue', [armed.exit, armed.rows[0]?.result], [EXIT_OK, '#21 · auto-merge SQUASH · not in the merge queue · its base has no merge queue']);
+      // Measured on this repository's queue: a pull whose checks are green is enqueued at once and the answer carries no autoMergeRequest.
+      const queued = await enable({ autoMergeRequest: null, isInMergeQueue: true, isMergeQueueEnabled: true });
+      t('a green pull enqueued at once on a merge-queue base lands, though the answer carries no autoMergeRequest', [queued.exit, queued.rows[0]?.result], [EXIT_OK, '#21 · auto-merge off · in the merge queue · its base has a merge queue']);
+      const queueArmed = await enable({ autoMergeRequest: { enabledAt: 'now', mergeMethod: 'MERGE' }, isInMergeQueue: false, isMergeQueueEnabled: true });
+      t('⛔ the merge method is never judged: a merge-queue base answers MERGE for a SQUASH request, and that arm lands', [queueArmed.exit, queueArmed.rows[0]?.result], [EXIT_OK, '#21 · auto-merge MERGE · not in the merge queue · its base has a merge queue']);
+
+      const stillArmed = await run(base([{ op: 'automerge_disable', pull: 21 }]), answer('disablePullRequestAutoMerge', { autoMergeRequest: { enabledAt: 'then' }, isInMergeQueue: false, isMergeQueueEnabled: true }));
+      t('automerge_disable whose answer still carries an autoMergeRequest is a FAILED action', [stillArmed.exit, stillArmed.rows[0]?.result.includes('auto-merge off (autoMergeRequest null)')], [EXIT_ACTION_FAILED, true], stillArmed.rows[0]?.result);
+      const disarmedQueued = await run(base([{ op: 'automerge_disable', pull: 21 }]), answer('disablePullRequestAutoMerge', { autoMergeRequest: null, isInMergeQueue: true, isMergeQueueEnabled: true }), { file: paceFile });
+      t('automerge_disable lands on auto-merge off even for a queued pull — the row says it is still in the merge queue', [disarmedQueued.exit, disarmedQueued.rows[0]?.result], [EXIT_OK, '#21 · auto-merge off · in the merge queue · its base has a merge queue']);
+
+      const stillDraft = await run(base([{ op: 'pr_ready', pull: 21 }]), answer('markPullRequestReadyForReview', { isDraft: true }));
+      const stillReady = await run(base([{ op: 'pr_draft', pull: 21 }]), answer('convertPullRequestToDraft', { isDraft: false }));
+      t('pr_ready answered isDraft true, and pr_draft answered isDraft false, are FAILED actions naming the state', [stillDraft.exit, stillDraft.rows[0]?.result.includes('#21 · draft'), stillReady.exit, stillReady.rows[0]?.result.includes('#21 · ready')], [EXIT_ACTION_FAILED, true, EXIT_ACTION_FAILED, true]);
+      const noPull = await run(base([{ op: 'automerge_enable', pull: 21 }]), { ...allowed, ...pull, 'POST /graphql': { status: 200, json: { data: { enablePullRequestAutoMerge: null } } } });
+      t('an answer that carries no pullRequest is a FAILED action, never a landing', [noPull.exit, noPull.rows[0]?.result.includes('carries no pullRequest')], [EXIT_ACTION_FAILED, true]);
+
+      const bare = { verb: 'POST', path: '/graphql', graphql: { mutation: 'enablePullRequestAutoMerge', query: 'q', pull: 21 } };
+      t('⛔ a pull mutation whose descriptor declares no landed state is never judged landed', requestLanded(bare, { status: 200, json: { data: { enablePullRequestAutoMerge: { pullRequest: { number: 21, autoMergeRequest: { mergeMethod: 'SQUASH' } } } } } }).ok, false);
+      // The table half: every pull mutation the op table can issue carries its entry, and selects every field that entry reads.
+      const pullRows = Object.keys(OPS).flatMap((op) => OPS[op].requests({ op, pull: 21, issue: 21, comment_id: 1, target_repo: 'x', title: 't', body: 'b', head: 'h', base: 'main', labels: ['l'], assignees: ['u'], reviewers: ['r'] }, REPO).filter((r) => r.graphql?.pull !== undefined).map((r) => [op, r.graphql]));
+      const selects = (query, field) => new RegExp(`\\b${field}\\b`).test(query.slice(query.indexOf('pullRequest {')));
+      t('every pull mutation in the op table carries its PR_LANDED_STATE entry, and its query selects every field that entry reads', [pullRows.map(([op]) => op).sort(), pullRows.every(([op, g]) => g.landed === PR_LANDED_STATE[op] && g.landed.fields.every((f) => selects(g.query, f)))], [Object.keys(PR_LANDED_STATE).sort(), true]);
+    }
+
     // ── the transfer ────────────────────────────────────────────────────────
     battery('the transfer: the sender gated on BOTH repositories, both node ids first, a pull or a moved card refused before the mutation, landing only on the target, the remedy on failure');
     {
@@ -664,7 +733,7 @@ export async function selfTest() {
   console.log(
     `✓ fleet-write/execute self-test: ${cases.length} cases pass across ${declared.length} batteries — the sender gate from the target repo's answer, ` +
       'every op as the request the table declares, stop at the first failure with later actions untouched, the idempotent label DELETE, the GraphQL ' +
-      'ops behind a node-id read, a transfer gated on both repositories and landing only on its target, one summary row per request, and a known ' +
+      'ops behind a node-id read, a pull mutation landing only when its answer shows the state it asked for (armed or queued, off, ready, draft), a transfer gated on both repositories and landing only on its target, one summary row per request, and a known ' +
       'token that came back out of NO summary, log or error.',
   );
   selfTestReachedVerdict = true;

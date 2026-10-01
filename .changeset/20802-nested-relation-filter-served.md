@@ -25,4 +25,4 @@ Measured through `POST /api/v1/data/:object/query` on SQLite and PostgreSQL 16 (
 | `{ $not: { owner: { region: "NA" } } }` | `INVALID_FILTER` / 400 | `d2`, `d4` |
 | `{ owner: { region: "APAC" } }` (no owner matches) | `INVALID_FILTER` / 400 | no rows |
 
-On the in-memory driver, a multi-valued relation's `$contains` still matches a stored id by substring per element, so there an id that is a substring of another stored id (`u1` inside `u10`) also matches; SQLite and PostgreSQL match the element.
+SQLite, PostgreSQL and the in-memory driver match the element of a multi-valued relation, so an id that is a substring of another stored id (`u1` inside `u10`) does not match it.

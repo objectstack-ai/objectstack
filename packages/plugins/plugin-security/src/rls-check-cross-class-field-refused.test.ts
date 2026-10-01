@@ -204,7 +204,8 @@ for (const [driverName, makeDriver, available] of DRIVERS) {
       it(`${c.id} \`${c.predicate}\` — the 400 names neither column; the server log names the policy and both`, async () => {
         const w = await boot(makeDriver, 'check', c.predicate);
         const message = await messageOf(w.engine.insert(w.OBJ, NEW, { context: w.caller } as never));
-        expect(message).toMatch(/^A field-to-field comparison/);
+        // The remedy leads: the REST door cuts a long message's tail, never its head.
+        expect(message).toMatch(/^In a row-level policy, compare a field only with a field of the same class/);
         for (const column of c.columns) expect(message).not.toContain(column);
 
         const lines = w.refusalLines();

@@ -161,6 +161,31 @@ describe('matchesFilterCondition — a field compared with a field of no shared 
     expect(crossFieldClassRefusalCarriedBy(new Error('x'))).toBeNull();
   });
 
+  it('leads with its remedy and fits the REST client-message bound whole, however long the column names', () => {
+    // The REST door cuts a 4xx message of 500 characters or more to 499 plus an
+    // ellipsis (`CLIENT_MESSAGE_MAX`, `@objectstack/rest`): it keeps the HEAD.
+    const remedy =
+      'In a row-level policy, compare a field only with a field of the same class, or fix the declaration of ' +
+      'the one that is declared with the wrong type.';
+    const long = (stem: string) => `${stem}_${'x'.repeat(120)}`;
+    const longFields = { [long('stage')]: { type: 'text' }, [long('amount')]: { type: 'number' } };
+    const shortErr = refusalOf({ status: { $ne: { $field: 'amount' } } })!;
+    let longErr: WireBearingError | null = null;
+    try {
+      matchesFilterCondition({}, { [long('stage')]: { $ne: { $field: long('amount') } } } as never, { fields: longFields });
+    } catch (e) {
+      longErr = e as WireBearingError;
+    }
+    expect({ code: longErr?.code, status: longErr?.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
+    // It names no column, so its length does not depend on theirs.
+    expect(longErr?.message).toBe(shortErr.message);
+    expect(shortErr.message.startsWith(remedy)).toBe(true);
+    expect(shortErr.message.length).toBeLessThan(500);
+    // After the remedy: what is refused, why, and why the columns are withheld.
+    const at = (s: string) => shortErr.message.indexOf(s);
+    expect([at('share no class'), at('so it is refused'), at('withheld')].every((i, n, a) => i > remedy.length && (n === 0 || i > a[n - 1]))).toBe(true);
+  });
+
   it('findCrossFieldClassRefusal answers null for a filter whose comparisons all compare', () => {
     expect(findCrossFieldClassRefusal({ $and: [{ status: { $eq: { $field: 'title' } } }, { amount: { $lt: { $field: 'budget' } } }] }, FIELDS)).toBeNull();
     expect(findCrossFieldClassRefusal({ amount: { $lt: { $field: 'status' } } }, FIELDS)).toMatchObject({

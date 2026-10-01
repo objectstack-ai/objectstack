@@ -748,6 +748,10 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // `@objectstack/spec` already declares it verbatim, so Layer C reaches it
       // today. What stays uncovered stays recorded in that test's header.
       'scripts/**',
+      // The census's hand LEDGER names this file: a NOT_SDK row pins its five
+      // producer reads of `analytics.query`. A real input, so a changed call
+      // count re-runs this suite.
+      'packages/rest/src/analytics-nested-relation-filter.test.ts',
     ],
     heldBy: {
       // `scripts/**` is rostered TODAY through the census's own

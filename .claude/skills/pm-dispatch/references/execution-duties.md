@@ -19,7 +19,6 @@
 - 工作项面:卡片与分诊评论列的每条工作项逐条对树核验是否仍未完成,⛔ 不对卡核验。
 - 每条工作项写进派发令时都是 dev 首先证伪的前提。
 - `batch` 封顶全部子代理,等待不填槽;同批独立按文件面不相交判,⛔ 不按包、不按 check 名。
-- 舰队至多一张 `tooling` 卡带 `pm:dispatched`,第二张等;带 `Unblocks:` 者继承产品级不计数。
 - single-writer 路径 = `SINGLE_CLAIM_PATHS` 所枚举;共享其它路径是普通并发,后落地方解冲突。
 - 第 N 单派发前读 `scripts/pm/os-verify-lock.sh --status`:到达深度 ≥ `LOCK_DEPTH_HOLD`(= 2)即等。
 - 到达深度 = `queue N:` 行数 + 1(待派 dev 的运行算作到达);`state:` holder 与 `parked` 行不计。
@@ -43,6 +42,7 @@
 - 阻塞项无主 ⇒ 被挡席认领做掉,不限大小;在该卡走完整认领、尊重其热文件串行队。
 - 阻塞项在飞 ⇒ 等:`pm:blocking` 在其车道排最前、等待者写该卡;p0/p1 优先级沿链传递。
 - 取卡前置 = `docs/NORTH-STAR.md`「优先级」第 3 条:本车道队列开放 P0/P1 每次取卡现读。
+- 开放 = 未派发(无 `pm:dispatched`、无 assignee);在飞的 P0/P1 不挡任何候选,只余取卡全序。
 - 取卡全序:维护者直派插队卡(出处三件)> 契约面卡(判据见 `references/lanes/spec.md`)> 标签序。
 - 标签序:`priority:p0` > `pm:blocking` > 功能点位次 > `target:` 板上项 > p1 > p2 > p3 > 无级。
 - `pm:blocking` 级内先按解锁扇出(从 `Blocked-by:` 反向索引现算,⛔ 扇出数不落标签)。

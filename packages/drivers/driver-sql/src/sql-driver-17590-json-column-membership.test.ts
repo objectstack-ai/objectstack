@@ -93,18 +93,23 @@ const FIELDS: Record<string, Record<string, unknown>> = {
   tags_: { type: 'tags' },
   picks: { type: 'multiselect' },
   nums: { type: 'select', multiple: true },
+  // [#20874] A multi-valued LOOKUP — the shape the nested-relation filter
+  // lowers onto (`$contains` per related id) and the one `driver-memory`
+  // pins the same rows for (`memory-20874-contains-membership.test.ts`).
+  owners: { type: 'lookup', reference: 'os17590_owner', multiple: true },
 };
 
 /**
  * Rows where substring and membership DISAGREE on every column — see the head
  * note. `redwood`/`ab`/`[10, 21]` are the rows a substring emitter returns and
- * a membership construct does not.
+ * a membership construct does not; `['u10']` is the row a per-element
+ * substring answers for `u1` (#20874).
  */
 const ROWS = [
-  { id: '1', label: 'redwood', tags_: ['red', 'blue'], picks: ['a', 'b'], nums: [1, 2] },
-  { id: '2', label: 'red', tags_: ['redwood'], picks: ['ab'], nums: [10, 21] },
-  { id: '3', label: 'blue', tags_: ['blue'], picks: ['b'], nums: [2] },
-  { id: '4', label: 'none', tags_: [], picks: [], nums: [] },
+  { id: '1', label: 'redwood', tags_: ['red', 'blue'], picks: ['a', 'b'], nums: [1, 2], owners: ['u1', 'u2'] },
+  { id: '2', label: 'red', tags_: ['redwood'], picks: ['ab'], nums: [10, 21], owners: ['u10'] },
+  { id: '3', label: 'blue', tags_: ['blue'], picks: ['b'], nums: [2], owners: ['u3', 'u1'] },
+  { id: '4', label: 'none', tags_: [], picks: [], nums: [], owners: [] },
 ] as const;
 
 const ALL_IDS = ['1', '2', '3', '4'];
@@ -127,7 +132,13 @@ function declareMembershipCell(cell: DialectCell): void {
       knexInstance = driver.getKnex();
       await knexInstance.schema.dropTableIfExists(OBJECT);
       await driver.initObjects([{ name: OBJECT, fields: FIELDS } as never]);
-      for (const row of ROWS) await driver.create(OBJECT, { ...row, tags_: [...row.tags_], picks: [...row.picks], nums: [...row.nums] }, BYPASS);
+      for (const row of ROWS) {
+        await driver.create(
+          OBJECT,
+          { ...row, tags_: [...row.tags_], picks: [...row.picks], nums: [...row.nums], owners: [...row.owners] },
+          BYPASS,
+        );
+      }
     }, LIVE_CELL_TIMEOUT_MS);
 
     afterAll(async () => {
@@ -173,6 +184,19 @@ function declareMembershipCell(cell: DialectCell): void {
       expect(await ids({ nums: { $contains: '2' } })).toEqual(['1', '3']);
       expect(await ids({ nums: { $contains: '10' } })).toEqual(['2']);
       expect(await ids({ nums: { $contains: '0' } })).toEqual([]);
+    }, LIVE_CELL_TIMEOUT_MS);
+
+    /**
+     * [#20874] An id that is a PREFIX of another stored id is not its member.
+     * `u1` inside `['u10']` is the row a per-element substring answers and the
+     * membership construct does not — the case the nested-relation filter
+     * reaches (`$contains` per related id on a multi-valued relation).
+     * `driver-memory` pins these literal rows over the same fixture.
+     */
+    it('$contains over a multi-valued lookup answers the MEMBER ids, never an id that prefixes another (u1 / u10)', async () => {
+      expect(await ids({ owners: { $contains: 'u1' } })).toEqual(['1', '3']);
+      expect(await ids({ owners: { $contains: 'u10' } })).toEqual(['2']);
+      expect(await ids({ owners: { $notContains: 'u1' } })).toEqual(['2', '4']);
     }, LIVE_CELL_TIMEOUT_MS);
 
     /**
