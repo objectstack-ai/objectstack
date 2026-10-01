@@ -196,23 +196,24 @@
       "title": "MCP stdio auto-start fails closed without OS_MCP_STDIO_API_KEY; with a member-bound key, reads AND aggregates honor RLS/FLS and revocation bites on the next call",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P0",
       "surface": "cli",
-      "personas": ["restricted member API key (for the RLS half)", "admin API key (for the full-row comparison)"],
+      "personas": ["restricted member API key (for the RLS half — on showcase, a contributor-bound member)", "a second restricted member API key for the FLS half (on showcase, a client_liaison-bound member — see fixtures.requires)", "admin API key (for the full-row comparison)"],
       "fixtures": {
         "app": "any",
         "requires": [
           "an OWD-private object with rows owned by two different users (the showcase task/invoice seeds qualify when run against the showcase)",
           "two osk_ API keys: one bound to a restricted member, one to an admin (Setup → Connect an Agent, or POST /api/v1/keys)",
-          "for the aggregate half: a field on that object the restricted member cannot read (the same FLS-masked field the row/field clause relies on), plus at least one readable field to group a count by"
+          "for the aggregate half: a field on that object the restricted member cannot read (the same FLS-masked field the row/field clause relies on), plus at least one readable field to group a count by",
+          "⚠️ on showcase NO single persona carries both RLS-hidden rows and an FLS-masked field on one object, so the RLS and FLS halves take two personas. RLS: a contributor-bound member (the search:qa-contributor-bound-member recipe) reads only its own showcase_invoice rows. FLS: the only `readable: false` grants are showcase_client_liaison's on showcase_project.budget / spent / budget_remaining (permission-sets.ts ClientLiaisonPermissionSet), and showcase_project is public_read_write, so that persona has no RLS-hidden rows there. Mint a key for each; score the RLS legs of acceptance[3] and acceptance[4] on the first, the FLS legs of acceptance[3] and acceptance[5] on the second"
         ],
         "knownGaps": [
           "aggregate_records is registered on the MCP transport only when the runtime routes aggregation through the ObjectQL engine (mcp-http-tools.ts registers it IFF the bridge exposes aggregate — graceful degradation, the same contract as the action bridge). The showcase runtime does route it through the engine (packages/runtime/src/domains/mcp.ts). If tools/list lacks aggregate_records on this boot, record the aggregate clauses blocked(dependency), not a fail"
         ]
       },
       "steps": [
-        "start the app with the stdio transport enabled (OS_MCP_STDIO_ENABLED=true, or the plugin autoStart option) and OS_MCP_STDIO_API_KEY UNSET; capture the startup failure",
+        "start the app with `os start` from the app directory (e.g. `os start -p <port> -d file:<run db>`) with the stdio transport enabled (OS_MCP_STDIO_ENABLED=true, or the plugin autoStart option) and OS_MCP_STDIO_API_KEY UNSET; capture the startup failure. ⛔ Not `os dev`: the stdio transport owns STDOUT (newline-delimited JSON a client parses line by line), and measured on a stock showcase boot `os dev` printed a 15-line banner there, the MCP connect block included, while `os start` printed nothing to stdout (every diagnostic goes to stderr, #7915)",
         "start again with OS_MCP_STDIO_API_KEY=osk_unknown (a key that resolves to nothing); capture that failure",
         "start with the restricted member's valid key; capture the principal-bound startup log line",
         "over MCP stdio, query_records the OWD-private object and get_record a row owned by the OTHER user; record row sets and field sets",
@@ -254,7 +255,7 @@
           "evidence": "the member MCP aggregate, the member REST aggregate, and the admin REST aggregate"
         },
         {
-          "clause": "an aggregate whose input or groupBy names an FLS-unreadable field fails CLOSED — the FLS aggregate-INPUT gate rejects before any statistic is computed ('Field read denied', details.forbiddenFields: [<field>]); a masked field's sum/count_distinct never leaks through an alias, because result masking cannot run on aggregate output rows (they carry only aliases) — so the leak is stopped on the input (#2976)",
+          "clause": "an aggregate whose input or groupBy names an FLS-unreadable field fails CLOSED — the FLS aggregate-INPUT gate rejects before any statistic is computed, its message naming the field ('[Security] Field read denied: not permitted to aggregate [<field>] on <object>'). ⚠️ The thrown error carries forbiddenFields, but neither wire serializes it: REST answers {error, code, object} (packages/rest/src/error-response.ts, the PERMISSION_DENIED arm) and QA run #21056 found no details on the MCP tool error either — score on the message naming the field, never on a details key; a masked field's sum/count_distinct never leaks through an alias, because result masking cannot run on aggregate output rows (they carry only aliases) — so the leak is stopped on the input (#2976)",
           "oracle": "api",
           "verify": "aggregate_records over the masked field errors with the field-read-denied refusal and returns no numeric result; the same aggregate over a READABLE field succeeds (and count(*) needs no field) — the gate targets the field, not the operation",
           "evidence": "the refusal + a control aggregate over a readable field"
@@ -292,7 +293,13 @@
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358 §9", "ref": "#3358" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 3, "date": "2026-08-08", "change": "clause-extension (§G1 #2976): member-keyed aggregate_records reconciles to the member's OWN REST aggregate (RLS parity, not the admin's), and an aggregate over an FLS-masked field fails closed on the input gate — the RLS-bypassing count is the sys_attachment-total-leak class", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 3, "date": "2026-08-08", "change": "clause-extension (§G1 #2976): member-keyed aggregate_records reconciles to the member's OWN REST aggregate (RLS parity, not the admin's), and an aggregate over an FLS-masked field fails closed on the input gate — the RLS-bypassing count is the sys_attachment-total-leak class", "ref": "claude/platform-test-checklist-ocwugl" },
+        {
+          "revision": 4,
+          "date": "2026-10-01",
+          "change": "checklist-accuracy findings of QA run #21056: no single showcase persona carries both RLS-hidden rows and an FLS-masked field on one object, so the item now names two (contributor for RLS, client_liaison for FLS); acceptance[5] no longer expects details.forbiddenFields on the wire, which neither transport serializes; steps[0] names `os start` as the host and says why `os dev` corrupts the stdio channel (its banner goes to stdout — 15 lines measured, against 0 for `os start`)",
+          "ref": "#21060"
+        }
       ]
     },
     {
