@@ -5693,8 +5693,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'an author following the contract met a tool contradicting it with no way to tell which side '
       + 'was wrong. A retiredKey tombstone on `ObjectKanbanPropsSchema` with one D2 conversion that '
       + 'is a pure lossless DELETE (the key never had an effect to preserve) scoped by component '
-      + '`type`: `quickAdd` stays LIVE on the `kanban-ui` block, where a React host supplies the '
-      + 'runtime slot, and the ruling keeps it there deliberately.',
+      + '`type`. Delete the key; `object-kanban` offers no quick-add control.',
   },
   {
     id: 'object-tenancy-organization-field-retired',

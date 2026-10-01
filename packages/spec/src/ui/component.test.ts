@@ -3640,7 +3640,8 @@ describe('ObjectKanbanPropsSchema quickAdd is retired (#17260)', () => {
     // custom string: an author steered there writes a node that saves clean and
     // resolves no renderer. The control itself has no metadata route, so the
     // one sentence every copy shares is "delete the key" — pinned on the
-    // refusal, the D2 conversion's summary and the D3 entry's three texts.
+    // refusal, the D2 conversion's summary, the D3 entry's three texts and
+    // step 18's rationale (the paragraph the upgrade guide prints).
     const refused = kanban.safeParse({ objectName: 'showcase_task', quickAdd: true });
     expect(refused.success).toBe(false);
     const issue = (refused.error?.issues ?? []).find((i) => i.path.join('.') === 'quickAdd');
@@ -3649,16 +3650,18 @@ describe('ObjectKanbanPropsSchema quickAdd is retired (#17260)', () => {
     expect(tombstone).toContain('Delete the key; `object-kanban` offers no quick-add control.');
 
     const conversion = ALL_CONVERSIONS.find((c) => c.id === 'object-kanban-quick-add-removed');
-    const semantic = MIGRATIONS_BY_MAJOR[18]?.semantic
-      .find((m) => m.id === 'object-kanban-quick-add-retired');
+    const step18 = MIGRATIONS_BY_MAJOR[18];
+    const semantic = step18?.semantic.find((m) => m.id === 'object-kanban-quick-add-retired');
     expect(conversion).toBeDefined();
     expect(semantic).toBeDefined();
+    expect(step18?.rationale).toContain('retires `object-kanban`\'s `quickAdd`');
     const remedyTexts = [
       tombstone,
       conversion?.summary ?? '',
       semantic?.replacement ?? '',
       semantic?.reason ?? '',
       semantic?.acceptanceCriteria ?? '',
+      step18?.rationale ?? '',
     ];
     for (const text of remedyTexts) {
       expect(text.length).toBeGreaterThan(0);
