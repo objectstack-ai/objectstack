@@ -94,7 +94,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const sourceOf = (file: string) => readFileSync(resolve(HERE, file), 'utf8');
 
 const REST_SERVER = sourceOf('rest-server.ts');
-const IMPORT_RUNNER = sourceOf('import-runner.ts');
+// [#20919] The runner moved to `@objectstack/core`, beside `bulkWrite`.
+const IMPORT_RUNNER = readFileSync(resolve(HERE, '../../core/src/utils/import-runner.ts'), 'utf8');
 
 interface CensusEntry {
     /** File name, relative to this test — the census reads package sources only. */
