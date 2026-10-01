@@ -42,6 +42,7 @@ import { isMissingTableError } from '@objectstack/types';
 // [#21081] The name the activity row declares its text provenance under, owned
 // by the read side that redacts by it.
 import { ACTIVITY_TEXT_SOURCES_KEY, type ActivityTextSources } from './activity-field-redaction.js';
+import type { LedgerRecordWriteAction } from './audit-log-field-redaction.js';
 
 /**
  * Minimal structural view of `NotificationService.emit` (ADR-0030). Declared
@@ -236,8 +237,15 @@ const NOISE_FIELDS = new Set<string>([
  */
 export { createFieldPresenceProbe, resolveRecordOrganizationField } from '@objectstack/metadata-core';
 
-/** Action name produced from a HookContext.event string. */
-function actionFor(event: string): 'create' | 'update' | 'delete' | null {
+/**
+ * Action name produced from a HookContext.event string.
+ *
+ * [#21155] Typed by the ledger's record-write vocabulary: these are the rows
+ * whose snapshots are a parent record's field map, and the read side
+ * (`audit-log-field-redaction.ts`) narrows exactly those. A new record-write
+ * action does not compile until that list names it.
+ */
+function actionFor(event: string): LedgerRecordWriteAction | null {
   if (event === 'afterInsert') return 'create';
   if (event === 'afterUpdate') return 'update';
   if (event === 'afterDelete') return 'delete';
