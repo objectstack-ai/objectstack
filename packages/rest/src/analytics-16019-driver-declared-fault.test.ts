@@ -26,6 +26,10 @@
  * THAT — the door refuses the expression `PERMISSION_DENIED` / 403, the one
  * judge #21156 reaches (no new error code) — beside a positive control that a
  * legitimate dataset on declared fields is still served 200 by the real driver.
+ * It pins the route's SAVED branch (`body.datasetName`) the same way: that branch
+ * loads the dataset from metadata and calls the same `queryDataset`, so a saved
+ * dataset whose `field` is not a column reference is refused too, and a saved
+ * plain-column dataset is still served.
  *
  * The second block pins the ordering the ruling's execution notes name. A
  * DECLARED fault is withheld even when its text is one the heuristic does not
@@ -75,11 +79,12 @@ function mockServer() {
     use: vi.fn(), listen: vi.fn().mockResolvedValue(undefined), close: vi.fn().mockResolvedValue(undefined),
   };
 }
-function mockProtocol() {
+/** `savedDatasets` is what the route's `body.datasetName` branch loads from metadata. */
+function mockProtocol(savedDatasets: unknown[] = []) {
   return {
     getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
     getMetaTypes: vi.fn().mockResolvedValue([]),
-    getMetaItems: vi.fn().mockResolvedValue([]),
+    getMetaItems: vi.fn().mockResolvedValue(savedDatasets),
   };
 }
 function mockRes() {
@@ -90,9 +95,9 @@ function mockRes() {
   return res;
 }
 
-function buildRoute(analyticsProvider?: any) {
+function buildRoute(analyticsProvider?: any, savedDatasets: unknown[] = []) {
   const rest = new RestServer(
-    mockServer() as any, mockProtocol() as any, { api: { requireAuth: false } } as any,
+    mockServer() as any, mockProtocol(savedDatasets) as any, { api: { requireAuth: false } } as any,
     undefined, undefined, undefined, undefined, undefined, undefined, undefined,
     undefined, undefined, undefined, undefined,
     analyticsProvider,
@@ -240,6 +245,38 @@ describe('[#16019] a driver fault on the raw-SQL path reaches the caller by decl
     expect(res.statusCode).toBe(200);
     expect(res.body.rows).toEqual([{ industry: 'tech', account_count: 1 }]);
     expect(warned.filter((m) => m.includes('[sql-driver] DATABASE_ERROR'))).toHaveLength(0);
+  });
+
+  // [#21177] The route's SAVED branch: `body.datasetName` loads the dataset from
+  // metadata and calls the same `queryDataset`, so the door judges a saved
+  // dataset's own `field` text exactly as it judges an inline one. The expression
+  // here is one SQLite can run, so without the door it would be served (200).
+  it('[#21177] a SAVED dataset (body.datasetName) whose dimension field is not a column reference is refused 403 PERMISSION_DENIED — nothing executed', async () => {
+    const saved = {
+      ...dataset,
+      name: 'account_metrics_saved_expr',
+      dimensions: [{ name: 'lowered_name', field: 'lower(name)', type: 'string' }],
+    };
+    const execute = vi.spyOn(driver, 'execute');
+    const route = buildRoute(async () => realAnalytics(driver), [saved]);
+    const res = await post(route, { datasetName: saved.name, selection: { measures: ['account_count'], dimensions: ['lowered_name'] } });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body.code).toBe('PERMISSION_DENIED');
+    expect(execute).not.toHaveBeenCalled();
+    const body = JSON.stringify(res.body);
+    expect(body).toContain('lowered_name');
+    expect(body).not.toMatch(/lower\(name\)/i);
+  });
+
+  it('[#21177] CONTROL: a SAVED plain-column dataset (body.datasetName) → 200 with rows', async () => {
+    const execute = vi.spyOn(driver, 'execute');
+    const route = buildRoute(async () => realAnalytics(driver), [dataset]);
+    const res = await post(route, { datasetName: dataset.name, selection: { measures: ['account_count'], dimensions: ['industry'] } });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.rows).toEqual([{ industry: 'tech', account_count: 1 }]);
+    expect(execute).toHaveBeenCalled();
   });
 });
 

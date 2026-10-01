@@ -2001,41 +2001,55 @@ export class AnalyticsService implements IAnalyticsService {
   }
 
   /**
-   * [#21177] An INLINE dataset's own dimension/measure `field` text is CALLER
-   * content at query time, and main does not judge it: {@link answerDataset}
-   * compiles the dataset into a cube whose members read as DECLARED, so a
-   * dimension/measure whose `field` is a raw expression resolves to a declared
-   * cube member whose `sql` is that expression — and #21156's
+   * [#21177] The dimension/measure `field` text of a dataset handed to
+   * {@link queryDataset} is judged here, and main did not judge it:
+   * {@link answerDataset} compiles the dataset into a cube whose members read as
+   * DECLARED, so a dimension/measure whose `field` is a raw expression resolves to
+   * a declared cube member whose `sql` is that expression — and #21156's
    * {@link assertCallerMembersResolvable} leaves a DECLARED expression member to
    * the field-level gate (#20965), which stands down with no security service and
    * on an object its reader answers `undefined` for. In those tiers the
    * expression reached `NativeSQLStrategy`'s statement as written.
    *
-   * So the dataset's own `field` text is judged here, on the one judge: a `field`
-   * that is not a column reference is caller content the admission cannot
+   * ## Every branch that supplies the dataset
+   *
+   * The service cannot tell where the dataset came from, so the judgement does not
+   * depend on it. The `/analytics/dataset/query` route hands this door an INLINE
+   * dataset (`body.dataset`, the caller's own text) and a SAVED one alike — it
+   * loads `body.datasetName` from metadata and calls the same
+   * {@link queryDataset} — and the build probe calls it with a saved dataset too.
+   * One uniform refusal here is the safer reading: a saved dataset whose `field` is
+   * an expression is refused exactly as an inline one is. No shipped dataset
+   * carries a non-column `field`. Refusing such a `field` when it is AUTHORED is
+   * the job of the dataset schema's own retirement of expression fields, not of
+   * this door.
+   *
+   * ## The refusal
+   *
+   * A `field` that is not a column reference names no field the admission can
    * attribute, so it is refused through main's {@link assertCallerMembersJudgeable}
    * / {@link fieldReadUnjudgeableError} — `PERMISSION_DENIED` / 403, the SAME
    * refusal #21156 reaches, no new error code — for EVERY caller (admin included)
    * and whether or not a security provider is wired, BEFORE the dataset is
-   * compiled, so no caller expression reaches a strategy (the draft-preview branch
-   * included). It names the dimension/measure the caller spelled, never the
-   * `field` expression behind it.
+   * compiled, so no such expression reaches a strategy (the draft-preview branch
+   * included). It names the dimension/measure, never the `field` expression
+   * behind it.
    *
    * ## Boundary
    *
-   * Only the dataset's OWN `field` text is caller content here. The dataset's
-   * `filter`, the selection's `runtimeFilter` and the query's members are lowered
-   * into the compiled query's `where` / member list by `DatasetExecutor` and are
-   * already judged by #21156 on the query path (`callCtx` →
+   * Only the dataset's OWN `field` text is judged here. The dataset's `filter`,
+   * the selection's `runtimeFilter` and the query's members are lowered into the
+   * compiled query's `where` / member list by `DatasetExecutor` and are already
+   * judged by #21156 on the query path (`callCtx` →
    * {@link assertCallerMembersResolvable}), so this gate does not re-judge them. A
-   * REGISTERED dataset's own field text is author text, queried by cube name
-   * through {@link query} and never through {@link answerDataset}; it stays with
-   * the field gate / the parse (#20943), exactly as #21156 leaves it.
+   * dataset registered through the configuration door ({@link registerDataset})
+   * and queried by cube name runs through {@link query}, not here; its members
+   * stay with the field gate / the parse (#20943), exactly as #21156 leaves them.
    *
    * A derived measure references other measures BY NAME (the spec enforces that),
    * so it carries no `field` to judge.
    */
-  private assertInlineDatasetFieldsJudgeable(dataset: Dataset, context: ExecutionContext | undefined): void {
+  private assertDatasetFieldsJudgeable(dataset: Dataset, context: ExecutionContext | undefined): void {
     const object = typeof dataset.object === 'string' ? dataset.object : '';
     const caller: NamedRead[] = [];
     for (const d of dataset.dimensions ?? []) {
@@ -2369,12 +2383,12 @@ export class AnalyticsService implements IAnalyticsService {
     context?: ExecutionContext,
     options?: { previewDrafts?: boolean },
   ): Promise<AnalyticsResult> {
-    // [#21177] The inline dataset's own dimension/measure `field` text is caller
-    // content at query time — refuse any that is not a column reference here,
-    // ahead of compile and the draft-preview branch, so no caller expression ever
-    // reaches a strategy (`PERMISSION_DENIED` / 403, the one judge, every tier).
-    // See {@link assertInlineDatasetFieldsJudgeable}.
-    this.assertInlineDatasetFieldsJudgeable(dataset, context);
+    // [#21177] The dataset's own dimension/measure `field` text — inline or saved,
+    // whichever branch supplied it — is judged here: a `field` that is not a
+    // column reference is refused ahead of compile and the draft-preview branch,
+    // so no such expression reaches a strategy (`PERMISSION_DENIED` / 403, the one
+    // judge, every tier). See {@link assertDatasetFieldsJudgeable}.
+    this.assertDatasetFieldsJudgeable(dataset, context);
     const compiled = this.compile(dataset);
     this.logger.debug(`[Analytics] queryDataset "${dataset.name}" (object=${dataset.object}, include=${(dataset.include ?? []).join(',') || '—'})`);
 

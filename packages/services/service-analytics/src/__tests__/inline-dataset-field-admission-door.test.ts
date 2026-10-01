@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#21177] The INLINE dataset's own `field` text, judged at the analytics door.
+ * [#21177] A dataset's own `field` text, judged at the analytics dataset door.
  *
  * A caller POSTs an inline dataset to `/analytics/dataset/query`. Its
  * dimension/measure `field` text is caller content at query time, and the service
@@ -16,11 +16,16 @@
  * reaches, no new error code — for EVERY caller (admin included) and whether or
  * not a security provider is wired, before any strategy runs.
  *
- * The controls stay served: a plain-column inline dataset, and a REGISTERED
- * dataset queried by cube name (author text left to the existing gates, as #21156
- * leaves it). The `/analytics/query` door's own caller members are #21156's and
- * are pinned in `caller-member-column-reference-gate.test.ts` /
- * `field-read-admission-gate.test.ts`.
+ * The door judges every dataset `queryDataset` is handed — the route's SAVED
+ * branch (`body.datasetName`) included, since it calls the same method; that
+ * branch is pinned end to end in `packages/rest`'s
+ * `analytics-16019-driver-declared-fault.test.ts`.
+ *
+ * The controls stay served: a plain-column inline dataset, and a dataset
+ * registered through the configuration door and queried by cube name (it runs
+ * through `query()`, where #21156 leaves its members to the existing gates). The
+ * `/analytics/query` door's own caller members are #21156's and are pinned in
+ * `caller-member-column-reference-gate.test.ts` / `field-read-admission-gate.test.ts`.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -126,7 +131,7 @@ describe('[#21177] inline-dataset `field` admission — the dataset door', () =>
       expect(executed.length).toBeGreaterThan(0);
     });
 
-    it('still answers a REGISTERED dataset queried by cube name (author text, left to the existing gates)', async () => {
+    it('still answers a dataset registered through the configuration door and queried by cube name', async () => {
       const registered = datasetWith({ name: 'id_registered' });
       const { service, executed } = makeService({ capabilities, getReadableFields: (o) => READABLE[o], datasets: [registered] });
       await service.query({ cube: 'id_registered', measures: ['total'], dimensions: ['status'] } as never, MEMBER);
