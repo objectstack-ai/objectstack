@@ -41,14 +41,10 @@
  *
  * ## What the ObjectQL face is asked, and why not more
  *
- * - Only the two multi-valued classes. The engine's text-operator door
- *   (`filter-text-operator-declared-type.ts`, the #15661 ruling) refuses every
- *   text operator over a `STRUCTURED_JSON_TYPES` field before any driver runs,
- *   so a `doc` filter never reaches the engine's membership construct there.
- * - Its `where` is asked `$contains` only. Its NULL guard for `$notContains`
- *   reaches `driver-sql` in a form the driver refuses on a JSON column, the
- *   defect family #20918 carries on that strategy's own file. The dogfood door
- *   pin asks the ObjectQL strategy's `$notContains` on the memory driver.
+ * Only the two multi-valued classes. The engine's text-operator door
+ * (`filter-text-operator-declared-type.ts`, the #15661 ruling) refuses every
+ * text operator over a `STRUCTURED_JSON_TYPES` field before any driver runs,
+ * so a `doc` filter never reaches the engine's membership construct there.
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
@@ -269,6 +265,7 @@ describe('[#20987] $contains / $notContains on a JSON-stored field answer member
       it(`${field}: $notContains 'u1' counts the complement, the row with no value included`, async () => {
         const where = { [field]: { $notContains: 'u1' } };
         expect(ids((await native.query(query(where))).rows), 'native').toEqual(NOT_MEMBER);
+        if (ENGINE_FIELDS.includes(field)) expect(ids((await objectql.query(query(where))).rows), 'objectql').toEqual(NOT_MEMBER);
       });
     }
 
