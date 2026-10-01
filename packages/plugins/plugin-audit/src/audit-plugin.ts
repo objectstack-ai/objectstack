@@ -19,6 +19,7 @@ import { createAuthEventAuditSink } from './auth-event-audit.js';
 import { installCommentAccessHooks, installCommentReadVisibility } from './comment-access-hooks.js';
 import { installActivityReadVisibility } from './activity-read-visibility.js';
 import { installActivityFieldRedaction, type ActivityFieldVisibilitySource } from './activity-field-redaction.js';
+import { installActivityPredicateGuard } from './activity-predicate-guard.js';
 
 /**
  * [#8992] Read/view audit configuration — the per-object opt-in, closed.
@@ -287,6 +288,23 @@ export class AuditPlugin implements Plugin {
       // read side is the whole gate. Without the middleware seam it cannot be
       // installed, and that is said rather than left silent.
       if (typeof (engine as any).registerMiddleware === 'function') {
+        // [#21154] A query that filters, sorts, searches, groups or aggregates
+        // by a value-bearing column is judged before the read gate below runs
+        // its pre-scan — the redaction narrows only what is served, so such a
+        // predicate would select on a value the reader is not served. The
+        // security service is resolved on every read, as for the redaction.
+        installActivityPredicateGuard(
+          engine as any,
+          () => {
+            try {
+              const sec = ctx.getService<ActivityFieldVisibilitySource>('security');
+              return sec && typeof sec.getReadableFields === 'function' ? sec : undefined;
+            } catch {
+              return undefined;
+            }
+          },
+          ctx.logger,
+        );
         installActivityReadVisibility(engine as any, ctx.logger);
         ctx.logger.info('AuditPlugin: sys_activity parent-record read visibility installed');
         // [#21081] …and of each row it keeps, the value-bearing columns serve a

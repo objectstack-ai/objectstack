@@ -29,6 +29,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
+import { namedSnapshotColumn, pinnedSubjectObject } from './payload-predicate-guard.js';
 
 const REQUEST_OBJECT = 'sys_approval_request';
 const SUBJECT = 'ppg_subject';
@@ -230,5 +231,31 @@ describe('[#21154] a query over the approval snapshot by a reader withheld a sub
     } finally {
       security.getReadableFields = readable;
     }
+  });
+});
+
+describe('[#21154] the snapshot query guard: its pin rule and its clause walk', () => {
+  it('reads a pin only from an equality at the root or inside a root conjunction', () => {
+    expect(pinnedSubjectObject({ object_name: 'acct' })).toBe('acct');
+    expect(pinnedSubjectObject({ object_name: { $eq: 'acct' } })).toBe('acct');
+    expect(pinnedSubjectObject({ $and: [{ status: 'pending' }, { $and: [{ object_name: 'acct' }] }] })).toBe('acct');
+    expect(pinnedSubjectObject({ object_name: 'acct', $and: [{ object_name: 'lead' }] })).toBeNull();
+    expect(pinnedSubjectObject({ $or: [{ object_name: 'acct' }] })).toBeNull();
+    expect(pinnedSubjectObject({ $not: { object_name: 'acct' } })).toBeNull();
+    expect(pinnedSubjectObject({ object_name: { $in: ['acct'] } })).toBeNull();
+    expect(pinnedSubjectObject({ object_name: '  ' })).toBeNull();
+    expect(pinnedSubjectObject(undefined)).toBeNull();
+  });
+
+  it('finds the column in every row-shaping clause, a cross-field comparand included, and not in the projection', () => {
+    expect(namedSnapshotColumn({ fields: ['payload_json'] })).toEqual({ aggregate: false, predicate: false });
+    expect(namedSnapshotColumn({ where: { status: { $eq: { $field: 'payload_json' } } } }).predicate).toBe(true);
+    expect(namedSnapshotColumn({ where: { $or: [{ status: 'x' }, { $not: { payload_json: 'y' } }] } }).predicate).toBe(true);
+    expect(namedSnapshotColumn({ having: { payload_json: 'x' } }).predicate).toBe(true);
+    expect(namedSnapshotColumn({ orderBy: [{ field: 'payload_json' }] }).predicate).toBe(true);
+    expect(namedSnapshotColumn({ groupBy: ['payload_json'] }).aggregate).toBe(true);
+    expect(namedSnapshotColumn({ aggregations: [{ function: 'count', field: '*', filter: { payload_json: 'x' } }] }))
+      .toEqual({ aggregate: false, predicate: true });
+    expect(namedSnapshotColumn({ where: { object_name: 'acct', status: 'pending' } })).toEqual({ aggregate: false, predicate: false });
   });
 });
