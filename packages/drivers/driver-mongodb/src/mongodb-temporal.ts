@@ -40,9 +40,9 @@
  *
  * A bare `YYYY-MM-DD` means **midnight UTC**, stated explicitly so it cannot be
  * re-read as midnight in the server's local zone. The whole-day reading of a
- * bare day used as an UPPER bound is a separate, operator-sensitive concern
- * handled before this by `nextUtcCalendarDay` (#3777/#4042) — this function
- * only converts FORM.
+ * bare day used as an UPPER bound is a separate, operator-sensitive concern,
+ * applied before this by the shared `lowerFilterCondition` at the seams
+ * (ADR-0053 D-D1, as amended) — this function only converts FORM.
  */
 export function storageDatetimeValue(value: unknown): unknown {
   if (value == null) return value;

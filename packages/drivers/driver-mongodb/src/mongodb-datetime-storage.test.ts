@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { parseFilterAST } from '@objectstack/spec/data';
+import { lowerFilterCondition, parseFilterAST } from '@objectstack/spec/data';
 import type { MongoMemoryServer } from 'mongodb-memory-server';
 import { MongoDBDriver } from './mongodb-driver.js';
 import { createTestMongod } from './test-mongod.js';
@@ -28,6 +28,23 @@ import { createTestMongod } from './test-mongod.js';
 const sharedMongod: MongoMemoryServer | undefined = await createTestMongod('datetime-storage');
 
 const ids = (rows: any[]) => rows.map((r: any) => r.id).sort();
+
+/** The declared field map `task` is synced with — what a typed seam reads. */
+const TASK_FIELDS: Record<string, { type: string }> = {
+  title: { type: 'string' },
+  created_at: { type: 'datetime' },
+  created_on: { type: 'date' },
+};
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5 and 9, as amended] What a TYPED seam hands
+ * this driver: the filter through the shared lowering, `datetime` columns only.
+ * The driver keeps no whole-day copy of its own, so a bare-day upper bound on
+ * `created_at` keeps the whole day only on a seam-fed read — the cells below
+ * that assert the whole day read through this, as every engine read does.
+ */
+const seamed = <T,>(where: T): T =>
+  lowerFilterCondition(where, { isDatetimeColumn: (column) => TASK_FIELDS[column]?.type === 'datetime' });
 
 describe.skipIf(!sharedMongod)('MongoDB Field.datetime storage (#4047)', () => {
   const mongod = sharedMongod as MongoMemoryServer;
@@ -52,11 +69,7 @@ describe.skipIf(!sharedMongod)('MongoDB Field.datetime storage (#4047)', () => {
     // — the mongo analogue of `initObjects` populating `datetimeFields`.
     await driver.syncSchema('task', {
       name: 'task',
-      fields: {
-        title: { type: 'string' },
-        created_at: { type: 'datetime' },
-        created_on: { type: 'date' },
-      },
+      fields: TASK_FIELDS,
     });
   });
 
@@ -96,7 +109,7 @@ describe.skipIf(!sharedMongod)('MongoDB Field.datetime storage (#4047)', () => {
     // The dashboard's shape: bare-day bounds as ISO strings, against a
     // system-injected datetime field. Pre-fix this returned [] on mongo.
     const found = await driver.find('task', {
-      where: { created_at: { $gte: '2026-04-29', $lte: '2026-07-28' } },
+      where: seamed({ created_at: { $gte: '2026-04-29', $lte: '2026-07-28' } }),
     } as any);
     expect(ids(found)).toEqual(['d_midnight', 'd_yesterday', 's_evening', 's_morning']);
   });
@@ -116,7 +129,8 @@ describe.skipIf(!sharedMongod)('MongoDB Field.datetime storage (#4047)', () => {
 
   it('keeps #3777/#4042 bound semantics on top of the converged storage', async () => {
     await seedMixed();
-    // Bare-day upper bound = the whole day (half-open), lower bound = midnight.
+    // Lower bound = midnight. (The whole-day upper bound is the seam's: the
+    // seamed cells above and below.)
     const gte = await driver.find('task', { where: { created_at: { $gte: '2026-07-28' } } } as any);
     expect(ids(gte)).toEqual(['d_midnight', 'd_next_day', 's_evening', 's_morning']);
 
@@ -133,7 +147,7 @@ describe.skipIf(!sharedMongod)('MongoDB Field.datetime storage (#4047)', () => {
   it('$between and the array spelling take the same coercion', async () => {
     await seedMixed();
     const between = await driver.find('task', {
-      where: { created_at: { $between: ['2026-04-29', '2026-07-28'] } },
+      where: seamed({ created_at: { $between: ['2026-04-29', '2026-07-28'] } }),
     } as any);
     expect(ids(between)).toEqual(['d_midnight', 'd_yesterday', 's_evening', 's_morning']);
 
@@ -141,9 +155,9 @@ describe.skipIf(!sharedMongod)('MongoDB Field.datetime storage (#4047)', () => {
     // join (`[condA, 'and', condB]`) has no lowering at all and is refused at
     // the door; the declared spelling of "both bounds" is the prefix group.
     const array = await driver.find('task', {
-      where: parseFilterAST(
+      where: seamed(parseFilterAST(
         ['and', ['created_at', '>=', '2026-04-29'], ['created_at', '<=', '2026-07-28']],
-      ) as any,
+      )) as any,
     } as any);
     expect(ids(array)).toEqual(['d_midnight', 'd_yesterday', 's_evening', 's_morning']);
   });

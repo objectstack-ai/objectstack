@@ -1,0 +1,72 @@
+// The TEST-layer type-check program (#20800 -- the last three packages of the
+// #4311 ledger, graduated by the #15048 / #15050 road: a sibling program named
+// by the `typecheck` script). `tsconfig.json` beside this one stays exactly as
+// it is: it is the BUILD config. `package.json`'s `typecheck` script NAMES this
+// sibling (`tsc --noEmit -p tsconfig.test.json`), because a config no script
+// invokes reads as coverage and delivers none.
+//
+// WHAT THE BUILD CONFIG ALREADY DID. `tsconfig.json` includes `src` with no
+// test exclusion, so the program that reads these tests always existed; the
+// package simply declared no `typecheck` script, so nothing ever ran it. That
+// is the `service-automation` / `service-cluster` shape, not the
+// exclude-and-compensate one, and AGENTS.md forbids ADDING such an exclusion.
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - MODULE SEMANTICS and `lib`, nothing else. vitest runs these files as ESM
+//     through esbuild on a Node that has the ES2022 builtins, and the root
+//     config's `lib` is ES2020. `module: esnext` / `moduleResolution: bundler`
+//     is the reading vitest really performs; the build leg of the script
+//     (`tsc --noEmit`) keeps the stricter NodeNext reading of the same files,
+//     so the two programs complement each other rather than overlap.
+//   - STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`, `noUnusedParameters`,
+//     `noImplicitReturns`, `noFallthroughCasesInSwitch`, `rootDir`, `paths` and
+//     `types` are all INHERITED and none is re-declared. ⚠️ A child that declared
+//     its own `paths` would REPLACE the parent map, so this file declares none.
+//     Nothing here may loosen a type rule; if a test does not compile, that is
+//     the finding.
+//
+// MEASURED at f8178ffece (origin/main), the workspace closure built first
+// (`turbo run build --filter='@objectstack/cloud-connection^...'`), BEFORE any
+// fix, once per config (`tsc --noEmit --pretty false [--listFiles] -p <config>`):
+//
+//   program under this config     923 files (44 of them this package's `src`),
+//                                 all 30 of its `src/**/*.test.ts` in it
+//   BUILD config (tsconfig.json)  13  = TS2493 x11 + TS2550 x2
+//   THIS config                   11  = TS2493 x11
+//
+// The two readings DISAGREE by exactly two, and those two are the config tier:
+// TS2550 ("Property 'at' does not exist ... change your target library"), both
+// `Array#at` in `marketplace-install-local-bundle.test.ts` (81, 106) -- the CHECK
+// reading ES2020 where the runtime is Node >= 22, which is what `lib` below
+// reconciles. The other 11 are code tier and agree under both configs: TS2493
+// ("Tuple type '[]' of length '0' has no element at index N"), every one an
+// index into `fetchSpy.mock.calls[0]` where `fetchSpy = vi.fn(async () => ...)`
+// was declared with NO parameters, so vitest types `.mock.calls` as an array of
+// EMPTY tuples. The call site it stubs is `fetch(url, init)`, which the plugin
+// always calls with a string URL and an init object; the fix types each of the 7
+// declarations (`cloud-connection-plugin.test.ts` x3,
+// `connection-credential-store.test.ts` x4) to that call --
+// `vi.fn(async (_url: string, _init?: RequestInit) => ...)`. No cast was added,
+// no `@ts-expect-error`, no `src` signature touched.
+//
+// The build leg reads these tests under ES2020 too, so the two `Array#at` reads
+// were not left to this file's `lib`: they now use vitest's own
+// `mock.lastCall` (the LAST register call, which is what both comments say),
+// which compiles under both programs. Without that the first leg of `typecheck`
+// would stay red on files this leg accepts.
+//
+// AFTER: 0 and 0. There is NO `test-typecheck-debt.json` beside this config, and
+// its ABSENCE is the zero: any error in any file here is red immediately, with no
+// ledger to be added to -- the same call `metadata-fs` and
+// `trigger-record-change` recorded.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

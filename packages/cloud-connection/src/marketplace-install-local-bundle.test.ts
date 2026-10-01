@@ -78,7 +78,7 @@ describe('install-local compiled-bundle normalization', () => {
 
         // The UI bundle registers at kernel:ready; the LAST register call is
         // the installed package — flattened: top-level id + sections.
-        const installed = register.mock.calls.at(-1)![0];
+        const installed = register.mock.lastCall![0];
         expect(installed.id).toBe('app.acme.crm');
         expect(installed.namespace).toBe('crm');
         expect(installed.version).toBe('2.0.0');
@@ -103,6 +103,6 @@ describe('install-local compiled-bundle normalization', () => {
             makeC({ manifest: flat }),
         );
         expect(res.payload?.success).toBe(true);
-        expect(register.mock.calls.at(-1)![0].id).toBe('com.acme.flat');
+        expect(register.mock.lastCall![0].id).toBe('com.acme.flat');
     });
 });

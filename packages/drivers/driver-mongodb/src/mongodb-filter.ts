@@ -24,7 +24,6 @@
  */
 
 import type { Filter } from 'mongodb';
-import { nextUtcCalendarDay, isUnboundedAbove } from '@objectstack/core';
 import { StandardErrorCode } from '@objectstack/spec/api';
 // [#5659] The Filter Protocol's boolean identity reduction, shared with
 // driver-sql, driver-memory and the flow linter and proven against the same
@@ -1041,14 +1040,21 @@ interface LoweredWrite {
  * | lowered key | written by |
  * |---|---|
  * | `$eq`  | `$eq`, `$null: true`,  `$exists: false` |
- * | `$ne`  | `$ne`, `$null: false`, `$exists: true`, `$lte` (the LAST supported day, `9999-12-31` — #20600: no bound, a value) |
+ * | `$ne`  | `$ne`, `$null: false`, `$exists: true` |
  * | `$gte` | `$gte`, `$between` |
  * | `$lte` | `$lte`, `$between` |
- * | `$lt`  | `$lt`, `$lte` (BARE CALENDAR DAY — #4042's half-open rewrite), `$between` (bare-day max) |
  * | `$regex` | `$contains`, `$startsWith`, `$endsWith`, `$icontains` |
  *
- * Two of those rows had not been named anywhere. `$lte` → `$lt` is a clobber on
- * a bare `YYYY-MM-DD` upper bound. And the `$regex` row is this driver's alone:
+ * [ADR-0053 D-D1 item 5, as amended] The table had a `$lt` row, and `$lte`
+ * wrote `$lt` and `$ne` too: this translator applied the whole-day upper bound
+ * itself (a bare-day `$lte` became `$lt` the next day, the last supported day
+ * `$ne: null`). That rule is applied once at the seams now, and `$lte` and
+ * `$between` write only the keys above. Where the lowering's `$lt` meets an
+ * author's own `$lt` on one column, the lowering emits it as a conjunct of its
+ * own (one operator per conjunct), so both bounds reach this translator and
+ * survive it — `mongodb-operator-key-clobber.test.ts` pins both sides.
+ *
+ * One of those rows had not been named anywhere. The `$regex` row is this driver's alone:
  * `driver-memory` promotes its string family to `$and` branches already
  * (`_multiRegex`), while here `{name: {$startsWith: 'a', $endsWith: 'z'}}`
  * emitted `{name: {$regex: 'z$'}}` and its key-swapped twin `{name: {$regex:
@@ -1116,11 +1122,19 @@ function assembleLoweredWrites(writes: readonly LoweredWrite[]): Record<string, 
  * Translate ObjectStack field-level operators into MongoDB operators.
  *
  * `kind` is the declared temporal type of the field these operators apply to,
- * so each comparand lands in the field's storage form (#4047). Order matters
- * and is load-bearing: the calendar-day upper-bound rewrite (#3777/#4042) runs
- * on the STRING first — it is a calendar operation — and only the resulting
- * bound is converted to the storage form. Converting first would leave
- * `nextUtcCalendarDay` a `Date` it correctly refuses to widen.
+ * so each comparand lands in the field's storage form (#4047).
+ *
+ * [ADR-0053 D-D1 items 5 and 6, as amended] Every comparison is translated as
+ * it is handed in. The whole-day upper bound — a bare `YYYY-MM-DD` `$lte` means
+ * "through the whole of that day", and on the last supported day it bounds
+ * nothing — is applied once, by the shared `lowerFilterCondition`
+ * (`@objectstack/spec/data`) at the seams that feed this driver (the engine's
+ * `where`, `aggregations[i].filter` and the RLS compile seam). A seam-fed
+ * filter therefore arrives with `$lt` the next day and no `$between` on a
+ * declared `datetime`, and because the seam widens the calendar string before
+ * this function converts it, the D-E3 order (widen first, convert second)
+ * holds by construction. A caller that reaches this driver without a seam gets
+ * the comparison it wrote.
  */
 function translateFieldOperators(
   ops: Record<string, unknown>,
@@ -1157,6 +1171,7 @@ function translateFieldOperators(
       case '$gt':
       case '$gte':
       case '$lt':
+      case '$lte':
       case '$in':
       case '$nin':
         put(op, store(value));
@@ -1195,25 +1210,6 @@ function translateFieldOperators(
         // other writer and the shared rule ranks it.
         put(value === true ? '$ne' : '$eq', null);
         break;
-
-      case '$lte': {
-        // A bare-day upper bound means "through that whole day" (#4042; the
-        // driver-sql twin is #3777): `<= '2026-07-28'` compiles half-open
-        // (`< '2026-07-29'`) so instants on the final day stay in;
-        // order-equivalent to `<=` for plain `YYYY-MM-DD` date values.
-        // [#13524] `$lt` here is a key an AUTHOR can also write — this arm is a
-        // member of the clobber class that no card had named. See
-        // {@link assembleLoweredWrites}.
-        // [#20600] On the last supported day there is no next day: every
-        // value is inside the bound, so what `$lte` still asks is a value —
-        // `$ne: null`, the lowering `$exists: true` takes above. Collected like
-        // every other write, so an author's own `$ne` survives beside it.
-        const nextDay = nextUtcCalendarDay(value);
-        if (isUnboundedAbove(nextDay)) put('$ne', null);
-        else if (nextDay != null) put('$lt', store(nextDay));
-        else put('$lte', store(value));
-        break;
-      }
 
       // String operators → $regex
       //
@@ -1278,8 +1274,11 @@ function translateFieldOperators(
         put('$regex', asciiCaseInsensitiveRegexSource(String(value)));
         break;
 
-      // Range operator → $gte + upper bound (half-open on a bare-day max,
-      // inheriting `$lte`'s whole-day rule — #4042)
+      // Range operator → $gte + $lte, both bounds as written. [ADR-0053 D-D1
+      // item 5] A seam-fed `$between` on a declared `datetime` never reaches
+      // this arm: the shared lowering splits it into `$gte` and a whole-day
+      // `$lt` first. On any other column it arrives whole and is inclusive at
+      // both ends.
       //
       // [#5346] The arm used to be this `if` with NO else, so a comparand that
       // was not a two-element array wrote NEITHER bound and the field's operator
@@ -1300,12 +1299,7 @@ function translateFieldOperators(
       case '$between': {
         if (!isBetweenRange(value)) throw malformedBetweenError(field, value, `${path}.$between`);
         put('$gte', store(value[0]));
-        // [#20600] A max on the last supported day bounds nothing: the range
-        // keeps its minimum alone.
-        const betweenNextDay = nextUtcCalendarDay(value[1]);
-        if (isUnboundedAbove(betweenNextDay)) break;
-        if (betweenNextDay != null) put('$lt', store(betweenNextDay));
-        else put('$lte', store(value[1]));
+        put('$lte', store(value[1]));
         break;
       }
 
@@ -1387,9 +1381,8 @@ function translateFieldOperators(
   //
   // #13195 landed this rule for `$exists` alone and said in this spot that the
   // identical clobber was reachable through `$null` and `$between`. Enumerating
-  // the declared vocabulary instead of the noticed operators found two more on
-  // this face: `$lte` on a bare calendar day (it lowers onto `$lt`), and the
-  // whole `$regex` string family, which `driver-memory` had promoted for years
+  // the declared vocabulary instead of the noticed operators found the whole
+  // `$regex` string family too, which `driver-memory` had promoted for years
   // and this driver never did. See {@link assembleLoweredWrites}.
   return assembleLoweredWrites(writes);
 }

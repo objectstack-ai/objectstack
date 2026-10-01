@@ -134,8 +134,9 @@ describe('the time canon reaches the FILTER path, not just the write path', () =
   });
 
   it('leaves an inclusive upper bound EXACT — the calendar-day rule must not reach a time', () => {
-    // `nextUtcCalendarDay` widens only a bare `YYYY-MM-DD`; a wall clock never
-    // matches that shape, so `$lte` stays `$lte` rather than becoming `$lt`.
+    // The whole-day rule widens only a bare `YYYY-MM-DD`, and since #20822 it is
+    // applied at the seams, not here (ADR-0053 D-D1 item 5); a wall clock never
+    // matches that shape either way, so `$lte` stays `$lte`.
     expect(translateFilter({ at: { $lte: '14:30:00' } }, timeKind)).toEqual({
       at: { $lte: '14:30:00' },
     });
