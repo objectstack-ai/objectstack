@@ -240,7 +240,7 @@ async function suppressedStart(): Promise<void> {
  * Read off `IPluginLifecycleEvents` (`packages/spec/src/contracts/`
  * `plugin-lifecycle-events.ts`), not off a survey of what hosts do there:
  *
- *  - `kernel:bootstrapped` is "the all synchronous bootstrap has settled"
+ *  - `kernel:bootstrapped` is the "all synchronous bootstrap has settled"
  *    anchor, for "reconcile/backfill work that consumes" the data a
  *    `kernel:ready` handler produced — reads and writes of rows, never a
  *    declaration;
