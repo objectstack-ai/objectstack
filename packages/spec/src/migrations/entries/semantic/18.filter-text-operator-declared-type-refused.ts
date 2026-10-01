@@ -68,8 +68,11 @@ export const entry: SemanticMigration = {
     + 'every text operator there except the membership pair `$contains` / `$notContains` '
     + '— `$startsWith`, `$endsWith`, `$icontains`, `$like` and `$ilike`, beside the '
     + 'scalar comparisons it already refused — with an `INVALID_FILTER` 400 that names no '
-    + 'declared type, so a stored filter left on one of them answers that 400 after the '
-    + 'upgrade and is outside this entry\'s repair list. Its repair is membership, which '
-    + 'no rewrite chooses either: `$contains` for one member, an `$or` of `$contains` for '
-    + 'any-of.',
+    + 'declared type, so a stored filter left on one of those operators there answers '
+    + 'that 400 after the upgrade and is outside this entry\'s repair list. On a multi-valued field its '
+    + 'repair is membership, which no rewrite chooses either: `$contains` for one member, '
+    + 'an `$or` of `$contains` for any-of. A single-value file-class field is not a '
+    + 'membership question: it answers text operators again once its deployment finishes '
+    + 'the media-column move (the column step of `objectstack migrate files-to-references '
+    + '--apply`).',
 };
