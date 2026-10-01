@@ -761,7 +761,7 @@ function walkObject(ledger: ConsumerLedger, obj: AnyRec, objectName: string, obj
       fieldName !== undefined &&
       field.inlineEdit &&
       (field.type === 'master_detail' || field.type === 'lookup') &&
-      reference !== undefined &&
+      !!reference &&
       !hasAuthoredColumns(field.inlineColumns)
     ) {
       creditDerivedInlineGrid(ledger, objectName, fieldName, 'objects', `${fieldPath}.inlineEdit`);
