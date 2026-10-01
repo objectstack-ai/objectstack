@@ -7,6 +7,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 import {
   composeForDeclarations,
+  createDeclarationBootLifecycle,
   createDeclarationBootWriteGuard,
 } from './schema-migration-plugins.js';
 
@@ -35,6 +36,15 @@ import {
  *  - the declaration boot then refuses every one of those writes at the driver
  *    — while the log-only hooks the same plugin registered still run, which is
  *    the property this shape was chosen for over neutralising `init()` hooks.
+ *
+ * #21054 narrowed which of a HOST plugin's hooks reach those phases at all:
+ * `composeForDeclarations` no longer registers its `kernel:bootstrapped` /
+ * `kernel:listening` hooks (the phases the kernel contract defines as
+ * post-declaration work), so a host hook still runs — and still meets the
+ * guard — only on `kernel:ready`. The guard's own phase-agnostic property is
+ * pinned with a writer the composition does NOT wrap, which is what this
+ * repo's own plugins are. The lifecycle half has its own block at the foot of
+ * this file.
  */
 
 /** The row-write members of the data-driver contract, as the fixture exercises them. */
@@ -218,11 +228,13 @@ describe('the declaration boot writes nothing (#13332)', () => {
     expect(log.ran).toContain('write:kernel:listening');
   });
 
-  it('THE DEFECT: suppressing start() alone leaves all three phases writing', async () => {
-    // The state of the world before this card: `composeForDeclarations` and
-    // nothing else. `start()`'s seed is gone; the three `init()`-registered
-    // hooks are untouched. This is the shape the guarantee was measured
-    // against, so it is pinned rather than described.
+  it('THE DEFECT: the declaration composition alone still leaves kernel:ready writing', async () => {
+    // `composeForDeclarations` and nothing else. `start()`'s seed is gone and
+    // (#21054) the post-declaration hooks were never registered — but the
+    // `init()`-registered `kernel:ready` hook is untouched: the contract leaves
+    // late registration on that phase, so the composition cannot withhold it.
+    // This is the shape the guarantee was measured against, so it is pinned
+    // rather than described.
     const driver = new RecordingDriver();
     const log: HookLog = { ran: [] };
     const kernel = newKernel();
@@ -233,14 +245,11 @@ describe('the declaration boot writes nothing (#13332)', () => {
     await kernel.shutdown();
 
     expect(log.ran).not.toContain('write:start');
-    expect(driver.writes.map((w) => w.object)).toEqual([
-      'sys_ai_model',
-      'sys_ai_model',
-      'sys_ai_model',
-    ]);
+    expect(driver.writes.map((w) => w.object)).toEqual(['sys_ai_model']);
+    expect(log.ran).toEqual(['log-only:kernel:ready', 'write:kernel:ready']);
   });
 
-  it('THE FIX: the guard refuses every one of them, and the log-only hooks still run', async () => {
+  it('THE FIX: the guard refuses it, and the log-only hook still runs', async () => {
     const driver = new RecordingDriver();
     const log: HookLog = { ran: [] };
     const guard = createDeclarationBootWriteGuard();
@@ -256,10 +265,45 @@ describe('the declaration boot writes nothing (#13332)', () => {
     // The whole point: nothing reached the driver.
     expect(driver.writes).toEqual([]);
 
-    // …and the hooks themselves still RAN. This is what separates suppressing
-    // the WRITE from neutralising the HOOK: a read/log-only hook keeps working
-    // on the path an operator reads before a production apply.
+    // …and the `kernel:ready` hooks themselves still RAN. This is what
+    // separates suppressing the WRITE from neutralising the HOOK: a
+    // read/log-only hook on the phase declaring happens in keeps working on
+    // the path an operator reads before a production apply. The
+    // post-declaration phases are not this case's — see the #21054 block.
     expect(log.ran).toEqual([
+      'log-only:kernel:ready',
+      'write:kernel:ready',
+    ]);
+
+    // The refusal is reported rather than swallowed — and with no raw
+    // execute() forwarded this run, the outcome claim HELD and is printed.
+    const note = guard.disarm();
+    expect(note).toContain('Refused 1 write(s)');
+    expect(note).toContain('a plan writes nothing');
+    expect(note).toContain('create() on sys_ai_model');
+
+    await kernel.shutdown();
+  });
+
+  it('the guard is PHASE-AGNOSTIC: a writer the composition does not wrap is refused on every phase and in start()', async () => {
+    // The guard sits at the driver, not at a list of phases. A plugin this repo
+    // composes itself is not wrapped by `composeForDeclarations` — its
+    // `start()` and every hook it registers run — and its writes still never
+    // land, on all three phases, which is the property #13332 chose the driver
+    // seam for.
+    const driver = new RecordingDriver();
+    const log: HookLog = { ran: [] };
+    const guard = createDeclarationBootWriteGuard();
+    const kernel = newKernel();
+
+    await kernel.use(datasourcePlugin(driver));
+    await kernel.use(guard.plugin as Plugin);
+    await kernel.use(writingHostPlugin(log));
+    await kernel.bootstrap();
+
+    expect(driver.writes).toEqual([]);
+    expect(log.ran).toEqual([
+      'write:start',
       'log-only:kernel:ready',
       'write:kernel:ready',
       'log-only:kernel:bootstrapped',
@@ -267,12 +311,9 @@ describe('the declaration boot writes nothing (#13332)', () => {
       'log-only:kernel:listening',
       'write:kernel:listening',
     ]);
-
-    // The refusal is reported, per phase, rather than swallowed — and with no
-    // raw execute() forwarded this run, the outcome claim HELD and is printed.
     const note = guard.disarm();
-    expect(note).toContain('Refused 3 write(s)');
-    expect(note).toContain('a plan writes nothing');
+    expect(note).toContain('Refused 4 write(s)');
+    expect(note).toContain('create() on sys_permission_set');
     expect(note).toContain('create() on sys_ai_model x3');
 
     await kernel.shutdown();
@@ -341,7 +382,9 @@ describe('the declaration boot writes nothing (#13332)', () => {
       name: 'com.example.exercises-the-contract',
       version: '1.0.0',
       init: async (ctx: PluginContext) => {
-        ctx.hook('kernel:bootstrapped', async () => {
+        // `kernel:ready`: the phase a host hook still reaches on a declaration
+        // boot (#21054 withholds the post-declaration ones at registration).
+        ctx.hook('kernel:ready', async () => {
           const d = ctx.getService<RecordingDriver>('driver.recording');
           await d.create('t', {});
           await d.update('t', 'id1', {});
@@ -647,7 +690,8 @@ describe('the two named boundaries (#14126)', () => {
       name: 'com.example.writes-to-archive',
       version: '1.0.0',
       init: async (ctx: PluginContext) => {
-        ctx.hook('kernel:bootstrapped', async () => {
+        // `kernel:ready` — see 'covers the whole row-write contract' for why.
+        ctx.hook('kernel:ready', async () => {
           const ql = ctx.getService<ObjectQL>('objectql');
           await ql.getDriverForObject('archive_row')!.update('archive_row', 'id1', { name: 'closed' });
         });
@@ -793,7 +837,8 @@ describe('the two named boundaries (#14126)', () => {
       name: 'com.example.only-drops',
       version: '1.0.0',
       init: async (ctx: PluginContext) => {
-        ctx.hook('kernel:listening', async () => {
+        // `kernel:ready` — see 'covers the whole row-write contract' for why.
+        ctx.hook('kernel:ready', async () => {
           await ctx.getService<RecordingDriver>('driver.recording').dropTable('sys_old_table');
         });
       },
@@ -901,7 +946,7 @@ describe('the two named boundaries (#14126)', () => {
     await kernel.shutdown();
   });
 
-  it('POSITIVE CONTROL — an embedder with no data plane and read/log-only hooks: nothing to arm, nothing to report, hooks untouched', async () => {
+  it('POSITIVE CONTROL — an embedder with no data plane and read/log-only hooks: nothing to arm, nothing to report, kernel:ready hooks untouched', async () => {
     const guard = createDeclarationBootWriteGuard();
     const kernel = newKernel();
     const log: HookLog = { ran: [] };
@@ -925,9 +970,124 @@ describe('the two named boundaries (#14126)', () => {
     expect(guard.refusals).toEqual([]);
     expect(guard.rawExecutions).toEqual([]);
     expect(guard.immediateDdl).toEqual([]);
-    expect(log.ran).toEqual(['log-only:kernel:ready', 'log-only:kernel:bootstrapped', 'log-only:kernel:listening']);
+    // The post-declaration hooks are withheld at registration (#21054); the
+    // `kernel:ready` one runs, and the guard has nothing to say about any of it.
+    expect(log.ran).toEqual(['log-only:kernel:ready']);
     // No note at all: a quiet boot renders byte-identically to before any of this existed.
     expect(guard.disarm()).toBeNull();
+    await kernel.shutdown();
+  });
+});
+
+/**
+ * #21054 — on a declaration boot, host code does not run where the kernel
+ * contract says declaring is over.
+ *
+ * `examples/app-crm`'s `onEnable` hooks `kernel:bootstrapped` and READS
+ * `sys_position` / `sys_permission_set` — tables the plan's composition never
+ * declares — so every plan printed six `DATABASE_ERROR` lines. The guard above
+ * cannot help: it refuses writes and lets the hook run. So the composition
+ * does not register a host plugin's `kernel:bootstrapped` / `kernel:listening`
+ * hooks (and the config's `onEnable` is withheld by its AppPlugin, pinned in
+ * `@objectstack/runtime` and in `schema-migration-plugins.test.ts`).
+ *
+ * Real `ObjectKernel`, phases really fired. The POSITIVE CONTROL first: the
+ * same host plugin, composed as a served boot composes it, runs on all three.
+ */
+describe('host hooks on the post-declaration phases are not fired (#21054)', () => {
+  /** A host plugin that READS from each phase — the app-crm shape — and logs it. */
+  function readingHostPlugin(log: HookLog, name = 'com.example.reads-from-init'): Plugin {
+    return {
+      name,
+      version: '1.0.0',
+      init: async (ctx: PluginContext) => {
+        for (const phase of ['kernel:ready', 'kernel:bootstrapped', 'kernel:listening'] as const) {
+          ctx.hook(phase, async () => {
+            await ctx.getService<RecordingDriver>('driver.recording').find('sys_position');
+            log.ran.push(`${name}|read:${phase}`);
+          });
+        }
+        ctx.hook('kernel:shutdown', async () => { log.ran.push(`${name}|shutdown`); });
+      },
+    };
+  }
+
+  it('POSITIVE CONTROL: a served composition fires the host hooks on all three phases', async () => {
+    const driver = new RecordingDriver();
+    const log: HookLog = { ran: [] };
+    const kernel = newKernel();
+
+    await kernel.use(datasourcePlugin(driver));
+    await kernel.use(readingHostPlugin(log));
+    await kernel.bootstrap();
+
+    expect(log.ran).toEqual([
+      'com.example.reads-from-init|read:kernel:ready',
+      'com.example.reads-from-init|read:kernel:bootstrapped',
+      'com.example.reads-from-init|read:kernel:listening',
+    ]);
+    await kernel.shutdown();
+  });
+
+  it('THE FIX: kernel:bootstrapped / kernel:listening host hooks are not fired; kernel:ready and the teardown are; the platform\'s own hooks are untouched', async () => {
+    const driver = new RecordingDriver();
+    const log: HookLog = { ran: [] };
+    const guard = createDeclarationBootWriteGuard();
+    const lifecycle = createDeclarationBootLifecycle();
+    const kernel = newKernel();
+
+    await kernel.use(datasourcePlugin(driver));
+    await kernel.use(guard.plugin as Plugin);
+    await kernel.use(composeForDeclarations(readingHostPlugin(log), lifecycle));
+    // The in-run control: a plugin this repo composes itself (not host code),
+    // on the very same boot, keeps every phase.
+    await kernel.use(readingHostPlugin(log, 'com.objectstack.platform-probe'));
+    await kernel.bootstrap();
+
+    expect(log.ran).toEqual([
+      'com.example.reads-from-init|read:kernel:ready',
+      'com.objectstack.platform-probe|read:kernel:ready',
+      'com.objectstack.platform-probe|read:kernel:bootstrapped',
+      'com.objectstack.platform-probe|read:kernel:listening',
+    ]);
+    expect(lifecycle.withheldHooks).toEqual([
+      { plugin: 'com.example.reads-from-init', phase: 'kernel:bootstrapped', count: 1 },
+      { plugin: 'com.example.reads-from-init', phase: 'kernel:listening', count: 1 },
+    ]);
+    expect(lifecycle.describe()).toContain('did not register 2 host hook(s) on post-declaration phases');
+    // Nothing tried to write, so the guard stays quiet.
+    expect(guard.disarm()).toBeNull();
+
+    // `kernel:shutdown` is the teardown of what init() opened — still registered.
+    await kernel.shutdown();
+    expect(log.ran).toContain('com.example.reads-from-init|shutdown');
+  });
+
+  it('a host that keeps its init() context and registers LATER is still declined', async () => {
+    const driver = new RecordingDriver();
+    const log: HookLog = { ran: [] };
+    const lifecycle = createDeclarationBootLifecycle();
+    const kernel = newKernel();
+
+    const deferredRegistrar: Plugin = {
+      name: 'com.example.registers-from-ready',
+      version: '1.0.0',
+      init: async (ctx: PluginContext) => {
+        ctx.hook('kernel:ready', async () => {
+          log.ran.push('ready');
+          ctx.hook('kernel:bootstrapped', async () => { log.ran.push('bootstrapped'); });
+        });
+      },
+    };
+
+    await kernel.use(datasourcePlugin(driver));
+    await kernel.use(composeForDeclarations(deferredRegistrar, lifecycle));
+    await kernel.bootstrap();
+
+    expect(log.ran).toEqual(['ready']);
+    expect(lifecycle.withheldHooks).toEqual([
+      { plugin: 'com.example.registers-from-ready', phase: 'kernel:bootstrapped', count: 1 },
+    ]);
     await kernel.shutdown();
   });
 });
