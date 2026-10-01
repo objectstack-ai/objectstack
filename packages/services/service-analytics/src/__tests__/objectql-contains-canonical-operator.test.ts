@@ -148,7 +148,7 @@ function matchesLikeFamily(row: (typeof FIXTURE)[number], cond: Record<string, u
  * not just its `stage` entry.
  *
  * `$notContains` is NULL-safe now, so the strategy emits it as
- * `{$or: [{stage: null}, {stage: {$notContains: …}}]}` and the condition no
+ * `{$or: [{stage: {$null: true}}, {stage: {$notContains: …}}]}` and the condition no
  * longer has `stage` at the top level. Reading `filter.stage` alone therefore
  * found `undefined`, handed {@link matchesLikeFamily} an EMPTY operator object,
  * and every row passed the empty loop — the whole fixture came back and the
@@ -156,6 +156,12 @@ function matchesLikeFamily(row: (typeof FIXTURE)[number], cond: Record<string, u
  * particular. A stand-in engine that cannot read the shape under test measures
  * the stand-in, so it walks the tree.
  */
+/** `{ $null: true | false }` — the null predicate the strategy hands the engine. */
+function isNullFlag(value: unknown): value is { $null: boolean } {
+  return typeof value === 'object' && value !== null && Object.keys(value).length === 1
+    && typeof (value as { $null?: unknown }).$null === 'boolean';
+}
+
 function matchesCondition(row: (typeof FIXTURE)[number], cond: Record<string, unknown>): boolean {
   for (const [key, value] of Object.entries(cond)) {
     if (key === '$and') {
@@ -167,10 +173,10 @@ function matchesCondition(row: (typeof FIXTURE)[number], cond: Record<string, un
       continue;
     }
     if (key !== 'stage') throw new Error(`[test] this face only scopes "stage", got "${key}"`);
-    // A bare `null` comparand is the null PREDICATE — the guard's own disjunct,
-    // and the spelling every driver reads as IS NULL.
-    if (value === null) {
-      if (row.stage !== null) return false;
+    // `{ $null: true }` is the null PREDICATE — the guard's own disjunct, in
+    // the engine's own spelling (#20918; it was the bare `null` before).
+    if (isNullFlag(value)) {
+      if ((row.stage === null) !== value.$null) return false;
       continue;
     }
     if (!matchesLikeFamily(row, value as Record<string, unknown>)) return false;
@@ -259,7 +265,7 @@ describe('[#5557] `contains` reaches the engine as `$contains`, comparand taken 
       // lowering's escape around this face's own copy. Same operator key, same
       // literal comparand, same rows.
       expect(await engineFilter({ stage: { $notContains: 'a.b' } })).toEqual({
-        $and: [{ $or: [{ stage: null }, { $or: [{ stage: null }, { stage: { $notContains: 'a.b' } }] }] }],
+        $and: [{ $or: [{ stage: { $null: true } }, { $or: [{ stage: { $null: true } }, { stage: { $notContains: 'a.b' } }] }] }],
       });
       expect(await engineFilter({ stage: { $startsWith: 'a.b' } })).toEqual({
         stage: { $startsWith: 'a.b' },
