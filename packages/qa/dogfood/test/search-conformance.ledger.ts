@@ -25,7 +25,12 @@ export const SEARCH_SURFACE: ConformanceRow[] = [
     // emits `$icontains` — the operator that actually folds — so the row names
     // it. Neither operator's own semantics moved; only what `$search` compiles
     // to did.
-    summary: '`$search` server-resolved cross-field executor (terms AND-ed, fields OR-ed, case-insensitive via `$icontains`)',
+    // [#21009] A MULTI-VALUED field (stored as a JSON array, where only the
+    // membership pair answers) is matched by `$contains` membership instead.
+    // No showcase object carries one in its search set, so that half's
+    // HTTP-level proof is `packages/rest`'s
+    // `data-search-multi-valued-membership.test.ts`, not this row's dogfood file.
+    summary: '`$search` server-resolved cross-field executor (terms AND-ed, fields OR-ed, case-insensitive via `$icontains`; a multi-valued field by `$contains` membership)',
     surface: 'spec/api/query.zod.ts:$search (QueryParams `search`)',
     state: 'enforced',
     enforcement: 'objectql/src/engine.ts (find AST expansion) → objectql/src/search-filter.ts expandSearchToFilter',
