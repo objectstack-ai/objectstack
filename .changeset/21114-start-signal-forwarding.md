@@ -23,5 +23,9 @@ same mechanism:
 - A child that exits on its own still ends `start` with the child's exit code,
   as before.
 
-Nothing else changes: no flag, port, environment variable, banner line or
-`os dev` behaviour moves.
+One visible side effect, the same one `os dev` already has: Ctrl-C at a terminal
+signals `start` and the child together, so the child now receives SIGINT twice
+and logs one `Shutdown already in progress, ignoring SIGINT` warning. The
+terminal prompt also returns only after the server has stopped, not before.
+
+No flag, port, environment variable, banner line or `os dev` behaviour changes.
