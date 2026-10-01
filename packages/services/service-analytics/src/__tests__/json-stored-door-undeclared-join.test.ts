@@ -36,6 +36,8 @@
  *   the object the lookup's `reference` declares. Neither face's own refusal
  *   carries that envelope (the engine's names `groupBy[1]`, the cross-object
  *   one carries no `field` / `object`), so equal envelopes are the door's.
+ * - An ad-hoc query's inferred cube declares no join at all: a dotted
+ *   dimension on it is refused the same way.
  * - The declared-join members are the control: the same refusal, `object` the
  *   joined object.
  * - The scalar column over the same undeclared-join path is served.
@@ -286,6 +288,17 @@ for (const cell of CELLS) {
 
       it('the control — the same members over the declared join answer the same refusal', async () => {
         await refusedOnBothFaces(DECLARED);
+      });
+
+      it('an ad-hoc query over the object — an inferred cube, which declares no join at all — is refused the same way', async () => {
+        for (const face of FACES) {
+          const { res, err, rawSql, aggregate } = await read(face, { cube: DEAL, measures: ['count'], dimensions: ['owner.prefs'] });
+          expect(res, `${face} must not be served`).toBeUndefined();
+          expect(envelopeOf(err), `${face}: ${err?.message}`).toEqual({
+            code: 'INVALID_FIELD', status: 400, member: 'owner.prefs', param: 'dimensions', cube: DEAL, field: 'owner.prefs', object: PERSON,
+          });
+          expect(rawSql + aggregate, `${face}: nothing was read`).toBe(0);
+        }
       });
 
       it('the dry-run door refuses what the query door refuses', async () => {
