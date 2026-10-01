@@ -1138,13 +1138,23 @@ describe('dead / experimental / planned / live-elsewhere verdicts are distinct, 
   // contract test on the two rows that are still planned — `translation.flows`
   // just above and `object.externalSharingModel` just below.
 
-  it('REAL LEDGER: object.externalSharingModel (planned, no authorHint — falls back to `note`) — planned rule id, note hint does not say Remove it', () => {
+  it('REAL LEDGER: object.externalSharingModel (planned, no authorHint) — planned rule id, the planned DEFAULT hint, never its ledger note', () => {
     const findings = lintLivenessProperties({ objects: [{ name: 'widget', externalSharingModel: 'read' }] });
     const f = findings.find((x) => x.message.includes('externalSharingModel'));
     expect(f).toBeDefined();
     expect(f!.rule).toBe('liveness-planned-property');
     expect(f!.message).not.toContain('dead');
-    expect(f!.hint).not.toMatch(/^Remove it/);
+    const ledger = JSON.parse(readFileSync(join(shippedLedgerDir(), 'object.json'), 'utf8'));
+    const row = ledger.props.externalSharingModel;
+    // Anti-vacuity: the row is still the leaking shape this pin exists for.
+    expect(row.authorWarn).toBe(true);
+    expect(row.authorHint).toBeUndefined();
+    expect(row.note).toMatch(/#\d+/);
+    expect(f!.hint).toBe(
+      checkItemAgainstWarnMap('gadget', { name: 'g1', gizmo: 'x' }, "gadget 'g1'", oneEntry({ status: 'planned', authorWarn: true }))[0].hint,
+    );
+    expect(f!.hint).not.toMatch(/#\d+/);
+    expect(f!.hint).not.toContain(row.note);
   });
 
   // ── SYNTHETIC: the default hint per verdict, when neither authorHint nor
@@ -1218,11 +1228,11 @@ describe('dead / experimental / planned / live-elsewhere verdicts are distinct, 
     expect(f.hint).toContain('evidence');
   });
 
-  it('SYNTHETIC: live-elsewhere keeps the shared hint precedence — authorHint over note over the default', () => {
+  it('SYNTHETIC: live-elsewhere shares the hint precedence — authorHint over the default, never the note', () => {
     const hintOf = (entry: Record<string, unknown>) =>
       checkItemAgainstWarnMap('gadget', { name: 'g1', gizmo: 'x' }, "gadget 'g1'", oneEntry(entry))[0].hint;
     expect(hintOf({ status: 'live-elsewhere', authorWarn: true, authorHint: 'H', note: 'N' })).toBe('H');
-    expect(hintOf({ status: 'live-elsewhere', authorWarn: true, note: 'N' })).toBe('N');
+    expect(hintOf({ status: 'live-elsewhere', authorWarn: true, note: 'N' })).toContain('sibling repo');
     expect(hintOf({ status: 'live-elsewhere', authorWarn: true })).toContain('sibling repo');
   });
 
@@ -1714,9 +1724,10 @@ describe('the dead and live-elsewhere verdicts warn on their own (#16094)', () =
 // the 105 newly warned entries' notes cite a tracker id, and three of the four
 // an author can reach say the row was deliberately not warned. AGENTS.md keeps
 // tracker numbers out of anything an author is shown. So such a row shows its
-// `authorHint`, else the verdict's default hint; a row that opted in, and an
-// `experimental` row, keep the hint they had before the ruling, byte for byte.
-describe('the hint a verdict-triggered row shows an author (#16094)', () => {
+// `authorHint`, else the verdict's default hint. The same rule holds for every
+// other row class (an opted-in `planned`/`dead`/`live-elsewhere` row and an
+// `experimental` row), pinned below (#21096).
+describe('the hint a warned row shows an author (#16094, #21096)', () => {
   type ShippedRow = { type: string; path: string; entry: Record<string, unknown> };
 
   /** Every shipped row at the depth the warn map reads (props + one level of `children`). */
@@ -1774,38 +1785,56 @@ describe('the hint a verdict-triggered row shows an author (#16094)', () => {
     }
   });
 
-  it('CONTROL, REAL LEDGER: every row that warned before the ruling keeps its hint byte for byte', () => {
+  it('REAL LEDGER: no opted-in or experimental row shows its note either, and none without an authorHint carries a tracker id', () => {
     // A `live` row that opts in is outside this population: `describe()` throws
-    // on it before and after the ruling (the COVERAGE pin above holds that it
-    // stays loud), so it has no hint to keep.
-    const before = shippedRows().filter(
+    // on it (the COVERAGE pin above holds that it stays loud).
+    const warned = shippedRows().filter(
       (r) => (r.entry.authorWarn === true || r.entry.status === 'experimental') && r.entry.status !== 'live',
     );
-    // Anti-vacuity: an opted-in row and an experimental row both fall back to
-    // their note today, so the control would see a change in either.
-    expect(before.some((r) => r.entry.authorWarn === true && r.entry.authorHint === undefined && typeof r.entry.note === 'string')).toBe(true);
-    expect(before.some((r) => r.entry.status === 'experimental' && r.entry.authorHint === undefined && typeof r.entry.note === 'string')).toBe(true);
-    for (const row of before) {
-      const expected = row.entry.authorHint ?? row.entry.note;
-      if (typeof expected !== 'string') continue; // only the default remains — unchanged by construction
-      expect(hintFor(row), `${row.type}/${row.path}`).toBe(expected);
+    // Anti-vacuity: an opted-in row and an experimental row, each without an
+    // authorHint and each with a note, exist, so the leak this pin forbids is a real one.
+    const leakers = (pred: (r: ShippedRow) => boolean) =>
+      warned.filter((r) => pred(r) && r.entry.authorHint === undefined && typeof r.entry.note === 'string');
+    expect(leakers((r) => r.entry.authorWarn === true).length).toBeGreaterThan(0);
+    expect(leakers((r) => r.entry.status === 'experimental').length).toBeGreaterThan(0);
+    expect(leakers((r) => typeof r.entry.note === 'string' && TRACKER_ID.test(r.entry.note as string)).length).toBeGreaterThan(0);
+    for (const row of warned) {
+      const where = `${row.type}/${row.path}`;
+      const hint = hintFor(row);
+      if (typeof row.entry.authorHint === 'string') {
+        expect(hint, where).toBe(row.entry.authorHint); // CONTROL: the authored hint, exactly
+      } else {
+        expect(hint, where).not.toBe(row.entry.note);
+        expect(TRACKER_ID.test(hint), `${where} hint carries a tracker id`).toBe(false);
+      }
     }
   });
 
-  it('SYNTHETIC: the opt-in, not the verdict, decides whether the note may be shown', () => {
+  it('SYNTHETIC: authorHint wins, otherwise the verdict default — for every row class, never the note', () => {
     const hintOf = (entry: Record<string, unknown>) =>
       checkItemAgainstWarnMap('gadget', { name: 'g1', gizmo: 'x' }, "gadget 'g1'", gizmoEntry(entry))[0].hint;
     const deadDefault = hintOf({ status: 'dead' });
     const elsewhereDefault = hintOf({ status: 'live-elsewhere' });
-    // Verdict-triggered: authorHint wins, otherwise the default — never the note.
-    expect(hintOf({ status: 'dead', note: 'N #123' })).toBe(deadDefault);
-    expect(hintOf({ status: 'live-elsewhere', note: 'N #123' })).toBe(elsewhereDefault);
-    expect(hintOf({ status: 'dead', authorHint: 'H', note: 'N' })).toBe('H');
-    // Opted in: today's precedence, unchanged — the note is shown.
-    expect(hintOf({ status: 'dead', authorWarn: true, note: 'N' })).toBe('N');
-    expect(hintOf({ status: 'live-elsewhere', authorWarn: true, note: 'N' })).toBe('N');
-    // Experimental needs no opt-in and keeps its note, as before the ruling.
-    expect(hintOf({ status: 'experimental', note: 'N' })).toBe('N');
+    const plannedDefault = hintOf({ status: 'planned', authorWarn: true });
+    const experimentalDefault = hintOf({ status: 'experimental' });
+    const NOTE = 'N #123';
+    // Verdict-triggered, with or without the opt-in: the default, never the note.
+    expect(hintOf({ status: 'dead', note: NOTE })).toBe(deadDefault);
+    expect(hintOf({ status: 'live-elsewhere', note: NOTE })).toBe(elsewhereDefault);
+    expect(hintOf({ status: 'dead', authorWarn: true, note: NOTE })).toBe(deadDefault);
+    expect(hintOf({ status: 'live-elsewhere', authorWarn: true, note: NOTE })).toBe(elsewhereDefault);
+    // Opted-in planned and experimental rows: the default, never the note.
+    expect(hintOf({ status: 'planned', authorWarn: true, note: NOTE })).toBe(plannedDefault);
+    expect(hintOf({ status: 'experimental', note: NOTE })).toBe(experimentalDefault);
+    expect(hintOf({ status: 'experimental', authorWarn: true, note: NOTE })).toBe(experimentalDefault);
+    for (const hint of [deadDefault, elsewhereDefault, plannedDefault, experimentalDefault]) {
+      expect(hint).not.toMatch(/#\d+/);
+    }
+    // Control: an authorHint is printed exactly, note or no note.
+    for (const status of ['dead', 'live-elsewhere', 'planned', 'experimental']) {
+      expect(hintOf({ status, authorWarn: true, authorHint: 'H', note: NOTE }), status).toBe('H');
+      expect(hintOf({ status, authorWarn: true, authorHint: 'H' }), status).toBe('H');
+    }
   });
 
   it('END TO END: the authored dead RLS keys show the dead default hint, not the ledger note', () => {
