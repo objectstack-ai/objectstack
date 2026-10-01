@@ -7,7 +7,13 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", "json-schema/**", ".next/**", "!.next/cache/**"]
+      "outputs": ["dist/**", "json-schema/**", ".next/**", "!.next/cache/**"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/tsup-drop-sources-content.mjs",
+        "$TURBO_ROOT$/scripts/check-dts-emitted.mjs",
+        "$TURBO_ROOT$/scripts/invoked-as.mjs"
+      ]
     },
     "test": {
       "dependsOn": ["^build"],
@@ -29,6 +35,81 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**", "json-schema/**", ".next/**", "!.next/cache/**"],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/content/**"]
+    },
+    "@objectstack/spec#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", "json-schema/**", ".next/**", "!.next/cache/**"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/tsup-drop-sources-content.mjs",
+        "$TURBO_ROOT$/scripts/check-dts-emitted.mjs",
+        "$TURBO_ROOT$/scripts/invoked-as.mjs",
+        "$TURBO_ROOT$/scripts/check-dts-references.mjs",
+        "$TURBO_ROOT$/scripts/ts-parse.mjs",
+        "$TURBO_ROOT$/scripts/check-regen-pending.mjs",
+        "$TURBO_ROOT$/scripts/regen-artifacts.mjs",
+        "$TURBO_ROOT$/scripts/git-env.mjs",
+        "$TURBO_ROOT$/scripts/import-prerequisite.mjs",
+        "$TURBO_ROOT$/scripts/cli-build-prerequisite.mjs",
+        "$TURBO_ROOT$/scripts/check-dev-prereqs.mjs",
+        "$TURBO_ROOT$/scripts/build-input-hash.mjs",
+        "$TURBO_ROOT$/scripts/workspace-enumerator.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs"
+      ]
+    },
+    "@objectstack/core#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", "json-schema/**", ".next/**", "!.next/cache/**"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/tsup-drop-sources-content.mjs",
+        "$TURBO_ROOT$/scripts/check-dts-emitted.mjs",
+        "$TURBO_ROOT$/scripts/invoked-as.mjs",
+        "$TURBO_ROOT$/scripts/check-dev-prereqs.mjs",
+        "$TURBO_ROOT$/scripts/build-input-hash.mjs",
+        "$TURBO_ROOT$/scripts/workspace-enumerator.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs"
+      ]
+    },
+    "@objectstack/organizations#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", "json-schema/**", ".next/**", "!.next/cache/**"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/tsup-drop-sources-content.mjs",
+        "$TURBO_ROOT$/scripts/check-dts-emitted.mjs",
+        "$TURBO_ROOT$/scripts/invoked-as.mjs",
+        "$TURBO_ROOT$/scripts/check-dev-prereqs.mjs",
+        "$TURBO_ROOT$/scripts/build-input-hash.mjs",
+        "$TURBO_ROOT$/scripts/workspace-enumerator.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs"
+      ]
+    },
+    "@objectstack/plugin-auth#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", "json-schema/**", ".next/**", "!.next/cache/**"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/tsup-drop-sources-content.mjs",
+        "$TURBO_ROOT$/scripts/check-dts-emitted.mjs",
+        "$TURBO_ROOT$/scripts/invoked-as.mjs",
+        "$TURBO_ROOT$/scripts/check-dev-prereqs.mjs",
+        "$TURBO_ROOT$/scripts/build-input-hash.mjs",
+        "$TURBO_ROOT$/scripts/workspace-enumerator.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs"
+      ]
+    },
+    "create-objectstack#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", "json-schema/**", ".next/**", "!.next/cache/**"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/check-dts-emitted.mjs",
+        "$TURBO_ROOT$/scripts/invoked-as.mjs",
+        "$TURBO_ROOT$/scripts/sync-scaffold-emission-policy.mjs",
+        "$TURBO_ROOT$/scripts/sync-template-versions.mjs",
+        "$TURBO_ROOT$/packages/cli/src/commands/init.ts"
+      ]
     },
     "@objectstack/service-settings#test": {
       "dependsOn": ["^build"],

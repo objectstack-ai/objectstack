@@ -90,7 +90,7 @@ export async function resolveNamedMapping(
         if (entry?.transform === 'javascript') {
             return {
                 ok: false, status: 400, code: 'UNSUPPORTED_TRANSFORM',
-                error: `Mapping "${mappingName}" uses transform "javascript", which the import path does not execute (no server-side sandbox; see framework#2611)`,
+                error: `Mapping "${mappingName}" uses transform "javascript", which the import path does not execute (there is no server-side sandbox), so the import is refused rather than run with that transform skipped`,
             };
         }
     }

@@ -48,10 +48,10 @@
  * are computed from the rows with JS arithmetic and asserted with `toBe`: a
  * string, a boolean or a rounding difference each fail. The precision case
  * holds #20335's one-double policy — a total beyond a double answers the
- * nearest double, equal to SQLite and to the ObjectQL face. ⛔ No case pins the
- * SUM / AVG accumulation of non-dyadic fractions (`0.1 + 0.2`, `11 / 9`): the
- * native statement does not carry #20387's double accumulation, a different
- * defect shape that is tracked on its own.
+ * nearest double, equal to SQLite and to the ObjectQL face. The SUM / AVG
+ * accumulation of non-dyadic fractions (`0.1 + 0.2`, `11 / 9`) is a different
+ * question — what the statement adds, not how its answer is presented — and is
+ * pinned beside this file in `native-sql-aggregate-policies.test.ts` (#21042).
  *
  * ## The dialect axis of THIS file
  *

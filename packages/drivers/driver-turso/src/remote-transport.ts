@@ -46,6 +46,18 @@ import { resolveFilterSubtreeProvenance } from '@objectstack/spec/data';
 // `AggregationNodeSchema.function` admits, nor from the local driver's twin.
 import { AggregationFunction, emptyGroupValueFor } from '@objectstack/spec/data';
 import type { DriverQuery } from '@objectstack/spec/contracts';
+// [#21178] The JSON-column half of the filter contract, from the one home both
+// faces of this driver stand on: the operator set a JSON-stored column refuses
+// and the words of that refusal (`json-column-operator-refusal.ts`), and the
+// `$contains` membership construct (`json-membership-sql.ts`). `SqlDriver` —
+// this driver's LOCAL face — reads the same three, so the two faces cannot fork
+// on which operators a JSON column refuses, what the refusal says, or what
+// `$contains` means there. ⛔ Never a copy of any of them in this file.
+import {
+  JSON_COLUMN_INCOMPATIBLE_OPERATORS,
+  jsonColumnOperatorRefusalText,
+  jsonMembershipPredicate,
+} from '@objectstack/core';
 // [#8413] What a `unique: true` FIELD becomes, from the one place that decides
 // it. `uniqueIndexesFromFields`' own contract is that it is "the ONLY place
 // field-level uniqueness becomes an index, so the create-table, alter-table,
@@ -922,6 +934,22 @@ export type NonTextColumnResolver = (object: string, field: string) => boolean;
 export type DeclaredValueShapeResolver = (object: string, field: string) => ValueShapeFieldDef | undefined;
 
 /**
+ * [#21178] Is this field stored as a JSON TEXT column — a `multiple: true`
+ * field, an inherently multi-value option type, or a structured-JSON type?
+ * Injected by TursoDriver exactly the way {@link NonTextColumnResolver} is, and
+ * answered by `SqlDriver.isJsonColumn` from the `jsonFields` registry that
+ * `registerRemoteFieldMetadata` → `SqlDriver.registerExternalObject` fills in
+ * remote mode — the registry the LOCAL face's gate and membership reading ask —
+ * so this transport and its local twin read one population. ⛔ Never re-derived
+ * here from a field's type: that would be a second list of "which columns are
+ * JSON" beside the driver's, drifting on its aliases and on the ADR-0104 media
+ * deployment fact. Absent (a transport driven standalone), every column reads
+ * as not-JSON — the local face's own answer for a table it was never told
+ * about — and the gate and the membership reading stay off.
+ */
+export type JsonColumnResolver = (object: string, field: string) => boolean;
+
+/**
  * Remote transport that executes all queries via @libsql/client.
  *
  * Handles SQL generation, filter compilation, and result mapping for
@@ -968,6 +996,13 @@ export class RemoteTransport {
    * held", and `$empty` is refused rather than answered by a guessed row.
    */
   private declaredValueShape: DeclaredValueShapeResolver | null = null;
+
+  /**
+   * [#21178] The driver's JSON-column rule — see {@link setJsonColumnResolver}.
+   * Absent means "no column is known to be JSON", which is what this transport
+   * could say before it was handed the rule.
+   */
+  private jsonColumn: JsonColumnResolver | null = null;
 
   /**
    * [#7929] Where the withheld half of a redacted refusal is written.
@@ -1135,6 +1170,21 @@ export class RemoteTransport {
    */
   setDeclaredValueShapeResolver(resolver: DeclaredValueShapeResolver): void {
     this.declaredValueShape = resolver;
+  }
+
+  /**
+   * [#21178] Hand this transport the driver's answer to "is this field stored
+   * as a JSON TEXT column?", so {@link buildWhereSQL} applies the JSON-column
+   * half of the filter contract exactly as `SqlDriver` does locally: the
+   * operators in `JSON_COLUMN_INCOMPATIBLE_OPERATORS` are refused on such a
+   * column ({@link jsonColumnOperator}), and `$contains` / `$notContains` answer
+   * MEMBERSHIP rather than a substring of the serialization
+   * ({@link pushJsonMembership}). Same shape as
+   * {@link setNonTextColumnResolver} and for the same reason: the declaration
+   * lives on the driver, and this transport asks rather than re-deriving it.
+   */
+  setJsonColumnResolver(resolver: JsonColumnResolver): void {
+    this.jsonColumn = resolver;
   }
 
   /**
@@ -2934,6 +2984,23 @@ export class RemoteTransport {
         // widening the statement to every row in the table.
         const clausesBefore = clauses.length;
         for (const [op, opValue] of Object.entries(value as Record<string, any>)) {
+          // [#21178] The column-type gate, on the operator AS WRITTEN and ahead
+          // of every arm — `SqlDriver.assertOperatorAppliesToColumn`'s position
+          // on the local face. A JSON column holds the serialization
+          // `["u1","u2"]`, so every operator in the shared set compares or
+          // matches THAT text: measured on this transport before the gate,
+          // `$nin` and `$ne` returned the rows holding the excluded member
+          // (fail-open), `$eq` / `$in` returned none, `$lt` / `$lte` answered
+          // lexicographically over the serialization, and `$startsWith: '['`
+          // matched every row — while the local face refused each with
+          // `INVALID_FILTER` / 400. The arms below never see such an operator
+          // on such a column.
+          if (JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op) && this.isJsonColumn(object, key)) {
+            // [#8220] `value` — this field's operator map — is the node the
+            // entry seam resolves the refusal's provenance against, as the
+            // local face hands its gate the same map.
+            throw this.jsonColumnOperator(key, op, false, value);
+          }
           switch (op) {
             case '$eq':
               // [#6050] `=== null` only. `undefined` used to share this arm and
@@ -3024,6 +3091,9 @@ export class RemoteTransport {
             case '$contains': {
               const bind = this.serializeComparand(object, key, op, opValue);
               if (this.pushTextOverNonTextColumn(clauses, object, key, op)) break;
+              // [#21178] The MEMBERSHIP reading on a JSON column, ahead of the
+              // substring emitter every scalar string column keeps.
+              if (this.pushJsonMembership(clauses, args, object, key, column, opValue, false)) break;
               this.pushLike(clauses, args, column, bind, 'contains');
               break;
             }
@@ -3048,6 +3118,9 @@ export class RemoteTransport {
               // single emission point.
               const bind = this.serializeComparand(object, key, op, opValue);
               if (this.pushTextOverNonTextColumn(clauses, object, key, op)) break;
+              // [#21178] The exact complement of `$contains`' membership arm,
+              // on the same population and the same construct, NULL-safe.
+              if (this.pushJsonMembership(clauses, args, object, key, column, opValue, true)) break;
               this.pushLike(clauses, args, column, bind, 'contains', true, true);
               break;
             }
@@ -3187,6 +3260,18 @@ export class RemoteTransport {
         // stored with `organization_id IS NULL`; emitting `= ?` here is what
         // made every env-wide draft read come back empty even though the row
         // was written. (Knex special-cases this; this hand-rolled builder did not.)
+        //
+        // [#21178] Still the bare equality spelling, so a JSON column refuses
+        // it here exactly as it refuses `{ field: 'u1' }` below and
+        // `{ field: { $eq: null } }` above: the local face's bare-value
+        // positions ask the column-type gate whatever the comparand, `null`
+        // included. Measured on this harness: local refused `{ owners: null }`
+        // with `INVALID_FILTER` / 400 while this branch answered the NULL row —
+        // a different answer from one driver by connection string. `$null: true`
+        // is the presence spelling, and both faces answer it.
+        if (this.isJsonColumn(object, key)) {
+          throw this.jsonColumnOperator(key, '=', true, filters);
+        }
         const column = `"${this.mapSortField(key)}"`;
         clauses.push(`${column} IS NULL`);
       } else {
@@ -3203,6 +3288,14 @@ export class RemoteTransport {
         // map above and a bad one already threw (#1004).
         const column = `"${this.mapSortField(key)}"`;
         const bind = this.serializeComparand(object, key, '$eq', value);
+        // [#21178] The bare `{ field: value }` spelling is an implicit `=`, so
+        // the column-type gate applies here too — after the comparand gate, the
+        // order the local face's bare-value positions run their two gates in.
+        // [#8220] A bare comparand is usually a primitive, so `filters` — the
+        // node carrying `key` — is what carries the mark.
+        if (this.isJsonColumn(object, key)) {
+          throw this.jsonColumnOperator(key, '=', true, refusalNode(value, filters));
+        }
         clauses.push(`${this.comparisonColumn(object, key, column)} = ?`);
         args.push(bind);
       }
@@ -3241,6 +3334,99 @@ export class RemoteTransport {
   private pushTextOverNonTextColumn(clauses: string[], object: string, field: string, op: string): boolean {
     if (!this.nonTextColumn || !this.nonTextColumn(object, field)) return false;
     clauses.push(op === '$notContains' ? '1 = 1' : SQL_FALSE);
+    return true;
+  }
+
+  /**
+   * [#21178] Is `field` on `object` stored as a JSON TEXT column, per the
+   * driver's injected {@link JsonColumnResolver}? `false` when no rule was
+   * injected — never a guess from the value.
+   */
+  private isJsonColumn(object: string, field: string): boolean {
+    return this.jsonColumn !== null && this.jsonColumn(object, field);
+  }
+
+  /**
+   * [#21178] The refusal an operator in `JSON_COLUMN_INCOMPATIBLE_OPERATORS`
+   * gets on a JSON column — the local face's `jsonColumnOperatorError`, one
+   * package over. ADR-0112 class 1, `INVALID_FILTER` / 400.
+   *
+   * Both texts are `@objectstack/core`'s {@link jsonColumnOperatorRefusalText},
+   * byte for byte what the local face prints, with no `[RemoteTransport]`
+   * prefix: one mistake reads one sentence whichever face answered it. The
+   * caller-visible `message` withholds the field and the operator (on a read
+   * scope the predicate is an administrator's, #7929 / #8197); the `diagnostic`
+   * naming both goes to the diagnostic sink, and the entry seam swaps it back
+   * onto the wire only for a positively `'author'`-marked `subtree` (#8220) —
+   * the local face's `withheldFilterError` contract, with the same carrier keys.
+   *
+   * `bare` is the implicit-equality spelling `{ field: value }`, whose operator
+   * the diagnostic names as `=`.
+   */
+  private jsonColumnOperator(field: string, op: string, bare: boolean, subtree: unknown): Error {
+    const { message, diagnostic } = jsonColumnOperatorRefusalText(this.mapSortField(field), op, bare);
+    return this.withheldRefusal(message, subtree, diagnostic);
+  }
+
+  /**
+   * [#21178] Emit the MEMBERSHIP reading of `$contains` / `$notContains` when
+   * the column they were aimed at is a JSON column, and say whether it did —
+   * the local face's `SqlDriver.applyJsonMembership`, one package over.
+   * `false` leaves the caller on its substring emitter, which is what every
+   * scalar string column keeps: on such a column `$contains` IS the substring
+   * test (the spec's `FILTER_OPERATORS.$contains` docblock states both halves).
+   *
+   * The construct is `@objectstack/core`'s {@link jsonMembershipPredicate},
+   * `'sqlite'` dialect — libSQL is SQLite — so it asks whether the comparand's
+   * JSON value is an ELEMENT of the stored array: `u1` no longer answers the
+   * row holding `["u10"]`, and a stored object or scalar answers no member at
+   * all, exactly as locally. Measured before this arm on the libsql stub: the
+   * substring reading matched `["u10"]` for `u1`, `$notContains: 'u1'` dropped
+   * that row, and a `json`-typed field's `$contains` matched text inside the
+   * serialized object — three row sets the local face did not return.
+   *
+   * The column is the PLAIN quoted identifier (no storage-form rewrite applies
+   * to a JSON column), emitted by reference; each candidate value is bound
+   * through `?` in placeholder order, so `args` stays aligned with the SQL. The
+   * comparand is handed over AS WRITTEN — the caller has already run it through
+   * {@link serializeComparand}'s gate — because the construct reads its text
+   * rendering itself, exactly as the local face hands it the raw comparand.
+   *
+   * The negated spelling composes with the NULL rule rather than replacing it:
+   * a row with no value satisfies `$notContains` (#5298), and the `json_each`
+   * scan answers NULL — not FALSE — for a NULL column, so {@link nullSafeNegative}
+   * is doing real work here.
+   */
+  private pushJsonMembership(
+    clauses: string[],
+    args: any[],
+    object: string,
+    field: string,
+    column: string,
+    value: unknown,
+    negate: boolean,
+  ): boolean {
+    if (!this.isJsonColumn(object, field)) return false;
+    const bound: unknown[] = [];
+    const sql = jsonMembershipPredicate(
+      'sqlite',
+      {
+        column: () => column,
+        value: (v) => {
+          bound.push(v);
+          return '?';
+        },
+      },
+      value,
+    );
+    if (sql === null) {
+      // Unreachable: `'sqlite'` always has a construct, and only `'unknown'`
+      // answers `null`. Said out loud rather than falling back to the substring
+      // emitter, which would be the very answer this arm exists to replace.
+      throw new Error('[RemoteTransport] jsonMembershipPredicate returned no construct for the sqlite dialect');
+    }
+    clauses.push(negate ? this.nullSafeNegative(column, `NOT ${sql}`) : sql);
+    args.push(...bound);
     return true;
   }
 

@@ -9,7 +9,7 @@
 - `--tier` 嫌疑行是提示非裁定;双肢命中任一 ⇒ 无达档条款②复核 PASS 在案 ⛔ 禁止入队。
 - 路径肢 = diff 触及契约面 `packages/spec/src/**` 非测试,含 error-code-ledger、`*.zod.ts` 契约 schema。
 - 声明肢 = 认领评论声明 `Clause-②: yes`,与路径无关;错误的 `no` 是可审计的假申报。
-- 交付后复核按面欠 ⛔ 不按车道(五面见 `references/contract-review.md`);双肢命中即 spec 车道。
+- 交付后复核按面欠 ⛔ 不按车道(三面见 `references/contract-review.md`);双肢命中即 spec 车道。
 - 子代理起不来 ⇒ 复核缺席,PR 带 `needs:contract-review` 留 draft 队列外;旁路仅维护者逐次亲审
 - PASS ⇒ ready、auto-merge;FAIL ⇒ 补丁轮;⛔ 免复核不放行。
 - DELIBERATE CORRECTION 红(`check-empty-changeset`):同 head 达档复核 PASS 记录即确认,⛔ 不等维护者。

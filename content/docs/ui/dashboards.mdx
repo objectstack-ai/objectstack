@@ -104,7 +104,7 @@ selects `dimensions` (X / group / split) and `values` (the measures to plot):
 | `chartConfig` | `object` | optional | Chart **appearance**: `title`, `subtitle`, `description`, `colors`, `height`, `showLegend`, `showDataLabels`, `annotations`, `interaction`. The bound dataset decides which series exist and which column each one reads, so `type`, `xAxis`, `yAxis` and `series` are refused here — see below |
 | `colorVariant` | `enum` | optional | KPI/card accent color |
 | `compareTo` | `object` | optional | Period-over-period comparison: `{ kind: 'previousPeriod' \| 'previousYear', dimension? }`. Omit `dimension` when the selection dates exactly one time dimension — the runtime resolves it, and errors naming the candidates rather than guessing when it cannot. |
-| `options` | `object` | optional | Renderer extras **plus** the query keys below |
+| `options` | `object` | optional | The query keys below. Presentation does not go here — see below |
 
 ### What `chartConfig` does **not** carry
 
@@ -135,10 +135,25 @@ Existing sources: `os migrate meta --from 17` lists the mechanical edits.
 
 ### Widget `options`
 
-`options` is an open bag: keys the renderer understands (`icon`, `columns`,
-`striped`, `density`, …) pass through untouched. Five keys are **declared**,
-because they are not presentation-only — four of them change the query the
-dataset compiles to:
+`options` carries five **declared** keys, and four of them change the query the
+dataset compiles to. The bag is open, so any other key parses, but a dashboard
+widget is always bound to a dataset and nothing on that render path reads
+another key: an `icon`, `columns`, `format` or `color` written here styles
+nothing. `os validate`, `os build` and `os lint` warn on each such key by name
+(`unconsumed-widget-option`) and list the keys that are read.
+
+Presentation has declared homes instead:
+
+| You want | Write it here |
+| :--- | :--- |
+| A number's format or currency | The dataset **measure**'s `format` and `currency` |
+| A KPI tile's accent color | The widget's `colorVariant` |
+| A chart's look (colors, legend, data labels, height) | The widget's `chartConfig` |
+
+A key that something outside the renderer genuinely reads can say so with
+`suppressWarnings: ['unconsumed-widget-option']` on the widget.
+
+The declared keys:
 
 | Key | Type | Effect |
 | :--- | :--- | :--- |
@@ -146,10 +161,12 @@ dataset compiles to:
 | `sortBy` | `string` | Orders rows by a dimension or measure **this widget selects**. |
 | `sortOrder` | `asc \| desc` | Direction for `sortBy` (default `asc`). |
 | `limit` | `number` | Max rows, applied **after** ordering. |
-| `stageOrder` | `(string \| number \| boolean)[]` | Explicit stage order for a `funnel` widget, as the dimension's **stored values**. `funnel` is the only widget type that reads it — on any other type the key parses and is never consulted; order those with `sortBy` / `sortOrder`. Omit to use the dimension field's picklist option order. |
+| `stageOrder` | `(string \| number \| boolean)[]` | Explicit stage order for a `funnel` widget, as the dimension's **stored values**. `funnel` is the only widget type that reads it, and the schema refuses it on any other type; order those with `sortBy` / `sortOrder`. Omit to use the dimension field's picklist option order. |
 
-Because they are declared, a misspelling (`sortDirection`, `granularity`) is an
-author-time error rather than an option that reads as if it works.
+Because they are declared, a wrong **value** (`sortOrder: 'sideways'`) is an
+author-time error. A misspelled **key** (`sortDirection`, `granularity`) is
+not declared, so it parses like any other extra and changes nothing; the
+`unconsumed-widget-option` warning is what names it.
 
 ```ts
 {
