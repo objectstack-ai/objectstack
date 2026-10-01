@@ -31,6 +31,8 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
+// The mocked module (see `vi.mock` below), loaded at module top.
+import { matchesFilterCondition } from '@objectstack/formula';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
@@ -200,8 +202,7 @@ const CELLS: Cell[] = [
 ];
 
 describe("formula's whole-day copy is out of reach in this file", () => {
-  it('a bare-day $lte no longer admits an instant later on that day', async () => {
-    const { matchesFilterCondition } = await import('@objectstack/formula');
+  it('a bare-day $lte no longer admits an instant later on that day', () => {
     expect(matchesFilterCondition({ d: '2026-01-05T15:00:00Z' }, { d: { $lte: '2026-01-05' } } as never)).toBe(false);
     expect(matchesFilterCondition({ d: '2026-01-05' }, { d: { $lte: '2026-01-05' } } as never)).toBe(true);
   });
