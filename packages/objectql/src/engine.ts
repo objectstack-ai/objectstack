@@ -186,9 +186,16 @@ import {
  * Per-row outcome of {@link ObjectQL.insertMany} (framework#3172). One entry
  * per input row, in input order: written rows carry the after-hook record,
  * failed rows carry the per-row error (validation / autonumber / encryption).
+ *
+ * [#20922] A written row also carries `droppedFields`: the caller-supplied
+ * fields the engine LEGALLY stripped from THAT row, one `DroppedFieldsEvent`
+ * per reason — the per-row channel, recorded at the strips. Present only when
+ * at least one field was taken from the row. The batch-level `onFieldsDropped`
+ * events are unchanged and still name no row; this key is not a resolution of
+ * them. A failed row carries none: its write did not complete.
  */
 export type InsertManyRowOutcome =
-  | { ok: true; record: any }
+  | { ok: true; record: any; droppedFields?: DroppedFieldsEvent[] }
   | { ok: false; error: unknown };
 import { CoreServiceName, StorageNameMapping, PLATFORM_PROVIDED_OBJECT_NAMES } from '@objectstack/spec/system';
 import { IRealtimeService, RealtimeEventPayload } from '@objectstack/spec/contracts';
@@ -1931,23 +1938,28 @@ function undeclaredWriteFieldErrors(
  *
  * @param refused the declared-field door's per-row verdicts, index-aligned: a
  *   row that door refused is left exactly as it is and counts toward nothing.
- * @returns the rows as the strip leaves them (index-aligned with the input) and
+ * @returns the rows as the strip leaves them (index-aligned with the input);
  *   the union of the keys it took, in first-seen order — one report per call,
- *   the shape every insert-side strip already reports in.
+ *   the shape every insert-side strip already reports in; and `droppedPerRow`,
+ *   the keys taken from EACH row (index-aligned, `[]` for a row it left alone).
+ *   The union and the per-row lists are the same strip's one result read two
+ *   ways: the per-row lists are what {@link droppedFieldEvents} attributes
+ *   to a row on `validate` and on `insertMany`'s outcomes.
  */
 function stripComputedWriteFields(
   schema: { fields?: unknown } | undefined,
   rows: readonly unknown[],
   refused?: readonly unknown[],
-): { rows: unknown[]; dropped: string[] } {
+): { rows: unknown[]; dropped: string[]; droppedPerRow: string[][] } {
   const out = rows.slice();
   const dropped: string[] = [];
+  const droppedPerRow: string[][] = rows.map(() => []);
   const fields = schema?.fields;
-  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return { rows: out, dropped };
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return { rows: out, dropped, droppedPerRow };
   const computed = Object.entries(fields as Record<string, { type?: unknown } | null | undefined>)
     .filter(([, def]) => def?.type === 'formula')
     .map(([name]) => name);
-  if (computed.length === 0) return { rows: out, dropped };
+  if (computed.length === 0) return { rows: out, dropped, droppedPerRow };
   for (let i = 0; i < out.length; i++) {
     if (refused?.[i] !== undefined) continue;
     const row = out[i];
@@ -1960,9 +1972,35 @@ function stripComputedWriteFields(
       delete copy[name];
       if (!dropped.includes(name)) dropped.push(name);
     }
+    droppedPerRow[i] = taken;
     out[i] = copy;
   }
-  return { rows: out, dropped };
+  return { rows: out, dropped, droppedPerRow };
+}
+
+/**
+ * The strip report as `DroppedFieldsEvent`s: one event per reason, `computed`
+ * before `readonly` — the order the strips run — and an empty list when
+ * nothing was taken.
+ *
+ * ONE builder for both channels the create-side strips report through, so
+ * they cannot disagree on a reason or its order: the batch-level union (the
+ * `onFieldsDropped` events of `insert` and {@link ObjectQL.validate}, unchanged
+ * by the per-row channel) and the per-row lists (`results[i].droppedFields` on
+ * `validate`, `droppedFields` on an `ok` outcome of `insertMany`). The per-row
+ * lists are recorded at the strips themselves, never reconstructed from the
+ * union: "which rows supplied N" is not "which rows dropped N" once a hook can
+ * exempt a key on one row and not another.
+ */
+function droppedFieldEvents(
+  object: string,
+  computed: readonly string[],
+  readonly: readonly string[],
+): DroppedFieldsEvent[] {
+  const events: DroppedFieldsEvent[] = [];
+  if (computed.length > 0) events.push({ object, fields: [...computed], reason: 'computed' });
+  if (readonly.length > 0) events.push({ object, fields: [...readonly], reason: 'readonly' });
+  return events;
 }
 
 /**
@@ -12167,6 +12205,11 @@ export class ObjectQL implements IObjectQLEngine {
    * reported through `options.onFieldsDropped`, the listener the write reports
    * through.
    *
+   * [#20922] And per row: an accepted row's `droppedFields` names what the
+   * write would take from THAT row, recorded at the strips themselves — the
+   * same report `insertMany` hangs on that row's `ok` outcome. The listener's
+   * events stay the batch-level union, one per reason, naming no row.
+   *
    * ## ADR-0104 posture — the whole reason B was rejected
    *
    * The verdict is resolved against the TARGET DEPLOYMENT'S REAL POSTURE via
@@ -12311,11 +12354,20 @@ export class ObjectQL implements IObjectQLEngine {
     // (#8093, ADDRESSING IS NOT PAYLOAD). `readonlyWhen` and the primary-key
     // strip are not run: both judge a prior record or a dispatch this
     // operation does not have (the named limits below).
+    //
+    // [#20922] Each strip's result is recorded twice at the strip itself: into
+    // the batch-level union the listener reports (unchanged), and into the
+    // taking row's own list, which becomes that row's `droppedFields` below.
     const readonlyDropped: string[] = [];
-    const collectTaken = (before: Record<string, unknown>, after: Record<string, unknown>): void => {
-      for (const k of Object.keys(before)) {
-        if (!(k in after) && !readonlyDropped.includes(k)) readonlyDropped.push(k);
+    const readonlyDroppedPerRow: string[][] = rows.map(() => []);
+    const recordTaken = (i: number, taken: readonly string[]): void => {
+      for (const k of taken) {
+        if (!readonlyDropped.includes(k)) readonlyDropped.push(k);
+        if (!readonlyDroppedPerRow[i]!.includes(k)) readonlyDroppedPerRow[i]!.push(k);
       }
+    };
+    const collectTaken = (i: number, before: Record<string, unknown>, after: Record<string, unknown>): void => {
+      recordTaken(i, Object.keys(before).filter((k) => !(k in after)));
     };
     if (!options?.context?.isSystem) {
       const preserveAudit = options?.context?.preserveAudit === true;
@@ -12325,7 +12377,7 @@ export class ObjectQL implements IObjectQLEngine {
             schemaForValidation as any, rows[i], rawRows[i] ?? {}, undefined, { preserveAudit },
           ) as Record<string, unknown>;
           if (stripped === rows[i]) continue;
-          collectTaken(rows[i]!, stripped);
+          collectTaken(i, rows[i]!, stripped);
           rows[i] = stripped;
         }
         const readonlySubject = staticReadonlyInsertSubject(schemaForValidation as any);
@@ -12335,7 +12387,7 @@ export class ObjectQL implements IObjectQLEngine {
               object, readonlySubject, rows[i]!, rawRows[i] ?? {}, options?.context,
               { logger: undefined, strictReadonlyWrites: false, hookWrittenKeys: undefined, nowSnap: nowSnapshot, permissionResolution },
             );
-            for (const k of pass.taken) if (!readonlyDropped.includes(k)) readonlyDropped.push(k);
+            recordTaken(i, pass.taken);
             // The write fails on this resolution failure outside partial mode;
             // a preview has no partial mode, so it fails the same way.
             if (pass.error !== undefined) throw pass.error;
@@ -12350,16 +12402,14 @@ export class ObjectQL implements IObjectQLEngine {
             schemaForValidation as any, rows[i], supplied, undefined, { preserveAudit },
           ) as Record<string, unknown>;
           if (stripped === rows[i]) continue;
-          collectTaken(rows[i]!, stripped);
+          collectTaken(i, rows[i]!, stripped);
           rows[i] = stripped;
         }
       }
     }
     const onFieldsDropped = options?.onFieldsDropped;
     if (typeof onFieldsDropped === 'function') {
-      const drops: DroppedFieldsEvent[] = [];
-      if (computedStrip.dropped.length > 0) drops.push({ object, fields: computedStrip.dropped, reason: 'computed' });
-      if (readonlyDropped.length > 0) drops.push({ object, fields: readonlyDropped, reason: 'readonly' });
+      const drops = droppedFieldEvents(object, computedStrip.dropped, readonlyDropped);
       for (const drop of drops) {
         try {
           onFieldsDropped(drop);
@@ -12420,7 +12470,7 @@ export class ObjectQL implements IObjectQLEngine {
     // above. A resolution failure rejects the preview, as it fails the write.
     const previewPermissionsFor = await this.resolveOptionPermissions(schemaForValidation, rows, permissionResolution);
 
-    const results: NonNullable<ValidateDataResponse['results']> = rows.map((row) => {
+    const results: NonNullable<ValidateDataResponse['results']> = rows.map((row, i) => {
       const warnings: ValidateDataIssue[] = [];
       // Warn-first admissions are the posture signal the caller came for, so
       // they are reported — into this row's own bucket, never into the
@@ -12457,7 +12507,15 @@ export class ObjectQL implements IObjectQLEngine {
         }
         throw e;
       }
-      return { valid: true, errors: [], warnings };
+      // [#20922] THIS row's drops, from the strips' own per-row record above
+      // — the report `insertMany` hangs on the same row's `ok` outcome, so a
+      // dry run and its commit answer one row in one vocabulary. Only on a
+      // row the verdict accepts: a drop is "the write completed without
+      // them", and the write refuses an invalid row, so it drops nothing
+      // (`insertMany` answers that row `ok: false`, with no drops). Absent
+      // when nothing would be taken.
+      const droppedFields = droppedFieldEvents(object, computedStrip.droppedPerRow[i]!, readonlyDroppedPerRow[i]!);
+      return { valid: true, errors: [], warnings, ...(droppedFields.length > 0 ? { droppedFields } : {}) };
     });
 
     return {
@@ -12888,7 +12946,21 @@ export class ObjectQL implements IObjectQLEngine {
       // hook that RE-ISSUES the record number lost its write to any caller
       // that had also submitted the key, while the same hook's write survived
       // on a caller that had not. The update path's twin (#5591).
+      //
+      // [#20922] Every key a caller-write strip takes is recorded twice, at
+      // the strip: into the batch-level union (`insertDropped`, reported once
+      // per call below, unchanged) and into the taking row's own list, which
+      // `insertMany` hangs on that row's `ok` outcome. Per row because the
+      // rows CAN differ (`hookWrittenKeys` is armed per row), so the union
+      // cannot be resolved back to rows after the fact.
       const insertDropped: string[] = [];
+      const insertDroppedPerRow: string[][] = rows.map(() => []);
+      const recordInsertTaken = (i: number, taken: readonly string[]): void => {
+        for (const k of taken) {
+          if (!insertDropped.includes(k)) insertDropped.push(k);
+          if (!insertDroppedPerRow[i]!.includes(k)) insertDroppedPerRow[i]!.push(k);
+        }
+      };
       if (!opCtx.context?.isSystem) {
         const preserveAudit = opCtx.context?.preserveAudit === true;
         for (let i = 0; i < rows.length; i++) {
@@ -12915,9 +12987,7 @@ export class ObjectQL implements IObjectQLEngine {
             },
           ) as Record<string, unknown>;
           if (stripped === rows[i]) continue;
-          for (const k of Object.keys(rows[i])) {
-            if (!(k in stripped) && !insertDropped.includes(k)) insertDropped.push(k);
-          }
+          recordInsertTaken(i, Object.keys(rows[i]).filter((k) => !(k in stripped)));
           rows[i] = stripped;
           rowHookContexts[i].input.data = stripped;
         }
@@ -12976,8 +13046,8 @@ export class ObjectQL implements IObjectQLEngine {
               },
             );
             if (pass.row === rows[i] && pass.taken.length === 0) continue;
+            recordInsertTaken(i, pass.taken);
             for (const k of pass.taken) {
-              if (!insertDropped.includes(k)) insertDropped.push(k);
               if (preserveAudit && !preserveAuditIgnored.includes(k)) preserveAuditIgnored.push(k);
             }
             if (pass.error !== undefined) {
@@ -13164,9 +13234,7 @@ export class ObjectQL implements IObjectQLEngine {
         // so `readonly` would lie about it. One event per reason, in the order
         // the strips ran; a payload with no `formula` key reports exactly what
         // it did before.
-        const insertDrops: DroppedFieldsEvent[] = [];
-        if (computedDropped.length > 0) insertDrops.push({ object, fields: computedDropped, reason: 'computed' });
-        if (insertDropped.length > 0) insertDrops.push({ object, fields: insertDropped, reason: 'readonly' });
+        const insertDrops = droppedFieldEvents(object, computedDropped, insertDropped);
         if (insertDrops.length > 0) {
           if (options?.strictReadonlyWrites === true) {
             // Before the driver write and before validation — nothing is
@@ -13415,11 +13483,25 @@ export class ObjectQL implements IObjectQLEngine {
         // results for batch, the single record otherwise. In partial mode the
         // batch return is instead one outcome PER INPUT ROW ({ok,record} /
         // {ok:false,error}), in input order (framework#3172).
+        //
+        // [#20922] An `ok` outcome also carries what the strips took from
+        // THAT row (`droppedFields`, absent when nothing was taken), from
+        // their own per-row record — the same report `validate` answers the
+        // row's dry run with. A failed outcome carries none: its write did
+        // not complete, and a drop is "completed without them".
         const written = isBatch
           ? (partialMode
-              ? rows.map((_r, i) => (rowErrors[i] === undefined
-                  ? { ok: true as const, record: rowHookContexts[i].result }
-                  : { ok: false as const, error: rowErrors[i] }))
+              ? rows.map((_r, i): InsertManyRowOutcome => {
+                  if (rowErrors[i] !== undefined) return { ok: false as const, error: rowErrors[i] };
+                  const droppedFields = droppedFieldEvents(
+                    object, computedStrip.droppedPerRow[i] ?? [], insertDroppedPerRow[i] ?? [],
+                  );
+                  return {
+                    ok: true as const,
+                    record: rowHookContexts[i].result,
+                    ...(droppedFields.length > 0 ? { droppedFields } : {}),
+                  };
+                })
               : rowHookContexts.map((rowCtx) => rowCtx.result))
           : rowHookContexts[0].result;
         // Records ARE written; a summary that could not be recomputed after

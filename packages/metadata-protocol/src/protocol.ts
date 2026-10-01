@@ -11842,6 +11842,12 @@ export class ObjectStackProtocolImplementation implements
      * Same object-existence gate as every other data entry point (#3770), so
      * an unknown object fails the same way here as it would on the real write
      * — a preview that 404s differently from its write is a mirror again.
+     *
+     * [#20922] The per-row drops ride the same verdict: `engine.validate`
+     * answers each accepted row's `droppedFields` from its own strips, so this
+     * relays them as it relays `errors` / `warnings`. No listener is passed
+     * here: the engine's `onFieldsDropped` events are the batch-level union,
+     * and this response has no batch-level slot to put them in.
      */
     async validateData(request: { object: string, data: any, mode?: 'insert' | 'update', context?: any }) {
         this.assertObjectRegistered(request.object);
@@ -13615,7 +13621,7 @@ export class ObjectStackProtocolImplementation implements
      * channel (an `onFieldsDropped` signature that carries the row), never a
      * reconstruction at this call site.
      */
-    async insertManyData(request: { object: string, records: any[], context?: any }): Promise<{ object: string; outcomes: Array<{ ok: boolean; record?: any; error?: unknown }>; droppedFields?: DroppedFieldsEvent[] }> {
+    async insertManyData(request: { object: string, records: any[], context?: any }): Promise<{ object: string; outcomes: Array<{ ok: boolean; record?: any; error?: unknown; droppedFields?: DroppedFieldsEvent[] }>; droppedFields?: DroppedFieldsEvent[] }> {
         this.assertObjectRegistered(request.object); // [#3770]
         const engineInsertMany = (this.engine as any)?.insertMany;
         if (typeof engineInsertMany !== 'function') {
@@ -13629,7 +13635,12 @@ export class ObjectStackProtocolImplementation implements
         const dropped: DroppedFieldsEvent[] = [];
         const opts: any = { onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
         if (request.context !== undefined) opts.context = request.context;
-        const outcomes: Array<{ ok: boolean; record?: any; error?: unknown }> = await engineInsertMany.call(
+        // [#20922] Each `ok` outcome carries the ENGINE's per-row report
+        // (`outcomes[i].droppedFields`), recorded at its strips — a separate
+        // channel from the batch-level union below, which still names no row.
+        // Passed through as the engine answers it; ⛔ nothing here derives a
+        // row's drops from the union.
+        const outcomes: Array<{ ok: boolean; record?: any; error?: unknown; droppedFields?: DroppedFieldsEvent[] }> = await engineInsertMany.call(
             this.engine,
             request.object,
             request.records,
