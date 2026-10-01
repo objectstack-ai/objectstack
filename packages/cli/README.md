@@ -58,7 +58,11 @@ os compile
 | `os generate <type> <name>` | Generate metadata files (alias: `os g`) |
 | `os create <type> [name]` | Scaffold a standalone **kernel code** plugin project (the `Plugin` contract, built by `tsc`) from a built-in template |
 
-Available generate types: `object`, `view`, `action`, `flow`, `dashboard`, `app`, `skill`
+Available generate types: `object`, `view`, `action`, `flow`, `dashboard`, `app`, `skill`, `picklist`
+
+`picklist` writes a shared option list (`src/picklists/<name>.picklist.ts`, with
+`definePicklist`). A select field names it with `Field.select({ picklist: '<name>' })`
+in place of its own `options`, and the server serves that field with the list's options.
 
 `agent` is **retired** (ADR-0063 §2): agents are platform-internal, so a scaffolded
 `src/agents/*.ts` validated, published and was then filtered out of the runtime
