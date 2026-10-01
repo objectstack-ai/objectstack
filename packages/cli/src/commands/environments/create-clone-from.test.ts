@@ -75,11 +75,11 @@ function recordingClient(): { client: ObjectStackClient; requests: Recorded[] } 
   const client = new ObjectStackClient({
     baseUrl: 'https://door.test',
     token: 'test-token',
-    fetch: async (url: unknown, init?: { method?: string; body?: string }) => {
+    fetch: async (url: URL | RequestInfo, init?: RequestInit) => {
       requests.push({
         url: String(url),
         method: init?.method,
-        body: init?.body === undefined ? undefined : JSON.parse(init.body),
+        body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined,
       });
       return {
         ok: true,
