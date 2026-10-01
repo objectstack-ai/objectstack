@@ -2116,7 +2116,10 @@ export const RecordLineItemsProps = lazySchema(() => strictObject({
     object: 'childObject', childObjectName: 'childObject', child: 'childObject',
     foreignKey: 'relationshipField', relationField: 'relationshipField', parentField: 'relationshipField',
     fields: 'columns', label: 'title', sumField: 'amountField', rollupField: 'totalField',
-    ...FILTERS_TO_FILTER,
+    // The plural every `filter` door answers (`FILTERS_TO_FILTER`, declared
+    // further down — spelled here because `OS_EAGER_SCHEMAS=1` evaluates this
+    // body before that const is initialised).
+    filters: 'filter',
   },
   guidance: {
     // The four detail-entry keys this panel does not read — the spellings an

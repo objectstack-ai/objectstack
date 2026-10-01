@@ -337,7 +337,11 @@ describe('validatePageFieldBindings — binding precedence and traversal', () =>
 });
 
 describe('validatePageFieldBindings — false-positive floor', () => {
-  it('skips an unregistered component type', () => {
+  // `record:line_items` has a `ComponentPropsMap` row since #21142, but this
+  // rule's own descriptor table (`COMPONENT_FIELD_SPECS`) does not carry it, so
+  // the rule skips it — which is what this pins. Its props are the props
+  // gate's to judge.
+  it('skips a component type its descriptor table does not carry', () => {
     const findings = validatePageFieldBindings({
       ...baseStack(),
       pages: [pageWith([
