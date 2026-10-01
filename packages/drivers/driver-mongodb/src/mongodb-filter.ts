@@ -306,6 +306,20 @@ function classifyFilterKey(key: string, value: unknown, here: string): FilterVer
     throw nonBooleanNullComparandError(key, value.$null, `${here}.$null`);
   }
 
+  // [#20897] `$exists`' comparand is a boolean by the same declaration, and the
+  // ruling that refused `$null`'s third value (#5347-A) was applied to this one
+  // by name (#5369, ruled on #5298). Gated on this walk for `$null`'s
+  // evaluation-order reason, one paragraph up. Before it, the emitter's
+  // `value === true` arm lowered every non-boolean to `$eq: null`, so
+  // `{ stage: { $exists: 'yes' } }` asked MongoDB for the rows with NO value.
+  if (
+    isFilterNode(value) &&
+    Object.prototype.hasOwnProperty.call(value, '$exists') &&
+    typeof value.$exists !== 'boolean'
+  ) {
+    throw nonBooleanExistsComparandError(key, value.$exists, `${here}.$exists`);
+  }
+
   // [#20444] `$empty`'s comparand is a boolean by the same declaration, gated on
   // this walk for the same evaluation-order reason as `$null` above.
   if (
@@ -535,6 +549,33 @@ function nonBooleanNullComparandError(field: string, value: unknown, path: strin
       `compiled IS NOT NULL (anything but true), and driver-memory's matcher dropped the ` +
       `constraint entirely. Note "false" the STRING is truthy, so it landed on the side opposite ` +
       `the false it was written to mean.`,
+  );
+}
+
+/**
+ * [#20897] `$exists` whose comparand is not a boolean — the twin of
+ * {@link nonBooleanNullComparandError}, under the same ruling (#5347-A,
+ * applied to `$exists` by #5369).
+ *
+ * The words are `driver-sql`'s `nonBooleanExistsComparandError`, verbatim —
+ * one condition, one wording (#5240) — with its "this driver" clause re-aimed
+ * at the backend it names, as the `$null` twin names `driver-sql`. Measured on
+ * `translateFilter` at `origin/main` `f6ccca4a` before the refusal: `'yes'`,
+ * `1`, `0`, `null` and the string `'false'` each translated to
+ * `{ stage: { $eq: null } }` — the no-value rows — because the emitter asked
+ * `value === true` and sent everything else to the other side.
+ */
+function nonBooleanExistsComparandError(field: string, value: unknown, path: string): Error {
+  return unsupportedFilterError(
+    `Operator "$exists" on field "${field}" requires a boolean comparand (true or false). ` +
+      `Received ${describeFilterOperand(value)} (${safeShapePreview(value)}) at ${path}. ` +
+      `@objectstack/spec FieldOperatorsSchema declares $exists as a boolean. It is refused rather ` +
+      `than coerced for the same reason $null is: a non-boolean lands on whichever side ` +
+      `the backend's two-branch conditional happens to default to, and those defaults point in ` +
+      `OPPOSITE directions — driver-sql's \`=== false\` test compiles IS NOT NULL for anything ` +
+      `but false, this driver's \`=== true\` test compiled IS NULL for anything but true. Note ` +
+      `"false" the STRING is truthy, so it lands on the side opposite the false it was written ` +
+      `to mean.`,
   );
 }
 
@@ -1143,6 +1184,11 @@ function translateFieldOperators(
       // already agreed, is unmoved. Measured on a real mongod 8.2.6 while this
       // cell was pinned.
       case '$exists':
+        // [#20897] The load-bearing copy of this gate is on the walk
+        // (`reduceFilterKey`), for the reason the `$null` arm below gives; this
+        // one keeps the arm's two-way choice total for its own invariant, with
+        // the same constructor and the same path spelling.
+        if (typeof value !== 'boolean') throw nonBooleanExistsComparandError(field, value, `${path}.$exists`);
         // Collected, not assigned: the assembly has to know whether the key
         // this lowers to is already spoken for. [#13524] Since the class was
         // generalised this arm is no longer special — it `put`s like every

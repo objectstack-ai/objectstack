@@ -690,7 +690,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "A' (#17712): a changeset the PR did not add is neither modified nor deleted": 29,
   'D (#18160): the refusal names BOTH classes, body and annotation pinned equal': 12,
   '#4690, one step later: no merge base at all is a failure': 1,
-  'The consumer: this gate\'s own CI step (#6129)': 23,
+  'The consumer: this gate\'s own CI step (#6129)': 34,
   'The second consumer: where THIS SELF-TEST runs (#6509)': 12,
   'Parser unit rows': 8,
   'THE FIX (#7004): comments and quoted bump values': 12,
@@ -1743,6 +1743,77 @@ function selfTest() {
       assert(
         grepAt >= 0 && allowTrueAt.length === 1 && allowTrueAt[0] > grepAt,
         `consumer: the live allow-major read must write \`allow=true\` exactly once and only after the label was really observed (found ${allowTrueAt.length} at ${JSON.stringify(allowTrueAt)}, grep at ${grepAt}) -- an exemption handed out because the label list could not be read is the #4690 anti-pattern, and here it would wave a whole-stack major through`,
+      );
+
+      // ── Past a designed red (#20784) ─────────────────────────────────────────
+      //
+      // Two steps of this job are red BY DESIGN on the DELIBERATE CORRECTION
+      // class, and the red is left standing: route 0 of `Require a changeset`,
+      // and this gate's own foreign-changeset refusal. The three steps after
+      // this gate -- the ADR-0087 disposition, the live allow-major read that
+      // feeds the major guard, and the major guard itself -- are independent
+      // verdicts on the same diff. Under GitHub's implicit `success()` a designed
+      // red above them skipped all three, so the PRs that correct a pending note
+      // (the ones most likely to carry a breaking changeset) went through CI with
+      // neither verdict read, and every assertion in this battery stayed green.
+      //
+      // What is pinned, read as one sentence: each of the three LEADS its `if:`
+      // with `!cancelled() &&` and carries no `||` (so no disjunct can route
+      // around it); each also requires `steps.diffbase.outputs.merge_base != ''`,
+      // because a step run past the unusable-base red would hand its script
+      // `--base ""`, which this script and its two siblings read as NO base and
+      // answer against `origin/main` at exit 0; the steps of this job that name a
+      // status function are exactly these three, because every step above them
+      // reads an output an earlier step may not have written; and nothing in the
+      // workflow uses `always()`, because a cancelled run must still stop.
+      const ifOf = (step) => {
+        const lines = step.split('\n');
+        const at = lines.findIndex((l) => /^ {8}if:/.test(l));
+        if (at === -1) return null;
+        const head = lines[at].replace(/^ {8}if:\s*/, '').trim();
+        if (!/^[>|][+-]?$/.test(head)) return head;
+        const body = [];
+        for (const l of lines.slice(at + 1)) {
+          if (l.trim() !== '' && !/^ {9,}/.test(l)) break;
+          body.push(l.trim());
+        }
+        return body.filter(Boolean).join(' ');
+      };
+      const pastRed = [
+        ['the ADR-0087 disposition', (c) => /node scripts\/check-adr-0087-registration\.mjs --base/.test(c)],
+        ['the live allow-major read', (c) => /grep -qxF 'allow-major'/.test(c)],
+        ['the major guard', (c) => /node scripts\/check-changeset-no-major\.mjs --base/.test(c)],
+      ].map(([label, isIt]) => {
+        const at = namedSteps.findIndex(isIt);
+        return { label, at, cond: at === -1 ? null : ifOf(namedSteps[at]) };
+      });
+      for (const { label, cond } of pastRed) {
+        assert(
+          cond !== null,
+          `consumer: ${label} step could not be sliced out of the Check Changeset job with an \`if:\` -- the two assertions after this one would judge nothing`,
+        );
+        assert(
+          /^!cancelled\(\)\s*&&/.test(cond ?? '') && !/\|\|/.test(cond ?? ''),
+          `consumer: ${label} step must lead its \`if:\` with \`!cancelled() &&\` and carry no \`||\` -- under the implicit \`success()\` a designed red above it (route 0, or the foreign-changeset refusal) skips it, and the PRs that correct a pending note get no verdict from it in CI. Got ${JSON.stringify(cond)}`,
+        );
+        assert(
+          /steps\.diffbase\.outputs\.merge_base != ''/.test(cond ?? ''),
+          `consumer: ${label} step must require \`steps.diffbase.outputs.merge_base != ''\` -- run past a red it also runs past the unusable-base red, and a changeset script handed \`--base ""\` reads NO base and answers against origin/main at exit 0. Got ${JSON.stringify(cond)}`,
+        );
+      }
+      const NAMES_STATUS = /\b(?:always|cancelled|success|failure)\s*\(\s*\)/;
+      const namingStatus = namedSteps
+        .map((c, i) => ({ i, cond: ifOf(c) }))
+        .filter(({ cond }) => NAMES_STATUS.test(cond ?? ''))
+        .map(({ i }) => i);
+      const expectedStatus = pastRed.map(({ at }) => at).sort((a, b) => a - b);
+      assert(
+        expectedStatus.every((i) => i >= 0) && JSON.stringify(namingStatus) === JSON.stringify(expectedStatus),
+        `consumer: in the Check Changeset job exactly the three steps after the empty-changeset gate may name a status function (steps ${JSON.stringify(expectedStatus)}), found ${JSON.stringify(namingStatus)} -- every step above them reads an output an earlier step may not have written, and run past a red one of them announces a verdict on an empty input`,
+      );
+      assert(
+        !/\balways\s*\(\s*\)/.test(yaml.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n')),
+        'consumer: nothing in pr-automation.yml may use `always()` -- `!cancelled()` runs a step past a red, `always()` also runs it on a cancelled run, which must still stop',
       );
 
       // The hard constraint of #6378, stated as structure: none of this may have
