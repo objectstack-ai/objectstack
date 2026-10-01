@@ -11065,10 +11065,85 @@ export class RestServer {
                     if (refuseRepeatedQueryParams(req, res, ['q'])) return;
                     const q = String(req.query?.q ?? '').trim().slice(0, 100);
 
+                    const context: any = {
+                        permissions: ['guest_portal'],
+                        anonymous: true,
+                    };
+
+                    // [#21062] The picker's ONE key — the field the search
+                    // predicate below matches and the order further down sorts
+                    // by — is the first display field THIS CALLER MAY QUERY ON,
+                    // by the security service's published answer
+                    // (`getQueryableFields`, #20935), not blindly the first
+                    // display field. A field whose masking rule applies to the
+                    // caller is SERVED (projected, its value masked) and is NOT
+                    // queryable: a `contains` probe on it rebuilds the masked
+                    // value row by row, and an order on it ranks rows by the
+                    // value the mask hides, so the engine refuses both with
+                    // `403 PERMISSION_DENIED`. Keyed blindly, a picker whose
+                    // first display field is masked answered that 403 to every
+                    // caller the rule applies to, on every request.
+                    //
+                    // ⛔ No second derivation of masking here: the answer is the
+                    // security service's, computed by the derivation the
+                    // engine's predicate guard refuses from, and this door only
+                    // reads it. Three states:
+                    //   - no security service: this deployment has no
+                    //     field-level security, nothing is masked, and the first
+                    //     display field stays the key;
+                    //   - an answer: the key is the first display field in it;
+                    //   - a service that cannot give it (the method is absent,
+                    //     or answered `undefined`): the contract's fallback
+                    //     (`ISecurityService.getQueryableFields`) — every display
+                    //     field whose DECLARATION carries a `maskingRule` is
+                    //     passed over, whoever the caller is. A declaration that
+                    //     cannot be read admits no display field.
+                    // No display field queryable → the engine's own refusal for
+                    // those fields, its words and its envelope, before the engine
+                    // is asked: the picker never searches or sorts on a field the
+                    // caller may not query.
+                    const security = await this.resolveSecurityService(environmentId, req);
+                    const queryableAnswer = async (): Promise<readonly string[]> => {
+                        const answer = typeof security?.getQueryableFields === 'function'
+                            ? await security.getQueryableFields(referenceObject, context)
+                            : undefined;
+                        if (answer !== undefined) return answer;
+                        const declared: any = typeof (p as any).getMetaItem === 'function'
+                            ? (await (p as any).getMetaItem({
+                                type: 'object',
+                                name: referenceObject,
+                                ...(environmentId ? { environmentId } : {}),
+                            }))?.item?.fields
+                            : undefined;
+                        if (!declared || typeof declared !== 'object') return [];
+                        const declarationOf = (f: string): any => (Array.isArray(declared)
+                            ? declared.find((d: any) => d?.name === f)
+                            : declared[f]);
+                        return displayFields.filter((f) => declarationOf(f)?.maskingRule == null);
+                    };
+                    const queryable: ReadonlySet<string> | undefined = security
+                        ? new Set(await queryableAnswer())
+                        : undefined;
+                    const key: string | undefined = queryable ? displayFields.find((f) => queryable.has(f)) : displayFields[0];
+                    if (key === undefined) {
+                        const refused = displayFields.filter((f) => !queryable?.has(f));
+                        const denied: any = new Error(
+                            `[Security] Access denied: query on '${referenceObject}' references field(s) not readable by the caller: `
+                            + `${refused.join(', ')}. Filtering, sorting, grouping, or aggregating by a hidden field `
+                            + `would leak its values (filter oracle) — remove these predicates or grant field read access.`,
+                        );
+                        denied.name = 'PermissionDeniedError';
+                        denied.code = 'PERMISSION_DENIED';
+                        denied.statusCode = 403;
+                        const mapped = mapDataError(denied);
+                        res.status(mapped.status).json(mapped.body);
+                        return;
+                    }
+
                     // Compose filters: form-defined static filter first,
-                    // then the search predicate over displayFields. The
-                    // search predicate uses `contains` on the first
-                    // display field so non-indexed columns still work.
+                    // then the search predicate on the key above. The
+                    // search predicate uses `contains` so non-indexed
+                    // columns still work.
                     //
                     // [#16581] …and then LOWER the composed rows to the filter
                     // grammar the ingress parses. BOTH halves are the authoring
@@ -11086,13 +11161,8 @@ export class RestServer {
                     // is teaching `findData` a second dialect.
                     const rules: any[] = [];
                     if (Array.isArray(picker.filter)) rules.push(...picker.filter);
-                    if (q) rules.push({ field: displayFields[0], operator: 'contains', value: q });
+                    if (q) rules.push({ field: key, operator: 'contains', value: q });
                     const filters = lowerViewFilterRules(rules);
-
-                    const context: any = {
-                        permissions: ['guest_portal'],
-                        anonymous: true,
-                    };
 
                     const pickerRequest: ServerScopedDataRequest<FindDataRequest> = {
                         object: referenceObject,
@@ -11118,8 +11188,9 @@ export class RestServer {
                             offset: 0,
                             where: filters,
                             fields: ['id', ...displayFields],
-                            // [#7485] Ordering is FIXED — first display field,
-                            // ascending. This used to read `picker.sort`, a key
+                            // [#7485] Ordering is FIXED — the key above (the
+                            // first display field the caller may query on,
+                            // #21062), ascending. This used to read `picker.sort`, a key
                             // `FormFieldPublicPickerSchema` (#7467) deliberately
                             // never declared: enforced by the route, authorable
                             // nowhere. The maintainer ruled retire-the-read over
@@ -11127,7 +11198,7 @@ export class RestServer {
                             // permanently-maintained public key on an
                             // UNAUTHENTICATED surface. A pre-schema stored row
                             // still carrying `sort` is IGNORED, not an error.
-                            orderBy: [{ field: displayFields[0], order: 'asc' }],
+                            orderBy: [{ field: key, order: 'asc' }],
                         },
                         ...(environmentId ? { environmentId } : {}),
                         context,
