@@ -140,12 +140,21 @@ describe('#4940: what an admin identity operation leaves in sys_audit_log', () =
 
     // W2 — and the endpoint's own row is a SECOND row on the same record.
     // Kept deliberately: it records the admin's DECISIONS, none of which is
-    // derivable from a field diff of the created row.
+    // stored in a field of the created user.
     const explicit = creates.filter((r) => isExplicit(r, 'user.admin_created'));
     expect(explicit).toHaveLength(1);
     expect(explicit[0].user_id).toBe(adminUserId);
-    expect(String(explicit[0].metadata)).toContain('"mustChangePassword":true');
     expect(String(explicit[0].metadata)).toContain('"passwordGenerated":false');
+    // The must-change-password stamp is a write to a field of the user, so it
+    // rides plugin-audit's own `update` row for that write (the snapshot column
+    // the ledger's read side narrows per reader), never the explicit row's
+    // free metadata, which no read-time narrowing reaches.
+    expect(String(explicit[0].metadata)).not.toContain('mustChangePassword');
+    await waitForRows(
+      async () => (await userAudit(ql, userId)).filter((r) => r.action === 'update' && isGeneric(r)),
+      (rows) => rows.some((r) => String(r.new_value).includes('must_change_password')),
+      "plugin-audit's update row for the must-change-password stamp",
+    );
     // The overlap is exactly two — measured, so a third writer appearing on
     // this path is a finding rather than a silent extra ledger row.
     expect(creates).toHaveLength(2);
