@@ -13,6 +13,7 @@ import { redirectStdoutToStderr } from '../utils/json-stdout.js';
 import { redactConnectionUrl } from '../utils/connection-display.js';
 import { databaseDriverFlag } from '../utils/database-driver-flag.js';
 import { childEnvWithResolvedArtifact } from '../utils/internal-artifact-channel.js';
+import { ServeRestartCoordinator } from '../utils/dev-restart.js';
 import { readEnvWithDeprecation } from '@objectstack/types';
 // The ONE port contract, shared with `dev` and with the `serve` child this
 // command spawns (#12673). ⛔ Nothing about ports is declared in this file —
@@ -445,18 +446,50 @@ export default class Start extends Command {
     }
 
     const binPath = process.argv[1];
-    const child = spawn(
-      process.execPath,
-      [
-        binPath,
-        'serve',
-        flags.ui ? '--ui' : '--no-ui',
-        ...(flags.verbose ? ['--verbose'] : []),
-        ...(flags['log-level'] ? ['--log-level', flags['log-level']] : []),
-      ],
-      { stdio: 'inherit', env: localEnv },
-    );
-    child.on('exit', (code) => process.exit(code ?? 0));
+
+    // ── The serve child's lifecycle: `os dev`'s mechanism, not a copy (#21114)
+    // `start` is a supervisor, so a signal sent to ITS pid alone — a plain
+    // `kill`, `docker stop`, a systemd stop, a CI step — has to reach the
+    // child too. This command used to listen for the child's `exit` and
+    // nothing else: a SIGTERM to the parent ended the parent and left `serve`
+    // running, reparented to init, port still bound and `/health` still
+    // answering 200.
+    //
+    // ⭐ Supervised by `ServeRestartCoordinator`, the ONE forwarding mechanism
+    // `os dev` already runs, used as is — `start` never calls
+    // `requestRestart`, so only the parts both commands need are reached:
+    // `beginShutdown` forwards SIGINT / SIGTERM and lets the child's exit end
+    // the parent; `killChildOnParentExit` reaps the child on whatever path
+    // ends the parent; and a child that exits on its own still ends the
+    // parent with `code ?? 0`, exactly the handler this replaces.
+    // ⛔ No forwarding or reaping logic of this command's own: what a signal
+    // DOES belongs in the coordinator, where `dev` gets the same change.
+    // Pinned end to end, with `os dev` as the control, by
+    // `test/start-signal-forwarding.e2e.test.ts`.
+    const coordinator = new ServeRestartCoordinator({
+      spawnChild: () => {
+        // `const child = spawn(` is the anchor
+        // `utils/port-contract-single-source.test.ts` reads to hold the port
+        // door above AHEAD of this spawn — keep the spelling.
+        const child = spawn(
+          process.execPath,
+          [
+            binPath,
+            'serve',
+            flags.ui ? '--ui' : '--no-ui',
+            ...(flags.verbose ? ['--verbose'] : []),
+            ...(flags['log-level'] ? ['--log-level', flags['log-level']] : []),
+          ],
+          { stdio: 'inherit', env: localEnv },
+        );
+        return child;
+      },
+      exitParent: (code) => process.exit(code),
+    });
+    process.on('SIGINT', () => coordinator.beginShutdown('SIGINT'));
+    process.on('SIGTERM', () => coordinator.beginShutdown('SIGTERM'));
+    process.on('exit', () => coordinator.killChildOnParentExit());
+    coordinator.start();
   }
 }
 
