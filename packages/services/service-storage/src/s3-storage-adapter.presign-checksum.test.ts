@@ -24,14 +24,26 @@
  * fully offline, because presigning is pure local computation over the fake
  * credentials and the fixed endpoint below; nothing here opens a socket.
  *
- * ## The two options, each with its own pin
+ * ## The two options are a pair, and the cases below hold both halves
  *
  * `requestChecksumCalculation` governs the upload URL (the card). The adapter
- * also sets `responseChecksumValidation` symmetrically, and its observable
- * footprint is on the download URL: the default bakes `x-amz-checksum-mode=
- * ENABLED` into a presigned GET, which asks the store to answer with checksum
- * headers. Each option has a case that goes red when only that option is
- * removed, so neither can be dropped as redundant with the other.
+ * also sets `responseChecksumValidation`, and its observable footprint is on
+ * the download URL: the default bakes `x-amz-checksum-mode=ENABLED` into a
+ * presigned GET, which asks the store to answer with checksum headers.
+ *
+ * They cannot be set one at a time. Measured on `@aws-sdk/client-s3` 3.1090.0,
+ * presigning with each combination (query names that start `x-amz-checksum` or
+ * `x-amz-sdk-checksum`):
+ *
+ *   request / response       PUT URL                    GET URL
+ *   default  / default       crc32, sdk-...-algorithm   mode
+ *   REQUIRED / default       (none)                     mode
+ *   default  / REQUIRED      crc32, sdk-...-algorithm   crc32   <- worse than default
+ *   REQUIRED / REQUIRED      (none)                     (none)
+ *
+ * so setting only the response option would put a CRC32 on a GET URL that had
+ * none. The upload case goes red when the request option is dropped, the
+ * download case when either is.
  */
 
 import { describe, it, expect } from 'vitest';

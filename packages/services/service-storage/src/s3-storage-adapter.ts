@@ -241,10 +241,11 @@ export class S3StorageAdapter implements IStorageService {
           // browser PUT with a checksum mismatch, while server-side `upload()`
           // keeps working: presign answers 200 and the object never lands.
           // None of the commands this adapter issues is checksum-required.
-          // `responseChecksumValidation` is the symmetric half: it is what
-          // bakes `x-amz-checksum-mode=ENABLED` into a presigned GET, and what
-          // makes `download()` validate a response checksum. Pinned in
-          // `s3-storage-adapter.presign-checksum.test.ts`.
+          // `responseChecksumValidation` is the other half: it is what bakes
+          // `x-amz-checksum-mode=ENABLED` into a presigned GET, and what makes
+          // `download()` validate a response checksum. The two are set TOGETHER
+          // on purpose: the response option alone puts a CRC32 on the GET URL.
+          // Pinned in `s3-storage-adapter.presign-checksum.test.ts`.
           requestChecksumCalculation: 'WHEN_REQUIRED',
           responseChecksumValidation: 'WHEN_REQUIRED',
         };
