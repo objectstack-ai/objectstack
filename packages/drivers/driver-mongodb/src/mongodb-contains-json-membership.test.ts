@@ -103,12 +103,21 @@ function matchOps(value: unknown, ops: Record<string, unknown>): boolean {
   return true;
 }
 
+/** MongoDB implicit equality: a scalar matches itself, and an array value matches by element. */
+function equals(value: unknown, comparand: unknown): boolean {
+  if (Array.isArray(value)) return value.some((element) => element === comparand);
+  return value === comparand;
+}
+
 function matchDoc(row: Record<string, unknown>, doc: Record<string, unknown>): boolean {
   for (const [key, value] of Object.entries(doc)) {
     if (key === '$and') { if (!(value as Array<Record<string, unknown>>).every((d) => matchDoc(row, d))) return false; continue; }
     if (key === '$or') { if (!(value as Array<Record<string, unknown>>).some((d) => matchDoc(row, d))) return false; continue; }
     if (key.startsWith('$')) throw new Error(`unmodelled document operator ${key}`);
-    if (!matchOps(row[key], value as Record<string, unknown>)) return false;
+    const cond = value as Record<string, unknown>;
+    const isOps = cond !== null && typeof cond === 'object' && !Array.isArray(cond)
+      && Object.keys(cond).every((k) => k.startsWith('$'));
+    if (isOps ? !matchOps(row[key], cond) : !equals(row[key], value)) return false;
   }
   return true;
 }
