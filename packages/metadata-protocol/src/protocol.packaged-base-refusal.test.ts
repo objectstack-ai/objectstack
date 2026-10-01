@@ -313,6 +313,35 @@ describe('packagedBaseRefusal — each Regime C type names its OWN sanctioned pa
         });
     });
 
+    it('a save NAMING the read-only base takes the named-base ITEM_LOCKED limb — same row, no hatch (both kernel shapes)', () => {
+        // [#20910] The limb's emitter is `SysMetadataRepository.readOnlyBaseOverrideError`,
+        // reached through the package door; with the hatch closed it speaks
+        // for the row too. A booted code package is read-only (`manifests`).
+        for (const environmentId of [undefined, 'env_1']) {
+            const registry = { getArtifactItem: (type: string, name: string) => ARTIFACTS.get(type)?.get(name) };
+            const p = new ObjectStackProtocolImplementation(
+                { registry, manifests: new Map([[PACKAGE_ID, {}]]) } as never, () => new Map(), environmentId,
+            );
+            for (const [type, name, path] of [
+                ['flow', 'pkg_flow', 'POST /api/v1/automation/:name/clone'],
+                ['action', 'pkg_action', 'POST /api/v1/actions/_activation/:object/:action'],
+                ['permission', 'pkg_perm', 'POST /api/v1/data/sys_permission_set'],
+            ] as const) {
+                const r: any = p.packagedBaseRefusal({ type, name, operation: 'save', packageId: PACKAGE_ID });
+                expect({ code: r?.code, status: r?.status, lockSource: r?.lockSource, packageId: r?.packageId }, type)
+                    .toEqual({ code: 'ITEM_LOCKED', status: 403, lockSource: 'package', packageId: PACKAGE_ID });
+                const message = String(r.message);
+                expect(message.startsWith(
+                    `Cannot overlay '${type}' in package '${PACKAGE_ID}': that package is read-only, and its packaged base `
+                    + 'is locked against in-place edits. ',
+                ), type).toBe(true);
+                expect(message, type).toContain(path);
+                expect(message, type).not.toContain('OS_METADATA_WRITABLE');
+                expect(message.endsWith(`See ${ADR_0126}.`), type).toBe(true);
+            }
+        }
+    });
+
     it('every row arrives whole through the REST door\'s 500-character bound for an 88-character name', () => {
         // `truncateClientMessage` (packages/rest/src/error-response.ts) keeps a
         // message only while it is SHORTER than 500 characters; past that the

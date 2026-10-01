@@ -43,6 +43,7 @@ import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 import { ensureMetadataOverlayIndexes } from './migrations/overlay-index.js';
 import { driverCanRunSql, resolveDriverExec } from './migrations/driver-exec.js';
 import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
+import { packagedBaseRegimeSentence } from './packaged-base-regime.js';
 import {
     bumpWriteEpoch,
     metaOverlayCacheTtlMs,
@@ -4796,31 +4797,6 @@ const PREFLIGHT_AUDIT_CODE: Record<PreflightViolationCode, string> = {
  */
 function isNonCanonicalStoredType(type: string): boolean {
     return canonicalMetaType(type) !== type && (PLURAL_TO_SINGULAR[type] ?? type) === type;
-}
-
-/**
- * [#20819] An ADR-0126 customization regime the packaged-base refusal speaks
- * for — only the regimes it needs today (see
- * `ObjectStackProtocolImplementation.PACKAGED_BASE_REGIME`).
- */
-type PackagedBaseRegime = 'C';
-
-/**
- * [#20910, ADR-0126 §2] The sanctioned routes a Regime C type's row supplies to
- * its refusal: how to reach that type's clone-as-sibling, and how to reach its
- * enable/disable switch — each spelled as the route a client calls (and its
- * body), never as prose about the type. A row declares the primitives its type
- * HAS and only those: the union refuses a row naming neither, so a type cannot
- * be declared Regime C with nothing to prescribe.
- */
-type PackagedBaseRegimeCRoutes =
-    | { readonly clone: string; readonly switchOff?: string }
-    | { readonly clone?: string; readonly switchOff: string };
-
-/** [#20910] One type's row: its regime, and the routes that regime names for it. */
-interface PackagedBaseRegimeRow {
-    readonly regime: PackagedBaseRegime;
-    readonly routes: PackagedBaseRegimeCRoutes;
 }
 
 /**
@@ -14843,140 +14819,14 @@ export class ObjectStackProtocolImplementation implements
         return status === 403 && (code === 'NOT_OVERRIDABLE' || code === 'ITEM_LOCKED');
     }
 
-    /**
-     * [#20819, ADR-0126 §2 / §3] The customization REGIME of a metadata type,
-     * declared for the types whose packaged-base refusal speaks for its regime.
-     *
-     * ADR-0126 §2 requires a Regime C refusal to name the sanctioned path —
-     * "in-place edit refused loudly at the write door, the refusal naming the
-     * sanctioned path" — and §10 gives the reason: a locked base that refuses
-     * with its sanctioned path in the message is what keeps AI-written metadata
-     * from guessing. The regime is recorded nowhere else in code (the ADR's
-     * table is prose, and the registry entries carry no regime field), so this
-     * map is its one declaration for the refusal, and
-     * {@link PACKAGED_BASE_REFUSAL_BY_REGIME} is keyed off it — never a second
-     * list of type names, and never a type branch in the emitters' prose.
-     *
-     * [#20910] ONE regime, PER-TYPE routes. A row is the type's regime plus the
-     * sanctioned routes that regime gives THAT type: the regime decides the
-     * sentence's shape (locked; here is the sanctioned path), the row supplies
-     * the paths, and {@link PACKAGED_BASE_REFUSAL_BY_REGIME} builds the
-     * sentence from the row alone. ADR-0126 §3's Regime C types declared here,
-     * each with only the primitives it has, each route the one it is SERVED
-     * at:
-     *
-     *  - `flow` — both (§7): the clone under a new name (§7.1,
-     *    `POST /automation/:name/clone`, body `{ name, label }`, both keys
-     *    required) and the enable/disable switch (§7.2,
-     *    `POST /automation/:name/toggle`, body `{ enabled }`);
-     *  - `action` — the switch only (§8 item 2, amendment ruling 3):
-     *    `POST /actions/_activation/:object/:action`, body `{ enabled }`, the
-     *    `:object` segment spelled `global` for an object-less action. ⛔ No
-     *    clone: the action-clone half is not chartered, so a clone route named
-     *    here would advertise one that does not exist;
-     *  - `permission` — the clone only (§8 item 3, the landed lock-and-clone
-     *    machinery): the "Clone" action on the permission set, which posts the
-     *    copy to `POST /data/sys_permission_set` under a new name. Spelled as
-     *    `plugin-security`'s own lock refusal spells that same path
-     *    (`packaged-permission-set-lock.ts`), so one condition reads one way
-     *    at both doors.
-     *
-     * Both switch routes are gated by the ONE §5 write-authority gate
-     * (`packages/runtime/src/domains/activation-gate.ts`), so both carry the
-     * same operator-only clause. Still absent: ADR-0126 §3's pre-charted
-     * `tool` / `skill` / `position` — no sanctioned path is built for them, and
-     * a row with no route does not compile ({@link PackagedBaseRegimeCRoutes}).
-     */
-    private static readonly PACKAGED_BASE_REGIME: Readonly<Record<string, PackagedBaseRegimeRow>> = {
-        flow: {
-            regime: 'C',
-            routes: {
-                clone: 'POST /api/v1/automation/:name/clone, body {name, label}',
-                switchOff: 'POST /api/v1/automation/:name/toggle, body {enabled: false}; '
-                    + 'operator-only where one install serves several organizations',
-            },
-        },
-        action: {
-            regime: 'C',
-            routes: {
-                switchOff: 'POST /api/v1/actions/_activation/:object/:action, body {enabled: false}, '
-                    + ':object = global for an object-less action; '
-                    + 'operator-only where one install serves several organizations',
-            },
-        },
-        permission: {
-            regime: 'C',
-            routes: {
-                clone: 'the "Clone" action on the permission set, '
-                    + 'or POST /api/v1/data/sys_permission_set with a new name',
-            },
-        },
-    };
-
-    /**
-     * [#20819, ADR-0126 §2 / §7] The packaged-base refusal's sentence, chosen
-     * PER REGIME ({@link PACKAGED_BASE_REGIME}). A type with no declared regime
-     * keeps the sentence the emitters carry inline, byte for byte.
-     *
-     * Regime C (§2: behavioral — locked base, disable, clone-as-sibling) states
-     * the lock, then names the sanctioned paths the type's ROW declares, in one
-     * fixed order — clone first, then the switch — and cites the ADR that
-     * decided them. [#20910] Nothing in it reads the type: a flow reads "clone
-     * it …, or switch it off …" because its row has both, an action reads only
-     * the switch and a permission set only the clone because theirs have one.
-     * A `flow`'s sentence is byte-identical to the one this builder replaced
-     * (pinned).
-     *
-     * ⛔ It does not name the `OS_METADATA_WRITABLE` hatch. The hatch still
-     * opens this lock exactly as before ({@link isOverlayAllowed}), so which
-     * writes are refused does not move — only what the refusal prescribes.
-     * ⛔ Nor does it prescribe editing the source and redeploying: the
-     * administrator of an installed package cannot do that.
-     *
-     * Kept under the REST door's 500-character client-message bound, past
-     * which the tail is truncated. Characters before the item's name, save /
-     * removal: `flow` 411 / 404, `action` 365 / 358, `permission` 317 (its
-     * removal is the #6960 carve-out, never refused on this ground) — so a
-     * name of up to 88 characters arrives whole for every row (pinned).
-     */
-    private static readonly PACKAGED_BASE_REFUSAL_BY_REGIME: Readonly<
-        Record<
-            PackagedBaseRegime,
-            (type: string, name: string, operation: 'save' | 'delete', routes: PackagedBaseRegimeCRoutes) => string
-        >
-    > = {
-        C: (type, name, operation, routes) => {
-            // [verb opening the sentence, verb after "or", the rest of the path]
-            const paths: Array<readonly [string, string, string]> = [
-                ...(routes.clone
-                    ? [['Clone', 'clone', ` it under a new name to customize it (${routes.clone})`] as const]
-                    : []),
-                ...(routes.switchOff ? [['Switch', 'switch', ` it off (${routes.switchOff})`] as const] : []),
-            ];
-            const prescription = paths
-                .map(([opening, following, rest], i) => (i === 0 ? opening : following) + rest)
-                .join(', or ');
-            return `Metadata item '${type}/${name}' is provided by a code package, and its packaged base is locked `
-                + (operation === 'delete' ? `against removal. ` : `against in-place edits. `)
-                + `${prescription}. `
-                + `See docs/adr/0126-packaged-metadata-customization-model.md.`;
-        },
-    };
-
-    /**
-     * The regime-chosen refusal sentence for `(type, name, operation)`, built
-     * from the type's row, or `undefined` when the type declares no regime and
-     * the emitter keeps its own sentence.
-     */
-    private static packagedBaseRegimeSentence(
-        type: string, name: string, operation: 'save' | 'delete',
-    ): string | undefined {
-        const singular = PLURAL_TO_SINGULAR[type] ?? type;
-        const regimes = ObjectStackProtocolImplementation.PACKAGED_BASE_REGIME;
-        if (!Object.prototype.hasOwnProperty.call(regimes, singular)) return undefined;
-        const row = regimes[singular];
-        return ObjectStackProtocolImplementation.PACKAGED_BASE_REFUSAL_BY_REGIME[row.regime](singular, name, operation, row.routes);
-    }
+    // [#20819, #20910, ADR-0126 §2 / §3] The packaged-base refusal's sentence is
+    // chosen PER REGIME, from the ONE regime table in `./packaged-base-regime.ts`
+    // (`packagedBaseRegimeSentence` there), which the repository's type door and
+    // its named-base `ITEM_LOCKED` limb read too — so the three doors onto one
+    // locked base cannot prescribe three different things. Each Regime C type's
+    // row supplies its own sanctioned routes (`flow` clone and switch, `action`
+    // its activation switch, `permission` its clone); a type with no declared
+    // regime keeps the sentence the emitters below carry inline, byte for byte.
 
     /**
      * [#8184] THE PACKAGE DOOR — `saveMetaItem`'s refusal of a write onto an
@@ -14994,7 +14844,10 @@ export class ObjectStackProtocolImplementation implements
      *
      * [#20819] Since lifted, the package-less `NOT_OVERRIDABLE` SENTENCE is
      * chosen per ADR-0126 regime ({@link packagedBaseRegimeSentence}); the
-     * predicate, the code, the status and the named-base limb are unchanged.
+     * predicate, the code and the status are unchanged. [#20910] The named-base
+     * limb's emitter, `readOnlyBaseOverrideError`, takes a Regime C type's
+     * prescription from the same table — in that emitter, so both doors that
+     * call it keep one sentence.
      */
     private refusePackagedBaseOverride(
         request: { type: string; name: string; packageId?: string | null },
@@ -15073,7 +14926,7 @@ export class ObjectStackProtocolImplementation implements
             // [#20819] The SENTENCE is chosen per ADR-0126 regime; the code,
             // the status and this branch's predicate are unchanged.
             const err = new Error(
-                ObjectStackProtocolImplementation.packagedBaseRegimeSentence(request.type, request.name, 'save')
+                packagedBaseRegimeSentence(request.type, request.name, 'save')
                 ?? (`Metadata item '${request.type}/${request.name}' is provided by a code package `
                 + `and the type has not opted into per-org overlay writes (allowOrgOverride=false). `
                 + `Edit the source artifact and redeploy, or set OS_METADATA_WRITABLE to grant a runtime escape hatch. `
@@ -15113,7 +14966,7 @@ export class ObjectStackProtocolImplementation implements
         if (artifactBacked && !overlayAllowed && !legacyOverlayRemoval) {
             // [#20819] Sentence per ADR-0126 regime, as in the save door.
             const err = new Error(
-                ObjectStackProtocolImplementation.packagedBaseRegimeSentence(request.type, request.name, 'delete')
+                packagedBaseRegimeSentence(request.type, request.name, 'delete')
                 ?? (`Metadata item '${request.type}/${request.name}' is provided by a code package `
                 + `and the type has not opted into per-org overlay writes. `
                 + `See docs/adr/0005-metadata-customization-overlay.md.`)

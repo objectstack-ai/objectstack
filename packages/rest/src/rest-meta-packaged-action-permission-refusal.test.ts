@@ -27,8 +27,18 @@
  * Same harness as `rest-meta-packaged-flow-refusal.test.ts`: a REAL
  * `ObjectStackProtocolImplementation` over a REAL `SchemaRegistry`, the packaged
  * items registered under a package id the way an artifact loader registers
- * them. Run on an ENVIRONMENT kernel, where `saveMetaItem` / `deleteMetaItem`
- * ask the package door; the refusals land before any store is touched.
+ * them, and that package booted as code (`manifests`), so it is read-only. The
+ * refusals land before any store is touched. Three doors, one table:
+ *
+ *  - an ENVIRONMENT kernel, where `saveMetaItem` / `deleteMetaItem` ask the
+ *    protocol's package door;
+ *  - [#20910] a HOST-CONFIG kernel (no environment id — the shape the default
+ *    `pnpm dev` boot measured), where that door is not asked and the write is
+ *    refused one layer down by `SysMetadataRepository.assertAllowed`'s type
+ *    door — with the same row-built sentence;
+ *  - [#20910] a write NAMING the read-only base (`?package=`), refused by the
+ *    named-base `ITEM_LOCKED` limb, which speaks for the row with the hatch
+ *    closed.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -57,14 +67,15 @@ function makeRes() {
     return res;
 }
 
-function boot() {
+function boot(environmentId: string | undefined = 'env_1') {
     const registry = new SchemaRegistry({ multiTenant: false, collisionPolicy: 'error' });
     for (const name of [PACKAGED_ACTION, LONG_ACTION]) {
         registry.registerItem('action', { name, label: 'Approve', type: 'script', target: 'approve_fn' }, 'name', PACKAGE_ID);
     }
     registry.registerItem('permission', { name: PACKAGED_PERMISSION, label: 'Contributor', objects: {} }, 'name', PACKAGE_ID);
     const protocol = new ObjectStackProtocolImplementation(
-        { registry, findOne: async () => null } as never, () => new Map(), 'env_1',
+        { registry, findOne: async () => null, manifests: new Map([[PACKAGE_ID, {}]]) } as never,
+        () => new Map(), environmentId,
     );
     const rest = new RestServer(createMockServer() as any, protocol as any, { api: { requireAuth: false } } as any);
     // The write doors demand `manage_metadata`; held here, so every 403 below is the LOCK.
@@ -75,9 +86,9 @@ function boot() {
         if (!found) throw new Error(`${method} /api/v1/meta/:type/:name is not registered`);
         return found;
     };
-    const call = async (method: 'PUT' | 'DELETE', type: string, name: string, body?: unknown) => {
+    const call = async (method: 'PUT' | 'DELETE', type: string, name: string, body?: unknown, query: Record<string, string> = {}) => {
         const res = makeRes();
-        await route(method).handler({ method, params: { type, name }, query: {}, headers: {}, body } as any, res);
+        await route(method).handler({ method, params: { type, name }, query, headers: {}, body } as any, res);
         // The door's 4xx envelope: `code` beside the client-facing `error` text.
         return { status: res._status, code: res._json?.code, message: res._json?.error };
     };
@@ -152,4 +163,51 @@ describe('PUT /api/v1/meta/permission/:name on a packaged permission set — the
         expect(r.code).not.toBe('NOT_OVERRIDABLE');
         expect(r.status ?? 200).not.toBe(403);
     });
+});
+
+const ACTION_BODY = { name: PACKAGED_ACTION, label: 'Changed in place', type: 'script', target: 'approve_fn' };
+const PERMISSION_BODY = { name: PACKAGED_PERMISSION, label: 'Changed in place', objects: {} };
+
+describe('[#20910] a host-config kernel — the repository\'s type door answers with the same row-built sentence', () => {
+    it('PUT action answers 403 NOT_OVERRIDABLE naming the switch, no hatch', async () => {
+        const { call } = boot(undefined);
+        const r = await call('PUT', 'action', PACKAGED_ACTION, ACTION_BODY);
+        expect(r.status).toBe(403);
+        expect(r.code).toBe('NOT_OVERRIDABLE');
+        expect(expectRegimeC(r.message, 'action', PACKAGED_ACTION, 'save')).toContain(ACTION_SWITCH);
+    });
+
+    it('PUT permission answers 403 NOT_OVERRIDABLE naming the clone, no hatch', async () => {
+        const { call } = boot(undefined);
+        const r = await call('PUT', 'permission', PACKAGED_PERMISSION, PERMISSION_BODY);
+        expect(r.status).toBe(403);
+        expect(r.code).toBe('NOT_OVERRIDABLE');
+        expect(expectRegimeC(r.message, 'permission', PACKAGED_PERMISSION, 'save')).toContain(PERMISSION_CLONE);
+    });
+});
+
+describe('[#20910] a write naming the read-only base (?package=) — the named-base ITEM_LOCKED limb names the row\'s path', () => {
+    for (const environmentId of [undefined, 'env_1']) {
+        const kernel = environmentId ? 'environment' : 'host-config';
+        for (const [type, name, body, path] of [
+            ['action', PACKAGED_ACTION, ACTION_BODY, ACTION_SWITCH],
+            ['permission', PACKAGED_PERMISSION, PERMISSION_BODY, PERMISSION_CLONE],
+        ] as const) {
+            it(`PUT ${type}?package= answers 403 ITEM_LOCKED with the path and no hatch (${kernel} kernel)`, async () => {
+                const { call } = boot(environmentId);
+                const r = await call('PUT', type, name, body, { package: PACKAGE_ID });
+                expect(r.status).toBe(403);
+                expect(r.code).toBe('ITEM_LOCKED');
+                const text = String(r.message);
+                expect(text.startsWith(
+                    `Cannot overlay '${type}' in package '${PACKAGE_ID}': that package is read-only, and its packaged base `
+                    + 'is locked against in-place edits. ',
+                )).toBe(true);
+                expect(text).toContain(path);
+                expect(text).not.toContain('OS_METADATA_WRITABLE');
+                expect(text).not.toContain('redeploy');
+                expect(text.endsWith('See docs/adr/0126-packaged-metadata-customization-model.md.')).toBe(true);
+            });
+        }
+    }
 });
