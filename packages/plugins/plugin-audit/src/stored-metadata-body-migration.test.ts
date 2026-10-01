@@ -123,7 +123,9 @@ describe('migrateStoredMetadataBodyCopies (driven)', () => {
       },
       async update(object, data, options) {
         // Refuse exactly what the real engine's update dispatch refuses.
-        assertEngineUpdateDispatch(data, options);
+        // Every option key reaches the predicate — spread into a literal only so
+        // the contract's options interface meets the predicate's indexed input.
+        assertEngineUpdateDispatch(data, options === undefined ? undefined : { ...options });
         const { id, ...rest } = data as Record<string, unknown>;
         updates.push({ object, id: String(id), data: rest });
         return { id, ...rest };
