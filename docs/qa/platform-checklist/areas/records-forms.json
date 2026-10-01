@@ -1387,7 +1387,7 @@
       "source": [
         "#3358 §4 ('leaving it unticked on the strength of a label')",
         "ADR-0059",
-        "examples/app-showcase/src/ui/actions/index.ts#maxSize (maxSize declarations)"
+        "examples/app-showcase/src/ui/actions/index.ts#ActionParamGalleryAction (maxSize declarations on its image and file params — re-pointed #18101: maxSize is a key written INLINE in each param literal, which the shared resolver does not read as a declaration, and ActionParamGalleryAction is the action constant that declares those params)"
       ],
       "history": [
         {
@@ -2835,7 +2835,7 @@
       },
       "source": [
         "objectui: packages/fields/src/widgets/LookupField.tsx (allowCreate default-on, SYSTEM_REFERENCE_RX / USER_DIRECTORY_REFS, isUserFacingReference, handleCreateNew), packages/fields/src/widgets/RecordPickerDialog.tsx (scoped find)",
-        "examples/app-showcase/src/data/objects/business-unit.object.ts#allowCreate + category.object.ts (parent allowCreate:true)",
+        "examples/app-showcase/src/data/objects/business-unit.object.ts#BusinessUnit.parent + category.object.ts (parent allowCreate:true — re-pointed #18101: allowCreate is a key written INLINE in the lookup options, which the shared resolver does not read as a declaration, and the parent field of the BusinessUnit object is the declaration that carries it)",
         "PENDING-GAPS §B lookup-picker-create-new"
       ],
       "history": [
