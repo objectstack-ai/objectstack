@@ -335,7 +335,7 @@
     "ai": "^7.0.66",
     "tsx": "^4.23.12",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.11",
+    "vitest": "^5.0.2",
     "yaml": "^2.9.0"
   },
   "dependencies": {

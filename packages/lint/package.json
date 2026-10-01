@@ -49,7 +49,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
-    "vitest": "^4.1.11",
+    "vitest": "^5.0.2",
     "zod": "^4.6.1"
   },
   "keywords": [

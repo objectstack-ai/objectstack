@@ -28,7 +28,7 @@
     "@objectstack/runtime": "workspace:*",
     "hono": "^4.13.5",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.2"
   },
   "description": "Hono adapter for ObjectStack — edge-compatible REST API server for Cloudflare Workers, Deno, Bun, and Node.",
   "keywords": [
