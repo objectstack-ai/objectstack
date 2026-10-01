@@ -32,10 +32,12 @@
  * - **An RLS `using` bound** — the RLS compile seam (`judgeCompiledComparands`,
  *   step 2) lowers every compiled policy filter before `getReadFilter` returns
  *   it. The half is pinned in BOTH spellings the read scope can be handed: the
- *   policy as that seam lowers it on a typed guard, and the policy as written
- *   (what a guard without types, or any producer that skipped that seam,
- *   hands over). Both answer `find()`'s rows, so this face's answer does not
- *   depend on which one reached it.
+ *   policy as that seam lowers it, and the policy as written (what a producer
+ *   that skipped that seam hands over). A guard without types no longer hands
+ *   the written form: since the faces' copies were deleted, that seam lowers
+ *   it type-blind (ADR-0053 D-D1 item 7), so it arrives as the first spelling.
+ *   Both answer `find()`'s rows, so this face's answer does not depend on
+ *   which one reached it.
  *
  * ## Column-type scope (the amendment's item 7)
  *
@@ -43,9 +45,10 @@
  * `declaredValueShape` — so the whole-day rule rewrites a declared `datetime`
  * column only, the scope `SqlDriver` holds. A `date` column compiles
  * byte-identical to before (`<= day` orders exactly as `< next-day` on date
- * text). A caller that hands no declarations reads NO column as `datetime`:
- * the step-2 RLS seam's choice for a guard without types, for the same reason
- * — it moves no answer.
+ * text). A caller that hands no declarations reads NO column as `datetime`,
+ * and its bound compiles as written (pinned below). The RLS compile seam reads
+ * a guard without types the other way since the faces' copies were deleted —
+ * type-blind, item 7's other half — so this is no longer that seam's choice.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -188,13 +191,14 @@ describe('[ADR-0053 D-D1 amended — #5930 step 3] the read scope lowers its fil
 
   // ── The RLS `using` half, in both spellings the read scope can be handed ─────
 
-  it('RLS using, as the RLS seam lowers it on a typed guard: the whole named day', async () => {
+  it('RLS using, as the RLS seam lowers it: the whole named day', async () => {
     // `record.signed_at <= '2026-07-28'` compiled and lowered by
-    // `judgeCompiledComparands` with `signed_at` in the guard's datetime set.
+    // `judgeCompiledComparands`: with `signed_at` in a typed guard's datetime
+    // set, or type-blind for a guard without types (ADR-0053 D-D1 item 7).
     await expectSameRows({ signed_at: { $lt: '2026-07-29' } }, ['c27', 'c28']);
   });
 
-  it('RLS using, as written (a guard without types): the whole named day all the same', async () => {
+  it('RLS using, as written (a producer that skipped the RLS seam): the whole named day all the same', async () => {
     await expectSameRows({ signed_at: { $lte: '2026-07-28' } }, ['c27', 'c28']);
   });
 

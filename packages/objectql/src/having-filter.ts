@@ -103,9 +103,12 @@
 //
 // [#20176] …and, where the column's CLASS is known, every temporal comparand is
 // compared by that column's storage rule — the rule the drivers apply to the
-// same comparand in a `where`, `@objectstack/core`'s `temporalStorageForm`,
-// with ADR-0053 D-D's whole-day reading of a bare-day upper bound on a
-// `datetime` column. The class comes from the object's declaration for the
+// same comparand in a `where`, `@objectstack/core`'s `temporalStorageForm`.
+// [ADR-0053 D-D1 item 5, as amended] The whole-day reading of a bare-day upper
+// bound on a `datetime` column is not applied here: the engine's seam lowers
+// both positions before this walker sees them (`lowerFilterCondition`), and a
+// caller that reaches it without a seam gets the comparison it wrote. The class
+// comes from the object's declaration for the
 // per-aggregation `filter` (`declaredFieldClasses`) and from the query for
 // `having` (`aggregatedRowColumnClasses`, #20127's rule). See
 // {@link checkCondition}. Before, both positions compared a temporal comparand
@@ -173,11 +176,8 @@ import { utcInstantMs } from '@objectstack/spec/data';
 // stored value counts as empty for a face that judges by value.
 import { isEmptyFilterValue } from '@objectstack/spec/data';
 // [#20176] The storage rule a temporal column puts a value in — ONE function,
-// shared with `driver-sql`'s and `driver-memory`'s `where` — and the whole-day
-// reading of a bare-day upper bound on a `datetime` column (ADR-0053 D-D), from
-// the spec, where that rule is declared.
+// shared with `driver-sql`'s and `driver-memory`'s `where`.
 import { temporalStorageForm, type TemporalComparandKind } from '@objectstack/core';
-import { nextUtcCalendarDay, UNBOUNDED_ABOVE, isUnboundedAbove, type UnboundedAbove } from '@objectstack/spec/data';
 // [#20873] The JSON-stored population — the declared fields on which `$contains`
 // asks MEMBERSHIP — from the spec's value-shape classes, the same two
 // `driver-sql`'s JSON-column registry is built from.
@@ -1664,31 +1664,6 @@ function listHolds(list: readonly unknown[], value: unknown): boolean {
 }
 
 /**
- * [#20176] ADR-0053 D-D: a bare `YYYY-MM-DD` as the UPPER bound of a
- * `datetime` column (`$lte`, a `$between` max) means that WHOLE day — the
- * exclusive bound at the next day's midnight, in the column's storage form.
- * `undefined` when the rule does not apply: another class, or a bound that is
- * not a bare calendar day (a full timestamp and a `Date` keep instant
- * semantics). The same decision both drivers' `where` emitters take
- * (`SqlDriver.calendarDayUpperBoundRewrite`, `driver-memory`'s `$lte` arm),
- * read from the spec's `nextUtcCalendarDay`.
- *
- * [#20600] `UNBOUNDED_ABOVE` for `9999-12-31`, the last supported day: every
- * supported value is inside its whole day, so the callers compare against NO
- * upper bound — `$lte` asks only for a value, a `$between` keeps its minimum.
- * The drivers compile the same (`IS NOT NULL`, `$ne: null`).
- */
-function wholeDayUpperBound(
-  bound: unknown,
-  kind: TemporalComparandKind | undefined,
-): unknown | UnboundedAbove {
-  if (kind !== 'datetime') return undefined;
-  const next = nextUtcCalendarDay(bound);
-  if (isUnboundedAbove(next)) return UNBOUNDED_ABOVE;
-  return next === null ? undefined : temporalStorageForm(next, 'datetime');
-}
-
-/**
  * [#20873] The JSON NUMBER grammar, spelled out — the pattern `driver-sql`'s
  * `jsonMembershipCandidates` tests a `$contains` comparand against, for its
  * reason: `Number()` also accepts `'0x10'`, `' 1 '`, `'Infinity'` and `''`, none
@@ -1741,15 +1716,16 @@ function storedArrayHasMember(value: unknown, comparand: unknown): boolean {
  * its class and the class is `date`, `datetime` or `time`. Then the row's value
  * AND every comparand of `$eq` / `$ne` / the four orderings / `$between` /
  * `$in` / `$nin` / implicit equality are put in that rule's storage form
- * (`temporalStorageForm`) before they are compared, and a bare-day upper bound
- * on a `datetime` column reads as the whole day ({@link wholeDayUpperBound}) —
- * the reading the drivers give the same comparand in a `where`. So
- * `'2026-02-01T00:00:00.000Z'` against a `date` column is the day
- * `'2026-02-01'`, `'2026-02-01'` as a `datetime` `$lte` includes that day's
- * rows, epoch milliseconds are an instant, and a `Date` against a `date` or
- * `time` column is its UTC day or time of day. The value takes the form too
- * because that is the pairing the drivers compare (`driver-sql` wraps a legacy
- * SQLite column in the same canon); rows a driver returns are in it already.
+ * (`temporalStorageForm`) before they are compared — the reading the drivers
+ * give the same comparand in a `where`. So `'2026-02-01T00:00:00.000Z'` against
+ * a `date` column is the day `'2026-02-01'`, epoch milliseconds are an instant,
+ * and a `Date` against a `date` or `time` column is its UTC day or time of day.
+ * A bare-day `$lte` on a `datetime` column reaches this function already lowered
+ * to the next day's `$lt` by the engine's seam (ADR-0053 D-D1 item 5, as
+ * amended); this function applies no whole-day rule of its own. The value
+ * takes the form too because that is the pairing the drivers compare
+ * (`driver-sql` wraps a legacy SQLite column in the same canon); rows a driver
+ * returns are in it already.
  * Presence (`$exists`, `$null`), the text operators and a `{ $field }`
  * reference are not comparands of a value, and are read as before.
  *
@@ -1847,8 +1823,7 @@ function checkCondition(
     // [#20148] The comparison and list arms read a `Date` bound — or a `Date`
     // value — as an instant ({@link instantsOf}); every other pair compares
     // exactly as before. [#20176] On a temporal column both sides are in its
-    // storage form first (`form`), and a bare-day upper bound on a `datetime`
-    // column is the whole day ({@link wholeDayUpperBound}).
+    // storage form first (`form`).
     const stored = form(value);
     switch (op) {
       case '$eq': if (!comparandEquals(stored, form(target))) return false; break;
@@ -1856,29 +1831,18 @@ function checkCondition(
       case '$gt': if (!ordered(stored, form(target), (a, b) => a > b)) return false; break;
       case '$gte': if (!ordered(stored, form(target), (a, b) => a >= b)) return false; break;
       case '$lt': if (!ordered(stored, form(target), (a, b) => a < b)) return false; break;
-      case '$lte': {
-        const dayAfter = wholeDayUpperBound(target, kind);
-        if (isUnboundedAbove(dayAfter)) {
-          // [#20600] No upper bound: what `$lte` still asks is a value.
-          if (stored === null || stored === undefined) return false;
-          break;
-        }
-        if (dayAfter !== undefined
-          ? !ordered(stored, dayAfter, (a, b) => a < b)
-          : !ordered(stored, form(target), (a, b) => a <= b)) return false;
-        break;
-      }
+      // [ADR-0053 D-D1 items 5 and 9, as amended] Both upper bounds compare as
+      // written. The whole-day reading of a bare day on a `datetime` column,
+      // and the last supported day bounding nothing, are applied once by the
+      // engine's seam (`lowerFilterCondition`), which hands this arm a `$lt` the
+      // next day (or `$null: false`) and splits a literal `$between` into `$gte`
+      // and that bound. A caller evaluating rows without the seam gets the
+      // comparison it wrote.
+      case '$lte': if (!ordered(stored, form(target), (a, b) => a <= b)) return false; break;
       case '$between': {
         if (!Array.isArray(target)) break;
-        const dayAfter = wholeDayUpperBound(target[1], kind);
-        // [#20600] A max on the last supported day bounds nothing: the range
-        // keeps its minimum alone.
         if (ordered(stored, form(target[0]), (a, b) => a < b)
-          || (isUnboundedAbove(dayAfter)
-            ? false
-            : dayAfter !== undefined
-              ? ordered(stored, dayAfter, (a, b) => a >= b)
-              : ordered(stored, form(target[1]), (a, b) => a > b))) return false;
+          || ordered(stored, form(target[1]), (a, b) => a > b)) return false;
         break;
       }
       case '$in': if (!Array.isArray(target) || !listHolds(target.map(form), stored)) return false; break;

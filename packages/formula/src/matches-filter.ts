@@ -123,6 +123,10 @@ import { matchesLikePattern } from '@objectstack/spec/data';
 // [#20444] `$empty`'s value-level half — the spec's one definition of what a
 // stored value counts as empty for a face that reads no field declaration.
 import { isEmptyFilterValue } from '@objectstack/spec/data';
+// The JSON-stored population — the declared columns on which `$contains` asks
+// MEMBERSHIP — from the spec's value-shape classes, the same two every typed
+// face's population is built from. See {@link containsAsksMembership}.
+import { STRUCTURED_JSON_TYPES, isMultiValueField } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 
 /**
@@ -314,6 +318,11 @@ export interface MatchesFilterOptions {
    * Omitted, the evaluator judges values only, as it always has: it has no
    * schema of its own, and a caller without one (an aggregated row, a probe
    * record) is not asked for one.
+   *
+   * A column named here also selects the question `$contains` / `$notContains`
+   * ask of it: MEMBERSHIP on a JSON-stored column, SUBSTRING on any other. A
+   * column it does not name is judged by its stored value instead
+   * ({@link containsAsksMembership}).
    */
   readonly fields?: Readonly<Record<string, CrossFieldComparisonFieldMeta>>;
 }
@@ -340,7 +349,7 @@ export function matchesFilterCondition(
     const refusal = findCrossFieldClassRefusal(filter, options.fields);
     if (refusal) throw crossFieldClassError(refusal);
   }
-  return evalNode(record, filter as Record<string, unknown>);
+  return evalNode(record, filter as Record<string, unknown>, options?.fields);
 }
 
 /**
@@ -596,26 +605,29 @@ function isEmptyFieldConstraint(spec: unknown): boolean {
   return Object.keys(spec as Record<string, unknown>).length === 0;
 }
 
-function evalNode(record: Record<string, unknown>, node: Record<string, unknown>): boolean {
+/** The caller's declared columns ({@link MatchesFilterOptions.fields}), when it supplied them. */
+type DeclaredColumns = Readonly<Record<string, CrossFieldComparisonFieldMeta>> | undefined;
+
+function evalNode(record: Record<string, unknown>, node: Record<string, unknown>, fields?: DeclaredColumns): boolean {
   // A node is the AND of all its entries.
   for (const [key, val] of Object.entries(node)) {
     if (key === '$and') {
-      if (!Array.isArray(val) || !val.every((c) => evalNode(record, c as Record<string, unknown>))) return false;
+      if (!Array.isArray(val) || !val.every((c) => evalNode(record, c as Record<string, unknown>, fields))) return false;
     } else if (key === '$or') {
-      if (!Array.isArray(val) || val.length === 0 || !val.some((c) => evalNode(record, c as Record<string, unknown>))) return false;
+      if (!Array.isArray(val) || val.length === 0 || !val.some((c) => evalNode(record, c as Record<string, unknown>, fields))) return false;
     } else if (key === '$not') {
       if (val == null || typeof val !== 'object') return false;
-      if (evalNode(record, val as Record<string, unknown>)) return false;
+      if (evalNode(record, val as Record<string, unknown>, fields)) return false;
     } else if (key.startsWith('$')) {
       return false; // unknown top-level operator → fail closed
     } else {
-      if (!evalField(record, key, val)) return false;
+      if (!evalField(record, key, val, fields)) return false;
     }
   }
   return true;
 }
 
-function evalField(record: Record<string, unknown>, field: string, spec: unknown): boolean {
+function evalField(record: Record<string, unknown>, field: string, spec: unknown, fields?: DeclaredColumns): boolean {
   const actual = getPath(record, field);
   // `{ field: null }` → IS NULL.
   if (spec === null) return actual == null;
@@ -638,13 +650,21 @@ function evalField(record: Record<string, unknown>, field: string, spec: unknown
   // `evalNode` on a subtree, and a total function must stay total — but it is a
   // floor, no longer this backend's ANSWER to the shape.
   if (keys.length === 0 || keys.some((k) => !k.startsWith('$'))) return false;
+  const declared = fields && Object.prototype.hasOwnProperty.call(fields, field) ? fields[field] : undefined;
   for (const op of keys) {
-    if (!evalOp(actual, op, ops[op], record)) return false;
+    if (!evalOp(actual, op, ops[op], record, declared)) return false;
   }
   return true;
 }
 
-function evalOp(actual: unknown, op: string, raw: unknown, record: Record<string, unknown>): boolean {
+function evalOp(
+  actual: unknown,
+  op: string,
+  raw: unknown,
+  record: Record<string, unknown>,
+  // The column's declaration, when the caller supplied one for it.
+  declared?: CrossFieldComparisonFieldMeta,
+): boolean {
   // [#19886 stage 2d] A `{ $field }` comparison whose column holds a list or an
   // object ON THIS RECORD — either side. See {@link assertComparableReference}.
   if (isFieldReference(raw)) assertComparableReference(actual, op, raw, record);
@@ -671,7 +691,20 @@ function evalOp(actual: unknown, op: string, raw: unknown, record: Record<string
     case '$between':
       return Array.isArray(v) && v.length === 2 && actual != null && v[0] != null && v[1] != null
         && order(actual, v[0], (a, b) => a >= b) && lteBound(actual, v[1]);
-    case '$contains': return typeof actual === 'string' && typeof v === 'string' && actual.includes(v);
+    /**
+     * MEMBERSHIP on a JSON-stored column, SUBSTRING on a scalar one — the two
+     * questions `FILTER_OPERATORS`' `$contains` docblock (`@objectstack/spec`)
+     * gives this one operator. Which one is asked is decided by
+     * {@link containsAsksMembership}: the column's declaration when the caller
+     * supplied it, the stored value's shape otherwise.
+     *
+     * Before, this arm answered the substring test alone, and a stored array is
+     * not a string, so a `check` written as `{ tags: { $contains: 'x' } }` over
+     * a multi-valued field denied every write, while the read the same policy
+     * scopes (the typed drivers, the read-scope SQL) showed the rows holding
+     * `'x'` by membership.
+     */
+    case '$contains': return containsHolds(actual, v, declared);
     /**
      * [#6520] `$contains`' case-INSENSITIVE twin, folding ASCII case and nothing
      * else — `asciiCaseInsensitiveContains` is the spec's shared definition, the
@@ -717,7 +750,9 @@ function evalOp(actual: unknown, op: string, raw: unknown, record: Record<string
       } catch {
         return false;
       }
-    case '$notContains': return !(typeof actual === 'string' && typeof v === 'string' && actual.includes(v));
+    // The exact complement of `$contains`, whichever question that asks: a
+    // value with no member, and a value that is not text, satisfy it (#5298).
+    case '$notContains': return !containsHolds(actual, v, declared);
     case '$startsWith': return typeof actual === 'string' && typeof v === 'string' && actual.startsWith(v);
     case '$endsWith': return typeof actual === 'string' && typeof v === 'string' && actual.endsWith(v);
     case '$null': return v === true ? actual == null : actual != null;
@@ -1018,4 +1053,80 @@ function looseEq(a: unknown, b: unknown): boolean {
   if (a instanceof Date && (typeof b === 'string' || typeof b === 'number')) return a.getTime() === new Date(b).getTime();
   if (b instanceof Date && (typeof a === 'string' || typeof a === 'number')) return new Date(a).getTime() === b.getTime();
   return a === b;
+}
+
+/**
+ * Does `$contains` ask MEMBERSHIP of this column, rather than SUBSTRING?
+ *
+ * `FILTER_OPERATORS`' `$contains` docblock (`@objectstack/spec`) selects the
+ * question by the COLUMN: on a `multiple: true` field or a JSON-stored type it
+ * is membership, on a scalar string column it is substring. This evaluator
+ * judges a record, and is handed the record's declaration only by some callers
+ * (`plugin-security`'s write check and explain engine, when the object's schema
+ * loads), so it reads the question in two ways:
+ *
+ * - **A declared column** (the caller supplied {@link MatchesFilterOptions.fields}
+ *   and it names this column) — by the DECLARATION, contract first: the spec's
+ *   JSON-stored classes, `STRUCTURED_JSON_TYPES` or a multi-valued field
+ *   (`isMultiValueField`), the two halves every typed face's population is
+ *   built from. A declared JSON-stored column holding a scalar then has no
+ *   member, and a declared scalar column holding an array matches nothing, as
+ *   on `driver-sql`.
+ * - **Anything else** — no map, or a column the map does not name — by the
+ *   stored VALUE: an array asks membership, anything else substring. This is
+ *   the face's existing split for a value-level rule: `$empty` here is judged
+ *   by the stored value because this face judges a record, not a declaration
+ *   (ruling A on #20399), and `$contains` takes the same reading for the same
+ *   reason.
+ */
+function containsAsksMembership(actual: unknown, declared: CrossFieldComparisonFieldMeta | undefined): boolean {
+  if (declared) {
+    return STRUCTURED_JSON_TYPES.has(declared.type)
+      || isMultiValueField({ type: declared.type, multiple: declared.multiple === true });
+  }
+  return Array.isArray(actual);
+}
+
+/** `$contains` on one value: membership or substring, per {@link containsAsksMembership}. The comparand is a string by contract. */
+function containsHolds(actual: unknown, comparand: unknown, declared: CrossFieldComparisonFieldMeta | undefined): boolean {
+  if (typeof comparand !== 'string') return false;
+  if (containsAsksMembership(actual, declared)) return storedArrayHasMember(actual, comparand);
+  return typeof actual === 'string' && actual.includes(comparand);
+}
+
+/**
+ * The JSON NUMBER grammar, spelled out — the pattern `@objectstack/core`'s
+ * `jsonMembershipCandidates` tests a comparand against, for its reason:
+ * `Number()` also accepts `'0x10'`, `' 1 '`, `'Infinity'` and `''`, none of
+ * which is a JSON number, and admitting them would make the member set depend
+ * on JS coercion rules no SQL dialect shares.
+ */
+const JSON_NUMBER_TEXT = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/;
+
+/**
+ * Is `comparand` a MEMBER of the stored array?
+ *
+ * The comparand is a STRING by contract, so a member stored as a JSON number or
+ * boolean is named by its TEXT: `'1'` names the string `'1'` or the number `1`,
+ * `'true'` the string or `true`, `'null'` the string or `null`, and `'1.50'`
+ * the number `1.5`. That is the candidate set `@objectstack/core`'s
+ * `jsonMembershipCandidates` binds for every SQL dialect, read here as a
+ * predicate over JS values. Array-only, as the SQL constructs are: a value that
+ * is not an array has no member, and neither does an element that is itself
+ * an object or an array.
+ *
+ * ⚠️ A copy of that rule, not an import of it: this package depends on
+ * `@objectstack/spec` alone, and the rule lives in `@objectstack/core`. objectql's
+ * `having` walker and `driver-memory` carry the same copy for their own reasons;
+ * the one shared home they could all read is `@objectstack/spec/data`.
+ */
+function storedArrayHasMember(value: unknown, comparand: string): boolean {
+  if (!Array.isArray(value)) return false;
+  const number = JSON_NUMBER_TEXT.test(comparand) ? Number(comparand) : Number.NaN;
+  return value.some((element) => {
+    if (typeof element === 'string') return element === comparand;
+    if (typeof element === 'number') return Number.isFinite(number) && element === number;
+    if (typeof element === 'boolean' || element === null) return String(element) === comparand;
+    return false;
+  });
 }
