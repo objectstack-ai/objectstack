@@ -619,6 +619,42 @@ export function nonBooleanNullComparandError(field: string, value: unknown, path
 }
 
 /**
+ * [#20897, applying #5347's ruling A as #5369 did] `$exists` whose comparand
+ * is not a boolean.
+ *
+ * The symmetric twin of {@link nonBooleanNullComparandError}, and a copy of its
+ * disposition rather than a fresh judgement: `FieldOperatorsSchema` declares
+ * `$exists: z.boolean()` exactly as it declares `$null`, and the 2026-08-06
+ * ruling on #5298 applied #5347-A to `$exists` by name — `driver-sql` has
+ * refused a non-boolean here since. This driver did not, and its answer was the
+ * sharpest of the splits: the live path lowered `val === true` to has-a-value
+ * and EVERYTHING else to no-value, so `{ stage: { $exists: 'yes' } }` returned
+ * the rows with NO value — the author's intent inverted — while this package's
+ * own cube face read the flag by truthiness (`Boolean(raw[0])`) and answered
+ * the valued rows for the same filter. One filter, one package, two answers.
+ * Measured on `origin/main` `f6ccca4a` through `engine.find`, `count`,
+ * `aggregate`, `updateMany`, `deleteMany` and the analytics face, before this
+ * refusal.
+ *
+ * The words are `driver-sql`'s `nonBooleanExistsComparandError`, verbatim —
+ * one condition, one wording (#5240) — with its "this driver" clause re-aimed
+ * at the backend it names, the way the `$null` twin above names `driver-sql`.
+ */
+export function nonBooleanExistsComparandError(field: string, value: unknown, path: string): Error {
+  return unsupportedFilterError(
+    `Operator "$exists" on field "${field}" requires a boolean comparand (true or false). ` +
+      `Received ${describeFilterOperand(value)} (${safeShapePreview(value)}) at ${path}. ` +
+      `@objectstack/spec FieldOperatorsSchema declares $exists as a boolean. It is refused rather ` +
+      `than coerced for the same reason $null is: a non-boolean lands on whichever side ` +
+      `the backend's two-branch conditional happens to default to, and those defaults point in ` +
+      `OPPOSITE directions — driver-sql's \`=== false\` test compiles IS NOT NULL for anything ` +
+      `but false, this driver's \`=== true\` test compiled IS NULL for anything but true. Note ` +
+      `"false" the STRING is truthy, so it lands on the side opposite the false it was written ` +
+      `to mean.`,
+  );
+}
+
+/**
  * [#20444] A non-boolean `$empty` comparand. The leading sentence is
  * `driver-sql`'s `nonBooleanEmptyComparandError`, verbatim — one condition,
  * one wording (#5240).
@@ -938,6 +974,14 @@ function assertFieldConstraintShape(
     // being answered silently, differently, by each face.
     if (op === '$null' && typeof spec[op] !== 'boolean') {
       throw nonBooleanNullComparandError(field, spec[op], `${path}.$null`);
+    }
+    // [#20897] `$exists`' comparand is a boolean by the same declaration, and
+    // the ruling that refused `$null`'s third value refused this one too. On
+    // this walk for the reason `$null` is: the live path's `=== true` arm and
+    // the cube face's truthiness read put a third value on OPPOSITE sides, so
+    // the refusal has to fire before either face lowers anything.
+    if (op === '$exists' && typeof spec[op] !== 'boolean') {
+      throw nonBooleanExistsComparandError(field, spec[op], `${path}.$exists`);
     }
     // [#20444] `$empty`'s comparand is a boolean by the same declaration
     // (`FieldOperatorsSchema`), refused on this walk for the same reason: both

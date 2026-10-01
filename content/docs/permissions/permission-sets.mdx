@@ -95,7 +95,9 @@ opt-in. Grant it through an ordinary position-distributed set instead.
 Enforcement is server-side and covers both egress doors:
 
 - `GET /api/v1/data/:object/export` answers `403 EXPORT_NOT_PERMITTED` before it
-  reads the first row.
+  reads the first row. Its import template (`?template=true`) is not a copy of
+  data — it carries no records — so it is gated by the import instead: the create
+  permission on the object, never `allowExport`.
 - A **report** rendered as `csv` or `json` is the same bulk copy and is gated the
   same way, whether run interactively or delivered by a schedule. `html_table`
   is a rendered view and stays a read.

@@ -86,7 +86,7 @@
 
 import { bucketDateKey, compensatedSum } from '@objectstack/core';
 import type { QueryAST, GroupByNode, AggregationNode, DateGranularityValue } from '@objectstack/spec/data';
-import { declaredFieldClasses, matchesAggregationFilter } from './having-filter.js';
+import { declaredFieldClasses, declaredJsonStoredFields, matchesAggregationFilter } from './having-filter.js';
 
 /**
  * Group + aggregate raw rows according to the AST's `groupBy` /
@@ -102,6 +102,10 @@ import { declaredFieldClasses, matchesAggregationFilter } from './having-filter.
  * handed one — the rule the driver applies to the same comparand in a `where`
  * (having-filter.ts `checkCondition`). Absent (a registry-less caller) ⇒ every
  * comparand is compared as written, as before.
+ *
+ * [#20873] …and `$contains` / `$notContains` on a declared JSON-stored field ask
+ * MEMBERSHIP (having-filter.ts `declaredJsonStoredFields`), the reading the
+ * same condition gets in a `where`. Absent ⇒ the substring reading, as before.
  */
 export function applyInMemoryAggregation(
   rows: any[],
@@ -113,13 +117,14 @@ export function applyInMemoryAggregation(
   const aggregations = (ast.aggregations ?? []) as AggregationNode[];
   if (groupBy.length === 0 && aggregations.length === 0) return rows;
   // [#20176] Read once per call, and only when some aggregation carries a filter.
-  const filterClasses = fields && aggregations.some((a) => a?.filter && Object.keys(a.filter).length > 0)
-    ? declaredFieldClasses(fields)
-    : undefined;
+  const anyFilter = aggregations.some((a) => a?.filter && Object.keys(a.filter).length > 0);
+  const filterClasses = fields && anyFilter ? declaredFieldClasses(fields) : undefined;
+  // [#20873] Read once per call too, from the same declaration.
+  const filterJsonStored = fields && anyFilter ? declaredJsonStoredFields(fields) : undefined;
 
   if (groupBy.length === 0) {
     // Pure aggregation — single result row.
-    return [aggregateBucket(rows, aggregations, filterClasses)];
+    return [aggregateBucket(rows, aggregations, filterClasses, filterJsonStored)];
   }
 
   const buckets = new Map<string, { key: Record<string, any>; rows: any[] }>();
@@ -147,7 +152,7 @@ export function applyInMemoryAggregation(
 
   const out: any[] = [];
   for (const { key, rows: bucketRows } of buckets.values()) {
-    const aggValues = aggregateBucket(bucketRows, aggregations, filterClasses);
+    const aggValues = aggregateBucket(bucketRows, aggregations, filterClasses, filterJsonStored);
     out.push({ ...key, ...aggValues });
   }
   return out;
@@ -182,6 +187,7 @@ function aggregateBucket(
   allRows: any[],
   aggregations: AggregationNode[],
   filterClasses?: ReturnType<typeof declaredFieldClasses>,
+  filterJsonStored?: ReadonlySet<string>,
 ): Record<string, any> {
   const out: Record<string, any> = {};
   for (const [index, agg] of aggregations.entries()) {
@@ -198,7 +204,7 @@ function aggregateBucket(
     // still lists, objectui#3136).
     const aggFilter = agg.filter;
     const rows = aggFilter && Object.keys(aggFilter).length > 0
-      ? allRows.filter((row) => matchesAggregationFilter(row, aggFilter, index, filterClasses))
+      ? allRows.filter((row) => matchesAggregationFilter(row, aggFilter, index, filterClasses, filterJsonStored))
       : allRows;
     if (fn === 'count') {
       // `*` is the count-all sentinel: the Cube `count` measure and a dataset

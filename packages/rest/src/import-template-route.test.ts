@@ -8,7 +8,9 @@
  * registry injects onto every object are really there to be excluded.
  *
  * Also here: the proof that WITHOUT `?template=true` the export is byte for
- * byte what it was before the mode existed — see the last describe block.
+ * byte what it was before the mode existed — see the last describe block —
+ * and that the template is judged by the IMPORT door's gates, never the
+ * export's (#20896 ruling A).
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -104,6 +106,12 @@ const DEAL = {
 /** The seven columns the registry injects onto every object (the card's table). */
 const INJECTED = ['organization_id', 'created_at', 'created_by', 'updated_at', 'updated_by', 'owner_id', 'owning_business_unit_id'];
 
+/**
+ * A security service's `explain` answering "may create" for every object —
+ * the caller half of the import door's gates on `?template=true` (#20896).
+ */
+const MAY_CREATE = async (request: { operation: string }) => ({ allowed: request.operation === 'create' });
+
 interface BootOptions {
   security?: Record<string, unknown>;
 }
@@ -130,7 +138,7 @@ async function boot(opts: BootOptions = {}) {
     await exportRoute.handler({ params: { object }, query, headers } as any, out.res);
     return out;
   };
-  return { engine, protocol, findData, get, importRoute };
+  return { engine, protocol, findData, get, importRoute, rest };
 }
 
 const headerRow = async (bytes: Buffer, sheet = 0) => {
@@ -221,7 +229,7 @@ describe('?template=true — field-level security: the WRITE projection', () => 
 
   it('a field the caller may read but not edit is absent, and the response names the write projection', async () => {
     const { get } = await boot({
-      security: { canExport: async () => true, getReadableFields: async () => READABLE, getWritableFields: async () => WRITABLE },
+      security: { explain: MAY_CREATE, getReadableFields: async () => READABLE, getWritableFields: async () => WRITABLE },
     });
     const out = await get({ template: 'true' });
     const { wb, header } = await headerRow(out.body());
@@ -233,7 +241,7 @@ describe('?template=true — field-level security: the WRITE projection', () => 
   });
 
   it('a security service without getWritableFields: narrowed by the read projection, and the response says so', async () => {
-    const { get } = await boot({ security: { canExport: async () => true, getReadableFields: async () => READABLE } });
+    const { get } = await boot({ security: { explain: MAY_CREATE, getReadableFields: async () => READABLE } });
     const out = await get({ template: 'true' });
     const { wb, header } = await headerRow(out.body());
     expect(header).toContain('Salary');
@@ -244,7 +252,7 @@ describe('?template=true — field-level security: the WRITE projection', () => 
 
   it('a security service that answers neither projection fails the request instead of an unnarrowed header', async () => {
     const { get } = await boot({
-      security: { canExport: async () => true, getWritableFields: async () => undefined, getReadableFields: async () => undefined },
+      security: { explain: MAY_CREATE, getWritableFields: async () => undefined, getReadableFields: async () => undefined },
     });
     const out = await get({ template: 'true' });
     expect(out.status()).toBe(500);
@@ -253,26 +261,85 @@ describe('?template=true — field-level security: the WRITE projection', () => 
   });
 });
 
-describe('?template=true — the two existing gates still decide', () => {
-  it('a caller without the export permission is refused 403 and gets no workbook', async () => {
-    const { get } = await boot({ security: { canExport: async () => false, getReadableFields: async () => ['title'] } });
+describe('?template=true — the IMPORT door\'s gates decide, not the export\'s (#20896 ruling A)', () => {
+  // The template carries no records, so it answers to whoever may import:
+  // the object's `import` exposure, then the caller's create permission. The
+  // export gates (`export` exposure, `canExport`) neither admit nor refuse it.
+  const noCreate = async () => ({ allowed: false });
+
+  it('create on the object and no allowExport → 200 and the workbook', async () => {
+    const canExport = vi.fn(async () => false);
+    const explain = vi.fn(MAY_CREATE);
+    const { get } = await boot({ security: { canExport, explain, getWritableFields: async () => ['title', 'stage'] } });
+    const out = await get({ template: 'true' });
+    expect(out.status()).toBe(200);
+    expect(out.headers['Content-Type']).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    expect(out.headers['X-Export-Template']).toBe('true');
+    expect((await headerRow(out.body())).header).toEqual(['Title *', 'Stage']);
+    expect(explain).toHaveBeenCalledWith({ object: 'deal', operation: 'create' }, expect.objectContaining({ userId: 'test-user' }));
+    expect(canExport).not.toHaveBeenCalled();
+  });
+
+  it('no create → 403 PERMISSION_DENIED from the import door, and the template builder is never called', async () => {
+    const getWritableFields = vi.fn(async () => ['title']);
+    const { get, rest } = await boot({ security: { canExport: async () => false, explain: noCreate, getWritableFields } });
+    const builder = vi.spyOn(rest as any, 'answerImportTemplate');
     const out = await get({ template: 'true' });
     expect(out.status()).toBe(403);
-    expect(out.json()).toMatchObject({ code: 'EXPORT_NOT_PERMITTED' });
+    expect(out.json()).toMatchObject({ success: false, error: { code: 'PERMISSION_DENIED', details: { object: 'deal' } } });
+    expect(out.body().length).toBe(0);
+    expect(builder).not.toHaveBeenCalled();
+    expect(getWritableFields).not.toHaveBeenCalled();
+  });
+
+  it('allowExport and no create → 403 on template=true — the export permission admits no template', async () => {
+    const canExport = vi.fn(async () => true);
+    const getWritableFields = vi.fn(async () => ['title']);
+    const { get, rest } = await boot({ security: { canExport, explain: noCreate, getWritableFields } });
+    const builder = vi.spyOn(rest as any, 'answerImportTemplate');
+    const out = await get({ template: 'true' });
+    expect(out.status()).toBe(403);
+    expect(out.json()).toMatchObject({ success: false, error: { code: 'PERMISSION_DENIED', details: { object: 'deal' } } });
+    expect(out.body().length).toBe(0);
+    expect(builder).not.toHaveBeenCalled();
+    expect(getWritableFields).not.toHaveBeenCalled();
+    expect(canExport).not.toHaveBeenCalled();
+  });
+
+  it('a create verdict that throws is a denial, never a grant', async () => {
+    const { get } = await boot({
+      security: { explain: async () => { throw new Error('permission sets did not resolve'); }, getWritableFields: async () => ['title'] },
+    });
+    const out = await get({ template: 'true' });
+    expect(out.status()).toBe(403);
+    expect(out.json()?.error?.code).toBe('PERMISSION_DENIED');
     expect(out.body().length).toBe(0);
   });
 
-  it('an object that does not expose export is refused before the template', async () => {
+  it('an object exposing create but not export serves the template — its export exposure no longer stands in front', async () => {
     const { get, engine } = await boot();
     engine.registry.registerObject({
-      // `export` is derived from `list`, so only a whitelist without `list` closes it.
-      name: 'locked', label: 'Locked', enable: { apiMethods: ['get'] },
+      // `export` is derived from `list`; `import` from `create ∨ update`.
+      name: 'intake', label: 'Intake', enable: { apiMethods: ['create'] },
+      fields: { title: { name: 'title', type: 'text', label: 'Title' } },
+    } as any);
+    const out = await get({ template: 'true' }, 'intake');
+    expect(out.status()).toBe(200);
+    expect((await headerRow(out.body())).header).toEqual(['Title']);
+  });
+
+  it('an object exposing export but neither create nor update is refused 405 before the template', async () => {
+    const { get, engine, rest } = await boot();
+    engine.registry.registerObject({
+      name: 'ledger', label: 'Ledger', enable: { apiMethods: ['get', 'list'] },
       fields: { title: { name: 'title', type: 'text' } },
     } as any);
-    const out = await get({ template: 'true' }, 'locked');
+    const builder = vi.spyOn(rest as any, 'answerImportTemplate');
+    const out = await get({ template: 'true' }, 'ledger');
     expect(out.status()).toBe(405);
     expect(out.json()).toMatchObject({ code: 'OBJECT_API_METHOD_NOT_ALLOWED' });
     expect(out.body().length).toBe(0);
+    expect(builder).not.toHaveBeenCalled();
   });
 });
 
@@ -556,8 +623,11 @@ const PRE_CHANGE: Record<string, {
   },
 };
 
-/** `export-integration.test.ts`'s fixtures: `systemFields: false`, two rows. */
-async function bootExportFixture() {
+/**
+ * `export-integration.test.ts`'s fixtures: `systemFields: false`, two rows. An
+ * optional security service is composed the way `boot` composes one.
+ */
+async function bootExportFixture(security?: Record<string, unknown>) {
   const engine = new ObjectQL();
   liveEngines.push(engine);
   engine.registerDriver(makeSqliteDriver(), true);
@@ -586,19 +656,22 @@ async function bootExportFixture() {
   await engine.insert('task', { id: '1', title: '写代码', done: true, priority: 'high', due: '2026-06-30T00:00:00.000Z', owner: 'u1' });
   await engine.insert('task', { id: '2', title: '写文档', done: false, priority: 'low', due: '2026-07-01T00:00:00.000Z', owner: 'u2' });
   const protocol = new ObjectStackProtocolImplementation(engine as any);
+  const findData = vi.spyOn(protocol as any, 'findData');
   const rest = new RestServer(createMockServer() as any, protocol as any, { api: { requireAuth: false } } as any);
   (rest as any).resolveExecCtx = async () => ({ userId: 'test-user', timezone: 'UTC' });
+  if (security) (rest as any).resolveSecurityService = async () => security;
   rest.registerRoutes();
-  return rest.getRoutes().find((r: any) => r.method === 'GET' && r.path === '/api/v1/data/:object/export')!;
+  const route = rest.getRoutes().find((r: any) => r.method === 'GET' && r.path === '/api/v1/data/:object/export')!;
+  return { route, findData };
 }
 
-async function exportOnce(query: Record<string, string>) {
+async function exportOnce(query: Record<string, string>, security?: Record<string, unknown>) {
   vi.useFakeTimers({ now: new Date(FROZEN_NOW), toFake: ['Date'] });
   try {
-    const route: any = await bootExportFixture();
+    const { route, findData } = await bootExportFixture(security);
     const out = makeRes();
     await route.handler({ params: { object: 'task' }, query } as any, out.res);
-    return out;
+    return { ...out, findData };
   } finally {
     vi.useRealTimers();
   }
@@ -624,5 +697,28 @@ describe('without ?template=true the export is byte-identical to the pre-change 
     expect(off.headers).toEqual(plain.headers);
     expect(off.body().equals(plain.body())).toBe(true);
     expect(off.body().toString('utf8')).toBe(PRE_CHANGE.csvDefault.text);
+  });
+
+  // [#20896] The template's gate swap reaches no export request: the export
+  // is still judged by `canExport`, and the create verdict is never asked.
+  it('without allowExport: 403 EXPORT_NOT_PERMITTED before a row is read, whatever the caller may create', async () => {
+    const explain = vi.fn(MAY_CREATE);
+    const out = await exportOnce({}, { canExport: async () => false, explain });
+    expect(out.status()).toBe(403);
+    expect(out.json()).toMatchObject({ code: 'EXPORT_NOT_PERMITTED', object: 'task' });
+    expect(out.body().length).toBe(0);
+    expect(out.findData).not.toHaveBeenCalled();
+    expect(explain).not.toHaveBeenCalled();
+  });
+
+  it('with allowExport and without create: the pre-change bytes, the create verdict never asked', async () => {
+    const explain = vi.fn(async () => ({ allowed: false }));
+    const out = await exportOnce({}, { canExport: async () => true, explain });
+    const body = out.body();
+    expect(out.status()).toBe(200);
+    expect(out.headers).toEqual(PRE_CHANGE.csvDefault.headers);
+    expect(body.toString('utf8')).toBe(PRE_CHANGE.csvDefault.text);
+    expect(createHash('sha256').update(body).digest('hex')).toBe(PRE_CHANGE.csvDefault.sha256);
+    expect(explain).not.toHaveBeenCalled();
   });
 });

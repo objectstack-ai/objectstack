@@ -37,7 +37,10 @@
  * face asserted here is the gate itself, called directly — the live path and
  * the gate must refuse identically. Its row answers were the live path's too,
  * with ONE exception, pinned at the foot of this file: `$exists` over a
- * non-boolean flag, where the matcher and the live path disagreed.
+ * non-boolean flag, where the matcher and the live path disagreed. [#20897]
+ * That cell is a refusal now, under the ruling `$null`'s refusal took; the
+ * full `$exists` battery, across every entry of this package, is
+ * `memory-exists-non-boolean-refusal.test.ts`.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -178,20 +181,32 @@ describe('[#5347] $null requires a boolean comparand, on the live path and its s
     expect(await findIds({})).toEqual(['1', '2']);
   });
 
-  it('$exists is deliberately NOT tightened here — and the live path reads a non-boolean flag as FALSE', async () => {
-    // #5347 ruled on `$null` alone. `$exists` diverges on its own axis (#5299
-    // holds the open question of what "exists" means for a null-valued key), so
-    // it keeps today's answers rather than being settled as a rider.
+  it('$exists is refused too — the carve-out this line used to pin is gone (#20897)', async () => {
+    // FLIPPED CARVE-OUT. This case was titled "$exists is deliberately NOT
+    // tightened here — and the live path reads a non-boolean flag as FALSE",
+    // and pinned `['2']` — the row with NO value — for `$exists: 'yes'`. #5347
+    // ruled on `$null` alone, and what "exists" means for a null-valued key was
+    // still #5299's open question, so tightening it as a rider would have been
+    // settling a second ruling silently.
     //
-    // [#5930 step 4] This line used to pin the REFERENCE MATCHER's answer,
-    // `['1']`: it read the flag by truthiness (`!!'yes'`), so `'yes'` meant
-    // "has a value". The live path never agreed — it lowers `val === true` to
-    // `$ne: null` and anything else to `$eq: null`, so `'yes'` asks for the
-    // rows with NO value. That was the matcher's own divergence from the path
-    // users run; with the matcher retired, the live path's answer is pinned,
-    // measured, and the refusal this cell lacks is reported rather than
-    // decided here.
-    expect(await findIds({ stage: { $exists: 'yes' } })).toEqual(['2']);
+    // That question was closed ("has a value", ruled on #5298) and the same
+    // ruling applied #5347-A to `$exists` by name, which `driver-sql` enforced
+    // at once; this driver kept the pinned answer — the author's intent
+    // inverted, since `'yes'` fell to the `$eq: null` side of the live path's
+    // `val === true` test. So the pin becomes the refusal, through the live path
+    // and the gate alike, in `driver-sql`'s leading sentence.
+    for (const value of ['yes', 1, 'false']) {
+      const findErr = await refusalOfFind({ stage: { $exists: value } });
+      expect(findErr.code).toBe('INVALID_FILTER');
+      expect(findErr.status).toBe(400);
+      expect(findErr.message).toContain(
+        'Operator "$exists" on field "stage" requires a boolean comparand (true or false).',
+      );
+      expect(findErr.message).toContain('filter.stage.$exists');
+      expect(refusalOfGate({ stage: { $exists: value } }).message).toBe(findErr.message);
+    }
+    // The control: the two booleans the spec declares answer exactly as before.
     expect(await findIds({ stage: { $exists: true } })).toEqual(['1']);
+    expect(await findIds({ stage: { $exists: false } })).toEqual(['2']);
   });
 });
