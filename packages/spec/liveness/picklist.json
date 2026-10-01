@@ -10,15 +10,13 @@
     },
     "label": {
       "status": "live",
-      "evidence": "packages/metadata/src/plugin.ts#ARTIFACT_FIELD_TO_TYPE",
       "verifiedAt": "2026-10-01",
-      "note": "Display: the list's own label, served with the kind by `GET /meta/picklist` (the artifact door registers `picklists:` as items) and translated under `picklists.<name>.label` (`translatePicklist`). A Studio picklist page is a later phase."
+      "note": "display: the list's own label, served with the kind (`GET /meta/picklist`; the artifact door registers `picklists:` as items) and translated under `picklists.<name>.label` (`translatePicklist`). A Studio picklist page is a later phase."
     },
     "description": {
       "status": "live",
-      "evidence": "packages/metadata/src/plugin.ts#ARTIFACT_FIELD_TO_TYPE",
       "verifiedAt": "2026-10-01",
-      "note": "Display: served with the kind by `GET /meta/picklist` for authors choosing a list."
+      "note": "display: served with the kind (`GET /meta/picklist`) for authors choosing a list."
     },
     "options": {
       "status": "live",
@@ -45,9 +43,8 @@
         },
         "color": {
           "status": "live",
-          "evidence": "packages/objectql/src/registry.ts#resolvePicklistOptions",
           "verifiedAt": "2026-10-01",
-          "note": "Carried onto the referencing field's resolved option, where the same key is `live` on `field.json`."
+          "note": "display: carried onto the referencing field's resolved option, rendered like an inline option's (`field.options`)."
         },
         "default": {
           "status": "live",
@@ -57,7 +54,7 @@
         },
         "visibleWhen": {
           "status": "live",
-          "evidence": "packages/objectql/src/registry.ts#resolvePicklistOptions",
+          "evidence": "packages/objectql/src/validation/rule-validator.ts",
           "verifiedAt": "2026-10-01",
           "note": "Carried onto the referencing field's resolved option, where the option-visibility predicate reads it like an inline option's."
         }
