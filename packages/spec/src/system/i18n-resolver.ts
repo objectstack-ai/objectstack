@@ -24,7 +24,9 @@
  * `<view_key>` is the BARE authoring key (`listViews.<key>`, or the default
  * list/form key) — never the `<object>.<key>` identity the registry assigns a
  * served view document. `resolveViewLabel` derives the bare key from that
- * identity, so the same bundle serves both hand-built and served views (#4854).
+ * identity, so the same bundle serves both hand-built and served views (#4854),
+ * and `translateObject` reads the same keys for the views an object document
+ * embeds in its `listViews`, by their record key.
  *
  * For object-less actions (no `objectName`), helpers fall back to:
  *
@@ -402,6 +404,32 @@ function viewTranslationKey(view: ViewLike, objectName: string): string {
 }
 
 /**
+ * One string off a view's `objects.<object>._views.<viewKey>` node, across the
+ * locale chain — `undefined` when no locale carries it.
+ *
+ * The ONE read of that address. Both view channels go through it: a served
+ * view document ({@link resolveViewLabel}, {@link resolveViewDescription},
+ * keyed by {@link viewTranslationKey}) and a view embedded in an object
+ * document's `listViews` ({@link translateObject}, keyed by its record key).
+ * Both keys are the bare authoring key the i18n extractor's `pushViewEntries`
+ * writes, so one lookup serves both — ⛔ never a second key convention.
+ */
+function lookupViewText(
+  bundle: TranslationBundle | undefined,
+  objectName: string,
+  viewKey: string,
+  attr: 'label' | 'description',
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.objects?.[objectName]?._views?.[viewKey]?.[attr];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
  * Resolve a translated view label, falling back to the literal `view.label`
  * (or `view.name`) when no translation is available.
  */
@@ -412,14 +440,8 @@ export function resolveViewLabel(
 ): string {
   const fallback = view.label ?? view.name;
   const objectName = viewObjectName(view);
-  if (!bundle || !objectName) return fallback;
-  const key = viewTranslationKey(view, objectName);
-  for (const code of localeChain(opts)) {
-    const data = pickData(bundle, code);
-    const candidate = data?.objects?.[objectName]?._views?.[key]?.label;
-    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
-  }
-  return fallback;
+  if (!objectName) return fallback;
+  return lookupViewText(bundle, objectName, viewTranslationKey(view, objectName), 'label', opts) ?? fallback;
 }
 
 /**
@@ -432,16 +454,9 @@ export function resolveViewDescription(
   opts?: ResolveOptions,
 ): string | undefined {
   const objectName = viewObjectName(view);
-  if (bundle && objectName) {
-    const key = viewTranslationKey(view, objectName);
-    for (const code of localeChain(opts)) {
-      const data = pickData(bundle, code);
-      const candidate =
-        data?.objects?.[objectName]?._views?.[key]?.description;
-      if (typeof candidate === 'string' && candidate.length > 0) return candidate;
-    }
-  }
-  return view.description;
+  if (!objectName) return view.description;
+  return lookupViewText(bundle, objectName, viewTranslationKey(view, objectName), 'description', opts)
+    ?? view.description;
 }
 
 /**
@@ -2329,6 +2344,12 @@ export interface ObjectLike {
   fields?: Record<string, ObjectFieldLike> | ObjectFieldLike[];
   /** Actions declared inline on the object (`Object.actions`). */
   actions?: ActionLike[];
+  /**
+   * List views embedded in the object document (`Object.listViews`), keyed by
+   * view name. Each entry is narrowed at runtime to the copy
+   * {@link translateObject} overlays; the record key is the `_views` key.
+   */
+  listViews?: Record<string, unknown>;
 }
 
 export interface ObjectFieldLike {
@@ -2746,11 +2767,94 @@ function valueOverridesPackagedBase(base: unknown, key: string, value: unknown):
 }
 
 /**
+ * Overlay the catalog onto an object document's EMBEDDED `listViews` — each
+ * view's `label`, `description` and `bulkActionDefs[]` copy, the same strings
+ * {@link translateView} overlays on a served view document — returning the
+ * SAME record reference when nothing matched, so {@link translateObject} can
+ * leave `listViews` off its copy.
+ *
+ * ## The address is the extractor's, by construction
+ *
+ * The i18n extractor walks `obj.listViews` and hands `pushViewEntries` each
+ * RECORD key, so `objects.<object>._views.<recordKey>.*` is the one address a
+ * translation for an embedded view exists under. That key is already bare —
+ * there is no `<object>.` prefix to strip, as there is on a served view
+ * document's registry name — so it goes straight to {@link lookupViewText} and
+ * {@link translateBulkActionDefs}, the helpers {@link translateView} reads
+ * through. The view's own optional `name` is never consulted.
+ *
+ * An embedded view carries its `bulkActionDefs` on itself, the authored
+ * address the extractor reads; a served view document nests them under
+ * `config`, which is why `translateView` reads them there. Nothing is
+ * translated that `translateView` would not translate: `emptyState` has no
+ * server-side reader on either channel.
+ *
+ * ## The catalog loses to an explicit override — ADR-0029 D9.2a
+ *
+ * The catalog translates the PACKAGED view, so every string is judged by
+ * {@link valueOverridesPackagedBase} (⛔ never a second comparison) against the
+ * same view in the packaged object's `listViews` — the base the serving layer
+ * supplies as {@link TranslateDocumentOptions.packagedBase}. A view the base
+ * does not carry was authored after the fact, and every string on it counts as
+ * diverged; no base supplied means nothing is inferred and the catalog applies.
+ */
+function translateObjectListViews(
+  listViews: unknown,
+  bundle: TranslationBundle | undefined,
+  objectName: string,
+  opts: TranslateDocumentOptions | undefined,
+): unknown {
+  const views = asRecord(listViews);
+  if (views === undefined || !bundle) return listViews;
+  const base = asRecord(opts?.packagedBase);
+  // The base's own `listViews` — `{}` when the base is known but carries none,
+  // so every view on the served document then counts as authored.
+  const packagedViews = base === undefined ? undefined : asRecord(base.listViews) ?? {};
+  let changed = false;
+  const next: Record<string, unknown> = {};
+  for (const [viewKey, raw] of Object.entries(views)) {
+    const view = asRecord(raw);
+    if (view === undefined) {
+      next[viewKey] = raw;
+      continue;
+    }
+    const packagedView = packagedViews === undefined ? undefined : asRecord(packagedViews[viewKey]) ?? {};
+    const text = (attr: 'label' | 'description') =>
+      valueOverridesPackagedBase(packagedView, attr, view[attr])
+        ? undefined
+        : lookupViewText(bundle, objectName, viewKey, attr, opts);
+    const label = text('label');
+    const description = text('description');
+    const defs = translateBulkActionDefs(view.bulkActionDefs, bundle, objectName, viewKey, opts, packagedView);
+    if (label === undefined && description === undefined && defs === view.bulkActionDefs) {
+      next[viewKey] = raw;
+      continue;
+    }
+    changed = true;
+    next[viewKey] = {
+      ...view,
+      ...(label !== undefined ? { label } : {}),
+      ...(description !== undefined ? { description } : {}),
+      ...(defs !== view.bulkActionDefs ? { bulkActionDefs: defs } : {}),
+    };
+  }
+  return changed ? next : listViews;
+}
+
+/**
  * Apply the active locale to an object metadata document. Translates the
  * object's `label` / `pluralLabel` / `description`, walks each field to
- * translate its `label`, `help`, and per-option `label`s, and walks any
- * inline-declared `actions` through {@link translateAction}. The input document
+ * translate its `label`, `help`, and per-option `label`s, walks any
+ * inline-declared `actions` through {@link translateAction}, and overlays the
+ * copy of each EMBEDDED `listViews` entry from the `_views` keys the i18n
+ * extractor writes for it ({@link translateObjectListViews}). The input document
  * is not mutated; a structural clone of the touched branches is returned.
+ *
+ * The embedded views were the second long-standing hole: `os i18n extract`
+ * wrote `objects.<object>._views.<view>.*` for them and every shipped platform
+ * bundle carried the leaves, while the served object went out with the
+ * authored tab labels — extract and serve disagreed, and only a client
+ * re-translating with its own bundle showed a tab in the reader's language.
  *
  * Field maps come in two shapes across the codebase: a `Record<string, Field>`
  * (preferred — the canonical authored shape) and an `Array<Field>` (some REST
@@ -2786,6 +2890,10 @@ function valueOverridesPackagedBase(base: unknown, key: string, value: unknown):
  * The rule is scoped to the three SCALARS, which are what the ruling covers:
  * `fields` is a key-keyed spread whose per-field labels have their own
  * (per-field) catalog keys, and no read has been measured to diverge on them.
+ * The embedded `listViews` follow the VIEW translator's application of the
+ * same rule (ADR-0029 D9.2a, as {@link translateView} applies it), judged per
+ * view against the packaged object's own `listViews` — see
+ * {@link translateObjectListViews}.
  */
 export function translateObject<T extends ObjectLike>(
   doc: T,
@@ -2866,6 +2974,8 @@ export function translateObject<T extends ObjectLike>(
       })
     : undefined;
 
+  const listViews = translateObjectListViews(doc.listViews, bundle, objectName, opts);
+
   return {
     ...doc,
     ...(label !== undefined ? { label } : {}),
@@ -2873,6 +2983,7 @@ export function translateObject<T extends ObjectLike>(
     ...(description !== undefined ? { description } : {}),
     ...(fields !== undefined ? { fields } : {}),
     ...(actions !== undefined ? { actions } : {}),
+    ...(listViews !== doc.listViews ? { listViews } : {}),
   };
 }
 
