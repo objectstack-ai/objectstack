@@ -7,7 +7,7 @@ view / page / dashboard / report metadata.
 
 - `analytics-inline-vs-dataset.json` — dataset-envelope decisions for
   dashboard/report widgets: when a data need fits a `defineDataset`, when it
-  must escalate to a Cube or a stored rollup field, and when an ad-hoc
+  must escalate to a stored field or app code, and when an ad-hoc
   in-page `<ObjectChart>` needs no dataset at all.
 - `views-apps-actions-pages.json` — `defineView` containers, `App.create`
   navigation, `defineAction` surfaces, record / interface pages, package

@@ -23,8 +23,9 @@ export const entry: SemanticMigration = {
     + '`mode`, `upsertKey`) whose `connectorSource` names the `rest` or `openapi` connector '
     + 'instance it pulls from (`connector`), the action that reads the records (`action`, with a '
     + 'fixed `input` and a `recordsPath`) and, for a timestamp-incremental pull, a `watermark` '
-    + '(`field` on the record, `param` on the request); a `job` sets the cadence. Declared in this '
-    + 'protocol step and not yet executed — authoring it warns until the pull executor reads it.',
+    + '(`field` on the record, `param` on the request); a `job` sets the cadence. The pull executor '
+    + 'reads the binding when a `job` drives it; nothing schedules a pull yet, and authoring it '
+    + 'warns until a job can.',
   reason: 'The D2 conversion `connector-sync-keys-removed` deletes `syncConfig` and '
     + '`fieldMappings` from every connector, stack entry and stored connector row, one notice per '
     + 'key, and the delete is lossless: no engine ever ran a connector-attached sync or moved a '
@@ -47,6 +48,6 @@ export const entry: SemanticMigration = {
     + 'DataSyncConfig, SyncStrategy, ConnectorConflictResolution or ConnectorFieldMapping or '
     + 'their schemas. Every connector registers and dispatches its actions exactly as it did '
     + 'before the upgrade. Each sync the author still wants is a `mapping` whose '
-    + '`connectorSource` names a `rest` or `openapi` connector instance, validated at authoring, '
-    + 'with a `job` chosen for its cadence.',
+    + '`connectorSource` names a `rest` or `openapi` connector instance, with a `job` chosen for '
+    + 'its cadence.',
 };

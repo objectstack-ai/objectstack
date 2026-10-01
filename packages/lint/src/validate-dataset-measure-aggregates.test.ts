@@ -17,12 +17,16 @@ import {
   AGGREGATE_FIELD_TYPE_COMPATIBILITY,
   BOOLEAN_VALUE_TYPES,
   FieldType,
+  MULTI_CAPABLE_TYPES,
   NUMERIC_VALUE_TYPES,
+  STRUCTURED_JSON_TYPES,
   isAggregateCompatibleWithFieldType,
+  isMultiValueField,
 } from '@objectstack/spec/data';
 
 import { runAuthoringRules } from './authoring-rules.js';
 import {
+  DIMENSION_JSON_STORED_FIELD_REFUSED,
   MEASURE_AGGREGATE_FIELD_TYPE_REFUSED,
   validateDatasetMeasureAggregates,
 } from './validate-dataset-measure-aggregates.js';
@@ -385,6 +389,233 @@ describe('measure-aggregate-field-type-refused — reaches the author through th
       runAuthoringRules('lint', { normalized: accepted, parsed: accepted }).filter(
         (f) => f.rule === RULE,
       ),
+    ).toEqual([]);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#20890] The declaration half: `count_distinct` over a field declared
+// `multiple: true`. The table is per TYPE and accepts `select`; the declaration
+// makes it a list stored as JSON, which the compile leg (`400 DATASET_INVALID`)
+// and the engine's `count_distinct` door already refuse.
+// ───────────────────────────────────────────────────────────────────────────
+
+/** {@link stackWith}, with the measured field declared `multiple: true`. */
+const flaggedStackWith = (aggregate: string, fieldType: string): Record<string, unknown> =>
+  stackWith(aggregate, fieldType, {
+    fields: { name: { type: 'text' }, measured: { type: fieldType, multiple: true } },
+  });
+
+describe('measure-aggregate-field-type-refused — reads the declaration, not the type alone', () => {
+  // ⭐ The addendum's pin and its control, one pair.
+  it('refuses count_distinct over a select declared multiple: true, and accepts it over a single select', () => {
+    const found = findings(flaggedStackWith('count_distinct', 'select'));
+    expect(found).toHaveLength(1);
+    const issue = found[0];
+    expect(issue.severity).toBe('error');
+    expect(issue.rule).toBe(RULE);
+    expect(issue.path).toBe('datasets[0].measures[0].aggregate');
+    // The DECLARATION is named, flag included, or the author reads the verdict
+    // as a claim about `select` that the table plainly does not make.
+    expect(issue.message).toContain('`select` with `multiple: true`');
+    expect(issue.message).toContain('none of them with `multiple: true`');
+    // The way out is computed from the same predicate: only `count` is left.
+    expect(issue.hint).toContain('accepts: count.');
+
+    expect(findings(stackWith('count_distinct', 'select'))).toEqual([]);
+  });
+
+  it('refuses count_distinct over every multi-capable type flagged multiple: true, and nothing else moves', () => {
+    expect(MULTI_CAPABLE_TYPES.size).toBeGreaterThan(0);
+    for (const fieldType of MULTI_CAPABLE_TYPES) {
+      expect(findings(flaggedStackWith('count_distinct', fieldType)), `count_distinct(${fieldType}, multiple)`).toHaveLength(1);
+      expect(findings(stackWith('count_distinct', fieldType)), `count_distinct(${fieldType})`).toEqual([]);
+      // `count` reads no value, flagged or not.
+      expect(findings(flaggedStackWith('count', fieldType)), `count(${fieldType}, multiple)`).toEqual([]);
+    }
+  });
+
+  // The whole flagged surface against the spec's two predicates — the table's
+  // row and `isMultiValueField` — never against a list retyped here.
+  it('agrees with the table and isMultiValueField on every aggregate × every declared FieldType flagged multiple: true', () => {
+    let refused = 0;
+    let accepted = 0;
+    for (const aggregate of AGGREGATES) {
+      for (const fieldType of FieldType.options) {
+        const fires = findings(flaggedStackWith(aggregate, fieldType)).length > 0;
+        const expected =
+          !isAggregateCompatibleWithFieldType(aggregate, fieldType) ||
+          (aggregate === 'count_distinct' && isMultiValueField({ type: fieldType, multiple: true }));
+        expect(fires, `${aggregate}(${fieldType}, multiple)`).toBe(expected);
+        if (fires) refused++;
+        else accepted++;
+      }
+    }
+    expect(refused).toBeGreaterThan(50);
+    expect(accepted).toBeGreaterThan(50);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#20890] `dimension-json-stored-field-refused` — the dimension leg. The
+// analytics door refuses a query that groups by a JSON-stored column
+// (`400 INVALID_FIELD`); this is that verdict where the author is standing.
+// ───────────────────────────────────────────────────────────────────────────
+
+const DIMENSION_RULE = DIMENSION_JSON_STORED_FIELD_REFUSED;
+
+/**
+ * One dataset over one object whose one dimension groups by `grouped`,
+ * declared as `fieldDef`. `field` overrides the path the dimension names.
+ */
+const dimensionStack = (
+  fieldDef: Record<string, unknown> | undefined,
+  overrides: { field?: unknown; datasetObject?: string } = {},
+): Record<string, unknown> => ({
+  name: 'analytics_probe',
+  objects: [
+    {
+      name: 'crm_opportunity',
+      sharingModel: 'private',
+      fields: {
+        name: { type: 'text' },
+        grouped: fieldDef ?? { label: 'Untyped' },
+      },
+    },
+  ],
+  datasets: [
+    {
+      name: 'opportunity_metrics',
+      object: overrides.datasetObject ?? 'crm_opportunity',
+      dimensions: [
+        { name: 'the_dimension', field: 'field' in overrides ? overrides.field : 'grouped' },
+      ],
+      measures: [{ name: 'n', aggregate: 'count' }],
+    },
+  ],
+});
+
+const dimensionFindings = (stack: unknown) =>
+  validateDatasetMeasureAggregates(stack).filter((f) => f.rule === DIMENSION_RULE);
+
+describe('dimension-json-stored-field-refused — a dimension over a JSON-stored field is refused', () => {
+  // ⭐ The card's pin and its control, one pair.
+  it('refuses a dimension over a json field, and accepts one over a text field', () => {
+    const found = dimensionFindings(dimensionStack({ type: 'json' }));
+    expect(found).toHaveLength(1);
+    const issue = found[0];
+    expect(issue.severity).toBe('error');
+    expect(issue.rule).toBe(DIMENSION_RULE);
+    expect(issue.path).toBe('datasets[0].dimensions[0].field');
+    expect(issue.where).toBe('dataset "opportunity_metrics" › dimension "the_dimension"');
+    // The author can act without opening the analytics service: the DIMENSION,
+    // the FIELD, its declared TYPE, the class, and what the door answers.
+    expect(issue.message).toContain('"the_dimension"');
+    expect(issue.message).toContain('"grouped"');
+    expect(issue.message).toContain('`json`');
+    expect(issue.message).toContain('structured-JSON');
+    expect(issue.message).toContain('400 INVALID_FIELD');
+    expect(issue.hint).toContain('scalar value');
+
+    expect(dimensionFindings(dimensionStack({ type: 'text' }))).toEqual([]);
+    // And a dimension never lands under the measure rule's id.
+    expect(findings(dimensionStack({ type: 'json' }))).toEqual([]);
+  });
+
+  it('refuses a dimension over every member of STRUCTURED_JSON_TYPES', () => {
+    expect(STRUCTURED_JSON_TYPES.size).toBeGreaterThan(0);
+    for (const fieldType of STRUCTURED_JSON_TYPES) {
+      expect(dimensionFindings(dimensionStack({ type: fieldType })), fieldType).toHaveLength(1);
+    }
+  });
+
+  // The analytics door's SECOND predicate, which reads the declaration: the
+  // same JSON column whether the type is inherently multi or flagged.
+  it('refuses a dimension over a multi-value field — inherently multi, or flagged multiple: true — and serves the same type unflagged', () => {
+    for (const fieldType of ['multiselect', 'checkboxes', 'tags']) {
+      expect(dimensionFindings(dimensionStack({ type: fieldType })), fieldType).toHaveLength(1);
+    }
+    const [flagged] = dimensionFindings(dimensionStack({ type: 'select', multiple: true }));
+    expect(flagged?.message).toContain('`select` with `multiple: true`');
+    expect(flagged?.message).toContain('multi-value');
+    // The route the door names: filter by one member, never group.
+    expect(flagged?.hint).toContain('$contains');
+    expect(dimensionFindings(dimensionStack({ type: 'select' }))).toEqual([]);
+  });
+
+  // The whole surface against the door's two predicates, read from the spec.
+  it('agrees with STRUCTURED_JSON_TYPES and isMultiValueField on every declared FieldType, flagged and not', () => {
+    let refused = 0;
+    let accepted = 0;
+    for (const fieldType of FieldType.options) {
+      for (const multiple of [false, true]) {
+        const def = multiple ? { type: fieldType, multiple: true } : { type: fieldType };
+        const fires = dimensionFindings(dimensionStack(def)).length > 0;
+        const expected = STRUCTURED_JSON_TYPES.has(fieldType) || isMultiValueField({ type: fieldType, multiple });
+        expect(fires, `${fieldType}${multiple ? ', multiple' : ''}`).toBe(expected);
+        if (fires) refused++;
+        else accepted++;
+      }
+    }
+    expect(refused).toBeGreaterThan(15);
+    expect(accepted).toBeGreaterThan(50);
+  });
+
+  it('judges a dimension over a joined field on the object the leaf lives on', () => {
+    const joined = (leafType: string) => ({
+      name: 'analytics_probe',
+      objects: [
+        {
+          name: 'crm_opportunity',
+          sharingModel: 'private',
+          fields: { name: { type: 'text' }, account: { type: 'lookup', reference: 'crm_account' } },
+        },
+        {
+          name: 'crm_account',
+          sharingModel: 'private',
+          fields: { name: { type: 'text' }, hq: { type: leafType } },
+        },
+      ],
+      datasets: [
+        {
+          name: 'opportunity_metrics',
+          object: 'crm_opportunity',
+          include: ['account'],
+          dimensions: [{ name: 'acct_hq', field: 'account.hq' }],
+          measures: [{ name: 'n', aggregate: 'count' }],
+        },
+      ],
+    });
+    const found = dimensionFindings(joined('json'));
+    expect(found).toHaveLength(1);
+    expect(found[0].message).toContain('account.hq');
+    expect(found[0].message).toContain('crm_account');
+    expect(dimensionFindings(joined('text'))).toEqual([]);
+  });
+
+  it('never hands the predicates a guess — the same skips as the measure leg', () => {
+    // A base object this stack does not define: `validate-object-references.ts`'s.
+    expect(dimensionFindings(dimensionStack({ type: 'json' }, { datasetObject: 'not_here' }))).toEqual([]);
+    // A path that resolves to nothing: `dataset-field-unknown`'s.
+    expect(dimensionFindings(dimensionStack({ type: 'json' }, { field: 'nope' }))).toEqual([]);
+    // An untyped field, and a dimension that writes no field / a non-string one.
+    expect(dimensionFindings(dimensionStack(undefined))).toEqual([]);
+    expect(dimensionFindings(dimensionStack({ type: 'json' }, { field: undefined }))).toEqual([]);
+    expect(dimensionFindings(dimensionStack({ type: 'json' }, { field: ['grouped'] }))).toEqual([]);
+  });
+
+  it('fires through runAuthoringRules on all three commands, and only on the refused dimension', () => {
+    const stack = dimensionStack({ type: 'json' });
+    for (const command of ['validate', 'build', 'lint'] as const) {
+      const found = runAuthoringRules(command, { normalized: stack, parsed: stack }).filter(
+        (f) => f.rule === DIMENSION_RULE,
+      );
+      expect(found, command).toHaveLength(1);
+      expect(found[0].severity, command).toBe('error');
+    }
+    const control = dimensionStack({ type: 'text' });
+    expect(
+      runAuthoringRules('lint', { normalized: control, parsed: control }).filter((f) => f.rule === DIMENSION_RULE),
     ).toEqual([]);
   });
 });

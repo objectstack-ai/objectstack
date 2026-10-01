@@ -63,6 +63,16 @@ export * from './utils/aggregate-answer.js';
 // Export the shared batched-write helper (framework#2678)
 export * from './utils/bulk-write.js';
 
+// [#20919] The bulk-import runner and the three pieces it writes through, moved
+// here from `@objectstack/rest` (which re-exports every name) so the connector
+// sync executor in `@objectstack/service-automation` writes through the same
+// runner as the import door without depending on the HTTP layer. ⛔ Never a
+// copy: one runner, one coercion, one mapping pipeline.
+export * from './utils/import-field-meta.js';
+export * from './utils/import-coerce.js';
+export * from './utils/import-mapping.js';
+export * from './utils/import-runner.js';
+
 // Export the shared write-response `internal: true` strip (#7823, #8497) — the
 // ONE helper every write mouth that answers an external caller runs its
 // records through. It lives here, on the floor all three transports share,

@@ -54,6 +54,11 @@ export const RenewalsPipelinePage = definePage({
   source: `
 function Page() {
   const adapter = useAdapter();
+  // The data-invalidation bus nonces for the two objects the rollup reads: a page
+  // action elsewhere that writes a project or an invoice moves one, and the effect
+  // below re-reads in place.
+  const projectChanged = useDataInvalidation('showcase_project');
+  const invoiceChanged = useDataInvalidation('showcase_invoice');
   const [sel, setSel] = React.useState(null);
   const [editing, setEditing] = React.useState(false);
   const [reload, setReload] = React.useState(0);
@@ -61,7 +66,7 @@ function Page() {
   const [related, setRelated] = React.useState({ projects: 0, invoices: 0, openInvoices: 0, capped: false });
 
   // Hand-rolled rollup: the imperative counterpart of the framework blocks
-  // below. You own the queries, loading, and refresh (reload bumps re-run it) --
+  // below. You own the queries, loading, and refresh (reload bumps and bus writes re-run it) --
   // and, because you own them, you own the two adapter contracts the blocks hide:
   //
   //  1. QUERY OPTIONS ARE $-PREFIXED. QueryParams declares $select, $filter,
@@ -99,7 +104,7 @@ function Page() {
       });
     })();
     return () => { alive = false; };
-  }, [adapter, sel, reload]);
+  }, [adapter, sel, reload, projectChanged, invoiceChanged]);
 
   const Stat = ({ label, value, accent }) => (
     <div style={{ background: 'hsl(var(--muted))', border: '1px solid hsl(var(--border))', borderRadius: 'var(--radius)', padding: 12 }}>

@@ -30,7 +30,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { ObjectQL } from '@objectstack/objectql';
-import { runImport, type ImportProtocolLike } from './import-runner';
+import { runImport, type ImportProtocolLike } from '@objectstack/core';
 import type { ExportFieldMeta } from './export-format.js';
 
 const TICKET = {
