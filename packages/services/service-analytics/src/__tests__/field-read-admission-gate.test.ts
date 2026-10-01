@@ -392,6 +392,9 @@ function fakeEngine() {
         reads.push(`aggregate:${object}`);
         return [];
       },
+      // [#21080] The engine this double models answers which objects carry a
+      // middleware registered for them; none of this file's objects does.
+      hasObjectMiddleware: () => false,
       getObject: (name: string) =>
         FIELDS[name] ? { fields: Object.fromEntries(FIELDS[name].map((f) => [f, { type: 'text' }])) } : undefined,
       resolveEffectiveDatasource: () => undefined,

@@ -5113,6 +5113,24 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#21080] Whether a middleware is registered FOR `objectName` — a
+   * {@link registerMiddleware} call whose `object` names it
+   * (`IObjectQLEngine.hasObjectMiddleware`).
+   *
+   * A read of what the registrations above recorded, and nothing else: it
+   * runs no middleware and registers none. A global registration (no
+   * `object`, or `'*'`) matches every object in {@link executeWithMiddleware}
+   * but is keyed to none, so it is not counted.
+   *
+   * Asked by a read path that runs no engine operation — the analytics
+   * native-SQL strategy, which executes raw SQL through the driver — so it can
+   * decline an object whose gates live here and let this engine serve it.
+   */
+  hasObjectMiddleware(objectName: string): boolean {
+    return this.middlewares.some((m) => !!m.object && m.object !== '*' && m.object === objectName);
+  }
+
+  /**
    * Execute an operation through the middleware chain
    */
   private async executeWithMiddleware(ctx: OperationContext, executor: () => Promise<any>): Promise<any> {
