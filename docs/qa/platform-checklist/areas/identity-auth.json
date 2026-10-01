@@ -1596,7 +1596,7 @@
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts (POST /two-factor/disable, SDK row)",
         "packages/platform-objects/src/identity/sys-user.object.ts#two_factor_enabled (disable_two_factor: password param, visible only while two_factor_enabled) + packages/platform-objects/src/identity/sys-two-factor.object.ts#sys_two_factor (the sys_two_factor variant, same endpoint)",
         "packages/plugins/plugin-auth/src/auth-manager.ts#computeAuthGate (computeAuthGate: MFA_REQUIRED after the grace window; mfa_required_at stamped lazily, no clearing write anywhere in the source; fail-open) + (isAuthGateActive)",
-        "packages/plugins/plugin-auth/src/auth-plugin.ts#twoFactor (mfa_required forces plugins.twoFactor on — 'otherwise gated users would have no way to comply' — the not-stranded contract the last clause tests)",
+        "packages/plugins/plugin-auth/src/auth-plugin.ts#mfa_required (mfa_required forces plugins.twoFactor on — 'otherwise gated users would have no way to comply' — the not-stranded contract the last clause tests; re-pointed: twoFactor is now a key written INLINE in the refusable mfa_required patch literal, which the shared resolver does not read as a declaration, and 'mfa_required' is the quoted settings key that guards that forcing branch)",
         "packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts (arming + challenge rig + TOTP helper precedent, as on the sibling items)"
       ],
       "history": [

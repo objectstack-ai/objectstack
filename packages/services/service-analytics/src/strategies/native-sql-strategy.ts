@@ -18,6 +18,8 @@ import { findCrossFieldComparand, findUninterpretableTemporalMember } from '../c
 import { assertReadScopeCannotVacate, compileScopedFilterToSql } from '../read-scope-sql.js';
 import { nonTextColumnResolver, textOperatorPolarity } from '../non-text-column.js';
 import { declaredValueShapeResolver, whereEmptyLeafSql } from '../empty-operator-sql.js';
+// [#20986] The one resolver of the object a relationship-path hop reads.
+import { columnObjectOf, relationshipReferenceOf, resolvePathHops, type HopReference } from '../hop-object.js';
 import { datasetInvalidError, invalidMemberError } from '../dataset-refusal.js';
 import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
@@ -128,6 +130,24 @@ export const EXPRESSION_METRIC_TYPES = new Set(['number', 'string', 'boolean']);
  * expression that merely contains a dot. #4157.
  */
 const IDENTIFIER_PATH = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/;
+
+/**
+ * [#20986] The joins ONE statement registers, keyed by alias: each join's SQL
+ * and the object it reads — the object {@link resolvePathHops} named for that
+ * hop, which `generateSql` then scopes the alias as. One value for both, so
+ * the object a statement joins and the object whose read scope it applies to
+ * that join cannot differ.
+ *
+ * Carries the host's {@link HopReference} (the context's
+ * `relationshipReference`) so every path the statement walks — a dimension, a
+ * measure, a filter member, a time dimension — is resolved with the answer the
+ * door admitted the query with.
+ */
+class StatementJoins extends Map<string, { readonly sql: string; readonly object: string }> {
+  constructor(readonly referenceOf: HopReference | undefined) {
+    super();
+  }
+}
 
 /**
  * NativeSQLStrategy — Priority 1
@@ -528,9 +548,11 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     const selectClauses: string[] = [];
     const groupByClauses: string[] = [];
     const tableName = this.extractObjectName(cube);
-    // Map of relation alias → JOIN clause. Populated lazily as dotted
-    // dimensions/measures/filters are resolved.
-    const joins = new Map<string, string>();
+    // Map of relation alias → JOIN clause and the object it reads. Populated
+    // lazily as dotted dimensions/measures/filters are resolved. [#20986] Each
+    // hop's object comes from the one resolver, with the host's answer for a
+    // relationship field's declared target — the door's own.
+    const joins = new StatementJoins(relationshipReferenceOf(ctx));
 
     // Build SELECT for dimensions
     if (query.dimensions && query.dimensions.length > 0) {
@@ -558,7 +580,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // asked of the SAME target `compileFilterNode` coerces for. This face's own
     // bare-day copy (`buildFilterClause`'s `lte` arm) stays until its deletion
     // card, and is idempotent on the lowered bound.
-    const lowering = declaredDatetimeLowering(ctx, (member) => this.resolveStorageTarget(cube, member, tableName));
+    const lowering = declaredDatetimeLowering(ctx, (member) => this.resolveStorageTarget(cube, member, tableName, joins.referenceOf));
 
     // Build SELECT for measures
     if (query.measures && query.measures.length > 0) {
@@ -649,7 +671,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
           // and normalise the column to that form too, because the column holds
           // BOTH forms at once and coercing only the bounds still empties the
           // half the writer stored the other way (#3912).
-          const td2 = this.resolveStorageTarget(cube, td.dimension, tableName);
+          const td2 = this.resolveStorageTarget(cube, td.dimension, tableName, joins.referenceOf);
           const column = this.temporalColumn(ctx, td2, colExpr);
           // A bare-day window end means "through that whole day" (#3777). A
           // BETWEEN's inclusive upper bound anchors a bare `YYYY-MM-DD` to
@@ -720,17 +742,18 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // 2. Inject the tenant/RLS read scope for the base table AND every joined
     //    object — this is the predicate the raw-SQL path would otherwise skip.
     this.applyReadScope(this.extractObjectName(cube), tableName, ctx, whereClauses, params);
-    for (const alias of joins.keys()) {
-      // The joined OBJECT (for the RLS lookup) is the target table from the
-      // cube's join map; the ALIAS is how it's referenced in SQL. These differ
-      // for namespaced objects (alias `account` → object `crm_account`).
-      const joinedObject = cube.joins?.[alias]?.name ?? alias;
-      this.applyReadScope(joinedObject, alias, ctx, whereClauses, params);
+    for (const [alias, join] of joins) {
+      // The joined OBJECT (for the RLS lookup) is the object the join reads;
+      // the ALIAS is how it's referenced in SQL. These differ whenever the
+      // relationship is named differently from its target (alias `account` →
+      // object `crm_account`). [#20986] Read off the registered join itself —
+      // the object `qualifyAndRegisterJoin` joined, never a second resolution.
+      this.applyReadScope(join.object, alias, ctx, whereClauses, params);
     }
 
     let sql = `SELECT ${selectClauses.join(', ')} FROM "${tableName}"`;
     if (joins.size > 0) {
-      sql += ' ' + Array.from(joins.values()).join(' ');
+      sql += ' ' + Array.from(joins.values(), (join) => join.sql).join(' ');
     }
     if (whereClauses.length > 0) {
       sql += ` WHERE ${whereClauses.join(' AND ')}`;
@@ -816,13 +839,6 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     whereClauses.push(`(${rendered})`);
   }
 
-  /** SQL-safe join alias for a relationship path (dots → `__`); single-segment
-   *  paths are unchanged. Mirrors the dataset compiler's `cube.joins` keying so
-   *  alias, allowlist, and per-hop RLS all agree on one valid identifier. */
-  private joinAlias(path: string): string {
-    return path.replace(/\./g, '__');
-  }
-
   /**
    * Resolve a dimension/measure/filter SQL expression that may reference a
    * related table via dot notation (e.g. `account.industry`).
@@ -835,9 +851,11 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
    *
    *   <parentTable>.<lookupField> = <lookupField>.id
    *
-   * i.e. the lookup field name on the parent table equals the related
-   * table name. This holds for all `Field.lookup({ object: '...' })`
-   * declarations where the field is named after its target object.
+   * and the joined TABLE at each hop is the object {@link resolvePathHops}
+   * names for it ([#20986]): the cube's declared join, else the lookup
+   * field's declared target, else the alias itself. A lookup named after its
+   * target joins `LEFT JOIN "account" ON …`; one named differently joins its
+   * target under the field's alias, `LEFT JOIN "crm_person" "owner" ON …`.
    *
    * Returns the qualified SQL reference (e.g. `"account"."industry"`).
    * Pure column references (no dot) are returned as-is.
@@ -845,7 +863,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
   private qualifyAndRegisterJoin(
     rawSql: string,
     parentTable: string,
-    joins: Map<string, string>,
+    joins: StatementJoins,
     cube?: Cube,
   ): string {
     if (!rawSql.includes('.')) {
@@ -878,22 +896,21 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     const hops = segments.slice(0, -1);
     if (hops.length === 0 || !column) return rawSql;
     let parentAlias = parentTable;
-    let prefix = '';
-    for (const seg of hops) {
-      prefix = prefix ? `${prefix}.${seg}` : seg;
-      const alias = this.joinAlias(prefix);
+    // [#20986] The joined TABLE at each hop is the object the one resolver
+    // names — the cube's join keyed by the same alias (emitted by the dataset
+    // compiler), else the relationship field's declared target, else the alias
+    // for a host that cannot answer — and the join records it, so the read
+    // scope `generateSql` applies to the alias is that object's.
+    for (const hop of resolvePathHops(cube, parentTable, hops, joins.referenceOf)) {
+      const alias = hop.alias;
       if (!joins.has(alias)) {
-        // The joined TABLE is resolved from the Cube's `joins` map (emitted by
-        // the dataset compiler, keyed by the same alias); fall back to the alias
-        // as the table for legacy/same-name cubes.
-        const joinTable = cube?.joins?.[alias]?.name ?? alias;
         // Only emit an explicit alias when the table differs from it; when they
         // match, `LEFT JOIN "account" ON …` is cleaner (and back-compat).
-        const tableRef = joinTable === alias ? `"${alias}"` : `"${joinTable}" "${alias}"`;
-        joins.set(
-          alias,
-          `LEFT JOIN ${tableRef} ON "${parentAlias}"."${seg}" = "${alias}"."id"`,
-        );
+        const tableRef = hop.object === alias ? `"${alias}"` : `"${hop.object}" "${alias}"`;
+        joins.set(alias, {
+          sql: `LEFT JOIN ${tableRef} ON "${parentAlias}"."${hop.field}" = "${alias}"."id"`,
+          object: hop.object,
+        });
       }
       parentAlias = alias;
     }
@@ -945,7 +962,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     cube: Cube,
     member: string,
     parentTable: string,
-    joins: Map<string, string>,
+    joins: StatementJoins,
   ): string {
     const dim = this.lookupMember(cube, member, 'dimension');
     const raw = dim ? dim.sql : (member.includes('.') ? member.split('.')[1] : member);
@@ -961,7 +978,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     cube: Cube,
     member: string,
     parentTable: string,
-    joins: Map<string, string>,
+    joins: StatementJoins,
     predicate: string | null = null,
   ): string {
     const measure = this.lookupMember(cube, member, 'measure') as
@@ -1043,7 +1060,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     cube: Cube,
     member: string,
     parentTable: string,
-    joins: Map<string, string>,
+    joins: StatementJoins,
   ): string {
     const dim = this.lookupMember(cube, member, 'dimension');
     if (dim) return this.qualifyAndRegisterJoin(dim.sql, parentTable, joins, cube);
@@ -1060,9 +1077,10 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
    * Mirrors `resolveFieldSql`'s `sql` resolution but yields the *logical*
    * target rather than the qualified SQL:
    *   - A dotted column (`account.region`, emitted for a relation traversal)
-   *     belongs to the JOINED object — resolve the alias → target table via the
-   *     cube's `joins` map (alias `account` → object `crm_account` when
-   *     namespaced) and take the tail as the column.
+   *     belongs to the JOINED object — the object the path's last hop reads,
+   *     as {@link resolvePathHops} names it for the join itself ([#20986]: the
+   *     cube's join, else the lookup field's declared target, else the alias)
+   *     — and the tail is the column.
    *   - Otherwise the column lives on the cube's BASE table. Use the dimension's
    *     resolved `sql` (the real column, which may differ from the member name,
    *     e.g. dimension `assessed` → column `assessed_at`) rather than the member.
@@ -1071,18 +1089,19 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     cube: Cube,
     member: string,
     baseTable: string,
+    referenceOf: HopReference | undefined,
   ): { object: string; field: string } {
     const dim = this.lookupMember(cube, member, 'dimension');
     const measure = dim ? undefined : this.lookupMember(cube, member, 'measure');
     const rawSql = dim?.sql ?? measure?.sql ?? (member.includes('.') ? member.split('.').slice(1).join('.') : member);
 
     if (rawSql.includes('.')) {
-      // Multi-hop (ADR-0071): the column's owning object is the join at the
-      // relationship PATH (all segments but the last); the column is the last.
+      // Multi-hop (ADR-0071): the column's owning object is the object the
+      // relationship PATH (all segments but the last) reaches; the column is
+      // the last.
       const segments = rawSql.split('.');
       const field = segments[segments.length - 1];
-      const relPath = segments.slice(0, -1).join('.');
-      const object = cube.joins?.[this.joinAlias(relPath)]?.name ?? relPath;
+      const object = columnObjectOf(cube, baseTable, rawSql, referenceOf);
       return { object, field };
     }
     return { object: baseTable, field: rawSql };
@@ -1185,7 +1204,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     node: NormalizedFilterNode | null,
     cube: Cube,
     parentTable: string,
-    joins: Map<string, string>,
+    joins: StatementJoins,
     params: unknown[],
     ctx: StrategyContext,
   ): string | null {
@@ -1218,7 +1237,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       const colExpr = this.resolveFieldSql(cube, node.member, parentTable, joins);
       // Resolve the (object, column) this member binds against so the value
       // can be coerced to the column's storage form (see buildFilterClause).
-      const target = this.resolveStorageTarget(cube, node.member, parentTable);
+      const target = this.resolveStorageTarget(cube, node.member, parentTable, joins.referenceOf);
       return this.buildFilterClause(colExpr, node.operator, node.values, params, ctx, target);
     }
 
@@ -1243,7 +1262,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
         if (node.kind !== 'or') continue;
         params.length = paramBase;
         joins.clear();
-        for (const [alias, clauseSql] of joinBase) joins.set(alias, clauseSql);
+        for (const [alias, join] of joinBase) joins.set(alias, join);
         return null;
       }
       parts.push(clause);
