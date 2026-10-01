@@ -45,6 +45,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import type { PermissionSet } from '@objectstack/spec/security';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { SecurityPlugin } from './security-plugin.js';
 import { RLS_DENY_FILTER } from './rls-compiler.js';
 
@@ -77,10 +78,11 @@ async function boot(deployment: Deployment) {
       registerMiddleware: (mw: any) => middlewares.push(mw),
       getSchema: (name: string) => SCHEMAS[name],
       // The delegator's user row, and nothing else: the delegator's grants come
-      // from the explicit list below, or from no list at all.
-      findOne: vi.fn(async (object: string, query: any) =>
-        (object === 'sys_user' && query?.where?.id === DELEGATOR_ID ? { id: DELEGATOR_ID, email: 'delegator@synth.test' } : null)),
-      find: vi.fn(async () => []),
+      // from the deployment's sets, or from no set at all.
+      findOne: vi.fn(async (object: string, query: any) => {
+        assertEngineFindOnePredicate(object, query);
+        return object === 'sys_user' && query?.where?.id === DELEGATOR_ID ? { id: DELEGATOR_ID, email: 'delegator@synth.test' } : null;
+      }),
     },
     metadata: {
       get: async (_type: string, name: string) => SCHEMAS[name],
