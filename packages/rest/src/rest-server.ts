@@ -5319,6 +5319,26 @@ export class RestServer {
                             sendEnvelopeError(res, typeRefusal.status, typeRefusal.code, typeRefusal.message);
                             return;
                         }
+                        // [#21124] …and its write-side twin: a write of a
+                        // datasource definition is admitted on the capability
+                        // the datasource admin door requires for the same
+                        // create / update / remove. Asked here, before the
+                        // door's own authoring admission resolves the protocol,
+                        // so a refused caller writes nothing and is told the
+                        // same thing whether or not the name exists. The verb
+                        // judged is the ROUTE's declared one (`RouteEntry.method`
+                        // is required) — the door being entered. The decision
+                        // is `metaTypeWriteRefusal`, which the runtime
+                        // dispatcher's `/meta` entry asks too.
+                        const writeRefusal = metaReadGate.metaTypeWriteRefusal(
+                            entry.method,
+                            req?.params?.type,
+                            context,
+                        );
+                        if (writeRefusal) {
+                            sendEnvelopeError(res, writeRefusal.status, writeRefusal.code, writeRefusal.message);
+                            return;
+                        }
                         return (inner as (rq: any, rs: any) => unknown)(req, res);
                     },
                 } as any);
