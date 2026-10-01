@@ -39,6 +39,7 @@ import { validateSemanticRoles } from '@objectstack/lint';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import type { MetadataAuthoringChannel } from './protocol.js';
 import { SDUI_MANIFEST_SERVICE } from './index.js';
+import { stampHtmlPageRequires } from './runtime-authoring-gate.js';
 
 /** The issue's body. Zod-valid: `approvers[].value` is just a string to the schema. */
 const brokenApprovalFlow = () => ({
@@ -1230,5 +1231,168 @@ describe('html page source compiled at the save door against the SDUI manifest (
         expect(storedPage(rows)?.requires).toBeUndefined();
         const lines = (warn.mock.calls as unknown[][]).map((c) => String(c[0])).filter((m) => m.includes(`'sdui-manifest' service`));
         expect(lines).toHaveLength(1);
+    });
+});
+
+/**
+ * [#20312] ADR-0080 §5 — `requires` is "validated at save and load", and it is
+ * derived from the source, never carried. The save door's half is pinned in
+ * the block above; this block pins the other two moments a stored page's
+ * `requires` meets the deployment's manifest:
+ *
+ *  - **At load** (`loadMetaFromDb`, the boot hydration of stored rows): a page
+ *    whose `requires` names a namespace no component in the manifest carries —
+ *    a plugin this deployment's console does not load — is reported with the
+ *    page and the namespace named, and the page still loads. It reads the same
+ *    `SDUI_MANIFEST_SERVICE` key the save door reads; with no manifest
+ *    registered nothing is judged, exactly as at the save door.
+ *  - **At draft → active promotion** (`publishMetaItem` and
+ *    `publishPackageDrafts`, both through `promoteDraftForPublish`): the
+ *    promoted body carries the `requires` the save door computes for it
+ *    (`stampHtmlPageRequires`), not the draft's.
+ */
+describe('stored html page `requires` at load and at draft promotion (#20312)', () => {
+    const slot = { name: 'children', type: 'slot' };
+    const manifest = (withKanban = true) => ({
+        components: {
+            flex: { type: 'flex', namespace: 'ui', isContainer: true, inputs: [slot] },
+            box: { type: 'box', namespace: 'ui', isContainer: true, inputs: [slot] },
+            ...(withKanban ? { kanban: { type: 'kanban', namespace: 'plugin-kanban', inputs: [] } } : {}),
+        },
+    });
+    const htmlPage = (source: string, extra: Record<string, unknown> = {}) => ({
+        name: 'landing', label: 'Landing', kind: 'html', source, ...extra,
+    });
+    const WITH_KANBAN = '<flex><box>a</box><kanban /></flex>';
+
+    /** A protocol whose services table the test holds, plus the registry writes boot hydration makes. */
+    function hostWith(services: Map<string, unknown>) {
+        const { engine, rows } = makeStubEngine();
+        const registered: Array<{ type: string; name: unknown }> = [];
+        engine.registry.registerItem = (type: string, item: { name?: unknown }) => {
+            registered.push({ type, name: item?.name });
+        };
+        const protocol = new ObjectStackProtocolImplementation(engine, () => services, 'env_test') as any;
+        return { protocol, rows, registered };
+    }
+    const storedPage = (rows: Map<string, Row>, state = 'active') => {
+        const row = Array.from(rows.values()).find((r) => r.type === 'page' && r.state === state);
+        return row ? JSON.parse(row.metadata) : undefined;
+    };
+    const savePage = (protocol: any, item: unknown, extra: Record<string, unknown> = {}) =>
+        protocol.saveMetaItem({ type: 'page', name: 'landing', item, ...extra });
+    const loadReports = (warn: ReturnType<typeof vi.spyOn>) =>
+        (warn.mock.calls as unknown[][]).map((c) => String(c[0])).filter((m) => m.includes('[page_requires_plugin_absent]'));
+
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+    });
+
+    // ── At load ──────────────────────────────────────────────────────────
+
+    it('at load, a stored page naming a plugin the manifest does not carry is reported — page and plugin named — and still loads', async () => {
+        const services = new Map<string, unknown>();
+        const { protocol, rows, registered } = hostWith(services);
+        // Stored on a host with no manifest, so stored as written…
+        await savePage(protocol, htmlPage(WITH_KANBAN, { requires: ['ui', 'plugin-kanban'] }));
+        expect(storedPage(rows)?.requires).toEqual(['ui', 'plugin-kanban']);
+        // …and the deployment's console now carries no `plugin-kanban` component.
+        services.set('sdui-manifest', manifest(false));
+
+        const result = await protocol.loadMetaFromDb();
+
+        expect(result).toMatchObject({ loaded: 1, errors: 0, storeUnavailable: false });
+        expect(registered).toContainEqual({ type: 'page', name: 'landing' });
+        const lines = loadReports(warn);
+        expect(lines, JSON.stringify(warn.mock.calls)).toHaveLength(1);
+        expect(lines[0]).toContain('page/landing');
+        expect(lines[0]).toContain(`'plugin-kanban'`);
+        expect(lines[0]).not.toContain(`'ui'`);
+    });
+
+    it('at load, a stored page whose every plugin is present is not reported (the control)', async () => {
+        const services = new Map<string, unknown>();
+        const { protocol, registered } = hostWith(services);
+        await savePage(protocol, htmlPage(WITH_KANBAN, { requires: ['ui', 'plugin-kanban'] }));
+        services.set('sdui-manifest', manifest(true));
+
+        const result = await protocol.loadMetaFromDb();
+
+        expect(result).toMatchObject({ loaded: 1, errors: 0 });
+        expect(registered).toContainEqual({ type: 'page', name: 'landing' });
+        expect(loadReports(warn)).toEqual([]);
+    });
+
+    it('at load, a host with no manifest judges nothing — the save door\'s posture', async () => {
+        const { protocol, registered } = hostWith(new Map());
+        await savePage(protocol, htmlPage(WITH_KANBAN, { requires: ['ui', 'plugin-absent'] }));
+
+        const result = await protocol.loadMetaFromDb();
+
+        expect(result).toMatchObject({ loaded: 1, errors: 0 });
+        expect(registered).toContainEqual({ type: 'page', name: 'landing' });
+        expect(loadReports(warn)).toEqual([]);
+    });
+
+    // ── At draft → active promotion ──────────────────────────────────────
+
+    it('a draft saved before the manifest arrived is promoted with the `requires` the save door computes', async () => {
+        const services = new Map<string, unknown>();
+        const { protocol, rows } = hostWith(services);
+        const body = htmlPage(WITH_KANBAN);
+        await savePage(protocol, body, { mode: 'draft' });
+        expect(storedPage(rows, 'draft')?.requires).toBeUndefined();
+        services.set('sdui-manifest', manifest());
+
+        await expect(protocol.publishMetaItem({ type: 'page', name: 'landing' }))
+            .resolves.toMatchObject({ success: true });
+
+        const saveDoor = stampHtmlPageRequires('page', body, manifest()) as { requires?: unknown };
+        expect(saveDoor.requires).toEqual(['ui', 'plugin-kanban']);
+        expect(storedPage(rows)?.requires).toEqual(saveDoor.requires);
+    });
+
+    it('an agreeing draft `requires` is promoted as the save door spells it, not as the draft carried it', async () => {
+        const services = new Map<string, unknown>();
+        const { protocol, rows } = hostWith(services);
+        const body = htmlPage(WITH_KANBAN, { requires: ['plugin-kanban', 'ui', 'ui'] });
+        await savePage(protocol, body, { mode: 'draft' });
+        services.set('sdui-manifest', manifest());
+
+        await expect(protocol.publishMetaItem({ type: 'page', name: 'landing' }))
+            .resolves.toMatchObject({ success: true });
+
+        expect(storedPage(rows)?.requires)
+            .toEqual((stampHtmlPageRequires('page', body, manifest()) as { requires?: unknown }).requires);
+        expect(storedPage(rows)?.requires).toEqual(['ui', 'plugin-kanban']);
+    });
+
+    it('the package batch promotion re-stamps too', async () => {
+        const services = new Map<string, unknown>();
+        const { protocol, rows } = hostWith(services);
+        const body = htmlPage(WITH_KANBAN);
+        await savePage(protocol, body, { mode: 'draft', packageId: 'com.example.pages' });
+        services.set('sdui-manifest', manifest());
+
+        const result = await protocol.publishPackageDrafts({ packageId: 'com.example.pages' });
+
+        expect(result, JSON.stringify(result.failed)).toMatchObject({ success: true, publishedCount: 1 });
+        expect(storedPage(rows)?.requires)
+            .toEqual((stampHtmlPageRequires('page', body, manifest()) as { requires?: unknown }).requires);
+    });
+
+    it('a promotion on a host with no manifest stores the draft as written — the save door\'s posture', async () => {
+        const { protocol, rows } = hostWith(new Map());
+        await savePage(protocol, htmlPage(WITH_KANBAN, { requires: ['plugin-absent'] }), { mode: 'draft' });
+
+        await expect(protocol.publishMetaItem({ type: 'page', name: 'landing' }))
+            .resolves.toMatchObject({ success: true });
+
+        expect(storedPage(rows)?.requires).toEqual(['plugin-absent']);
     });
 });

@@ -3225,11 +3225,16 @@ export class AuthPlugin implements Plugin {
     // mount when an operator flipped the env var on without editing the
     // config file, leaving external OIDC/MCP clients unable to discover
     // the authorization server.
+    //
+    // [#21078] Called SYNCHRONOUSLY, like every route above: the discovery
+    // routes are on the router before this `kernel:ready` hook returns, so
+    // they land ahead of `kernel:listening` (the phase that opens the socket)
+    // and ahead of the first request. A throw here — a route that cannot
+    // mount — propagates out of the hook and fails the boot, the same as the
+    // routes above; ⛔ never `void` it, and ⛔ never catch-and-log it.
     const oidcEnabled = resolveOidcProviderEnabled(this.options.plugins);
     if (oidcEnabled) {
-      void this.registerOidcDiscoveryRoutes(rawApp, ctx).catch((error) => {
-        ctx.logger.error('Failed to register OIDC discovery routes', error as Error);
-      });
+      this.registerOidcDiscoveryRoutes(rawApp, ctx);
     }
 
     ctx.logger.info(`Auth routes registered: All requests under ${basePath}/* forwarded to better-auth`);
@@ -3240,27 +3245,52 @@ export class AuthPlugin implements Plugin {
    * URL. Required by RFC 8414 §3 and OpenID Connect Discovery 1.0 §4 — the
    * documents must live at `/.well-known/{oauth-authorization-server,openid-configuration}`
    * relative to the issuer, not under the auth basePath.
+   *
+   * ## [#21078] Every route is mounted HERE, synchronously — never after an await
+   *
+   * Hono builds its route matcher on the first request it matches, and from
+   * then on `app.get(...)` throws `Can not add a route since the matcher is
+   * already built`. This method used to `await` the better-auth instance
+   * first and mount after it, and its caller dispatched it with `void`, so the
+   * mounts landed whenever that build finished — after `kernel:listening`
+   * whenever the build outlasted the rest of the boot. A first request inside
+   * that window (a readiness probe is the likely one) built the matcher, the
+   * late mount threw, the throw was caught and logged, and both discovery
+   * doors answered 404 for the life of the process.
+   *
+   * So the work is split by what is knowable WHEN:
+   *
+   *   - CONFIG-level — known at mount, decided here: whether discovery is on
+   *     at all (the caller's `resolveOidcProviderEnabled`), the issuer and its
+   *     transport posture, the base path the RFC 8414 §3.1 alias inserts, and
+   *     whether the RFC 9728 protected-resource documents go up (the MCP
+   *     surface env switch and `isMcpOAuthEnabled()`, both configuration
+   *     reads). Every route is put on the router before this returns.
+   *   - INSTANCE-level — known only once better-auth is built: whether the
+   *     oauthProvider plugin actually initialised (`getDegradedAuthFeatures`),
+   *     and the instance the vendor's document builders read. Each handler
+   *     resolves that per request, through `getAuthInstance()` — single-flight
+   *     and memoised in `AuthManager`, so a request costs a cached promise, and
+   *     a rebuild after a settings patch is served from the live instance
+   *     rather than the one that happened to exist at boot.
+   *
+   * ⛔ No `rawApp.get` after an `await`, in this method or anywhere it calls.
    */
-  private async registerOidcDiscoveryRoutes(rawApp: any, ctx: PluginContext): Promise<void> {
-    const auth = await this.authManager!.getAuthInstance();
+  private registerOidcDiscoveryRoutes(rawApp: any, ctx: PluginContext): void {
+    const manager = this.authManager!;
 
     // The oauthProvider plugin may have been skipped by the optional-plugin
     // isolation in AuthManager.buildPluginList (a failing optional plugin no
     // longer fails the whole instance — the 15.1.0 lesson). Advertising
     // .well-known discovery documents for an IdP whose endpoints are not
-    // mounted would send every external client into 404s, so skip the mounts
-    // and say why. Core auth is already up at this point.
-    const degradedOidc = this.authManager!
-      .getDegradedAuthFeatures()
-      .find((d) => d.feature === 'oidcProvider');
-    if (degradedOidc) {
-      ctx.logger.error(
-        'OIDC provider is configured but its better-auth plugin failed to initialize; ' +
-          'skipping /.well-known discovery mounts. External SSO/MCP clients cannot use this ' +
-          `deployment as an IdP until the underlying error is fixed: ${degradedOidc.error}`,
-      );
-      return;
-    }
+    // mounted would send every external client into 404s. That is an
+    // INSTANCE-level fact, so it cannot decide whether a route is mounted
+    // (the routes are mounted before the instance exists); it decides how a
+    // mounted route ANSWERS — `next()`, which is exactly the answer the path
+    // gave when it was not mounted at all: whatever else matches, else the
+    // server's not-found response.
+    const degradedOidc = () =>
+      manager.getDegradedAuthFeatures().find((d) => d.feature === 'oidcProvider');
 
     // ── Plain-HTTP OAuth notices (maintainer ruling 2026-09-21; how the
     //    ruled sentence is carried: ruling batch #210 item 5) ───────────
@@ -3302,7 +3332,14 @@ export class AuthPlugin implements Plugin {
     // TLS. Both read off the PUBLISHED issuer — the authorization-server
     // identity these documents are about — so each names the exact URL a
     // client is sent to rather than a value only this method can see.
-    const authIssuer = this.authManager!.getAuthIssuer();
+    //
+    // [#21078] Both are CONFIG-level facts — the issuer is configuration — so
+    // they are emitted here, at mount, before the instance exists. They used
+    // to sit behind the degraded-oauthProvider early return; a deployment
+    // with that plugin degraded now also gets its own boot-time ERROR line
+    // below, which says the documents are NOT served, and that line is the
+    // one that decides what a client meets.
+    const authIssuer = manager.getAuthIssuer();
     const servedOverPlainHttp = /^http:\/\//i.test(authIssuer);
     if (servedOverPlainHttp && isOAuthEligibleBaseUrl(authIssuer)) {
       ctx.logger.warn(
@@ -3327,12 +3364,26 @@ export class AuthPlugin implements Plugin {
       );
     }
 
-    const { oauthProviderAuthServerMetadata, oauthProviderOpenIdConfigMetadata } = await import(
-      '@better-auth/oauth-provider'
-    );
-
-    const authServerHandler = oauthProviderAuthServerMetadata(auth as any);
-    const openidConfigHandler = oauthProviderOpenIdConfigMetadata(auth as any);
+    // INSTANCE-level: the vendor's document builders, bound to the live
+    // instance. `null` = the oauthProvider plugin is degraded on that
+    // instance, so the documents are not served (see `degradedOidc` above).
+    // A rejection (the instance cannot be built) is NOT caught here: a
+    // request meets it as the server's error response, and the next request
+    // retries the build — `getOrCreateAuth` drops a failed build.
+    type DocumentHandler = (req: Request) => Promise<Response>;
+    const resolveDiscoveryDocuments = async (): Promise<
+      { authServer: DocumentHandler; openidConfig: DocumentHandler } | null
+    > => {
+      const auth = await manager.getAuthInstance();
+      if (degradedOidc()) return null;
+      const { oauthProviderAuthServerMetadata, oauthProviderOpenIdConfigMetadata } = await import(
+        '@better-auth/oauth-provider'
+      );
+      return {
+        authServer: oauthProviderAuthServerMetadata(auth as any),
+        openidConfig: oauthProviderOpenIdConfigMetadata(auth as any),
+      };
+    };
 
     // Cache-Control for OIDC discovery docs. These describe stable issuer
     // configuration (endpoints, supported scopes, signing algs); they
@@ -3349,8 +3400,19 @@ export class AuthPlugin implements Plugin {
       return resp;
     };
 
-    rawApp.get('/.well-known/oauth-authorization-server', (c: any) => withDiscoveryCache(authServerHandler, c.req.raw));
-    rawApp.get('/.well-known/openid-configuration', (c: any) => withDiscoveryCache(openidConfigHandler, c.req.raw));
+    // One handler shape for every document route: resolve the instance-level
+    // half for THIS request, then serve — or hand on exactly as an unmounted
+    // path would when the provider is degraded.
+    const serveDocument =
+      (pick: (docs: { authServer: DocumentHandler; openidConfig: DocumentHandler }) => DocumentHandler) =>
+      async (c: any, next: () => Promise<void>) => {
+        const docs = await resolveDiscoveryDocuments();
+        if (!docs) return next();
+        return withDiscoveryCache(pick(docs), c.req.raw);
+      };
+
+    rawApp.get('/.well-known/oauth-authorization-server', serveDocument((d) => d.authServer));
+    rawApp.get('/.well-known/openid-configuration', serveDocument((d) => d.openidConfig));
 
     // RFC 8414 §3.1 path-insertion variant. Our issuer identifier carries a
     // path component (`<origin>/api/v1/auth`), so spec-conforming clients
@@ -3358,9 +3420,7 @@ export class AuthPlugin implements Plugin {
     // metadata) request `/.well-known/oauth-authorization-server/api/v1/auth`
     // — alias it to the same document.
     const basePath = (this.options.basePath ?? DEFAULT_AUTH_BASE_PATH).replace(/\/$/, '');
-    rawApp.get(`/.well-known/oauth-authorization-server${basePath}`, (c: any) =>
-      withDiscoveryCache(authServerHandler, c.req.raw),
-    );
+    rawApp.get(`/.well-known/oauth-authorization-server${basePath}`, serveDocument((d) => d.authServer));
 
     // ── MCP protected-resource metadata (RFC 9728, #2698) ──────────────
     // `/api/v1/mcp` is an OAuth 2.1 protected resource; its metadata points
@@ -3369,10 +3429,17 @@ export class AuthPlugin implements Plugin {
     // transport rule satisfied — TLS, or plain HTTP on a loopback / private
     // / link-local host): when it is off, nothing is advertised and the
     // endpoint stays API-key-only, fail-closed.
-    const manager = this.authManager!;
+    //
+    // [#21078] Mounted on the CONFIG-level decision (the env switch and
+    // `isMcpOAuthEnabled()` are both configuration reads). The document points
+    // clients at the authorization server above, so it carries the same
+    // INSTANCE-level gate: a degraded oauthProvider hands the request on,
+    // exactly as the unmounted path used to answer.
     if (readMcpServerEnabledEnv() && typeof manager.isMcpOAuthEnabled === 'function') {
       if (manager.isMcpOAuthEnabled()) {
-        const prmHandler = () => {
+        const prmHandler = async (_c: unknown, next: () => Promise<void>) => {
+          await manager.getAuthInstance();
+          if (degradedOidc()) return next();
           const body = JSON.stringify(manager.getMcpProtectedResourceMetadata());
           return new Response(body, {
             status: 200,
@@ -3398,6 +3465,47 @@ export class AuthPlugin implements Plugin {
 
     ctx.logger.info(
       'OIDC discovery endpoints mounted at /.well-known/{oauth-authorization-server,openid-configuration}',
+    );
+
+    // ── Boot-time preparation — mounts NOTHING ──────────────────────────
+    //
+    // Every route is already on the router above. This runs the SAME
+    // instance-level resolution a request runs, once, at boot, for the three
+    // things the old await-then-mount shape did at boot and that are kept:
+    //
+    //   1. the better-auth instance is built in the background at boot, not
+    //      by whichever request first needs it — moving that build (and the
+    //      vendor plugins' own `init` writes) into the serving window is a
+    //      separate change, not this one;
+    //   2. a degraded oauthProvider is reported at boot, once, at ERROR;
+    //   3. documents that cannot be built from the instance are reported at
+    //      boot, at ERROR, under the line's established opening words —
+    //      `scripts/publish-smoke.sh` asserts them BY NAME in its boot window
+    //      (SMOKE_BOOT_ERROR_PATTERN), so they are a grep anchor and are kept
+    //      verbatim at the front of the line.
+    //
+    // Not awaited — nothing above depends on it and nothing here can add a
+    // route — and not swallowed: both outcomes are logged, and a request that
+    // meets the same failure gets the server's error response.
+    void resolveDiscoveryDocuments().then(
+      (docs) => {
+        const degraded = docs ? undefined : degradedOidc();
+        if (!degraded) return;
+        ctx.logger.error(
+          'OIDC provider is configured but its better-auth plugin failed to initialize, so the ' +
+            '/.well-known discovery documents are NOT served: those paths answer as if they were not ' +
+            'mounted. External SSO/MCP clients cannot use this deployment as an IdP until the ' +
+            `underlying error is fixed: ${degraded.error}`,
+        );
+      },
+      (error) => {
+        ctx.logger.error(
+          'Failed to register OIDC discovery routes: the /.well-known paths are mounted, but the auth ' +
+            'instance their documents are built from could not be prepared, so every discovery request ' +
+            'answers an error until it can be',
+          error as Error,
+        );
+      },
     );
   }
 }

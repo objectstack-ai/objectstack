@@ -94,6 +94,27 @@ const ACTION = '/actions/showcase_task/showcase_mark_done/anon-probe-id';
 // genuinely exists in the app's metadata.
 const FLOW = 'showcase_reassign_wizard';
 
+// ── #21060 — the two `@objectstack/rest` families this file did not drive ───
+//
+// The checklist item this file pins (`access-security.anonymous-deny-surfaces`)
+// names SIX surface families (seven since the analytics family below joined at
+// #21061), and until #21060 this file drove four of those six:
+// the cross-object `POST /batch` and the ADR-0090 D6 `/security/explain` pair
+// were checked by hand on every QA run and by nothing else. Both are
+// `@objectstack/rest` routes whose handler opens with `enforceAuth`, so both
+// answer the REST seam's flat envelope — measured live by QA run #21056
+// (6/6 `401 UNAUTHENTICATED` across the item's families).
+//
+// The batch body is the checklist's own probe — an EMPTY operation list, which
+// carries nothing to write — so the anonymous case also shows the floor runs
+// before the body is judged, and the member contrast below cannot mutate the
+// shared stack whatever the batch validator answers. The explain probe is a
+// read, and names a real object so a member's answer is about authorization,
+// never about the target.
+const BATCH = '/batch';
+const BATCH_PROBE_BODY = { operations: [] } as const;
+const EXPLAIN = '/security/explain?object=showcase_task&operation=read';
+
 // ── #21061 — the analytics faces (dispatcher-mounted; runtime domains/analytics.ts)
 //
 // One handler body serves all three, so the floor is its first statement. The
@@ -540,6 +561,34 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     expect(r.status, 'anonymous draft publish must be 401').toBe(401);
   });
 
+  // ── /batch and /security/explain (@objectstack/rest) — #21060 ───────────
+  it('anonymous POST /batch is denied (401) — before the body is judged', async () => {
+    const r = await anon('POST', BATCH, BATCH_PROBE_BODY);
+    expect(r.status, 'anonymous cross-object batch must be 401').toBe(401);
+  });
+
+  it('anonymous GET /security/explain is denied (401) — the access diagnosis stays private', async () => {
+    const r = await anon('GET', EXPLAIN);
+    expect(r.status, 'anonymous access explanation must be 401').toBe(401);
+  });
+
+  it.each([
+    ['POST /batch', 'POST', BATCH, BATCH_PROBE_BODY],
+    ['GET /security/explain', 'GET', EXPLAIN, undefined],
+  ] as const)(
+    'an authenticated member is NOT denied on %s — and is NOT 404, so the door is really there',
+    async (seam, method, path, body) => {
+      // The same two claims the /meta write-door contrast makes. `.not.toBe(401)`:
+      // a session changes the answer, so the anonymous 401 is the auth floor.
+      // `.not.toBe(404)`: the route is registered on this boot, so that 401 is
+      // not vacuous. The member's exact status is the batch validator's or the
+      // explain gate's business, deliberately not pinned here.
+      const r = await stack.apiAs(memberToken, method, path, body);
+      expect(r.status, `${seam}: an authenticated caller must clear the auth floor`).not.toBe(401);
+      expect(r.status, `${seam}: the route must be registered — a 404 would make the 401 above vacuous`).not.toBe(404);
+    },
+  );
+
   it('an authenticated member reaches the packages domain — not 401 (the deny targets anonymity)', async () => {
     // Teeth for the anonymous cases above: the same route, with a session,
     // clears the auth floor. A plain member holds neither `studio.access` nor
@@ -660,7 +709,8 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
   //     `@objectstack/service-ai` ships in the open framework, and that
   //     domain's gate sits BEHIND its route match, so it never runs here);
   //   - `GET /security/permissions` answers 404 (the showcase registration
-  //     path mounts no `/security`);
+  //     path mounts no dispatcher `/security` domain — `/security/explain`
+  //     below is a different owner, `@objectstack/rest`, in the flat family);
   //   - `/meta` on this stack is served by `@objectstack/rest`, so it exercises
   //     the flat family, not the dispatcher's meta domain.
   // The wrapper family is therefore represented by actions + automation +
@@ -687,6 +737,9 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
       call: () => anon(door.method, door.path, door.body),
     })),
     { seam: `GET ${OBJ}`, owner: '@objectstack/rest enforceAuth', family: 'rest-flat', call: () => anon('GET', OBJ) },
+    // [#21060] The two remaining REST families the checklist item names.
+    { seam: 'POST /batch', owner: '@objectstack/rest enforceAuth', family: 'rest-flat', call: () => anon('POST', BATCH, BATCH_PROBE_BODY) },
+    { seam: 'GET /security/explain', owner: '@objectstack/rest enforceAuth', family: 'rest-flat', call: () => anon('GET', EXPLAIN) },
     { seam: 'POST /actions/:object/:action/:id', owner: 'runtime domains/actions.ts', family: 'dispatcher-wrapper', call: () => anon('POST', ACTION, { params: {} }) },
     { seam: 'POST /automation/:name/trigger', owner: 'runtime domains/automation.ts', family: 'dispatcher-wrapper', call: () => anon('POST', `/automation/${FLOW}/trigger`, {}) },
     { seam: 'GET /automation/_status', owner: 'runtime domains/automation.ts', family: 'dispatcher-wrapper', call: () => anon('GET', '/automation/_status') },
