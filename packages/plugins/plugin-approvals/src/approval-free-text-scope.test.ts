@@ -147,6 +147,17 @@ function makeVisibility(answers: Record<string, string[] | undefined>) {
       if (context?.isSystem) return Object.keys(ROW_A);
       return answers[object];
     },
+    /**
+     * [#20964] The contract's query-side answer, which the real service gives
+     * beside the read projection. No field in this fixture carries a masking
+     * rule, so it equals the read projection; a source WITHOUT it fails closed
+     * (pinned in `approval-payload-masked-field.test.ts`). Not recorded in
+     * `_calls`, which counts read-projection asks.
+     */
+    async getQueryableFields(object: string, context?: any): Promise<string[] | undefined> {
+      if (context?.isSystem) return Object.keys(ROW_A);
+      return answers[object];
+    },
   };
 }
 
