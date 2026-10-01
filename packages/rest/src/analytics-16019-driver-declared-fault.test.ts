@@ -5,29 +5,26 @@
  * reaches the caller by DECLARATION, and the declaration wins over the
  * phrasing heuristic.
  *
- * ## The two shapes, and why this file drives the real driver
+ * ## The ruling, and where each half is proved
  *
- * The card was filed on a hand-made `Error('no such function: translate')` and
- * re-scoped when the Clause-② review of PR #16020 measured the shape production
- * actually raises — knex's `<statement> - no such function: translate` — and
- * found it withheld already, by accident: `looksLikeInternalErrorLeak` fires on
- * the `select ` prefix, never on the phrase. On `origin/main`:
+ * Under the 2026-09-06 ruling (decision batch #57, option 3) `SqlDriver.execute()`
+ * declares the fault — `DATABASE_ERROR`/500, the dialect error under a
+ * non-enumerable `cause` — and this door's ③a arm relays a declared 5xx with the
+ * producer's code and `INTERNAL_ERROR_MESSAGE`. The two halves are proved
+ * separately: `driver-sql`'s `sql-driver-16019-raw-statement-fault-envelope.test.ts`
+ * proves `SqlDriver.execute` declares the fault, and the SECOND block here proves
+ * this route relays a declared `DATABASE_ERROR`/500 with the prose withheld (a
+ * throwing double hands the door the exact declared shape).
  *
- * | shape reaching the door                       | body                                                  |
- * |-----------------------------------------------|-------------------------------------------------------|
- * | bare `Error('no such function: translate')`   | `500 ANALYTICS_QUERY_FAILED`, raw engine text         |
- * | knex-shaped — what `SqlDriver.execute` raised | `500 ANALYTICS_QUERY_FAILED`, `Internal server error` |
- *
- * Both were UNDECLARED. Under the 2026-09-06 ruling (decision batch #57,
- * option 3) `SqlDriver.execute()` declares the fault — `DATABASE_ERROR`/500,
- * the dialect error under a non-enumerable `cause` — and this door's ③a arm
- * relays a declared 5xx with the producer's code and `INTERNAL_ERROR_MESSAGE`.
- * The first block drives that END TO END: a real `AnalyticsService` on the
- * native-SQL strategy, a real better-sqlite3 `SqlDriver` behind the exact
- * bridge `service-analytics`'s plugin wires (`engine.execute` → `driver.execute`),
- * and a dataset dimension whose expression calls `translate()` — the function
- * SQLite lacks, the #16028 fault verbatim — so the refusal is the ENGINE's,
- * not a fixture's, and the compiled statement is the real one.
+ * [#21177] This file once drove the two halves END TO END through one call — a
+ * real `AnalyticsService` on the native-SQL strategy over a real better-sqlite3
+ * `SqlDriver`, fed a dataset dimension whose expression called `translate()`, the
+ * function SQLite lacks. That path is gone: #21177 refuses a caller-supplied
+ * dimension/measure `field` that is not a column reference at the analytics door,
+ * before any strategy or driver runs, so a raw `translate(...)` can no longer
+ * reach the engine from caller content. The FIRST block now pins THAT — the door
+ * refuses the expression `400 INVALID_FIELD` — beside a positive control that a
+ * legitimate dataset on declared fields is still served 200 by the real driver.
  *
  * The second block pins the ordering the ruling's execution notes name. A
  * DECLARED fault is withheld even when its text is one the heuristic does not
@@ -44,19 +41,14 @@
  *
  * ## Reverse verification, direction predicted BEFORE running
  *
- * Restore the bare `await builder` in `SqlDriver.execute()` and REBUILD
- * driver-sql: the first block's `DATABASE_ERROR` assertions go RED
- * (`ANALYTICS_QUERY_FAILED` returns) while its `INTERNAL_ERROR_MESSAGE`
- * assertion stays GREEN — the accident the re-scope measured, the heuristic's
- * `select ` limb — and the driver-log assertion goes RED (the driver no longer
- * logs; the route's `logError` becomes the only copy). The second block stays
- * GREEN throughout: it hands the door shapes that never touch the driver.
- *
  * The ORDERING pin in block 2 has its own leg: gate the door's ③a relay
  * behind `looksLikeInternalErrorLeak` being false (i.e. consult the heuristic
  * first) and only that case goes RED (`ANALYTICS_QUERY_FAILED` in place of the
  * producer's code); the neighbouring "phrase the heuristic does not know"
  * case stays GREEN, which is precisely why it could not stand in for this one.
+ * The first block's leg: remove the caller-content gate and the expression
+ * reaches the real driver again — the refusal flips from `400 INVALID_FIELD` to
+ * the `500 DATABASE_ERROR` relay this file once asserted.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
@@ -123,11 +115,9 @@ async function post(route: any, body: unknown) {
 const ACCOUNT_FIELDS = ['id', 'name', 'industry'];
 
 /**
- * One plain dimension for the control, and one whose expression calls the
- * function SQLite lacks. The compiler passes an expression through verbatim
- * (`qualifyAndRegisterJoin` leaves anything that is not a bare identifier or
- * a dotted path alone) and the source-field gate judges bare identifiers only,
- * so this is the real statement the strategy emits, refused by the real engine.
+ * A legitimate dataset on declared fields — the positive control, and the body
+ * block 2 posts to the throwing double (whose `queryDataset` is mocked, so the
+ * definition never reaches the real door).
  */
 const dataset = {
   name: 'account_metrics',
@@ -135,9 +125,27 @@ const dataset = {
   object: 'crm_account',
   dimensions: [
     { name: 'industry', field: 'industry', type: 'string' },
-    { name: 'folded_name', field: "translate(name, 'ABC', 'abc')", type: 'string' },
   ],
   measures: [{ name: 'account_count', aggregate: 'count' }],
+};
+
+/**
+ * [#21177] A caller-supplied inline dataset whose dimension `field` is a raw
+ * expression. Until #21177 the compiler passed it through verbatim and the real
+ * engine ran it (the #16028 `translate()` fault this file once drove end to end);
+ * now the caller-content gate refuses it at the door, before any strategy or
+ * driver runs. The real-driver declaration and the door relay it once proved
+ * jointly are each covered on their own: `driver-sql`'s
+ * `sql-driver-16019-raw-statement-fault-envelope.test.ts` proves `SqlDriver`
+ * declares the fault, and block 2 below proves this route relays a declared
+ * `DATABASE_ERROR` / 500 with the prose withheld.
+ */
+const expressionDataset = {
+  ...dataset,
+  dimensions: [
+    { name: 'industry', field: 'industry', type: 'string' },
+    { name: 'folded_name', field: "translate(name, 'ABC', 'abc')", type: 'string' },
+  ],
 };
 
 async function realDriver(): Promise<SqlDriver> {
@@ -208,41 +216,22 @@ describe('[#16019] a driver fault on the raw-SQL path reaches the caller by decl
     await driver.disconnect();
   });
 
-  it('the statement SQLite refuses answers 500 DATABASE_ERROR with the prose withheld — the ③a relay, not ③b', async () => {
+  it('[#21177] a caller-supplied dimension-field expression is refused 400 INVALID_FIELD at the door — before any strategy or driver runs', async () => {
     const route = buildRoute(async () => realAnalytics(driver));
-    const res = await post(route, { dataset, selection: { measures: ['account_count'], dimensions: ['folded_name'] } });
+    const res = await post(route, { dataset: expressionDataset, selection: { measures: ['account_count'], dimensions: ['folded_name'] } });
 
-    expect(res.statusCode).toBe(500);
-    // The producer's code, relayed — where an undeclared fault answered the
-    // route's generic one.
-    expect(res.body.code).toBe('DATABASE_ERROR');
-    expect(res.body.code).not.toBe('ANALYTICS_QUERY_FAILED');
-    expect(res.body.error).toBe(INTERNAL_ERROR_MESSAGE);
-
+    expect(res.statusCode).toBe(400);
+    expect(res.body.code).toBe('INVALID_FIELD');
+    // Caller text that names no attributable field is refused as invalid input,
+    // not evaluated — the driver never ran, so there is no driver fault line.
+    expect(warned.filter((m) => m.includes('[sql-driver] DATABASE_ERROR'))).toHaveLength(0);
+    // ⛔ The refusal names the member, never the caller's expression text.
     const body = JSON.stringify(res.body);
     expect(body).not.toMatch(/translate/i);
-    expect(body).not.toMatch(/no such function/i);
     expect(body).not.toMatch(/SELECT|GROUP BY|crm_account/i);
   });
 
-  it('the operator keeps the whole diagnostic: the driver logged the statement and the engine text, the route logged the envelope', async () => {
-    const route = buildRoute(async () => realAnalytics(driver));
-    await post(route, { dataset, selection: { measures: ['account_count'], dimensions: ['folded_name'] } });
-
-    // The driver's warn line is now the only copy of the dialect text.
-    const driverLine = warned.find((m) => m.includes('[sql-driver] DATABASE_ERROR'));
-    expect(driverLine).toBeDefined();
-    expect(driverLine).toContain('no such function: translate');
-    expect(driverLine).toMatch(/translate\(name, 'ABC', 'abc'\)/i);
-    // The route still logs the fault it relayed — the composed envelope, which
-    // names no statement (`logError` prints `error.message`).
-    const routeLine = errored.find((m) => m.includes('[REST] Analytics dataset query error'));
-    expect(routeLine).toBeDefined();
-    expect(routeLine).toContain('refused to run a raw statement');
-    expect(routeLine).not.toContain('no such function');
-  });
-
-  it('POSITIVE CONTROL: the same wiring with the plain dimension → 200 with rows', async () => {
+  it('POSITIVE CONTROL: a legitimate dataset on declared fields → 200 with rows', async () => {
     const route = buildRoute(async () => realAnalytics(driver));
     const res = await post(route, { dataset, selection: { measures: ['account_count'], dimensions: ['industry'] } });
 
