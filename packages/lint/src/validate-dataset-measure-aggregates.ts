@@ -330,7 +330,8 @@ export function validateDatasetMeasureAggregates(stack: unknown): DatasetMeasure
         `${declarerOf(verdict, object)} declares as ${declaredAs(shape)} — `;
       const door =
         'The analytics door refuses every query that groups by this dimension with ' +
-        '`400 INVALID_FIELD` before any SQL is built, so no report or dashboard can select it.';
+        '`400 INVALID_FIELD` before any SQL is built, so a report or dashboard that selects it gets ' +
+        'that refusal instead of an answer.';
       findings.push({
         severity: 'error',
         rule: DIMENSION_JSON_STORED_FIELD_REFUSED,
