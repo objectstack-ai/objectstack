@@ -1299,6 +1299,27 @@ export const ERROR_CODE_LEDGER = {
     // door answers with, never whether a shipped code is registered.
     // Producer: `packages/drivers/driver-sql/src/dialect-emission-refusal.ts`.
     'SQL_DIALECT_EMISSION_UNSUPPORTED',
+    // [#21185] An upsert whose conflict lands on a row outside the
+    // organization the row is written under is refused with this code and
+    // `status: 409`, stamped through `UPSERT_UNIQUE_VIOLATION_CODE` /
+    // `UPSERT_UNIQUE_VIOLATION_STATUS` (`packages/drivers/driver-sql/src/sql-driver.ts`).
+    // `TursoDriver` throws the same constructor on its remote face through
+    // `SqlDriver`, so `@objectstack/driver-turso` stamps nothing and carries no
+    // row for it. The ruling on #21185 (record 5934879010, refinement 2) chose
+    // the code `create()` answers for the same collision, and ⛔ no new code.
+    //
+    // Provenance ONLY: a code `@objectstack/types`, `@objectstack/plugin-security`
+    // and `@objectstack/driver-memory` already register, so the union, its casing
+    // and every other package's rows are byte-unchanged. Per this file's
+    // header, a code emitted by several packages is listed once per emitting
+    // package.
+    //
+    // `door: 'none'` on this tree. No HTTP route reaches the driver's
+    // `upsert`: the engine has no upsert door, and the sandbox body runner's
+    // upsert falls back to insert. The thrown value is the boundary, for a
+    // connector, plugin or host calling the driver directly, and that is why
+    // it ships in `dist` and is registered (#16404, "Door or no door").
+    'UNIQUE_VIOLATION',
   ],
   '@objectstack/driver-turso': [
     // [#14287] Provenance for the Turso REMOTE transport's unsafe-identifier

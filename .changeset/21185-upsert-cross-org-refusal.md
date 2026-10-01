@@ -1,6 +1,7 @@
 ---
 '@objectstack/driver-sql': minor
 '@objectstack/driver-turso': minor
+'@objectstack/spec': patch
 ---
 
 fix(driver-sql,driver-turso)!: an upsert whose conflict lands on another organization's row is refused with `UNIQUE_VIOLATION` and writes nothing, and an upsert never changes a row's organization (#21185)
