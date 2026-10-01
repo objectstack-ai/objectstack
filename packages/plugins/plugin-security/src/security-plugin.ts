@@ -2018,6 +2018,18 @@ export class SecurityPlugin implements Plugin {
       // work under secure-by-default (anonymous-deny) WITHOUT a deployment-configured
       // `guest_portal`, scoped to exactly the declared object (the field
       // allow-list is enforced at the route; the context is request-scoped).
+      //
+      // [#21062] The grant ADMITS; it never bypasses the result masker. What
+      // it hands back — the created record the route echoes, a read-back —
+      // passes step 4 ({@link maskOperationResult}) for the caller the grant
+      // stands in for, resolved exactly as the data plane resolves it: the
+      // permission sets `resolvePermissionSetsForContext` answers for the
+      // grant's context (no user id, so no baseline: the deployment's guest
+      // set when it registers one, otherwise none) and the posture those sets
+      // read (`resolveCallerPosture`, the zero-set stand-in included). A
+      // grant context is never the principal-less hand-off below, whatever
+      // it carries: the submitter is a non-system caller, which is who every
+      // `maskingRule` declares itself for.
       const formGrant = opCtx.context?.publicFormGrant;
       if (formGrant && typeof formGrant === 'object' && (formGrant as { object?: string }).object) {
         const grantObject = (formGrant as { object: string }).object;
@@ -2055,7 +2067,39 @@ export class SecurityPlugin implements Plugin {
               );
             }
           }
-          return next();
+          // [#21062] The masker's inputs, read BEFORE the operation runs and
+          // failing CLOSED as the data plane's do: a masker that cannot know
+          // its rules must not let the echo out, and refusing before `next()`
+          // leaves nothing written behind a refusal. The anonymous submitter
+          // acts for nobody, so there is no delegator to intersect.
+          let grantCallerSets: PermissionSet[];
+          try {
+            grantCallerSets = await this.resolvePermissionSetsForContext(opCtx.context);
+          } catch (e) {
+            ctx.logger.error(
+              `[security] permission resolution failed for public-form operation '${opCtx.operation}' on ` +
+                `object '${opCtx.object}' — denying request (fail-closed)`,
+              e instanceof Error ? e : new Error(String(e)),
+            );
+            throw new PermissionDeniedError(
+              `[Security] Access denied: permission subsystem unavailable for ` +
+                `operation '${opCtx.operation}' on object '${opCtx.object}'`,
+            );
+          }
+          const grantCallerPosture = await this.resolveCallerPosture(opCtx.object, grantCallerSets);
+          if (grantCallerPosture.unresolved) {
+            const cause: UnresolvedPostureCause = grantCallerPosture.unresolvedCause ?? 'unknown';
+            ctx.logger.error(
+              unresolvedPostureLogLine(opCtx.object, opCtx.operation, String(opCtx.context?.userId ?? 'unknown'), cause),
+            );
+            throw new PermissionDeniedError(
+              unresolvedPostureDenialMessage(opCtx.object, opCtx.operation, cause),
+              { operation: opCtx.operation, object: opCtx.object },
+            );
+          }
+          await next();
+          this.maskOperationResult(opCtx, grantCallerSets, grantCallerPosture, null);
+          return;
         }
         throw new PermissionDeniedError(
           `[Security] Access denied: public-form grant permits only create/read-back on '${grantObject}', ` +
@@ -3834,30 +3878,10 @@ export class SecurityPlugin implements Plugin {
       // with edit-but-not-field-read could PATCH a record and read a
       // read-protected field back out of the mutation response (FLS bypass).
       // Field WRITES are already blocked upstream (detectForbiddenWrites); this
-      // closes the read leak on the response image.
-      if (opCtx.result && ['find', 'findOne', 'insert', 'update'].includes(opCtx.operation)) {
-        const basePerms = this.permissionEvaluator.getFieldPermissions(opCtx.object, permissionSets);
-        // [ADR-0066 D3] AND-gate field-level requiredPermissions into the mask.
-        let fieldPerms = this.foldFieldRequiredPermissions(basePerms, secMeta.fieldRequiredPermissions, permissionSets);
-        // [ADR-0090 D10] Mask any field the delegator cannot read, too.
-        let delBasePerms: Record<string, { readable: boolean; editable: boolean }> | null = null;
-        if (delegatorSets) {
-          delBasePerms = this.permissionEvaluator.getFieldPermissions(opCtx.object, delegatorSets);
-          let delFieldPerms = this.foldFieldRequiredPermissions(delBasePerms, secMeta.fieldRequiredPermissions, delegatorSets);
-          fieldPerms = intersectFieldMasks(fieldPerms, delFieldPerms);
-        }
-        // [#8993] Partial masking: fields whose declared rule applies to this
-        // caller are REPLACED with their masked value instead of deleted —
-        // EXCEPT where a permission set explicitly marks the field
-        // non-readable (strictest wins: a masking rule never widens an
-        // explicit deny, so those callers keep getting the key deleted).
-        const partialRules = this.computeReadPartialMaskRules(
-          secMeta, permissionSets, delegatorSets, basePerms, delBasePerms,
-        );
-        if (Object.keys(fieldPerms).length > 0 || Object.keys(partialRules).length > 0) {
-          opCtx.result = this.fieldMasker.maskResults(opCtx.result, fieldPerms, opCtx.object, partialRules);
-        }
-      }
+      // closes the read leak on the response image. [#21062] The body is
+      // {@link maskOperationResult}, which the ADR-0056 public-form grant
+      // branch above reads too — one masker for both.
+      this.maskOperationResult(opCtx, permissionSets, secMeta, delegatorSets);
     });
 
     ctx.logger.info('Security middleware registered on ObjectQL engine');
@@ -8999,6 +9023,51 @@ export class SecurityPlugin implements Plugin {
       }
     }
     return rules;
+  }
+
+  /**
+   * Step 4 of the engine middleware — the RESULT masker: mask the fields this
+   * caller may not read in the records an operation returns (reads, and the
+   * record a write echoes back), deleting a field the caller's field map
+   * denies and serving a field whose masking rule applies masked
+   * ({@link computeReadPartialMaskRules}).
+   *
+   * [#21062] ONE masker, two readers: the middleware's step 4, for the caller
+   * it resolved, and the ADR-0056 public-form grant branch, for the caller the
+   * grant stands in for. The grant passes before the gates and used to return
+   * before this ran, so the record it echoed to an anonymous submitter carried
+   * every masked field as stored. ⛔ Never a second derivation of masking for
+   * either reader: both hand their resolved sets, posture and delegator here.
+   */
+  private maskOperationResult(
+    opCtx: any,
+    permissionSets: PermissionSet[],
+    secMeta: ObjectSecurityMeta,
+    delegatorSets: PermissionSet[] | null,
+  ): void {
+    if (opCtx.result && ['find', 'findOne', 'insert', 'update'].includes(opCtx.operation)) {
+      const basePerms = this.permissionEvaluator.getFieldPermissions(opCtx.object, permissionSets);
+      // [ADR-0066 D3] AND-gate field-level requiredPermissions into the mask.
+      let fieldPerms = this.foldFieldRequiredPermissions(basePerms, secMeta.fieldRequiredPermissions, permissionSets);
+      // [ADR-0090 D10] Mask any field the delegator cannot read, too.
+      let delBasePerms: Record<string, { readable: boolean; editable: boolean }> | null = null;
+      if (delegatorSets) {
+        delBasePerms = this.permissionEvaluator.getFieldPermissions(opCtx.object, delegatorSets);
+        let delFieldPerms = this.foldFieldRequiredPermissions(delBasePerms, secMeta.fieldRequiredPermissions, delegatorSets);
+        fieldPerms = intersectFieldMasks(fieldPerms, delFieldPerms);
+      }
+      // [#8993] Partial masking: fields whose declared rule applies to this
+      // caller are REPLACED with their masked value instead of deleted —
+      // EXCEPT where a permission set explicitly marks the field
+      // non-readable (strictest wins: a masking rule never widens an
+      // explicit deny, so those callers keep getting the key deleted).
+      const partialRules = this.computeReadPartialMaskRules(
+        secMeta, permissionSets, delegatorSets, basePerms, delBasePerms,
+      );
+      if (Object.keys(fieldPerms).length > 0 || Object.keys(partialRules).length > 0) {
+        opCtx.result = this.fieldMasker.maskResults(opCtx.result, fieldPerms, opCtx.object, partialRules);
+      }
+    }
   }
 
   private foldFieldRequiredPermissions(

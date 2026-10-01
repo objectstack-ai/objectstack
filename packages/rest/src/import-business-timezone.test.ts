@@ -40,7 +40,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server.js';
-import { parseDateCell, coerceFieldValue, coerceRow } from './import-coerce.js';
+import { parseDateCell, coerceFieldValue, coerceRow } from '@objectstack/core';
 import { parseXlsxToRows } from './import-prepare.js';
 import { formatCellValue } from './export-format.js';
 import type { ExportFieldMeta } from './export-format.js';

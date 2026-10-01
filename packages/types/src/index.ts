@@ -68,6 +68,12 @@ export * from './unbacked-conflict-target.js';
 // the pure enumerator both the hard stop (install seam) and the advisories
 // (`os doctor` / `os migrate plan`) read, so the three cannot drift apart.
 export * from './unique-scope-install-gate.js';
+// [#20919] The REST door's error CLASSIFICATION half (`mapDataError` through
+// `classifyDataError`), moved here from `@objectstack/rest` beside the
+// primitives it composes, so the bulk-import runner in `@objectstack/core`
+// judges a failed row with the same table the HTTP door answers with. `rest`
+// keeps the emission half and re-exports the public names.
+export * from './data-error-classification.js';
 
 // Placeholder for Kernel interface to avoid circular dependency
 // The actual Kernel implementation will satisfy this interface.

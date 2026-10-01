@@ -64,10 +64,13 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 /**
  * The classification's own source, read once: §4-derivation and §6 both scan it
  * — one re-derives the arm list from the tree (the ruling commit cf6e0a193 landed: its execution
- * constraint), the other guards the sentence rule. Same package, so the read
- * does not escape it (AGENTS.md → cross-package test inputs).
+ * constraint), the other guards the sentence rule. [#20919] The classification
+ * half moved to `@objectstack/types`, so the read escapes this package and the
+ * file is listed in `vitest.repo-tests.json` (AGENTS.md → cross-package test
+ * inputs); the two halves are read in the order the one file had them.
  */
-const SOURCE = readFileSync(resolve(HERE, 'error-response.ts'), 'utf8');
+const SOURCE = readFileSync(resolve(HERE, '../../types/src/data-error-classification.ts'), 'utf8')
+    + readFileSync(resolve(HERE, 'error-response.ts'), 'utf8');
 
 /** The business sentence a hook author addressed to the end user. */
 const BUSINESS = 'Opportunity is closed.';
