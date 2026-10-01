@@ -4,9 +4,10 @@
  * [#21154] QUERY guard for the two plugin-audit objects whose rows carry the
  * field values of ANOTHER record — the activity stream (`sys_activity`) and the
  * compliance ledger (`sys_audit_log`). A non-system reader may filter, sort,
- * search, group or aggregate by one of their value-bearing columns only in a
- * query that names ONE parent object whose fields that reader is served in
- * full. Any other such query is refused, in the engine's own refusal shape.
+ * search, group or aggregate by one of their value-bearing columns only when
+ * it is served every field of the objects the query can reach: the ONE parent
+ * object the query names, or, when it names none, every registered object.
+ * Any other such query is refused, in the engine's own refusal shape.
  *
  * ## The defect this closes
  *
@@ -35,8 +36,9 @@
  *
  * For a non-system reader whose security answer withholds any field of the
  * parent object, a query that names a value-bearing column is refused. A
- * reader served every field of that parent keeps querying the column as
- * before.
+ * reader whose answer withholds nothing on that parent keeps querying the
+ * column as before — a query naming no parent included, for a reader withheld
+ * nothing on any object those rows can concern.
  *
  * "Withholds any field" is read from the serve seam, never derived a second
  * way: the fields this reader is served unmasked are
@@ -47,23 +49,37 @@
  * object), the redaction serves the text whole, so a predicate over it
  * discloses nothing the rows do not, and the query passes.
  *
- * ## Which parent: the query must pin one
+ * ## Which parent
  *
  * The parent is a property of each row, while the decision has to be made
- * before any row exists. The only parent a query can be judged against without
- * reading rows is one it names itself: an equality on `object_name` at the root
- * of its `where` (directly, or inside a root `$and`). Such a query reaches no
- * other parent.
+ * before any row exists, and the set of parents it is judged against must not
+ * depend on the query: the parents of the rows a query MATCHES are a function of
+ * the probe, so judging those (the read gate's pre-scan, which runs the
+ * caller's own filter) would refuse a matching probe and answer a non-matching
+ * one with an empty list — the refusal itself would be the oracle. So:
  *
- * Without that pin the query is refused for every non-system reader whenever
- * the security service is wired. The alternative — judging every parent the
- * query can reach — has no probe-independent answer: the parents of the rows a
- * query MATCHES are a function of the probe, so a matching probe would reach a
- * withholding parent and be refused while a non-matching one reached none and
- * answered an empty list. The refusal itself would be the oracle. This is the
- * shape `plugin-approvals` took for its service door's free-text arm
- * (`freeTextMayMatchSnapshot`, #11040): authority absent ⇒ unchanged;
- * authority wired ⇒ one known object, or nothing.
+ *  - A query that names ONE parent object — an equality on `object_name` at the
+ *    root of its `where`, directly or inside a root `$and` — reaches no other
+ *    parent, and is judged against that object alone.
+ *  - A query that names none is judged against the DECLARED set: every object
+ *    registered in the engine ({@link declaredParentObjects}), read from
+ *    metadata, never from rows, so it answers the same whatever the query and
+ *    whatever rows arrive. It is the writers' reach and a superset of it: the
+ *    CRUD mirror (`audit-writers.ts`) is registered on every object but its own
+ *    exclusion list, and that list has grown over time, so rows about an
+ *    object it now skips can still be at rest. The query is admitted only for
+ *    a reader who is withheld no field of ANY of them.
+ *
+ * "Fields whose value the column can carry" is every field: a create or delete
+ * snapshot records the whole stored record, and rows written before the mirror
+ * began masking credential fields (#6656) are still at rest. So the
+ * per-object question is the pinned query's own, asked of each object.
+ *
+ * Measured on a stock showcase boot with its seeded admin: that admin is served
+ * every field of every registered object, so its unpinned search over these
+ * objects — the Setup audit-log list's search — is admitted, at three security
+ * calls per registered object per such query. A reader withheld any field
+ * anywhere is refused an unpinned query, as before.
  *
  * ## Which clauses
  *
@@ -93,11 +109,7 @@
  */
 
 import { FieldReferenceSchema } from '@objectstack/spec/data';
-import {
-  resolveServedFields,
-  type ActivityFieldVisibilitySource,
-  type ActivityRedactionLogger,
-} from './activity-field-redaction.js';
+import { resolveServedFields, type FieldRedactionLogger, type FieldVisibilitySource } from './served-fields.js';
 import { parseActivityParentObject, type ActivityMiddlewareEngine } from './activity-read-visibility.js';
 
 const SYSTEM_CTX = { isSystem: true } as const;
@@ -118,8 +130,8 @@ export interface ParentFieldQueryGuard {
 
 const remedy = (what: string) =>
   ` ${what} carries field values of the record its row is about, so a query may filter, sort, search, group ` +
-  'or aggregate by it only when it names a single parent object by equality on object_name, and only for a ' +
-  'caller served every field of that object.';
+  'or aggregate by it only for a caller served every field of the objects it can reach: one parent object ' +
+  'named by equality on object_name, or every object when it names none.';
 
 /**
  * The activity stream: the columns the field redaction narrows (see its header
@@ -252,10 +264,10 @@ export function pinnedParentObject(where: unknown, guarded: string): string | nu
  * text of unknown provenance.
  */
 export async function readerWithholdsParentField(
-  security: ActivityFieldVisibilitySource,
+  security: FieldVisibilitySource,
   object: string,
   context: unknown,
-  logger?: ActivityRedactionLogger,
+  logger?: FieldRedactionLogger,
 ): Promise<boolean> {
   const served = await resolveServedFields(security, object, context, logger);
   if (served === undefined) return false;
@@ -268,6 +280,48 @@ export async function readerWithholdsParentField(
   if (!Array.isArray(all)) return true;
   const servedSet = new Set(served.map(String));
   return all.some((field) => !servedSet.has(String(field)));
+}
+
+/** The engine slice the declared set is read from: its object registry. */
+export interface ParentObjectRegistryEngine extends ActivityMiddlewareEngine {
+  registry?: { getAllObjects?(): ReadonlyArray<{ name?: unknown }> };
+}
+
+/**
+ * The DECLARED parent set: every object registered in the engine, read from
+ * metadata — never from rows — or `null` when the engine cannot say, which
+ * the caller treats as a refusal (fail closed).
+ */
+export function declaredParentObjects(engine: ParentObjectRegistryEngine): string[] | null {
+  let all: ReadonlyArray<{ name?: unknown }> | undefined;
+  try {
+    all = engine.registry?.getAllObjects?.();
+  } catch {
+    all = undefined;
+  }
+  if (!Array.isArray(all)) return null;
+  const names = [...new Set(all.map((o) => String(o?.name ?? '').trim()).filter(Boolean))];
+  return names.length > 0 ? names : null;
+}
+
+/**
+ * Is `context` withheld a field of ANY object of the declared set? `true` too
+ * when the engine cannot say which objects are registered. One per-object
+ * question, the pinned query's own ({@link readerWithholdsParentField}), asked
+ * in turn and stopped at the first object that withholds.
+ */
+export async function readerWithholdsAnyDeclaredParentField(
+  engine: ParentObjectRegistryEngine,
+  security: FieldVisibilitySource,
+  context: unknown,
+  logger?: FieldRedactionLogger,
+): Promise<boolean> {
+  const declared = declaredParentObjects(engine);
+  if (declared === null) return true;
+  for (const object of declared) {
+    if (await readerWithholdsParentField(security, object, context, logger)) return true;
+  }
+  return false;
 }
 
 /** The refusal's shape — the engine's `PermissionDeniedError` envelope. */
@@ -311,10 +365,10 @@ export function parentFieldQueryRefusal(
 
 /** Register the query guard for one object. */
 function installParentFieldQueryGuard(
-  engine: ActivityMiddlewareEngine,
+  engine: ParentObjectRegistryEngine,
   guard: ParentFieldQueryGuard,
-  getSecurity: () => ActivityFieldVisibilitySource | undefined,
-  logger: ActivityRedactionLogger,
+  getSecurity: () => FieldVisibilitySource | undefined,
+  logger: FieldRedactionLogger,
 ): void {
   engine.registerMiddleware!(
     async (ctx, next) => {
@@ -329,16 +383,19 @@ function installParentFieldQueryGuard(
       if (!security) return next();
       const parent = pinnedParentObject(ctx.ast.where, guard.object);
       let refuse = true;
-      if (parent !== null) {
-        try {
+      try {
+        if (parent !== null) {
           refuse = await readerWithholdsParentField(security, parent, ctx.context, logger);
-        } catch (err) {
-          logger.warn(
-            `[audit] ${guard.object} query guard: could not tell whether the caller is served every field of ` +
-              `'${parent}' — refusing the query (fail closed): ${(err as Error)?.message ?? err}`,
-          );
-          refuse = true;
+        } else {
+          refuse = await readerWithholdsAnyDeclaredParentField(engine, security, ctx.context, logger);
         }
+      } catch (err) {
+        logger.warn(
+          `[audit] ${guard.object} query guard: could not tell whether the caller is served every field of ` +
+            `${parent !== null ? `'${parent}'` : 'every registered object'} — refusing the query (fail closed): ` +
+            `${(err as Error)?.message ?? err}`,
+        );
+        refuse = true;
       }
       if (refuse) throw parentFieldQueryRefusal(guard, ctx.operation, named);
       return next();
@@ -354,9 +411,9 @@ function installParentFieldQueryGuard(
  * seam; `AuditPlugin` says so.
  */
 export function installParentFieldQueryGuards(
-  engine: ActivityMiddlewareEngine,
-  getSecurity: () => ActivityFieldVisibilitySource | undefined,
-  logger: ActivityRedactionLogger,
+  engine: ParentObjectRegistryEngine,
+  getSecurity: () => FieldVisibilitySource | undefined,
+  logger: FieldRedactionLogger,
 ): void {
   if (typeof engine.registerMiddleware !== 'function') return;
   for (const guard of [ACTIVITY_QUERY_GUARD, AUDIT_LOG_QUERY_GUARD]) {

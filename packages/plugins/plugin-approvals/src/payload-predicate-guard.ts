@@ -3,9 +3,10 @@
 /**
  * [#21154] Query guard for the approval snapshot on the GENERIC data door: a
  * non-system reader may filter, sort, search, group or aggregate by
- * `payload_json` only in a query that names ONE subject object whose fields
- * that reader is served in full. Any other such query is refused, in the
- * engine's own refusal shape.
+ * `payload_json` only when it is served every field of the objects the query
+ * can reach: the ONE subject object the query names, or, when it names none,
+ * every registered object. Any other such query is refused, in the engine's
+ * own refusal shape.
  *
  * ## The defect this closes
  *
@@ -34,10 +35,16 @@
  *    the system. An `undefined` from the serve seam is its "narrow nothing",
  *    and passes.
  *
- * A query that pins no subject object cannot be judged before rows exist —
- * the subject is a property of each row — and is refused: the parents of the
- * rows it MATCHES would make the refusal itself the oracle. That is #11040's
- * shape for the service door: authority wired ⇒ one known object, or nothing.
+ * A query that pins no subject object is judged against the DECLARED set —
+ * every object registered in the engine, read from metadata and never from
+ * rows ({@link declaredSubjectObjects}) — because the subject is a property of
+ * each row and the set judged must not depend on the query: the subjects of
+ * the rows it MATCHES would make the refusal itself the oracle. The snapshot
+ * writer can record a request on any object (the service's submit takes one),
+ * and records the record as it was handed over, so every field of every
+ * registered object counts. The query is admitted only for a reader withheld
+ * no field of any of them; measured on a stock showcase boot, its seeded admin
+ * is such a reader.
  *
  * ## Which clauses
  *
@@ -178,6 +185,48 @@ export async function readerWithholdsSubjectField(
   return all.some((field) => !servedSet.has(String(field)));
 }
 
+/** The engine slice the declared set is read from: its object registry. */
+export interface SubjectObjectRegistryEngine extends MiddlewareEngine {
+  registry?: { getAllObjects?(): ReadonlyArray<{ name?: unknown }> };
+}
+
+/**
+ * The DECLARED subject set: every object registered in the engine, read from
+ * metadata — never from rows — or `null` when the engine cannot say, which the
+ * caller treats as a refusal (fail closed).
+ */
+export function declaredSubjectObjects(engine: SubjectObjectRegistryEngine): string[] | null {
+  let all: ReadonlyArray<{ name?: unknown }> | undefined;
+  try {
+    all = engine.registry?.getAllObjects?.();
+  } catch {
+    all = undefined;
+  }
+  if (!Array.isArray(all)) return null;
+  const names = [...new Set(all.map((o) => String(o?.name ?? '').trim()).filter(Boolean))];
+  return names.length > 0 ? names : null;
+}
+
+/**
+ * Is `context` withheld a field of ANY object of the declared set? `true` too
+ * when the engine cannot say which objects are registered. The pinned query's
+ * own per-object question ({@link readerWithholdsSubjectField}), asked in turn
+ * and stopped at the first object that withholds.
+ */
+export async function readerWithholdsAnyDeclaredSubjectField(
+  engine: SubjectObjectRegistryEngine,
+  security: FieldVisibilitySource,
+  context: unknown,
+  logger?: { warn?: (msg: string, meta?: Record<string, any>) => void },
+): Promise<boolean> {
+  const declared = declaredSubjectObjects(engine);
+  if (declared === null) return true;
+  for (const object of declared) {
+    if (await readerWithholdsSubjectField(security, object, context, logger)) return true;
+  }
+  return false;
+}
+
 /** The refusal's shape — the engine's `PermissionDeniedError` envelope. */
 export type SnapshotQueryRefusal = Error & {
   code: 'PERMISSION_DENIED';
@@ -190,8 +239,8 @@ export type SnapshotQueryRefusal = Error & {
 
 const REMEDY =
   ' The snapshot carries field values of the record under approval, so a query may filter, sort, search, ' +
-  'group or aggregate by it only when it names a single subject object by equality on object_name, and only ' +
-  'for a caller served every field of that object.';
+  'group or aggregate by it only for a caller served every field of the objects it can reach: one subject ' +
+  'object named by equality on object_name, or every object when it names none.';
 
 /** The refusal, in the engine's words for the role the column is named in. */
 export function snapshotQueryRefusal(operation: string, named: NamedSnapshotColumn): SnapshotQueryRefusal {
@@ -218,7 +267,7 @@ export function snapshotQueryRefusal(operation: string, named: NamedSnapshotColu
  * as for the redaction: the security plugin may register after this one.
  */
 export function bindSnapshotPredicateGuard(
-  engine: MiddlewareEngine,
+  engine: SubjectObjectRegistryEngine,
   getSecurity: () => FieldVisibilitySource | undefined,
   logger?: { warn?: (msg: string, meta?: Record<string, any>) => void },
 ): void {
@@ -232,15 +281,17 @@ export function bindSnapshotPredicateGuard(
     if (!security || typeof security.getReadableFields !== 'function') return next();
     const subject = pinnedSubjectObject(ast.where);
     let refuse = true;
-    if (subject !== null) {
-      try {
+    try {
+      if (subject !== null) {
         refuse = await readerWithholdsSubjectField(security, subject, context, logger);
-      } catch (err: any) {
-        logger?.warn?.('[approvals] snapshot query guard could not tell whether the caller is served every field — refusing the query (fail closed)', {
-          object: subject, error: err?.message ?? String(err),
-        });
-        refuse = true;
+      } else {
+        refuse = await readerWithholdsAnyDeclaredSubjectField(engine, security, context, logger);
       }
+    } catch (err: any) {
+      logger?.warn?.('[approvals] snapshot query guard could not tell whether the caller is served every field — refusing the query (fail closed)', {
+        object: subject ?? '(every registered object)', error: err?.message ?? String(err),
+      });
+      refuse = true;
     }
     if (refuse) throw snapshotQueryRefusal(opCtx.operation, named);
     return next();
