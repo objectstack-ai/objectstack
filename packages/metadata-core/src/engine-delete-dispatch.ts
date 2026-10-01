@@ -271,14 +271,14 @@ export const ENGINE_DELETE_DISPATCH_CASES: readonly EngineDeleteDispatchCase[] =
   // there is no predicate the by-id path could drop, and LifecycleService's
   // guarded reap relies on this shape for per-record cascade handling
   // (`engine-data-events.test.ts` pins the event contract of the same shape).
-  { what: 'scalar where.id with multi:true and NOTHING else in where — still one by-id delete (#11009)', options: { where: { id: 'rec_1' }, multi: true }, expect: 'by-id' },
+  { what: 'scalar where.id with multi:true and NOTHING else in where — still one by-id delete', options: { where: { id: 'rec_1' }, multi: true }, expect: 'by-id' },
   { what: 'multi with a predicate', options: { where: { rule_id: 'r1' }, multi: true }, expect: 'multi' },
   { what: 'multi with no predicate at all', options: { multi: true }, expect: 'multi' },
   { what: 'multi alongside an $in id set', options: { where: { id: { $in: ['a', 'b'] } }, multi: true }, expect: 'multi' },
   // [#11009] The compare-and-set spelling: a scalar `where.id` beside real
   // predicate keys WITH a declared `multi` is a predicate call — every key
   // rides the AST to `driver.deleteMany`, so the condition is honoured.
-  { what: 'scalar where.id + extra predicate keys + multi:true — the predicate path honours ALL of it (#11009)', options: { where: { id: 'rec_1', status: 'stale' }, multi: true }, expect: 'multi' },
+  { what: 'scalar where.id + extra predicate keys + multi:true — the predicate path honours ALL of it', options: { where: { id: 'rec_1', status: 'stale' }, multi: true }, expect: 'multi' },
   // ── The FALSY scalars (objectstack#5747). `0` and `''` are scalars, so
   //    `scalarDeleteId` returns them — but the engine's `if (input.id)` is a
   //    truthiness test, so neither identifies a row. With a declared bulk
@@ -317,6 +317,6 @@ export const ENGINE_DELETE_DISPATCH_CASES: readonly EngineDeleteDispatchCase[] =
   //    update-side cases. Each used to dispatch `by-id` and silently DISCARD
   //    every `where` key other than `id`; now the refusal names the dropped
   //    keys and prescribes the predicate path (`multi: true`).
-  { what: 'scalar where.id alongside other predicates, NO multi — the guard would be silently dropped (#11009)', options: { where: { id: 'rec_1', tenant: 't1' } }, expect: 'reject' },
-  { what: 'scalar where.id + a CAS operator predicate, multi explicitly false (#11009)', options: { where: { id: 'rec_1', status: { $in: ['done'] } }, multi: false }, expect: 'reject' },
+  { what: 'scalar where.id alongside other predicates, NO multi — the guard would be silently dropped', options: { where: { id: 'rec_1', tenant: 't1' } }, expect: 'reject' },
+  { what: 'scalar where.id + a CAS operator predicate, multi explicitly false — refused, the by-id path would drop the CAS guard', options: { where: { id: 'rec_1', status: { $in: ['done'] } }, multi: false }, expect: 'reject' },
 ];
