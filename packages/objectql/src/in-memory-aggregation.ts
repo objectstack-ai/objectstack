@@ -86,7 +86,13 @@
 
 import { bucketDateKey, compensatedSum } from '@objectstack/core';
 import type { QueryAST, GroupByNode, AggregationNode, DateGranularityValue } from '@objectstack/spec/data';
-import { declaredFieldClasses, declaredJsonStoredFields, matchesAggregationFilter } from './having-filter.js';
+import {
+  aggregationFilterClause,
+  assertAggregationFilterSparesJsonStoredFields,
+  declaredFieldClasses,
+  declaredJsonStoredFields,
+  matchesAggregationFilter,
+} from './having-filter.js';
 
 /**
  * Group + aggregate raw rows according to the AST's `groupBy` /
@@ -106,18 +112,42 @@ import { declaredFieldClasses, declaredJsonStoredFields, matchesAggregationFilte
  * [#20873] …and `$contains` / `$notContains` on a declared JSON-stored field ask
  * MEMBERSHIP (having-filter.ts `declaredJsonStoredFields`), the reading the
  * same condition gets in a `where`. Absent ⇒ the substring reading, as before.
+ *
+ * [#21007] …and a scalar comparison on such a field (`$in`, `$nin`, `$eq`, an
+ * ordering, `$between`, implicit equality) is REFUSED `INVALID_FILTER` / 400,
+ * in the words `where` refuses it in — judged once per `aggregations[i].filter`
+ * by having-filter.ts `assertAggregationFilterSparesJsonStoredFields`, the same
+ * function `engine.aggregate` calls, BEFORE any row is judged. So an empty
+ * `rows` and a row set the per-row walk would short-circuit past refuse alike;
+ * the per-row arm is only the backstop. `reportWithheld` is where the withheld
+ * half of that refusal goes — the field, the operator and the position, which
+ * the message does not name. This entry point holds no logger of its own, so a
+ * host that wants the diagnostic passes its log here; absent ⇒ it is dropped,
+ * and the caller still gets the refusal's code, status and prescription.
+ * `engine.aggregate` has judged the filter already (and logged it) before it
+ * calls this, so it passes none.
  */
 export function applyInMemoryAggregation(
   rows: any[],
   ast: Pick<QueryAST, 'groupBy' | 'aggregations'>,
   timezone?: string,
   fields?: Record<string, unknown>,
+  reportWithheld?: (diagnostic: string) => void,
 ): any[] {
   const groupBy = (ast.groupBy ?? []) as GroupByNode[];
   const aggregations = (ast.aggregations ?? []) as AggregationNode[];
   if (groupBy.length === 0 && aggregations.length === 0) return rows;
   // [#20176] Read once per call, and only when some aggregation carries a filter.
   const anyFilter = aggregations.some((a) => a?.filter && Object.keys(a.filter).length > 0);
+  // [#21007] The JSON-column rule, judged on each FILTER before any row is —
+  // the complete door, not the per-row backstop. See the docblock above.
+  if (fields && anyFilter) {
+    const declared = { fields, reportWithheld: reportWithheld ?? (() => undefined) };
+    for (const [index, agg] of aggregations.entries()) {
+      if (!agg?.filter || Object.keys(agg.filter).length === 0) continue;
+      assertAggregationFilterSparesJsonStoredFields(agg.filter, aggregationFilterClause(index).root, declared);
+    }
+  }
   const filterClasses = fields && anyFilter ? declaredFieldClasses(fields) : undefined;
   // [#20873] Read once per call too, from the same declaration.
   const filterJsonStored = fields && anyFilter ? declaredJsonStoredFields(fields) : undefined;

@@ -1042,11 +1042,26 @@ export function assertAggregationFilterIsEvaluable(
  * here meet only declared operators. A plain object with no `$` key is not a
  * condition this rule reads; the engine's no-operator-object door refuses it
  * earlier. No usable field map (a registry-less host) ⇒ nothing is judged.
+ *
+ * THIS is the complete door. The per-row arm in {@link checkCondition} is a
+ * backstop that fires only on a row that reaches it, and many never do: an
+ * empty table has no row, and the spec's filter lowering (rule 3) rewrites a
+ * negation into `$or: [{ f: { $null: true } }, { f: { $ne: v } }]` (and gives a
+ * `$not` operand an `{ f: { $null: false } }` conjunct), so on a row with no
+ * value the `$null` arm decides and the walker never reaches the comparison.
+ * Measured with this call removed: a `json` field null in every row answered
+ * `$ne` / `$nin` / `$not $in` with every row counted. Hence [#21007]'s second
+ * caller, `applyInMemoryAggregation`, which a host may call with a field map
+ * and no engine in front of it — it calls this same function, once per
+ * aggregation, before any row is judged.
+ *
+ * `declared` needs only the field map and where the diagnostic goes; the
+ * object's name is the reference rule's, not this one's.
  */
-function assertAggregationFilterSparesJsonStoredFields(
+export function assertAggregationFilterSparesJsonStoredFields(
   filter: unknown,
   root: string,
-  declared: AggregationFilterDeclaration,
+  declared: Pick<AggregationFilterDeclaration, 'fields' | 'reportWithheld'>,
 ): void {
   const jsonStored = declaredJsonStoredFields(declared.fields);
   if (jsonStored.size === 0) return;
@@ -1637,11 +1652,16 @@ function storedArrayHasMember(value: unknown, comparand: unknown): boolean {
  *
  * [#21007] …and a scalar comparison on such a column — implicit equality, or an
  * operator in `JSON_COLUMN_INCOMPATIBLE_OPERATORS` — is REFUSED, in `where`'s
- * withheld words. The engine judges that once on the filter
- * ({@link assertAggregationFilterSparesJsonStoredFields}) before any row is
- * read, and reports the diagnostic there; this arm is the floor for a caller
- * that evaluates rows directly. Above the no-value exit, for the #7158 reason:
- * it is the filter's verdict, not the row's.
+ * withheld words. The COMPLETE door is
+ * {@link assertAggregationFilterSparesJsonStoredFields}, which judges the filter
+ * once, before any row is read, and reports the diagnostic; `engine.aggregate`
+ * and `applyInMemoryAggregation` both call it. This arm is only the BACKSTOP
+ * for a row that reaches it — a caller evaluating rows directly through
+ * `matchesAggregationFilter`. It sits above the no-value exit, so a row with no
+ * value that reaches it is refused too; but its REACH is the row's: an empty
+ * row set never gets here, and neither does a row on which a short-circuited
+ * `$or` / `$and` branch has already decided (the spec lowering's rule 3 puts a
+ * `$null` arm ahead of every negation).
  */
 function checkCondition(
   value: any,
@@ -1695,7 +1715,8 @@ function checkCondition(
       throw emptyFlagComparandError(field, target, `${path}.${op}`);
     }
     // [#21007] A scalar comparison on a declared JSON-stored column — refused,
-    // as `where` refuses it. The floor under the engine's one-time judgment.
+    // as `where` refuses it. The backstop under the one-time judgment
+    // (assertAggregationFilterSparesJsonStoredFields), for a row that gets here.
     if (jsonStored && JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op)) {
       throw invalidFilterError(jsonColumnOperatorRefusalText(field, op, false).message);
     }

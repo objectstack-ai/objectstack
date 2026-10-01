@@ -29,8 +29,10 @@
 // `aggregation-filter-json-column-refusal.test.ts`.
 
 import { describe, it, expect, vi } from 'vitest';
+import { lowerFilterCondition } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 import { declaredJsonStoredFields, matchesAggregationFilter } from './having-filter.js';
+import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 
 const OBJECT = 'os21007_doc';
 
@@ -247,5 +249,88 @@ describe('[#21007] the per-row floor — a caller evaluating rows directly meets
 
   it('undeclared (no jsonStored set): the walker answers as it always did', () => {
     expect(matchesAggregationFilter(ROWS[0], { owners: { $in: ['u1'] } } as never, 0)).toBe(false);
+  });
+});
+
+describe('[#21007] applyInMemoryAggregation — a direct caller with a field map meets the same refusal, before any row is judged', () => {
+  // `applyInMemoryAggregation` is published (objectql's root and `./core`), so a
+  // host can reach the walker with a field map and no engine in front of it.
+  // It calls the engine's own gate once per filter; without that call the
+  // per-row backstop answered both cells below 200 — an empty row set has no
+  // row to reach it, and on the LOWERED filter (the shape every engine seam
+  // hands the evaluator: spec `lowerFilterCondition`, rule 3) a row with no
+  // value is decided by the `$null` arm before the comparison is walked.
+  const NEGATIONS: ReadonlyArray<readonly [string, Record<string, unknown>, string]> = [
+    ['$ne', { meta: { $ne: 'a' } }, '$ne'],
+    ['$nin', { meta: { $nin: ['a', 'b'] } }, '$nin'],
+    ['$not $in', { $not: { meta: { $in: ['a'] } } }, '$in'],
+  ];
+  const NULL_META_ROWS = ROWS.map((row) => ({ ...row, meta: null }));
+  const ast = (filter: unknown, groupBy?: string[]) => ({
+    ...(groupBy ? { groupBy } : {}),
+    aggregations: [
+      { function: 'count' as const, alias: 'n' },
+      { function: 'count' as const, alias: 'm', filter: filter as never },
+    ],
+  });
+
+  function refusalFrom(run: () => unknown): Error & { code?: string; status?: number } {
+    try {
+      run();
+    } catch (e) {
+      return e as Error & { code?: string; status?: number };
+    }
+    throw new Error('expected applyInMemoryAggregation to refuse this filter, but it answered');
+  }
+
+  async function engineMessageFor(filter: unknown): Promise<string> {
+    const { engine } = await makeEngine([]);
+    return (await refusalOf(() => engine.aggregate(OBJECT, perAggregation(filter)))).message;
+  }
+
+  for (const [name, filter, op] of NEGATIONS) {
+    const lowered = lowerFilterCondition(filter);
+
+    it(`${name} — the lowered filter carries the $null arm the walker short-circuits on`, () => {
+      expect(JSON.stringify(lowered)).toContain('"$null"');
+    });
+
+    const cells: ReadonlyArray<{ cell: string; rows: Record<string, unknown>[]; spelled: unknown; groupBy?: string[] }> = [
+      { cell: 'an EMPTY row set', rows: [], spelled: filter },
+      { cell: 'an EMPTY row set, grouped', rows: [], spelled: filter, groupBy: ['title'] },
+      { cell: 'meta null in every row, the lowered filter', rows: NULL_META_ROWS, spelled: lowered },
+      { cell: 'meta null in every row, the filter as written', rows: NULL_META_ROWS, spelled: filter },
+    ];
+    for (const { cell, rows, spelled, groupBy } of cells) {
+      it(`${name} on ${cell}: 400 INVALID_FILTER, engine.aggregate's very message, the diagnostic to reportWithheld`, async () => {
+        const reported: string[] = [];
+        const err = refusalFrom(() => applyInMemoryAggregation(
+          rows.map((row) => ({ ...row })), ast(spelled, groupBy), undefined, FIELDS,
+          (diagnostic) => { reported.push(diagnostic); },
+        ));
+        expect(err.code).toBe('INVALID_FILTER');
+        expect(err.status).toBe(400);
+        expect(err.message).toBe(await engineMessageFor(filter));
+        expect(err.message).toContain('{ "FIELD": { "$contains": "a" } }');
+        expect(err.message).not.toContain('"meta"');
+        expect(reported.join('\n')).toContain(`Operator "${op}" on field "meta" WAS NOT APPLIED`);
+        expect(reported.join('\n')).toContain('At aggregations[1].filter.');
+      });
+    }
+  }
+
+  it('no reportWithheld: the same refusal, the diagnostic dropped', () => {
+    const err = refusalFrom(() => applyInMemoryAggregation([], ast({ owners: { $in: ['u1'] } }), undefined, FIELDS));
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
+  });
+
+  it('no field map: nothing is judged, and the walker answers as it always did', () => {
+    expect(applyInMemoryAggregation(ROWS.map((row) => ({ ...row })), ast({ owners: { $in: ['u1'] } }))).toEqual([{ n: 6, m: 0 }]);
+  });
+
+  it('what still answers on a declared JSON-stored field answers here too', () => {
+    expect(applyInMemoryAggregation(ROWS.map((row) => ({ ...row })), ast({ owners: { $contains: 'u1' } }), undefined, FIELDS))
+      .toEqual([{ n: 6, m: 2 }]);
   });
 });
