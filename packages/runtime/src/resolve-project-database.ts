@@ -311,7 +311,8 @@ export function resolveProjectDatabaseUrl(
                     url: `file:${legacyPath}`,
                     source: 'legacy-file',
                     notice:
-                        `Reading legacy database file ${legacyPath} — the unified default is now ${unifiedPath} (#6469); ` +
+                        `Reading legacy database file ${legacyPath} — dev, start and migrate now share one default, ` +
+                        `${unifiedPath}; ` +
                         `migrate with: mv "${legacyPath}" "${unifiedPath}" (move any -wal/-shm siblings too), ` +
                         `or pin it explicitly via OS_DATABASE_URL=file:${legacyPath}`,
                 };

@@ -62,10 +62,6 @@ interface DropReason {
     article: string;
     /** What delivering anyway would mean — the harm being refused. */
     ratherThan: string;
-    /** Issue this drop rule comes from. */
-    issue: string;
-    /** Issue pair for the repeat line. */
-    issues: string;
 }
 
 const SIGNING_SECRET_CREDENTIAL: DropReason = {
@@ -73,8 +69,6 @@ const SIGNING_SECRET_CREDENTIAL: DropReason = {
     noun: 'signing secret',
     article: 'an encrypted signing secret',
     ratherThan: 'delivered unsigned',
-    issue: '#7799',
-    issues: '#7799/#8022',
 };
 
 const CUSTOM_HEADERS_CREDENTIAL: DropReason = {
@@ -82,8 +76,6 @@ const CUSTOM_HEADERS_CREDENTIAL: DropReason = {
     noun: 'custom header map',
     article: 'encrypted custom headers',
     ratherThan: 'delivered without the headers it was authored with',
-    issue: '#7986',
-    issues: '#7986/#8022',
 };
 
 /**
@@ -522,8 +514,9 @@ export class AutoEnqueuer {
         const message =
             `[webhook-auto-enqueuer] could not record the undeliverable event for webhook `
             + `'${sub.name}' — the subscription is parked for an unresolvable credential, and this `
-            + `event is now DISCARDED WITH NO TRACE in sys_http_delivery, which is the durability `
-            + `gap #8069 closes. Most likely cause: the enqueue callback was wired directly to `
+            + `event is now DISCARDED WITH NO TRACE in sys_http_delivery — the very loss a parked `
+            + `subscription's dead row exists to prevent. Most likely cause: the enqueue callback was `
+            + `wired directly to `
             + `IHttpOutbox.enqueue instead of MessagingService.enqueueHttp — only the messaging seam `
             + `routes a parked event to recordUndeliverable(), and the delivery door refuses it `
             + `rather than minting a pending row that would be sent UNSIGNED.`;
@@ -540,13 +533,14 @@ export class AutoEnqueuer {
         sub.parkedReason =
             `[${WEBHOOK_SECRET_REFUSAL_CODE}/${WEBHOOK_SECRET_REFUSAL_STATUS}] webhook '${sub.name}' `
             + `holds ${credential.article} that could not be decrypted, so this event was NOT `
-            + `delivered — recording it here rather than ${credential.ratherThan} (${credential.issue}, `
-            + `#8069). This row was never sent and cannot be redelivered: it carries no HMAC signature, `
+            + `delivered — recording it here rather than ${credential.ratherThan}, and rather than `
+            + `discarding it without a trace. This row was never sent and cannot be redelivered: `
+            + `it carries no HMAC signature, `
             + `because the ${credential.noun} that would have produced one is exactly what is missing. `
             + `Fix: register a CryptoProvider (engine.setCryptoProvider — LocalCryptoProvider in dev, `
             + `KMS/Vault in production) with the same key the ${credential.noun} was written under, and `
             + `make sure the sys_secret row is reachable; the subscription re-arms on registration `
-            + `(#8022) and at the next periodic refresh, and later events are delivered normally. `
+            + `and at the next periodic refresh, and later events are delivered normally. `
             + `Cause: ${(err as Error)?.message ?? String(err)}`;
     }
 
@@ -745,7 +739,7 @@ export class AutoEnqueuer {
         if (this.droppedForSecret.has(sub.id)) {
             this.logger?.debug?.(
                 `[webhook-auto-enqueuer] webhook '${sub.name}' is still dropped for an unresolvable ` +
-                    `${credential.noun} (${credential.issues})`,
+                    `${credential.noun}`,
                 meta,
             );
             return;
@@ -759,15 +753,15 @@ export class AutoEnqueuer {
         // the evidence IS.
         const message =
             `[webhook-auto-enqueuer] webhook '${sub.name}' holds ${credential.article} that ` +
-            `could not be decrypted — the subscription is PARKED rather than ${credential.ratherThan} ` +
-            `(${credential.issue}), so every matching record change is discarded with NO delivery, ` +
+            `could not be decrypted — the subscription is PARKED rather than ${credential.ratherThan}, ` +
+            `so every matching record change is discarded with NO delivery, ` +
             'while the row keeps reading active:true in Setup. Each discarded event IS recorded in ' +
-            'sys_http_delivery as a dead row with 0 attempts carrying this cause (#8069) — look there ' +
+            'sys_http_delivery as a dead row with 0 attempts carrying this cause — look there ' +
             'for the backlog; those rows can never be sent or redelivered, because a parked row has no ' +
             'HMAC signature. Fix: register a ' +
             'CryptoProvider (engine.setCryptoProvider — LocalCryptoProvider in dev, KMS/Vault in ' +
             `production) with the same key the ${credential.noun} was written under, and make sure the ` +
-            'sys_secret row is reachable; the subscription re-arms on registration (#8022) and at the ' +
+            'sys_secret row is reachable; the subscription re-arms on registration and at the ' +
             'next periodic refresh.';
         // The logger surface is a subset of console/kernel logger — `error` is
         // optional on it, so fall back rather than silently losing the report
@@ -836,7 +830,8 @@ export class AutoEnqueuer {
             this.logger?.warn?.(
                 `[webhook-auto-enqueuer] webhook '${(row.name as string) ?? row.id}' has no dispatchable ` +
                     `triggers — it will NEVER fire (rule webhook/without-triggers): there is no manual fire ` +
-                    `path (#3196), so this row is dead while looking armed in Setup. Declare ` +
+                    `path (the 'api' trigger was removed because nothing could fire it), so this row is dead while ` +
+                    `looking armed in Setup. Declare ` +
                     `one of: ${[...DISPATCHABLE_WEBHOOK_TRIGGERS].join(', ')}, or set it inactive if it ` +
                     `should be off.`,
                 { id: row.id },

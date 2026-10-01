@@ -15,6 +15,7 @@
  *   objects.<object>._actions.<action_name>.description
  *   objects.<object>._actions.<action_name>.confirmText
  *   objects.<object>._actions.<action_name>.successMessage
+ *   objects.<object>._actions.<action_name>.outcomeMessages.<outcome>
  *   objects.<object>._actions.<action_name>.params.<param_name>.label
  *   objects.<object>._actions.<action_name>.params.<param_name>.helpText
  *   objects.<object>._actions.<action_name>.params.<param_name>.placeholder
@@ -31,7 +32,7 @@
  * For object-less actions (no `objectName`), helpers fall back to:
  *
  *   globalActions.<action_name>.label / .description / .confirmText /
- *     .successMessage / .params.<param_name>.*
+ *     .successMessage / .outcomeMessages.<outcome> / .params.<param_name>.*
  *
  * Lookup order: requested locale → each entry of `fallbackChain` → literal
  * `label` from the metadata — except that a request for the deployment's
@@ -152,6 +153,11 @@ export interface ActionLike {
   description?: string;
   confirmText?: string;
   successMessage?: string;
+  /**
+   * `ActionSchema.outcomeMessages` — success copy per handler `outcome`,
+   * narrowed to `string` values for the same reason `successMessage` is.
+   */
+  outcomeMessages?: Record<string, string>;
   /** `ActionSchema.params` — the param dialog's own copy. */
   params?: ActionParamLike[];
   /** When omitted, the action is treated as global. */
@@ -675,6 +681,50 @@ export function resolveActionSuccess(
 }
 
 /**
+ * The translated `outcomeMessages` map of an action (#21095), or `undefined`
+ * when the action declares none.
+ *
+ * Overlaid KEY BY KEY, and only for outcomes the action itself declares: the
+ * map's keys are the closed set of `outcome` facts the handler reports, so a
+ * bundle cannot add an outcome — a translated entry for an undeclared key is
+ * never selected by anything and is not copied in. Each declared key resolves
+ * the way {@link lookupActionField} resolves `successMessage`: object-scoped
+ * `objects.<object>._actions.<action>.outcomeMessages.<outcome>` first, then
+ * `globalActions.<action>.outcomeMessages.<outcome>`, per locale in the chain,
+ * falling back to the authored copy. The `${result.*}` tokens in a message
+ * are the renderer's to interpolate — a translation carries them verbatim.
+ */
+function resolveActionOutcomeMessages(
+  bundle: TranslationBundle | undefined,
+  action: ActionLike,
+  opts?: ResolveOptions,
+): Record<string, string> | undefined {
+  const declared = action.outcomeMessages;
+  if (!declared || typeof declared !== 'object') return undefined;
+  if (!bundle) return declared;
+  const chain = localeChain(opts);
+  let out: Record<string, string> | undefined;
+  for (const outcome of Object.keys(declared)) {
+    for (const code of chain) {
+      const data = pickData(bundle, code);
+      if (!data) continue;
+      const fromObject = action.objectName
+        ? data.objects?.[action.objectName]?._actions?.[action.name]?.outcomeMessages?.[outcome]
+        : undefined;
+      const candidate = typeof fromObject === 'string' && fromObject.length > 0
+        ? fromObject
+        : data.globalActions?.[action.name]?.outcomeMessages?.[outcome];
+      if (typeof candidate === 'string' && candidate.length > 0) {
+        out ??= { ...declared };
+        out[outcome] = candidate;
+        break;
+      }
+    }
+  }
+  return out ?? declared;
+}
+
+/**
  * The `params.<param>` translation node for one action, in one locale's data —
  * object-scoped first, then `globalActions`, the same split
  * {@link lookupActionField} walks.
@@ -1005,8 +1055,9 @@ export function translateView<T extends ViewLike>(
 
 /**
  * Apply the active locale to an action metadata document by overwriting
- * `label`, `description`, `confirmText`, `successMessage`, the `params[]` copy
- * and the `resultDialog` copy with translated values when available. The
+ * `label`, `description`, `confirmText`, `successMessage`, each declared
+ * `outcomeMessages` entry, the `params[]` copy and the `resultDialog` copy with
+ * translated values when available. The
  * original document is not mutated; a shallow copy is returned.
  *
  * ## Why `description` and `params` are overlaid HERE
@@ -1035,6 +1086,7 @@ export function translateAction<T extends ActionLike>(
   const description = lookupActionField(bundle, action, 'description', opts) ?? action.description;
   const confirmText = resolveActionConfirm(bundle, action, opts);
   const successMessage = resolveActionSuccess(bundle, action, opts);
+  const outcomeMessages = resolveActionOutcomeMessages(bundle, action, opts);
   const resultDialog = resolveActionResultDialog(bundle, action, opts);
   const params = translateActionParams(action, bundle, opts);
   return {
@@ -1043,6 +1095,7 @@ export function translateAction<T extends ActionLike>(
     ...(description !== undefined ? { description } : {}),
     ...(confirmText !== undefined ? { confirmText } : {}),
     ...(successMessage !== undefined ? { successMessage } : {}),
+    ...(outcomeMessages !== action.outcomeMessages ? { outcomeMessages } : {}),
     ...(resultDialog !== undefined ? { resultDialog } : {}),
     ...(params !== action.params ? { params } : {}),
   };

@@ -158,13 +158,24 @@ describe('getWritableFields — the answers the contract names', () => {
     expect(await plugin.getWritableFields('invoice', { isSystem: true })).toEqual(FIELDS);
   });
 
-  it('no permission sets resolved: the full field set minus the capability-gated field, which the write gate refuses', async () => {
+  it('no permission sets resolved: the full field set minus the capability-gated field — a field answer, while [#21079] the write itself is refused at object admission', async () => {
     const { plugin, middleware } = await boot([], { noBaseline: true });
     // [#21063] The caller holds no capability, so `margin`'s
-    // `requiredPermissions` refuses it on write; nothing else is refused.
+    // `requiredPermissions` is the one field the field layer refuses it.
     expect(await plugin.getWritableFields('invoice', WRITER_CTX)).toEqual(FIELDS.filter((f) => f !== 'margin'));
-    expect(await middlewareAdmits(middleware, 'update', WRITER_CTX, { margin: PAYLOAD_VALUE.margin })).toBe(false);
-    expect(await middlewareAdmits(middleware, 'update', WRITER_CTX, { secret: PAYLOAD_VALUE.secret })).toBe(true);
+    // [#21079] The answer is field-level only, as the contract states: this
+    // caller carries a principal and resolves no set, so the ADR-0056 D2 deny
+    // baseline refuses every write at the CRUD gate, whatever field it names.
+    for (const field of ['margin', 'secret']) {
+      const refusal = await middleware(
+        { object: 'invoice', operation: 'update', context: { ...WRITER_CTX }, options: {}, ast: { where: {} }, data: { [field]: PAYLOAD_VALUE[field] } },
+        async () => {},
+      ).then(
+        () => null,
+        (e: { code?: unknown; status?: unknown; statusCode?: unknown }) => ({ code: e.code, status: e.status ?? e.statusCode }),
+      );
+      expect(refusal, `update naming ${field}`).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    }
   });
 
   it('an unresolvable object is no answer (undefined), not an empty one', async () => {

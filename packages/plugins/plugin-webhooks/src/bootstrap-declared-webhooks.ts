@@ -263,7 +263,7 @@ export async function bootstrapDeclaredWebhooks(
       const protection = isSecretProtectionFailure(err);
       logger?.warn?.(
         protection
-          ? '[webhook] declared webhook NOT seeded — its signing secret cannot be stored encrypted (#7799)'
+          ? '[webhook] declared webhook NOT seeded — its signing secret cannot be stored encrypted, and it is never stored in cleartext instead'
           : '[webhook] declared webhook seed failed',
         {
           name: wh.name,

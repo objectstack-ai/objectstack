@@ -324,7 +324,7 @@ export class SqlHttpOutbox implements IHttpOutbox {
                 `SqlHttpOutbox.claim: ${this.objectName}.headers_json is declared \`internal: true\`, `
                     + 'but this data engine does not implement resolveInternalField() — stored headers '
                     + 'cannot be recovered, and a delivery must not go out missing the headers it was '
-                    + 'authored with (#8118). The claimed rows revert to pending via the claim TTL.',
+                    + 'authored with. The claimed rows revert to pending via the claim TTL.',
             );
         }
         return engine.resolveInternalField(this.objectName, ids, 'headers_json');

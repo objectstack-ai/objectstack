@@ -103,12 +103,13 @@ export default defineView({
 
 ## 2. (Optional) Create the `guest_portal` permission set
 
-Authorization no longer depends on this set — the declaration-derived
-`publicFormGrant` (see the note above) is what permits the insert. You only need
-a `guest_portal` permission set if you rely on the legacy back-compat path (e.g.
-an older runtime, or object hooks that branch on the `guest_portal` permission).
-When present it is still attached to the anonymous context, so keep it
-INSERT-only on the target object — the guest-safe shape (ADR-0090 D9).
+The submit's authorization no longer depends on this set — the
+declaration-derived `publicFormGrant` (see the note above) is what permits the
+insert. For the submit you only need a `guest_portal` permission set if you rely
+on the legacy back-compat path (e.g. an older runtime, or object hooks that
+branch on the `guest_portal` permission). When present the set is attached to
+the anonymous context, so keep it INSERT-only on the form's target object — the
+guest-safe shape (ADR-0090 D9).
 
 {/* os:check */}
 ```ts
