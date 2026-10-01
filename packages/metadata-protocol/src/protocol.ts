@@ -173,11 +173,18 @@ import {
 // `getMetaItems` / `getMetaItem` exits; the two named here are the exits that
 // decoration does not reach — `getMetaItemLayered`, which serves three RAW
 // layers, and `saveMetaItem`, which owes the redaction its write-path inverse.
+// [#21086] The stored-row helpers are the generic data door's half: `findData`
+// and `getData` serve `sys_metadata` / `sys_metadata_history` rows, whose
+// `metadata` column is the same stored body, through the same redactor.
 import {
     carryForwardRedactedValues,
     hasMetadataRedactor,
     redactMetadataItem,
     redactedPathsCarriedForward,
+    redactStoredMetadataRow,
+    redactStoredMetadataRows,
+    storedMetadataBodyGroupingRefusal,
+    storedMetadataBodyProjection,
 } from './metadata-redaction.js';
 import type {
     StoredFlowCanonicalization,
@@ -11632,6 +11639,13 @@ export class ObjectStackProtocolImplementation implements
         // rows returned ungrouped, looking exactly like a served query.
         this.assertGroupByFieldsExist(request.object, options.groupBy);
         this.assertAggregationFieldsExist(request.object, options.aggregations);
+        // [#21086] A stored metadata body is served only as its type's read
+        // projection (see `redactStoredMetadataRows` below), and a GROUP KEY
+        // cannot be projected — so grouping by the body column of a
+        // stored-metadata table is refused, after the existence gates so an
+        // unknown name keeps its own answer.
+        const bodyGroupingRefusal = storedMetadataBodyGroupingRefusal(request.object, options.groupBy);
+        if (bodyGroupingRefusal) throw bodyGroupingRefusal;
 
         // Route to engine.aggregate() when the query has GROUP BY / aggregations.
         // engine.find() does not do in-memory aggregation fallback, so without
@@ -11721,7 +11735,19 @@ export class ObjectStackProtocolImplementation implements
         for (const k of ['object', 'count', 'joins', 'windowFunctions', 'cursor', 'distinct', 'having']) {
             delete options[k];
         }
-        const records = await this.engine.find(request.object, options);
+        // [#21086] The generic data door is a read exit for the stored metadata
+        // body too: a `sys_metadata` / `sys_metadata_history` row's `metadata`
+        // column is served as its type's read projection — the one `/meta`
+        // serves — so a stored credential is withheld here exactly as there.
+        // The row's `type` selects the redactor, so it is read even when the
+        // projection named only the body, and taken back off before serving.
+        const bodyProjection = storedMetadataBodyProjection(request.object, options.fields);
+        if (bodyProjection.addedType) options.fields = bodyProjection.fields;
+        const records = redactStoredMetadataRows(
+            request.object,
+            await this.engine.find(request.object, options),
+            { dropType: bodyProjection.addedType },
+        );
         // Pagination metadata. When a `limit` is present the response is a single
         // page, so `records.length` is the page size — NOT the match total. Run a
         // count over the same `where` so the client can render total pages and know
@@ -11823,6 +11849,10 @@ export class ObjectStackProtocolImplementation implements
                 : request.select;
             this.assertProjectionFieldsExist(request.object, queryOptions.fields, 'select');
         }
+        // [#21086] Same read projection as the list path (`findData`): the row's
+        // `type` is read even when `select` named only the body.
+        const bodyProjection = storedMetadataBodyProjection(request.object, queryOptions.fields);
+        if (bodyProjection.addedType) queryOptions.fields = bodyProjection.fields;
 
         // Support expand for single-record retrieval
         if (request.expand) {
@@ -11841,7 +11871,7 @@ export class ObjectStackProtocolImplementation implements
             return {
                 object: request.object,
                 id: request.id,
-                record: result
+                record: redactStoredMetadataRow(request.object, result, { dropType: bodyProjection.addedType }),
             };
         }
         throw recordNotFoundError(request.object, request.id);
