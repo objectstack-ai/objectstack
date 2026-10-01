@@ -54,14 +54,19 @@ import { z } from 'zod';
  * refuse a name for slots whose accept set no ruling has narrowed.
  *
  * `ObjectSchema.fields` (`data/object.zod.ts`) is the slot that does, and since
- * #19346 it refuses them with a RECORD-level `bannedKeys(['constructor',
- * 'prototype'])` rather than in its key grammar. The reason is the PUBLISHED
- * file and not the runtime: a `.refine()` on the key schema is a `custom`
- * check, which `z.toJSONSchema()` has no arm for, so such a rule reaches the
- * runtime and never `packages/spec/json-schema/**` — it held nine
- * `fields.out.keyType` rows in `dropped-refinements.baseline.json` saying
- * exactly that. Declared through the closed projection list's `banned-keys`
- * arm, the same rule is published as `propertyNames` plus `not`.
+ * #19346 it refuses them with RECORD-level `bannedKeys` refines rather than in
+ * its key grammar. The reason is the PUBLISHED file and not the runtime: a
+ * `.refine()` on the key schema is a `custom` check, which `z.toJSONSchema()`
+ * has no arm for, so such a rule reaches the runtime and never
+ * `packages/spec/json-schema/**` — it held nine `fields.out.keyType` rows in
+ * `dropped-refinements.baseline.json` saying exactly that. Declared through
+ * the closed projection list's `banned-keys` arm, the same rule is published
+ * as `propertyNames` plus `not`.
+ *
+ * Since #20997 that is ONE single-name refine per name, whose static `path`
+ * is that name, so each refusal is located at `fields.<name>` exactly as this
+ * guard's own refusal is located at `fields.__proto__` — a record-level
+ * predicate keeps the projection, and a per-name one keeps the path.
  *
  * ⛔ That route is not open to `__proto__`, here or anywhere: this wrapper's
  * guard is a pre-parse `z.preprocess` node, which the projection cannot see

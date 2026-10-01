@@ -278,6 +278,17 @@ describe('AuditPlugin — sys_comment access gates are mounted', () => {
     expect(hooks.some((h) => h.event === 'afterInsert' && !h.object)).toBe(true);
   });
 
+  it('registers the sys_activity parent-record read middleware at kernel:ready', async () => {
+    const { engine, middlewares } = makeGateEngine();
+    const { ctx, fireReady } = makeCtx(engine);
+    const plugin = new AuditPlugin();
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    await fireReady();
+
+    expect(middlewares).toContainEqual({ object: 'sys_activity' });
+  });
+
   it('the mounted beforeInsert actually refuses a comment on an unreadable record', async () => {
     const { engine, hooks } = makeGateEngine();
     const { ctx, fireReady } = makeCtx(engine);

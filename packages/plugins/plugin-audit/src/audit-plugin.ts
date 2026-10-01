@@ -17,6 +17,7 @@ import { installAuditWriters, type AuditI18nSurface, type MessagingEmitSurface }
 import { installReadAuditWriter, type ReadAuditWriterHandle } from './read-audit.js';
 import { createAuthEventAuditSink } from './auth-event-audit.js';
 import { installCommentAccessHooks, installCommentReadVisibility } from './comment-access-hooks.js';
+import { installActivityReadVisibility } from './activity-read-visibility.js';
 
 /**
  * [#8992] Read/view audit configuration — the per-object opt-in, closed.
@@ -276,6 +277,22 @@ export class AuditPlugin implements Plugin {
           );
         }
         ctx.logger.info('AuditPlugin: sys_comment record-level access gates installed');
+      }
+
+      // sys_activity READ visibility — an activity row is readable when the
+      // record it is about (`object_name`, `record_id`) is readable, decided by
+      // the same caller-scoped parent read the sys_comment gate above asks.
+      // The object is append-only with `apiMethods: ['get', 'list']`, so the
+      // read side is the whole gate. Without the middleware seam it cannot be
+      // installed, and that is said rather than left silent.
+      if (typeof (engine as any).registerMiddleware === 'function') {
+        installActivityReadVisibility(engine as any, ctx.logger);
+        ctx.logger.info('AuditPlugin: sys_activity parent-record read visibility installed');
+      } else {
+        ctx.logger.warn(
+          'AuditPlugin: engine has no middleware seam — sys_activity READ visibility NOT installed ' +
+            '(activity about records the caller cannot read would be listable)',
+        );
       }
     });
   }
