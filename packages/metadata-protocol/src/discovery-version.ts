@@ -4,7 +4,7 @@
  * Resolves the value `ObjectStackProtocolImplementation.getDiscovery()` serves
  * as the `DiscoverySchema` "System Identity" `version` field (`./protocol.ts`).
  *
- * ## #11235 — why the literal it replaces was provably not a contract value
+ * ## Commit 376c70f98 — why the literal it replaces was provably not a contract value
  *
  * This producer hardcoded `version: '1.0'`. It is the SECOND
  * `DiscoverySchema`-conforming producer; the first
@@ -23,7 +23,7 @@
  * `@objectstack/metadata-protocol`, not the reverse, so importing it would
  * invert the dependency direction. Hoisting a shared helper into
  * `@objectstack/types` or `@objectstack/core` (both already dependencies of
- * this package) was considered and declined at #11235 triage: a hoist widens
+ * this package) was considered and declined when the derivation landed (commit 376c70f98): a hoist widens
  * two packages' published surface for ~10 lines serving two call sites.
  * Consolidation rides a later card if a third caller ever appears.
  *
@@ -103,7 +103,7 @@ function resolvePackageVersion(): string | undefined {
  * 3. `'unknown'` — only if BOTH of the above are unavailable (the package's own
  *    `package.json` is unreadable). Honest about not knowing, rather than a
  *    plausible-looking literal a caller could mistake for real identity — the
- *    exact failure mode #10993 and #11235 exist to close.
+ *    exact failure mode #10993 and commit 376c70f98 close.
  */
 export function resolveDiscoveryVersion(): string {
     return getEnv('OS_RUNTIME_VERSION') || resolvePackageVersion() || 'unknown';

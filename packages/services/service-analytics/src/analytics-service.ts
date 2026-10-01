@@ -70,7 +70,7 @@ import { measureResultType } from './measure-result-type.js';
 // a measure whose aggregate × field-type pair it refuses is refused in
 // `ensureCube`, ahead of both strategies, as the dataset door refuses it at
 // compile.
-import { assertCubeMeasureFieldTypesAccepted } from './cube-measure-field-type-door.js';
+import { assertCubeMeasureFieldTypesAccepted, type MeasureColumn } from './cube-measure-field-type-door.js';
 import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext, DatasetScopedStrategyContext, DatasetScope, ReadScopeFilterJudge } from './strategies/types.js';
 import { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from './strategies/objectql-strategy.js';
@@ -115,8 +115,10 @@ import { assertNoStructuredJsonDimension } from './structured-json-dimension-doo
 import { ACCEPTED_SQL_DIALECTS, isUnrecognisedSqlDialectAnswer, type AcceptedSqlDialect } from './text-match-sql.js';
 // [#20986] The one resolver of the object a relationship-path hop reads. The
 // door's field gate and its admitted and scoped set read it here; both
-// strategies read it through the context's `relationshipReference`.
-import { resolvePathHops, type HopReference } from './hop-object.js';
+// strategies read it through the context's `relationshipReference`. [#21129]
+// So do the measure × field-type door and the measure result type, for the
+// object a relationship-path measure column is declared on.
+import { columnObjectOf, resolvePathHops, type HopReference } from './hop-object.js';
 
 /**
  * [#5717] Does this error carry an ADR-0112 envelope — i.e. did its PRODUCER
@@ -651,20 +653,37 @@ function withDeclaredMeasureFormats(
 /**
  * [#21044] The cube measure a `measures` entry resolves to — through
  * {@link declaredMemberEntry}, the resolver {@link withDeclaredMeasureFormats}
- * reads — and the base-object COLUMN it aggregates: its `sql` when that is a
- * bare identifier, `null` otherwise (`'*'`, or a relationship path whose
- * declaration lives on another object). `undefined` when the entry resolves to
- * no declared measure.
+ * reads — and the COLUMN it aggregates, located on the object that declares
+ * it; `null` when its `sql` is not a column reference (`'*'`, an expression).
+ * `undefined` when the entry resolves to no declared measure.
+ *
+ * - A bare identifier is a column of `baseObject`.
+ * - [#21129] A relationship path (`account.name`) is its last segment, on the
+ *   object the path's last hop reaches: {@link columnObjectOf}, the one hop
+ *   resolver (`hop-object.ts`) — the cube's join, else the relationship
+ *   field's declared target through `referenceOf`, else the alias — which is
+ *   the object both strategies join and read for that path. ⛔ No second walk.
  */
 function declaredMeasureColumn(
   cube: Cube,
   member: string,
-): { type: unknown; column: string | null } | undefined {
+  baseObject: string,
+  referenceOf: HopReference | undefined,
+): { type: unknown; column: MeasureColumn | null } | undefined {
   const entry = declaredMemberEntry(cube, member, 'measure');
   const measure = entry ? cube.measures[entry.key] : undefined;
   if (!measure) return undefined;
   const sql = typeof measure.sql === 'string' ? measure.sql.trim() : '';
-  return { type: measure.type, column: BARE_IDENTIFIER.test(sql) ? sql : null };
+  if (BARE_IDENTIFIER.test(sql)) return { type: measure.type, column: { object: baseObject, column: sql, path: sql } };
+  if (!IDENTIFIER_PATH.test(sql)) return { type: measure.type, column: null };
+  return {
+    type: measure.type,
+    column: {
+      object: columnObjectOf(cube, baseObject, sql, referenceOf),
+      column: sql.slice(sql.lastIndexOf('.') + 1),
+      path: sql,
+    },
+  };
 }
 
 /** The `AggregationFunction` vocabulary — the aggregates `measureResultType` speaks about. */
@@ -680,13 +699,15 @@ const AGGREGATION_FUNCTIONS: ReadonlySet<string> = new Set(AggregationFunction.o
  * ADR-0021 enrichment (`enrichResultColumns`); the cube door described a
  * `min` / `max` over a temporal column as a number, in the same response that
  * carried the instant. ⛔ No copy of the rule: this asks it with the cube
- * measure's aggregate and the declared type of the base-object column it reads,
- * and writes only what it answers. It answers `undefined` for every pair it has
+ * measure's aggregate and the declared type of the column it reads, and writes
+ * only what it answers. It answers `undefined` for every pair it has
  * nothing to say about — the numeric and boolean classes, the count / sum / avg
  * rows, an expression metric type — and for every pair the aggregate ×
  * field-type table refuses, which the cube door has refused before any strategy
- * ran ({@link assertCubeMeasureFieldTypesAccepted}). A relationship-path column
- * is not described: the declaration this reads is the base object's.
+ * ran ({@link assertCubeMeasureFieldTypesAccepted}). [#21129] The column is
+ * {@link declaredMeasureColumn}'s, the door's own: a relationship-path column
+ * is described by the declaration on the object its last hop reaches, as a
+ * base-object column is by the base object's.
  *
  * Copy-on-write, like the format pass: the strategy owns the object it
  * returned.
@@ -696,6 +717,7 @@ function withMeasureResultTypes(
   query: AnalyticsQuery,
   cube: Cube | undefined,
   declaredTypeOf: ((object: string, field: string) => string | undefined) | undefined,
+  referenceOf: HopReference | undefined,
 ): AnalyticsResult {
   if (!declaredTypeOf || !cube || !result?.fields?.length || !query.measures?.length) return result;
   const object = typeof cube.sql === 'string' ? cube.sql.trim() : '';
@@ -704,9 +726,12 @@ function withMeasureResultTypes(
   let fields: AnalyticsResult['fields'] | undefined;
   result.fields.forEach((f, i) => {
     if (!requested.has(f.name)) return;
-    const measure = declaredMeasureColumn(cube, f.name);
+    const measure = declaredMeasureColumn(cube, f.name, object, referenceOf);
     if (!measure?.column || typeof measure.type !== 'string' || !AGGREGATION_FUNCTIONS.has(measure.type)) return;
-    const type = measureResultType(measure.type as AggregationFunction, declaredTypeOf(object, measure.column));
+    const type = measureResultType(
+      measure.type as AggregationFunction,
+      declaredTypeOf(measure.column.object, measure.column.column),
+    );
     if (type === undefined || f.type === type) return;
     fields ??= [...result.fields];
     fields[i] = { ...f, type };
@@ -2216,6 +2241,7 @@ export class AnalyticsService implements IAnalyticsService {
             query,
             cube,
             this.sourceFieldMeta && ((object, field) => this.sourceFieldMeta?.(object, field)?.type),
+            this.hopReference,
           ),
         );
       } catch (e) {
@@ -3189,7 +3215,10 @@ export class AnalyticsService implements IAnalyticsService {
    * - The measure and column a member resolves to are
    *   {@link declaredMeasureColumn}'s — {@link declaredMemberEntry}, the
    *   resolver {@link withDeclaredMeasureFormats} reads — and nothing else
-   *   resolves a member to a field here.
+   *   resolves a member to a field here. [#21129] A relationship-path column
+   *   is located on the object its last hop reaches by the one hop resolver,
+   *   with {@link hopReference}: the answer the field gate admitted the path
+   *   with and the strategies join it by.
    * - The column's declared type is {@link AnalyticsServiceConfig.sourceFieldMeta}'s,
    *   the declaration the #20807 / #20912 door reads beside it.
    *
@@ -3206,8 +3235,7 @@ export class AnalyticsService implements IAnalyticsService {
     assertCubeMeasureFieldTypesAccepted(
       query,
       cube.name,
-      object,
-      (member) => declaredMeasureColumn(cube, member),
+      (member) => declaredMeasureColumn(cube, member, object, this.hopReference),
       (o, field) => fieldMeta(o, field)?.type,
     );
   }

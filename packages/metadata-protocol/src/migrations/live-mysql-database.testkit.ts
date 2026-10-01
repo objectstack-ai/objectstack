@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #10382 — the per-file live MySQL database for this package's live suites.
+ * Commit ee09d2119 — the per-file live MySQL database for this package's live suites.
  *
  * ## What was actually wrong, which is not what the card said
  *

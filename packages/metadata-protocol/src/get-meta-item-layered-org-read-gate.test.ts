@@ -1,13 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#14907] `getMetaItemLayered` — the THIRD `/meta` read verb — applies the
+ * [commit e1d4f9e3f] `getMetaItemLayered` — the THIRD `/meta` read verb — applies the
  * registry read gate ITSELF, so a caller cannot spend a raw active
  * organization on a type that has no per-org read channel.
  *
  * ── The defect, and why this verb was graded on its own harm ──────────────
  *
- * The series is #9454 → #14683 (plural `getMetaItems`) → #14770 (singular
+ * The series is #9454 → commit 96326040f (plural `getMetaItems`) → commit d5cbb44f3 (singular
  * `getMetaItem`) → this one. On the plural verb an ungated organization can
  * only ADD a row; on the singular verb it SUBSTITUTES the served document.
  * Here the affected value is the `overlay` LAYER of a three-layer diagnostic
@@ -28,19 +28,19 @@
  * and it is correct there because the binding already sat AFTER
  * `canonicalizeMetaRequestType`. Here the binding sat BEFORE the fold, so the
  * one-liner does NOT port: dropping the same expression in place would gate on
- * the RAW type. #10340 measured what that costs — `declaresOrgOverride`
+ * the RAW type. Commit 26f3588fb measured what that costs — `declaresOrgOverride`
  * tolerates the MANIFEST plurals but not the URL-only ones (`translations` /
  * `email_templates` have no manifest key), so a raw segment splits one item
  * across two partitions. The fix is therefore a REORDER, and §3 is what fails
  * if a later author moves the binding back above the fold: it asserts that a
  * URL-only spelling of an OVERRIDABLE type still reaches its org partition.
  *
- * ── §4–§5 are the idempotence proof the #14683 ruling made this conditional
+ * ── §4–§5 are the idempotence proof the ruling behind commit 96326040f made this conditional
  *    on, discharged over THIS door's caller population ──────────────────────
  *
  * That ruling makes a callee-side gate conditional on proving no already-gating
  * caller is double-scoped or wrongly denied, discharged PER DOOR over that
- * door's own callers. #14770's proof covers none of this verb's population, so
+ * door's own callers. Commit d5cbb44f3's proof covers none of this verb's population, so
  * it is re-discharged here: §4 covers `f(t, undefined) === undefined` (the four
  * `plugin-security` invocations that name no organization) and §5 covers
  * `f(t, f(t, o)) === f(t, o)` over the COMPLETE accepted-spelling population
@@ -359,13 +359,13 @@ describe('§3 the gate resolves AFTER canonicalizeMetaRequestType', () => {
             expect(res.overlayScope, spelling).toBe('org');
             // ONLY the org partition: the org row wins, so the `overlay ===
             // null` env fallback never runs. Gated on the raw segment this
-            // list is `[null]` instead — the partition split #10340 measured.
+            // list is `[null]` instead — the partition split commit 26f3588fb measured.
             expect(partitions(findOnes), spelling).toEqual([ORG]);
         }
     });
 
     it('answers the URL spelling and the canonical spelling identically', async () => {
-        // The #10340 statement restated as an equality: one item, ONE
+        // The statement of commit 26f3588fb restated as an equality: one item, ONE
         // partition, whichever accepted spelling addresses it.
         for (const spelling of URL_ONLY_OVERRIDABLE) {
             const canonical = canonicalMetaUrlType(spelling);

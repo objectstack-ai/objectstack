@@ -623,7 +623,7 @@ export async function bootStack(
               'authority on what it has to publish.'
             : `Install/link it in THIS APP (${hostRoot}) — and DECLARE it in that app's ` +
               'package.json, which is what is actually checked: a package merely reachable through ' +
-              'NODE_PATH or a hoisted workspace store is not accepted (#4719) — to run multi-org fixtures.';
+              'NODE_PATH or a hoisted workspace store is not accepted — to run multi-org fixtures.';
       throw new Error(
         'verify: multiTenant=true requires the enterprise @objectstack/organizations package (migrated from plugin-org-scoping, ADR-0105 D12). ' +
           `${remedy} (${(e as Error).message})`,

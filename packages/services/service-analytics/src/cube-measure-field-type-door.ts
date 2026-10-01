@@ -47,9 +47,13 @@
  *   and a compiled dataset's are one population. The member is resolved by the
  *   CALLER's resolver (the same one `withDeclaredMeasureFormats` reads), never
  *   a second one here.
- * - The measure's column is its `sql` when that is a bare identifier: a column
- *   of the cube's own object, whose declaration the door already reads
- *   (`sourceFieldMeta`).
+ * - The measure's column is its `sql` when that is a column reference, read on
+ *   the object that DECLARES it (`sourceFieldMeta`): a bare identifier is a
+ *   column of the cube's own object; [#21129] a relationship path
+ *   (`account.name`) is its last segment, on the object the path's last hop
+ *   reaches. The caller locates it through the one hop resolver
+ *   (`hop-object.ts`, `columnObjectOf`) — the object both strategies join and
+ *   read for that path — and ⛔ this module walks no path of its own.
  * - The verdict is `isAggregateCompatibleWithFieldType`'s. ⛔ No row is
  *   restated here: the accepted set the words name is read off the exported
  *   table, so a row changed in the spec changes this refusal in the same
@@ -69,19 +73,40 @@
  * - A member that resolves to no declared measure (the source-field gate's).
  * - A measure type outside the table's vocabulary: the expression metric types
  *   (`number` / `string` / `boolean`).
- * - A RELATIONSHIP-PATH column (`account.name`): the declaration the door
- *   reads is the base object's, so it would answer about a different column of
- *   the same name, or about nothing. The spec module says exactly this ("a
- *   consumer that cannot resolve a field's type must NOT call the predicate
- *   with a guess").
- * - A column the declaration hook cannot resolve, or a type outside
+ * - A `sql` that is not a column reference (`'*'`, an expression).
+ * - A column the declaration hook cannot resolve — for a relationship path,
+ *   one whose hop reaches an object the host does not know (the resolver's
+ *   alias tier with nothing registered under the alias) — or a type outside
  *   `FieldType` (a driver-internal alias): the table is fail-closed on
- *   vocabulary, and refusing on it would refuse a pair nobody declared.
+ *   vocabulary, and refusing on it would refuse a pair nobody declared. The
+ *   spec module says the same ("a consumer that cannot resolve a field's type
+ *   must NOT call the predicate with a guess").
+ *
+ * ## [#21129] A relationship-path column
+ *
+ * Measured through `POST /api/v1/analytics/query` on the real dispatcher route
+ * at `c6b6889193`, a configured cube over `deal` with a declared join
+ * `account` to a related object holding `name` (`text`), `revenue`
+ * (`number`), `opened_at` (`datetime`) and `tier` (`select`):
+ *
+ * | measure `sql` | face | SQLite | PostgreSQL 16.14 |
+ * |:--|:--|:--|:--|
+ * | `max` / `min` over `account.name`, `max` over `account.tier` | `NativeSQLStrategy` | 200, the text, `fields[]` `number` | the same |
+ * | `sum` over `account.name` | `NativeSQLStrategy` | 200, `0` | 500 `DATABASE_ERROR` |
+ * | every one of them | `ObjectQLStrategy` | 400 `INVALID_FIELD`, its cross-object refusal | the same |
+ *
+ * A base-object column of the same type was already refused here, so one
+ * question about one declared type was answered by whether the column sat a
+ * hop away. Read where the column is declared, a relationship-path pair the
+ * table refuses is refused as a base-object one is, ahead of both strategies:
+ * one envelope and one wording on both faces.
  *
  * ## The envelope, and why it is not the dataset door's code
  *
  * `INVALID_FIELD` / 400 through `invalidMemberError` (ADR-0112), with the
- * column and its object attached, as the #20912 door attaches them. The
+ * column and its object attached, as the #20912 door attaches them: `field` is
+ * the column as the measure's `sql` spells it (`note`, or `account.name`), and
+ * `object` is the object that declares it. The
  * dataset door answers the same pair `DATASET_INVALID`, which is a verdict
  * about a dataset DOCUMENT (`dataset-refusal.ts`'s header): this door's caller
  * sent no dataset, and a verdict about ONE MEMBER the request named is the
@@ -89,6 +114,9 @@
  * its #20912 `count_distinct` door and the engine's aggregate door already
  * answer, the last one for this very pair on the ObjectQL face. The dataset
  * door never reaches this one for a pair it refuses: it refuses at compile.
+ * Its compile check reads the base object's declaration and leaves a
+ * relationship-path field unjudged, so such a pair reaches this door through
+ * `DatasetExecutor` and is refused here.
  */
 
 import {
@@ -121,16 +149,35 @@ const reasonFor = (aggregate: string): string =>
       + 'the backend.';
 
 /**
+ * A measure's column, located on the object that declares it — the shape the
+ * #20912 door's `DimensionColumn` carries for a dimension.
+ */
+export interface MeasureColumn {
+  /** The object that declares the column: the cube's own, or the one a relationship path's last hop reaches. */
+  readonly object: string;
+  /** The column's name on that object. */
+  readonly column: string;
+  /** The measure's `sql` as written: the column, or the relationship path to it. */
+  readonly path: string;
+}
+
+/** Who declares the column, as the words say it: the cube's own object, or the related one. */
+function declarerOf(target: MeasureColumn): string {
+  return target.path === target.column
+    ? `which object '${target.object}' declares`
+    : `whose column '${target.column}' the related object '${target.object}' declares`;
+}
+
+/**
  * Refuse the first `measures` entry of `query` whose aggregate the table
  * refuses for its column's declared type — `INVALID_FIELD` / 400. See the
  * module header.
  *
- * @param baseObject - The object `cube.sql` names (the caller has checked it is
- *   a bare object name).
  * @param measureOf - The cube measure a `measures` entry resolves to, by the
- *   caller's resolver: its `type`, and the base-object `column` it aggregates
- *   (`null` when its `sql` is not a bare identifier) — or `undefined` when the
- *   entry resolves to no declared measure.
+ *   caller's resolver: its `type`, and the {@link MeasureColumn} it aggregates,
+ *   located on the object that declares it (`null` when its `sql` is not a
+ *   column reference) — or `undefined` when the entry resolves to no declared
+ *   measure.
  * @param declaredTypeOf - The declared `FieldType` of a column on an object, or
  *   `undefined` when nothing authoritative answers.
  *
@@ -141,8 +188,7 @@ const reasonFor = (aggregate: string): string =>
 export function assertCubeMeasureFieldTypesAccepted(
   query: AnalyticsQuery,
   cubeName: string,
-  baseObject: string,
-  measureOf: (member: string) => { type: unknown; column: string | null } | undefined,
+  measureOf: (member: string) => { type: unknown; column: MeasureColumn | null } | undefined,
   declaredTypeOf: (object: string, field: string) => string | undefined,
 ): void {
   for (const member of query.measures ?? []) {
@@ -150,20 +196,20 @@ export function assertCubeMeasureFieldTypesAccepted(
     if (!measure?.column) continue;
     const aggregate = measure.type;
     if (!isJudgedAggregate(aggregate)) continue;
-    const column = measure.column;
-    const declared = declaredTypeOf(baseObject, column);
+    const target = measure.column;
+    const declared = declaredTypeOf(target.object, target.column);
     if (typeof declared !== 'string' || !DECLARED_FIELD_TYPES.has(declared)) continue;
     if (isAggregateCompatibleWithFieldType(aggregate, declared)) continue;
 
     const err = invalidMemberError(
-      `Measure '${member}' on cube '${cubeName}' takes the ${aggregate} of field '${column}', which object `
-      + `'${baseObject}' declares as ${declared}: ${aggregate} does not accept that type, so the query was NOT `
+      `Measure '${member}' on cube '${cubeName}' takes the ${aggregate} of field '${target.path}', `
+      + `${declarerOf(target)} as ${declared}: ${aggregate} does not accept that type, so the query was NOT `
       + `run. ${aggregate} accepts ${AGGREGATE_FIELD_TYPE_COMPATIBILITY[aggregate].join(', ')}; aggregate a `
       + `field of one of those types, or count the rows with count. ${reasonFor(aggregate)}`,
       { member, param: 'measures', cube: cubeName },
     ) as Error & { field?: string; object?: string };
-    err.field = column;
-    err.object = baseObject;
+    err.field = target.path;
+    err.object = target.object;
     throw err;
   }
 }

@@ -12,7 +12,7 @@ export default defineConfig({
   dts: !process.env.OS_SKIP_DTS,
   format: ['esm', 'cjs'],
   target: 'es2020',
-  // [#11235] LOAD-BEARING, and measured rather than assumed. `discovery-
+  // [commit 376c70f98] LOAD-BEARING, and measured rather than assumed. `discovery-
   // version.ts` reads its own `package.json` via
   // `createRequire(import.meta.url)` — correct as written for the ESM output.
   // `shims: true` makes tsup rewrite `import.meta.url` in the CJS build to a

@@ -133,7 +133,7 @@ import { packagedBaseRegimePrescription, packagedBaseRegimeSentence } from './pa
  * because a guard on some arms and not others re-opens the drift the single
  * spelling closed.
  *
- * Reachability is MEASURED, not assumed (#14409, landed `3ecb7dc1a`): mysql2
+ * Reachability is MEASURED, not assumed (commit `3ecb7dc1a`): mysql2
  * 3.23.1 returns a module constant literally named `INVALID_DATE` for a zero
  * `DATETIME`, and postgres-date 1.0.7 builds `new Date(NaN)` for every year in
  * 275760..294276 — years Postgres itself stores. Unguarded,
@@ -145,7 +145,7 @@ import { packagedBaseRegimePrescription, packagedBaseRegimeSentence } from './pa
  * The terminal value is chosen **per call site**, and this one's is
  * `undefined`: every caller already carries such a chain — `getByHash` and
  * `rowToItem` end in `?? new Date(...).toISOString()`, `rowToEvent` (#16422)
- * in `?? new Date(0).toISOString()`, `listDrafts` (#14938) in `?? null` —
+ * in `?? new Date(0).toISOString()`, `listDrafts` (commit c383352cb) in `?? null` —
  * the branch an absent column takes at each of them today.
  * The ruling assigns `undefined` exactly where "the field is optional and the
  * caller already carries a `?? default` chain". ⛔ NOT the visible text
@@ -366,7 +366,7 @@ export function resetEnvWritableMetadataTypes(): void {
  * Both halves live together because SHUTDOWN NEEDS THE SECOND ONE. A registry
  * of event sinks can only express shutdown as "send an event", and an event is
  * precisely what a filtered or numeric-`since` subscriber is entitled to drop
- * (#11021).
+ * (commit 7d81c889f).
  */
 interface WatchSubscription {
   /** Receives every broadcast event; applies this subscriber's own filters. */
@@ -1165,7 +1165,7 @@ export class SysMetadataRepository implements MetadataRepository {
       name: row.name,
       organizationId: row.organization_id ?? null,
       packageId: row.package_id ?? null,
-      // [#14938] `updated_at` / `created_at` are the BUILTIN audit columns,
+      // [commit c383352cb] `updated_at` / `created_at` are the BUILTIN audit columns,
       // and on Postgres and MySQL they used to arrive here as a JS `Date`:
       // the audit repair and the declared-datetime fold both sat inside
       // `SqlDriver#formatOutput`'s `if (this.isSqlite)` arm. #13973
@@ -1310,7 +1310,7 @@ export class SysMetadataRepository implements MetadataRepository {
    *
    * ## `since` — invariant 6, both halves
    *
-   * **Numeric `since`** (#10842): every logged event with `seq > since` is
+   * **Numeric `since`** (commit f334d662e): every logged event with `seq > since` is
    * replayed out of `sys_metadata_history` before any live event is yielded.
    * `since` used to be nothing but a DROP filter on live events, so an event
    * that had already committed was unreachable through `watch()` however low
@@ -1346,7 +1346,7 @@ export class SysMetadataRepository implements MetadataRepository {
    * it and {@link close} runs the identical routine. Either settles a parked
    * `next()` with `{ done: true }` and no value. A consumer therefore never
    * has to recognise a shutdown *event* — there is not one to recognise, which
-   * is the #11021 repair; see `close()` for what modelling it as an event cost.
+   * is the repair in commit 7d81c889f; see `close()` for what modelling it as an event cost.
    * Anything still queued or unreplayed at that point is dropped, on both
    * paths alike.
    */
@@ -1459,7 +1459,7 @@ export class SysMetadataRepository implements MetadataRepository {
   /**
    * Shut down every live `watch()` iterator.
    *
-   * **Shutdown is not a metadata event** — #11021, and the reason this method
+   * **Shutdown is not a metadata event** — commit 7d81c889f, and the reason this method
    * no longer broadcasts anything. It used to push a synthetic
    * `{ seq: -1, ref: { org: '', type: 'view', name: '_close' } }` through the
    * same `dispatch` closure real events pass, then clear the registry. Both of
@@ -1829,7 +1829,7 @@ export class SysMetadataRepository implements MetadataRepository {
    * kernel (`environmentId === undefined`) skips the protocol's own two-tier
    * block entirely and lands here instead. That made it the second of the two
    * refusal points #6960 measured: on an environment carrying an overlay row
-   * authored BEFORE #6483 / PR #6608 rolled `allowOrgOverride` back to
+   * authored BEFORE commit ee58392e1 rolled `allowOrgOverride` back to
    * `false`, the row kept merging overlay-wins at read time while the ordinary
    * "Reset to package default" answered 403 — the removal reachable only
    * through `OS_METADATA_WRITABLE`. Maintainer ruling, 2026-08-10: the delete
@@ -1844,7 +1844,7 @@ export class SysMetadataRepository implements MetadataRepository {
    *  - `supportsOverlay: true` — the loader merges the row, so a row under
    *    this name really is a customization sitting on top of a code-declared
    *    default, and subtracting it restores that default. This is the tier
-   *    #6483 rolled back (`permission` / `position` / `page` / `app` /
+   *    commit ee58392e1 rolled back (`permission` / `position` / `page` / `app` /
    *    `dataset` / `book`).
    *  - `supportsOverlay: false` — `object` above all, whose overlay registers
    *    as its own contributor LAYER (ADR-0029 D9) rather than merging, and
@@ -1857,7 +1857,7 @@ export class SysMetadataRepository implements MetadataRepository {
    *
    *  - It does not touch `put`. Create and update on such an item stay refused
    *    exactly as today; the asymmetry is the ruling, not an oversight, and
-   *    "restoring symmetry" here re-opens the write door #6483 closed.
+   *    "restoring symmetry" here re-opens the write door commit ee58392e1 closed.
    *  - It does not widen `runtime-only`. That intent means "no artifact under
    *    this name", which the `allowRuntimeCreate` tier already governs — so
    *    the carve-out is scoped to the `override-artifact` intent, which is
@@ -2065,7 +2065,7 @@ export class SysMetadataRepository implements MetadataRepository {
     subject: string,
   ): 1 {
     // Benign — and only benign: a fresh DB has no row to be inconsistent with.
-    // [#13324] Both callers read `this.historyTable`, so a failure naming any
+    // [commit 4cda78c9b] Both callers read `this.historyTable`, so a failure naming any
     // other relation is not evidence that THIS one is empty.
     if (isMissingTableError(error, this.historyTable)) return 1;
 

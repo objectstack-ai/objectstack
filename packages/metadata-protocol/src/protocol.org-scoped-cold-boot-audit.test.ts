@@ -6,7 +6,7 @@
  * ---------------------------------------------------------------------------
  * What survived the upstream ruling, measured against `origin/main`
  * ---------------------------------------------------------------------------
- * #6155 Q1=B → #6283 → PR #6478 rolled `flow`'s `allowOrgOverride` back to
+ * #6155 Q1=B → #6283 → commit 474f131cf rolled `flow`'s `allowOrgOverride` back to
  * `false` and proved declared=enforced on the write side: overlaying a
  * PACKAGED flow per org is now a 403 `NOT_OVERRIDABLE` before persistence.
  *
@@ -177,7 +177,7 @@ describe('#6190 — cold boot names the org-scoped rows it cannot hydrate', () =
     // ── the premise, read from the registry rather than restated ──────────
 
     it('flow is the specimen: not per-org overridable, still runtime-creatable', () => {
-        // Both halves matter. `allowOrgOverride: false` (#6283 / PR #6478) is
+        // Both halves matter. `allowOrgOverride: false` (#6283 / commit 474f131cf) is
         // why an org-scoped flow row can never be read back as an overlay;
         // `allowRuntimeCreate: true` is why one can still be WRITTEN. If a
         // later ruling closes the second flag, this case goes red and the
