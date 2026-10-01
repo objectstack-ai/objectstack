@@ -178,9 +178,11 @@ describe('[#20935] getQueryableFields — the answers the contract names', () =>
     expect(await plugin.getQueryableFields('ledger', { isSystem: true })).toEqual(FIELDS);
   });
 
-  it('no permission sets resolved: the full field set, as the middleware skips both guards', async () => {
+  it('no permission sets resolved: every field but the masked ones — a caller holding nothing lifts no rule (#20995)', async () => {
     const { plugin } = await boot([], { noBaseline: true });
-    expect(await plugin.getQueryableFields('ledger', MEMBER_CTX)).toEqual(FIELDS);
+    // `denied_masked`'s explicit deny comes from a set this caller does not
+    // resolve, so here it is simply a field whose rule applies.
+    expect(await plugin.getQueryableFields('ledger', MEMBER_CTX)).toEqual(['id', 'title', 'secret']);
   });
 
   it('an unresolvable object is no answer (undefined), not an empty one', async () => {

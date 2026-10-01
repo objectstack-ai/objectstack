@@ -87,11 +87,34 @@
  * asserted before any verdict; a missing one exits 1 naming which. No `⚠` +
  * exit 0 — and no line claiming a leg that did not run, which is the same
  * failure with better manners.
+ *
+ * ## The one place the producer IS run: the self-test
+ *
+ * No production run here executes the generator. The self-test runs it once,
+ * over a fixture: the real `PRODUCER` file, copied byte for byte into a
+ * throwaway repo root beside a stub registry, under a TMPDIR reached through a
+ * symlink, with its output then held to `checkTree`. A symlinked temp base is
+ * the shape of macOS's default TMPDIR (`/var` -> `/private/var`), and it breaks
+ * the generator's one path comparison: its resolve hook re-anchors a runner
+ * import only when the import's parent URL equals the runner's, and Node
+ * reports that URL by its realpath. A Linux runner's own TMPDIR is no symlink,
+ * so without this row no CI run reaches that comparison.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -131,6 +154,14 @@ const OBJECTUI_VERSION_FILE = 'packages/core/package.json';
  */
 const RECORD_FIELDS = ['objectuiSha', 'source', 'modulesRoot', 'objectuiWorkspaceVersion', 'sha256', 'components'];
 const RECORD_SOURCE = 'built-tree';
+
+/**
+ * The one producer, repo-relative. Read by the SELF-TEST only — copied into a
+ * fixture tree and run there (see the header) — never by `checkTree`, so it is
+ * not a `READ_PATHS` entry. Spelled as one literal at module scope so that
+ * `scripts/pm/dispatch-gates.mjs` derives this gate for an edit to the producer.
+ */
+const PRODUCER = 'scripts/gen-sdui-manifest-node.mjs';
 
 /**
  * The population this gate reads, declared for `scripts/pm/dispatch-gates.mjs`.
@@ -393,6 +424,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'an unreachable objectui checkout is not a version verdict': 1,
   '--require-objectui turns an unreachable checkout RED': 1,
   'a pinned commit with no packages/core/package.json is RED': 1,
+  'the producer, run under a TMPDIR behind a symlink, writes a tree this gate passes': 1,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -401,7 +433,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // the literal above, so the roster falls below this number; the table
 // cross-check in the floor block is the other half, and names WHICH label
 // collided.
-const SELF_TEST_BATTERY_FLOOR = 12;
+const SELF_TEST_BATTERY_FLOOR = 13;
 
 function selfTest() {
   const mk = (mutate, { pin = 'a'.repeat(40), version = '0.0.0-selftest' } = {}) => {
@@ -469,6 +501,81 @@ function selfTest() {
   const disagreeing = mkObjectui({ version: '9.9.9-not-the-recorded-one' });
   const noVersionFile = mkObjectui({ omitVersionFile: true });
 
+  /**
+   * The PRODUCER's own output, written under a TMPDIR reached through a
+   * symlink (see the header for why that shape).
+   *
+   * The fixture is a built tree as the producer expects one: a throwaway
+   * objectui commit AT the pin under `.cache/objectui-<SHA12>/`, with one stub
+   * per `@object-ui/*` name the producer spells, under
+   * `apps/console/node_modules/`, and a stub adapter at the parser dist path.
+   * Every one of those names is a BARE import issued from the runner, so each
+   * resolves only if the hook re-anchors it. A producer whose runner URL is
+   * built from the unresolved temp path exits 1 with `Cannot find package`,
+   * writes nothing, and the row reads RED (missing artefact) with the
+   * producer's stderr printed above it.
+   *
+   * The stub names are read off the producer's source, not restated here, so
+   * a registry module it gains cannot red this row for a stub nobody added.
+   */
+  const mkProduced = () => {
+    const base = mkdtempSync(join(tmpdir(), 'sdui-manifest-producer-'));
+    const realTmp = join(base, 'tmp-real');
+    const linkTmp = join(base, 'tmp-link');
+    mkdirSync(realTmp);
+    symlinkSync(realTmp, linkTmp, 'dir');
+    const root = join(base, 'repo');
+    mkdirSync(join(root, 'scripts'), { recursive: true });
+    // Only a fixture while the TMPDIR it hands over is NOT its own realpath:
+    // a plain directory here would turn the row into a Linux-default run that
+    // passes with or without the fix.
+    if (realpathSync(linkTmp) === linkTmp) {
+      console.error(`  fixture: ${linkTmp} resolves to itself, so it exercises no symlink — the producer was not run.`);
+      return { root, objectuiRoot: NO_OBJECTUI };
+    }
+
+    const producerSource = readFileSync(join(DEFAULT_ROOT, PRODUCER), 'utf8');
+    copyFileSync(join(DEFAULT_ROOT, PRODUCER), join(root, PRODUCER));
+    const parserDist = join(root, 'packages', 'sdui-parser', 'dist');
+    mkdirSync(parserDist, { recursive: true });
+    writeFileSync(
+      join(parserDist, 'index.mjs'),
+      'export const manifestFromConfigs = (configs) => ({ components: Object.fromEntries(configs.map((c) => [c.type, { type: c.type, inputs: [] }])) });\n',
+    );
+
+    const objectui = mkObjectui({ version: '0.0.0-selftest' });
+    const tree = join(root, '.cache', `objectui-${objectui.sha.slice(0, 12)}`);
+    mkdirSync(dirname(tree), { recursive: true });
+    renameSync(objectui.dir, tree);
+    writeFileSync(join(root, '.objectui-sha'), objectui.sha + '\n');
+    const names = new Set(['@object-ui/core', ...[...producerSource.matchAll(/'(@object-ui\/[a-z0-9-]+)'/g)].map((m) => m[1])]);
+    for (const name of names) {
+      const pkg = join(tree, 'apps', 'console', 'node_modules', ...name.split('/'));
+      mkdirSync(join(pkg, 'dist'), { recursive: true });
+      writeFileSync(
+        join(pkg, 'package.json'),
+        JSON.stringify({ name, version: '0.0.0-selftest', type: 'module', exports: { '.': { import: './dist/index.js' } } }),
+      );
+      writeFileSync(
+        join(pkg, 'dist', 'index.js'),
+        name === '@object-ui/core'
+          ? "export const ComponentRegistry = { getPublicConfigs: () => [{ type: 'selftest_flex' }] };\n"
+          : 'export {};\n',
+      );
+    }
+
+    const run = spawnSync(process.execPath, [join(root, PRODUCER)], {
+      encoding: 'utf8',
+      env: { ...process.env, TMPDIR: linkTmp },
+    });
+    if (run.status !== 0) {
+      console.error(`  the producer under TMPDIR=${linkTmp} (a symlink) exited ${run.status ?? run.signal}:`);
+      for (const line of String(run.stderr ?? run.error ?? '').trim().split('\n')) console.error(`    ${line}`);
+    }
+    return { root, objectuiRoot: tree };
+  };
+  const produced = mkProduced();
+
   const cases = [
     ['green fixture passes', mk(), 0, blind],
     ['missing artefact is RED', mk((r) => rmSync(join(r, 'sdui.manifest.json'))), 1, blind],
@@ -505,6 +612,14 @@ function selfTest() {
     ['an unreachable objectui checkout is not a version verdict', mk(undefined, { pin: disagreeing.sha, version: '0.0.0-selftest' }), 0, blind],
     ['--require-objectui turns an unreachable checkout RED', mk(undefined, { pin: disagreeing.sha, version: '0.0.0-selftest' }), 1, { objectuiRoot: NO_OBJECTUI, requireObjectui: true }],
     ['a pinned commit with no packages/core/package.json is RED', mk(undefined, { pin: noVersionFile.sha, version: '0.0.0-selftest' }), 1, { objectuiRoot: noVersionFile.dir }],
+
+    // ── The producer, under a symlinked TMPDIR ────────────────────────────
+    //
+    // GREEN is the assertion: the generator ran to completion and its artefact
+    // and record pass all four checks, check 4 included — `requireObjectui`
+    // with the fixture's own objectui as the oracle, so the version leg cannot
+    // read `unreachable` and pass by not running.
+    ['the producer, run under a TMPDIR behind a symlink, writes a tree this gate passes', produced.root, 0, { objectuiRoot: produced.objectuiRoot, requireObjectui: true }],
   ];
 
   // The ledger this self-test's floor is evaluated against (#13489).
@@ -606,7 +721,8 @@ function selfTest() {
   }
   console.log(
     `✓ check-sdui-manifest self-test: ${cases.length} cases behave (green passes; absence, tamper, moved pin, emptiness, a retired-route record, ` +
-      'a version the pin does not declare, and an oracle that cannot answer are RED; an absent oracle is reported, not scored).',
+      'a version the pin does not declare, and an oracle that cannot answer are RED; an absent oracle is reported, not scored; ' +
+      'the producer, run under a symlinked TMPDIR, writes a tree that passes).',
   );
 
   return SELF_TEST_VERDICT;

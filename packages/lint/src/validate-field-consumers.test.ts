@@ -669,3 +669,169 @@ describe('[#20929] validateFieldConsumers — an inline grid column names a fiel
     expect(verdicts(stack({}, {}, { datasets }))).toEqual({ 'inv.qty': 'inert', 'line.qty': 'inert', 'line.memo': 'inert' });
   });
 });
+
+/**
+ * [#20951] Two more positions where an inline child collection names a CHILD
+ * field without the walk crediting it there.
+ *
+ * Site 1 — a `subforms` entry's child-field keys, read per key. `amountField`
+ * ("Numeric child column summed for the running total") and
+ * `relationshipField` ("FK on the child pointing back to the parent") name
+ * fields of the entry's `childObject`; `totalField` ("Parent field to receive
+ * the rolled-up sum") names a field of the PARENT. The walk carried the
+ * parent's context into the entry, so the child's amount column read as inert
+ * while a same-named parent field was credited in its place.
+ *
+ * Site 2 — a DERIVED inline grid. A relationship field with `inlineEdit` and
+ * no `inlineColumns`, or a `subforms` entry with no `columns`, draws the
+ * columns `deriveInlineGridColumns` (`@objectstack/spec/data`) derives from
+ * the child object. The rule credits exactly those, and nothing the derivation
+ * leaves out.
+ *
+ * `inv` is the parent, `line` the child. Each declares a field the other's
+ * key names, so a key read against the wrong object shows up as the wrong
+ * one of the pair going quiet.
+ */
+describe('[#20951] validateFieldConsumers — a child collection credits its child fields per key, and a derived grid its derived columns', () => {
+  const data = { provider: 'object', object: 'inv' };
+  const MASTER_DETAIL = { type: 'master_detail', reference: 'inv' };
+
+  const stack = (lineFields: AnyRec, view: AnyRec = {}, invoice: AnyRec = MASTER_DETAIL): AnyRec => ({
+    objects: [
+      { name: 'inv', fields: { name: { type: 'text' }, total: { type: 'number' }, line_total: { type: 'number' } } },
+      { name: 'line', fields: { name: { type: 'text' }, invoice, ...lineFields } },
+    ],
+    views: [{ list: { type: 'grid', data, columns: [{ field: 'name' }] }, ...view }],
+  });
+
+  /** `object.field` → verdict, for every field the rule reports. */
+  const verdicts = (s: AnyRec): Record<string, string> =>
+    Object.fromEntries(validateFieldConsumers(s).map((f) => [`${f.object}.${f.field}`, f.verdict]));
+
+  describe('site 1: `amountField` and `relationshipField` on the child, `totalField` on the parent', () => {
+    const lineFields = { qty: { type: 'number' }, line_total: { type: 'number' }, total: { type: 'number' }, memo: { type: 'text' } };
+    const entry = (extra: AnyRec): AnyRec => ({ childObject: 'line', columns: [{ name: 'qty' }], ...extra });
+
+    it('baseline: with neither key, every field but the grid column is reported', () => {
+      const form = { type: 'simple', data, subforms: [entry({})] };
+      expect(verdicts(stack(lineFields, { form }))).toEqual({
+        'inv.total': 'inert',
+        'inv.line_total': 'inert',
+        'line.line_total': 'inert',
+        'line.total': 'inert',
+        'line.memo': 'inert',
+      });
+    });
+
+    it("`amountField` credits the CHILD's field, `totalField` the PARENT's — each same-named counterpart stays reported", () => {
+      const form = { type: 'simple', data, subforms: [entry({ amountField: 'line_total', totalField: 'total' })] };
+      expect(verdicts(stack(lineFields, { form }))).toEqual({
+        'inv.line_total': 'inert',
+        'line.total': 'inert',
+        'line.memo': 'inert',
+      });
+    });
+
+    it('each `formViews` entry, the same way', () => {
+      const edit = { type: 'simple', data, subforms: [entry({ amountField: 'line_total', totalField: 'total' })] };
+      expect(verdicts(stack(lineFields, { formViews: { edit } }))).toEqual({
+        'inv.line_total': 'inert',
+        'line.total': 'inert',
+        'line.memo': 'inert',
+      });
+    });
+
+    it('`relationshipField` credits the child FK the rows are loaded and saved by', () => {
+      const link = { type: 'lookup', reference: 'inv' };
+      const without = { type: 'simple', data, subforms: [entry({ amountField: 'line_total', totalField: 'total' })] };
+      const withKey = { type: 'simple', data, subforms: [entry({ amountField: 'line_total', totalField: 'total', relationshipField: 'link' })] };
+      expect(verdicts(stack({ ...lineFields, link }, { form: without }))['line.link']).toBe('inert');
+      expect(verdicts(stack({ ...lineFields, link }, { form: withKey }))['line.link']).toBeUndefined();
+    });
+
+    it('control: each key is read against its own object, so swapped keys credit the swapped pair', () => {
+      const form = { type: 'simple', data, subforms: [entry({ amountField: 'total', totalField: 'line_total' })] };
+      // `amountField: 'total'` names the CHILD's `total`, `totalField:
+      // 'line_total'` the PARENT's `line_total` — what the keys literally say.
+      expect(verdicts(stack(lineFields, { form }))).toEqual({
+        'inv.total': 'inert',
+        'line.line_total': 'inert',
+        'line.memo': 'inert',
+      });
+    });
+  });
+
+  describe('site 2: a grid with no authored columns draws the derived ones', () => {
+    /** Three the derivation draws, and three it leaves out: JSON, `hidden`, `readonly`. */
+    const lineFields = {
+      qty: { type: 'number' },
+      line_total: { type: 'currency' },
+      memo: { type: 'text' },
+      blob: { type: 'json' },
+      secret: { type: 'text', hidden: true },
+      frozen: { type: 'number', readonly: true },
+    };
+    /** The parent's two fields (nothing reads them) and the three the derivation leaves out. */
+    const DERIVED = {
+      'inv.total': 'inert',
+      'inv.line_total': 'inert',
+      'line.blob': 'inert',
+      'line.secret': 'inert',
+      'line.frozen': 'inert',
+    };
+
+    it('baseline: without `inlineEdit` no grid is drawn, and every child field is reported', () => {
+      expect(verdicts(stack(lineFields))).toEqual({
+        ...DERIVED,
+        'line.qty': 'inert',
+        'line.line_total': 'inert',
+        'line.memo': 'inert',
+      });
+    });
+
+    it.each([['grid'], ['form'], [true]])('`inlineEdit: %s` with no `inlineColumns` credits the derived columns, and only them', (inlineEdit) => {
+      expect(verdicts(stack(lineFields, {}, { ...MASTER_DETAIL, inlineEdit }))).toEqual(DERIVED);
+    });
+
+    it('an empty `inlineColumns` is no authored list: the grid is derived', () => {
+      expect(verdicts(stack(lineFields, {}, { ...MASTER_DETAIL, inlineEdit: 'grid', inlineColumns: [] }))).toEqual(DERIVED);
+    });
+
+    it('an authored `inlineColumns` replaces the derivation: only the named column is credited', () => {
+      expect(verdicts(stack(lineFields, {}, { ...MASTER_DETAIL, inlineEdit: 'grid', inlineColumns: [{ name: 'qty' }] }))).toEqual({
+        ...DERIVED,
+        'line.line_total': 'inert',
+        'line.memo': 'inert',
+      });
+    });
+
+    it('`inlineEdit` on a field that is not a relationship draws no grid', () => {
+      expect(verdicts(stack({ ...lineFields, tag: { type: 'text', inlineEdit: 'grid' } }))).toEqual({
+        ...DERIVED,
+        'line.qty': 'inert',
+        'line.line_total': 'inert',
+        'line.memo': 'inert',
+        'line.tag': 'inert',
+      });
+    });
+
+    it('a column the budget collapses into the chooser is credited too: it is drawn on demand, never dropped', () => {
+      const wide = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`f${i}`, { type: 'text' }]));
+      const findings = verdicts(stack(wide, {}, { ...MASTER_DETAIL, inlineEdit: 'grid' }));
+      expect(findings).toEqual({ 'inv.total': 'inert', 'inv.line_total': 'inert' });
+    });
+
+    it('a `subforms` entry with no `columns` credits the derived columns of its `childObject`', () => {
+      const form = { type: 'simple', data, subforms: [{ childObject: 'line' }] };
+      expect(verdicts(stack(lineFields, { form }))).toEqual(DERIVED);
+    });
+
+    it("a `subforms` entry's derivation excludes the `relationshipField` it names, which that key credits instead", () => {
+      const link = { type: 'lookup', reference: 'inv' };
+      const form = { type: 'simple', data, subforms: [{ childObject: 'line', relationshipField: 'link' }] };
+      const findings = validateFieldConsumers(stack({ ...lineFields, link }, { form }));
+      expect(findings.find((f) => f.object === 'line' && f.field === 'link')).toBeUndefined();
+      expect(Object.fromEntries(findings.map((f) => [`${f.object}.${f.field}`, f.verdict]))).toEqual(DERIVED);
+    });
+  });
+});

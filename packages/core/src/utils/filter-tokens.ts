@@ -31,6 +31,12 @@
  * a driver-native value here would fork that convention into a second source of
  * truth and break the moment a query crosses datasources.
  *
+ * [#20844] A day outside the years 0001..9999 has no `YYYY-MM-DD` form; it is
+ * spelled in the expanded-year form instead (`+010026-10-01`), so every reader
+ * reads the year it resolved to — see {@link asYmd}. Which years a field takes
+ * is the engine's question, not this module's: it refuses a resolved token
+ * outside its field's years.
+ *
  * # Period `_end` resolves to a calendar DAY — its WIDTH is ADR-0053 D-D
  *
  * `{current_year_end}` resolves to `2026-12-31`, per the spec's own
@@ -92,7 +98,7 @@ import {
   type DateMacroUnit,
 } from '@objectstack/spec/data';
 import { calendarPartsInTzOrUtc, wallClockToUtcMs } from './datetime.js';
-import { temporalStorageForm } from './temporal-storage-form.js';
+import { isOutsideTemporalYearRange, temporalStorageForm } from './temporal-storage-form.js';
 
 /**
  * The slice of an execution context the resolver reads. Structural on purpose —
@@ -202,8 +208,25 @@ function proxyDay(now: Date, timezone?: string): Date {
  * day). [#20599] Before the proxy dates kept their year, a step into
  * 0001..0099 came out in the 1900s instead, so this spelling was never reached
  * for those years; a step into 0100..0999 was already spelled unpadded.
+ *
+ * [#20844] A day outside 0001..9999 has no `YYYY-MM-DD` form, and the storage
+ * rule's spelling of one (`10026-10-01`, `0-10-01`, `-1-10-01`) is read by
+ * nothing as the day it names: `Date.parse` takes it through the host's
+ * legacy parser, in the host's zone, and reads `-1-10-01` as 2001-01-10. So
+ * `{2027_years_ago}` was judged inside the range by core's
+ * `isOutsideTemporalYearRange` and compared as a day in 2001. Such a day is
+ * spelled in the expanded-year form of ECMAScript's date time string format
+ * instead (`+010026-10-01`, `-000001-10-01`), the day half of what
+ * `toISOString` spells for its instant: every reader reads it as that UTC day,
+ * on every host. The range is core's one range, asked of the day itself, never
+ * re-derived here. A step past the instants a `Date` holds is not one of these:
+ * it has no day at all, and keeps the rule's spelling of an invalid `Date`.
  */
-const asYmd = (d: Date): string => String(temporalStorageForm(d, 'date'));
+function asYmd(d: Date): string {
+  if (!isOutsideTemporalYearRange(d, 'date')) return String(temporalStorageForm(d, 'date'));
+  const iso = d.toISOString();
+  return iso.slice(0, iso.indexOf('T'));
+}
 
 type PeriodKind = 'week' | 'month' | 'quarter' | 'year';
 

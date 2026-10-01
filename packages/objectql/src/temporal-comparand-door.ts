@@ -94,7 +94,8 @@
  *   BEFORE `resolveWhereTokens` (which is where it must run — the refusal has
  *   to precede the driver), so judging one would refuse `{30_days_ago}`, the
  *   platform's own correct spelling. Unknown tokens keep their existing loud
- *   refusal one layer down.
+ *   refusal one layer down, and [#20844] a known one is judged once resolved,
+ *   by its year alone (below).
  * - **Non-string comparands are not judged, save the year classes.** A number
  *   is epoch milliseconds and a `Date` is an instant; the `datetime` and `time`
  *   rules read both, [#20480] a `time` column only when the instant's UTC year
@@ -185,6 +186,36 @@
  *   beneath it stays answered there, so this door steps over those operators
  *   rather than answer them in the words #15661 retired.
  *
+ * ## [#20844] A relative-date placeholder, judged by its year once resolved
+ *
+ * The door steps around a `{placeholder}`, so the year range never saw what
+ * one resolved to. Measured before this on InMemoryDriver and SqlDriver on
+ * SQLite, through `engine.find` and `POST /data/:object/query`, a `datetime`
+ * field and two rows, one in 2026 and one in 1500:
+ *
+ * ```
+ * $gt "{8000_years_from_now}"   200, both rows     (resolved to 10026-10-01)
+ * $lt "{2027_years_ago}"        200, the 1500 row  (resolved to -1-10-01, read as 2001-01-10)
+ * $lt "{1977_years_ago}"        200, no row        (0049-10-01, below the datetime floor)
+ * ```
+ *
+ * …and on a `time` field (rows at 09:00 and 12:00), `$gt "{8000_years_from_now}"`
+ * answered both rows: the instant has no four-digit year, so the `time` rule
+ * kept no time of day from it and it compared as text. A literal of each
+ * resolved value is refused here, and the first two answered rows where the
+ * right answer was none. {@link assertResolvedTemporalTokensInRange} and
+ * {@link assertHavingResolvedTemporalTokensInRange} close it: the engine's
+ * resolution stage hands them the caller's condition and its resolution, the
+ * same walk takes both trees side by side, and a comparand written as a date
+ * macro is refused when core's `isOutsideTemporalYearRange` puts the value it
+ * resolved to outside its column's years (on a `time` column, the four-digit
+ * years of the instant, the [#20480] class) — `INVALID_FILTER` / 400, in this
+ * door's words for that class, naming the placeholder and the year. ⛔ Not a
+ * second pass of the door: every other comparand was judged before
+ * resolution. Core's resolver spells a day outside 0001..9999 in the
+ * expanded-year form (`+010026-10-01`, `-000001-10-01`), so the range reads
+ * the year it names on every host.
+ *
  * @see `@objectstack/core`'s `temporal-comparand.ts` — the value-half predicate,
  *   shared with the analytics raw-SQL decline so one rule cannot exist twice.
  * @see https://github.com/objectstack-ai/objectstack/issues/8690
@@ -197,7 +228,7 @@ import {
   temporalStorageForm,
   type TemporalComparandKind,
 } from '@objectstack/core';
-import { isTextFilterOperator } from '@objectstack/spec/data';
+import { classifyFilterToken, isTextFilterOperator } from '@objectstack/spec/data';
 import { invalidFilterError } from './filter-comparand-shape.js';
 import { temporalKindOf, type AggregatedColumnClass } from './having-filter.js';
 
@@ -218,13 +249,73 @@ export interface UninterpretableTemporalComparand {
 }
 
 /**
+ * [#20844] A relative-date placeholder that resolved to a value outside its
+ * field's years: the placeholder as written, and the value it resolved to.
+ */
+export interface ResolvedTokenOutsideYears extends UninterpretableTemporalComparand {
+  /** The placeholder as the caller wrote it, braces included. */
+  token: string;
+  /** The value it resolved to. */
+  value: unknown;
+}
+
+/**
  * [#20263] What one filter position supplies to the walk: the storage kind of
  * the column a KEY names (`null` = not temporal, or not known), and whether an
  * operator's comparands are judged at all.
  */
-interface WalkScope {
+interface PositionScope {
   kindOf: (key: string) => TemporalComparandKind | null;
   judgesOperator: (op: string) => boolean;
+}
+
+/**
+ * [#20844] …and what the walk asks of each comparand it reaches: `value` where
+ * it sits in the walked tree, `twin` the comparand at the same path in the
+ * tree walked beside it. The door walks one tree beside itself; the
+ * resolved-token judge walks the caller's tree beside its resolution, which
+ * has the same shape (the resolver replaces a placeholder string and copies
+ * everything else).
+ */
+interface WalkScope<H> extends PositionScope {
+  judge: (kind: TemporalComparandKind, field: string, value: unknown, twin: unknown, path: string) => H | null;
+}
+
+/** The `where` position's scope: each key's kind is its declared field's. */
+function whereScope(fields: Record<string, unknown>): PositionScope {
+  return {
+    kindOf: (key) => temporalComparandKind((fields[key] as { type?: unknown } | undefined)?.type),
+    judgesOperator: () => true,
+  };
+}
+
+/** [#20263] The `having` position's scope — see the module note's `having` section. */
+function havingScope(classes: ReadonlyMap<string, AggregatedColumnClass | undefined>): PositionScope {
+  return {
+    kindOf: (key) => temporalKindOf(classes.get(key)) ?? null,
+    judgesOperator: (op) => !isTextFilterOperator(op),
+  };
+}
+
+/** The door's own judgement of one comparand — the twin is the comparand itself. */
+function judgeAsWritten(
+  kind: TemporalComparandKind,
+  field: string,
+  value: unknown,
+  _twin: unknown,
+  path: string,
+): UninterpretableTemporalComparand | null {
+  return judgeComparand(kind, field, value, path);
+}
+
+/** The value at `key` in a twin node, or `undefined` when the twin has none there. */
+function twinAt(twin: unknown, key: string): unknown {
+  return isFilterNode(twin) && Object.prototype.hasOwnProperty.call(twin, key) ? twin[key] : undefined;
+}
+
+/** The member at `index` of a twin list, or `undefined`. */
+function twinMember(twin: unknown, index: number): unknown {
+  return Array.isArray(twin) ? twin[index] : undefined;
 }
 
 /**
@@ -271,43 +362,39 @@ export function findUninterpretableTemporalComparand(
   // see — the same early return `assertFilterIsMaterializable` makes.
   const fields = (schema as { fields?: Record<string, unknown> } | undefined)?.fields;
   if (!fields || typeof fields !== 'object') return null;
-  return walkCondition(
-    {
-      kindOf: (key) => temporalComparandKind((fields[key] as { type?: unknown } | undefined)?.type),
-      judgesOperator: () => true,
-    },
-    where,
-    path,
-    depth,
-  );
+  return walkCondition({ ...whereScope(fields), judge: judgeAsWritten }, where, where, path, depth);
 }
 
 /**
  * The walk itself, shared by every position: the node structure is judged the
  * same way wherever the condition sits; only the {@link WalkScope} differs.
+ * [#20844] `twin` is walked beside `node`, step for step, and each comparand's
+ * twin is handed to the scope's judge.
  */
-function walkCondition(
-  scope: WalkScope,
+function walkCondition<H>(
+  scope: WalkScope<H>,
   node: unknown,
+  twin: unknown,
   path: string,
   depth: number,
-): UninterpretableTemporalComparand | null {
+): H | null {
   if (depth > 32) return null;
   if (!isFilterNode(node)) return null;
 
   for (const [key, value] of Object.entries(node)) {
     const here = `${path}.${key}`;
+    const twinValue = twinAt(twin, key);
     if (key === '$and' || key === '$or') {
       if (Array.isArray(value)) {
         for (const [index, arm] of value.entries()) {
-          const hit = walkCondition(scope, arm, `${here}[${index}]`, depth + 1);
+          const hit = walkCondition(scope, arm, twinMember(twinValue, index), `${here}[${index}]`, depth + 1);
           if (hit) return hit;
         }
       }
       continue;
     }
     if (key === '$not') {
-      const hit = walkCondition(scope, value, here, depth + 1);
+      const hit = walkCondition(scope, value, twinValue, here, depth + 1);
       if (hit) return hit;
       continue;
     }
@@ -315,22 +402,23 @@ function walkCondition(
     if (key.includes('.')) continue;
     const kind = scope.kindOf(key);
     if (!kind) continue;
-    const hit = judgeFieldComparands(kind, key, value, here, scope.judgesOperator);
+    const hit = judgeFieldComparands(scope, kind, key, value, twinValue, here);
     if (hit) return hit;
   }
   return null;
 }
 
 /** One temporal field's constraint: `{ at: <spec> }`. */
-function judgeFieldComparands(
+function judgeFieldComparands<H>(
+  scope: WalkScope<H>,
   kind: TemporalComparandKind,
   field: string,
   spec: unknown,
+  twin: unknown,
   path: string,
-  judgesOperator: (op: string) => boolean,
-): UninterpretableTemporalComparand | null {
+): H | null {
   // Not filter structure → an implicit-equality comparand, judged at this path.
-  if (!isFilterNode(spec)) return judgeComparand(kind, field, spec, path);
+  if (!isFilterNode(spec)) return scope.judge(kind, field, spec, twin, path);
   // A field spec with no `$` key is a deep-equality / nested-relation condition;
   // the #5869 gate records why descending into one would invent a contract no
   // backend agrees with.
@@ -339,18 +427,19 @@ function judgeFieldComparands(
   if (isFieldReference(spec)) return null;
   for (const op of keys) {
     if (!op.startsWith('$')) continue;
-    if (!judgesOperator(op)) continue;
+    if (!scope.judgesOperator(op)) continue;
     const comparand = spec[op];
+    const twinComparand = twinAt(twin, op);
     // Every MEMBER of a list operator is a comparand in its own right — the
     // same split the #7872 type door makes at the shared compile face.
     if (Array.isArray(comparand)) {
       for (const [index, member] of comparand.entries()) {
-        const hit = judgeComparand(kind, field, member, `${path}.${op}[${index}]`);
+        const hit = scope.judge(kind, field, member, twinMember(twinComparand, index), `${path}.${op}[${index}]`);
         if (hit) return hit;
       }
       continue;
     }
-    const hit = judgeComparand(kind, field, comparand, `${path}.${op}`);
+    const hit = scope.judge(kind, field, comparand, twinComparand, `${path}.${op}`);
     if (hit) return hit;
   }
   return null;
@@ -467,8 +556,25 @@ const DATETIME_BEFORE_YEAR_1000: YearClass = {
  * (`9999-12-31T23:00:00-02:00` names year 10000 in UTC).
  */
 function isInstantOutsideFourDigitYears(value: unknown): boolean {
-  const instant = typeof value === 'string' ? Date.parse(String(temporalStorageForm(value, 'datetime'))) : value;
+  const instant = typeof value === 'string' ? instantMsOf(value) : value;
   return isOutsideTemporalYearRange(instant, 'date');
+}
+
+/** The epoch milliseconds the `datetime` rule reads a string as (`NaN` for none). */
+function instantMsOf(value: string): number {
+  return Date.parse(String(temporalStorageForm(value, 'datetime')));
+}
+
+/**
+ * [#20844] The UTC year of the instant a resolved placeholder names — for the
+ * message only. A resolver day (`YYYY-MM-DD`, or `+010026-10-01` past the
+ * four-digit years) is read at midnight UTC, so its year is the day's own; an
+ * instant (`{N_hours_ago}`) names its UTC year, which is the year both rules
+ * take of it.
+ */
+function resolvedYearOf(value: unknown): string {
+  const ms = typeof value === 'string' ? instantMsOf(value) : Number.NaN;
+  return Number.isFinite(ms) ? String(new Date(ms).getUTCFullYear()) : 'unknown';
 }
 
 /**
@@ -478,8 +584,13 @@ function isInstantOutsideFourDigitYears(value: unknown): boolean {
  */
 function yearClassOf(hit: UninterpretableTemporalComparand): YearClass | undefined {
   if (hit.kind === 'time' || !isOutsideTemporalYearRange(hit.value, hit.kind)) return undefined;
-  if (hit.kind === 'datetime' && !isInstantOutsideFourDigitYears(hit.value)) return DATETIME_BEFORE_YEAR_1000;
-  return YEAR_CLASS[hit.kind];
+  return yearClassOutside(hit.kind, hit.value);
+}
+
+/** The year class of a value core's range already put outside its kind's years. */
+function yearClassOutside(kind: 'date' | 'datetime', value: unknown): YearClass {
+  if (kind === 'datetime' && !isInstantOutsideFourDigitYears(value)) return DATETIME_BEFORE_YEAR_1000;
+  return YEAR_CLASS[kind];
 }
 
 /**
@@ -629,6 +740,15 @@ function havingColumnSource(column: string, groupBy: unknown, aggregations: unkn
   return 'an aggregated column';
 }
 
+/** [#20263] How a `having` refusal names the column a hit sits on. */
+function havingColumnPhrase(
+  hit: UninterpretableTemporalComparand,
+  query: { groupBy?: unknown; aggregations?: unknown },
+): string {
+  return `\`having\` on '${hit.field}' (${havingColumnSource(hit.field, query.groupBy, query.aggregations)}, `
+    + `a ${hit.kind} column)`;
+}
+
 /**
  * [#20263] Refuse every `having` comparand its aggregated column's storage rule
  * cannot read, before any driver is asked for a row.
@@ -646,18 +766,9 @@ export function assertHavingTemporalComparandsInterpretable(
   classes: ReadonlyMap<string, AggregatedColumnClass | undefined>,
   query: { groupBy?: unknown; aggregations?: unknown },
 ): void {
-  const hit = walkCondition(
-    {
-      kindOf: (key) => temporalKindOf(classes.get(key)) ?? null,
-      judgesOperator: (op) => !isTextFilterOperator(op),
-    },
-    having,
-    'having',
-    0,
-  );
+  const hit = walkCondition({ ...havingScope(classes), judge: judgeAsWritten }, having, having, 'having', 0);
   if (!hit) return;
-  const column = `\`having\` on '${hit.field}' (${havingColumnSource(hit.field, query.groupBy, query.aggregations)}, `
-    + `a ${hit.kind} column)`;
+  const column = havingColumnPhrase(hit, query);
   // The year class, in its own words, as on `where` (#20240, #20264, #20280).
   const yearClass = yearClassOf(hit);
   if (yearClass) {
@@ -682,5 +793,121 @@ export function assertHavingTemporalComparandsInterpretable(
     + `which is not a ${hit.kind} value this platform can interpret. Compared with each group as `
     + 'written, it would keep no group or every group, a 200 indistinguishable from a real answer. '
     + `The \`having\` was NOT applied. ${REMEDY[hit.kind]}`,
+  );
+}
+
+/**
+ * [#20844] What one filter position does with the placeholders it resolved:
+ * `written` is the position's condition before resolution, `resolved` the
+ * same condition after. The engine's resolution stage calls one whenever
+ * something resolved — see the module note's resolved-token section.
+ */
+export type ResolvedTokenJudge = (written: unknown, resolved: unknown) => void;
+
+/**
+ * [#20844] Judge one comparand the caller wrote as a relative-date
+ * placeholder, by the year of the value it resolved to and nothing else — the
+ * year class the door asks of a literal of the column's kind: core's
+ * `isOutsideTemporalYearRange` for a `date` or a `datetime`, and [#20480] for a
+ * `time` column, which has no year of its own, the class of an instant the
+ * `time` rule keeps no time of day from because its UTC year has no
+ * four-digit spelling — asked as the door asks it, of core's predicate and of
+ * the four-digit years, so year 0 (`0000-…`) reads as it does for a literal.
+ * A literal comparand was judged by the door before resolution, and a context
+ * placeholder (`{current_user_id}`) names no year, so neither is this
+ * judgement's.
+ */
+function judgeResolvedToken(
+  kind: TemporalComparandKind,
+  field: string,
+  written: unknown,
+  resolved: unknown,
+  path: string,
+): ResolvedTokenOutsideYears | null {
+  if (classifyFilterToken(written)?.kind !== 'date-macro') return null;
+  const outside = kind === 'time'
+    ? isUninterpretableTemporalComparand('time', resolved) && isInstantOutsideFourDigitYears(resolved)
+    : isOutsideTemporalYearRange(resolved, kind);
+  return outside ? { field, kind, token: written as string, value: resolved, path } : null;
+}
+
+/** [#20844] The placeholder, where it sits, and what it resolved to — for the message. */
+function resolvedTokenPhrase(hit: ResolvedTokenOutsideYears): string {
+  return `${preview(hit.token)} at ${hit.path}, a relative-date placeholder that resolved to `
+    + `${preview(hit.value)} (the year ${resolvedYearOf(hit.value)})`;
+}
+
+/** [#20844] The fix for a placeholder, ahead of the year class's own for a literal. */
+const RESOLVED_TOKEN_REMEDY = 'Use a relative-date placeholder whose offset lands inside those years.';
+
+/**
+ * [#20844] A hit's words, in the door's sentences for the class a literal of
+ * the same value takes: the kind's year class for a `date` or a `datetime`,
+ * and [#20480] the `time` class for a `time` column.
+ */
+function resolvedTokenWords(hit: ResolvedTokenOutsideYears): { cls: string; where: string; having: string; remedy: string } {
+  if (hit.kind === 'time') {
+    const time = TIME_OUTSIDE_FOUR_DIGIT_YEARS;
+    return { cls: time.why, where: time.where, having: time.having, remedy: REMEDY.time };
+  }
+  const yearClass = yearClassOutside(hit.kind, hit.value);
+  return {
+    cls: `${yearClass.year}, the years a ${hit.kind} value may name`,
+    where: yearClass.where,
+    having: yearClass.having,
+    remedy: `${RESOLVED_TOKEN_REMEDY} ${yearClass.remedy}`,
+  };
+}
+
+/**
+ * [#20844] Refuse a relative-date placeholder in `where` (or, by `path`, a
+ * per-aggregation `filter`) that resolved to a value outside its declared
+ * field's years — `INVALID_FILTER` / 400, in the door's year-class words,
+ * naming the placeholder and the year it resolved to.
+ *
+ * Called by the engine's resolution stage on the caller's condition and its
+ * resolution, so the walk keeps the door's paths and skips what the door
+ * skips. ⛔ Not a second pass of the door: every other comparand was judged
+ * as written, before resolution, and only a placeholder's year is new here.
+ */
+export function assertResolvedTemporalTokensInRange(
+  object: string,
+  operation: string,
+  schema: unknown,
+  written: unknown,
+  resolved: unknown,
+  path = 'where',
+): void {
+  const fields = (schema as { fields?: Record<string, unknown> } | undefined)?.fields;
+  if (!fields || typeof fields !== 'object') return;
+  const hit = walkCondition({ ...whereScope(fields), judge: judgeResolvedToken }, written, resolved, path, 0);
+  if (!hit) return;
+  const words = resolvedTokenWords(hit);
+  throw invalidFilterError(
+    `${operation}('${object}'): filter on '${hit.field}' compares a declared ${hit.kind} field against `
+    + `${resolvedTokenPhrase(hit)}, ${words.cls}, so it is not a ${hit.kind} value this platform can `
+    + `interpret. ${words.where} The filter was NOT applied. ${words.remedy}`,
+  );
+}
+
+/**
+ * [#20844] The same refusal on `having`, by each aggregated column's class
+ * (`classes`, #20127's `aggregatedRowColumnClasses`), stepping over the text
+ * operators as the `having` door does.
+ */
+export function assertHavingResolvedTemporalTokensInRange(
+  object: string,
+  written: unknown,
+  resolved: unknown,
+  classes: ReadonlyMap<string, AggregatedColumnClass | undefined>,
+  query: { groupBy?: unknown; aggregations?: unknown },
+): void {
+  const hit = walkCondition({ ...havingScope(classes), judge: judgeResolvedToken }, written, resolved, 'having', 0);
+  if (!hit) return;
+  const words = resolvedTokenWords(hit);
+  throw invalidFilterError(
+    `aggregate('${object}'): ${havingColumnPhrase(hit, query)} compares against ${resolvedTokenPhrase(hit)}, `
+    + `${words.cls}, so it is not a ${hit.kind} value this platform can interpret. ${words.having} `
+    + `The \`having\` was NOT applied. ${words.remedy}`,
   );
 }
