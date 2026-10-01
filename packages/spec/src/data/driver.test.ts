@@ -199,14 +199,17 @@ describe('[#4634] tsc channel: the retired bits are unwritable in DriverCapabili
     const typeAt = (name: string) =>
       checker.typeToString(checker.getTypeOfSymbolAtLocation(props.get(name)!, decl!));
 
+    // `retiredKey()` types the property as its tombstone mark or `undefined`:
+    // an object whose one property is named by the `[REMOVED]` sentence and
+    // typed `never`, so there is no value an author can write. A resurrected
+    // live bit reads `boolean` (or wider) here and turns this red.
+    const TOMBSTONE = /^\{ '\[REMOVED\] [^']*': never; \} \| undefined$/;
     for (const bit of RETIRED_BITS) {
-      // `retiredKey()` is `z.never().optional()`: the property type collapses
-      // to `undefined` — there is no value an author can write. A resurrected
-      // live bit reads `boolean` (or wider) here and turns this red.
-      expect(typeAt(bit), `retired bit ${bit} must be unwritable`).toBe('undefined');
+      expect(typeAt(bit), `retired bit ${bit} must be unwritable`).toMatch(TOMBSTONE);
     }
     for (const bit of LIVE_BITS) {
       expect(typeAt(bit), `live bit ${bit} must stay writable`).not.toBe('undefined');
+      expect(typeAt(bit), `live bit ${bit} must not be a tombstone`).not.toMatch(TOMBSTONE);
     }
   });
 });

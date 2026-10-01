@@ -61,8 +61,19 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // `revoked` on ONE key. The multi-select surface this rule protects does not
   // exist for API keys, and the shape a future one would take does not need
   // `bulk` either — both read off the console build this release pins
-  // (`.objectui-sha` = `db11afd49`, `packages/plugin-grid`; re-measured at
-  // that pin, 2026-09-29. On the hop off `dd3f7e1be`, `ObjectGrid.tsx` changed
+  // (`.objectui-sha` = `e420df310`, `packages/plugin-grid`; re-measured at
+  // that pin, 2026-09-30. On the hop off `db11afd49`, `ObjectGrid.tsx` changed
+  // again (164 insertions, 48 deletions: objectui#9853's display page size,
+  // objectui#11021's searched grouped grid, objectui#9547's `onNavigate` prop,
+  // objectui#7297's `{record_id}` filter values and objectui#11070's
+  // `reference` spelling among them), none of it inside the selection block,
+  // which only MOVED by +114: `ObjectGrid.tsx:4751-4778` here (`4637-4664` at
+  // `db11afd49`), still hashing to
+  // `c88443302d40c2db739ddb235470bafa29056e2e` (hash-object of the block),
+  // re-READ with the same reading below; `hooks/useBulkExecutor.ts` is
+  // byte-identical to `db11afd49` and its `:298-303` still hashes to
+  // `01083348330f10a201cdf1078b4c21c236402b6a`. At `db11afd49`, 2026-09-29:
+  // on the hop off `dd3f7e1be`, `ObjectGrid.tsx` changed
   // again (105 insertions, 16 deletions: objectui#11068's grid keys,
   // objectui#11105's server-grouped column-name fix, objectui#10993's title
   // locale map among them), none of it inside the selection block, which only
@@ -72,7 +83,7 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // re-READ with the same reading below; `hooks/useBulkExecutor.ts` is
   // byte-identical to `dd3f7e1be` and its `:298-303` still hashes to
   // `01083348330f10a201cdf1078b4c21c236402b6a`. Previously measured at
-  // `dd3f7e1be`, `f8a9d0fb0`, `62597c588`,
+  // `db11afd49`, `dd3f7e1be`, `f8a9d0fb0`, `62597c588`,
   // `87af769e9`, `53ded82bf`, `a472b0716`, `00d3f09c5`, `67dadd602`, before
   // that at `d8ec8d6d4`, `9602dc820`, `190fbd01d`, `9a3daf8d3`, originally at
   // `6314e87f2`. On the hop off `f8a9d0fb0`, `ObjectGrid.tsx` changed hard

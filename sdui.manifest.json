@@ -571,7 +571,7 @@
         {
           "name": "fields",
           "type": "array",
-          "description": "Which parent fields to show, in order — and it is NOT ignored when `sections` is given: the two INTERSECT. The parent field pool is built from this key first and every section then resolves its own members against that pool, so a section member this key does not list is dropped from the rendered form, and a section that loses EVERY member that way disappears with its heading. Each such drop is reported once via `console.warn` (objectui#9884); it is not repaired, because this key is also the parent pool for values, create defaults and the submitted set. Author one or the other, or list every section member here too. Members are bare field names (`{ name }` tolerated); NOT the spec `FormFieldSchema` object `sections[].fields` accepts (identity key `field`) — that shape resolves to no name here and is silently skipped (the parent form renders through the same `ObjectForm` / `SimpleObjectForm` as `object-form` — see its `fields` description)."
+          "description": "Which parent fields to show, in order — and it is NOT ignored when `sections` is given: the two INTERSECT. The parent field pool is built from this key first and every section then resolves its own members against that pool, so a section member this key does not list is dropped from the rendered form, and a section that loses EVERY member that way disappears with its heading. Each such drop is reported once via `console.warn` (objectui#9884); it is not repaired, because this key bounds what the form DRAWS and edits, not what Save writes: on a create, the submitted set is the drawn fields plus any parent value seeded through `initialValues` (or its alternate spelling `initialData`), drawn or not. A seed for an undeclared, server-owned, computed or read-only field is still stripped, as on any save. Author one or the other, or list every section member here too. Members are bare field names (`{ name }` tolerated); NOT the spec `FormFieldSchema` object `sections[].fields` accepts (identity key `field`) — that shape resolves to no name here and is silently skipped (the parent form renders through the same `ObjectForm` / `SimpleObjectForm` as `object-form` — see its `fields` description)."
         },
         {
           "name": "title",
@@ -787,6 +787,16 @@
           "description": "Inline records, read SECOND on the record-source ladder: a `data` configuration wins and this key is then never reached, while `objectName` is read AFTER it, so a gantt carrying both charts these rows and never queries that object. `filter` and `sort` narrow and order these rows exactly as they do fetched ones."
         },
         {
+          "name": "filter",
+          "type": "array",
+          "description": "Base query filter in the rule-array form `[{ field, operator, value }, ...]`, narrowing the tasks the gantt charts — from every record source it reads: the object, an `api` request, or inline rows. Context tokens such as `{current_user_id}` are resolved first, then the filter is lowered to `$filter` on the query. The MongoDB-style record form is not this key’s shape."
+        },
+        {
+          "name": "sort",
+          "type": "array",
+          "description": "Task order in `[{ field, order }]` form, ordering the rows the gantt charts. Lowered to `$orderby` on the same query."
+        },
+        {
           "name": "dataSource",
           "type": "object",
           "binding": "object",
@@ -811,6 +821,16 @@
             "horizontal",
             "gantt"
           ]
+        },
+        {
+          "name": "filter",
+          "type": "array",
+          "description": "Base query filter in the rule-array form `[{ field, operator, value }, ...]`, narrowing the records the timeline fetches. Context tokens such as `{current_user_id}` are resolved first, then the filter is lowered to `$filter` on the query. Authored `items` or `data` suppress that query, so the key then narrows nothing. The MongoDB-style record form is not this key’s shape."
+        },
+        {
+          "name": "sort",
+          "type": "array",
+          "description": "Entry order in `[{ field, order }]` form, ordering the records the timeline fetches. Lowered to `$orderby` on the same query."
         },
         {
           "name": "dataSource",
@@ -843,6 +863,16 @@
           "name": "staticData",
           "type": "array",
           "description": "Inline records, read SECOND on the record-source ladder: a `data` configuration wins and this key is then never reached, while `objectName` is read AFTER it, so a map carrying both plots these rows and never queries that object. `filter` and `sort` narrow and order these rows exactly as they do fetched ones."
+        },
+        {
+          "name": "filter",
+          "type": "array",
+          "description": "Base query filter in the rule-array form `[{ field, operator, value }, ...]`, narrowing the markers the map plots — fetched rows and inline (`staticData`, `{ provider: 'value' }`) rows alike. Context tokens such as `{current_user_id}` are resolved first, then the filter is lowered to `$filter` on the query. The MongoDB-style record form is not this key’s shape."
+        },
+        {
+          "name": "sort",
+          "type": "array",
+          "description": "Marker order in `[{ field, order }]` form, ordering the rows the map plots. Lowered to `$orderby` on the same query."
         },
         {
           "name": "dataSource",
@@ -1207,6 +1237,23 @@
           "name": "showHeader",
           "type": "boolean",
           "description": "Render the detail body's own title / follow-star / copy-id chip above the fields. Off by default because this block is normally composed under a `page:header` that already draws that chrome, and turning it on there shows the record title twice. Set it true only when this block is the whole page."
+        },
+        {
+          "name": "enforceFieldSecurity",
+          "type": "boolean",
+          "description": "Fold this block's field list through the caller's FIELD-read permissions before rendering, so a field the permission set denies leaves no empty row behind (renderer default: off). Presentation only: it re-applies the same field-read answer the server already enforced (ADR-0066 D3) and never widens access — with it off a denied field still arrives masked or stripped, and with it on the server still decides every value."
+        },
+        {
+          "name": "redactFields",
+          "type": "array",
+          "of": "string",
+          "description": "Field names this block never renders, whatever the permission answer (renderer default: render everything authored). Presentation only, evaluated in the browser after the record is fetched — the values are still in the page, so this is NOT a data-access control and NOT the object's `publicSharing.redactFields`, which removes them server-side. To keep a value from the caller, gate the field itself (`requiredPermissions` / `maskingRule`, ADR-0066 D3) or the permission set. Neighbours `hideFields`, which is the dedupe channel the renderer also writes to."
+        },
+        {
+          "name": "requiredPermissions",
+          "type": "array",
+          "of": "string",
+          "description": "[ADR-0066] Capabilities the user must ALL hold — names that permission sets grant through `systemPermissions`, not object actions: `read` or `update` here is an ordinary capability name, not the object's read or edit permission. When the client has resolved the user's capabilities and any of these is missing, this block does not render its content; wherever it would otherwise render, an insufficient-permissions notice takes its place. Presentation only: it authorises nothing, and the data API still serves the same data to the same user. A client that cannot resolve the user's capabilities (no permission provider, or one that does not report `systemPermissions`) renders this block as if they were held — it fails open."
         }
       ]
     },
@@ -1228,6 +1275,23 @@
             "vertical"
           ],
           "description": "Layout orientation for highlight fields"
+        },
+        {
+          "name": "enforceFieldSecurity",
+          "type": "boolean",
+          "description": "Fold this block's highlight chips through the caller's FIELD-read permissions before rendering, so a field the permission set denies leaves no empty chip behind (renderer default: off). Presentation only: it re-applies the same field-read answer the server already enforced (ADR-0066 D3) and never widens access — the record is fetched either way and the server still decides every value."
+        },
+        {
+          "name": "redactFields",
+          "type": "array",
+          "of": "string",
+          "description": "Field names this block never renders as a chip, whatever the permission answer (renderer default: render every field authored). Presentation only, evaluated in the browser after the record is fetched — the values are still in the page, so this is NOT a data-access control and NOT the object's `publicSharing.redactFields`, which removes them server-side. To keep a value from the caller, gate the field itself (`requiredPermissions` / `maskingRule`, ADR-0066 D3) or the permission set."
+        },
+        {
+          "name": "requiredPermissions",
+          "type": "array",
+          "of": "string",
+          "description": "[ADR-0066] Capabilities the user must ALL hold — names that permission sets grant through `systemPermissions`, not object actions: `read` or `update` here is an ordinary capability name, not the object's read or edit permission. When the client has resolved the user's capabilities and any of these is missing, this block does not render its content; wherever it would otherwise render, an insufficient-permissions notice takes its place. Presentation only: it authorises nothing, and the data API still serves the same data to the same user. A client that cannot resolve the user's capabilities (no permission provider, or one that does not report `systemPermissions`) renders this block as if they were held — it fails open."
         }
       ]
     },
@@ -1296,6 +1360,23 @@
           "name": "add",
           "type": "object",
           "description": "Adds an \"Add\" button that assigns EXISTING records instead of creating one — the m2m/junction case. Shape: `{ picker: { object, valueField?, labelField?, filter? }, linkField?, label? }`. `picker.object` (required) is the object whose records the dialog offers. `picker.valueField` is the field of the picked record used as the link value (default \"id\"); `picker.labelField` is the column shown in the picker rows (default \"name\", and the other columns are derived from that object's schema). With `linkField` set, selecting records CREATES rows in this list's own object as `{ [relationshipField]: parentValue, [linkField]: pickedId }` — the junction case; omit `linkField` and the picked child is RE-PARENTED instead, by setting its own `relationshipField` to this parent. `label` is the button text (default \"Add\", localizable inline). Setting `add` also enables generic link removal on rows when no host delete handler is wired. `picker.filter` restricts which records the dialog offers — a list of `{ field, operator, value }` rules in the same vocabulary as this list's own `filter`, applied as a hard constraint the user cannot widen (it never appears as an editable filter row)."
+        },
+        {
+          "name": "enforceFieldSecurity",
+          "type": "boolean",
+          "description": "Fold this list's `columns` through the caller's FIELD-read permissions on the RELATED object before rendering (renderer default: off). Presentation only: it re-applies the same field-read answer the server already enforced (ADR-0066 D3) and never widens access — the rows are fetched either way and the server still decides every value."
+        },
+        {
+          "name": "redactFields",
+          "type": "array",
+          "of": "string",
+          "description": "Field names this list never renders, whatever the permission answer (renderer default: render every column authored or derived). Applies to the authored `columns` AND to the columns the list derives for itself when none are authored. Presentation only, evaluated in the browser after the rows are fetched — the values are still in the page, so this is NOT a data-access control and NOT the object's `publicSharing.redactFields`, which removes them server-side. To keep a value from the caller, gate the field itself (`requiredPermissions` / `maskingRule`, ADR-0066 D3) or the permission set."
+        },
+        {
+          "name": "requiredPermissions",
+          "type": "array",
+          "of": "string",
+          "description": "[ADR-0066] Capabilities the user must ALL hold — names that permission sets grant through `systemPermissions`, not object actions: `read` or `update` here is an ordinary capability name, not the object's read or edit permission. When the client has resolved the user's capabilities and any of these is missing, this block does not render its content; wherever it would otherwise render, an insufficient-permissions notice takes its place. Presentation only: it authorises nothing, and the data API still serves the same data to the same user. A client that cannot resolve the user's capabilities (no permission provider, or one that does not report `systemPermissions`) renders this block as if they were held — it fails open."
         },
         {
           "name": "dataSource",
@@ -2002,6 +2083,128 @@
         {
           "name": "className",
           "type": "string"
+        },
+        {
+          "name": "visible",
+          "type": [
+            "boolean",
+            "string",
+            "object"
+          ],
+          "description": "Visibility predicate: `true`/`false`, a bare CEL expression, or the `{ dialect: 'cel', source }` envelope, evaluated against the row the host binds; the button is not rendered when it is false, nor when the predicate fails to evaluate. Omit for always-visible"
+        },
+        {
+          "name": "disabled",
+          "type": [
+            "boolean",
+            "string",
+            "object"
+          ],
+          "description": "Disabled predicate, in the same three shapes as `visible`: the button is shown but cannot be pressed while it holds. Omit for never-disabled"
+        },
+        {
+          "name": "params",
+          "type": "array",
+          "description": "The parameters to collect from the user before the action runs (`ActionParam` objects: `name`, `type`, `label`, …); each collected value reaches the executor under its parameter `name`. Static execution values ride `properties.params` instead"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "description": "Action description — the parameter dialog shows it under its title"
+        },
+        {
+          "name": "openIn",
+          "type": "enum",
+          "enum": [
+            "self",
+            "new-tab"
+          ],
+          "description": "For a `url` action: `self` navigates in place, `new-tab` opens a new browser tab"
+        },
+        {
+          "name": "method",
+          "type": "string",
+          "description": "HTTP method of an `api` action (`POST` when omitted)"
+        },
+        {
+          "name": "bodyExtra",
+          "type": "object",
+          "description": "Static request-body fields of an `api` action, merged last, so a constant here overrides a collected value of the same name"
+        },
+        {
+          "name": "bodyShape",
+          "type": [
+            "enum",
+            "object"
+          ],
+          "enum": [
+            "flat"
+          ],
+          "description": "How an `api` action shapes its request body: `flat` (the default) or `{ wrap: KEY }` to nest the collected values under that key, with `bodyExtra` beside it"
+        },
+        {
+          "name": "operation",
+          "type": "enum",
+          "enum": [
+            "update"
+          ],
+          "description": "`update` declares a single-record field write: the runner dispatches it to the platform action route with `patch` merged under the collected values"
+        },
+        {
+          "name": "patch",
+          "type": "object",
+          "description": "For `operation: update`: the field values written, merged UNDER the values the user supplies, so a collected value of the same name wins"
+        },
+        {
+          "name": "confirmText",
+          "type": "string",
+          "description": "Confirmation question asked before the action runs; the action runs only if it is confirmed"
+        },
+        {
+          "name": "successMessage",
+          "type": "string",
+          "description": "Toast text when the action succeeds (a message the server returns takes precedence)"
+        },
+        {
+          "name": "errorMessage",
+          "type": "string",
+          "description": "Toast text when the action fails, in place of the raw error"
+        },
+        {
+          "name": "refreshAfter",
+          "type": "boolean",
+          "description": "Refresh the surrounding data after the action succeeds"
+        },
+        {
+          "name": "locations",
+          "type": "array",
+          "of": "string",
+          "description": "The placements the action declares (`list_toolbar`, `list_item`, `record_header`, …). A `script` or `flow` action declared record-scoped (`list_item`, `record_header`, `record_more` or `record_section`) refuses to run when no record or single selection is in scope, instead of running without one"
+        },
+        {
+          "name": "toast",
+          "type": "object",
+          "description": "Toast behaviour: `{ showOnSuccess?, showOnError?, duration? }` — `false` suppresses that toast, `duration` is handed to the toast"
+        },
+        {
+          "name": "resultDialog",
+          "type": "object",
+          "description": "One-shot result dialog for a value the response shows exactly once (a 2FA code, a fresh secret); it replaces the success toast"
+        },
+        {
+          "name": "onSuccess",
+          "type": "object",
+          "description": "Post-success navigation `{ navigate, openIn? }`: `navigate` is a route template that can read `${result.*}`, `openIn` is `self` (the default) or `newTab`"
+        },
+        {
+          "name": "objectName",
+          "type": "string",
+          "description": "Object the action acts on — dispatch goes to this object instead of the page's. Omit to act on the page's object"
+        },
+        {
+          "name": "recordIdField",
+          "type": "string",
+          "description": "For a `script` action run against a single selected row: the row field whose value is sent as the record id (default `id`)"
         }
       ]
     },
@@ -2009,10 +2212,6 @@
       "type": "action:group",
       "namespace": "action",
       "inputs": [
-        {
-          "name": "name",
-          "type": "string"
-        },
         {
           "name": "label",
           "type": "string"
@@ -2023,7 +2222,9 @@
         },
         {
           "name": "actions",
-          "type": "object"
+          "type": "array",
+          "of": "object",
+          "description": "The actions in this group, in order. Each member is an action object the group draws and runs itself (`name`, `label`, `icon`, `type`, `target`, `locations`, `visible`, `disabled`, …); a member's executor is its own `type`"
         },
         {
           "name": "display",
@@ -2032,6 +2233,19 @@
             "inline",
             "dropdown"
           ]
+        },
+        {
+          "name": "location",
+          "type": "enum",
+          "enum": [
+            "list_toolbar",
+            "list_item",
+            "record_header",
+            "record_more",
+            "record_related",
+            "record_section"
+          ],
+          "description": "Render only the members whose `locations` include this location. Omit to render every member"
         },
         {
           "name": "variant",
@@ -2047,10 +2261,21 @@
           "name": "size",
           "type": "enum",
           "enum": [
+            "default",
             "sm",
-            "md",
-            "lg"
-          ]
+            "lg",
+            "icon"
+          ],
+          "description": "Button size for the dropdown trigger and for every inline member that sets none"
+        },
+        {
+          "name": "visible",
+          "type": [
+            "boolean",
+            "string",
+            "object"
+          ],
+          "description": "Visibility predicate for the whole group: `true`/`false`, a bare CEL expression, or the `{ dialect: 'cel', source }` envelope, evaluated against the row the host binds. Omit for always-visible"
         },
         {
           "name": "className",
@@ -2072,7 +2297,9 @@
         },
         {
           "name": "actions",
-          "type": "object"
+          "type": "array",
+          "of": "object",
+          "description": "The menu's actions, in order. Each member is an action object the menu draws and runs itself (`name`, `label`, `icon`, `type`, `target`, `visible`, `disabled`, `tags`, …); a member's executor is its own `type`"
         },
         {
           "name": "variant",
@@ -2083,6 +2310,26 @@
             "outline",
             "ghost"
           ]
+        },
+        {
+          "name": "size",
+          "type": "enum",
+          "enum": [
+            "default",
+            "sm",
+            "lg",
+            "icon"
+          ],
+          "description": "Trigger button size (renderer default: `icon`)"
+        },
+        {
+          "name": "visible",
+          "type": [
+            "boolean",
+            "string",
+            "object"
+          ],
+          "description": "Visibility predicate for the whole menu: `true`/`false`, a bare CEL expression, or the `{ dialect: 'cel', source }` envelope, evaluated against the row the host binds; a predicate that fails to evaluate hides it. Omit for always-visible"
         },
         {
           "name": "className",
@@ -2135,6 +2382,123 @@
         {
           "name": "className",
           "type": "string"
+        },
+        {
+          "name": "visible",
+          "type": [
+            "boolean",
+            "string",
+            "object"
+          ],
+          "description": "Visibility predicate: `true`/`false`, a bare CEL expression, or the `{ dialect: 'cel', source }` envelope, evaluated against the row the host binds; the icon is not rendered when it is false. Omit for always-visible"
+        },
+        {
+          "name": "disabled",
+          "type": [
+            "boolean",
+            "string",
+            "object"
+          ],
+          "description": "Disabled predicate, in the same three shapes as `visible`: the icon is shown but cannot be pressed while it holds. Omit for never-disabled"
+        },
+        {
+          "name": "params",
+          "type": "array",
+          "description": "The parameters to collect from the user before the action runs (`ActionParam` objects: `name`, `type`, `label`, …); each collected value reaches the executor under its parameter `name`. Static execution values ride `properties.params` instead"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "description": "Action description — the tooltip text when there is no `label`, and what the parameter dialog shows under its title"
+        },
+        {
+          "name": "openIn",
+          "type": "enum",
+          "enum": [
+            "self",
+            "new-tab"
+          ],
+          "description": "For a `url` action: `self` navigates in place, `new-tab` opens a new browser tab"
+        },
+        {
+          "name": "method",
+          "type": "string",
+          "description": "HTTP method of an `api` action (`POST` when omitted)"
+        },
+        {
+          "name": "bodyExtra",
+          "type": "object",
+          "description": "Static request-body fields of an `api` action, merged last, so a constant here overrides a collected value of the same name"
+        },
+        {
+          "name": "bodyShape",
+          "type": [
+            "enum",
+            "object"
+          ],
+          "enum": [
+            "flat"
+          ],
+          "description": "How an `api` action shapes its request body: `flat` (the default) or `{ wrap: KEY }` to nest the collected values under that key, with `bodyExtra` beside it"
+        },
+        {
+          "name": "operation",
+          "type": "enum",
+          "enum": [
+            "update"
+          ],
+          "description": "`update` declares a single-record field write: the runner dispatches it to the platform action route with `patch` merged under the collected values"
+        },
+        {
+          "name": "patch",
+          "type": "object",
+          "description": "For `operation: update`: the field values written, merged UNDER the values the user supplies, so a collected value of the same name wins"
+        },
+        {
+          "name": "confirmText",
+          "type": "string",
+          "description": "Confirmation question asked before the action runs; the action runs only if it is confirmed"
+        },
+        {
+          "name": "successMessage",
+          "type": "string",
+          "description": "Toast text when the action succeeds (a message the server returns takes precedence)"
+        },
+        {
+          "name": "errorMessage",
+          "type": "string",
+          "description": "Toast text when the action fails, in place of the raw error"
+        },
+        {
+          "name": "refreshAfter",
+          "type": "boolean",
+          "description": "Refresh the surrounding data after the action succeeds"
+        },
+        {
+          "name": "locations",
+          "type": "array",
+          "of": "string",
+          "description": "The placements the action declares (`list_toolbar`, `list_item`, `record_header`, …). A `script` or `flow` action declared record-scoped (`list_item`, `record_header`, `record_more` or `record_section`) refuses to run when no record or single selection is in scope, instead of running without one"
+        },
+        {
+          "name": "toast",
+          "type": "object",
+          "description": "Toast behaviour: `{ showOnSuccess?, showOnError?, duration? }` — `false` suppresses that toast, `duration` is handed to the toast"
+        },
+        {
+          "name": "resultDialog",
+          "type": "object",
+          "description": "One-shot result dialog for a value the response shows exactly once (a 2FA code, a fresh secret); it replaces the success toast"
+        },
+        {
+          "name": "onSuccess",
+          "type": "object",
+          "description": "Post-success navigation `{ navigate, openIn? }`: `navigate` is a route template that can read `${result.*}`, `openIn` is `self` (the default) or `newTab`"
+        },
+        {
+          "name": "objectName",
+          "type": "string",
+          "description": "Object the action acts on — dispatch goes to this object instead of the page's. Omit to act on the page's object"
         }
       ]
     },
@@ -2487,7 +2851,8 @@
         },
         {
           "name": "breadcrumb",
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Ignored: the header draws no breadcrumb, and the key is being retired from the contract. Leave it out."
         },
         {
           "name": "recordChrome",

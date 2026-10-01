@@ -64,6 +64,9 @@ import {
   RETIRED_DEFS_BY_MAJOR,
   RETIRED_KEYS_BY_MAJOR,
 } from '../src/migrations/registry';
+// The generator's own naming rule: the file name every registration remedy must
+// print, so an author who follows a gate writes a file the generator accepts.
+import { shardNameFor } from './build-migration-registry';
 // Read ONLY to keep the #17356 fixture honest about which SET its root lives in
 // — never to assert gate behaviour, which is read off the spawned run's output.
 import {
@@ -632,6 +635,12 @@ describe('build-schemas.ts --check — a check reports, it does not write (#4711
       expect(status).toBe(1);
       expect(output).toMatch(/1 previously published schema\(s\) disappeared from this build/);
       expect(output).toContain(`- json-schema/${PHANTOM_KEY}.json`);
+      // The deliberate-removal route registers through the generated table's
+      // entry FILE and the generator — never by typing into the table.
+      expect(output).toContain(entryFile('retired-defs', PHANTOM_KEY));
+      expect(output).toContain(`export const entry = '${PHANTOM_KEY}';`);
+      expect(output).toContain(REGEN_COMMAND);
+      expect(output).not.toContain('migrations/registry.ts');
       expect(readManifest()).toBe(withPhantom);
     },
   );
@@ -988,6 +997,16 @@ const CURRENT_MAJOR = Number.parseInt(
     .version,
   10,
 );
+
+/**
+ * The repo-relative entry file a registration remedy names for `id`: the two
+ * RETIRED_*_BY_MAJOR tables are GENERATED from these files, so a remedy that
+ * routes an author into `src/migrations/registry.ts` instead is the defect.
+ */
+const entryFile = (dir: 'retired-keys' | 'retired-defs', id: string, major = CURRENT_MAJOR): string =>
+  `packages/spec/src/migrations/entries/${dir}/${shardNameFor(major, id)}`;
+/** The one route into those tables — the generator, never a hand edit. */
+const REGEN_COMMAND = 'pnpm --filter @objectstack/spec gen:migration-registry';
 
 /** Reachable def (BUILTIN root `object`), never tombstoned — the #4643 shape. */
 const DELETED_LIVE = 'data/Object:zzNeverRetired4650';
@@ -3503,13 +3522,23 @@ describe('build-schemas.ts — check (b) matches the exact retired key, not its 
       expect(output).toContain(`2 ${CHECK_B}`);
       expect(output).toContain(`     - ${LEAF_COLLIDER_A}`);
       expect(output).toContain(`     - ${LEAF_COLLIDER_B}`);
-      // The prescription IS the contract: the exact line to paste, and where.
-      expect(output).toContain(`        '${LEAF_COLLIDER_A}',`);
-      expect(output).toContain(`        '${LEAF_COLLIDER_B}',`);
-      expect(output).toContain('RETIRED_KEYS_BY_MAJOR');
-      expect(output).toContain(`under \`${CURRENT_MAJOR}: [ … ]\``);
+      // The prescription IS the contract: the entry FILE to add per key, named
+      // by the generator's own rule, and the generator command. RETIRED_KEYS_BY_MAJOR
+      // is generated from those files, so a remedy that pastes lines into
+      // src/migrations/registry.ts sends the author to an edit the next run
+      // reverts and check:migration-registry fails.
+      const remedy = output.slice(output.indexOf(`2 ${CHECK_B}`));
+      for (const key of [LEAF_COLLIDER_A, LEAF_COLLIDER_B]) {
+        expect(remedy).toContain(entryFile('retired-keys', key));
+        expect(remedy).toContain(`export const entry = '${key}';`);
+        expect(remedy).not.toContain(`        '${key}',`);
+      }
+      expect(remedy).toContain(REGEN_COMMAND);
+      expect(remedy).toContain('RETIRED_KEYS_BY_MAJOR');
+      expect(remedy).not.toContain('migrations/registry.ts');
+      expect(remedy).not.toContain('copy these lines');
       // The D2 conversion is still asked for — the table did not replace it.
-      expect(output).toContain('src/conversions/registry.ts');
+      expect(remedy).toContain('src/conversions/registry.ts');
     },
   );
 
@@ -3554,6 +3583,64 @@ describe('build-schemas.ts — check (b) matches the exact retired key, not its 
   );
 
   it(
+    'the printed route registers: write exactly the files check (b) names, run the generator, and (b) is silent',
+    { timeout: SPAWN_TIMEOUT_MS * 3 },
+    () => {
+      // The case above registers by substituting the table. This one takes the
+      // route the remedy PRINTS, literally: every file/declaration pair is read
+      // off the red run's own output, written into the sandbox's entry
+      // directory, and concatenated by the sandbox's own copy of the generator —
+      // which refuses a file whose name does not match its id. So a remedy
+      // naming a file the generator would reject, or a route that does not
+      // register, goes red here rather than in an author's lap.
+      fs.writeFileSync(boxRegistry, pristineRegistry); // the real generated table, markers intact
+      untombstone(LEAF_COLLIDER_A, LEAF_COLLIDER_B);
+      const written: string[] = [];
+      try {
+        const red = runBox(['--check']);
+        expect(red.status).toBe(1);
+        expect(red.output).toContain(`2 ${CHECK_B}`);
+
+        const pairs = [
+          ...red.output.matchAll(
+            /^ +(packages\/spec\/src\/migrations\/entries\/retired-keys\/\S+\.ts)\n +(export const entry = '[^']+';)$/gm,
+          ),
+        ];
+        expect(pairs.map((m) => m[2]).sort()).toEqual(
+          [LEAF_COLLIDER_A, LEAF_COLLIDER_B].map((k) => `export const entry = '${k}';`).sort(),
+        );
+        for (const [, rel, declaration] of pairs) {
+          const file = path.join(box, rel!.slice('packages/spec/'.length));
+          expect(fs.existsSync(file), `${rel} already exists in the sandbox`).toBe(false);
+          fs.writeFileSync(file, `// Fixture: registered by following check (b)'s remedy.\n${declaration}\n`);
+          written.push(file);
+        }
+
+        const gen = spawnSync(TSX, [path.join(box, 'scripts', 'build-migration-registry.ts')], {
+          cwd: box,
+          encoding: 'utf8',
+          timeout: SPAWN_TIMEOUT_MS,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: HERMETIC_ENV,
+        });
+        expect(gen.status, `${gen.stdout ?? ''}${gen.stderr ?? ''}`).toBe(0);
+        expect(gen.stdout).toContain('✓ wrote src/migrations/registry.ts');
+        const regenerated = fs.readFileSync(boxRegistry, 'utf8');
+        for (const k of [LEAF_COLLIDER_A, LEAF_COLLIDER_B]) expect(regenerated).toContain(`'${k}',`);
+
+        const green = runBox(['--check']);
+        expect(green.output).not.toContain(CHECK_B);
+        expect(green.output).not.toContain('still LIVE');
+        // Same residue as the case above: the baseline still owes `gen:schema`.
+        expect(green.output).toContain('authorable-surface/ is out of date (2 key(s) not recorded)');
+      } finally {
+        for (const file of written) fs.rmSync(file, { force: true });
+        fs.writeFileSync(boxRegistry, pristineRegistry);
+      }
+    },
+  );
+
+  it(
     'an entry naming a key that is still LIVE fails: a registration nothing consumed (b2)',
     { timeout: SPAWN_TIMEOUT_MS },
     () => {
@@ -3568,8 +3655,14 @@ describe('build-schemas.ts — check (b) matches the exact retired key, not its 
 
       expect(status).toBe(1);
       expect(output).toContain('RETIRED_KEYS_BY_MAJOR entr(ies) name a key that is still LIVE');
-      expect(output).toContain(`     - ${STILL_LIVE_KEY}  (registered at major ${CURRENT_MAJOR})`);
+      expect(output).toContain(
+        `     - ${STILL_LIVE_KEY}  (registered at major ${CURRENT_MAJOR})\n` +
+          `         ${entryFile('retired-keys', STILL_LIVE_KEY)}\n`,
+      );
       expect(output).toContain('retiredKey(');
+      // Undoing a registration is an entry-file deletion plus the generator too.
+      expect(output).toContain(REGEN_COMMAND);
+      expect(output).not.toContain('migrations/registry.ts');
       expect(output).not.toContain(CHECK_B);
     },
   );
@@ -3831,11 +3924,19 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
       expect(output).toContain(`2 ${NO_REGISTERED_REMOVAL}`);
       expect(output).toContain(`     - json-schema/${REMOVED_DEF}.json`);
       expect(output).toContain(`     - json-schema/${REMOVED_DEF_2}.json`);
-      // The prescription IS the contract: the exact lines to paste, and where.
-      expect(output).toContain(`        '${REMOVED_DEF}',`);
-      expect(output).toContain(`        '${REMOVED_DEF_2}',`);
-      expect(output).toContain('RETIRED_DEFS_BY_MAJOR');
-      expect(output).toContain(`under \`${CURRENT_MAJOR}: [ … ]\``);
+      // The prescription IS the contract: the entry FILE to add per def, named
+      // by the generator's own rule, and the generator command — never lines to
+      // paste into the generated table in src/migrations/registry.ts.
+      const remedy = output.slice(output.indexOf(`2 ${NO_REGISTERED_REMOVAL}`));
+      for (const def of [REMOVED_DEF, REMOVED_DEF_2]) {
+        expect(remedy).toContain(entryFile('retired-defs', def));
+        expect(remedy).toContain(`export const entry = '${def}';`);
+        expect(remedy).not.toContain(`        '${def}',`);
+      }
+      expect(remedy).toContain(REGEN_COMMAND);
+      expect(remedy).toContain('RETIRED_DEFS_BY_MAJOR');
+      expect(remedy).not.toContain('migrations/registry.ts');
+      expect(remedy).not.toContain('copy these lines');
       // …and the two other routes a reader might actually need are named.
       expect(output).toContain('RENAMED_DEFS');
       expect(output).toContain('src/conversions/registry.ts');
@@ -3914,7 +4015,12 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
 
       expect(status).toBe(1);
       expect(output).toContain('RETIRED_DEFS_BY_MAJOR entr(ies) name a schema this build still publishes');
-      expect(output).toContain(`     - ${STILL_PUBLISHED_DEF}  (registered at major ${CURRENT_MAJOR})`);
+      expect(output).toContain(
+        `     - ${STILL_PUBLISHED_DEF}  (registered at major ${CURRENT_MAJOR})\n` +
+          `         ${entryFile('retired-defs', STILL_PUBLISHED_DEF)}\n`,
+      );
+      expect(output).toContain(REGEN_COMMAND);
+      expect(output).not.toContain('migrations/registry.ts');
       expect(output).not.toContain(NO_REGISTERED_REMOVAL);
     },
   );
@@ -3997,7 +4103,9 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
       expect(output).toContain(`${UNPUBLISHED_FAMILY.length} ${NO_REGISTERED_REMOVAL}`);
       for (const def of UNPUBLISHED_FAMILY) {
         expect(output).toContain(`     - json-schema/${def}.json`);
-        expect(output).toContain(`        '${def}',`);
+        // …and the entry file that registers it, never a line for the table.
+        expect(output).toContain(entryFile('retired-defs', def));
+        expect(output).toContain(`export const entry = '${def}';`);
       }
       // The old verdict, in full: check (c) waived all 116 lines as "def no
       // longer emitted", the manifest ratchet said nothing, and the run exited
@@ -4420,7 +4528,12 @@ describe('build-schemas.ts — a nested retirement row is judged, not ignored (#
 
       expect(status).toBe(1);
       expect(output).toContain(`1 ${CHECK_B3}`);
-      expect(output).toContain(`     - ${NESTED_TYPO_KEY}  (registered at major ${CURRENT_MAJOR})`);
+      expect(output).toContain(
+        `     - ${NESTED_TYPO_KEY}  (registered at major ${CURRENT_MAJOR})\n` +
+          `         ${entryFile('retired-keys', NESTED_TYPO_KEY)}\n`,
+      );
+      expect(output).toContain(REGEN_COMMAND);
+      expect(output).not.toContain('migrations/registry.ts');
       // Judged as absent, not as live: the two verdicts have different remedies.
       expect(output).not.toContain(CHECK_B2);
       // The refusal carries the remedy, including the one legitimate shape it

@@ -2,10 +2,102 @@
 
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import ts from 'typescript';
 import { defineConfig, type Options } from 'tsup';
-import type { Plugin } from 'esbuild';
 
 import { dropSourcesContent } from '../../scripts/tsup-drop-sources-content.mjs';
+
+/**
+ * esbuild's plugin type, read off tsup's own option rather than imported from
+ * `esbuild`: this package does not depend on esbuild directly (tsup does), so
+ * a bare `'esbuild'` specifier resolves for no type checker that reads this
+ * file — and `scripts/pure-schema-construction.test.ts` puts it in front of one.
+ */
+type Plugin = NonNullable<Options['esbuildPlugins']>[number];
+
+/**
+ * The three marked constructors, each with its purity argument:
+ *  - `lazySchema(fn)` allocates a Proxy, defers `fn` to first use;
+ *  - `strictObject(shape, …)` builds a closed zod object (construction only —
+ *    the unknown-key error closure runs at parse time, not now);
+ *  - `defineForm(cfg)` parses STATIC author-time data through `FormViewSchema`
+ *    — pure computation whose only observable effect is a throw on invalid
+ *    static input, which this package's own build (`gen:schema` under
+ *    OS_EAGER_SCHEMAS) and tests still exercise.
+ */
+const PURE_CONSTRUCTORS: ReadonlySet<string> = new Set(['lazySchema', 'strictObject', 'defineForm']);
+
+/** A file that never names a marked constructor is handed back untouched, unparsed. */
+const NAMES_A_PURE_CONSTRUCTOR = /\b(?:lazySchema|strictObject|defineForm)\b/;
+
+const PURE_ANNOTATION = '/* @__PURE__ */ ';
+
+/**
+ * Insert the PURE annotation in front of every CALL of a marked constructor in
+ * `source`, and nowhere else. Returns `undefined` when the file names none of
+ * them, so the loader can leave the file to esbuild's own reading.
+ *
+ * ## Why a parse, and not a line or token heuristic
+ *
+ * Only a real call may be marked. A marked name also appears inside string
+ * literals, template text, comments and JSDoc, and an annotation written there
+ * changes the text itself: inside a string it ships in the published bundle as
+ * part of the value (a D3 migration `reason` quoting `z.strictObject(…)` did,
+ * so `os migrate meta` would have printed the marker inside an author-facing
+ * sentence), and inside a block comment it terminates the outer comment and
+ * breaks the parse (measured on `shared/strict-object.ts:48`).
+ *
+ * The rule this replaced split the file into lines and skipped the ones that
+ * START like a comment. It could not see a string, a template, a trailing
+ * comment or a function declaration on a code line. A bare `ts.createScanner`
+ * pass cannot either, on its own: whether `/` starts a regular expression and
+ * whether `}` resumes a template are grammar questions the scanner answers only
+ * when the parser asks it to rescan. Measured over this package's `src` (1727
+ * real calls): a scanner loop without those rescans mis-lexes every regex
+ * literal containing a quote and loses 191 real calls, while marking two
+ * mentions inside a JSDoc `@example`. So the TypeScript parser drives the
+ * scanner here, and the marked positions are read off the syntax tree:
+ *
+ *  - a `CallExpression` whose callee is one of the three names, bare
+ *    (`lazySchema(…)`) or as the member of a property access
+ *    (`z.strictObject(…)`);
+ *  - the annotation goes at the START of that call expression — the one place
+ *    esbuild honours it. `z./* PURE *\/ strictObject(…)` (the old rule's
+ *    output for a member call) is dropped by esbuild and marks nothing;
+ *  - string and template TEXT, comments, JSDoc and declarations are not call
+ *    expressions, so nothing in them is ever touched. A call inside a template
+ *    SUBSTITUTION is code, and is marked like any other.
+ *
+ * The output differs from `source` by inserted annotations only: removing
+ * every inserted `PURE_ANNOTATION` gives `source` back byte-identical.
+ */
+export function annotatePureCalls(source: string, fileName: string): string | undefined {
+  if (!NAMES_A_PURE_CONSTRUCTOR.test(source)) return undefined;
+  const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
+  // A Set: a marked call chained off another (`lazySchema(f).strictObject(…)`)
+  // starts where the inner one does, and one annotation there is the mark.
+  const starts = new Set<number>();
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression;
+      const name = ts.isIdentifier(callee)
+        ? callee
+        : ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name)
+          ? callee.name
+          : undefined;
+      if (name && PURE_CONSTRUCTORS.has(name.text)) starts.add(node.getStart(file));
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  let out = '';
+  let from = 0;
+  for (const at of [...starts].sort((a, b) => a - b)) {
+    out += source.slice(from, at) + PURE_ANNOTATION;
+    from = at;
+  }
+  return out + source.slice(from);
+}
 
 /**
  * [#10031] Annotate deferred schema construction as pure IN THE EMITTED
@@ -29,42 +121,18 @@ import { dropSourcesContent } from '../../scripts/tsup-drop-sources-content.mjs'
  * the metadata-url-spelling agreement assertion, is now the build-time
  * `check:meta-url-spelling` gate).
  *
- * The word-boundary regex cannot hit the import specifier (`lazySchema,` /
- * `lazySchema }` carry no paren), the declaration (its token is
- * `lazySchema<T…>(`), or strings/comments in any way that survives bundling
- * (non-annotation comments are dropped from the bundle output).
+ * WHERE the annotation goes is `annotatePureCalls` above: real calls only,
+ * never text. `scripts/pure-schema-construction.test.ts` builds the
+ * `./migrations` entry through this plugin and holds its published
+ * `MIGRATIONS_BY_MAJOR` equal to the source value.
  */
-const pureSchemaConstruction: Plugin = {
+export const pureSchemaConstruction: Plugin = {
   name: 'pure-schema-construction',
   setup(build) {
-    // The three marked constructors, each with its purity argument:
-    //  - `lazySchema(fn)` allocates a Proxy, defers `fn` to first use;
-    //  - `strictObject(shape, …)` builds a closed zod object (construction
-    //    only — the unknown-key error closure runs at parse time, not now);
-    //  - `defineForm(cfg)` parses STATIC author-time data through
-    //    `FormViewSchema` — pure computation whose only observable effect is a
-    //    throw on invalid static input, which this package's own build
-    //    (`gen:schema` under OS_EAGER_SCHEMAS) and tests still exercise.
-    const PURE_CALL = /\b(lazySchema|strictObject|defineForm)\(/g;
     build.onLoad({ filter: /src[\\/].*\.(ts|mts)$/ }, async (args) => {
       const source = await readFile(args.path, 'utf8');
-      PURE_CALL.lastIndex = 0;
-      if (!PURE_CALL.test(source)) return undefined;
-      // Line-based on purpose: a marked name mentioned inside a JSDoc block
-      // must NOT receive an annotation — a comment injected inside a comment
-      // terminates the outer one and breaks the parse (measured on
-      // shared/strict-object.ts:48). Comment lines start with `*`, `//` or
-      // `/*` after indentation; every real call site in the tree starts with
-      // code (surveyed: 1731 code lines vs 9 comment mentions), and no code
-      // line carries a marked token in a trailing comment.
-      const contents = source
-        .split('\n')
-        .map((line) => {
-          const lead = line.trimStart();
-          if (lead.startsWith('*') || lead.startsWith('//') || lead.startsWith('/*')) return line;
-          return line.replace(PURE_CALL, '/* @__PURE__ */ $1(');
-        })
-        .join('\n');
+      const contents = annotatePureCalls(source, args.path);
+      if (contents === undefined) return undefined;
       return { contents, loader: 'ts' };
     });
   },
@@ -245,7 +313,9 @@ const swapServerOnlyGrammarArm: Plugin = {
  */
 const isDts = process.env.BUILD_DTS === 'true';
 
-const mainConfig: Options = {
+// Exported for `scripts/pure-schema-construction.test.ts`, which builds the
+// `./migrations` entry with these options; tsup itself reads only the default.
+export const mainConfig: Options = {
   entry: entries,
   splitting: false,
   sourcemap: true,

@@ -11,7 +11,9 @@
  * Column-type scope (the amendment's item 7): the seam reads the declared
  * `datetime` columns its caller hands it (`RlsFieldGuard.datetime`), so the
  * whole-day rule rewrites those only — the scope every driver holds — and a
- * guard without types reads no column as `datetime`. The NULL-polarity guards
+ * guard without types cannot read the type, so the rule applies type-blind
+ * (#20822; the no-guard half is pinned in
+ * `rls-20822-no-guard-type-blind-lowering.test.ts`). The NULL-polarity guards
  * do not depend on the type.
  *
  * Token order (item 3): nothing resolves a placeholder on either RLS clause —
@@ -51,9 +53,9 @@ describe('[ADR-0053 D-D1 amended — #5930] the RLS compile seam lowers every co
       expect(compile(clause, "record.due_on <= '2026-01-05'")).toEqual({ due_on: { $lte: '2026-01-05' } });
     });
 
-    it(`${clause}: a guard with no types reads no column as datetime`, () => {
+    it(`${clause}: a guard with no types cannot read the type, so the rule applies type-blind (#20822)`, () => {
       expect(compile(clause, "record.signed_on <= '2026-01-05'", { declared: DECLARED }))
-        .toEqual({ signed_on: { $lte: '2026-01-05' } });
+        .toEqual({ signed_on: { $lt: '2026-01-06' } });
     });
 
     it(`${clause}: the NULL-polarity guards apply whatever the type`, () => {

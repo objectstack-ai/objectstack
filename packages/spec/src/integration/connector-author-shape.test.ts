@@ -269,16 +269,19 @@ describe('[#5515] the spellings the example used to carry are rejected', () => {
   const results = compileProbes(probes);
 
   // ⚠ Measured, not assumed — and it is the one place the two tombstone
-  // channels are NOT equally good. `retiredKey()` is `z.never().optional()`, so
-  // its `z.input` type is `undefined`, and tsc reports the assignment failure
-  // against that type: "Type '{ … }' is not assignable to type 'undefined'".
-  // The compile channel therefore REFUSES the key but does not NAME it, while
-  // the parse channel (the runtime block below) carries the full prescription.
+  // channels are NOT equally good. `retiredKey()` types the key as its
+  // tombstone mark (an object whose one property is named by the `[REMOVED]`
+  // sentence and typed `never`), so tsc reports the assignment failure against
+  // that mark, worded by the value's kind: TS2741 for the two arrays, TS2353
+  // for the `syncConfig` object. The compile channel therefore REFUSES the key
+  // and says it was retired, pointing at `os validate`, while only the parse
+  // channel (the runtime block below) carries the key's own prescription.
   for (const probe of ['field-mappings-retired', 'sync-config-retired', 'webhooks-retired'] as const) {
     it(`\`${probe}\`: the key no longer type-checks, whatever it holds`, () => {
       const message = render(results.get(probe)!);
-      expect(message).toContain('TS2322');
-      expect(message).toContain("not assignable to type 'undefined'");
+      expect(message).toMatch(/^TS(2741|2353): /);
+      expect(message).toContain('[REMOVED]');
+      expect(message).toContain('`os validate`');
     });
   }
 

@@ -601,7 +601,8 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       // The guard travels as one more conjunct inside the `$not`, so any driver
       // behind the engine — NULL-safe or not — admits the same rows. Rendering it
       // only in the SQL strategy would have made the answer depend on the driver.
-      expect(JSON.stringify(lastEngineFilter)).toContain('$ne');
+      // [#20918] It travels in the engine's own spelling, `{ $null: false }`.
+      expect(JSON.stringify(lastEngineFilter)).toContain('{"stage":{"$null":false}}');
       expect(JSON.stringify(lastEngineFilter)).toContain('$not');
     });
 
@@ -890,13 +891,15 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
 
     it('the ObjectQL path hands the engine a null predicate, not `\'\'`', async () => {
       expect(await engineIds({ stage: { $eq: null } })).toEqual(['3', '4']);
-      // `convertFilter` maps `notSet` to a bare `null` — `{stage: null}`, the
-      // spelling every driver reads as IS NULL. It used to receive
-      // `{stage: ''}` (via `coerceFilterValueForObjectQL('')`), i.e. the empty
-      // string compared against stored `null` — never a match on any driver.
-      expect(lastEngineFilter).toEqual({ stage: null });
+      // `convertFilter` maps `notSet` to `{ $null: true }` and `set` to
+      // `{ $null: false }`, the engine's own null predicates (#20918; they were
+      // the bare `null` and `{ $ne: null }`, which `driver-sql` refuses over a
+      // JSON column). It used to receive `{stage: ''}` (via
+      // `coerceFilterValueForObjectQL('')`), i.e. the empty string compared
+      // against stored `null` — never a match on any driver.
+      expect(lastEngineFilter).toEqual({ stage: { $null: true } });
       expect(await engineIds({ stage: { $ne: null } })).toEqual(['1', '2']);
-      expect(lastEngineFilter).toEqual({ stage: { $ne: null } });
+      expect(lastEngineFilter).toEqual({ stage: { $null: false } });
     });
 
     it('the echoed display SQL renders the predicate it executes', async () => {

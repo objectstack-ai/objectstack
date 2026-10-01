@@ -38,7 +38,6 @@ import {
 import { StandardErrorCode } from '@objectstack/spec/api';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import type { DriverOptions, FilterCondition } from '@objectstack/spec/data';
-import { UNBOUNDED_ABOVE, isUnboundedAbove, type UnboundedAbove } from '@objectstack/spec/data';
 import type { Client } from '@libsql/client';
 import { RemoteTransport } from './remote-transport.js';
 import {
@@ -2555,14 +2554,16 @@ export class TursoDriver extends SqlDriver {
 
   /**
    * Compile a filter into the storage forms and operator shapes the remote
-   * transport can bind correctly.
+   * transport can bind correctly: each comparand in the driver's storage form,
+   * and `$between` split into the `$gte` / `$lte` pair the transport compiles.
    *
-   * Three things happen here, and the ORDER of the last two is load-bearing
-   * (ADR-0053 D-E3): the calendar-day widening is a *calendar* operation and
-   * must run on the bare-day STRING, with only the resulting bound converted to
-   * storage form. Converting first would hand `nextUtcCalendarDay` an instant,
-   * which it correctly refuses to widen — silently narrowing a whole-day window
-   * back to a midnight one.
+   * [ADR-0053 D-D1 items 5 and 9, as amended — #20822] No calendar-day widening
+   * happens here any more. A bare-day upper bound is widened ONCE, by the shared
+   * lowering (`lowerFilterCondition`, `@objectstack/spec/data`) at the seams,
+   * in the calendar-string domain — so every seamed read hands this method `$lt`
+   * the next day, which it converts to storage form like any comparand, and
+   * D-E3's order (widen the day first, convert the bound second) holds by
+   * construction. A caller that passes no seam gets the comparison it wrote.
    */
   private toRemoteFilter(object: string, where: unknown): unknown {
     if (where == null || typeof where !== 'object') return where;
@@ -2576,14 +2577,12 @@ export class TursoDriver extends SqlDriver {
       // `$not` carries ONE nested filter condition, so it recurses like the two
       // array combinators rather than passing through as an opaque `$`-key
       // (#1076). Skipping it left every condition INSIDE a negation on the raw
-      // path, i.e. short of the seam this method IS: `$between` was never
-      // lowered (so `{ $not: { amount: { $between: […] } } }` reached a
-      // transport that correctly refuses un-lowered `$between`, naming a step
-      // that had in fact been skipped), and a bare `YYYY-MM-DD` upper bound was
-      // never widened to the whole calendar day (framework#3777) — which under
-      // a negation hands BACK exactly the rows the day was meant to cover.
-      // Comparand storage form and the operator lowerings apply at every depth
-      // a condition can appear at, so the recursion has to reach all of them.
+      // path: `$between` was never split (so `{ $not: { amount: { $between:
+      // […] } } }` reached a transport that correctly refuses an unsplit
+      // `$between`, naming a step that had in fact been skipped), and a
+      // comparand under a negation never reached its storage form. Comparand
+      // storage form and the `$between` split apply at every depth a condition
+      // can appear at, so the recursion has to reach all of them.
       if (key === '$not') {
         out[key] = this.toRemoteFilter(object, val);
         continue;
@@ -2593,7 +2592,7 @@ export class TursoDriver extends SqlDriver {
     return out;
   }
 
-  /** One field's comparand(s), in storage form and with `$between` lowered. */
+  /** One field's comparand(s), in storage form and with `$between` split. */
   private toRemoteFieldSpec(object: string, field: string, spec: unknown): unknown {
     if (spec == null) return spec;
     // A bare scalar / `Date` is implicit equality; a bare array is not a valid
@@ -2608,10 +2607,14 @@ export class TursoDriver extends SqlDriver {
     for (const [op, raw] of Object.entries(spec as Record<string, unknown>)) {
       switch (op) {
         case '$between': {
-          // Lowered to its two bounds rather than given an operator of its own
-          // (framework#4081): the upper-bound arm below already carries the
-          // whole-day calendar rule, so a range's max inherits it by
-          // construction instead of via a second implementation.
+          // Split into its two bounds rather than given an operator of its own
+          // (framework#4081): the transport compiles `$gte` / `$lte` and has no
+          // `$between` arm. The split is structural only — both ends inclusive,
+          // as written. [#20822] The whole-day rule is not applied here: the
+          // shared lowering at the seams already split a `datetime` column's
+          // bare-day range into `$gte` / `$lt` the next day, and a range that
+          // arrives here unsplit is either on a column the typed seam leaves
+          // alone or from a caller that passed no seam.
           //
           // [#20094] A range that is not two bounds is NOT refused here: it is
           // handed to the transport as written, un-lowered, and the transport's
@@ -2629,19 +2632,7 @@ export class TursoDriver extends SqlDriver {
             break;
           }
           out.$gte = this.temporalFilterValue(object, field, raw[0]);
-          // [#20600] A max on the last supported day bounds nothing: the range
-          // keeps its minimum alone.
-          const upper = this.toRemoteUpperBound(object, field, '$lte', raw[1]);
-          if (!isUnboundedAbove(upper)) Object.assign(out, upper);
-          break;
-        }
-        case '$lte': {
-          // [#20600] `$lte` on the last supported day has no bound to send; what
-          // it still asks is that the column has a value, which the transport's
-          // `$null: false` arm spells `IS NOT NULL` — the reading local mode's
-          // emitter gives the same rewrite.
-          const upper = this.toRemoteUpperBound(object, field, op, raw);
-          Object.assign(out, isUnboundedAbove(upper) ? { $null: false } : upper);
+          out.$lte = this.temporalFilterValue(object, field, raw[1]);
           break;
         }
         case '$in':
@@ -2670,28 +2661,6 @@ export class TursoDriver extends SqlDriver {
       }
     }
     return out;
-  }
-
-  /**
-   * An inclusive upper bound, compiled half-open when the comparand is a bare
-   * calendar day on a `datetime` column (ADR-0053 D-D1, framework#3777).
-   *
-   * `calendarDayUpperBoundRewrite` is the inherited authority for that rule and
-   * already scopes itself to `datetime`, so `date`/`time` columns compile
-   * byte-identically to before. [#20600] `UNBOUNDED_ABOVE` — the last
-   * supported day, whose whole-day bound bounds nothing — is handed back for
-   * the caller to compile no upper bound.
-   */
-  private toRemoteUpperBound(
-    object: string,
-    field: string,
-    op: string,
-    raw: unknown,
-  ): Record<string, unknown> | UnboundedAbove {
-    const rewritten = this.calendarDayUpperBoundRewrite(object, field, op, raw);
-    if (isUnboundedAbove(rewritten)) return UNBOUNDED_ABOVE;
-    if (rewritten) return { [rewritten.op]: rewritten.value };
-    return { [op]: this.temporalFilterValue(object, field, raw) };
   }
 
   /** A query with its `where` compiled through {@link toRemoteFilter}. */

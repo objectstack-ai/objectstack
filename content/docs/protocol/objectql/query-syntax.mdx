@@ -568,10 +568,17 @@ const businessHours: FilterCondition = {
 
 A bare `YYYY-MM-DD` bound is a **calendar day**. As a lower bound (`$gte`) it
 means the start of that day (midnight UTC); as an upper bound (`$lte`, or the
-max of a `$between`) it covers the **whole** day — on a `datetime` column the
-driver compiles it half-open (`< next day`), so the `$between` above includes
-everything that happened on Dec 31. A full ISO timestamp keeps exact-instant
-semantics on every operator.
+max of a `$between`) it covers the **whole** day. On a `date` column that is
+plain comparison, so the `$between` above includes Dec 31. On a `datetime`
+column it is the shared filter lowering (`lowerFilterCondition` from
+`@objectstack/spec/data`, ADR-0053 D-D1 as amended): the engine's `where` seam
+and the RLS compile seam rewrite a bare-day upper bound on a `datetime` column
+half-open (`$lt` the next day) before any driver sees the filter, and a seam
+that cannot read the declared types applies that rewrite to every column. A
+filter handed directly to `SqlDriver` or a driver built on it
+(`SqliteWasmDriver`, `TursoDriver`), past both seams, is compared as written: a
+bare-day `$lte` on a `datetime` column compares against that day's midnight. A
+full ISO timestamp keeps exact-instant semantics on every operator.
 
 ### Null Checks
 

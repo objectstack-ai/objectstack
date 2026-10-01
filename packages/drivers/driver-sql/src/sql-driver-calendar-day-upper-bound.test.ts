@@ -12,8 +12,9 @@
  *
  * The fix is operator-sensitive and half-open: `$lte`/`<=`/`between`-max with
  * a bare-day comparand on a datetime column compiles to `< next-day-midnight`
- * (`calendarDayUpperBoundRewrite`), the same `[gte, lt)` shape the analytics
- * drill ranges emit. Everything else — `date` columns, full-ISO comparands,
+ * (since #20822 by the shared lowering at the seams, `lowerFilterCondition`;
+ * it was this driver's `calendarDayUpperBoundRewrite`), the same `[gte, lt)`
+ * shape the analytics drill ranges emit. Everything else — `date` columns, full-ISO comparands,
  * `$gte`/`$gt`/`$lt` — keeps its exact pre-fix behaviour, matching the
  * semantics table on the issue.
  *
@@ -23,11 +24,37 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { parseFilterAST, UNBOUNDED_ABOVE, type FilterCondition } from '@objectstack/spec/data';
+import { lowerFilterCondition, parseFilterAST, type FilterCondition } from '@objectstack/spec/data';
 import { SqlDriver } from '../src/index.js';
 import { LegacyStorageDriver } from '../src/legacy-datetime-storage.testkit.js';
 
 const ids = (rows: any[]) => rows.map((r: any) => r.id).sort();
+
+/** The declared `task` field maps these blocks sync — what a typed seam reads. */
+const TASK_FIELDS: Record<string, { type: string }> = {
+  title: { type: 'string' },
+  created_at: { type: 'datetime' },
+  created_on: { type: 'date' },
+};
+const LEGACY_TASK_FIELDS: Record<string, { type: string }> = { title: { type: 'string' }, created_at: { type: 'datetime' } };
+const LAST_DAY_TASK_FIELDS: Record<string, { type: string }> = { title: { type: 'string' }, at: { type: 'datetime' } };
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5, 7 and 9, as amended] What a TYPED seam hands
+ * this driver: the filter through the shared lowering, reading the declared
+ * field map (`datetime` columns only). The whole-day rule is the lowering's
+ * now — this driver's own copy (`calendarDayUpperBoundRewrite` /
+ * `calendarDayBetweenRewrite`) is deleted — so the row blocks below read the
+ * answer every seam-fed read gets, and their expected rows are unchanged. What
+ * this driver still owns, and what they still pin, is the second half: the
+ * lowered calendar-string bound converted to the column's storage form, on
+ * canonical and on un-backfilled legacy storage (D-A1, D-E3). A caller that
+ * passes no seam is pinned in `sql-driver-20822-comparison-as-written.test.ts`.
+ */
+const seamed = (fields: Record<string, { type: string }>, where: unknown): any =>
+  lowerFilterCondition(where, {
+    isDatetimeColumn: (column) => Object.prototype.hasOwnProperty.call(fields, column) && fields[column]!.type === 'datetime',
+  });
 
 describe('bare-day $lte on Field.datetime — the #3777 repro', () => {
   let driver: SqlDriver;
@@ -38,16 +65,7 @@ describe('bare-day $lte on Field.datetime — the #3777 repro', () => {
       connection: { filename: ':memory:' },
       useNullAsDefault: true,
     });
-    await driver.initObjects([
-      {
-        name: 'task',
-        fields: {
-          title: { type: 'string' },
-          created_at: { type: 'datetime' },
-          created_on: { type: 'date' },
-        },
-      },
-    ]);
+    await driver.initObjects([{ name: 'task', fields: TASK_FIELDS }]);
     // The issue's probe, verbatim: "today" is 2026-07-28, the window is the
     // last_90_days preset's expansion. `created_on` mirrors each instant's
     // calendar day so every case below can run the same probe on a date column.
@@ -73,7 +91,7 @@ describe('bare-day $lte on Field.datetime — the #3777 repro', () => {
   it('keeps the whole final day — the dashboard default-config window', async () => {
     // Exactly the shape objectui's buildFilterCondition sends for last_90_days.
     const found = await driver.find('task', {
-      where: { created_at: { $gte: '2026-04-29', $lte: '2026-07-28' } },
+      where: seamed(TASK_FIELDS, { created_at: { $gte: '2026-04-29', $lte: '2026-07-28' } }),
     } as any);
     // Pre-fix this returned only [t_midnight, t_yesterday]: the 09:15 and
     // 21:40 rows fell past the midnight-anchored upper bound.
@@ -82,58 +100,58 @@ describe('bare-day $lte on Field.datetime — the #3777 repro', () => {
 
   it('the same probe on a Field.date column is unchanged (already whole-day)', async () => {
     const found = await driver.find('task', {
-      where: { created_on: { $gte: '2026-04-29', $lte: '2026-07-28' } },
+      where: seamed(TASK_FIELDS, { created_on: { $gte: '2026-04-29', $lte: '2026-07-28' } }),
     } as any);
     expect(ids(found)).toEqual(['t_evening', 't_midnight', 't_morning', 't_yesterday']);
   });
 
   it('a full-ISO $lte keeps instant semantics — only the bare day is widened', async () => {
     const found = await driver.find('task', {
-      where: { created_at: { $lte: '2026-07-28T12:00:00.000Z' } },
+      where: seamed(TASK_FIELDS, { created_at: { $lte: '2026-07-28T12:00:00.000Z' } }),
     } as any);
     expect(ids(found)).toEqual(['t_midnight', 't_morning', 't_old', 't_yesterday']);
   });
 
   it('a Date-object $lte keeps instant semantics too', async () => {
     const found = await driver.find('task', {
-      where: { created_at: { $lte: new Date('2026-07-28T00:00:00Z') } },
+      where: seamed(TASK_FIELDS, { created_at: { $lte: new Date('2026-07-28T00:00:00Z') } }),
     } as any);
     expect(ids(found)).toEqual(['t_midnight', 't_old', 't_yesterday']);
   });
 
   it('$gte / $gt / $lt keep their midnight anchoring (the issue-table rows marked correct)', async () => {
-    const gte = await driver.find('task', { where: { created_at: { $gte: '2026-07-28' } } });
+    const gte = await driver.find('task', { where: seamed(TASK_FIELDS, { created_at: { $gte: '2026-07-28' } }) });
     expect(ids(gte)).toEqual(['t_evening', 't_midnight', 't_morning']);
 
-    const gt = await driver.find('task', { where: { created_at: { $gt: '2026-07-28' } } });
+    const gt = await driver.find('task', { where: seamed(TASK_FIELDS, { created_at: { $gt: '2026-07-28' } }) });
     expect(ids(gt)).toEqual(['t_evening', 't_morning']); // excludes the exact-midnight row
 
-    const lt = await driver.find('task', { where: { created_at: { $lt: '2026-07-28' } } });
+    const lt = await driver.find('task', { where: seamed(TASK_FIELDS, { created_at: { $lt: '2026-07-28' } }) });
     expect(ids(lt)).toEqual(['t_old', 't_yesterday']);
   });
 
   it('$between with a bare-day max covers the whole final day', async () => {
     const found = await driver.find('task', {
-      where: { created_at: { $between: ['2026-04-29', '2026-07-28'] } },
+      where: seamed(TASK_FIELDS, { created_at: { $between: ['2026-04-29', '2026-07-28'] } }),
     } as any);
     expect(ids(found)).toEqual(['t_evening', 't_midnight', 't_morning', 't_yesterday']);
   });
 
   it('$between on a Field.date column is unchanged', async () => {
     const found = await driver.find('task', {
-      where: { created_on: { $between: ['2026-04-29', '2026-07-28'] } },
+      where: seamed(TASK_FIELDS, { created_on: { $between: ['2026-04-29', '2026-07-28'] } }),
     } as any);
     expect(ids(found)).toEqual(['t_evening', 't_midnight', 't_morning', 't_yesterday']);
   });
 
   it('stays one grouped predicate inside an $or branch', async () => {
     const found = await driver.find('task', {
-      where: {
+      where: seamed(TASK_FIELDS, {
         $or: [
           { created_at: { $gte: '2026-07-28', $lte: '2026-07-28' } }, // "today" preset
           { title: 't_old' },
         ],
-      },
+      }),
     } as any);
     expect(ids(found)).toEqual(['t_evening', 't_midnight', 't_morning', 't_old']);
   });
@@ -146,14 +164,14 @@ describe('bare-day $lte on Field.datetime — the #3777 repro', () => {
     // (`[condA, 'and', condB]`) has no lowering at all and is refused at the
     // door; the declared spelling of "both bounds" is the prefix group.
     const found = await driver.find('task', {
-      where: parseFilterAST(
+      where: seamed(TASK_FIELDS, parseFilterAST(
         ['and', ['created_at', '<=', '2026-07-28'], ['created_at', '>=', '2026-04-29']],
-      ) as any,
+      )),
     } as any);
     expect(ids(found)).toEqual(['t_evening', 't_midnight', 't_morning', 't_yesterday']);
 
     const between = await driver.find('task', {
-      where: parseFilterAST([['created_at', 'between', ['2026-04-29', '2026-07-28']]]) as any,
+      where: seamed(TASK_FIELDS, parseFilterAST([['created_at', 'between', ['2026-04-29', '2026-07-28']]])),
     } as any);
     expect(ids(between)).toEqual(['t_evening', 't_midnight', 't_morning', 't_yesterday']);
   });
@@ -168,9 +186,7 @@ describe('bare-day $lte on an un-backfilled legacy column (mixed storage)', () =
       connection: { filename: ':memory:' },
       useNullAsDefault: true,
     });
-    await driver.initObjects([
-      { name: 'task', fields: { title: { type: 'string' }, created_at: { type: 'datetime' } } },
-    ]);
+    await driver.initObjects([{ name: 'task', fields: LEGACY_TASK_FIELDS }]);
     // Both pre-#3912 storage forms of the same calendar day, in ONE column:
     // an INTEGER epoch (a bound JS Date) and zone-naive TEXT (CURRENT_TIMESTAMP).
     // The half-open bound must keep both — via the CASE-normalised column
@@ -189,20 +205,30 @@ describe('bare-day $lte on an un-backfilled legacy column (mixed storage)', () =
 
   it('keeps both stored forms of the final day and excludes the next midnight', async () => {
     const found = await driver.find('task', {
-      where: { created_at: { $gte: '2026-04-29', $lte: '2026-07-28' } },
+      where: seamed(LEGACY_TASK_FIELDS, { created_at: { $gte: '2026-04-29', $lte: '2026-07-28' } }),
     } as any);
     expect(ids(found)).toEqual(['epoch_morning', 'text_evening']);
   });
 
   it('$between decomposes against the normalised column the same way', async () => {
     const found = await driver.find('task', {
-      where: { created_at: { $between: ['2026-04-29', '2026-07-28'] } },
+      where: seamed(LEGACY_TASK_FIELDS, { created_at: { $between: ['2026-04-29', '2026-07-28'] } }),
     } as any);
     expect(ids(found)).toEqual(['epoch_morning', 'text_evening']);
   });
 });
 
-// ── Dialect physical form of the rewritten bound (no DB connection) ─────────
+// ── Dialect physical form of the lowered bound (no DB connection) ──────────
+//
+// [#20822] These blocks pinned `calendarDayUpperBoundRewrite` /
+// `calendarDayBetweenRewrite`, the driver's own copy of the whole-day rule,
+// through a probe subclass. The copy is deleted; the rule — which bound, the
+// calendar arithmetic, the `datetime`-only scope, the last supported day — is
+// the shared lowering's, and its rule table is `@objectstack/spec`'s
+// `filter-lowering.test.ts`. What stays the driver's, and is pinned here per
+// dialect, is the physical form it binds for the lowered calendar-string bound
+// (`coerceFilterValue` via the public `temporalFilterValue`): the same values
+// the deleted rewrite bound.
 
 /** Test double that injects field-type metadata without a live connection. */
 class ProbeDriver extends SqlDriver {
@@ -212,72 +238,73 @@ class ProbeDriver extends SqlDriver {
   seedDate(table: string, field: string): void {
     (this.dateFields[table] ??= new Set()).add(field);
   }
-  rewrite(table: string, field: string, op: string, value: unknown) {
-    return this.calendarDayUpperBoundRewrite(table, field, op, value);
-  }
-  betweenRewrite(table: string, field: string, value: unknown) {
-    return this.calendarDayBetweenRewrite(table, field, value);
-  }
 }
 
 function makeProbe(client: string): ProbeDriver {
   return new ProbeDriver({ client, connection: { filename: ':memory:' }, useNullAsDefault: true } as any);
 }
 
-describe('calendarDayUpperBoundRewrite — dialect and boundary matrix', () => {
+/** The probe's declared field map: `at` a datetime, `on` a date, `title` text. */
+const PROBE_FIELDS: Record<string, { type: string }> = {
+  at: { type: 'datetime' },
+  on: { type: 'date' },
+  title: { type: 'string' },
+};
+
+describe('the lowered bound — dialect and boundary matrix', () => {
   it('binds next-day midnight in each dialect physical spelling', () => {
     const expected: Record<string, string> = {
       'better-sqlite3': '2026-07-29T00:00:00.000Z',
       pg: '2026-07-29T00:00:00.000Z',
       mysql2: '2026-07-29 00:00:00.000', // #3942: MySQL parses neither T nor Z
     };
+    const lowered = seamed(PROBE_FIELDS, { at: { $lte: '2026-07-28' } });
+    expect(lowered).toEqual({ at: { $lt: '2026-07-29' } });
     for (const [client, value] of Object.entries(expected)) {
       const d = makeProbe(client);
       d.seedDatetime('t', 'at');
-      expect(d.rewrite('t', 'at', '$lte', '2026-07-28'), client).toEqual({ op: '$lt', value });
-      expect(d.rewrite('t', 'at', '<=', '2026-07-28'), client).toEqual({ op: '<', value });
+      expect(d.temporalFilterValue('t', 'at', lowered.at.$lt), client).toBe(value);
     }
   });
 
   it('rolls month, year and leap-day boundaries as calendar arithmetic', () => {
     const d = makeProbe('better-sqlite3');
     d.seedDatetime('t', 'at');
-    const upper = (day: string) => (d.rewrite('t', 'at', '$lte', day) as any)?.value;
+    const upper = (day: string) => d.temporalFilterValue('t', 'at', seamed(PROBE_FIELDS, { at: { $lte: day } }).at.$lt);
     expect(upper('2026-07-31')).toBe('2026-08-01T00:00:00.000Z');
     expect(upper('2026-12-31')).toBe('2027-01-01T00:00:00.000Z');
     expect(upper('2024-02-28')).toBe('2024-02-29T00:00:00.000Z'); // leap year
     expect(upper('2025-02-28')).toBe('2025-03-01T00:00:00.000Z');
   });
 
-  it('declines everything outside the calendar-day-on-datetime cell', () => {
-    const d = makeProbe('better-sqlite3');
-    d.seedDatetime('t', 'at');
-    d.seedDate('t', 'on');
+  it('leaves everything outside the calendar-day-on-datetime cell as written', () => {
+    const asWritten = (where: FilterCondition) => expect(seamed(PROBE_FIELDS, where)).toEqual(where);
     // date column — `<=` is already whole-day-correct there.
-    expect(d.rewrite('t', 'on', '$lte', '2026-07-28')).toBeNull();
+    asWritten({ on: { $lte: '2026-07-28' } });
     // lower bounds and strict-less keep their midnight anchor.
-    expect(d.rewrite('t', 'at', '$gte', '2026-07-28')).toBeNull();
-    expect(d.rewrite('t', 'at', '$lt', '2026-07-28')).toBeNull();
+    asWritten({ at: { $gte: '2026-07-28' } });
+    asWritten({ at: { $lt: '2026-07-28' } });
     // instant comparands keep instant semantics.
-    expect(d.rewrite('t', 'at', '$lte', '2026-07-28T12:00:00Z')).toBeNull();
-    expect(d.rewrite('t', 'at', '$lte', new Date('2026-07-28T00:00:00Z'))).toBeNull();
+    asWritten({ at: { $lte: '2026-07-28T12:00:00Z' } });
+    asWritten({ at: { $lte: new Date('2026-07-28T00:00:00Z') } });
     // an impossible day is rejected, not rolled into an invented bound.
-    expect(d.rewrite('t', 'at', '$lte', '2026-02-30')).toBeNull();
+    asWritten({ at: { $lte: '2026-02-30' } });
     // non-temporal column.
-    expect(d.rewrite('t', 'title', '$lte', '2026-07-28')).toBeNull();
+    asWritten({ title: { $lte: '2026-07-28' } });
   });
 
-  it('between: only a [min, max] with a bare-day max on datetime decomposes', () => {
+  it('between: a [min, max] with a bare-day max on datetime splits, and each end binds its storage form', () => {
     const d = makeProbe('better-sqlite3');
     d.seedDatetime('t', 'at');
     d.seedDate('t', 'on');
-    expect(d.betweenRewrite('t', 'at', ['2026-04-29', '2026-07-28'])).toEqual({
-      lower: '2026-04-29T00:00:00.000Z',
-      upper: '2026-07-29T00:00:00.000Z',
-    });
-    expect(d.betweenRewrite('t', 'on', ['2026-04-29', '2026-07-28'])).toBeNull();
-    expect(d.betweenRewrite('t', 'at', ['2026-04-29', '2026-07-28T12:00:00Z'])).toBeNull();
-    expect(d.betweenRewrite('t', 'at', ['2026-04-29'])).toBeNull(); // malformed → caller's error
+    const split = seamed(PROBE_FIELDS, { at: { $between: ['2026-04-29', '2026-07-28'] } });
+    expect(split).toEqual({ at: { $gte: '2026-04-29', $lt: '2026-07-29' } });
+    expect(d.temporalFilterValue('t', 'at', split.at.$gte)).toBe('2026-04-29T00:00:00.000Z');
+    expect(d.temporalFilterValue('t', 'at', split.at.$lt)).toBe('2026-07-29T00:00:00.000Z');
+    // A date column's range is left whole; a malformed range is left for this driver to refuse.
+    expect(seamed(PROBE_FIELDS, { on: { $between: ['2026-04-29', '2026-07-28'] } }))
+      .toEqual({ on: { $between: ['2026-04-29', '2026-07-28'] } });
+    expect(seamed(PROBE_FIELDS, { at: { $between: ['2026-04-29'] } })).toEqual({ at: { $between: ['2026-04-29'] } });
   });
 });
 
@@ -290,26 +317,26 @@ describe('calendarDayUpperBoundRewrite — dialect and boundary matrix', () => {
  * both answered no rows. `9999-12-30` is the control: an ordinary bound.
  */
 describe('[#20600] a bare-day upper bound on the last supported day', () => {
-  it('the rewrite answers UNBOUNDED_ABOVE on every dialect for $lte and <=, and the between max carries it', () => {
+  it('the lowering drops the bound for $lte and the between max, and the kept minimum binds per dialect', () => {
     const lowerByClient: Record<string, string> = {
       'better-sqlite3': '2026-01-01T00:00:00.000Z',
       pg: '2026-01-01T00:00:00.000Z',
       mysql2: '2026-01-01 00:00:00.000',
     };
+    expect(seamed(PROBE_FIELDS, { at: { $lte: '9999-12-31' } })).toEqual({ at: { $null: false } });
+    const between = seamed(PROBE_FIELDS, { at: { $between: ['2026-01-01', '9999-12-31'] } });
+    expect(between).toEqual({ at: { $gte: '2026-01-01' } });
     for (const [client, lower] of Object.entries(lowerByClient)) {
       const d = makeProbe(client);
       d.seedDatetime('t', 'at');
-      d.seedDate('t', 'on');
-      expect(d.rewrite('t', 'at', '$lte', '9999-12-31'), client).toBe(UNBOUNDED_ABOVE);
-      expect(d.rewrite('t', 'at', '<=', '9999-12-31'), client).toBe(UNBOUNDED_ABOVE);
-      expect(d.betweenRewrite('t', 'at', ['2026-01-01', '9999-12-31']), client).toEqual({ lower, upper: UNBOUNDED_ABOVE });
-      // The control: the day before is an ordinary bound.
-      expect((d.rewrite('t', 'at', '$lte', '9999-12-30') as any)?.op, client).toBe('$lt');
-      // Outside the calendar-day-on-datetime cell nothing changes.
-      expect(d.rewrite('t', 'on', '$lte', '9999-12-31'), client).toBeNull();
-      expect(d.rewrite('t', 'at', '$gte', '9999-12-31'), client).toBeNull();
-      expect(d.rewrite('t', 'at', '$lte', '9999-12-31T10:00:00.000Z'), client).toBeNull();
+      expect(d.temporalFilterValue('t', 'at', between.at.$gte), client).toBe(lower);
     }
+    // The control: the day before is an ordinary bound.
+    expect(seamed(PROBE_FIELDS, { at: { $lte: '9999-12-30' } })).toEqual({ at: { $lt: '9999-12-31' } });
+    // Outside the calendar-day-on-datetime cell nothing changes.
+    expect(seamed(PROBE_FIELDS, { on: { $lte: '9999-12-31' } })).toEqual({ on: { $lte: '9999-12-31' } });
+    expect(seamed(PROBE_FIELDS, { at: { $gte: '9999-12-31' } })).toEqual({ at: { $gte: '9999-12-31' } });
+    expect(seamed(PROBE_FIELDS, { at: { $lte: '9999-12-31T10:00:00.000Z' } })).toEqual({ at: { $lte: '9999-12-31T10:00:00.000Z' } });
   });
 
   describe('row results — canonical text and the un-backfilled legacy column', () => {
@@ -336,14 +363,14 @@ describe('[#20600] a bare-day upper bound on the last supported day', () => {
 
     const run = async (driver: SqlDriver) => {
       const got: Record<string, string[]> = {};
-      for (const [name, where] of CASES) got[name] = ids(await driver.find('task', { where }));
+      for (const [name, where] of CASES) got[name] = ids(await driver.find('task', { where: seamed(LAST_DAY_TASK_FIELDS, where) }));
       expect(got).toEqual(Object.fromEntries(CASES.map(([name, , want]) => [name, want])));
     };
 
     it('canonical text: $lte and the $between max on 9999-12-31 compile no upper bound', async () => {
       const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
       try {
-        await driver.initObjects([{ name: 'task', fields: { title: { type: 'string' }, at: { type: 'datetime' } } }]);
+        await driver.initObjects([{ name: 'task', fields: LAST_DAY_TASK_FIELDS }]);
         for (const [id, at] of LAST_DAY_ROWS) await driver.create('task', { id, title: id, at }, { bypassTenantAudit: true });
         await driver.create('task', { id: 'none', title: 'none' }, { bypassTenantAudit: true });
         await run(driver);
@@ -355,7 +382,7 @@ describe('[#20600] a bare-day upper bound on the last supported day', () => {
     it('legacy mixed storage: the same answers through the normalised column expression', async () => {
       const driver = new LegacyStorageDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
       try {
-        await driver.initObjects([{ name: 'task', fields: { title: { type: 'string' }, at: { type: 'datetime' } } }]);
+        await driver.initObjects([{ name: 'task', fields: LAST_DAY_TASK_FIELDS }]);
         // Both pre-#3912 storage forms: an INTEGER epoch and zone-naive TEXT.
         await driver.seedLegacyRows('task', 'at', [
           ...LAST_DAY_ROWS.map(([id, at], i) => ({

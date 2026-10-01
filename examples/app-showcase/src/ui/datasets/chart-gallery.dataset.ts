@@ -24,6 +24,20 @@ export const ShowcaseTaskDataset = defineDataset({
     { name: 'est_hours', label: 'Estimated Hours', aggregate: 'sum', field: 'estimate_hours', format: '0.0' },
     { name: 'avg_estimate', label: 'Avg Estimate', aggregate: 'avg', field: 'estimate_hours', format: '0.0' },
     { name: 'avg_progress', label: 'Avg Progress', aggregate: 'avg', field: 'progress', format: '0.0' },
+    // The done rate, moved here from the `showcase_delivery` cube (#20943): a
+    // cube member's `sql` is a column reference, and this is the declared
+    // form of what its CASE expression computed — a count scoped by its own
+    // structured filter, over the unfiltered count. `ratio` yields a 0–1
+    // fraction (the cube's expression multiplied by 100), which the `%`
+    // pattern displays as a percentage; the server annotates the column's
+    // scale from the operator, as it does for `paid_rate`.
+    { name: 'done_count', label: 'Done Tasks', aggregate: 'count', filter: { status: 'done' } },
+    {
+      name: 'done_rate',
+      label: 'Done Rate',
+      derived: { op: 'ratio', of: ['done_count', 'task_count'] },
+      format: '0.0%',
+    },
   ],
 });
 

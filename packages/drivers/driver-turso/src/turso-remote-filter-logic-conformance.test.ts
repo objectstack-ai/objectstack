@@ -34,9 +34,20 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { FILTER_LOGIC_CASES, FILTER_LOGIC_ROWS } from '@objectstack/spec/data';
+import { FILTER_LOGIC_CASES, FILTER_LOGIC_ROWS, lowerFilterCondition } from '@objectstack/spec/data';
 import { TursoDriver } from './turso-driver.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5 and 9, as amended] What a seam hands this
+ * driver: the filter through the shared lowering, whose rule 3 makes each
+ * `$not` leaf total in the direction its operator answers for a row with no
+ * value (#5146, #5298). Neither face of `TursoDriver` carries its own copy of
+ * that rewrite any more, so the answers below are the ones every seamed read
+ * gets, unchanged. Every column the shared table declares is `text`, so the whole-day rule
+ * has nothing to rewrite.
+ */
+const seamed = <T,>(where: T): T => lowerFilterCondition(where, { isDatetimeColumn: () => false });
 
 const CONFORMANCE_OBJECT = {
   name: 'conformance',
@@ -101,7 +112,7 @@ describe('TursoDriver remote — filter logic conformance', () => {
 
   for (const c of FILTER_LOGIC_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('conformance', { where: c.filter });
+      const rows = await driver.find('conformance', { where: seamed(c.filter) });
       expect(ids(rows), c.note).toEqual([...c.expected]);
     });
   }
@@ -115,7 +126,7 @@ describe('TursoDriver remote — filter logic conformance', () => {
    */
   it('count() answers the same row set find() does, case for case', async () => {
     for (const c of FILTER_LOGIC_CASES) {
-      expect(await driver.count('conformance', { where: c.filter }), c.name).toBe(c.expected.length);
+      expect(await driver.count('conformance', { where: seamed(c.filter) }), c.name).toBe(c.expected.length);
     }
   });
 });

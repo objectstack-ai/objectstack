@@ -644,7 +644,10 @@ export const DATA_RECORD_READ_PARAMS: readonly string[] = ['select', 'expand'];
  * [#18386] …and `template`, the mode switch: `template=true` answers an xlsx
  * IMPORT template (`./import-template.ts`) instead of the data. It is read by
  * `readTemplateMode`, which also refuses the row parameters above on a
- * template request, since a template has no rows for them to select.
+ * template request, since a template has no rows for them to select. It also
+ * switches the door's gates: a template request is judged by the IMPORT door's
+ * (the object's import exposure and the caller's create permission), not by
+ * the export's — a template carries no records to egress ([#20896] ruling A).
  */
 export const DATA_EXPORT_PARAMS: readonly string[] = [
     'format', 'header',
@@ -2510,6 +2513,75 @@ export class RestServer {
             error: `Export is not permitted on object '${objectName}' for this user`,
             object: objectName,
         });
+        return true;
+    }
+
+    /**
+     * [#20896] The gates `GET …/export?template=true` answers behind: the IMPORT
+     * door's, never the export's. Returns `true` when a response was sent (the
+     * caller must return).
+     *
+     * A template carries no records — the columns this caller may write, one
+     * example row of placeholder values and an instructions sheet — so the
+     * export axis, which segregates a bulk copy of DATA, has nothing to guard
+     * on it. It belongs to the import it is filled in for: whoever may import
+     * may download it, and nobody else (ruling A on #20896).
+     *
+     *  1. The OBJECT half is the import door's own first gate, the same call
+     *     `POST …/import` makes before it parses a file:
+     *     {@link enforceApiAccess} for `import`, which the spec derives as
+     *     `create ∨ update` (404 when the object is not exposed, 405 when it
+     *     exposes neither). Its second, precise gate is not asked: that one
+     *     needs the write mode a request body names, and a template request
+     *     names none. Nor does a mode shape the template — its columns are
+     *     `templateColumns` over the security service's `getWritableFields`,
+     *     which takes no operation.
+     *  2. The CALLER half is the create permission — the verdict the engine's
+     *     security middleware reaches on every row the import door writes, and
+     *     answers there as a `PERMISSION_DENIED` row. The import door never
+     *     asks it before a write; this door writes nothing, so it asks the
+     *     security service for that same verdict: `explain` for `create`, the
+     *     contract's own "would the middleware allow this operation?" bottom
+     *     line, computed by the enforcement walk rather than re-derived here
+     *     from permission sets.
+     *
+     * Fail stance, as {@link enforceExportPermission}'s: no security service,
+     * or one without `explain`, → allow (no permission sets exist to deny
+     * with); `explain` throwing → deny, never read as a grant. One direction is
+     * stricter than a write: `explain` denies a caller whose permission sets
+     * resolve EMPTY, where the middleware skips its CRUD gate — reachable only
+     * on a deployment that configures no baseline set at all, and in the closed
+     * direction.
+     */
+    private async enforceImportTemplateGates(
+        req: any,
+        res: any,
+        p: RestProtocol,
+        environmentId: string | undefined,
+        objectName: string,
+        context: any,
+    ): Promise<boolean> {
+        if (await this.enforceApiAccess(req, res, p, environmentId, 'import')) return true;
+        const security = await this.resolveSecurityService(environmentId, req);
+        if (!security || typeof security.explain !== 'function') return false;
+        let allowed: boolean;
+        try {
+            const decision = await security.explain({ object: objectName, operation: 'create' }, context);
+            allowed = decision?.allowed === true;
+        } catch {
+            allowed = false; // access-narrowing answer → a throw is a denial
+        }
+        if (allowed) return false;
+        // Built through the SHARED envelope (`{ success: false, error: { code,
+        // message, details } }`), not in the flat sibling-`code` dialect the
+        // export gate above still answers in — `check:route-envelope` ratchets
+        // that dialect down and refuses a new body in it.
+        sendEnvelopeError(
+            res, 403, 'PERMISSION_DENIED',
+            `Creating records on object '${objectName}' is not permitted for this user, `
+                + 'so its import template is not served',
+            { details: { object: objectName } },
+        );
         return true;
     }
 
@@ -9630,10 +9702,22 @@ export class RestServer {
                         res.status(400).json({ code: 'INVALID_REQUEST', error: 'object is required' });
                         return;
                     }
-                    if (await this.enforceApiAccess(req, res, p, environmentId, 'export')) return;
-                    // [#3544] …then the USER-level one. The object may expose
-                    // export while THIS caller's permission sets deny it.
-                    if (await this.enforceExportPermission(req, res, environmentId, objectName, context)) return;
+                    // [#20896] Which door's gates judge the request is decided by
+                    // what the caller ASKED for: `template=true` asks for the
+                    // import template, which the IMPORT door's gates judge (see
+                    // `enforceImportTemplateGates`); everything else is the
+                    // export, judged exactly as before. Only the `template`
+                    // value is read here, so a template request that also names
+                    // a row parameter is still one — and is refused 400 below,
+                    // after these gates, as it was after the export's.
+                    if (readTemplateMode({ template: req.query?.template }).kind === 'template') {
+                        if (await this.enforceImportTemplateGates(req, res, p, environmentId, objectName, context)) return;
+                    } else {
+                        if (await this.enforceApiAccess(req, res, p, environmentId, 'export')) return;
+                        // [#3544] …then the USER-level one. The object may expose
+                        // export while THIS caller's permission sets deny it.
+                        if (await this.enforceExportPermission(req, res, environmentId, objectName, context)) return;
+                    }
                     // [#6877] The worst measured outcome on this surface:
                     // `?limit=1&limit=2` → `Number([...])` is `NaN` → `NaN || 0`
                     // is `0` → `Math.max(1, 0)` is `1`, so the caller downloaded
@@ -10042,10 +10126,13 @@ export class RestServer {
      * write, one example row, dropdowns for the closed value domains, and an
      * instructions sheet. No data is read.
      *
-     * It runs behind the export door's two gates, unchanged — the object's
-     * `export` exposure ({@link enforceApiAccess}) and the caller's export
-     * permission ({@link enforceExportPermission}) — and after the query-string
-     * gates, so it is reached only by a request the export would have served.
+     * It runs behind the IMPORT door's gates, not the export's
+     * ({@link enforceImportTemplateGates}, [#20896] ruling A) — the object's
+     * `import` exposure ({@link enforceApiAccess}) and the caller's create
+     * permission — because it carries no records, only what an importer needs
+     * to fill in; a caller may hold one door and not the other, and the export
+     * permission ({@link enforceExportPermission}) neither admits nor refuses a
+     * template. It runs after the route's query-string gates as well.
      *
      * Columns: an explicit `?fields=` is honoured as asked; otherwise
      * `templateColumns` over the object as this caller reads it, narrowed by
