@@ -28,6 +28,11 @@
  *   3. THE CONTROLS — valid columns on both carriers, a column that declares a
  *      `type`, a child field of another type, and a child object this stack
  *      does not declare are all accepted.
+ *   4. THE TABLE — every type-conditional rule of the column schema, found by
+ *      probing it, reaches `defineStack` through the hydrated-type table.
+ *   5. THE CHAIN STEP — the `field` → `name` respelling reaches the form-view
+ *      carrier (ADR-0087's lossless-break step): stored rows in every `view`
+ *      spelling and `os migrate meta` get it; the authoring funnel does not.
  *
  * Key-vs-value note: the column rules judge the KEY on one type whatever its
  * value, so each refusal is a full parse failure at the column's own path, and
@@ -35,8 +40,11 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { ALL_CONVERSIONS } from './conversions/registry';
+import { applyConversionsToStoredItem } from './conversions/stored';
 import { InlineGridColumnSchema } from './data/field.zod';
-import { FormViewSchema } from './ui/view.zod';
+import { applyMetaMigrations } from './migrations/chain';
+import { FormViewSchema, ViewMetadataSchema } from './ui/view.zod';
 import { defineStack } from './stack.zod';
 
 type Issue = { code: string; path: PropertyKey[]; message: string };
@@ -238,5 +246,151 @@ describe('#20901 — defineStack judges an identity-only column by the type it r
     expect(Object.keys(remedied)).toEqual(['name']);
     expect(() => build(stackWithSubformColumns([remedied]))).not.toThrow();
     expect(() => build(stackWithInlineColumns([remedied]))).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The hydrated-type table in `stack.zod.ts` covers every type-conditional rule.
+// ---------------------------------------------------------------------------
+
+/** Values tried for each column key; a key is probed with every one its own schema accepts. */
+const PROBE_VALUES: readonly unknown[] = [0, 2, true, 'x', ['x'], [{ label: 'A', value: 'a' }]];
+
+type TypeConditionalRule = { type: string; key: string; value: unknown };
+
+/**
+ * Every rule of `InlineGridColumnSchema` that depends on the column's `type`,
+ * found by probing the schema rather than listed: a (type, key, value) is one
+ * when the column parses with the key alone and with the type alone, and not
+ * with both. A key no probe value satisfies is reported, not skipped — its rules
+ * would be invisible here.
+ */
+function typeConditionalRules(): { rules: TypeConditionalRule[]; unprobed: string[] } {
+  const shape = InlineGridColumnSchema.shape as unknown as Record<string, unknown>;
+  const types = (shape.type as { unwrap(): { options: string[] } }).unwrap().options;
+  const keys = Object.keys(shape).filter((key) => key !== 'name' && key !== 'type');
+  const accepts = (column: Record<string, unknown>) => InlineGridColumnSchema.safeParse(column).success;
+  const rules: TypeConditionalRule[] = [];
+  const unprobed: string[] = [];
+  for (const type of types) {
+    if (!accepts({ name: 'probe', type })) rules.push({ type, key: '(none)', value: undefined });
+  }
+  for (const key of keys) {
+    const values = PROBE_VALUES.filter((value) => accepts({ name: 'probe', [key]: value }));
+    if (values.length === 0) unprobed.push(key);
+    for (const value of values) {
+      for (const type of types) {
+        if (!accepts({ name: 'probe', type, [key]: value })) rules.push({ type, key, value });
+      }
+    }
+  }
+  return { rules, unprobed };
+}
+
+/**
+ * A stack whose child object carries a field `probe` of `fieldType`, and an
+ * identity-only `inlineColumns` entry over it. The field type is the column
+ * type's own name: at the `.objectui-sha` pin `db11afd4967c`,
+ * `fieldTypeToColumnType` maps each of the column schema's nine types' namesake
+ * field type to that same column type.
+ */
+const stackWithProbeField = (fieldType: string, column: Record<string, unknown>) => {
+  const child = childObject([column]);
+  return { manifest, objects: [PARENT, { ...child, fields: { ...child.fields, probe: { type: fieldType } } }] };
+};
+
+describe('#20901 — every type-conditional column rule has its row in the hydrated-type table', () => {
+  it('the probe reaches every column key, and finds the rule the tree holds today', () => {
+    const { rules, unprobed } = typeConditionalRules();
+    expect(unprobed, 'column keys no probe value satisfies — add a value to PROBE_VALUES').toEqual([]);
+    // Anti-vacuity: a probe that found nothing would pass the check below vacuously.
+    expect(rules.some((r) => r.type === 'currency' && r.key === 'scale')).toBe(true);
+  });
+
+  it('defineStack refuses each one on an identity-only column over a field of that type', () => {
+    for (const { type, key, value } of typeConditionalRules().rules) {
+      const column = key === '(none)' ? { name: 'probe' } : { name: 'probe', [key]: value };
+      const subject = `the column schema refuses ${key === '(none)' ? 'a bare' : `\`${key}: ${JSON.stringify(value)}\` on a`} `
+        + `\`${type}\` column`;
+      let refusal: Refusal | undefined;
+      try {
+        build(stackWithProbeField(type, column));
+      } catch (error) {
+        refusal = error as Refusal;
+      }
+      expect(
+        refusal,
+        `${subject}, and defineStack accepted an identity-only column over a \`${type}\` child field `
+          + 'carrying it — add the row to HYDRATED_INLINE_COLUMN_TYPE in stack.zod.ts',
+      ).toBeDefined();
+      expect(refusal!.code, subject).toBe('STACK_CROSS_REFERENCE_INVALID');
+      expect(refusal!.status, subject).toBe(422);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The `field` → `name` respelling reaches the form-view carrier (ADR-0087 D2).
+// ---------------------------------------------------------------------------
+
+describe('#20901 — the `field` → `name` respelling is a chain step on the form-view carrier', () => {
+  const ID = 'form-view-subform-columns-canonicalized';
+  const conversion = () => ALL_CONVERSIONS.find((c) => c.id === ID);
+  const form = (columns: unknown[]) => ({ ...FORM_BASE, subforms: [{ childObject: 'crm_invoice_line', columns }] });
+  const LEGACY = [{ field: 'quantity', label: 'Qty' }, { name: 'amount' }];
+  const RESPELLED = [{ name: 'quantity', label: 'Qty' }, { name: 'amount' }];
+
+  /** A stored `view` row in each spelling `ViewMetadataSchema` accepts. */
+  const storedRows = (columns: unknown[]) => ({
+    container: { name: 'crm_invoice', object: 'crm_invoice', formViews: { entry: form(columns) } },
+    record: { name: 'crm_invoice.entry', object: 'crm_invoice', viewKind: 'form', config: form(columns) },
+    overlay: { name: 'crm_invoice.edit', object: 'crm_invoice', viewKind: 'form', ...form(columns) },
+  });
+  const columnsOf = (row: Record<string, any>): unknown[] =>
+    (row.formViews?.entry ?? row.config ?? row).subforms[0].columns;
+
+  it('is a retired protocol-18 entry stamped with the last release whose form-view carrier accepted `field`', () => {
+    expect(conversion()?.toMajor).toBe(18);
+    expect(conversion()?.retiredFromLoadPath).toBe(true);
+    expect(conversion()?.retiredAfter).toBe('17.5.0');
+  });
+
+  it('a stored row in each `view` spelling is respelled, and only then parses', () => {
+    for (const [spelling, row] of Object.entries(storedRows(LEGACY))) {
+      expect(ViewMetadataSchema.safeParse(row).success, `${spelling}, as stored`).toBe(false);
+      const converted = applyConversionsToStoredItem('view', structuredClone(row)) as Record<string, any>;
+      expect(columnsOf(converted), spelling).toEqual(RESPELLED);
+      expect(ViewMetadataSchema.safeParse(converted).success, `${spelling}, converted`).toBe(true);
+    }
+  });
+
+  it('CONTROLS — an entry already spelled `name`, and one carrying both keys, are left as they are', () => {
+    const columns = [{ name: 'quantity' }, { field: 'amount', name: 'total' }];
+    for (const [spelling, row] of Object.entries(storedRows(columns))) {
+      expect(applyConversionsToStoredItem('view', row), spelling).toBe(row);
+    }
+  });
+
+  it('`os migrate meta` replays it: the step-18 chain respells a source stack, one edit per column', () => {
+    const result = applyMetaMigrations(structuredClone(stackWithSubformColumns(LEGACY, 'formViews')), 17, 18);
+    const views = result.stack.views as Array<Record<string, any>>;
+    expect(views[0].formViews.entry.subforms[0].columns).toEqual(RESPELLED);
+    expect(result.applied.filter((a) => a.conversionId === ID).map((a) => a.path)).toEqual([
+      'views[0].formViews.entry.subforms[0].columns[0].name',
+    ]);
+  });
+
+  it('the authoring funnel does not replay it: defineStack refuses the `field` spelling at the schema parse', () => {
+    const refusal = refusalOf(stackWithSubformColumns(LEGACY));
+    expect(refusal.code).toBe('STACK_SCHEMA_INVALID');
+    expect(refusal.status).toBe(422);
+  });
+
+  it('both carriers get one respelling: a field\'s `inlineColumns` and a subform\'s `columns` convert alike', () => {
+    const columns = [...LEGACY, { field: 'amount', name: 'total' }, 'not-a-column'];
+    const object = applyConversionsToStoredItem('object', childObject(columns)) as Record<string, any>;
+    const view = applyConversionsToStoredItem('view', storedRows(columns).container) as Record<string, any>;
+    expect(columnsOf(view)).toEqual(object.fields.invoice.inlineColumns);
+    expect(columnsOf(view)).toEqual([...RESPELLED, { field: 'amount', name: 'total' }, 'not-a-column']);
   });
 });

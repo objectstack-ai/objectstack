@@ -475,6 +475,12 @@ const LEDGER: readonly LedgerRow[] = [
         method: 'analytics.query', receiver: 'service', count: 1, verdict: 'NOT_SDK',
         why: 'the real AnalyticsService, called to assert the SDK value equals what the producer returned',
     },
+    // ── the nested-relation pin in `@objectstack/rest`: producer reads only ──
+    {
+        file: 'packages/rest/src/analytics-nested-relation-filter.test.ts',
+        method: 'analytics.query', receiver: 'service', count: 5, verdict: 'NOT_SDK',
+        why: 'the real AnalyticsService (the cube read), called to compare its answer for the nested-relation filter with the engine\'s',
+    },
     // ── a producer face outside the SDK: driver-memory's cube service ────────
     {
         file: 'packages/drivers/driver-memory/src/memory-exists-non-boolean-refusal.test.ts',
@@ -678,15 +684,16 @@ describe('#13079 §2 — positive controls on the matcher itself', () => {
         // method, so a literal-embedded site lands HERE first, as a phantom
         // producer call. That makes this the assertion most likely to break
         // for a reason that has nothing to do with receivers.
-        // [#20897] Two producer faces call `analytics.query` bare: the real
-        // AnalyticsService behind the SDK, and driver-memory's cube service
-        // (`MemoryAnalyticsService`) in its own refusal suite. Neither receiver
-        // is the client, and every site is pinned by file.
-        expect(service.length, literalNote()).toBe(3);
-        expect(service.map((s) => s.file)).toEqual([
+        // [#20897] Three producer faces call `analytics.query` bare: the real
+        // AnalyticsService behind the SDK, the same service in `@objectstack/rest`'s
+        // nested-relation pin, and driver-memory's cube service
+        // (`MemoryAnalyticsService`) in its own refusal suite. None of the
+        // receivers is the client, and every file is pinned.
+        expect(service.length, literalNote()).toBe(8);
+        expect([...new Set(service.map((s) => s.file))].sort()).toEqual([
             'packages/client/src/analytics-automation-json-erasure.test.ts',
             'packages/drivers/driver-memory/src/memory-exists-non-boolean-refusal.test.ts',
-            'packages/drivers/driver-memory/src/memory-exists-non-boolean-refusal.test.ts',
+            'packages/rest/src/analytics-nested-relation-filter.test.ts',
         ]);
         expect(service.every((s) => s.method === 'analytics.query')).toBe(true);
     });
@@ -733,10 +740,10 @@ describe('#13079 §3 — every call site is classified', () => {
         expect(production, literalNote()).toEqual([]);
     });
 
-    it('records the split: 18 payload pins, 10 result-insensitive, 3 not-SDK', () => {
+    it('records the split: 18 payload pins, 10 result-insensitive, 8 not-SDK', () => {
         expect(verdictTotal('PAYLOAD_DEPENDENT')).toBe(18);
         expect(verdictTotal('RESULT_INSENSITIVE')).toBe(10);
-        expect(verdictTotal('NOT_SDK')).toBe(3);
+        expect(verdictTotal('NOT_SDK')).toBe(8);
         // The three above are LEDGER sums and cannot move on a census reading;
         // this one is census-derived, so it carries the note. [#13874]
         expect(sdkSites.length, literalNote()).toBe(28);

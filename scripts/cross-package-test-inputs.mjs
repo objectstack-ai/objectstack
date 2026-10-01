@@ -748,13 +748,16 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // `@objectstack/spec` already declares it verbatim, so Layer C reaches it
       // today. What stays uncovered stays recorded in that test's header.
       'scripts/**',
-      // [#20897] ONE file under `packages/`, declared by name because the
-      // census LEDGER carries a row for it: driver-memory's `$exists` refusal
-      // suite calls `analytics.query(` on its own `MemoryAnalyticsService`,
-      // which the census counts (receiver `service`, verdict `NOT_SDK`). A real
-      // input, not a prose mention: a call added to or removed from that file
+      // The census's hand LEDGER names this file: a NOT_SDK row pins its five
+      // producer reads of `analytics.query`. A real input, so a changed call
+      // count re-runs this suite.
+      'packages/rest/src/analytics-nested-relation-filter.test.ts',
+      // [#20897] Declared by name for the same reason: the census LEDGER
+      // carries a row for driver-memory's `$exists` refusal suite, which calls
+      // `analytics.query(` on its own `MemoryAnalyticsService` (receiver
+      // `service`, verdict `NOT_SDK`). A call added to or removed from that file
       // moves the census verdict, so a change to it has to re-run this suite.
-      // Per-file, not `packages/**`, for the price the entry above records.
+      // Per-file, not `packages/**`, for the price the `scripts/**` entry records.
       'packages/drivers/driver-memory/src/memory-exists-non-boolean-refusal.test.ts',
     ],
     heldBy: {

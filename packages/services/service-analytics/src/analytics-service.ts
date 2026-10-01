@@ -49,6 +49,7 @@ import { readScopeUnresolvedError } from './read-scope-refusal.js';
 // every member a query names, judged against the caller's readable fields.
 import {
   assertNamedFieldsReadable,
+  type QueryableFieldsProvider,
   type NamedField,
   type FieldReadRole,
   type ReadableFieldsProvider,
@@ -69,6 +70,7 @@ import {
   collectFilterLeaves,
   lowerAnalyticsWhere,
   conjunctFieldKeys,
+  findNestedRelationCondition,
   NO_DATETIME_COLUMNS,
 } from './strategies/filter-normalizer.js';
 import { findCrossFieldComparand } from './comparand-shape.js';
@@ -718,6 +720,26 @@ export interface AnalyticsServiceConfig {
    */
   getReadableFields?: ReadableFieldsProvider;
   /**
+   * [#20935] The QUERY-side half of the same field-level gate — which fields of
+   * an object the caller may filter, sort, group or aggregate by. Asked beside
+   * {@link getReadableFields}, at the same point and for the same objects, and
+   * a member is admitted only when BOTH answers carry its field: every member
+   * an analytics query names is a query position, and a field the caller is
+   * served MASKED is readable but not queryable (as a group key it hands back
+   * the unmasked value; as a filter it rebuilds the masked span). Refused
+   * `PERMISSION_DENIED` / 403 in the engine's words for the same field.
+   *
+   * The plugin auto-bridges this to the `security` service's
+   * `getQueryableFields`, and when that service predates the method, or
+   * answers `undefined`, it fails CLOSED: every field that declares a
+   * `maskingRule` is treated as not queryable, whoever the caller is. MAY be
+   * async; a THROW refuses
+   * the query. A host that wires {@link getReadableFields} and not this judges
+   * masked fields by the read projection alone, which admits them — the
+   * service says so once, at construction.
+   */
+  getQueryableFields?: QueryableFieldsProvider;
+  /**
    * ADR-0021 D-C — join allowlist per cube (the dataset's declared `include`).
    * Joins outside this set are rejected by the strategy. Compiled datasets
    * (via `queryDataset`/`registerDataset`) supply this automatically; this
@@ -1130,6 +1152,8 @@ export class AnalyticsService implements IAnalyticsService {
   private readonly readAdmissionProvider?: ObjectReadAdmissionProvider;
   /** [#20917] Field-level read-admission provider (bound per call to the request context). */
   private readonly readableFieldsProvider?: ReadableFieldsProvider;
+  /** [#20935] Field-level query-admission provider (bound per call to the request context). */
+  private readonly queryableFieldsProvider?: QueryableFieldsProvider;
   /**
    * Compiled datasets by name, as `registerDataset` registered them — feeds the
    * shared scope's join allowlist (D-C) and dataset scope. `queryDataset`
@@ -1199,6 +1223,14 @@ export class AnalyticsService implements IAnalyticsService {
     this.readScopeProvider = config.getReadScope;
     this.readAdmissionProvider = config.admitObjectRead;
     this.readableFieldsProvider = config.getReadableFields;
+    this.queryableFieldsProvider = config.getQueryableFields;
+    if (this.readableFieldsProvider && !this.queryableFieldsProvider) {
+      this.logger.warn(
+        '[Analytics] getReadableFields is configured without getQueryableFields: a field a caller is served ' +
+          'MASKED is readable, so the field-level gate admits it as a group key, a filter or a sort key, ' +
+          'which the data API refuses. Supply getQueryableFields (the security service\'s getQueryableFields).',
+      );
+    }
     this.configuredAllowedRelationships = config.getAllowedRelationships;
     this.relationshipResolver = config.relationshipResolver;
     this.sourceFieldMeta = config.sourceFieldMeta;
@@ -1443,7 +1475,10 @@ export class AnalyticsService implements IAnalyticsService {
     // read"). `callCtx` is the ONE thing `query()` and `generateSql()` share,
     // so gating it covers the direct `/analytics/query` door, the `/analytics/sql`
     // echo door and — through `DatasetExecutor` — every dataset door.
-    await this.assertReadAdmitted(this.queryObjects(query, scope), context);
+    // [#20933] The set is derived ONCE here and handed to both questions, so
+    // the objects admitted and the objects scoped are one value, not two calls.
+    const objects = this.queryObjects(query, scope);
+    await this.assertReadAdmitted(objects, context);
     // [#20917] …and the FIELD-level gate, right behind it and for the same
     // reason: every member the query names is judged here, once, so every
     // strategy — and the SQL echo — inherits the verdict by construction. The
@@ -1461,17 +1496,21 @@ export class AnalyticsService implements IAnalyticsService {
     // a deployment with no `getReadScope` provider is exactly the one that most
     // needs the engine to scope for it.
     if (!this.readScopeProvider) return { ...this.baseCtx, ...reads, context, getDatasetScope };
-    // Pre-resolve the read scope for every object the strategy will scan (base
-    // + all declared joins) BEFORE the synchronous SQL builder runs, since the
+    // Pre-resolve the read scope for every object the strategy will scan (base,
+    // declared joins, relationship paths — `queryObjects`, the set the admission
+    // above read) BEFORE the synchronous SQL builder runs, since the
     // provider may be async (the production `security.getReadFilter` bridge).
     // The strategy then reads each object's filter synchronously from the map.
-    const scopes = await this.resolveReadScopes(query, context, scope);
+    const scopes = await this.resolveReadScopes(objects, context);
     return {
       ...this.baseCtx,
       ...reads,
       context,
       getDatasetScope,
       getReadScope: (objectName: string) => scopes.get(objectName) ?? null,
+      // [#20933] …and the set itself, for the strategy that looks at the scopes
+      // before it compiles (`NativeSQLStrategy`'s cross-field decline).
+      readScopedObjects: [...objects],
     };
   }
 
@@ -1530,15 +1569,30 @@ export class AnalyticsService implements IAnalyticsService {
   }
 
   /**
-   * Every object this query will READ — the cube's base object plus every
-   * joined object.
+   * Every object this query will READ — the cube's base object, every join the
+   * cube declares, and every object a member the query names reaches through a
+   * relationship path.
    *
    * ONE derivation, two consumers: {@link resolveReadScopes} scopes exactly
    * this set and {@link assertReadAdmitted} admits exactly this set, so the set
    * that is row-scoped and the set that is admitted are provably the same set
    * rather than two lists that agree today. It is a SUPERSET of what a strategy
-   * actually scans (a strategy only joins along declared relationships), which
-   * is the safe direction: no scanned object is ever left ungated.
+   * actually scans (a declared join the query never uses is in it), which is
+   * the safe direction: no scanned object is ever left ungated.
+   *
+   * [#20933] A relationship path is read whether or not the cube declares it.
+   * A dotted member of an inferred cube, an authored member whose `sql` walks a
+   * relationship the cube's `joins` never lists, a dotted member the query
+   * names itself: `NativeSQLStrategy` joins the object at each hop
+   * (`qualifyAndRegisterJoin`) and `ObjectQLStrategy` reads it to resolve the
+   * related value. Those objects are in this set, so each is admitted and its
+   * read scope reaches the strategy exactly as a declared join's does — the
+   * strategies apply the scope of every object they read from this set, and
+   * carry no rule of their own. Each hop's object is the one the field gate
+   * attributes the hop's fields to ({@link namedQueryFields}: the cube's join
+   * keyed by the path with its dots as `__`, falling back to the alias itself),
+   * reused rather than re-derived, so the field gate and this set can never
+   * name different objects for the same hop.
    *
    * An unregistered cube yields the empty set — the query fails its own
    * cube-existence gate downstream, and inventing an object name here would
@@ -1553,14 +1607,21 @@ export class AnalyticsService implements IAnalyticsService {
   private queryObjects(query: AnalyticsQuery, scope: CubeScope): Set<string> {
     if (!query.cube) return new Set<string>();
     const cube = scope.getCube(query.cube);
-    return cube ? this.cubeObjects(cube) : new Set<string>();
+    if (!cube) return new Set<string>();
+    const objects = this.cubeObjects(cube);
+    for (const { object } of namedQueryFields(query, cube, this.cubeReads(scope).getDatasetScope(query.cube))) {
+      objects.add(object);
+    }
+    return objects;
   }
 
   /**
-   * {@link queryObjects} for a cube already in hand — the draft-preview branch
-   * holds the COMPILED dataset rather than a query naming it, and reaching for
-   * the registry there would make the gate depend on a registration side
-   * effect. One derivation, two entry points.
+   * The cube's own part of {@link queryObjects}: its base object and every
+   * join it declares. The draft-preview branch asks this part alone — it holds
+   * the COMPILED dataset rather than a query naming it (reaching for the
+   * registry there would make the gate depend on a registration side effect),
+   * and it evaluates the executor's queries over the base object's drafted seed
+   * rows in memory, so it reads no object through a relationship path.
    */
   private cubeObjects(cube: Cube): Set<string> {
     const objects = new Set<string>();
@@ -1626,18 +1687,20 @@ export class AnalyticsService implements IAnalyticsService {
       context,
       (object) => this.getObjectFieldNames?.(object),
       this.logger,
+      this.queryableFieldsProvider,
     );
   }
 
   /**
    * Resolve the read scope (tenant + RLS `FilterCondition`) for the base object
-   * AND every joined object of the query's cube, keyed by object name. This is
-   * the async pre-pass that lets the synchronous strategy enforce scoping even
-   * when the provider (security `getReadFilter`) resolves asynchronously.
+   * AND every object the query reads through a join or a relationship path,
+   * keyed by object name. This is the async pre-pass that lets the synchronous
+   * strategy enforce scoping even when the provider (security `getReadFilter`)
+   * resolves asynchronously.
    *
-   * The object set is `cube.sql` (base) plus every `cube.joins[*].name` — a
-   * SUPERSET of what the strategy actually scans (the strategy only joins along
-   * declared relationships), so no scanned object is ever left unscoped.
+   * The object set is {@link queryObjects} — the one the admission reads, a
+   * SUPERSET of what the strategy actually scans, so no scanned object is ever
+   * left unscoped.
    *
    * Fail-closed: if the provider throws for an object, the whole query is
    * rejected rather than emitting SQL with that object unscoped.
@@ -1651,15 +1714,14 @@ export class AnalyticsService implements IAnalyticsService {
    * enveloped, it is re-thrown before the wording is ever read.
    */
   private async resolveReadScopes(
-    query: AnalyticsQuery,
+    objects: Iterable<string>,
     context: ExecutionContext | undefined,
-    scope: CubeScope,
   ): Promise<Map<string, FilterCondition>> {
     const map = new Map<string, FilterCondition>();
     const provider = this.readScopeProvider;
-    if (!provider || !query.cube) return map;
+    if (!provider) return map;
 
-    for (const object of this.queryObjects(query, scope)) {
+    for (const object of objects) {
       let filter: FilterCondition | null | undefined;
       try {
         filter = await provider(object, context);
@@ -2963,8 +3025,9 @@ export class AnalyticsService implements IAnalyticsService {
    * predicate. This is deliberate and is the whole reason this gate is not a
    * second filter-tree walker: a hand-rolled walk would have to re-derive
    * `$and`/`$or`/`$not` recursion, `$`-prefixed operator keys, `$between`
-   * lowering, the nested-relation dot flattening (`{owner: {region: 'NA'}}` →
-   * member `owner.region`) and the #5334 array lowering, and every divergence
+   * lowering, the nested-relation condition (`{owner: {region: 'NA'}}` names
+   * the member `owner`, since #20887 carried as written for the engine) and the
+   * #5334 array lowering, and every divergence
    * would show up as "the field the gate saw" not being "the column that reached
    * SQL" — in either direction (a phantom rejection, or a hole).
    * `collectFilterLeaves` discards structure, which is exactly right here:
@@ -3281,6 +3344,9 @@ export class AnalyticsService implements IAnalyticsService {
     // `queryCapabilities` by hand. Cheap to say, and the alternative is a dead
     // end that reads like a misconfiguration.
     const crossField = findCrossFieldComparand(lowerAnalyticsWhereQuietly(query));
+    // [#20887] …and the second such decline: the nested-relation form, which
+    // `NativeSQLStrategy` routes to the engine path for the same reason.
+    const nested = crossField ? null : findNestedRelationCondition(lowerAnalyticsWhereQuietly(query));
     throw new Error(
       `[Analytics] No strategy can handle query for cube "${query.cube}". ` +
       `Checked: ${this.strategies.map(s => s.name).join(', ')}${skip?.size ? ` (skipped at runtime: ${[...skip].map((s) => s.name).join(', ')})` : ''}. ` +
@@ -3293,6 +3359,15 @@ export class AnalyticsService implements IAnalyticsService {
           `deployment: supply an \`executeAggregate\` bridge (the plugin auto-wires one from the ` +
           `engine), or compare against a literal value. Every other query on this cube is ` +
           `unaffected. `
+        : '') +
+      (nested
+        ? `This query's filter carries a nested-relation condition on "${nested.field}" ` +
+          `({ "${nested.field}": { … } }), and NativeSQLStrategy DECLINES it so that it routes to the ` +
+          `ObjectQL engine path — the engine reads the related object as the caller, with that ` +
+          `object's field permissions and a cap. No such path is configured here: supply an ` +
+          `\`executeAggregate\` bridge (the plugin auto-wires one from the engine), or match ` +
+          `"${nested.field}" against ids you hold ({ "${nested.field}": { "$in": [ID, …] } }). Every ` +
+          `other query on this cube is unaffected. `
         : '') +
       'Ensure a compatible driver is configured or a fallback service is registered.',
     );

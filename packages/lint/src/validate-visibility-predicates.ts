@@ -1233,7 +1233,7 @@ export function validateVisibilityPredicates(
   // components actually live: `regions[].components[]`, the slotted-page
   // `slots.<slot>` map (single component OR array), and the sub-trees hidden in
   // the untyped `properties` bag (`page:tabs` / `page:accordion`
-  // `items[].children`, `page:card` `body` / `footer`). It also skips
+  // `items[].children`, `page:card` `footer`). It also skips
   // source-authored (`html` / `react` / `jsx`) pages, whose `regions` are a
   // derived cache the author never wrote — reporting a gating error against
   // that cache would be a build failure over metadata nobody authored.

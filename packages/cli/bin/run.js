@@ -222,7 +222,7 @@ try {
  * serves, exit 0 at a 20 s SIGTERM, having written 7926 bytes over 16.6 s. So
  * the crash costs the run at its FIRST diagnostic line and 20 of its 21 stderr
  * writes, on the entry point a customer's install actually runs (`files` names
- * only `dist`, but npm packs a `bin` target regardless — #14874).
+ * only `dist`, but npm packs a `bin` target regardless).
  *
  * ⛔ Deliberately NOT narrowed to `error.code === 'EPIPE'`, for the reason
  * `bin/run-dev.js` records: the reason to tolerate is not WHICH error it is.

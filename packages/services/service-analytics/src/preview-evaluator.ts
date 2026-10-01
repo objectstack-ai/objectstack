@@ -31,13 +31,13 @@
 // condition is the one this face evaluates.
 
 import {
-  calendarPartsInTzOrUtc,
+  bucketDateKey,
   nextUtcCalendarDay,
   resolveAnalyticsDateRangeString,
   utcInstantMs,
   isUnboundedAbove,
   compensatedSum,
-  wallClockToUtcMs,
+  type BucketGranularity,
 } from '@objectstack/core';
 import { explicitDateRangeWindow } from './date-range-array-arm.js';
 // [#19810] The `where` door's refusal envelope — `INVALID_FILTER` / 400,
@@ -361,32 +361,25 @@ export function matchesWhere(row: Row, where: Record<string, unknown> | undefine
 
 // ── Time bucketing ──────────────────────────────────────────────────────────
 
-export function bucketDate(value: unknown, granularity: string, timezone?: string): string | null {
-  const d = new Date(String(value));
-  if (Number.isNaN(d.getTime())) return null;
-  // ADR-0053 Phase 2: resolve the calendar day in the reference zone so an
-  // instant near a tz day-boundary buckets where a user in that zone expects.
-  // Unset / 'UTC' / invalid keeps the historical UTC bucketing.
-  const { year: y, month, day: dayNum } = calendarPartsInTzOrUtc(d, timezone);
-  const m = `${month}`.padStart(2, '0');
-  const day = `${dayNum}`.padStart(2, '0');
-  switch (granularity) {
-    case 'year': return `${y}`;
-    case 'quarter': return `${y}-Q${Math.floor((month - 1) / 3) + 1}`;
-    case 'month': return `${y}-${m}`;
-    case 'week': {
-      // Build a UTC date from the zone-shifted parts, then step back to Monday.
-      // [#20599] Through core's `wallClockToUtcMs`, never `Date.UTC`, which
-      // reads a year from 0 to 99 as 1900 + year.
-      const monday = new Date(wallClockToUtcMs({ year: y, month, day: dayNum }));
-      const dow = (monday.getUTCDay() + 6) % 7; // Monday=0
-      monday.setUTCDate(monday.getUTCDate() - dow);
-      return monday.toISOString().slice(0, 10);
-    }
-    case 'day':
-    default:
-      return `${y}-${m}-${day}`;
-  }
+/**
+ * [#20867] The bucket key of one drafted row's date value: `@objectstack/core`'s
+ * `bucketDateKey`, the writer the published path's in-memory grouping delegates
+ * to and whose key the drivers' bucket SQL answers. So a draft preview keys a
+ * row as the same dataset does once published — the year in four digits
+ * (`0050-06`), the ISO week label (`2026-W25`), an epoch-ms number or a `Date`
+ * read as its instant — and this face spells no key of its own.
+ *
+ * ADR-0053 Phase 2: the calendar day is resolved in the reference `timezone`
+ * (unset / `'UTC'` / invalid keeps UTC), inside the writer.
+ *
+ * It replaced a local spelling of every granularity, which wrote a year below
+ * 1000 unpadded (`50`, `50-Q2`, `50-06`, `50-06-15`), keyed a week by its
+ * Monday's `YYYY-MM-DD` where the runtime writes the ISO week label, re-parsed
+ * a `Date` through its string form (a `Date` in 0050 keyed `1950`), and read an
+ * epoch-ms number as unparseable (the empty bucket).
+ */
+export function bucketDate(value: unknown, granularity: BucketGranularity, timezone?: string): string | null {
+  return bucketDateKey(value, granularity, timezone);
 }
 
 // ── Aggregation ─────────────────────────────────────────────────────────────
@@ -741,7 +734,7 @@ export function evaluateAnalyticsQueryOverRows(
       const dim = cube.dimensions?.[name];
       const field = String(dim?.sql ?? name);
       const raw = r[field];
-      const gran = granByDim.get(name) ?? (dim?.type === 'time' && dim.granularities?.length === 1 ? String(dim.granularities[0]) : undefined);
+      const gran = granByDim.get(name) ?? (dim?.type === 'time' && dim.granularities?.length === 1 ? dim.granularities[0] : undefined);
       values[name] = gran ? bucketDate(raw, gran, timezone) : (raw ?? null);
     }
     return { key: JSON.stringify(values), values };

@@ -16,7 +16,6 @@ fail with the database's own code and text (for example `SQLITE_ERROR` and
 `GET /api/v1/data/import/jobs/:jobId/results`, change the same way.
 
 The row now classifies a write error through the same mapper as the create door,
-and takes that answer when it is `INVALID_FIELD`. Rows for a unique conflict or a
-NOT NULL failure are unchanged. The dry run still cannot see a missing column,
+and takes that answer when it is `INVALID_FIELD`. The dry run still cannot see a missing column,
 because it checks the metadata and not the table, so it previews such a row as
 `ok`.

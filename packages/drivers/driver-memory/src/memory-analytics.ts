@@ -20,7 +20,7 @@ import {
 // call: `isFilterAST` gates the shape, `parseFilterAST` lowers it. See
 // {@link lowerWhereFilterArray}. ⛔ No second FilterArray parser in this face.
 import { isFilterAST, parseFilterAST, VALID_AST_OPERATORS } from '@objectstack/spec/data';
-import type { InMemoryDriver } from './memory-driver.js';
+import type { InMemoryDriver, MemoryContainsTest } from './memory-driver.js';
 import {
   Logger,
   createLogger,
@@ -238,15 +238,23 @@ interface MongoPredicateInput {
   /** The operands as authored. For operands that are not comparands. */
   readonly raw: readonly unknown[];
   /**
-   * A comparand as a literal-substring pattern, built by the DRIVER's own rule
-   * (`filterSubstringPattern`) rather than re-derived here.
+   * The test `$contains` asks of this member's column, built by the DRIVER's
+   * own rule (`filterContainsTest`) rather than re-derived here — `$notContains`
+   * wraps it in `$not`, as the live query path does.
    *
    * [#7723] Case-EXACT, because that rule is: `filterSubstringPattern` carried
    * an `i` flag until #7723 took it off, putting the `$contains` family on the
    * #4706 Q2 = A answer across every face of this package. Borrowing the rule
    * rather than restating it is what made that one edit reach this face too.
+   *
+   * [#20874] Borrowed WHOLE now, not as a pattern. On a declared JSON-stored
+   * field the rule asks MEMBERSHIP (an `$elemMatch`), not substring, and this
+   * face used to wrap `filterSubstringPattern` in a `$regex` of its own — so
+   * `u1` matched a stored `['u10']` here exactly as it did on `find()`. Taking
+   * the predicate rather than a piece of it is what makes the membership reading
+   * reach this face with the same edit, the lesson #7723 records above.
    */
-  readonly substring: (value: unknown) => RegExp;
+  readonly containment: (value: unknown) => MemoryContainsTest;
   /**
    * [#6520] A comparand as an ASCII-case-insensitive literal-substring pattern —
    * `$icontains`' fold, which is NOT {@link substring}'s.
@@ -335,8 +343,9 @@ const CUBE_OPERATOR_TO_MONGO_PREDICATE: Readonly<Record<CubeOperator, MongoPredi
   // table while `find()` answered with none of it.
   in: ({ comparands }) => ({ $in: [...comparands] }),
   notIn: ({ comparands }) => ({ $nin: [...comparands] }),
-  // A pattern, not a comparand: `raw`, and the driver's own substring rule.
-  contains: ({ raw, substring }) => ({ $regex: substring(raw[0]) }),
+  // A pattern, not a comparand: `raw`, and the driver's own rule — membership on
+  // a declared JSON-stored field, the substring everywhere else (#20874).
+  contains: ({ raw, containment }) => containment(raw[0]),
   // [#6520] The case-INSENSITIVE twin, folding ASCII and nothing else. It takes
   // `asciiSubstring`, not `substring`: the neighbour above folds Unicode, so
   // reusing it here would answer `CAFÉ` for `café` on this face while the SQL
@@ -344,8 +353,9 @@ const CUBE_OPERATOR_TO_MONGO_PREDICATE: Readonly<Record<CubeOperator, MongoPredi
   icontains: ({ raw, asciiSubstring }) => ({ $regex: asciiSubstring(raw[0]) }),
   // The fix this issue is about. `{$not: <scalar>}` constrains nothing; the
   // negation has to wrap a pattern, which is exactly what the live query path
-  // builds for `$notContains` (`memory-driver.ts` `normalizeFieldOperators`).
-  notContains: ({ raw, substring }) => ({ $not: { $regex: substring(raw[0]) } }),
+  // builds for `$notContains` (`memory-driver.ts` `normalizeFieldOperators`) —
+  // and, since #20874, the SAME test it builds, membership or substring.
+  notContains: ({ raw, containment }) => ({ $not: containment(raw[0]) }),
   // [#13195] A presence flag, not a comparand — and "present" means HAS A
   // VALUE (`!= null`), never key presence: #5298 leg 3 / #5369, landed in PR
   // #5962, ruled onto this face 2026-08-30. It used to emit `{$exists: <bool>}`
@@ -386,6 +396,52 @@ interface SqlPredicateInput {
    * See {@link globSubstringPattern} for why GLOB and not LIKE.
    */
   readonly globSubstring: (value: unknown) => string;
+  /**
+   * [#20874] The stored members a `$contains` comparand names on this column,
+   * or `null` when the column asks the SUBSTRING question — read off the
+   * DRIVER's test (`filterContainsTest`), the one its `$match` twin executes.
+   * See {@link sqliteMembershipPredicate}.
+   */
+  readonly members: (value: unknown) => readonly unknown[] | null;
+}
+
+/**
+ * [#20874] The SQLite rendering of a `$contains` MEMBERSHIP test — `driver-sql`'s
+ * own SQLite construct (`jsonMembershipPredicate`), with literals where that
+ * one binds.
+ *
+ * The echo's job is reproducing execution ({@link globSubstringPattern}). Once
+ * the `$match` twin asks membership on a declared JSON-stored column, a
+ * `GLOB '*u1*'` echo over the stored text `["u10"]` would return the row the
+ * chart excludes — so this renders the question that ran:
+ *
+ * - `json_each` over the column, guarded by `json_valid` so a cell holding
+ *   bare text has no members instead of raising — the guard `driver-sql` keeps
+ *   for the same reason;
+ * - `typeof(os_member.key) = 'integer'` keeps it array-only: an array element
+ *   has an INTEGER key, an object member a TEXT key and a scalar root a NULL
+ *   one — the same "a scalar or object has no member" the `$elemMatch` twin
+ *   answers;
+ * - each element's JSON TEXT compared with each member's, the `CASE` spelling
+ *   the three JSON literals by type name because SQLite surfaces `true` as the
+ *   INTEGER 1 and `json_quote` would render it `1`.
+ *
+ * The members' JSON texts are exactly the texts `driver-sql` binds, because
+ * both sides read the comparand the same way (`containsMemberCandidates` in
+ * `memory-driver.ts`, `jsonMembershipCandidates` in `driver-sql`).
+ */
+function sqliteMembershipPredicate(
+  column: string,
+  members: readonly unknown[],
+  literal: (value: unknown) => string,
+): string {
+  const texts = members.map((member) => literal(JSON.stringify(member))).join(', ');
+  return (
+    `EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(${column}) THEN ${column} ELSE '[]' END) AS os_member ` +
+    `WHERE typeof(os_member.key) = 'integer' AND CASE os_member.type ` +
+    `WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' WHEN 'null' THEN 'null' ` +
+    `ELSE json_quote(os_member.value) END IN (${texts}))`
+  );
 }
 
 type SqlPredicateBuilder = (input: SqlPredicateInput) => string;
@@ -537,10 +593,20 @@ const CUBE_OPERATOR_TO_SQL_PREDICATE: Readonly<Record<CubeOperator, SqlPredicate
     comparands.length === 0
       ? '1 = 1'
       : `(${column} IS NULL OR ${column} NOT IN (${comparands.map(literal).join(', ')}))`,
-  // A pattern, not a comparand: `raw`, and the shared GLOB substring rule.
-  contains: ({ column, raw, globSubstring }) => `${column} GLOB ${globSubstring(raw[0])}`,
-  notContains: ({ column, raw, globSubstring }) =>
-    `(${column} IS NULL OR ${column} NOT GLOB ${globSubstring(raw[0])})`,
+  // A pattern, not a comparand: `raw`, and the shared GLOB substring rule — or,
+  // on a declared JSON-stored column, the membership the `$match` twin runs
+  // (#20874, {@link sqliteMembershipPredicate}). The negation stays null-safe
+  // either way: `NOT EXISTS` is never UNKNOWN, but the NULL row still has to be
+  // admitted by name, since `json_each(NULL)` is not a row set to negate.
+  contains: ({ column, raw, globSubstring, members, literal }) => {
+    const set = members(raw[0]);
+    return set ? sqliteMembershipPredicate(column, set, literal) : `${column} GLOB ${globSubstring(raw[0])}`;
+  },
+  notContains: ({ column, raw, globSubstring, members, literal }) => {
+    const set = members(raw[0]);
+    const test = set ? `NOT ${sqliteMembershipPredicate(column, set, literal)}` : `${column} NOT GLOB ${globSubstring(raw[0])}`;
+    return `(${column} IS NULL OR ${test})`;
+  },
   // [#6520] The case-INSENSITIVE twin. SQLite's `lower()` folds ASCII and
   // nothing else — measured in #6518: `lower('CAFÉ')` is `'cafÉ'` — so it is
   // `$icontains`' fold (#4706 Q1 = A) rather than the Unicode one, and it goes
@@ -1595,10 +1661,11 @@ export class MemoryAnalyticsService implements IAnalyticsService {
       // predicate over `is_active` or `closed_at` selects the same rows
       // `find()` selects instead of none / all of them.
       const storageForm = this.storageFormFor(cube, filter.member);
+      const table = this.extractTableName(cube.sql);
       const predicate = this.mongoPredicateBuilder(filter.operator)({
         comparands: filter.values.map(storageForm),
         raw: filter.values,
-        substring: (value) => this.driver.filterSubstringPattern(value),
+        containment: (value) => this.driver.filterContainsTest(table, fieldPath, value),
         // [#6520] `$icontains`' fold, from the spec's shared definition rather
         // than from the driver's Unicode-folding `filterSubstringPattern`.
         asciiSubstring: (value) => new RegExp(asciiCaseInsensitiveRegexSource(String(value))),
@@ -1663,12 +1730,19 @@ export class MemoryAnalyticsService implements IAnalyticsService {
       }
       const fieldPath = this.resolveFieldPath(cube, entry.member);
       const storageForm = this.storageFormFor(cube, entry.member);
+      const table = this.extractTableName(cube.sql);
       clauses.push(this.sqlPredicateBuilder(entry.operator)({
         column: fieldPath,
         comparands: entry.values.map(storageForm),
         raw: entry.values,
         literal: (value) => this.toSqlLiteral(value),
         globSubstring: (value) => this.toSqlLiteral(globSubstringPattern(value)),
+        members: (value) => {
+          // [#20874] Read off the very test the `$match` exit runs, so the echo
+          // and the chart can never name two different member sets.
+          const test = this.driver.filterContainsTest(table, fieldPath, value);
+          return '$elemMatch' in test ? test.$elemMatch.$in : null;
+        },
       }));
     }
     return clauses;

@@ -494,7 +494,7 @@ describe('visibility-bare-identifier (#6128 / #5149 requirement 3)', () => {
 
     it('walks a component sub-tree hidden in the untyped `properties` bag', () => {
       // `page:tabs` / `page:accordion` keep their children at
-      // `properties.items[].children`; `page:card` at `properties.body`. A
+      // `properties.items[].children`. A
       // hand-rolled `regions[].components[]` loop sees none of them — which is
       // the dead-rule shape `page-walk.ts` exists to prevent (#3583).
       const stack = {

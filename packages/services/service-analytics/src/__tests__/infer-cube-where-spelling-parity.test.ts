@@ -443,9 +443,17 @@ describe('[#5353/#5739] a dotted `where` key is unified too — as a traversal',
     // `owner` — unchanged. The LEAF member is `owner.region`, which is why a
     // `collectFilterLeaves`-based seeder would have produced `region` here and
     // walked into the mis-cast above from a third direction.
-    const { dimensions, sqls } = await inferredDimensions({ owner: { region: 'NA' } }, NO_REGION);
+    // [#20887] The seeding is unchanged; what the query then runs is not. The
+    // nested form is the ENGINE's now (the related object read as the caller,
+    // capped), so it is asked of the engine path — handed over as written —
+    // where this case used to read the JOIN the native strategy compiled for
+    // the flattened `owner.region`.
+    const { dimensions, filters } = await inferredDimensions(
+      { owner: { region: 'NA' } },
+      { fields: NO_REGION.fields },
+    );
     expect(dimensions).toEqual(['owner']);
-    expect(sqls[0]).toContain('WHERE "owner"."region" = ');
+    expect(JSON.stringify(filters[0])).toContain('{"owner":{"region":"NA"}}');
   });
 
   it('bare and dotted keys reach parity together when both ride along', async () => {

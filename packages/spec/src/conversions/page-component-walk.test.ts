@@ -22,6 +22,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { applyConversions, collectConversionNotices } from './apply.js';
+import { pageComponentSlotPositions } from '../ui/component.zod.js';
 
 /** A page-header authored with the retired `description` spelling. */
 const staleHeader = (title: string) => ({
@@ -44,9 +45,13 @@ const componentAt = (stack: Record<string, unknown>, ...steps: (string | number)
 
 describe('#6775 — a conversion reaches a component nested in another component', () => {
   /**
-   * The four container shapes, spelled exactly as `packages/lint`'s
-   * `walkPageComponents` spells them. A fifth added there has to be added here
-   * too, or the two walkers drift apart again — which is the whole defect.
+   * The four container shapes this walker descends, spelled out by hand as the
+   * fixture — `body` included: it is a RETIRED spelling the authoring walks
+   * skip, but a stored document still carries it (#20940). WHICH positions
+   * the walker descends is no longer this file's or lint's to list: both read
+   * `pageComponentSlotPositions()`, and the completeness case below walks that
+   * list, so a fifth slot a row declares is reached — and tested — without
+   * an edit here.
    */
   const containers: { label: string; properties: (child: unknown) => Record<string, unknown>; path: string }[] = [
     {
@@ -94,6 +99,26 @@ describe('#6775 — a conversion reaches a component nested in another component
       ]);
     });
   }
+
+  it('reaches every position `pageComponentSlotPositions()` names, the retired spelling included (#20940)', () => {
+    const positions = pageComponentSlotPositions();
+    // Guards the case against passing vacuously on an empty list, and ties it
+    // to the four explicit shapes above.
+    expect(positions.map(({ key, panelKey }) => (panelKey === undefined ? key : `${key}[].${panelKey}`)).sort())
+      .toEqual(['body', 'children', 'footer', 'items[].children']);
+    for (const { key, panelKey } of positions) {
+      const properties = panelKey === undefined
+        ? { [key]: [staleHeader('Nested')] }
+        : { [key]: [{ label: 'Panel', [panelKey]: [staleHeader('Nested')] }] };
+      const { notices } = collectConversionNotices(regionPage({ type: 'page:section', properties }), {
+        includeRetired: true,
+      });
+      const where = panelKey === undefined ? `${key}[0]` : `${key}[0].${panelKey}[0]`;
+      expect(notices.map((n) => n.path)).toEqual([
+        `pages[0].regions[0].components[0].properties.${where}.properties.subtitle`,
+      ]);
+    }
+  });
 
   it('recurses — a header three containers down converts too', () => {
     const deep = {
