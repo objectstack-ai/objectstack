@@ -68,7 +68,22 @@
 
 import { getMetadataTypeRedactor } from '@objectstack/spec/kernel';
 import type { MetadataTypeRedactor } from '@objectstack/spec/kernel';
+// [#21120] The family-wide stored-metadata-body primitives — the object set,
+// the object predicate, the column names and the body redactor — live in
+// `@objectstack/spec/kernel`, reachable by every surface in the family
+// (service-analytics, plugin-audit, the objectql engine) that does not depend
+// on this package. The data-door wrappers below (`storedMetadataBodyProjection`,
+// `redactStoredMetadataRow`'s `dropType`, `storedMetadataBodyGroupingRefusal`)
+// are this package's own, built ON that one definition — never a second one.
+import {
+    isStoredMetadataBodyObject,
+    redactStoredMetadataBody,
+    STORED_METADATA_BODY_COLUMN,
+    STORED_METADATA_TYPE_COLUMN,
+} from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
+
+export { isStoredMetadataBodyObject };
 
 /**
  * Resolve the redactor for a request-shaped type name.
@@ -589,19 +604,14 @@ function planCarryForward<T>(type: string, incoming: T, stored: unknown): { out:
  * no write verb; `sys_metadata_history` is append-only), so a redacted body
  * read here can never be PUT back — no carry-forward inverse is owed, which is
  * what makes a pure read projection a complete answer on this door.
+ *
+ * [#21120] The object set, the `isStoredMetadataBodyObject` predicate and the
+ * two column names are the family-wide definition in `@objectstack/spec/kernel`,
+ * imported above and re-exported — one set, consumed by every surface, so the
+ * audit, analytics and realtime exits cannot drift from this one.
  */
-const STORED_METADATA_BODY_OBJECTS: ReadonlySet<string> = new Set(['sys_metadata', 'sys_metadata_history']);
-
-/** The column holding the serialized body, on every {@link STORED_METADATA_BODY_OBJECTS} member. */
-const STORED_BODY_COLUMN = 'metadata';
-
-/** The column naming the body's metadata type — what selects its redactor. */
-const STORED_TYPE_COLUMN = 'type';
-
-/** Whether `object`'s rows carry a stored metadata body the generic data door must project. */
-export function isStoredMetadataBodyObject(object: string): boolean {
-    return STORED_METADATA_BODY_OBJECTS.has(object);
-}
+const STORED_BODY_COLUMN = STORED_METADATA_BODY_COLUMN;
+const STORED_TYPE_COLUMN = STORED_METADATA_TYPE_COLUMN;
 
 /**
  * The projection to hand the engine for a read of `object`, given the caller's
@@ -655,31 +665,20 @@ export function redactStoredMetadataRow<T>(object: string, row: T, opts?: { drop
         const { [STORED_TYPE_COLUMN]: _type, ...rest } = record;
         return rest;
     };
-    const withheld = (): T => {
+
+    // [#21120] The body decision is the ONE shared primitive — same object set,
+    // same per-type redactor, same fail-closed rules — so this door cannot
+    // disagree with the audit / analytics / realtime exits about what a
+    // credential is. This function adds only the door-local wrinkles on top: the
+    // `dropType` strip of the type column `storedMetadataBodyProjection` asked
+    // for, and omitting the body on a fail-closed outcome.
+    const outcome = redactStoredMetadataBody(row[STORED_TYPE_COLUMN], row[STORED_BODY_COLUMN]);
+    if (!outcome.ok) {
         const { [STORED_BODY_COLUMN]: _body, ...rest } = row;
         return strip(rest) as T;
-    };
-
-    const body = row[STORED_BODY_COLUMN];
-    if (body === undefined || body === null) return (dropType ? strip(row) : row) as T;
-    const type = row[STORED_TYPE_COLUMN];
-    if (typeof type !== 'string' || type === '') return withheld();
-    if (!hasMetadataRedactor(type)) return (dropType ? strip(row) : row) as T;
-
-    let parsed: unknown = body;
-    if (typeof body === 'string') {
-        try {
-            parsed = JSON.parse(body);
-        } catch {
-            return withheld();
-        }
     }
-    const served = redactMetadataItem(type, parsed);
-    if (served === parsed) return (dropType ? strip(row) : row) as T;
-    return strip({
-        ...row,
-        [STORED_BODY_COLUMN]: typeof body === 'string' ? JSON.stringify(served) : served,
-    }) as T;
+    if (outcome.body === row[STORED_BODY_COLUMN]) return (dropType ? strip(row) : row) as T;
+    return strip({ ...row, [STORED_BODY_COLUMN]: outcome.body }) as T;
 }
 
 /** {@link redactStoredMetadataRow} over the rows of one read. Non-array input passes through. */
@@ -725,5 +724,53 @@ export function storedMetadataBodyGroupingRefusal(object: string, groupBy: unkno
         err.param = 'groupBy';
         return err;
     }
+    return undefined;
+}
+
+/**
+ * [#21120] The data door's FILTER / SORT refusal on the stored body column —
+ * maintainer ruling A, the further accept-set narrowing the grouping refusal
+ * (#21086) began.
+ *
+ * A filter on the body column EVALUATES the stored body row by row: a credential
+ * withheld from every served answer is still recoverable by prefix probing
+ * (`?filter={"metadata":{"$contains":"<guess>"}}` returns the row only when the
+ * guess is a prefix — a predicate oracle). A sort on it orders by the same
+ * stored bytes. Neither serves the body, so projecting it is no answer; the only
+ * answer is to refuse, the same posture the engine's own masked-field guard and
+ * the grouping refusal above take. Same family, shape and code: `INVALID_FIELD`
+ * / 400, naming the field, the object and the offending `param`.
+ *
+ * `filterFields` is the set of head field names the caller's `where` names
+ * (`collectFilterFieldKeys`), and `sortFields` the fields its `orderBy` names.
+ * Filter is judged before sort — a query that does both reads "the filter was
+ * not run" first. `undefined` when neither names the body column.
+ */
+export function storedMetadataBodyPredicateRefusal(
+    object: string,
+    opts: { filterFields?: readonly unknown[]; sortFields?: readonly unknown[] },
+): Error | undefined {
+    if (!isStoredMetadataBodyObject(object)) return undefined;
+    const namesBody = (fields: readonly unknown[] | undefined): boolean =>
+        Array.isArray(fields) && fields.some((f) => f === STORED_BODY_COLUMN);
+    const make = (param: 'filter' | 'sort', verb: string): Error => {
+        const err: any = new Error(
+            `Cannot ${verb} '${object}' by '${STORED_BODY_COLUMN}' (${param}): the query was not run. The `
+            + `${STORED_BODY_COLUMN} column holds a stored metadata body, served only as its type's read `
+            + `projection with stored credential material withheld. ${param === 'filter'
+                ? 'A filter on it evaluates the stored body row by row, which rebuilds a withheld credential by probing'
+                : 'A sort on it orders by the same stored bytes'}, so it is refused rather than evaluated. `
+            + `Filter or sort by '${STORED_TYPE_COLUMN}', 'name' or another scalar column instead.`,
+        );
+        err.code = 'INVALID_FIELD';
+        err.status = 400;
+        err.field = STORED_BODY_COLUMN;
+        err.fields = [STORED_BODY_COLUMN];
+        err.object = object;
+        err.param = param;
+        return err;
+    };
+    if (namesBody(opts.filterFields)) return make('filter', 'filter');
+    if (namesBody(opts.sortFields)) return make('sort', 'sort');
     return undefined;
 }
