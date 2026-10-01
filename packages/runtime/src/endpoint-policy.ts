@@ -260,7 +260,7 @@ export function computeCacheControl(
     if (method.toUpperCase() !== 'GET') {
         logger?.warn?.(
             `[dispatcher] endpoint '${endpoint.name}' declares \`cacheTtlSeconds\` on a ${method.toUpperCase()} endpoint. `
-            + '`cacheTtlSeconds` is GET-only (#5040 §3.3) and no Cache-Control header will be sent. Remove the key, or '
+            + '`cacheTtlSeconds` is GET-only and no Cache-Control header will be sent. Remove the key, or '
             + 'declare the endpoint as GET.',
         );
         return undefined;

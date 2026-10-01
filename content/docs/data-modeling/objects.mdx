@@ -68,6 +68,7 @@ export const Account = ObjectSchema.create({
 | :--- | :--- | :--- | :--- |
 | `nameField` | `string` | optional | The stored field used as the record display name, e.g. `'name'` or `'title'` (ADR-0079). The deprecated alias `displayNameField` is still accepted. |
 | `titleFormat` | `string` | optional | Deprecated (ADR-0079 → `nameField`). Render-only title template (e.g. `'{{record.name}} - {{record.code}}'`); an explicit `nameField` takes precedence |
+| `imageField` | `string` | optional | The record's picture: names a field of this object whose type is `image` or `avatar` — any other name is refused when the object is validated or published. It is the one object-level declaration the record page header is to draw beside the title once the renderer reads it; no renderer draws it yet. |
 | `highlightFields` | `string[]` | optional | Most-important fields in priority order — default list columns, cards, previews, detail highlight strip (ADR-0085; formerly `compactLayout` — the old spelling was retired and is now rejected) |
 | `stageField` | `string \| false` | optional | Linear lifecycle field; `false` declares the status field non-linear and suppresses stage heuristics (ADR-0085) |
 

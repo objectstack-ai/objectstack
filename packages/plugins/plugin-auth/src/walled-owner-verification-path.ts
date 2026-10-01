@@ -364,9 +364,10 @@ export function resolveWalledOwnerVerificationPathWarning(
   const situation =
     state === 'owner-unverified'
       ? 'An account holding a declared address ALREADY EXISTS and is NOT verified — it was created ' +
-        'outside the operator provisioning path (the #12751 stamp applies at operator-provisioned ' +
-        'CREATION only), so it holds NO platform-admin standing (an unverified declared address ' +
-        'resolves non-admin at request time) and has no in-product way to satisfy the condition. '
+        'outside the operator provisioning path (a declared owner is stamped verified only when an ' +
+        'operator-provisioned path CREATES the account), so it holds NO platform-admin standing (an ' +
+        'unverified declared address resolves non-admin at request time) and has no in-product way ' +
+        'to satisfy the condition. '
       : state === 'owner-absent'
         ? 'Human users already exist but none holds a declared address, so the first-account bootstrap ' +
           'window (whose owner-email creation would have been stamped verified) is spent; an ' +

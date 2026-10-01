@@ -2834,7 +2834,7 @@ export class AuthManager {
       console.error(
         '[AuthManager] Could not attach the JWT signing guard to better-auth\'s /get-session hook ' +
           '(its `hooks.after` shape changed). A JWT signing failure will now 500 every /get-session ' +
-          'instead of degrading to a missing set-auth-jwt header. See objectstack#3585 and re-check ' +
+          'instead of degrading to a missing set-auth-jwt header. Re-check ' +
           'the better-auth version in better-auth-schema-parity.test.ts.',
       );
     }

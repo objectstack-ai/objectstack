@@ -354,7 +354,7 @@ describe('[#5814] an unhonourable `mode: "insensitive"` is loud, never silent', 
     expect(message).toContain('user.name');
     expect(message).toContain('insensitive');
     expect(message).toContain('CASE-SENSITIVELY');
-    expect(message).toContain('#5814');
+    expect(message).toContain('`$ieq` is deliberately deferred until there is demonstrated pull');
   });
 
   it('answers the query anyway — loud is not fail-closed', async () => {

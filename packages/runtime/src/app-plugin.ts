@@ -1777,7 +1777,11 @@ export class AppPlugin implements Plugin {
                 // organization was just created and that must stand whatever
                 // happens here. `warn` and not `error` — nothing was lost, and the
                 // `kernel:ready` migration retries the same repair on next boot.
-                ctx.logger.warn('[AppPlugin] seed tenancy handoff failed (#8686)', {
+                ctx.logger.warn(
+                    '[AppPlugin] seed tenancy handoff failed: the seed rows were not stamped with the new '
+                    + 'organization, so seed and API writes stay on separate autonumber counters until the '
+                    + 'next boot\'s migration repairs it',
+                    {
                     error: e?.message ?? String(e),
                 });
             }

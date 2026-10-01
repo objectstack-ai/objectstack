@@ -140,7 +140,8 @@ export async function handleAuthRequest(deps: DomainHandlerDeps, _path: string, 
             const logger = deps.logger ?? console;
             logger?.error?.(
                 '[auth] the auth service threw while handling the request; the client was answered '
-                + 'with a sanitised 500 (#5085)',
+                + 'with a sanitised 500: the message is withheld unconditionally, and this line is where the '
+                + 'original error is read',
                 err instanceof Error ? err : new Error(String(err)),
             );
             return { handled: true, response: deps.error(INTERNAL_ERROR_MESSAGE, 500) };

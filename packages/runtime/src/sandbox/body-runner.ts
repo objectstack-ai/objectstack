@@ -123,7 +123,8 @@ function buildBodyLogSurface(
       console.warn(
         `[BodyRunner] ${origin.kind} '${origin.name}' (app '${opts.appId}') declares the 'log' ` +
           `capability, but this BodyRunner was constructed without a logger — ctx.log output is ` +
-          `discarded. Pass \`logger\` to ${origin.kind}BodyRunnerFactory({ … }). See #7448.`,
+          `discarded. Pass \`logger\` to ${origin.kind}BodyRunnerFactory({ … }): the capability writes only ` +
+          `to that logger, never to \`console\`, so the host's level and sinks apply.`,
       );
     };
     // [#7661] `debug` is warned for like the other three. A member missing from
@@ -387,7 +388,7 @@ export function actionBodyRunnerFactory(
       opts.logger?.warn?.(
         `[BodyRunner] action '${action.name}' declares \`type: '${type}'\` and carries a \`body\` — ` +
           `no handler was bound. \`body\` only runs for \`type: 'script'\`; a '${type}' action dispatches ` +
-          `on \`target\`. Set \`type: 'script'\` to run the body, or drop the \`body\`. See #4352.`,
+          `on \`target\`. Set \`type: 'script'\` to run the body, or drop the \`body\`.`,
         { appId: opts.appId, action: action.name, object: action.object, type },
       );
       return undefined;
@@ -465,7 +466,7 @@ function warnDiscardedRecordWrites(
     `[BodyRunner] action '${actionName}' wrote ${fields.length} field(s) to ctx.record, which is a read-only ` +
       `pre-fetched snapshot — the writes never left the sandbox and the stored record is unchanged. ` +
       `To persist, call ctx.api.object('${object ?? '<object>'}').update({ id: ctx.recordId, … }) ` +
-      `(needs the 'api.write' capability). See #4345.`,
+      `(needs the 'api.write' capability).`,
     { appId: opts.appId, action: actionName, object, fields },
   );
 }

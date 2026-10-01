@@ -397,7 +397,7 @@ function convertWhere(model: string, where: CleanedWhere[]): Record<string, any>
           `(operator '${operator}', better-auth \`Where.mode: 'insensitive'\`), but ` +
           `'${model}.${fieldName}' is not a normalised identifier field — the query is ` +
           `being answered CASE-SENSITIVELY, so a differently-cased value will not match. ` +
-          `ObjectQL has no case-insensitive equality operator (#5814 deferred \`$ieq\` ` +
+          `ObjectQL has no case-insensitive equality operator (\`$ieq\` is deliberately deferred ` +
           `until there is demonstrated pull for it). Normalised identifier fields: ` +
           `${Object.entries(NORMALISED_IDENTIFIER_FIELDS)
             .map(([m, fs]) => fs.map((f) => `${m}.${f}`).join(', '))
@@ -489,7 +489,7 @@ function convertWhere(model: string, where: CleanedWhere[]): Record<string, any>
             `Translate it to an ObjectQL operator in convertWhere() ` +
             `(packages/plugins/plugin-auth/src/objectql-adapter.ts) — refusing ` +
             `the query rather than dropping the predicate, which would widen ` +
-            `the result set instead of narrowing it (#5813).`,
+            `the result set instead of narrowing it.`,
         );
       }
     }

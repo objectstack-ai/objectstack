@@ -3144,6 +3144,21 @@ export class ObjectStackClient {
      *
      * The resolved value is one of the route's two 200 answers, discriminated by
      * `deleted`; each member declares exactly the keys that answer carries.
+     *
+     * **`outcome` and `message` are both optional, on purpose.** The control
+     * plane is moving from composing an English sentence to reporting a
+     * closed fact (ruling B on objectstack-ai/cloud#2315: the server returns
+     * facts, the console composes the message in the user's locale, from the
+     * action's `outcomeMessages`). The two ends land in order — this SDK
+     * first, the control plane last — so at any moment a 200 may carry the
+     * sentence, the fact, or both, and this type claims neither as
+     * guaranteed. `outcome` is the closed vocabulary to read, split by arm:
+     * `archived` (a live environment archived now), `already_archived` (an
+     * archived one deleted again without `purge`), `purge_deferred` (`purge`
+     * asked of a live environment, archived instead) — and `destroyed` on the
+     * teardown answer. A caller that branches on what happened reads
+     * `deleted` / `purgeDeferred`, which every answer carries, or `outcome`
+     * when present; ⛔ never the `message` prose.
      */
     delete: async (id: string, opts?: { force?: boolean; purge?: boolean }) => {
       const params = new URLSearchParams();
@@ -3159,19 +3174,32 @@ export class ObjectStackClient {
             environmentId: string;
             deleted: false;
             archived: true;
+            /**
+             * Which archive happened, as a closed fact: `archived` (archived now),
+             * `already_archived` (it already was, and stays so), `purge_deferred`
+             * (`purge` was asked of a live environment; it was archived instead).
+             * Optional until the control plane reports it — see the docblock above.
+             */
+            outcome?: 'archived' | 'already_archived' | 'purge_deferred';
             /** `true` when `purge` was asked of a LIVE environment: it was archived instead — delete again with `purge`. */
             purgeDeferred: boolean;
             /** Days the archived environment is retained before the control plane reclaims it. */
             retentionDays: number;
             /** Always empty on an archive. */
             warnings: string[];
-            /** The control plane's account of what happened and what to do next. */
-            message: string;
+            /**
+             * The control plane's English account of what happened. Optional: the
+             * sentence leaves the wire as `outcome` replaces it — compose display
+             * copy from `outcome`, never parse this.
+             */
+            message?: string;
           }
         | {
             environmentId: string;
             deleted: true;
             purged: true;
+            /** `destroyed` — the environment was torn down. Optional until the control plane reports it. */
+            outcome?: 'destroyed';
             /** Best-effort cleanup steps that failed after the teardown itself succeeded. */
             warnings: string[];
           }

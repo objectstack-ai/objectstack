@@ -386,6 +386,13 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
   },
   {
     kind: 'omit',
+    type: 'object',
+    path: ROOT_PATH,
+    key: 'imageField',
+    why: 'declared, not enforced yet — liveness verdict `planned` (the record picture: the parse refuses any name but a declared `image` / `avatar` field, and the record chrome that is to draw it in the record page header does not read it yet). No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate',
+  },
+  {
+    kind: 'omit',
     type: 'field',
     path: ROOT_PATH,
     key: 'picklist',
@@ -411,6 +418,13 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     path: ROOT_PATH,
     key: 'onSuccess',
     why: 'declared, not enforced yet — both of its children (`navigate`, `openIn`) carry the liveness verdict `planned`: no console consumer reads the block yet. No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate',
+  },
+  {
+    kind: 'omit',
+    type: 'action',
+    path: ROOT_PATH,
+    key: 'outcomeMessages',
+    why: "declared, not enforced yet — liveness verdict `planned` (#21095: the console reader that picks the entry named by the handler's `outcome` is a later link of the same ruling). No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate",
   },
 
   // Renderer-owned vocabulary — a key is admitted here only when all three
