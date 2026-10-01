@@ -137,7 +137,7 @@ export const attachmentsFixtureStack = defineStack({
     type: 'app',
     name: 'Attachments Permission Matrix Fixture',
     description:
-      'Three-object app exercising the #2755 attachment permission matrix: parent visibility, uploader/editor delete, enable.files gate.',
+      'Three-object app exercising the non-admin attachment permission matrix: parent visibility, uploader/editor delete, enable.files gate.',
   },
   objects: [AttCase, AttSecret, AttNoFiles, AttReadonly],
 });

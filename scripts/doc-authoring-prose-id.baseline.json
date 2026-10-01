@@ -247,9 +247,6 @@
   "#5973": 1,
   "#6428": 1
  },
- "packages/qa/dogfood/test/armed.ts": {
-  "#8074": 2
- },
  "packages/qa/dogfood/test/authz-conformance.matrix.ts": {
   "#10145": 1,
   "#10243": 1,
@@ -297,56 +294,6 @@
   "#8811": 1,
   "#9083": 2,
   "#9377": 1
- },
- "packages/qa/dogfood/test/build-shaped-artifact.ts": {
-  "#6293": 3
- },
- "packages/qa/dogfood/test/enterprise-organizations.ts": {
-  "#4719": 1
- },
- "packages/qa/dogfood/test/expression-conformance.ledger.ts": {
-  "#1887": 1,
-  "#2614": 2,
-  "#3067": 1,
-  "#5016": 1,
-  "#7310": 1,
-  "#7327": 1
- },
- "packages/qa/dogfood/test/fixtures/attachments-fixture.ts": {
-  "#2755": 1
- },
- "packages/qa/dogfood/test/fixtures/comments-fixture.ts": {
-  "#4630": 1
- },
- "packages/qa/dogfood/test/fixtures/email-template-materialization-fixture.ts": {
-  "#4509": 1
- },
- "packages/qa/dogfood/test/fixtures/flow-durable-suspend-fixture.ts": {
-  "#4470": 1
- },
- "packages/qa/dogfood/test/fixtures/flow-function-effect-fixture.ts": {
-  "#4396": 1
- },
- "packages/qa/dogfood/test/fixtures/flow-runas-fixture.ts": {
-  "#1888": 1
- },
- "packages/qa/dogfood/test/fixtures/label-scope-fixture.ts": {
-  "#3602": 1
- },
- "packages/qa/dogfood/test/fixtures/rls-owner-fixture.ts": {
-  "#1994": 2
- },
- "packages/qa/dogfood/test/fixtures/webhook-materialization-fixture.ts": {
-  "#3461": 1
- },
- "packages/qa/dogfood/test/search-conformance.ledger.ts": {
-  "#4254": 1
- },
- "packages/qa/dogfood/test/showcase-security.ts": {
-  "#5491": 1
- },
- "packages/qa/downstream-contract/src/stack.ts": {
-  "#2035": 1
  },
  "packages/services/service-analytics/src/analytics-service.ts": {
   "#3867": 1,

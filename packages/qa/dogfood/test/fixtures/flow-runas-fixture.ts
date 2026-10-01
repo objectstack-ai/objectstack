@@ -122,7 +122,7 @@ export const runasFixtureStack = defineStack({
     version: '0.0.0',
     type: 'app',
     name: 'Flow runAs Fixture',
-    description: 'Owner-isolated single-object app exercising flow.runAs identity enforcement (#1888).',
+    description: 'Owner-isolated single-object app exercising flow.runAs identity enforcement.',
   },
   objects: [RunAsNote],
   flows: [runasSystemTouch, runasUserTouch, runasSystemRead, runasUserRead],

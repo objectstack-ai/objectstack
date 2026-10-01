@@ -72,7 +72,7 @@ const result = DatasetSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Dimension name — referenced by presentations |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
-| **field** | `string` | ✅ | Base field, or `relationship[.relationship].field` path |
+| **field** | `string` | ✅ | Base field, or `relationship[.relationship].field` path. A column reference, never a SQL expression. |
 | **type** | `Enum<'string' \| 'number' \| 'date' \| 'boolean' \| 'lookup'>` | optional |  |
 | **dateGranularity** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional |  |
 
@@ -83,7 +83,7 @@ const result = DatasetSchema.parse(data);
 | **name** | `string` | ✅ | Measure name — e.g. "revenue"; defined once |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **aggregate** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>` | optional | Aggregation (sum/avg/count/...); omit when `derived` is set |
-| **field** | `string` | optional | Aggregated field; optional for count(*) |
+| **field** | `string` | optional | Aggregated field: a base field, a relationship path, or "*"; optional for count(*). Never a SQL expression. |
 | **filter** | `any` | optional |  |
 | **format** | `string` | optional | Numeral pattern for a NUMERIC measure — grouping, decimals, percent; e.g. "0,0.00", "0.0%". An amount takes its symbol from `currency`, not from a "$" in the pattern. A DATE-valued measure never reads a date pattern: `"YYYY-MM-DD"` renders that arm's default face. A date or datetime value reads `format` as a display style — `short` or `relative`, honoured on both. |
 | **currency** | `string` | optional | Display currency code (ISO 4217) |
@@ -108,7 +108,7 @@ const result = DatasetSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Dimension name — referenced by presentations |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
-| **field** | `string` | ✅ | Base field, or `relationship[.relationship].field` path |
+| **field** | `string` | ✅ | Base field, or `relationship[.relationship].field` path. A column reference, never a SQL expression. |
 | **type** | `Enum<'string' \| 'number' \| 'date' \| 'boolean' \| 'lookup'>` | optional |  |
 | **dateGranularity** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional |  |
 
@@ -124,7 +124,7 @@ const result = DatasetSchema.parse(data);
 | **name** | `string` | ✅ | Measure name — e.g. "revenue"; defined once |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **aggregate** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>` | optional | Aggregation (sum/avg/count/...); omit when `derived` is set |
-| **field** | `string` | optional | Aggregated field; optional for count(*) |
+| **field** | `string` | optional | Aggregated field: a base field, a relationship path, or "*"; optional for count(*). Never a SQL expression. |
 | **filter** | `any` | optional |  |
 | **format** | `string` | optional | Numeral pattern for a NUMERIC measure — grouping, decimals, percent; e.g. "0,0.00", "0.0%". An amount takes its symbol from `currency`, not from a "$" in the pattern. A DATE-valued measure never reads a date pattern: `"YYYY-MM-DD"` renders that arm's default face. A date or datetime value reads `format` as a display style — `short` or `relative`, honoured on both. |
 | **currency** | `string` | optional | Display currency code (ISO 4217) |

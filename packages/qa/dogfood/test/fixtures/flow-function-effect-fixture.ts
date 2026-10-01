@@ -66,7 +66,7 @@ export const flowFunctionEffectStack = defineStack({
     version: '0.0.0',
     type: 'app',
     name: 'Flow Function Effect Fixture',
-    description: "Proves a flow function's declared effect reaches the run summary (#4396).",
+    description: "Proves a flow function's declared effect reaches the run summary.",
   },
   objects: [FxInvoice],
   flows: [sweepFlow('fxn_pure_sweep', 'scoreInvoices'), sweepFlow('fxn_writing_sweep', 'syncBilling')],

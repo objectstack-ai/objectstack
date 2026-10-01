@@ -53,8 +53,8 @@
         "field": {
           "status": "live",
           "evidence": "packages/services/service-analytics/src/dataset-compiler.ts#compileDataset (`sql: d.field`, guarded by `assertDeclared(d.field, 'dimension', d.name)` — the relationship-path validation)",
-          "note": "emitted as the dimension's SQL column reference (relationship-validated). 2026-08-28: RE-ANCHORED (commit 9ee2dcfbd) and REPOINTED — `:144` had rotted onto a docblock terminator `*/`. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the review accepting that re-anchoring sorts as OLDEST).",
-          "verifiedAt": "2026-08-28"
+          "note": "emitted as the dimension's SQL column reference (relationship-validated). NARROWED 2026-10-01 (#21220; ADR-0021 zero raw expressions, ADR-0049 enforce-or-remove): the value is a COLUMN REFERENCE — a bare identifier or a dotted identifier path (relationship hops, then the column), the cube member's accept set from the one shared declaration in `data/analytics-column-reference.ts`, minus the row wildcard `'*'`, which both analytics strategies answered 500 as a dimension (`GROUP BY *`). A SQL expression, a padded or empty string and `'*'` are refused at parse with a prescription naming the ADR-0021 form. Still LIVE: the key is unchanged and read at the site above; the analytics dataset door's 403 for an expression `field` (#21190) stays as defence in depth for a dataset that reaches the service without meeting the parse. The D3 entry is `dataset-member-field-expression-refused`; a dimension has no D2 conversion (no lossless rewrite). 2026-08-28: RE-ANCHORED (commit 9ee2dcfbd) and REPOINTED — `:144` had rotted onto a docblock terminator `*/`. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the review accepting that re-anchoring sorts as OLDEST).",
+          "verifiedAt": "2026-10-01"
         },
         "type": {
           "status": "live",
@@ -94,8 +94,8 @@
         "field": {
           "status": "live",
           "evidence": "packages/services/service-analytics/src/dataset-compiler.ts#compileDataset (`sql: m.field ?? '*'` — `count` with no field aggregates over rows — guarded by `assertDeclared(m.field, 'measure', m.name)`)",
-          "note": "SQL aggregate operand (count omits field → '*'); relationship-validated. 2026-08-28: RE-ANCHORED (commit 9ee2dcfbd) and REPOINTED — `:170` had rotted into a comment about members the spec now refuses at parse. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the review accepting that re-anchoring sorts as OLDEST).",
-          "verifiedAt": "2026-08-28"
+          "note": "SQL aggregate operand (count omits field → '*'); relationship-validated. NARROWED 2026-10-01 (#21220, with `dimensions.field`): the value is a COLUMN REFERENCE — a bare identifier, a dotted identifier path, or `'*'` — exactly the cube member `sql` accept set, from the one shared declaration in `data/analytics-column-reference.ts`. A SQL expression and a padded or empty string are refused at parse (a count spells \"no field\" by omitting the key), with a prescription naming the ADR-0021 form (a measure-scoped `filter`, `derived: { op, of }`). The one lossless repair is the D2 conversion `dataset-count-measure-empty-field-removed`: a `count` measure's empty `field` is dropped from stored rows and sources and still counts rows; the D3 entry `dataset-member-field-expression-refused` carries the rest. Still LIVE, at the site above; the dataset door's 403 for an expression (#21190) stays as defence in depth. 2026-08-28: RE-ANCHORED (commit 9ee2dcfbd) and REPOINTED — `:170` had rotted into a comment about members the spec now refuses at parse. Re-closed by hand against c459da6bc; DATED for the first time (this file carried no `verifiedAt` anywhere, which the review accepting that re-anchoring sorts as OLDEST).",
+          "verifiedAt": "2026-10-01"
         },
         "filter": {
           "status": "live",

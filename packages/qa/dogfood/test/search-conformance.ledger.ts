@@ -46,7 +46,7 @@ export const SEARCH_SURFACE: ConformanceRow[] = [
   },
   {
     id: 'search-fields-override',
-    summary: '`$searchFields` per-query narrowing — validated against the allowed set, can never widen it; a name outside the set is 400 INVALID_FIELD at the REST ingress (#4254), not silently dropped',
+    summary: '`$searchFields` per-query narrowing — validated against the allowed set, can never widen it; a name outside the set is 400 INVALID_FIELD at the REST ingress, not silently dropped',
     surface: 'spec/api/query.zod.ts:$searchFields',
     state: 'enforced',
     enforcement: 'spec/data/search-fields.ts resolveSearchFields (intersection) + metadata-protocol/src/protocol.ts assertSearchFieldsAreSearchable (ingress gate)',
