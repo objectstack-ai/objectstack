@@ -4,7 +4,7 @@
 
 fix(driver-memory)!: on a declared JSON-stored field, the query path and the analytics face refuse `$eq` / `$ne` / an ordering / `$between` / `$in` / `$nin` / implicit equality with `INVALID_FILTER` / 400, in the words the SQL family refuses them in, instead of answering each per element
 
-Clause-②: no (narrowing)
+Clause-②: yes (narrowing)
 
 <!-- adr-0087: not-required (no-migration-prescription) a refusal of a QUERY shape at this driver's filter gate: the operator x declared-type pairs refused are exactly the pairs driver-sql's where refuses on a JSON-stored column and the engine's per-aggregation filter refuses on the same declared fields, read from the one set @objectstack/core holds. No authorable key, spelling or stored metadata shape moves: FilterConditionSchema and every object, view and dataset definition parse and save as before, and nothing reads or rewrites a stored row. There is nothing for objectstack migrate meta to rewrite, since what changes is which query this driver answers, not what any metadata says; the refusal itself names the spelling to use. The other categories are closed on facts: the bumped package publishes (not unpublished); no ADR-0087 id covers a filter operator on a JSON-stored column and this diff adds none (not registered / already-registered); and the change is runtime behaviour, with no published export or type narrowed or removed (not runtime-interface-only / type-surface-only). -->
 
