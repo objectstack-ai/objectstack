@@ -147,20 +147,21 @@ afterEach(() => {
 
 /** Boot a real `os <command>` and resolve once its child printed the ready banner. */
 function boot(command: Command): Promise<Booted> {
-  workdir = mkdtempSync(join(tmpdir(), `os-${command}-signal-`));
-  const artifact = join(workdir, 'objectstack.json');
+  const dir = mkdtempSync(join(tmpdir(), `os-${command}-signal-`));
+  workdir = dir;
+  const artifact = join(dir, 'objectstack.json');
   writeFileSync(artifact, ARTIFACT);
   const port = reservePort();
 
   return new Promise((resolveBoot, rejectBoot) => {
     const parent = spawn(process.execPath, [RUN_JS, ...argvFor(command, artifact, port)], {
-      cwd: workdir,
+      cwd: dir,
       // `NODE_ENV: undefined` is required by the built entrypoint (#11464):
       // `development`/`test` sends oclif's command lookup back to `src/`.
       env: childEnv({
         NODE_ENV: undefined,
         NO_COLOR: '1',
-        OS_HOME: join(workdir, 'home'),
+        OS_HOME: join(dir, 'home'),
         OS_LOG_LEVEL: 'error',
       }),
       stdio: ['ignore', 'pipe', 'pipe'],
