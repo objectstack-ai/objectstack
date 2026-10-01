@@ -49,6 +49,13 @@
  * same composition mingo performs, which is why the two faces agree here by
  * construction rather than by coincidence.
  *
+ * ⚠️ [#21066] The column here is DECLARED `text` — a scalar column holding
+ * arrays — and that is the only population this per-element reading still
+ * covers. On a column DECLARED JSON-stored (a `multiple: true` field, `tags`,
+ * `json`, …) the equality and ordering family is REFUSED `INVALID_FILTER` /
+ * 400 by the shape gate, as the SQL family refuses it, and the membership
+ * question is `$contains`'s: `memory-21066-json-column-family-refusal.test.ts`.
+ *
  * ⚠️ One level only, measured rather than reasoned: mingo does not descend into
  * a NESTED array, so neither does this face — `[['a']]` does not match `'a'` on
  * either face, and that row is in the fixture to hold it.

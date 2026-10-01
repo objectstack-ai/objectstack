@@ -58,7 +58,7 @@ describe('storedMetadataBodyAnalyticsRefusal', () => {
     // The field-level gate refuses an expression member itself; this refusal
     // judges attributable fields only, so it adds no second rule for them.
     expect(
-      storedMetadataBodyAnalyticsRefusal([{ object: 'sys_metadata', member: 'derived', expression: true }]),
+      storedMetadataBodyAnalyticsRefusal([{ object: 'sys_metadata', member: 'derived', expression: true, declared: true }]),
     ).toBeUndefined();
   });
 
