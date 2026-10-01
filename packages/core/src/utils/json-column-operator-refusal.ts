@@ -26,6 +26,27 @@
  * carries the #8220 provenance seam, the engine's the ADR-0112 envelope); what
  * they share is what the caller reads.
  *
+ * ## The words: true on every face, whole on the wire
+ *
+ * [#21067] Three faces print the sentence below — `driver-sql`'s `where`, the
+ * engine's per-aggregation `filter`, and `driver-memory`'s filter gate (#21066)
+ * — and each reached its wrong answer by a different route: SQL compared the
+ * serialization, the engine compared an array in JS, and mingo compared each
+ * member. So the reason the sentence gives is the one that holds on all three:
+ * a scalar comparison or text operator met a multi-value or JSON field, and
+ * membership is `$contains`. It names no storage form and no backend's wrong
+ * answer; those stay in these docblocks, out of what a caller reads.
+ *
+ * It is also sized for the door it is read through. The REST envelope cuts a
+ * 4xx message of 500 characters or more to 499 plus an ellipsis, keeping the
+ * head (`truncateClientMessage`, `@objectstack/types`). The withheld message is
+ * one constant text, so it is held WHOLE under that bound, the remedy and the
+ * "withheld" sentence included, by a pin that runs it through that function
+ * (`json-column-operator-refusal.test.ts`). The diagnostic names the field four
+ * times, so its length grows with the name; its order (what was refused, why,
+ * then the remedy) leaves the any-of example last, the first thing a very long
+ * name pushes past the bound when an author-marked refusal discloses it.
+ *
  * ## The other half of the JSON column's contract
  *
  * `$contains` is the membership spelling on such a column (`FILTER_OPERATORS`'
@@ -108,10 +129,35 @@ export interface JsonColumnOperatorRefusalText {
    * What the caller is told. It names neither the field nor the operator: on a
    * read scope the predicate is an administrator's, so both are withheld
    * (#7929 / #8197), and the sentence says where they went.
+   *
+   * [#21067] One constant text, shorter than the REST envelope's 4xx bound, so
+   * every word of it reaches the caller.
    */
   readonly message: string;
-  /** The full diagnostic — the field and the operator named — for the server log. */
+  /**
+   * The full diagnostic — the field and the operator named — for the server log,
+   * and the wire text when a face discloses it to the filter's own author
+   * (`driver-sql`'s `'author'` provenance arm, #8220).
+   */
   readonly diagnostic: string;
+}
+
+/**
+ * [#21067] Why the operator was refused, in words true on every face that
+ * prints them — see the module docblock. Shared by both texts, so the message
+ * and the diagnostic cannot come to give two reasons.
+ */
+const REFUSAL_REASON =
+  'it aims a scalar comparison or text operator at a multi-value or JSON field, which such an ' +
+  'operator cannot test for one member.';
+
+/** The prescription, spelled with `name` in the field position. */
+function containsRemedy(name: string): string {
+  return (
+    `Use "$contains" for membership ({ "${name}": { "$contains": "a" } }), or an $or of ` +
+    `"$contains" for any-of ({ "$or": [{ "${name}": { "$contains": "a" } }, ` +
+    `{ "${name}": { "$contains": "b" } }] }).`
+  );
 }
 
 /**
@@ -147,39 +193,31 @@ export interface JsonColumnOperatorRefusalText {
  * byte, so `where` and the per-aggregation `filter` print one sentence. The
  * caller builds the error: this returns only the text.
  *
- * [#21009] The text family that joined the set reads these same words,
- * unchanged. Its prescription holds as written — membership is `$contains` —
- * while the "scalar comparison" wording and the two directions the closing
- * sentence names are the equality family's.
+ * [#21009] The text family that joined the set reads these same words. Its
+ * prescription holds as written — membership is `$contains`.
+ *
+ * [#21067] Reworded once, for two reasons. The words named `driver-sql`'s
+ * mechanism ("a field this driver stores as a JSON TEXT column", and the two
+ * wrong answers SQL gave), which is untrue where the engine's per-aggregation
+ * `filter` and `driver-memory` print them; the reason is now
+ * {@link REFUSAL_REASON}. And the message ran to 748 characters, so the REST
+ * envelope cut it at 499 and no caller read the end of the any-of example or
+ * the sentence saying the field and the operator were withheld; it is now 461.
+ * The mechanism above stays here, where the next author reads it.
  */
 export function jsonColumnOperatorRefusalText(
   field: string,
   op: string,
   bare: boolean,
 ): JsonColumnOperatorRefusalText {
-  const spelling = bare
+  const subject = bare
     ? `The bare equality spelling { "${field}": value }`
-    : `Operator "${op}"`;
-  const on = bare ? '' : ` on field "${field}"`;
+    : `Operator "${op}" on field "${field}"`;
   return {
     message:
-      `A constraint in this filter WAS NOT APPLIED: it aims a scalar comparison operator at a ` +
-      `field this driver stores as a JSON TEXT column (e.g. ["a","b"]), and such an operator ` +
-      `compares that whole serialized text against a single value — it can never equal one ` +
-      `member. Use "$contains" for membership ({ "FIELD": { "$contains": "a" } }), or an $or of ` +
-      `"$contains" for any-of ({ "$or": [{ "FIELD": { "$contains": "a" } }, ` +
-      `{ "FIELD": { "$contains": "b" } }] }). Refused rather than compiled because the answer ` +
-      `was silently wrong in BOTH directions: $in/$eq matched nothing, while $nin/$ne returned ` +
-      `the very rows they were asked to exclude. The field and the operator this filter ` +
-      `used are withheld from the message; the full diagnostic is in the server log.`,
-    diagnostic:
-      `${spelling}${on} WAS NOT APPLIED: "${field}" is a multi-value (or otherwise JSON-valued) ` +
-      `field, stored by this driver as a JSON TEXT column (e.g. ["a","b"]), and "${op}" compares ` +
-      `that whole serialized text against a single value — it can never equal one member. ` +
-      `Use "$contains" for membership ({ "${field}": { "$contains": "a" } }), or an $or of ` +
-      `"$contains" for any-of ({ "$or": [{ "${field}": { "$contains": "a" } }, ` +
-      `{ "${field}": { "$contains": "b" } }] }). Refused rather than compiled because the answer ` +
-      `was silently wrong in BOTH directions: $in/$eq matched nothing, while $nin/$ne returned ` +
-      `the very rows they were asked to exclude.`,
+      `A constraint in this filter WAS NOT APPLIED: ${REFUSAL_REASON} ${containsRemedy('FIELD')} ` +
+      `The field and the operator are withheld from the message; the full diagnostic is in the ` +
+      `server log.`,
+    diagnostic: `${subject} WAS NOT APPLIED: ${REFUSAL_REASON} ${containsRemedy(field)}`,
   };
 }
