@@ -740,7 +740,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ══════════════════════════════════════════════════════════════════════════
-  # PUSH LANE 2 — release integrity audit. Reads github.sha ONLY. Never mints.
+  # PUSH LANE 2 — release integrity audit. Never mints. Reads github.sha and the
+  # version commit it selects, both out of the object database; every backfill
+  # builds from that version commit's tree, as the publish job does.
   # ══════════════════════════════════════════════════════════════════════════
   release-integrity:
     name: Release integrity (audit + no-mint backfill)
@@ -999,6 +1001,9 @@ jobs:
           # has its repair — the `force` dispatch (D4) — not a push.
           vc_tree="${RUNNER_TEMP}/release-version-commit"
           git worktree add --quiet --detach "$vc_tree" "$version_commit"
+          # The backfill steps below build from this tree, not from this
+          # checkout (github.sha), so it is handed to them by name.
+          echo "version-tree=${vc_tree}" >> "$GITHUB_OUTPUT"
           if ! group=$(RELEASE_VERSION="$version" node scripts/release-verify-npm.mjs --probe --root "$vc_tree"); then
             echo "::error::could not read whether the whole fixed group of ${version} is on npm (reason above). Refusing to request a backfill nobody measured."
             exit 1
@@ -1049,13 +1054,44 @@ jobs:
 
       # Everything below is skipped on the overwhelmingly common path (nothing to
       # repair), which is why the install is here rather than at the top of the job.
+      #
+      # ── Every backfill builds from the VERSION COMMIT's tree ─────────────
+      # The publish job checks out the version commit and runs that commit's
+      # own scripts over that commit's own tree (ADR-0125 D1 as amended
+      # 2026-09-29). A repair describes the same release, so the steps below
+      # run in the worktree the audit made of the version commit (its
+      # `version-tree` output), with that commit's lockfile and tooling, and
+      # never in this checkout. This checkout is `github.sha`, the head of
+      # whichever push is being audited. A landing after the version commit
+      # that touched packages/spec/src would otherwise make the D4 asset
+      # describe a tree npm did not ship, and a Release created here would
+      # point its CHANGELOG link, and any tag it has to create, at that landing.
+      #
+      # The checkout itself is NOT swapped: the audit above reads `github.sha`
+      # and its tripwire reads this workspace, and both stay as they are. Each
+      # step re-asserts that its tree is the version commit and refuses
+      # otherwise, because an empty `version-tree` would leave the step in
+      # this checkout, which is the defect, with nothing said.
+      #
+      # Pinned by battery 13 of `node scripts/release-verify-npm.mjs
+      # --self-test` (lint.yml runs it): these steps' own text runs after the
+      # audit's, and a landing that moved packages/spec/src is the fixture.
       - name: Setup pnpm
         if: steps.audit.outputs.releases-missing == 'true'
         uses: ./.github/actions/setup-pnpm
 
-      - name: Install dependencies
+      - name: Install dependencies (the version commit's tree)
         if: steps.audit.outputs.releases-missing == 'true'
-        run: pnpm install --frozen-lockfile
+        env:
+          VERSION_COMMIT: ${{ steps.audit.outputs.version-commit }}
+          VERSION_TREE: ${{ steps.audit.outputs.version-tree }}
+        run: |
+          if [ -z "$VERSION_TREE" ] || [ "$(git -C "$VERSION_TREE" rev-parse HEAD 2>/dev/null)" != "$VERSION_COMMIT" ]; then
+            echo "::error::the version commit's tree ('${VERSION_TREE}') is not at the version commit '${VERSION_COMMIT}'. Refusing to backfill from any other tree."
+            exit 1
+          fi
+          cd "$VERSION_TREE"
+          pnpm install --frozen-lockfile
 
       - name: Backfill GitHub Releases (bodies truncated to the API limit)
         if: steps.audit.outputs.releases-missing == 'true'
@@ -1066,22 +1102,46 @@ jobs:
           # Changesets `fixed` group releases every public package at one
           # version, which check-changeset-fixed.mjs gates.
           RELEASE_VERSION: ${{ steps.audit.outputs.version }}
-        run: node scripts/release-github-releases.mjs
+          VERSION_COMMIT: ${{ steps.audit.outputs.version-commit }}
+          VERSION_TREE: ${{ steps.audit.outputs.version-tree }}
+        # The script reads every package and CHANGELOG.md from the tree it
+        # lives in, and takes `GITHUB_SHA` as each Release's `target_commitish`
+        # and as the ref of its CHANGELOG permalink. Both must be the version
+        # commit. GitHub ignores `target_commitish` when the tag already exists,
+        # but a publish that died before its tag push leaves no tag, and the
+        # Release then CREATES it at `target_commitish`. So the version
+        # commit's own script runs in its own tree, with GITHUB_SHA set for that
+        # one process only.
+        run: |
+          if [ -z "$VERSION_TREE" ] || [ "$(git -C "$VERSION_TREE" rev-parse HEAD 2>/dev/null)" != "$VERSION_COMMIT" ]; then
+            echo "::error::the version commit's tree ('${VERSION_TREE}') is not at the version commit '${VERSION_COMMIT}'. Refusing to backfill from any other tree."
+            exit 1
+          fi
+          cd "$VERSION_TREE"
+          GITHUB_SHA="$VERSION_COMMIT" node scripts/release-github-releases.mjs
 
       - name: Backfill spec-changes.json on the GitHub Release (ADR-0087 D4)
         # Ordering is load-bearing: `gh release upload` needs the Release the
         # step above creates.
         #
         # `--prepare` regenerates the manifest against the previously published
-        # tarball exactly as the publish lane does, so the asset this repair
-        # uploads carries the same per-release section the npm artifact does.
-        # It cannot repair the npm artifact itself — that tarball is immutable —
-        # and this lane never publishes one.
+        # tarball exactly as the publish job does: in the version commit's
+        # tree, with that commit's generator. So the asset this repair uploads
+        # carries the same per-release section the npm artifact does. It cannot
+        # repair the npm artifact itself — that tarball is immutable — and this
+        # lane never publishes one.
         if: steps.audit.outputs.releases-missing == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_VERSION: ${{ steps.audit.outputs.version }}
+          VERSION_COMMIT: ${{ steps.audit.outputs.version-commit }}
+          VERSION_TREE: ${{ steps.audit.outputs.version-tree }}
         run: |
+          if [ -z "$VERSION_TREE" ] || [ "$(git -C "$VERSION_TREE" rev-parse HEAD 2>/dev/null)" != "$VERSION_COMMIT" ]; then
+            echo "::error::the version commit's tree ('${VERSION_TREE}') is not at the version commit '${VERSION_COMMIT}'. Refusing to backfill from any other tree."
+            exit 1
+          fi
+          cd "$VERSION_TREE"
           bash scripts/release-spec-changes.sh --prepare
           bash scripts/release-spec-changes.sh --attach
 

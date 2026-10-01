@@ -614,12 +614,12 @@ Even inside your own worktree, operate defensively:
      `git merge-tree` of any `merge=os-regen` path runs the same merge-ort machinery as
      `git merge` and therefore honours the custom driver, while GitHub runs none, so the
      two answer different questions about the same snapshot. Probe from a throwaway bare
-     clone that shares the object store and has no driver registered
-     (`git clone --bare --shared . PROBE.git`, then
-     `git --git-dir=PROBE.git merge-tree --write-tree --name-only BASE HEAD`), ⛔ never
-     with `-c merge.os-regen.driver=` or `-c merge.os-regen.driver=false`, neither of
-     which disables the driver: git runs the configured program, it fails, and every
-     routed path is reported conflicted, including ones that text-merge cleanly.
+     clone with no driver registered that FETCHES both commits (`--shared` may copy only
+     what `refs/heads/**` reach; recipe: `os-regen-merge.sh`'s header): exit 1 with no
+     tree id, `not something we can merge`, is a missing object, never a conflict. ⛔ Never
+     with `-c merge.os-regen.driver=` or `-c merge.os-regen.driver=false`, neither of which
+     disables the driver: git runs the configured program, it fails, and every routed path
+     is reported conflicted, including ones that text-merge cleanly.
    - **Registration is per clone** (`pnpm install` → `prepare` →
      `scripts/setup-git-hooks.mjs`); an unregistered clone falls back to git's default
      text merge — older behaviour, not breakage.

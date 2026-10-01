@@ -111,6 +111,15 @@
 // {@link checkCondition}. Before, both positions compared a temporal comparand
 // as written, so an ISO instant against a `date` column counted 1 row where the
 // same condition in a `where` counted 3.
+//
+// [#20873] …and on a DECLARED multi-valued field, the per-aggregation `filter`
+// answers `$contains` / `$notContains` by MEMBERSHIP — the reading
+// `FILTER_OPERATORS`' `$contains` docblock (`@objectstack/spec`) declares for a
+// JSON-stored column and `where` already gives on every SQL dialect. Before,
+// the arm failed every value that was not a string, so a stored array never
+// matched: `{ owners: { $contains: 'u1' } }` counted 0 where the same `where`
+// counted 2, and `$notContains` counted every row, the members included. See
+// {@link storedArrayHasMember} and {@link declaredJsonStoredFields}.
 
 import type { FilterCondition } from '@objectstack/spec/data';
 // [#20099] The reference's own declaration, so a malformed `addDays` is refused
@@ -152,6 +161,10 @@ import { isEmptyFilterValue } from '@objectstack/spec/data';
 // the spec, where that rule is declared.
 import { temporalStorageForm, type TemporalComparandKind } from '@objectstack/core';
 import { nextUtcCalendarDay, UNBOUNDED_ABOVE, isUnboundedAbove, type UnboundedAbove } from '@objectstack/spec/data';
+// [#20873] The JSON-stored population — the declared fields on which `$contains`
+// asks MEMBERSHIP — from the spec's value-shape classes, the same two
+// `driver-sql`'s JSON-column registry is built from.
+import { STRUCTURED_JSON_TYPES, isMultiValueField } from '@objectstack/spec/data';
 // [#7047] The ADR-0112 envelope this face's refusals used to omit. Shared with
 // `filter-comparand-shape.ts` rather than re-declared here — see the note on
 // {@link invalidFilterError} and on {@link unknownOperator} below.
@@ -803,6 +816,46 @@ export function declaredFieldClasses(fields: unknown): Map<string, AggregatedCol
 }
 
 /**
+ * [#20873] The declared fields a per-aggregation `filter` reads `$contains` /
+ * `$notContains` on as MEMBERSHIP: the JSON-stored ones, a `STRUCTURED_JSON_TYPES`
+ * type or a multi-valued field (`isMultiValueField`, which covers
+ * `MULTI_OPTION_TYPES` and a multi-capable type flagged `multiple: true`).
+ *
+ * The contract (`FILTER_OPERATORS`' `$contains` docblock, `@objectstack/spec`)
+ * selects the question by the COLUMN — "One operator, two questions, selected
+ * by the COLUMN rather than by the caller" — because the storage shape is
+ * declared metadata. So the fork reads the declaration, never the row:
+ * `driver-sql` forks on its JSON-column registry the same way
+ * (`SqlDriver.isJsonColumn`, built from the same two spec sets), and a declared
+ * multi-valued field holding something other than an array has no member there,
+ * as it has none here.
+ *
+ * Measured at the public door, the two halves of the population do not reach
+ * this evaluator alike: the engine's text-operator declared-type door refuses
+ * `$contains` / `$notContains` on a declared STRUCTURED-JSON field before any
+ * row is read (`INVALID_FILTER`, in `where` and in the per-aggregation `filter`
+ * alike), so the half that arrives is the multi-valued one, whose rows the
+ * write door stores as an array (a scalar written to it is wrapped). The whole
+ * population is named anyway, so this face, `driver-sql` and `driver-memory`
+ * read one definition.
+ *
+ * No usable field map (a registry-less host) ⇒ an empty set, and the arms keep
+ * the substring reading, as `driver-sql` does for a table it was never told
+ * about.
+ */
+export function declaredJsonStoredFields(fields: unknown): Set<string> {
+  const stored = new Set<string>();
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return stored;
+  for (const [name, def] of Object.entries(fields as Record<string, unknown>)) {
+    const type = (def as { type?: unknown } | null)?.type;
+    if (typeof type !== 'string') continue;
+    const multiple = (def as { multiple?: unknown }).multiple === true;
+    if (STRUCTURED_JSON_TYPES.has(type) || isMultiValueField({ type, multiple })) stored.add(name);
+  }
+  return stored;
+}
+
+/**
  * [#20176] The storage rule a column of `cls` takes, or `undefined` for a class
  * that has none (numeric, text, boolean) and for a column whose class the
  * declaration cannot tell. [#20263] Also the kind the `having` temporal-comparand
@@ -1239,6 +1292,17 @@ export function applyHaving(
  * column whose class is temporal has its comparands compared by that column's
  * storage rule ({@link checkCondition}). Absent, or a column it does not name ⇒
  * compared as written.
+ *
+ * [#20873] `jsonStored` names the columns declared JSON-stored
+ * ({@link declaredJsonStoredFields}), on which `$contains` / `$notContains` ask
+ * MEMBERSHIP. Only the per-aggregation `filter` passes it. `applyHaving` does
+ * not: an aggregated row has no declaration of its own for a set to be read
+ * from, a `groupBy` on a multi-valued or structured-JSON field is refused before
+ * any row exists, and the one aggregated column that can still carry a stored
+ * array — a `min` / `max` over a multi-valued field — is itself answered three
+ * ways by the backends (an array on the in-memory aggregation, the serialized
+ * TEXT on SQLite's native aggregate, a `DATABASE_ERROR` on PostgreSQL), so
+ * there is no single `where` answer to hold `having` to there.
  */
 export function matchesHaving(
   row: Record<string, any>,
@@ -1246,22 +1310,23 @@ export function matchesHaving(
   path = 'having',
   clause: FilterClause = HAVING_CLAUSE,
   classes?: ReadonlyMap<string, AggregatedColumnClass | undefined>,
+  jsonStored?: ReadonlySet<string>,
 ): boolean {
   if (!cond || typeof cond !== 'object') return true;
   for (const [key, value] of Object.entries(cond)) {
     const here = `${path}.${key}`;
     if (key === '$and') {
       const branches = Array.isArray(value) ? value : [value];
-      if (!branches.every((c, i) => matchesHaving(row, c, `${here}[${i}]`, clause, classes))) return false;
+      if (!branches.every((c, i) => matchesHaving(row, c, `${here}[${i}]`, clause, classes, jsonStored))) return false;
       continue;
     }
     if (key === '$or') {
       const branches = Array.isArray(value) ? value : [value];
-      if (!branches.some((c, i) => matchesHaving(row, c, `${here}[${i}]`, clause, classes))) return false;
+      if (!branches.some((c, i) => matchesHaving(row, c, `${here}[${i}]`, clause, classes, jsonStored))) return false;
       continue;
     }
     if (key === '$not') {
-      if (matchesHaving(row, value, here, clause, classes)) return false;
+      if (matchesHaving(row, value, here, clause, classes, jsonStored)) return false;
       continue;
     }
     if (key.startsWith('$')) throw unknownOperator(key, 'logical', [], clause);
@@ -1270,7 +1335,11 @@ export function matchesHaving(
     // same way on purpose: it reads `driver.find()` rows, which are flat too.
     // [#20099] The row itself goes down too: a `{ $field }` comparand resolves
     // against it. [#20176] …and the column's storage rule, when it has one.
-    if (!checkCondition(row?.[key], value, key, here, clause, row, temporalKindOf(classes?.get(key)))) return false;
+    // [#20873] …and whether the column is declared JSON-stored, which decides
+    // the question `$contains` / `$notContains` ask of it.
+    if (!checkCondition(
+      row?.[key], value, key, here, clause, row, temporalKindOf(classes?.get(key)), jsonStored?.has(key) === true,
+    )) return false;
   }
   return true;
 }
@@ -1293,15 +1362,21 @@ export function matchesHaving(
  * [#20176] `classes` is the object's declared field classes
  * ({@link declaredFieldClasses}), so a temporal comparand here is read by the
  * column's storage rule, as the same comparand in a `where` is by the driver.
+ *
+ * [#20873] `jsonStored` is the object's declared JSON-stored fields
+ * ({@link declaredJsonStoredFields}), so `$contains` / `$notContains` on one of
+ * them ask MEMBERSHIP, as the same condition in a `where` does on every SQL
+ * dialect. Absent ⇒ every column keeps the substring reading.
  */
 export function matchesAggregationFilter(
   row: Record<string, any>,
   filter: FilterCondition,
   index: number,
   classes?: ReadonlyMap<string, AggregatedColumnClass | undefined>,
+  jsonStored?: ReadonlySet<string>,
 ): boolean {
   const clause = aggregationFilterClause(index);
-  return matchesHaving(row, filter, clause.root, clause, classes);
+  return matchesHaving(row, filter, clause.root, clause, classes, jsonStored);
 }
 
 /**
@@ -1381,6 +1456,52 @@ function wholeDayUpperBound(
 }
 
 /**
+ * [#20873] The JSON NUMBER grammar, spelled out — the pattern `driver-sql`'s
+ * `jsonMembershipCandidates` tests a `$contains` comparand against, for its
+ * reason: `Number()` also accepts `'0x10'`, `' 1 '`, `'Infinity'` and `''`, none
+ * of which is a JSON number, and admitting them would make the member set
+ * depend on JS coercion rules no SQL dialect shares.
+ */
+const JSON_NUMBER_TEXT = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/;
+
+/**
+ * [#20873] Is the `$contains` comparand a MEMBER of the stored array — the
+ * question `$contains` asks of a declared JSON-stored column
+ * ({@link declaredJsonStoredFields}).
+ *
+ * The comparand is a STRING by contract (`FILTER_OPERATORS`' `$contains`
+ * docblock), so a member stored as a JSON number or boolean is named by its
+ * TEXT: `'1'` names the string `'1'` or the number `1`, `'true'` the string or
+ * `true`, `'null'` the string or `null`, and `'1.50'` the number `1.5`. That is
+ * the candidate set `driver-sql`'s `jsonMembershipCandidates` binds for every
+ * dialect — `String(comparand)`, plus the canonical number when the text is a
+ * JSON number, plus the literal for `true` / `false` / `null` — read here as a
+ * predicate over JS values instead of as JSON text.
+ *
+ * Array-only, as the SQL constructs are: a value that is not an array (a
+ * scalar, an object, `null`) has no member, and neither does an element that
+ * is itself an object or an array.
+ *
+ * ⚠️ A second copy of one rule, not the shared one: `driver-sql`'s
+ * `jsonMembershipCandidates` is module-private, and `driver-memory`'s twin is
+ * module-private too, so neither is importable here. The one shared home would
+ * be `@objectstack/spec/data`, beside `asciiCaseInsensitiveContains` and
+ * `isEmptyFilterValue` — the value-level filter rules every JS face already
+ * reads from there.
+ */
+function storedArrayHasMember(value: unknown, comparand: unknown): boolean {
+  if (!Array.isArray(value)) return false;
+  const text = String(comparand);
+  const number = JSON_NUMBER_TEXT.test(text) ? Number(text) : Number.NaN;
+  return value.some((element) => {
+    if (typeof element === 'string') return element === text;
+    if (typeof element === 'number') return Number.isFinite(number) && element === number;
+    if (typeof element === 'boolean' || element === null) return String(element) === text;
+    return false;
+  });
+}
+
+/**
  * One column's condition — implicit equality or an operator object.
  *
  * [#20176] `kind` is the column's temporal storage rule, when the caller knows
@@ -1398,6 +1519,11 @@ function wholeDayUpperBound(
  * SQLite column in the same canon); rows a driver returns are in it already.
  * Presence (`$exists`, `$null`), the text operators and a `{ $field }`
  * reference are not comparands of a value, and are read as before.
+ *
+ * [#20873] `jsonStored` is whether the column is declared JSON-stored. Then
+ * `$contains` asks whether its comparand is a MEMBER of the stored array
+ * ({@link storedArrayHasMember}) and `$notContains` its exact complement; on
+ * any other column both keep the substring test.
  */
 function checkCondition(
   value: any,
@@ -1407,6 +1533,7 @@ function checkCondition(
   clause: FilterClause = HAVING_CLAUSE,
   row: Record<string, any> = {},
   kind?: TemporalComparandKind,
+  jsonStored = false,
 ): boolean {
   const form = (operand: unknown): unknown => (kind === undefined ? operand : temporalStorageForm(operand, kind));
   // Implicit equality (primitives, null, Date, array exact-match) — loose `==`
@@ -1521,7 +1648,15 @@ function checkCondition(
       case '$empty':
         if (isEmptyFilterValue(value) !== (target === true)) return false;
         break;
-      case '$contains': if (typeof value !== 'string' || !value.includes(target)) return false; break;
+      // [#20873] On a declared JSON-stored column, MEMBERSHIP — the reading
+      // `where` gives the same condition on every SQL dialect
+      // (`SqlDriver.applyJsonMembership`). The substring test below failed
+      // every value that was not a string, so a stored array never matched.
+      case '$contains':
+        if (jsonStored
+          ? !storedArrayHasMember(value, target)
+          : typeof value !== 'string' || !value.includes(target)) return false;
+        break;
       // [#5905] The mirror of `$contains`, NOT its copy-with-a-negated-test.
       // `$contains` fails a non-string value because "contains" cannot hold for
       // something that is not text; `$notContains` SUCCEEDS for the same value
@@ -1545,7 +1680,18 @@ function checkCondition(
       // the SQL compilers emit a type-gated constant for a column whose
       // declared type is in `NON_TEXT_STORED_VALUE_TYPES`. This arm was already
       // on the ruled side; nothing here moved.
-      case '$notContains': if (typeof value === 'string' && value.includes(target)) return false; break;
+      //
+      // [#20873] On a declared JSON-stored column, the exact complement of the
+      // membership arm above — what `where` gives on every SQL dialect
+      // (`col IS NULL OR NOT (…)`). The substring test SUCCEEDED for every
+      // value that was not a string, so a stored array satisfied
+      // `$notContains` even when it held the comparand. A row with no value
+      // still satisfies it (#5298): `null` and an absent column have no member.
+      case '$notContains':
+        if (jsonStored
+          ? storedArrayHasMember(value, target)
+          : typeof value === 'string' && value.includes(target)) return false;
+        break;
       case '$startsWith': if (typeof value !== 'string' || !value.startsWith(target)) return false; break;
       case '$endsWith': if (typeof value !== 'string' || !value.endsWith(target)) return false; break;
       // [#6520] `$contains`' case-INSENSITIVE twin, over ASCII case only. Same
