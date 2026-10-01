@@ -29,10 +29,12 @@
  * `emptyGroupValueFor` (`@objectstack/spec`) for every measure, measure-scoped
  * ones included, before the number presenter.
  *
- * Each measure is asked ALONE, on each face and at each door, and every group's
- * answer is held to the value the engine computes for those rows — so a policy
- * one face skips fails exactly that measure's case, and a face that errors
- * fails it too. The two faces are also held equal to each other, cell for cell.
+ * Each measure is asked on its own, on each face and at each door, and every
+ * group's answer is held to the value the engine computes for those rows — so
+ * a policy one face skips fails exactly that measure's case, and a face that
+ * errors fails it too. At the dataset door a measure rides with the base
+ * `cnt`, so the executor's main statement reports every group: a selection of
+ * measure-scoped measures alone reports only the groups their filter admits. The two faces are also held equal to each other, cell for cell.
  * One cell is NOT held to a value: at the dataset door a measure-scoped `avg`
  * is absent from a group its supplementary query reported no row for, on both
  * faces (no divergence, and no ruled answer); that cell is held only to "both
@@ -207,7 +209,8 @@ for (const cell of CELLS) {
       /** One measure, on one face, at one door: the answer per group, and which strategy served it. */
       const read = async (face: Face, door: Door, measure: Measure) => {
         const before = { ...reads };
-        const selection = { measures: [measure], dimensions: ['grp'] };
+        const measures = door === 'dataset' && measure !== 'cnt' ? ['cnt', measure] : [measure];
+        const selection = { measures, dimensions: ['grp'] };
         const outcome = await (door === 'cube'
           ? services[face]!.query({ cube: DATASET.name, ...selection } as any)
           : services[face]!.queryDataset(DATASET as any, selection as any)
