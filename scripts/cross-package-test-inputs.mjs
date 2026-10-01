@@ -1207,9 +1207,18 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // next page to teach the route would land outside the declared globs, its
     // edit would not re-run this suite, and the gate would go on reporting
     // green over a corpus it no longer hashes.
+    //
+    // The two `packages/` files are #20919's move: the bulk-import runner went
+    // to `@objectstack/core` and the error CLASSIFICATION half of
+    // `error-response.ts` to `@objectstack/types`. The source-reading pins that
+    // scanned them in this package (`rest-server-canonical-query-ast.test.ts`;
+    // the three `error-response-*` arm-derivation tests) now read them there,
+    // each bound to one relative literal.
     globs: [
       'content/docs/protocol/objectql/state-machine.mdx',
       'skills/objectstack-automation/SKILL.md',
+      'packages/types/src/data-error-classification.ts',
+      'packages/core/src/utils/import-runner.ts',
       'content/**',
       'docs/**',
       'skills/**',
@@ -1222,6 +1231,13 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // the scan itself.
       'docs/**': ['packages/rest/src/meta-state-route-doc-spelling.test.ts'],
     },
+  },
+  '@objectstack/service-automation': {
+    // src/connector-pull.integration.test.ts (#20919) drives the connector sync
+    // executor through the REAL `rest` provider, imported from
+    // `connector-rest`'s source by relative path: that package already
+    // dev-depends on this one, so a manifest edge back would close a cycle.
+    globs: ['packages/connectors/connector-rest/src/**'],
   },
   '@objectstack/metadata-protocol': {
     // src/sys-metadata-repository.draft-drain.test.ts reads the durability
