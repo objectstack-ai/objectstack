@@ -10,7 +10,9 @@
  *   `multiple: true`) — `group-by-structured-json-door.ts`, its second class;
  * - a `count_distinct` over a field the spec table's `count_distinct` row
  *   refuses (the structured-JSON class and the multi-option types), or over a
- *   multi-value field — `count-distinct-json-stored-door.ts`.
+ *   multi-value field — `aggregate-field-type-door.ts` (the door that asks
+ *   the whole table since #20914; its other rows are pinned in
+ *   `engine-aggregate-field-type-door.test.ts`).
  *
  * Measured on the base (`origin/main` `42d78b97fe`) through
  * `POST /api/v1/data/:object/query` over three rows:
@@ -40,7 +42,7 @@ import {
   type EngineAggregateOptions,
 } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
-import { assertCountDistinctNamesNoJsonStoredField } from './count-distinct-json-stored-door.js';
+import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
 
 const OBJECT = 'json_stored_key_probe';
 
@@ -257,7 +259,7 @@ describe('[#20808] a groupBy on a multi-value field, and a count_distinct on a J
   it('GUARD the count_distinct door asks the spec table for every FieldType, and isMultiValueField for every flagged multi-capable type', () => {
     const judged = (def: Record<string, unknown>) => {
       try {
-        assertCountDistinctNamesNoJsonStoredField(OBJECT, { fields: { f: def } }, distinct('f'));
+        assertAggregationFieldTypesAccepted(OBJECT, { fields: { f: def } }, distinct('f'));
         return null;
       } catch (e) {
         return envelopeOf(e as Thrown);
@@ -276,16 +278,27 @@ describe('[#20808] a groupBy on a multi-value field, and a count_distinct on a J
     }
   });
 
-  it('GUARD no verdict without a field map, for an undeclared name, an off-vocabulary type, or any other function', () => {
-    const judge = (schema: unknown, aggregations: unknown) => () => assertCountDistinctNamesNoJsonStoredField(OBJECT, schema, aggregations);
+  it('GUARD no verdict without a field map, for an undeclared name, an off-vocabulary type, or a row that accepts the pair', () => {
+    const judge = (schema: unknown, aggregations: unknown) => () => assertAggregationFieldTypesAccepted(OBJECT, schema, aggregations);
     expect(judge(undefined, distinct('meta'))).not.toThrow();
     expect(judge({}, distinct('meta'))).not.toThrow();
     expect(judge(PROBE, distinct('nope'))).not.toThrow();
     // A driver-internal alias on an introspected object: the table cannot answer, so no block.
     expect(judge({ fields: { f: { type: 'object' } } }, distinct('f'))).not.toThrow();
     expect(judge({ fields: { f: { type: 'integer' } } }, distinct('f'))).not.toThrow();
-    for (const fn of ['count', 'sum', 'avg', 'min', 'max']) {
+    // `count` compares no value, so its row accepts a JSON-stored field; `sum`
+    // is the row the #20914 census held back for triage.
+    for (const fn of ['count', 'sum']) {
       expect(judge(PROBE, [{ function: fn, field: 'meta', alias: 'n' }]), fn).not.toThrow();
+    }
+    // [#20914] Flipped: the door asks every row now, and the `avg`, `min` and
+    // `max` rows refuse a `json` field — the same envelope, at the same position.
+    for (const fn of ['avg', 'min', 'max']) {
+      let thrown: Thrown = null;
+      try { judge(PROBE, [{ function: fn, field: 'meta', alias: 'n' }])(); } catch (e) { thrown = e as Thrown; }
+      expect(envelopeOf(thrown), fn).toEqual(ENVELOPE);
+      expect(thrown?.message, fn).toContain(`aggregations[0].field `);
+      expect(thrown?.message, fn).toContain(`'meta', a declared json field — a structured-JSON value, which the engine does not `);
     }
     expect(judge(PROBE, [{ function: 'count_distinct', alias: 'n' }, { function: 'count_distinct', field: '*' }, null, 7])).not.toThrow();
     expect(judge(PROBE, 'meta')).not.toThrow();

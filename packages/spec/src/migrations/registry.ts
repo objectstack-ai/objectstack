@@ -5272,6 +5272,24 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'they meant.',
   },
   {
+    id: 'cube-member-sql-expression-retired',
+    order: 53,
+    text:
+      'It also narrows an analytics cube member\'s `sql` — `measures.<metric>.sql` and '
+      + '`dimensions.<dimension>.sql` — to a column reference: a field of the cube\'s object, a '
+      + 'relationship path ending in one, or `\'*\'` (maintainer ruling D, ADR-0021 "zero raw '
+      + 'SQL / zero raw expressions" carried from the dataset layer to the cube members it '
+      + 'compiles to; ADR-0049 enforce-or-remove). A SQL expression there names no single '
+      + 'field, so no platform check could judge which fields it reads, and the two analytics '
+      + 'strategies never agreed on it: the raw-SQL path ran it verbatim, the ObjectQL path '
+      + 'refused it. It is now refused at parse with a prescription naming the ADR-0021 dataset '
+      + 'form — a measure with its own structured `filter` for a conditional count or sum, and '
+      + '`derived: { op, of: [...] }` over named measures for a ratio, sum, difference or '
+      + 'product. No D2 conversion: an expression has no mechanical rewrite into a dataset, so '
+      + 'the semantic entry `cube-member-sql-expression-retired` carries the move, including '
+      + 'the scale change a ratio makes (a `derived` ratio is a 0–1 fraction).',
+  },
+  {
     id: 'cube-metric-filters-retired',
     order: 10,
     text:
@@ -5285,9 +5303,9 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'platform\'s structured-FilterCondition direction — it cannot be parameterized, '
       + 're-targeted per driver dialect, or walked by the lint filter rules. The mechanical '
       + 'conversion strips the key from old sources (pure lossless delete — it never had an '
-      + 'effect to lose); filter at query time with `where`, fold the condition into the '
-      + 'metric\'s own `sql` expression, or use an ADR-0021 dataset measure\'s structured '
-      + '`filter`.',
+      + 'effect to lose); filter at query time with `where`, or use an ADR-0021 dataset '
+      + 'measure\'s structured `filter` (a metric\'s own `sql` is a column reference, see '
+      + '`cube-member-sql-expression-retired`).',
   },
   {
     id: 'cube-refresh-key-retired',
@@ -8229,6 +8247,58 @@ const step18: MigrationStep = {
         + 'name and updated every query, dashboard and report that names `<cube>.<old key>`. '
         + '`GET /api/v1/analytics/meta` lists each member as `<cube>.<key>` exactly as before the upgrade.',
     },
+    // #20943, maintainer ruling D — a cube member's `sql` is a column reference;
+    // the expression half is retired at the contract (ADR-0021's zero raw
+    // expressions, carried from the dataset layer to the cube members it compiles
+    // to). Semantic only, with no D2 conversion: an expression has no mechanical
+    // rewrite — it moves to another metadata type, and a ratio changes scale on
+    // the way — so the upgrader owes the judgement this entry states.
+    {
+      id: 'cube-member-sql-expression-retired',
+      // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
+      // inside a code span AND a table cell.
+      surface:
+        'analyticsCubes[].measures.<metric>.sql and analyticsCubes[].dimensions.<dimension>.sql '
+        + '(data.MetricSchema.sql / data.DimensionSchema.sql) authored as a SQL expression — a CASE '
+        + 'expression, an aggregate or a ratio of aggregates, a quoted or $-prefixed spelling, or any '
+        + 'other value that is not a column reference',
+      replacement:
+        'a column reference: a field of the cube\'s object (`amount`), a relationship path ending '
+        + 'in one (`account.amount`), or `\'*\'` for a count. A derived value moves to an '
+        + 'ADR-0021 dataset over the same object: a conditional count or sum is a dataset measure '
+        + 'with its own structured `filter` (`{ name: \'done_count\', aggregate: \'count\', filter: '
+        + '{ status: \'done\' } }`), and a ratio, sum, difference or product of measures is '
+        + '`derived: { op, of: [...] }` over measures named in the same dataset (`{ name: '
+        + '\'done_rate\', derived: { op: \'ratio\', of: [\'done_count\', \'task_count\'] }, format: '
+        + '\'0.0%\' }`). A dimension that bucketed a column with a CASE expression has no expression '
+        + 'form in either layer: group by the column itself, or keep the bucket as a field of the '
+        + 'object and name that field',
+      reason:
+        'Maintainer ruling D (2026-09-30), from the analytics field-level read gate: a member whose '
+        + '`sql` is an expression names no single field, so no platform check can judge which fields '
+        + 'it reads, and the analytics strategies never agreed on it — the raw-SQL path emitted it '
+        + 'verbatim and the ObjectQL path refused it. ADR-0021 already set the direction for the '
+        + 'author surface ("zero raw SQL / zero raw expressions"); it governed the dataset layer and '
+        + 'left the cube members it compiles to open, which is the gap this closes. The dataset form '
+        + 'is the declared home of a derived value because every field it reads is named: a measure '
+        + 'filter names its fields, and a derived measure references other measures by name only. '
+        + 'There is no D2 conversion: the rewrite moves a member to a different metadata type and '
+        + 'cannot be derived from the expression text in general, so only the author can say which '
+        + 'dataset measures express what the expression meant. A ratio also changes SCALE on the way: '
+        + 'a `derived` ratio is a 0–1 fraction, while an expression that multiplied by 100 returned '
+        + 'percentage points — pair the ratio with a `%` numeral pattern (the server marks a ratio '
+        + 'column\'s percent scale as a fraction) and re-check any consumer that read the old number '
+        + 'raw. ADR-0021 / ADR-0049 / ADR-0087',
+      acceptanceCriteria:
+        'Every analytics cube parses: `CubeSchema`, the analytics_cube write door and defineStack '
+        + 'refuse an expression member at its `sql` with a prescription that names the dataset form, '
+        + 'so the sweep is mechanical — parse each cube, and each refusal is one member to move. For '
+        + 'each moved measure, a dataset over the same object declares it, and a query over a fixture '
+        + 'where the condition excludes rows returns the same figure the expression returned (a '
+        + 'ratio: the same value divided by 100 when the expression returned percentage points). '
+        + 'Every dashboard, report or saved query that named the cube member now names the dataset '
+        + 'measure. A cube member that aggregates a column parses byte-identically to before.',
+    },
     // #10414 (ADR-0049 enforce-or-remove) — the D3 entry of the
     // `metric-filters-removed` family (ruling B on #17152: one D3 entry per
     // retirement family, even when D2 is lossless). The unknown-keys entry
@@ -8239,22 +8309,23 @@ const step18: MigrationStep = {
     {
       id: 'cube-metric-filters-retired',
       surface: 'analyticsCubes[].measures.<metric>.filters — the per-metric raw-SQL filter list',
-      replacement: 'One of three filters that ARE applied: a `where` condition at query time, the '
-        + 'condition folded into the metric\'s own `sql` expression (a conditional aggregate), or an '
-        + 'ADR-0021 dataset measure with a structured `filter`.',
+      replacement: 'One of the two filters that ARE applied: a `where` condition at query time, or an '
+        + 'ADR-0021 dataset measure with a structured `filter`. (A third channel — folding the condition '
+        + 'into the metric\'s own `sql` expression — left with `cube-member-sql-expression-retired`: a '
+        + 'member\'s `sql` is a column reference.)',
       reason: 'The D2 conversion `metric-filters-removed` deletes `filters` from every cube metric, and '
         + 'the delete is lossless in the narrow sense: neither SQL strategy ever read the key, so a '
         + 'metric authored with `filters: [{ sql: "stage = \'closed_won\'" }]` already returned the '
         + 'UNFILTERED aggregate under the author\'s metric name, and still does. That is exactly why the '
         + 'strip does not finish the job. The author wrote a condition because they wanted a filtered '
         + 'number; every dashboard, report and export reading that metric has been showing a larger '
-        + 'one. Only the author can say which of the three live mechanisms expresses the condition '
-        + 'they meant — a query-time `where` changes every query, a conditional aggregate changes the '
-        + 'metric, a dataset measure moves it to the governed layer — and whether numbers already '
-        + 'published from the unfiltered metric need to be revisited.',
+        + 'one. Only the author can say which of the two live mechanisms expresses the condition '
+        + 'they meant — a query-time `where` changes every query, a dataset measure moves the metric '
+        + 'to the governed layer — and whether numbers already published from the unfiltered metric '
+        + 'need to be revisited.',
       acceptanceCriteria: 'No cube metric carries `filters`; the parse refuses the key by name. For '
         + 'each metric that carried one, the author has either re-expressed the condition through one '
-        + 'of the three live mechanisms or decided the unfiltered aggregate is what they want — and '
+        + 'of the two live mechanisms or decided the unfiltered aggregate is what they want — and '
         + 'renamed the metric if its name promised the filter. With the condition re-expressed, a query '
         + 'over a fixture where the condition excludes rows returns the filtered aggregate (strictly '
         + 'smaller for a positive sum over excluded rows), not the unfiltered one.',
@@ -9235,6 +9306,62 @@ const step18: MigrationStep = {
         + 'compile (input type `never`) and `DriverOptionsSchema.parse({ timeout: 5000 })` fails with '
         + 'the rename prescription naming `timeoutMs`; `{ timeoutMs: 5000 }` parses to the same '
         + 'number.',
+    },
+    // Registered by the change that removed the three methods (#20822, PR #20988),
+    // not by a later reconciliation.
+    {
+      id: 'driver-sql-calendar-day-methods-removed',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span already, and a nested backtick would close it.
+      surface:
+        'SqlDriver protected methods calendarDayExclusiveUpperBound, calendarDayUpperBoundRewrite '
+        + 'and calendarDayBetweenRewrite (inherited by SqliteWasmDriver and TursoDriver)',
+      replacement:
+        'lower the filter before the driver compiles it — '
+        + '`lowerFilterCondition(where, { isDatetimeColumn })` from `@objectstack/spec/data` — '
+        + 'instead of calling or overriding a driver method; leave `isDatetimeColumn` out and the '
+        + 'whole-day rule applies to every column',
+      reason:
+        'The exported `SqlDriver` class of `@objectstack/driver-sql` declared three `protected` '
+        + 'methods that were its own copy of the whole-day rule of ADR-0053 D-D1: on a `datetime` '
+        + 'column, a bare-day inclusive upper bound (`$lte \'2026-01-05\'`, or the maximum of a '
+        + '`$between`) compiled as `$lt` the next day, and the last supported day (`9999-12-31`) '
+        + 'compiled as no upper bound. `calendarDayExclusiveUpperBound` computed that bound, '
+        + '`calendarDayUpperBoundRewrite` rewrote a `$lte` with it, and `calendarDayBetweenRewrite` '
+        + 'rewrote a `$between` with it. The shared filter lowering in `@objectstack/spec/data` '
+        + '(`lowerFilterCondition`) now applies the rule once, at the engine\'s `where` seam and '
+        + 'at the RLS compile seam, before any driver sees the filter, so the driver\'s copy was '
+        + 'deleted, and the three methods with it (ADR-0053 D-D1 items 5 and 9, as amended). Two '
+        + 'consequences reach a subclass, and only one of them reaches the compiler. A subclass '
+        + 'that CALLS one of the three, or declares one with `override`, stops compiling: '
+        + 'TS2339 and TS4113, measured with tsc 6.0.3 against the published declaration. A '
+        + 'subclass that re-declares one '
+        + 'WITHOUT `override` compiles cleanly, with `noImplicitOverride` off and also with it '
+        + 'on, because the base class no longer has a member to override. That declaration is '
+        + 'never called: the driver calls none of the three any more, so the override goes '
+        + 'silently dead and the rule it carried stops applying. An untyped JS subclass gets a '
+        + '`TypeError` at a call and the same silent death for an override. A driver subclass is '
+        + 'CODE, never stack metadata, so there is no authored source for the chain to rewrite '
+        + 'and no schema tombstone. For the silent half, this entry is the only notice there is: '
+        + 'the same disposition as `driver-sql-distinct-bare-filter-typed` and '
+        + '`runtime-httpserver-wrapper-retired`. In this repo the one caller was `TursoDriver`\'s '
+        + 'remote face, changed in the same PR. A read through the engine or the RLS compile seam '
+        + 'answers as before, because the seam lowers first; a filter handed to the driver '
+        + 'directly is now compared as written. ADR-0053 / ADR-0087.',
+      acceptanceCriteria:
+        'No subclass of `SqlDriver`, `SqliteWasmDriver` or `TursoDriver` names '
+        + '`calendarDayExclusiveUpperBound`, `calendarDayUpperBoundRewrite` or '
+        + '`calendarDayBetweenRewrite`. Search the source for the three names rather than relying '
+        + 'on tsc, because a re-declaration without `override` compiles and is never called. A '
+        + 'subclass that called one to widen a bound hands the driver a lowered filter instead: '
+        + '`lowerFilterCondition(where, { isDatetimeColumn })`. One that overrode one to change '
+        + 'which columns take the whole-day bound passes its own `isDatetimeColumn`. Proven when, '
+        + 'on a `datetime` column, `where: { signed_on: { $lte: \'2026-01-05\' } }` reaches the '
+        + 'driver through that path and returns a row stamped `2026-01-05T15:00:00.000Z`. Handed '
+        + 'to the driver unlowered, the same filter compares against that day\'s midnight and '
+        + 'drops the row. A host that reads only through the engine (`find`, `count`, '
+        + '`aggregate`) or through RLS policies needs no change: those seams lower the filter '
+        + 'before the driver sees it.',
     },
     {
       id: 'driver-sql-unresolvable-where-column-refused',
@@ -12628,13 +12755,13 @@ const step18: MigrationStep = {
         + 'the audience that does not parse. Measured on 884e8347d: the only in-repo readers are '
         + 'packages/core/src/health-monitor.ts and packages/core/src/hot-reload.ts, both moved in '
         + 'this same change; and the pinned objectui checkout — the pin this repo builds '
-        + 'against, `.objectui-sha` = `db11afd4967cd9d39381c5e21dc2deec9d706204` — names '
+        + 'against, `.objectui-sha` = `e420df310f5ba9526fd19d5fe65c2a52d6ac6d8c` — names '
         + 'neither def and neither key: all thirteen exports of plugin-lifecycle-advanced.zod.ts and '
-        + 'the string debounceDelay each occur 0 times across its 9546 tracked files (0 across the 9283 at dd3f7e1be, the '
+        + 'the string debounceDelay each occur 0 times across its 9800 tracked files (0 across the 9546 at db11afd49, the 9283 at dd3f7e1be, the '
         + '8512 at f8a9d0fb0 and the 8303 at 62597c588 too), against lit '
         + 'controls objectstack 12966 and @objectstack/spec 4997 on the same corpus at 87af769e9, '
         + 'which re-count to 13125 and 5043 respectively at 62597c588, to 13347 and 5123 at '
-        + 'f8a9d0fb0, to 13745 and 5466 at dd3f7e1be and to 14704 and 5545 at this pin (git grep -o -F, the method that reproduces '
+        + 'f8a9d0fb0, to 13745 and 5466 at dd3f7e1be, to 14704 and 5545 at db11afd49 and to 15352 and 6024 at this pin (git grep -o -F, the method that reproduces '
         + 'every earlier count).',
       acceptanceCriteria:
         'Every producer and reader of a PluginHealthCheck spells intervalMs and timeoutMs, and every '
@@ -12839,10 +12966,10 @@ const step18: MigrationStep = {
         + 'spells timeout 0 times; outside the zod file and its test the only live occurrences are the '
         + 'generated rows in content/docs/references/kernel/plugin-security-advanced.mdx, which this '
         + 'rename regenerates. The pinned objectui checkout — this is the pin we build against, '
-        + '`.objectui-sha` = `db11afd4967cd9d39381c5e21dc2deec9d706204`, re-read from this tree — '
+        + '`.objectui-sha` = `e420df310f5ba9526fd19d5fe65c2a52d6ac6d8c`, re-read from this tree — '
         + 'spells resourceLimits.timeout 0 times across '
-        + '9546 tracked files, against lit controls timeout 1197, RuntimeConfig 273 and resourceLimits '
-        + '2 on the same corpus (0 across 9283, and 1172 / 263 / 2, at dd3f7e1be; 0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
+        + '9800 tracked files, against lit controls timeout 1293, RuntimeConfig 273 and resourceLimits '
+        + '2 on the same corpus (0 across 9546, and 1197 / 273 / 2, at db11afd49; 0 across 9283, and 1172 / 263 / 2, at dd3f7e1be; 0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
         + '1086 / 240 / 2, at 62597c588); both resourceLimits hits are prose in packages/app-shell recording '
         + 'that objectui\'s own AppShellRuntimeConfig shares not one key with the spec\'s '
         + 'RuntimeConfig, so nothing there authors this key and no pin bump is owed. ADR-0087.',
@@ -13078,10 +13205,10 @@ const step18: MigrationStep = {
         + 'no in-repo runtime reads any of the four — outside `packages/spec/src/system/logging.zod.ts` '
         + 'and its test the only occurrences are the generated rows in '
         + '`content/docs/references/system/logging.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `db11afd4967cd9d39381c5e21dc2deec9d706204` — spells '
+        + 'objectui checkout — `.objectui-sha` = `e420df310f5ba9526fd19d5fe65c2a52d6ac6d8c` — spells '
         + '`flushInterval` 0 times, `initialDelay` 0, `HttpDestinationConfig` 0 and `LoggingConfig` 0 '
-        + 'across its 9546 tracked files, against lit controls `useState` 2449 and `timeout` 1197 on '
-        + 'the same corpus (all four 0 across 9283, against 2435 and 1172, at dd3f7e1be, 0 across 8512, '
+        + 'across its 9800 tracked files, against lit controls `useState` 2464 and `timeout` 1293 on '
+        + 'the same corpus (all four 0 across 9546, against 2449 and 1197, at db11afd49, 0 across 9283, against 2435 and 1172, at dd3f7e1be, 0 across 8512, '
         + 'against 2391 and 1096, at f8a9d0fb0, and 0 across '
         + '8303, against 2389 and 1086, at 62597c588).',
       acceptanceCriteria:
@@ -16739,10 +16866,11 @@ const step18: MigrationStep = {
         + 'against a lit control of 1195 defineStack occurrences on that same corpus at fc28c1d38 '
         + '(1195 again at 9b62f54671); and the objectui '
         + 'checkout this repo builds against — this is the pin, '
-        + '`.objectui-sha` = `db11afd4967cd9d39381c5e21dc2deec9d706204`, re-read from this tree — '
-        + 'spells all six metrics def names and both distinctive keys 0 times across 9546 tracked '
-        + 'files at that sha, against lit controls window 3772, timeout 1197, period 228, '
-        + 'interval 196 and metrics 341 on that same corpus and sha (0 across 9283, against 3681 / 1172 / 183 / 176 / 340, at dd3f7e1be, 0 across 8512, against 3581 / '
+        + '`.objectui-sha` = `e420df310f5ba9526fd19d5fe65c2a52d6ac6d8c`, re-read from this tree — '
+        + 'spells all six metrics def names and both distinctive keys 0 times across 9800 tracked '
+        + 'files at that sha, against lit controls window 3873, timeout 1293, period 233, '
+        + 'interval 196 and metrics 352 on that same corpus and sha (0 across 9546, against 3772 / '
+        + '1197 / 228 / 196 / 341, at db11afd49, 0 across 9283, against 3681 / 1172 / 183 / 176 / 340, at dd3f7e1be, 0 across 8512, against 3581 / '
         + '1096 / 171 / 179 / 326, at f8a9d0fb0, and 0 across 8303, against 3526 / 1086 / 170 / 179 / '
         + '324, at 62597c588), so no pin bump is owed. '
         + 'ADR-0087.',
@@ -16955,12 +17083,13 @@ const step18: MigrationStep = {
         + 'dark control of 0; inside packages/spec the '
         + 'only occurrences are tracing.zod.ts, its test, and the generated rows in '
         + 'content/docs/references/system/tracing.mdx, which this rename regenerates. And the '
-        + 'pinned objectui checkout — `.objectui-sha` = `db11afd4967cd9d39381c5e21dc2deec9d706204` — names none of it: all 37 exports of '
-        + 'tracing.zod.ts and each of the four key names occur 0 times across the 9546 files '
+        + 'pinned objectui checkout — `.objectui-sha` = `e420df310f5ba9526fd19d5fe65c2a52d6ac6d8c` — names none of it: all 37 exports of '
+        + 'tracing.zod.ts and each of the four key names occur 0 times across the 9800 files '
         + 'tracked at that sha (the 486 Span and 53 SpanSchema hits are objectui\'s own HTML '
         + 'text-span component, TextSpanSchema, an unrelated name, plus colSpan and prose), against '
-        + 'two lit controls on that same corpus and sha: 14704 hits for the bare token objectstack, '
-        + 'and 5545 for the package specifier @objectstack/spec (at dd3f7e1be: 0 across 9283, Span 485, 13745 and 5466; at f8a9d0fb0: 0 across 8512, '
+        + 'two lit controls on that same corpus and sha: 15352 hits for the bare token objectstack, '
+        + 'and 6024 for the package specifier @objectstack/spec (at db11afd49: 0 across 9546, Span 486, '
+        + '14704 and 5545; at dd3f7e1be: 0 across 9283, Span 485, 13745 and 5466; at f8a9d0fb0: 0 across 8512, '
         + 'Span 488, 13347 and 5123; at 62597c588: 0 across 8303, Span 486, 13125 and 5043).',
       acceptanceCriteria:
         'Every author and reader of an OpenTelemetryCompatibility spells exporter.timeoutMs, '
@@ -17067,9 +17196,9 @@ const step18: MigrationStep = {
         + 'bd25e897dc: no in-repo runtime reads the key — outside `packages/spec/src/system/tenant.zod.ts` '
         + 'and its test the only occurrences are the four generated rows in '
         + '`content/docs/references/system/tenant.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `db11afd4967cd9d39381c5e21dc2deec9d706204` — spells it 0 '
-        + 'times across 9546 tracked files, against lit controls `TTL` 181 and `tenant` 1200 on the '
-        + 'same corpus (0 across 9283, against 181 and 1185, at dd3f7e1be; 0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
+        + 'objectui checkout — `.objectui-sha` = `e420df310f5ba9526fd19d5fe65c2a52d6ac6d8c` — spells it 0 '
+        + 'times across 9800 tracked files, against lit controls `TTL` 181 and `tenant` 1235 on the '
+        + 'same corpus (0 across 9546, against 181 and 1200, at db11afd49; 0 across 9283, against 181 and 1185, at dd3f7e1be; 0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
         + 'and 987, at 62597c588).',
       acceptanceCriteria:
         'Every schema-level tenant isolation source spells `performance.schemaCacheTtlSeconds`; '

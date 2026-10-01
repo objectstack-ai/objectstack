@@ -53,7 +53,21 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SqlDriver } from '../src/index.js';
 import type { FilterCondition } from '@objectstack/spec/data';
-import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
+import { lowerFilterCondition, markFilterSubtreeProvenance } from '@objectstack/spec/data';
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5 and 9, as amended] What a seam hands this
+ * driver: the filter through the shared lowering, whose rule 3 carries the
+ * NULL-polarity ruling this file pins — each `$not` leaf made total in the
+ * direction its operator answers for a missing value, and `$ne` / `$nin` /
+ * `$notContains` given their NULL escape. `SqlDriver` no longer carries its own
+ * copy of the `$not` rewrite (`nullSafeNegationOperand`), so the row answers
+ * below are the ones every seamed read gets, unchanged; `sqlFor` still shows
+ * what the driver compiles for the filter it is HANDED, and the guard pins
+ * hand it the seam's output. The table has no `datetime` column, so the
+ * whole-day rule has nothing to rewrite.
+ */
+const seamed = (where: unknown): unknown => lowerFilterCondition(where, { isDatetimeColumn: () => false });
 
 /**
  * Rows 3 and 4 are the point: `stage` is NULL in both, and row 3 additionally
@@ -96,7 +110,7 @@ describe('[#5146] SqlDriver compiles $not NULL-safely', () => {
   const ids = async (where: unknown): Promise<string[]> => {
     const rows = await driver.find('deal', {
       fields: ['id'],
-      where: where as FilterCondition,
+      where: seamed(where) as FilterCondition,
     });
     return rows.map((r: any) => String(r.id)).sort();
   };
@@ -117,7 +131,7 @@ describe('[#5146] SqlDriver compiles $not NULL-safely', () => {
     });
 
     it('the guard rides the leaf, so the emitted SQL is NOT-of-a-total predicate', () => {
-      const sql = sqlFor({ $not: { stage: 'won' } });
+      const sql = sqlFor(seamed({ $not: { stage: 'won' } }));
       expect(sql).toContain('`stage` is not null');
       expect(sql).toContain("`stage` = 'won'");
       expect(sql).toMatch(/^select `id` from `deal` where not \(/);
@@ -127,7 +141,7 @@ describe('[#5146] SqlDriver compiles $not NULL-safely', () => {
       // `NOT (a = 1 AND b = 2)` is UNKNOWN when either column is NULL, so both
       // row 3 (NULL stage) and row 4 (NULL stage AND NULL owner) were dropped.
       expect(await ids({ $not: { stage: 'won', owner: 'u1' } })).toEqual(['2', '3', '4']);
-      const sql = sqlFor({ $not: { stage: 'won', owner: 'u1' } });
+      const sql = sqlFor(seamed({ $not: { stage: 'won', owner: 'u1' } }));
       expect(sql).toContain('`stage` is not null');
       expect(sql).toContain('`owner` is not null');
     });
@@ -180,7 +194,7 @@ describe('[#5146] SqlDriver compiles $not NULL-safely', () => {
       // `OR stage IS NULL` would have handed back rows 3 and 4, i.e. rows the
       // filter excludes — the silent widening class of #2704 / #5134.
       expect(await ids({ $not: { stage: { $ne: 'won' } } })).toEqual(['1']);
-      expect(sqlFor({ $not: { stage: { $ne: 'won' } } })).toContain('`stage` is null');
+      expect(sqlFor(seamed({ $not: { stage: { $ne: 'won' } } }))).toContain('`stage` is null');
     });
 
     it('$not of $nin is not widened either', async () => {

@@ -63,6 +63,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
+  lowerFilterCondition,
   TEMPORAL_CASES,
   TEMPORAL_NOW,
   TEMPORAL_ROWS,
@@ -75,6 +76,21 @@ import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stu
 
 const resolveTokens = <T,>(filter: T): T =>
   resolveFilterTokens(filter, { now: new Date(TEMPORAL_NOW) });
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5, 7 and 9, as amended] What a TYPED seam hands
+ * this driver: the case's filter through the shared lowering, reading the
+ * object's declared field map (`datetime` columns only). The remote face keeps
+ * no whole-day copy any more (`toRemoteFilter` splits a `$between` and converts
+ * comparands to storage form, nothing else), so the whole-day cells are
+ * answered by the lowered filter, as on every seam-fed path; the expected rows
+ * are the shared table's, unchanged. Tokens resolve first, then lower (item 3).
+ */
+const lowered = <T,>(object: { fields: Record<string, { type: string }> }, filter: T): T =>
+  lowerFilterCondition(filter, {
+    isDatetimeColumn: (column) =>
+      Object.prototype.hasOwnProperty.call(object.fields, column) && object.fields[column]!.type === 'datetime',
+  });
 
 const CONFORMANCE_OBJECT = {
   name: 'conformance',
@@ -146,14 +162,14 @@ describe('TursoDriver remote — temporal conformance', () => {
 
   for (const c of TEMPORAL_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('conformance', { where: c.filter });
+      const rows = await driver.find('conformance', { where: lowered(CONFORMANCE_OBJECT, c.filter) });
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });
 
     if (c.tokenFilter) {
       it(`${c.name} — via relative tokens`, async () => {
-        const rows = await driver.find('conformance', { where: resolveTokens(c.tokenFilter) });
+        const rows = await driver.find('conformance', { where: lowered(CONFORMANCE_OBJECT, resolveTokens(c.tokenFilter)) });
         const got = (rows as any[]).map((r) => r.id).sort();
         expect(got, c.note).toEqual([...c.expected].sort());
       });
@@ -161,7 +177,7 @@ describe('TursoDriver remote — temporal conformance', () => {
   }
 
   it('count() answers the same window find() does', async () => {
-    const window = { at: { $gte: '2026-04-29', $lte: '2026-07-28' } };
+    const window = lowered(CONFORMANCE_OBJECT, { at: { $gte: '2026-04-29', $lte: '2026-07-28' } });
     expect(await driver.count('conformance', { where: window })).toBe(4);
   });
 
@@ -206,7 +222,7 @@ describe('TursoDriver remote — Field.time conformance', () => {
 
   for (const c of TEMPORAL_TIME_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('time_conformance', { where: c.filter });
+      const rows = await driver.find('time_conformance', { where: lowered(TIME_CONFORMANCE_OBJECT, c.filter) });
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });
@@ -316,7 +332,7 @@ describe('TursoDriver remote — temporal conformance on un-backfilled legacy st
   // orthogonal to storage form and already swept above.
   for (const c of TEMPORAL_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('conformance', { where: c.filter });
+      const rows = await driver.find('conformance', { where: lowered(CONFORMANCE_OBJECT, c.filter) });
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });
@@ -366,7 +382,7 @@ describe('TursoDriver remote — Field.time conformance on un-backfilled legacy 
 
   for (const c of TEMPORAL_TIME_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('time_conformance', { where: c.filter });
+      const rows = await driver.find('time_conformance', { where: lowered(TIME_CONFORMANCE_OBJECT, c.filter) });
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });

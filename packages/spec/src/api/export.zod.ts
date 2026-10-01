@@ -327,8 +327,10 @@ export type ImportRequestParsed = z.infer<typeof ImportRequestSchema>;
  * - `warnings` was SERVED before it was declared: the REST import runner's
  *   dry-run branch (`packages/rest/src/import-runner.ts`) copies the admitted
  *   findings of the engine's validate verdict onto the row, and both the
- *   synchronous route and the async job's results carry it (pinned at the wire
- *   by `packages/rest/src/import-dryrun-parity.test.ts`). Undeclared, it was
+ *   synchronous route and the async job's results carry it (the synchronous
+ *   route is pinned at the wire by
+ *   `packages/rest/src/import-dryrun-parity.test.ts`; no test reads it off the
+ *   async job's results). Undeclared, it was
  *   invisible to every reader typed by this schema, and
  *   `ImportRowResultSchema.parse` stripped it.
  * - `droppedFields` is DECLARED AHEAD of its producer, per row rather than

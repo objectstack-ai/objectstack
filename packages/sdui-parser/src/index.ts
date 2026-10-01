@@ -15,12 +15,6 @@ export {
   DASHBOARD_WIDGET_HOST_TYPES,
   UNCONSUMED_WIDGET_OPTION,
 } from './dashboard-widget-options.js';
-export {
-  checkKanbanQuickAdd,
-  INERT_QUICK_ADD,
-  QUICK_ADD_HOST_TYPES,
-  QUICK_ADD_KEY,
-} from './kanban-quick-add.js';
 export { generateDts, propsName, generateBlockList } from './codegen.js';
 export type { CodegenOptions } from './codegen.js';
 export { inputTypeArms, canonicalizeInputType, MANIFEST_INPUT_TYPES } from './input-type.js';

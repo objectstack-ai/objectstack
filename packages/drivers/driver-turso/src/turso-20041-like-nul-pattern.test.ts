@@ -24,9 +24,20 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createClient, type Client, type InStatement } from '@libsql/client';
 import type { DriverQuery } from '@objectstack/spec/contracts';
-import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
+import { lowerFilterCondition, markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import { TursoDriver } from './turso-driver.js';
 import { asLibsqlClient, makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5 and 9, as amended] What a seam hands this
+ * driver: the filter through the shared lowering, whose rule 3 makes each
+ * `$not` leaf total in the direction its operator answers for a row with no
+ * value (#5146, #5298). Neither face of `TursoDriver` carries its own copy of
+ * that rewrite any more, so the answers below are the ones every seamed read
+ * gets, unchanged. No column here is a declared `datetime`, so the whole-day rule has nothing
+ * to rewrite.
+ */
+const seamed = <T,>(where: T): T => lowerFilterCondition(where, { isDatetimeColumn: () => false });
 
 interface WireBearingError extends Error {
   code?: string;
@@ -203,7 +214,7 @@ describe('[#20041] TursoDriver LOCAL and REMOTE refuse a $like / $ilike pattern 
   for (const c of CONTROLS) {
     it(`control: ${JSON.stringify(c.where)} (no U+0000) answers the same rows on every transport`, async () => {
       const labels = async (driver: TursoDriver) =>
-        ((await driver.find(OBJECT.name, { where: c.where }, { bypassTenantAudit: true })) as Array<{ label: string }>)
+        ((await driver.find(OBJECT.name, { where: seamed(c.where) }, { bypassTenantAudit: true })) as Array<{ label: string }>)
           .map((r) => r.label)
           .sort();
       expect({ local: await labels(local), remote: await labels(remote), remoteLibsql: await labels(remoteLibsql) })
