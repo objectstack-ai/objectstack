@@ -22,8 +22,9 @@
     // dependency's `exports` map — i.e. `dist/index.d.ts`, A BUILD ARTIFACT —
     // so this package's `typecheck` would render a verdict about the last
     // `pnpm build` rather than about the producer's source in the checkout.
-    // `check:type-source-resolution` refuses exactly that, and its header
-    // states why the dangerous case is a typecheck that PASSES.
+    // `check:type-source-resolution` refused exactly that — the dangerous case
+    // being a typecheck that PASSES against a stale `dist` — until it was
+    // retired on 2026-09-18 (#18373); no gate checks this rule now.
     //
     // ONE rule, not two, and that is the predicate rather than a shortcut:
     // `@objectstack/metadata-protocol` publishes a single entry point (its

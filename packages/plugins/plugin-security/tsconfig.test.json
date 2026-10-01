@@ -54,16 +54,18 @@
 //     that declared its own `paths` would REPLACE this map rather than merge
 //     into it, silently sending that specifier back to `dist/` — a BUILD
 //     ARTIFACT — and this program's verdict would then be about the last
-//     `pnpm build` (`check:type-source-resolution`'s header states why the
-//     dangerous case is the typecheck that PASSES). This file declares no
-//     `paths` at all, so the rule stands.
+//     `pnpm build` (the dangerous case is the typecheck that PASSES, as the
+//     header of `check:type-source-resolution` argued until that gate was
+//     retired on 2026-09-18, #18373). This file declares no `paths` at all, so
+//     the rule stands.
 //     ⛔ Not extended to the four specifiers `vitest.config.ts` aliases to
 //     source: PR #12570 measured that route on `packages/rest` and it made the
 //     test layer WORSE (37 -> 42 errors, the +5 being TS6133 in other packages'
 //     source billed to a layer that cannot pay it down). The deps this program
-//     newly reaches through `dist/*.d.ts` are declared instead, in
+//     newly reaches through `dist/*.d.ts` were declared instead, in
 //     `scripts/check-type-source-resolution.mjs`'s registry, on that gate's
-//     onboarding limb — with the before/after numbers stated in place.
+//     onboarding limb — with the before/after numbers stated in place — until
+//     that gate and its registry were retired (readable at `03b7b8187^`).
 //
 // There is NO `test-typecheck-debt.json` beside this config, on purpose — the
 // call `packages/metadata-core`, `packages/metadata-fs` and
