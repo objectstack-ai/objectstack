@@ -8499,9 +8499,10 @@ const step18: MigrationStep = {
         + 'invent those renderings.',
       acceptanceCriteria:
         '⚠️ WHICH DOOR: the refusal is the spec\'s, and it reaches every door that parses the spec '
-        + 'schema — measured on `defineStack` (it throws, naming the widget), the stack schema that '
-        + '`os validate` / `os build` / `os lint` read, and the metadata save path, where an ACTIVE save '
-        + 'and a DRAFT save of such a dashboard both answer `422 INVALID_METADATA` at '
+        + 'schema — measured on `defineStack`, which throws naming the widget; on `os validate`, which '
+        + 'loads the configuration through `defineStack` and fails there with that same issue; on the '
+        + 'stack schema and the `dashboard` metadata-type schema; and on the metadata save path, where '
+        + 'an ACTIVE save and a DRAFT save of such a dashboard both answer `422 INVALID_METADATA` at '
         + '`widgets[N].values` and persist nothing. It is NOT refused by objectui\'s client-side '
         + 'authoring door until that door chains the new export: `@object-ui/types` builds its '
         + '`DashboardWidgetSchema` from a `.shape` spread of the spec\'s, which carries the FIELDS and '
@@ -8511,7 +8512,7 @@ const step18: MigrationStep = {
         + '⚠️ AND THE TODO CANNOT NAME YOUR MEASURES: a `SemanticMigration` is static prose emitted once '
         + 'per hop, with no per-document interpolation and no filtering by whether the stack carries the '
         + 'shape, so `os migrate meta` prints THIS paragraph, not a list of your widgets. The refusal is '
-        + 'what names them, per widget, on the re-parse — drive the fix off `os build`, not off the '
+        + 'what names them, per widget, on the re-parse — drive the fix off `os validate`, not off the '
         + 'migrate output. '
         + 'WHAT IS REFUSED, exactly: ONE `custom` issue at `widgets[N].values`, naming the widget\'s '
         + '`id`, the number of measures and the authored `type`, when `dimensions` is absent or an empty '

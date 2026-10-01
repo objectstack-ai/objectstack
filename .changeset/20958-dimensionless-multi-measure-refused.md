@@ -18,9 +18,11 @@ as `dashboard-widget-dimensionless-multi-measure-refused`.
 **What was wrong.** Outside the metric family, `DashboardWidgetSchema.values`
 (`z.array(z.string()).min(1)`) had no upper bound. Measured on this tree before
 the change: `{ type: 'pie', dataset: 'sales', values: ['a', 'b'] }` with no
-`dimensions` parsed, and so did `donut`, `funnel`, `scatter`, `radar`, `treemap`
-and `sankey`, at `DashboardSchema`, `defineStack` and the metadata save path —
-while `bogusProp` on the same widget was refused by name, the lit control. With
+`dimensions` parsed through `DashboardWidgetSchema`, and so did `donut`,
+`funnel`, `scatter`, `radar`, `treemap` and `sankey` — while `bogusProp` on the
+same widget was refused by name, the lit control. After it, the same body is
+refused at `defineStack`, at `os validate` (which loads through `defineStack`),
+and on the metadata save path (`422 INVALID_METADATA`, active and draft). With
 nothing to split by, those seven types draw `values[0]`: every measure after it
 is queried and dropped on the floor by the renderer. The maintainer's ruling D
 (「协议不正确的应该先修改协议」) fixes the protocol where it admits measures a
