@@ -192,7 +192,7 @@ jobs:
     # workflow) — while the hung job holds a runner for up to five more hours,
     # still `in_progress`. With the wall, a hung run ends `cancelled`, carrying
     # GitHub's failure annotation "The job has exceeded the maximum execution
-    # time of …", within minutes of the queue's own window.
+    # time of …", before the queue's own window closes.
     #
     # Measured: p50 15.8 / p99 32.6 / max 32.7 minutes (n = 81); a docs-only
     # change runs it in about 7–11, a code change in 25–33. The window, for
@@ -201,17 +201,18 @@ jobs:
     # rows), job `started_at` → `completed_at` from the jobs API.
     #
     # The rule, for every job in this file: about 2× the measured maximum,
-    # rounded to a 5-minute grain, never below the maximum plus 10 minutes,
-    # never above the queue's 60-minute window. Here 2 × 32.7 = 65.4, capped at
-    # 60. Above 60 the stretch between the queue removing an entry and this
-    # check turning `cancelled` only grows, so when the measured maximum nears
-    # the wall the remedy is a faster job (or the queue's own setting, which is
-    # the maintainer's) — never a higher number here. Re-measure over a fresh
-    # window before changing any value in this file. Four of them sit under the
-    # maximum-plus-10 clause — the consumer-gates, debt-ledger and source-gates
-    # lanes by 0.1, 2.5 and 3.7 minutes, the aggregate's 10 by 0.2 — and all
-    # six meet a 10-minute floor.
-    timeout-minutes: 60
+    # rounded to a 5-minute grain, never below 10 minutes, never above the
+    # queue's 60-minute window. Here the window binds, not 2× (2 × 32.7 =
+    # 65.4), and the cap is placed BELOW it, at 55: this job's clock starts
+    # only once a runner picks it up, after the queue's has started, so the
+    # five minutes are room for that pickup, and 55 still leaves 22 minutes
+    # (1.7×) over the measured maximum. Above 60 the stretch between the queue
+    # removing an entry and this check turning `cancelled` only grows, so when
+    # the measured maximum nears the wall the remedy is a faster job (or the
+    # queue's own setting, which is the maintainer's) — never a higher number
+    # here. Re-measure over a fresh window before changing any value in this
+    # file.
+    timeout-minutes: 55
     permissions:
       contents: read
       # ⭐ Read-only, and it buys exactly one thing: the LAST step of this job
