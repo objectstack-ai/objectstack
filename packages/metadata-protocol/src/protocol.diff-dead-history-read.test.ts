@@ -625,7 +625,7 @@ describe('#20451 — the default from side is the nearest earlier row whose body
     });
 
     it('the walk compares RAW bodies: a credential-only rotation stops it, and the served values stay redacted', async () => {
-        // The #8671 ruling (diff raw, redact what is emitted) applies to the
+        // The ruling commit 75e66fc8e implements (diff raw, redact what is emitted) applies to the
         // walk's comparison too. Compared redacted, the two bodies below are
         // equal and the walk would pass the rotation by.
         const { engine, tables } = makeStubEngine();

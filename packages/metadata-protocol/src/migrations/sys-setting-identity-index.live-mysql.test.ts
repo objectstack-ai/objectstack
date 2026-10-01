@@ -64,7 +64,7 @@
  * Everything runs in its OWN database, created on the spot, because
  * `sys_setting` is a fixed platform table name that other live suites also use.
  *
- * That database is DERIVED FROM THIS FILE's path (#10382) rather than named by
+ * That database is DERIVED FROM THIS FILE's path (commit ee09d2119) rather than named by
  * a constant. It used to be the literal `os_metadata_protocol_9434`, which was
  * distinct from the sibling suite's only because two authors happened to type
  * two different strings — and `afterAll` below issues `drop database`, so a

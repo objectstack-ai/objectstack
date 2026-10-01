@@ -6,7 +6,7 @@
  *
  * ## The defect
  *
- * #6483 / PR #6608 flipped six types to `allowOrgOverride: false`. That closed
+ * Commit ee58392e1 flipped six types to `allowOrgOverride: false`. That closed
  * the WRITE door and deliberately left the READ path alone: `supportsOverlay`
  * stayed `true`, so an overlay row authored BEFORE the rollback still merges
  * overlay-wins and still shapes the effective body. Removing it was refused at
@@ -266,7 +266,7 @@ describe('#6960 — the registry is the tier boundary, and it is DATA', () => {
         expect([...ROLLED_BACK_OVERLAYABLE_TYPES]).toEqual([
             'app', 'book', 'dataset', 'page', 'permission', 'position', 'skill', 'tool',
         ]);
-        // The six #6483 / PR #6608 named, all present.
+        // The six commit ee58392e1 named, all present.
         for (const t of ['permission', 'position', 'page', 'app', 'dataset', 'book']) {
             expect(ROLLED_BACK_OVERLAYABLE_TYPES).toContain(t);
         }

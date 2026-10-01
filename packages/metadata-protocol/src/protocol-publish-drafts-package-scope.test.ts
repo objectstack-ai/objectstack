@@ -306,9 +306,9 @@ describe('publishPackageDrafts — two packages holding drafts for one (type, na
 });
 
 /**
- * [#10350] The PER-ITEM door's half of the same key.
+ * [commit 490879ad0] The PER-ITEM door's half of the same key.
  *
- * `POST /meta/:type/:name/publish?package=PKG_ID` (#10063) made
+ * `POST /meta/:type/:name/publish?package=PKG_ID` (commit 9e04c3e35) made
  * `publishMetaItem` a package-naming caller too, so the narrowing the cases
  * above pin for `publishPackageDrafts` now has a SECOND entry point. The
  * runtime path already carried the value — `publishMetaItem` forwards its
@@ -396,8 +396,8 @@ describe('publishMetaItem — the per-item door names a package too (#10350)', (
 });
 
 /**
- * [#11003] The ORG-SCOPE probes' half of the same ADR-0048 key — maintainer
- * ruling 2026-08-22, option A (recorded on the issue): the scope probes ask
+ * [commit c74aefe63] The ORG-SCOPE probes' half of the same ADR-0048 key — maintainer
+ * ruling 2026-08-22, option A (recorded in that commit's message): the scope probes ask
  * the promote's question, i.e. `resolveDraftOrgScopeForPublish` threads the
  * stated `packageId` into BOTH of its `sys_metadata` probes.
  *
@@ -407,7 +407,7 @@ describe('publishMetaItem — the per-item door names a package too (#10350)', (
  * scopes, a package-stating publish resolved the wrong scope: probe 1 was
  * package-agnostic, matched the OTHER package's row in the caller's org,
  * named that org as the scope — and the promote (whose `whereFor` IS
- * package-exact since #8907/#10350) then found nothing there and answered
+ * package-exact since #8907/commit 490879ad0) then found nothing there and answered
  * `404 [no_draft]` over a draft sitting env-wide, publishable, and named by
  * the caller.
  *
@@ -596,7 +596,7 @@ describe('publishMetaItem — the scope probes ask the promote\'s question (#110
         // No `packageId` key at all: the probes stay package-agnostic, the
         // promote matches any package, and the ADR-0005 precedence picks the
         // caller's own org row — app.other's, whatever package it belongs to.
-        // This is the same absent-key contract the #10350 case above pins
+        // This is the same absent-key contract the case above (commit 490879ad0) pins
         // env-wide, exercised HERE because these probes only run for an
         // org-scoped caller (`requestOrgId === null` returns early).
         const res = await protocol.publishMetaItem({

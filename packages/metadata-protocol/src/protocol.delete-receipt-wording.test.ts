@@ -165,9 +165,9 @@ describe('#5927 — a delete receipt names what actually happened', () => {
         expect(entry('object')).toMatchObject({ allowRuntimeCreate: true, allowOrgOverride: false });
         expect(entry('view')).toMatchObject({ allowRuntimeCreate: true, allowOrgOverride: true });
         expect(entry('job')).toMatchObject({ allowRuntimeCreate: false, allowOrgOverride: false });
-        // #6283 → #6483 — the overlay-less-yet-overridable specimen the last
+        // #6283 → commit ee58392e1 — the overlay-less-yet-overridable specimen the last
         // case in this file needs. It was `flow` until #6283 rolled that
-        // flag back to `false` (ADR-0005:57), then `action` until #6483
+        // flag back to `false` (ADR-0005:57), then `action` until commit ee58392e1
         // rolled back the remaining nine unratified `true` flags. The
         // population is now EMPTY by ruling and pinned empty; the last case
         // reaches the pairing through `OS_METADATA_WRITABLE` — the one
@@ -235,7 +235,7 @@ describe('#5927 — a delete receipt names what actually happened', () => {
         //
         // The specimen was `flow` until #6283 rolled that type's
         // `allowOrgOverride` back to `false` (ADR-0005:57), then bare
-        // `action` until #6483 rolled back the remaining nine unratified
+        // `action` until commit ee58392e1 rolled back the remaining nine unratified
         // flags — the premise pin above now holds the population EMPTY. The
         // pairing stays reachable through `OS_METADATA_WRITABLE` (ADR-0005's
         // documented operator escape hatch, consulted by both write gates),

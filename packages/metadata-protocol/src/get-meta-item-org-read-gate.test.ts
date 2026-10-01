@@ -1,13 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#14770] `getMetaItem` — the SINGULAR verb — applies the registry read gate
+ * [commit d5cbb44f3] `getMetaItem` — the SINGULAR verb — applies the registry read gate
  * ITSELF, so a caller cannot spend a raw active organization on a type that has
  * no per-org read channel.
  *
  * ── The defect, and why the singular verb is the sharper half ─────────────
  *
- * #14683 (PR #14767) moved {@link organizationIdForMetaRead} INSIDE the PLURAL
+ * Commit 96326040f (PR #14767) moved {@link organizationIdForMetaRead} INSIDE the PLURAL
  * verb, `getMetaItems`, and deliberately did not carry to this one. There, the
  * two `queryByOrg` reads are UNIONed, so an ungated organization can only ADD
  * rows — the resurrection that card is about. Here the two `findOverlay` reads
@@ -37,7 +37,7 @@
  * The inner precedence rests on two other things: ADR-0005 design principle 3
  * stores the ENTIRE item document per overlay row (so a layering has nothing
  * to layer), and the field-level patch model that would have given "layering"
- * any meaning was retired and deleted whole under ADR-0049 (#13185, PR #13186,
+ * any meaning was retired and deleted whole under ADR-0049 (ADR-0005 principle 3's correction, commit 9e0ba21a1,
  * maintainer ruling 2026-08-29), with ADR-0126 §6 ruling out the phase it was
  * held for; and `organizationIdForMetaRead`'s own docblock quotes this very
  * expression as the intended shape while defining #9454. ADR-0029 D9 reaches
@@ -374,7 +374,7 @@ describe('§4 an already-gating caller receives the same scope it did before', (
         //
         // ⛔ This is why the gate sits AFTER the fold. `declaresOrgOverride`
         // tolerates the MANIFEST plurals and not the URL-only ones
-        // (`translations` / `email_templates` have no manifest key) — #10340
+        // (`translations` / `email_templates` have no manifest key) — commit 26f3588fb
         // measured what that costs when a raw segment reaches the predicate.
         for (const spelling of ALL_SPELLINGS) {
             const doorGate = organizationIdForMetaRead(canonicalMetaUrlType(spelling), ORG);

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #8671 — `GET /api/v1/meta/:type/:name/diff` must not serve stored credential
+ * Commit 75e66fc8e — `GET /api/v1/meta/:type/:name/diff` must not serve stored credential
  * VALUES, while still reporting that the credential CHANGED.
  *
  * The endpoint is routed and live (`rest-server.ts` answers `res.json(result)`

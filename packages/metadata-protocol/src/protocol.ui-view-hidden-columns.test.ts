@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#13259] `hidden` is a floor on BOTH passes of `getUiView`'s list branch.
+// [commit 2a75270b1] `hidden` is a floor on BOTH passes of `getUiView`'s list branch.
 //
 // `FieldSchema` declares `hidden` as "Hidden from default UI"
 // (`packages/spec/src/data/field.zod.ts`). `getUiView` IS the default UI — it
