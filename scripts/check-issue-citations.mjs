@@ -1424,10 +1424,13 @@ export async function selfTest() {
     check(live.rows.every((r) => !r.qualifier || repositoryOf(r.qualifier) !== null),
       'every qualifier the live corpus keeps must name a repository — an unrecognised one kept is the open grammar back');
     /* The three arms the #20636 closeout opened each reach the tree -- the
-     * floor that tells "no such spelling left" from "the arm went blind". */
-    check(live.rows.some((r) => new RegExp(`#${r.number}-[A-Za-z]`).test(r.context)),
+     * floor that tells "no such spelling left" from "the arm went blind". A
+     * row counts only when its number is spelled ONCE on its line, so the same
+     * number cited elsewhere on that line cannot stand in for the arm. */
+    const once = (r) => (r.context.match(new RegExp(`#${r.number}(?!\\d)`, 'g')) ?? []).length === 1;
+    check(live.rows.some((r) => once(r) && new RegExp(`#${r.number}-[A-Za-z]`).test(r.context)),
       'the live corpus must yield a `#N-word` citation — the hyphen arm reaching the tree');
-    check(live.rows.some((r) => new RegExp(`\\d/#${r.number}(?!\\d)`).test(r.context)),
+    check(live.rows.some((r) => once(r) && new RegExp(`\\d/#${r.number}(?!\\d)`).test(r.context)),
       'the live corpus must yield a slash-joined `#A/#B` second number — the continuation reaching the tree');
     check(live.rows.some((r) => /^https?:\/\//.test(r.raw)),
       'the live corpus must yield a URL-spelled citation — the URL arm reaching the tree');
