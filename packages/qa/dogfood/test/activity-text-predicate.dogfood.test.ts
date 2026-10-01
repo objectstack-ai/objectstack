@@ -37,9 +37,9 @@
 //   a filter that names no parent object.
 // - The same reader filters the text of a parent it is served in full, as
 //   before; the control filters every column of a pinned parent, as before.
-// - The platform admin, served every field of every object these rows can
-//   concern, filters and searches all three members with no parent named, as
-//   before.
+// - The platform admin, granted the fixture's two capabilities and so served
+//   every field of every object these rows can concern, filters and searches
+//   all three members with no parent named, as before.
 //
 // Fixtures are synthetic. ⚠️ No test title states a value or a column.
 // `@objectstack/plugin-audit` resolves through its BUILT output here (a ledgered
@@ -251,6 +251,17 @@ describe('[#21154] a query over activity text or the approval snapshot, by a rea
     const idOf = async (object: string, where: Record<string, unknown>) =>
       String((await ql.findOne(object, { where, context: { isSystem: true } }))?.id ?? '');
 
+    // The platform admin is served every field of every platform object, but the
+    // fixture's two capability-gated fields only with the capabilities: grant
+    // them, so the admin is a reader withheld nothing on any object these rows
+    // can concern — the reader an unpinned query is admitted for.
+    const adminId = await idOf('sys_user', { email: 'admin@objectos.ai' });
+    expect(adminId, 'the harness admin is seeded').toBeTruthy();
+    for (const name of READERS.control) {
+      const setId = await idOf('sys_permission_set', { name });
+      await ql.insert('sys_user_permission_set', { user_id: adminId, permission_set_id: setId }, SYS);
+    }
+
     for (const who of [...Object.keys(READERS), 'writer']) {
       const email = `atp-${who}@verify.test`;
       token[who] = await stack.signUp(email);
@@ -436,7 +447,7 @@ describe('[#21154] a query over activity text or the approval snapshot, by a rea
     }
   });
 
-  it('control: the platform admin filters the activity stream, the ledger and the approval snapshot with no parent named, as before', async () => {
+  it('control: the platform admin, served every field of every object, filters the activity stream, the ledger and the approval snapshot with no parent named, as before', async () => {
     const answered = async (object: string, where: unknown, extra = '') => {
       const a = await list('admin', object, where, extra);
       expect(a.status, a.text).toBe(200);
