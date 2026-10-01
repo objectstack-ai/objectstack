@@ -33,7 +33,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
-import type { EngineQueryOptions } from '@objectstack/spec/data';
+import type { EngineAggregateOptions, EngineQueryOptions } from '@objectstack/spec/data';
 
 import { AuditPlugin } from './audit-plugin.js';
 import { redactActivityRows } from './activity-field-redaction.js';
@@ -184,6 +184,15 @@ describe('[#21154] a query over the activity text by a reader withheld a parent 
     engine.find(ACTIVITY, { where, context, ...extra }) as Promise<Row[]>;
   const contains = (c: ColumnCase, value: string, pinned = true) =>
     pinned ? { object_name: c.parent, [c.column]: { $contains: value } } : { [c.column]: { $contains: value } };
+  const grouped = (context: Ctx, c: ColumnCase) => {
+    const options: EngineAggregateOptions = {
+      where: { object_name: c.parent },
+      groupBy: [c.column],
+      aggregations: [{ function: 'count', alias: 'n' }],
+      context,
+    };
+    return engine.aggregate(ACTIVITY, options);
+  };
 
   beforeAll(async () => {
     kernel = new ObjectKernel({ logger: { level: 'silent' } });
@@ -252,15 +261,7 @@ describe('[#21154] a query over the activity text by a reader withheld a parent 
         });
 
         it(`value-bearing column ${i + 1}: a grouping by it is refused in the aggregate words`, async () => {
-          await expectRefused(
-            engine.aggregate(ACTIVITY, {
-              where: { object_name: c.parent },
-              groupBy: [c.column],
-              aggregations: [{ function: 'count', alias: 'n' }],
-              context: reader.ctx,
-            } as any),
-            aggregateWords([c.column]),
-          );
+          await expectRefused(grouped(reader.ctx, c), aggregateWords([c.column]));
         });
 
         it(`value-bearing column ${i + 1}: a sort by it is refused`, async () => {
@@ -276,8 +277,8 @@ describe('[#21154] a query over the activity text by a reader withheld a parent 
         // columns), so the words name every value-bearing column it reaches.
         const searched = /^\[Security\] Access denied: query on 'sys_activity' references field\(s\) not readable by the caller: summary(, [a-z_]+)*\.$/;
         const c = reader.cases[0];
-        await expectRefused(find(reader.ctx, { object_name: c.parent }, { search: c.stored } as any), searched);
-        await expectRefused(find(reader.ctx, { object_name: c.parent }, { search: V.none } as any), searched);
+        await expectRefused(find(reader.ctx, { object_name: c.parent }, { search: c.stored }), searched);
+        await expectRefused(find(reader.ctx, { object_name: c.parent }, { search: V.none }), searched);
       });
 
       it('the same reader queries the text of a parent it is served in full, as before', async () => {
@@ -320,13 +321,7 @@ describe('[#21154] a query over the activity text by a reader withheld a parent 
       }
     }
     const c = READER_CASES[0].cases[0];
-    const grouped = await engine.aggregate(ACTIVITY, {
-      where: { object_name: c.parent },
-      groupBy: [c.column],
-      aggregations: [{ function: 'count', alias: 'n' }],
-      context: CONTROL,
-    } as any);
-    expect(grouped.length).toBeGreaterThan(0);
+    expect((await grouped(CONTROL, c)).length).toBeGreaterThan(0);
     const sorted = await find(CONTROL, { object_name: c.parent }, { orderBy: [{ field: c.column, order: 'asc' }] });
     expect(sorted.length).toBeGreaterThan(0);
   });

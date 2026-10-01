@@ -27,6 +27,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import type { EngineAggregateOptions, EngineQueryOptions } from '@objectstack/spec/data';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
 import { namedSnapshotColumn, pinnedSubjectObject } from './payload-predicate-guard.js';
@@ -38,9 +39,10 @@ const OPEN_SUBJECT = 'ppg_open';
 const HARNESS_PACKAGE = 'com.objectstack.test.payload-predicate-guard';
 const SYS = { isSystem: true } as const;
 
-const MASKED_READER = { userId: 'u_ppg_masked', positions: ['org_member'] };
-const UNSERVED_READER = { userId: 'u_ppg_unserved', positions: ['org_member'] };
-const CONTROL = { userId: 'u_ppg_control', positions: ['org_member'] };
+type Ctx = EngineQueryOptions['context'];
+const MASKED_READER: Ctx = { userId: 'u_ppg_masked', positions: ['org_member'] };
+const UNSERVED_READER: Ctx = { userId: 'u_ppg_unserved', positions: ['org_member'] };
+const CONTROL: Ctx = { userId: 'u_ppg_control', positions: ['org_member'] };
 
 /** Synthetic values. */
 const V = { masked: 'PPGMASKED51', unserved: 'PPGUNSERVED52', open: 'PPGOPEN53', none: 'PPGNOMATCH54' };
@@ -108,10 +110,19 @@ describe('[#21154] a query over the approval snapshot by a reader withheld a sub
     },
   };
 
-  const find = (context: unknown, where: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
-    engine.find(REQUEST_OBJECT, { where, context, ...extra } as any) as Promise<Array<Record<string, any>>>;
+  const find = (context: Ctx, where: Record<string, unknown>, extra: EngineQueryOptions = {}) =>
+    engine.find(REQUEST_OBJECT, { where, context, ...extra }) as Promise<Array<Record<string, any>>>;
   const contains = (value: string, subject: string | null = SUBJECT) =>
     subject ? { object_name: subject, payload_json: { $contains: value } } : { payload_json: { $contains: value } };
+  const grouped = (context: Ctx) => {
+    const options: EngineAggregateOptions = {
+      where: { object_name: SUBJECT },
+      groupBy: ['payload_json'],
+      aggregations: [{ function: 'count', alias: 'n' }],
+      context,
+    };
+    return engine.aggregate(REQUEST_OBJECT, options);
+  };
 
   beforeAll(async () => {
     engine = new ObjectQL();
@@ -130,8 +141,8 @@ describe('[#21154] a query over the approval snapshot by a reader withheld a sub
       object_name: subject, record_id: String(row.id), status: 'pending',
       process_name: 'flow:ppg', submitter_id: 'u_ppg_submitter', payload_json: JSON.stringify(row),
     });
-    await engine.insert(REQUEST_OBJECT, snapshot(SUBJECT, { id: 's1', name: 'subject', f_masked: V.masked, f_unserved: V.unserved }), { context: SYS } as any);
-    await engine.insert(REQUEST_OBJECT, snapshot(OPEN_SUBJECT, { id: 'o1', name: 'open', f_open: V.open }), { context: SYS } as any);
+    await engine.insert(REQUEST_OBJECT, snapshot(SUBJECT, { id: 's1', name: 'subject', f_masked: V.masked, f_unserved: V.unserved }), { context: SYS });
+    await engine.insert(REQUEST_OBJECT, snapshot(OPEN_SUBJECT, { id: 'o1', name: 'open', f_open: V.open }), { context: SYS });
 
     // The plugin mounts its own generic-door seams onto this engine.
     const services: Record<string, unknown> = { objectql: engine, security };
@@ -168,20 +179,12 @@ describe('[#21154] a query over the approval snapshot by a reader withheld a sub
       });
 
       it('a count under a matching and a non-matching filter is refused', async () => {
-        await expectRefused(engine.count(REQUEST_OBJECT, { where: contains(stored), context: reader } as any), predicateWords);
-        await expectRefused(engine.count(REQUEST_OBJECT, { where: contains(V.none), context: reader } as any), predicateWords);
+        await expectRefused(engine.count(REQUEST_OBJECT, { where: contains(stored), context: reader }), predicateWords);
+        await expectRefused(engine.count(REQUEST_OBJECT, { where: contains(V.none), context: reader }), predicateWords);
       });
 
       it('a grouping by the snapshot is refused in the aggregate words', async () => {
-        await expectRefused(
-          engine.aggregate(REQUEST_OBJECT, {
-            where: { object_name: SUBJECT },
-            groupBy: ['payload_json'],
-            aggregations: [{ function: 'count', alias: 'n' }],
-            context: reader,
-          } as any),
-          aggregateWords,
-        );
+        await expectRefused(grouped(reader), aggregateWords);
       });
 
       it('a sort by the snapshot is refused', async () => {
@@ -209,13 +212,7 @@ describe('[#21154] a query over the approval snapshot by a reader withheld a sub
   it('control: the unrestricted reader filters and groups by the snapshot of a pinned subject, as before', async () => {
     expect(await find(CONTROL, contains(V.masked))).toHaveLength(1);
     expect(await find(CONTROL, contains(V.none))).toHaveLength(0);
-    const grouped = await engine.aggregate(REQUEST_OBJECT, {
-      where: { object_name: SUBJECT },
-      groupBy: ['payload_json'],
-      aggregations: [{ function: 'count', alias: 'n' }],
-      context: CONTROL,
-    } as any);
-    expect(grouped).toHaveLength(1);
+    expect(await grouped(CONTROL)).toHaveLength(1);
   });
 
   it('a system read is not judged, pinned or not', async () => {

@@ -1,8 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#21154] A query over the stored activity text, or over the approval
-// snapshot, by a reader withheld a field of the record it is about, is refused
-// at the generic data door on a real boot — matching and non-matching alike.
+// [#21154] A query over the stored activity text, the compliance ledger's
+// before/after snapshots, or the approval snapshot, by a reader withheld a field
+// of the record it is about, is refused at the generic data door on a real boot
+// — matching and non-matching alike.
 //
 // ## The composition
 //
@@ -29,7 +30,8 @@
 // - The scene is real before anything is believed (`beforeAll`, `assertArmed`):
 //   the rows at rest carry every class's stored value, and the data plane serves
 //   each reader its class as the class says.
-// - For each class, each value-bearing activity column and the snapshot column,
+// - For each class, each value-bearing activity column, each ledger snapshot
+//   column and the approval snapshot column,
 //   a matching and a non-matching filter are both refused with the engine's
 //   refusal (403, PERMISSION_DENIED, its words); so are a grouping, a search and
 //   a filter that names no parent object.
@@ -141,6 +143,7 @@ const grants = {
     [OBJ, APPR, ...Object.values(LABEL_OBJ)].map((o) => [o, { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false }]),
   ),
   sys_activity: readOnly,
+  sys_audit_log: readOnly,
   sys_approval_request: readOnly,
 };
 const baselineSet = PermissionSetSchema.parse({ name: 'atp_baseline', label: 'ATP baseline', objects: grants });
@@ -185,6 +188,11 @@ const activityCases = (c: ClassName) => [
   { column: 'summary', parent: OBJ, stored: STORED[c][1] },
   { column: 'metadata', parent: OBJ, stored: STORED[c][0] },
   { column: 'record_label', parent: LABEL_OBJ[c], stored: LABEL_STORED[c] },
+];
+/** The two ledger snapshot columns, each with a stored value a class reaches it with. */
+const ledgerCases = (c: ClassName) => [
+  { column: 'old_value', stored: STORED[c][0] },
+  { column: 'new_value', stored: STORED[c][1] },
 ];
 
 describe('[#21154] a query over activity text or the approval snapshot, by a reader withheld a field of its record', () => {
@@ -292,15 +300,19 @@ describe('[#21154] a query over activity text or the approval snapshot, by a rea
           }
           const requests = await ql.find('sys_approval_request', { where: { object_name: APPR }, context: { isSystem: true } });
           const snap = JSON.stringify(requests);
+          const ledger = JSON.stringify(await ql.find('sys_audit_log', { where: { object_name: OBJ, record_id: recordId }, context: { isSystem: true } }));
           return {
             rows: rows.length,
             values: CLASSES.filter((c) => STORED[c].every((v) => blob.includes(v))),
             labels,
             requests: requests.length,
             snapshot: CLASSES.filter((c) => snap.includes(SNAP[c])),
+            ledger: CLASSES.filter((c) => STORED[c].every((v) => ledger.includes(v))),
           };
         },
-        armed: (o) => o.rows >= 2 && o.values.length === 3 && o.labels.length === 3 && o.requests === 1 && o.snapshot.length === 3,
+        armed: (o) =>
+          o.rows >= 2 && o.values.length === 3 && o.labels.length === 3 && o.requests === 1 && o.snapshot.length === 3 &&
+          o.ledger.length === 3,
         describe: (o) => JSON.stringify(o),
       }),
       armedWhen({
@@ -360,6 +372,20 @@ describe('[#21154] a query over activity text or the approval snapshot, by a rea
         }
       });
 
+      it('a matching and a non-matching filter on each ledger snapshot column are both refused, and so is a grouping by it', async () => {
+        for (const k of ledgerCases(c)) {
+          for (const value of [k.stored, NOMATCH]) {
+            expectRefused(await list(c, 'sys_audit_log', { object_name: OBJ, [k.column]: { $contains: value } }), predicateWords('sys_audit_log', k.column));
+          }
+          expectRefused(
+            await call(c, 'POST', '/data/sys_audit_log/query', {
+              where: { object_name: OBJ }, groupBy: [k.column], aggregations: [{ function: 'count', alias: 'n' }],
+            }),
+            aggregateWords('sys_audit_log', k.column),
+          );
+        }
+      });
+
       it('a matching and a non-matching filter on the approval snapshot are both refused, and so is a grouping by it', async () => {
         for (const value of [SNAP[c], NOMATCH]) {
           expectRefused(
@@ -383,6 +409,12 @@ describe('[#21154] a query over activity text or the approval snapshot, by a rea
         const miss = await list(c, 'sys_activity', { object_name: LABEL_OBJ[other], record_label: { $contains: NOMATCH } });
         expect(miss.status, miss.text).toBe(200);
         expect(miss.rows).toBe(0);
+        const ledgerHit = await list(c, 'sys_audit_log', { object_name: LABEL_OBJ[other], new_value: { $contains: LABEL_STORED[other] } });
+        expect(ledgerHit.status, ledgerHit.text).toBe(200);
+        expect(ledgerHit.rows).toBe(1);
+        const ledgerMiss = await list(c, 'sys_audit_log', { object_name: LABEL_OBJ[other], new_value: { $contains: NOMATCH } });
+        expect(ledgerMiss.status, ledgerMiss.text).toBe(200);
+        expect(ledgerMiss.rows).toBe(0);
       });
     });
   }
@@ -394,6 +426,12 @@ describe('[#21154] a query over activity text or the approval snapshot, by a rea
     }
   });
 
+  it('a ledger filter that names no parent object is refused for every reader, the control included', async () => {
+    for (const who of [...CLASSES, 'control']) {
+      expectRefused(await list(who, 'sys_audit_log', { new_value: { $contains: STORED.masked[1] } }), predicateWords('sys_audit_log', 'new_value'));
+    }
+  });
+
   it('control: the unmasking reader filters and groups by every column of a pinned parent, as before', async () => {
     for (const c of CLASSES) {
       for (const k of activityCases(c)) {
@@ -401,6 +439,14 @@ describe('[#21154] a query over activity text or the approval snapshot, by a rea
         expect(hit.status, hit.text).toBe(200);
         expect(hit.rows).toBeGreaterThan(0);
         const miss = await list('control', 'sys_activity', { object_name: k.parent, [k.column]: { $contains: NOMATCH } });
+        expect(miss.status, miss.text).toBe(200);
+        expect(miss.rows).toBe(0);
+      }
+      for (const k of ledgerCases(c)) {
+        const hit = await list('control', 'sys_audit_log', { object_name: OBJ, [k.column]: { $contains: k.stored } });
+        expect(hit.status, hit.text).toBe(200);
+        expect(hit.rows).toBeGreaterThan(0);
+        const miss = await list('control', 'sys_audit_log', { object_name: OBJ, [k.column]: { $contains: NOMATCH } });
         expect(miss.status, miss.text).toBe(200);
         expect(miss.rows).toBe(0);
       }
