@@ -4,7 +4,7 @@
 
 fix(service-analytics)!: a cube measure whose `sql` is a relationship path (`account.name`) is judged by the aggregate × field-type table, described in `fields[]` and presented on the native-SQL strategy by the declaration on the object the path's last hop reaches, as a measure over the cube's own column already was
 
-Clause-②: no (the door judgment narrows a measure the base-object door already refuses for its own fields; if the build finds an accept-set change beyond that, it reports it).
+Clause-②: no (narrowing)
 
 <!-- adr-0087: not-required (already-registered dataset-measure-selecting-aggregate-field-type-refused, dataset-measure-aggregate-field-type-refused) the pairs this change refuses are exactly the pairs AGGREGATE_FIELD_TYPE_COMPATIBILITY already refuses, and the table is not edited: every refused min / max pair is registered under protocol major 18 by the first id and every refused sum / avg pair by the second, each with its routes. This change makes the cube door read a relationship-path column's declaration on the object the path reaches, where it already read a base-object column's; it refuses a query shape, not a stored one, and no authorable key, export or stored row moves. -->
 
