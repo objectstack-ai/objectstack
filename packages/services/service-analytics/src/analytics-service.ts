@@ -50,6 +50,7 @@ import { readScopeUnresolvedError } from './read-scope-refusal.js';
 import {
   assertNamedFieldsReadable,
   assertCallerMembersJudgeable,
+  fieldReadUnjudgeableError,
   type QueryableFieldsProvider,
   type NamedField,
   type NamedRead,
@@ -1833,6 +1834,23 @@ export class AnalyticsService implements IAnalyticsService {
    * caller-supplied. A dataset's own filter is author text and is deliberately
    * not judged here (no `datasetScope` is passed); #21153's gate judges it
    * where it applies.
+   *
+   * ## The measure position
+   *
+   * {@link namedQueryFields} skips a measure the cube does not declare (both
+   * strategies refuse one it does not carry), so a caller-named measure that
+   * {@link inferCubeFromQuery} MINTS — its `sql` built from the caller's own
+   * text by {@link inferMeasure} — is not in that list. Judged on the inferred
+   * cube (the judged tier), the minted measure reads as a declared expression
+   * member and #21153 refuses it; in the ungated tiers nothing did, and the
+   * caller's text reached the aggregate position of the statement verbatim.
+   * So the inferred `sql` is judged here too, against the same rule, before a
+   * strategy compiles it: a caller-named measure must reduce — after
+   * {@link inferMeasure}'s suffix strip, the no-suffix default included — to
+   * `count` / `'*'` or to a column reference, or it is refused. Author-declared
+   * measures are skipped (handled where #21153 / the parse #20943 judge them),
+   * and a dotted non-qualifier measure has already been refused by #5918 in
+   * {@link ensureCube} ahead of this.
    */
   private assertCallerMembersResolvable(
     query: AnalyticsQuery,
@@ -1845,6 +1863,34 @@ export class AnalyticsService implements IAnalyticsService {
       authorCube ?? ({ name, title: name, sql: name, measures: {}, dimensions: {} } as Cube);
     const named = namedQueryFields(query, probeCube, undefined, this.hopReference);
     assertCallerMembersJudgeable(named, this.logger, context);
+
+    // [#21156] The measure position, which `namedQueryFields` does not carry.
+    const baseObject = typeof probeCube.sql === 'string' ? probeCube.sql.trim() : '';
+    if (!baseObject || !BARE_IDENTIFIER.test(baseObject)) return;
+    for (const measure of query.measures ?? []) {
+      if (typeof measure !== 'string' || measure === '') continue;
+      // Author-declared measures are not this gate's business.
+      if (authorCube && declaredMemberEntry(authorCube, measure, 'measure')) continue;
+      const inferredSql = inferredCallerMeasureSql(measure, name);
+      // `null` — a dotted non-qualifier measure #5918 already refused — and a
+      // column reference (`'*'`, a bare identifier, a relationship path) both
+      // pass; anything else is caller text reaching the aggregate unjudged.
+      if (
+        inferredSql === null ||
+        inferredSql === '*' ||
+        BARE_IDENTIFIER.test(inferredSql) ||
+        IDENTIFIER_PATH.test(inferredSql)
+      ) {
+        continue;
+      }
+      this.logger.warn(
+        `[Analytics] field-level read admission refused caller-named measure "${measure}" on ` +
+          `"${baseObject}" (user ${String((context as { userId?: unknown } | undefined)?.userId ?? 'unknown')}) — ` +
+          `it reduces to a source that is not a column reference, so no field it aggregates can be ` +
+          `judged, in any tier (fail-closed)`,
+      );
+      throw fieldReadUnjudgeableError(baseObject, measure);
+    }
   }
 
   private async assertFieldsReadable(
@@ -3754,6 +3800,25 @@ export function inferMeasure(key: string): { label: string; type: 'count' | 'sum
     }
   }
   return { label: key, type: 'sum', sql: key };
+}
+
+/**
+ * [#21156] The `sql` {@link inferMeasure} would mint for a caller-named measure
+ * — the text that reaches the aggregate position — or `null` for a dotted
+ * non-qualifier measure, which {@link mintableMeasureKey} / #5918 refuses in
+ * {@link AnalyticsService.ensureCube} ahead of the member-shape gate. Mirrors
+ * `mintableMeasureKey`'s qualifier strip WITHOUT its throw (that refusal has
+ * already happened), then reads {@link inferMeasure}'s source. The gate judges
+ * whether the result is a column reference.
+ */
+function inferredCallerMeasureSql(measure: string, cubeName: string): string | null {
+  let key = measure;
+  const dot = measure.indexOf('.');
+  if (dot >= 0) {
+    if (measure.slice(0, dot) === cubeName) key = measure.slice(dot + 1);
+    else return null;
+  }
+  return inferMeasure(key).sql;
 }
 
 /**

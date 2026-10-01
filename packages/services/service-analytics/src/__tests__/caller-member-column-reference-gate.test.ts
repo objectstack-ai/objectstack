@@ -43,12 +43,24 @@ const REGISTERED: Cube = {
   title: 'Ledger',
   sql: OBJ,
   public: true,
-  measures: { count: { type: 'count', sql: '*', label: 'Count' } },
+  measures: {
+    count: { type: 'count', sql: '*', label: 'Count' },
+    author_expr_measure: { type: 'number', sql: 'amount + 1', label: 'Author expression measure' },
+  },
   dimensions: {
     status: { type: 'string', sql: 'status', label: 'Status' },
     author_expr: { type: 'number', sql: 'amount + 1', label: 'Author expression' },
   },
 } as Cube;
+
+/**
+ * A measure the CALLER names itself whose inferred source is not a column
+ * reference: the suffixed form (`inferMeasure` strips `_sum` → `amount + 1`)
+ * and the no-suffix default (the whole key → `amount + 1`). Both reach the
+ * aggregate position verbatim before this gate.
+ */
+const CALLER_MEASURE_SUFFIXED = 'amount + 1_sum';
+const CALLER_MEASURE_NOSUFFIX = 'amount + 1';
 
 /** A member the CALLER names itself, spelled as no column is. Neutral, not a payload. */
 const CALLER_EXPR = 'amount + 1';
@@ -181,5 +193,65 @@ describe('[#21156] analytics — a caller-named non-column member is refused at 
       await service.query({ cube: 'cm_cube', measures: ['count'], dimensions: ['author_expr'] } as never, CALLER);
       expect(executed.length).toBeGreaterThan(0);
     });
+  });
+
+  // An author-declared expression MEASURE is a native-SQL-only feature (the
+  // ObjectQL aggregate AST cannot carry a raw SQL expression — a pre-existing
+  // strategy refusal, not this gate's). The non-regression claim is that THIS
+  // gate does not refuse it: on NativeSQL it still reaches the strategy with no
+  // security service.
+  it('an author-declared expression measure is not refused by this gate (served on NativeSQL, no security service)', async () => {
+    const { service, executed } = makeService({ capabilities: nativeSqlOnly });
+    await service.query({ cube: 'cm_cube', measures: ['author_expr_measure'] } as never, CALLER);
+    expect(executed.length).toBeGreaterThan(0);
+  });
+
+  // ── The MEASURE position (#21156 rework) ──────────────────────────────────
+  //
+  // A caller-named measure whose inferred source (after inferMeasure's suffix
+  // strip, the no-suffix default included) is not a column reference reached
+  // the aggregate position of the statement verbatim in the ungated tiers. It
+  // is refused here, in every tier, before a strategy compiles it.
+  describe('a caller-named measure that reduces to a non-column source is refused', () => {
+    const MEASURES = [
+      { label: 'a suffixed inferred measure', measure: CALLER_MEASURE_SUFFIXED },
+      { label: 'the no-suffix default', measure: CALLER_MEASURE_NOSUFFIX },
+    ];
+    describe.each([...UNJUDGED_TIERS, { label: 'judged object', readers: JUDGED }])(
+      'tier: $label',
+      ({ readers }) => {
+        describe.each(STRATEGY_PATHS)('$label', ({ capabilities }) => {
+          describe.each(CUBES)('on $label', ({ cube }) => {
+            it.each(MEASURES)('$label: refused PERMISSION_DENIED / 403 on both doors, nothing executed', async ({ measure }) => {
+              const { service, executed } = makeService({ capabilities, ...(readers as object) });
+              const q = { cube, measures: [measure] };
+              for (const run of [
+                () => service.query(q as never, CALLER),
+                () => service.generateSql(q as never, CALLER),
+              ]) {
+                const refusal = await run().then(() => null, (e: unknown) => e as Record<string, unknown>);
+                expect(refusal).toMatchObject({ code: 'PERMISSION_DENIED', status: 403, member: measure });
+              }
+              expect(executed).toEqual([]);
+            });
+          });
+        });
+      },
+    );
+
+    // No false positives: a valid inferred measure over a real column, and a
+    // bare count, are served in every tier.
+    describe.each([...UNJUDGED_TIERS, { label: 'judged object', readers: JUDGED }])(
+      'the positive control in tier: $label',
+      ({ readers }) => {
+        it.each(STRATEGY_PATHS)('$label: a valid _sum measure and a bare count are served', async ({ capabilities }) => {
+          for (const cube of ['cm_adhoc', 'cm_cube']) {
+            const { service, executed } = makeService({ capabilities, ...(readers as object) });
+            await service.query({ cube, measures: ['amount_sum', 'count'] } as never, CALLER);
+            expect(executed.length).toBeGreaterThan(0);
+          }
+        });
+      },
+    );
   });
 });
