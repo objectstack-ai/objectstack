@@ -4,7 +4,7 @@
 
 fix(driver-memory): `$contains` / `$notContains` on a multi-valued or JSON-stored field answer by membership, as the SQL drivers do
 
-Clause-②: no
+Clause-②: yes (widening) — one new public method on the exported `InMemoryDriver` class, `filterContainsTest`; its return type `MemoryContainsTest` is not re-exported from the package entry. No accepted filter key or operator is added: `$contains` and `$notContains` keep their declared shape.
 
 On a field whose declaration makes it JSON-stored (`multiple: true` on a `lookup`, `user`, `select`, `radio`, `file` or `image` field, a `multiselect`, `checkboxes` or `tags` field, or a structured type such as `json`), the in-memory driver now answers `{ field: { $contains: v } }` by whole-element membership: some element of the stored array equals `v`. It used to match each element by substring, so `u1` matched a row storing `['u10']` and `'red'` matched a row storing `['redwood']`. A number member answered nothing: `{ nums: { $contains: '1' } }` missed `[1, 2]`. `$notContains` is the exact complement, and a row with no value still satisfies it. A scalar text column keeps the case-exact substring test.
 
