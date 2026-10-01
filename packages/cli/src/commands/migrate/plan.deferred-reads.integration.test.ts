@@ -41,8 +41,27 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { CLI, childEnv } from '../../../test/helpers/serve-process.js';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+/** The source entry (tsx), as `test/helpers/serve-process.ts` spawns it; `src/` cannot import that helper. */
+const CLI = resolve(HERE, '../../../bin/run-dev.js');
+
+/**
+ * This process's environment for the child, minus the two families
+ * `test/helpers/serve-process.ts` `childEnv()` strips (its header says why):
+ * the vitest runner's own variables, and `NODE_PATH`, which moves the child's
+ * module resolution base. An `undefined` override unsets a variable.
+ */
+function childEnv(overrides: Record<string, string | undefined>): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key === 'TEST' || key === 'VITEST' || key.startsWith('VITEST_') || key === 'NODE_PATH') continue;
+    env[key] = value;
+  }
+  return { ...env, ...overrides };
+}
 
 /** The tables whose DDL the plan defers and whose boot readers it still runs. */
 const DEFERRED_READ_TABLES = ['sys_metadata', 'sys_metadata_activation', 'sys_migration'] as const;
