@@ -2416,7 +2416,11 @@ export class InMemoryDriver implements IDataDriver {
    * `driver-sql` writes its withheld filter diagnostics at — so the refusal's
    * "the full diagnostic is in the server log" is true here too.
    *
-   * Public for the analytics face, for the reason {@link filterContainsTest} is.
+   * @internal Not private only because the analytics face
+   * (`memory-analytics.ts`) is another class of this package and must judge
+   * its `where` by the same declarations, for the reason
+   * {@link filterContainsTest} is reachable from it. Not a consumer contract:
+   * `FilterFieldDeclarations` is not exported from the package root.
    */
   filterFieldDeclarations(object: string | undefined): FilterFieldDeclarations {
     return {
