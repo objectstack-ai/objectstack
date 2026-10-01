@@ -64,6 +64,9 @@ import type { PermissionSetNameCollisionDiagnostic } from '@objectstack/plugin-s
 // [#20393] The boot registrar's divergent view-container `name` refusal — the
 // walk `os validate` step 2c runs, over `@objectstack/objectql`'s one judge.
 import { findViewContainerNameRefusals } from '../utils/view-container-names.js';
+// A field `picklist` that names no picklist the stack declares — the walk
+// `os validate` step 2d runs, over the same judge.
+import { judgePicklistReferences, printPicklistReferenceNotices } from '../utils/picklist-references.js';
 
 export default class Compile extends Command {
   static override description = 'Compile ObjectStack configuration to JSON artifact';
@@ -178,6 +181,13 @@ export default class Compile extends Command {
     // computes the identical record so the residue pin holds, and it reports
     // without ever refusing. Appended LAST, in `os validate`'s order.
     let jsxGateNotices: ReturnType<typeof resolveJsxGateManifest>['notices'] = [];
+    // The `info` records of a field `picklist` reference that resolves nowhere
+    // in the stack while the declaring package depends on packages outside it
+    // (step 3a-bis). A member of `warningsSoFar()`, ⛔ not a payload key, for
+    // the reasons the three lists above record: it reports without refusing,
+    // and `os validate` computes the identical records. Appended LAST, in
+    // `os validate`'s order.
+    let picklistReferenceNotices: ReturnType<typeof judgePicklistReferences>['notices'] = [];
     const warningsSoFar = () => [
       ...ruleAdvisories,
       ...docWarnings,
@@ -186,6 +196,7 @@ export default class Compile extends Command {
       ...navGroupWarnings,
       ...permissionSetCollisionWarnings,
       ...jsxGateNotices,
+      ...picklistReferenceNotices,
     ];
     // [#18780] ONE rendering of the author-time advisory block, from the
     // COMPLETE list — hoisted here for the same reason the lists above are.
@@ -445,6 +456,36 @@ export default class Compile extends Command {
           containerNameRefusals.map((r) => r.message),
           { noun: 'view-container refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
         );
+        this.exit(1);
+      }
+
+      // 3a-bis. A field `picklist` that names no picklist the stack declares is
+      //     REFUSED — the SAME call `os validate` makes at its step 2d, so the
+      //     two doors cannot disagree about which references resolve. Without
+      //     it this door wrote the artifact carrying the misspelt reference, and
+      //     the command that ships shipped a choice with nothing to choose.
+      //
+      //     A reference the stack cannot resolve while the declaring package
+      //     depends on packages outside the stack is an `info` notice instead
+      //     (see `utils/picklist-references.ts`): the list may live there, and
+      //     this command cannot read it. Printed here, carried in
+      //     `warningsSoFar()`, never gating.
+      //
+      //     Right after the parse and ahead of every artifact write, like 3a.
+      //     The `--json` face is 3a's envelope (`errors`); the text face is
+      //     `os validate`'s.
+      const picklistJudgement = judgePicklistReferences(result.data as Record<string, unknown>);
+      picklistReferenceNotices = [...picklistJudgement.notices];
+      if (!flags.json) printPicklistReferenceNotices(picklistReferenceNotices);
+      if (picklistJudgement.refusals.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, errors: picklistJudgement.refusals, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        const n = picklistJudgement.refusals.length;
+        console.log('');
+        printError(`A field names a picklist this stack does not declare (${n} reference${n > 1 ? 's' : ''})`);
+        printAuthoringRuleErrors(picklistJudgement.refusals, { remedy: JSON_FULL_LIST_REMEDY });
         this.exit(1);
       }
 

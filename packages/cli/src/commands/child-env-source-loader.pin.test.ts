@@ -30,12 +30,13 @@
  * likely to be re-litigated: `plugin-email` already ships the explicit
  * `./email-plugin.js` extension and fails identically to `formula`'s
  * extensionless `./registry`. Adding extensions to the redirected packages
- * cannot fix this, and neither can removing the `paths` blocks — those are
- * mandated by `pnpm check:type-source-resolution`, which was green throughout.
- * So was `pnpm check:test-source-alias`. The two gates cover the **types** axis
- * and the **vitest** axis; the axis that broke — a CLI child's **runtime**
- * module resolution — is covered by neither, which is why the defect lived on
- * `main` while every gate reported success. The general third-axis guard is
+ * cannot fix this, and neither could removing the `paths` blocks — those were
+ * mandated by `pnpm check:type-source-resolution` (retired on 2026-09-18 —
+ * #18373), which was green throughout. So was
+ * `pnpm check:test-source-alias`. The two gates covered the **types** axis and
+ * the **vitest** axis; the axis that broke — a CLI child's **runtime** module
+ * resolution — was covered by neither, which is why the defect lived on `main`
+ * while every gate reported success. The general third-axis guard is
  * separate scope and tracked separately; this pin is the narrow half that
  * belongs to the fix.
  *
@@ -285,8 +286,8 @@ describe('no CLI command puts a child process under oclif\'s TypeScript source l
       + 'packages to their .ts source there — so the child resolves a CommonJS package to '
       + 'TypeScript and Node\'s CJS resolver then fails on that file\'s sibling imports '
       + '(`Cannot find module \'./registry\'`), killing `os dev` before the server starts. '
-      + 'Neither check:type-source-resolution (types axis) nor check:test-source-alias '
-      + '(vitest axis) sees this; they were both green while it was broken. Pass the child '
+      + 'Neither check:type-source-resolution (types axis, retired 2026-09-18) nor check:test-source-alias '
+      + '(vitest axis) saw this; they were both green while it was broken. Pass the child '
       + '`process.env` unmodified, or a NODE_ENV that is not '
       + `${[...SOURCE_LOADER_ACTIVATING].map((v) => `'${v}'`).join(' or ')}`
       + ' — and if a child genuinely needs dev semantics, let the child command set them '

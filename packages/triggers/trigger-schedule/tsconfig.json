@@ -14,8 +14,8 @@
     //
     // ⚠️ MEASURED before taking this route, because it is not always
     // available: `tsc --noEmit` here reports **0** TS6059 with both lines in
-    // place. That measurement is the precondition the gate's failure text
-    // names — where it does NOT hold (`service-automation` measured 647
+    // place. That measurement is the precondition the failure text of the gate
+    // below named — where it does NOT hold (`service-automation` measured 647
     // TS6059 for its own case) `paths` is ruled out and the dependency has to
     // be reached another way.
     "rootDir": "../..",
@@ -24,18 +24,20 @@
     ],
     // [#18378] Resolve the shared record→organization resolver to SOURCE for
     // `tsc --noEmit`, so this package's typecheck is a verdict about the
-    // checkout rather than about `metadata-core/dist` build state
-    // (`pnpm check:type-source-resolution`). The time-relative sweep reads
+    // checkout rather than about `metadata-core/dist` build state (asked for
+    // by `check:type-source-resolution`, retired on 2026-09-18 — #18373; no
+    // gate checks this rule now). The time-relative sweep reads
     // per-record acting organizations through its WALL face, and the precedence
     // that implements (`tenancy.enabled: false` ⇒ nothing, then a declared
     // `tenancy.tenantField`, then the kernel's `organization_id`) is exactly
     // what the `group` pins hold.
     //
-    // ⛔ NOT an entry in that gate's registry. Widening it is maintainer-only:
-    // this package's `@objectstack/types` row was admitted by maintainer
-    // ruling on #17396 and its docblock says in as many words that the row is
-    // a signature and not a door. `paths` is the self-serve route, and the
-    // measurement above is what makes it available.
+    // ⛔ It was NOT made an entry in that gate's registry. Widening the registry
+    // was maintainer-only: this package's `@objectstack/types` row had been
+    // admitted by maintainer ruling on #17396, and its docblock said in as many
+    // words that the row was a signature and not a door. `paths` was the
+    // self-serve route, and the measurement above is what made it available.
+    // The registry, that row included, went with the gate.
     "paths": {
       "@objectstack/metadata-core": [
         "../../metadata-core/src/index.ts"

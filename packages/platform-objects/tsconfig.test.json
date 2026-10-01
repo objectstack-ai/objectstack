@@ -80,8 +80,10 @@
 // SOURCE, while this program resolves its TYPES through `dist/`. `paths` is
 // measured to be the wrong repair for an ONBOARDING program (PR #12570 billed
 // other packages' source diagnostics into the onboarding package's ledger), so
-// the exposure is declared in `scripts/check-type-source-resolution.mjs`'s
-// shrink-only registry instead. That file's #12511 doc-block has the numbers.
+// the exposure was declared in `scripts/check-type-source-resolution.mjs`'s
+// shrink-only registry instead, until that gate and its registry were retired
+// on 2026-09-18 (#18373). That file's #12511 doc-block, which had the numbers,
+// is readable at `03b7b8187^`.
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {

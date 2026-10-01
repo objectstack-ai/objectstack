@@ -627,9 +627,18 @@ export function lintDataModel(objects: any[]): LintIssue[] {
       const type = def.type;
 
       // R8 — option fields need options (or an options source).
+      //
+      // A `picklist` reference IS an options source: the field takes its
+      // options from the shared list it names (`data/picklist.zod.ts`), the
+      // same reading `FIELD_CHOICE_WITHOUT_OPTIONS` in the spec's
+      // functional-completeness rules makes. And the fix names the two
+      // sources as ALTERNATIVES: `FieldSchema` refuses `options` declared
+      // beside `picklist`, so a fix that said "add options" to a
+      // picklist-bound field would prescribe the schema's own refusal.
       if (OPTION_FIELD_TYPES.has(type)) {
         const hasOptions =
           (Array.isArray(def.options) && def.options.length > 0) ||
+          (typeof def.picklist === 'string' && def.picklist !== '') ||
           !!def.optionsFrom || !!def.dataSource || !!refOf(def);
         if (!hasOptions) {
           issues.push({
@@ -637,6 +646,10 @@ export function lintDataModel(objects: any[]): LintIssue[] {
             rule: 'field/select-missing-options',
             message: `${type} field "${obj.name}.${fieldName}" has no options`,
             path: `${fieldPath}.options`,
+            fix:
+              "Give the field ONE options source: inline `options: [{ label: '…', value: '…' }]`, or " +
+              "`picklist: '<name>'` naming a shared list — never both, because a field declaring " +
+              '`options` beside `picklist` is refused.',
           });
         }
       }
