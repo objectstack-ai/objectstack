@@ -457,9 +457,12 @@ type AdminAuditDecisions =
  * before/after snapshots the ledger's read side narrows to what each reader is
  * served. `metadata` is free text that no read-time narrowing can map back to
  * a field without deriving masking a second time, so a copy here would serve
- * the value to a ledger reader the data plane withholds it from. The closed
- * {@link AdminAuditDecisions} type is the guard: a field value does not
- * compile into this row.
+ * the value to a ledger reader the data plane withholds it from. Two guards
+ * hold that: the closed {@link AdminAuditDecisions} type refuses a field value
+ * written as a literal key at compile time (a conditional spread passes
+ * TypeScript's excess-property check, so it does not stop that spelling), and
+ * the pins in `admin-user-endpoints.test.ts` fail on any key outside the
+ * decision set and on any value this call wrote into the user.
  */
 async function writeAdminAudit(
   deps: AdminUserEndpointDeps,
