@@ -1,0 +1,228 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * [#21113] Two writers, two PROCESSES, one database: every record number the
+ * remote face issues is distinct.
+ *
+ * # Why real processes, and what they measure
+ *
+ * The hosted runtime runs several containers against one tenant database, so
+ * the acceptance is cross-process atomicity — ⛔ never an in-process counter,
+ * ⛔ never the engine's in-memory fallback. Every other remote autonumber pin
+ * in this package runs on `libsql-sqlite-stub.testkit.ts`, a synchronous
+ * better-sqlite3 behind the `@libsql/client` interface: it serialises every
+ * statement by construction, so it cannot tell an atomic counter from a
+ * read-then-write one. Neither can two `@libsql/client` instances in ONE
+ * Node process, whose native calls run on the one JS thread.
+ *
+ * So this file spawns two child processes (through `tsx`, over the package's
+ * SOURCE, the way `packages/spec`'s process-boundary pins do), each holding
+ * its own `@libsql/client` connection — the native `file:` backend, which is
+ * libSQL itself, the engine behind a Turso endpoint — to one database file,
+ * each driving its own `TursoDriver` in REMOTE mode, writing through
+ * `TursoDriver.create`. A file barrier releases both writers at once, so their
+ * statements contend on the database's write lock rather than following each
+ * other through process start-up.
+ *
+ * What is NOT measured here, said plainly: an HTTP `sqld` server. None runs in
+ * this environment, and the transport's HTTP batching and retries are the
+ * concern of the suites that mock `execute`. What a server adds is the network;
+ * what decides atomicity is the statement, and the statement runs on the same
+ * engine under the same lock here as there.
+ *
+ * # The pins
+ *
+ * - N writes from two processes give N distinct numbers — the counter moved
+ *   in one atomic statement per reservation, so no two writers read the same
+ *   `last_value`.
+ * - Each writer's own sequence is strictly increasing: the counter is
+ *   gap-tolerant-monotonic. With no statement failing, the union is exactly
+ *   1..N, and the file says so when it is.
+ * - The two writers really overlapped: neither's numbers form one contiguous
+ *   block. (Had they run one after the other, the pin above would be vacuous.)
+ * - The writers are different processes, and neither is this one.
+ *
+ * # Reverse verification — direction predicted BEFORE it was run
+ *
+ * With the warm path split into two statements (read `last_value`, then write
+ * `last_value + 1`), two processes releasing on the barrier read the same
+ * value and write the same successor, so the distinct count drops below N.
+ * The window between the two statements is a native call wide, so the drop is
+ * probable rather than certain on a single run; the measured outcome, and the
+ * number of runs it took, are recorded in the PR.
+ */
+
+import { describe, it, expect, afterAll } from 'vitest';
+import { spawn } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createClient } from '@libsql/client';
+import { TursoDriver } from './index.js';
+
+const HERE = fileURLToPath(new URL('.', import.meta.url));
+const PKG_ROOT = join(HERE, '..');
+const DRIVER_ENTRY = new URL('./index.ts', import.meta.url).href;
+
+const WRITES_PER_WORKER = 25;
+const WORKERS = ['A', 'B'] as const;
+
+const NUMBERED_OBJECT = {
+  name: 'crm_case',
+  fields: {
+    organization_id: { type: 'string' },
+    case_number: { type: 'autonumber', format: 'CASE-{00000}', unique: true },
+    title: { type: 'string' },
+  },
+};
+
+const dirs: string[] = [];
+afterAll(() => {
+  while (dirs.length > 0) rmSync(dirs.pop()!, { recursive: true, force: true });
+});
+
+interface WorkerReport {
+  tag: string;
+  pid: number;
+  numbers: string[];
+  errors: string[];
+}
+
+/**
+ * The writer. Runs under `tsx` so it imports the driver's SOURCE, like the
+ * test itself does. It connects, registers the schema (the tables already
+ * exist — the parent created them — so `initObjects` records metadata and
+ * runs no DDL), announces readiness, waits for the parent's `go` file, then
+ * writes as fast as the database lets it and reports on stdout.
+ */
+const WORKER_SOURCE = `
+  import { createClient } from '@libsql/client';
+  import { existsSync, writeFileSync } from 'node:fs';
+  // tsx compiles this package's .ts to CJS (no "type": "module"), so the
+  // class may arrive under \`default\` — the spelling packages/spec's
+  // process-boundary pins use.
+  const driverModule = await import(${JSON.stringify(DRIVER_ENTRY)});
+  const TursoDriver = driverModule.TursoDriver ?? driverModule.default?.TursoDriver;
+  const { OS_TEST_DB, OS_TEST_DIR, OS_TEST_TAG, OS_TEST_WRITES } = process.env;
+  const client = createClient({ url: 'file:' + OS_TEST_DB, timeout: 20000 });
+  const driver = new TursoDriver({ url: 'libsql://concurrency.probe', client });
+  await driver.connect();
+  await driver.initObjects([${JSON.stringify(NUMBERED_OBJECT)}]);
+  writeFileSync(OS_TEST_DIR + '/ready-' + OS_TEST_TAG, String(process.pid));
+  const go = OS_TEST_DIR + '/go';
+  while (!existsSync(go)) await new Promise((r) => setTimeout(r, 2));
+  const numbers = [];
+  const errors = [];
+  for (let i = 0; i < Number(OS_TEST_WRITES); i++) {
+    try {
+      const row = await driver.create('crm_case', { organization_id: 'orgA', title: OS_TEST_TAG + '-' + i });
+      numbers.push(row.case_number);
+    } catch (e) {
+      errors.push(String(e && e.message || e));
+    }
+  }
+  await driver.disconnect();
+  process.stdout.write(JSON.stringify({ tag: OS_TEST_TAG, pid: process.pid, numbers, errors }));
+`;
+
+function runWorker(env: Record<string, string>): Promise<WorkerReport> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      ['--import', 'tsx', '--input-type=module', '-e', WORKER_SOURCE],
+      { cwd: PKG_ROOT, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (d) => { out += String(d); });
+    child.stderr.on('data', (d) => { err += String(d); });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`writer ${env.OS_TEST_TAG} exited ${code}\nstderr:\n${err}\nstdout:\n${out}`));
+        return;
+      }
+      try {
+        resolve(JSON.parse(out) as WorkerReport);
+      } catch (e) {
+        reject(new Error(`writer ${env.OS_TEST_TAG} wrote no report: ${String(e)}\nstderr:\n${err}\nstdout:\n${out}`));
+      }
+    });
+  });
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+describe('[#21113] two writers in two processes draw distinct numbers from one database', () => {
+  it(`${WORKERS.length} x ${WRITES_PER_WORKER} creates -> ${WORKERS.length * WRITES_PER_WORKER} distinct, monotonic per writer, interleaved`, async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'turso-autonumber-concurrency-'));
+    dirs.push(dir);
+    const dbPath = join(dir, 'shared.db');
+
+    // The parent creates the schema through its own remote-mode driver, so
+    // both writers find the tables and the unique index already there.
+    const parentClient = createClient({ url: `file:${dbPath}`, timeout: 20000 });
+    const parent = new TursoDriver({ url: 'libsql://concurrency.probe', client: parentClient });
+    await parent.connect();
+    await parent.initObjects([NUMBERED_OBJECT as any]);
+
+    // A writer that dies before the barrier surfaces as ITS error, not as a
+    // readiness timeout.
+    let died: Error | null = null;
+    const runs = WORKERS.map((tag) =>
+      runWorker({ OS_TEST_DB: dbPath, OS_TEST_DIR: dir, OS_TEST_TAG: tag, OS_TEST_WRITES: String(WRITES_PER_WORKER) })
+        .catch((e: Error) => { died ??= e; throw e; }),
+    );
+    // Release both only once both are connected and registered, so the
+    // writes contend rather than queue behind process start-up.
+    const deadline = Date.now() + 60_000;
+    while (!WORKERS.every((tag) => existsSync(join(dir, `ready-${tag}`)))) {
+      if (died) throw died;
+      if (Date.now() > deadline) throw new Error('writers did not become ready within 60s');
+      await sleep(5);
+    }
+    writeFileSync(join(dir, 'go'), '1');
+    const reports = await Promise.all(runs);
+
+    // Different processes, and not this one.
+    const pids = reports.map((r) => r.pid);
+    expect(new Set(pids).size).toBe(WORKERS.length);
+    expect(pids).not.toContain(process.pid);
+
+    // No write failed — so the union below is the whole 1..N and nothing was
+    // burned. (A failure would show here with its message, not as a gap.)
+    for (const r of reports) expect(r.errors, `writer ${r.tag} errors`).toEqual([]);
+    for (const r of reports) expect(r.numbers).toHaveLength(WRITES_PER_WORKER);
+
+    // N distinct numbers across both writers.
+    const all = reports.flatMap((r) => r.numbers);
+    const total = WORKERS.length * WRITES_PER_WORKER;
+    expect(new Set(all).size).toBe(total);
+    expect(all.every((n) => /^CASE-\d{5}$/.test(n))).toBe(true);
+    const expected = Array.from({ length: total }, (_, i) => `CASE-${String(i + 1).padStart(5, '0')}`);
+    expect([...all].sort()).toEqual(expected);
+
+    // Monotonic within each writer.
+    const asInt = (n: string) => Number(n.slice('CASE-'.length));
+    for (const r of reports) {
+      const ints = r.numbers.map(asInt);
+      for (let i = 1; i < ints.length; i++) expect(ints[i], `writer ${r.tag} at ${i}`).toBeGreaterThan(ints[i - 1]);
+    }
+
+    // They really overlapped: no writer's numbers form one contiguous block.
+    for (const r of reports) {
+      const ints = r.numbers.map(asInt);
+      const contiguous = ints[ints.length - 1] - ints[0] + 1 === ints.length;
+      expect(contiguous, `writer ${r.tag} ran alone: ${r.numbers[0]}..${r.numbers[r.numbers.length - 1]}`).toBe(false);
+    }
+
+    // And the database agrees: one row per number, one counter row at N.
+    const rows = await parent.find('crm_case', { orderBy: [{ field: 'case_number', order: 'asc' }] } as any);
+    expect(rows.map((row) => row.case_number)).toEqual(expected);
+    const counter = await parentClient.execute('select "last_value" from "_objectstack_sequences"');
+    expect(counter.rows).toHaveLength(1);
+    expect(Number(counter.rows[0].last_value)).toBe(total);
+    await parent.disconnect();
+  }, 120_000);
+});
