@@ -7527,6 +7527,28 @@ export class SqlDriver implements IDataDriver {
    * duplicate-record-number harm, self-inflicted. The predicate therefore stays
    * `prefix%` and the suffix is applied per row, where a non-match simply means
    * "different suffix, same counter".
+   *
+   * ## The escape the prefix is escaped FOR is declared, on every dialect (#21163)
+   *
+   * {@link escapeLikePrefix} writes a backslash before each `\`, `%` and `_`,
+   * which only means "literally" under a `LIKE` whose escape character IS that
+   * backslash. SQLite's `LIKE` has no escape character unless one is declared,
+   * and Knex's `where(col, 'like', …)` declares none on any dialect. Measured on
+   * better-sqlite3 before this change: the pattern `SO\_%` without `ESCAPE`
+   * matched nothing against a stored `SO_0007`, so on every SQLite face a
+   * format whose rendered prefix carries `_`, `%` or `\` — from the format's
+   * literal text OR from a `{field}` value such as `north_east` — scanned an
+   * empty partition: the cold bootstrap seeded the counter from 0 and the
+   * #5495 re-seed could not move it. Postgres and MySQL read a backslash as the
+   * default `LIKE` escape, so they were right by default rather than by
+   * declaration.
+   *
+   * The character is BOUND, never written as a literal — the same
+   * {@link LIKE_ESCAPE_CHARACTER} the filter compiler binds, for the reason
+   * given there: MySQL applies C escape syntax inside string literals, so a
+   * literal backslash is spelled differently per dialect while a bound value
+   * has one spelling everywhere. Turso's remote face sends its own statement
+   * to a SQLite engine only, and declares the same backslash there.
    */
   protected async scanMaxNumericTail(
     queryRunner: Knex | Knex.Transaction,
@@ -7537,7 +7559,10 @@ export class SqlDriver implements IDataDriver {
     tenantId: string | null,
     suffix = '',
   ): Promise<number> {
-    let builder = queryRunner(tableName).select(field).where(field, 'like', `${this.escapeLikePrefix(prefix)}%`).whereNotNull(field);
+    let builder = queryRunner(tableName)
+      .select(field)
+      .whereRaw('?? like ? escape ?', [field, `${this.escapeLikePrefix(prefix)}%`, LIKE_ESCAPE_CHARACTER])
+      .whereNotNull(field);
     if (tenantField && tenantId !== null) {
       builder = builder.where(tenantField, tenantId);
     }
@@ -7547,8 +7572,11 @@ export class SqlDriver implements IDataDriver {
 
   /**
    * The rendered prefix as a `LIKE` anchor: `\`, `%` and `_` escaped with a
-   * backslash, so a prefix is matched literally. The predicate's pre-filter
-   * only — {@link maxAutonumberCounter} re-checks the prefix per row.
+   * backslash, so a prefix is matched literally — under a `LIKE` that declares
+   * that backslash as its `ESCAPE`, which every statement using this anchor
+   * must do (see {@link scanMaxNumericTail}; SQLite has no escape character
+   * otherwise). The predicate's pre-filter only — {@link maxAutonumberCounter}
+   * re-checks the prefix per row.
    */
   protected escapeLikePrefix(prefix: string): string {
     return prefix.replace(/([\\%_])/g, '\\$1');
