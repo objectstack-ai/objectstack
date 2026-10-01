@@ -7,7 +7,7 @@ fix(driver-sql,driver-turso)!: an upsert whose conflict lands on another organiz
 
 Clause-②: no (narrowing)
 
-<!-- adr-0087: not-required (no-migration-prescription) Nothing an author writes moves: no spec key, no metadata shape, no stored row and no exported symbol changes, so `objectstack migrate meta` has nothing to reach. What narrows is the runtime accept set of one driver door, `upsert`, for calls that wrote across an organization boundary; its channel is the thrown `UNIQUE_VIOLATION` and this entry. -->
+<!-- adr-0087: registered driver-upsert-cross-organization-conflict-refused -->
 
 **BREAKING for `upsert` callers on the SQL drivers and on `TursoDriver`.**
 
