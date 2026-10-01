@@ -9,7 +9,7 @@
       "title": "Showcase boots clean: health + ready 200, no degraded startup banners, console + app metadata served",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P0",
       "surface": "mixed",
       "preconditions": [
@@ -19,7 +19,7 @@
         "boot examples/app-showcase via `objectstack dev --ui --seed-admin -p <port> -d file:/tmp/<run>/data.db`",
         "poll GET http://localhost:<port>/api/v1/health until 200; record time-to-healthy",
         "GET /api/v1/ready and record the status (the readiness probe is a separate route — packages/runtime/src/route-ledger.ts)",
-        "read the FULL boot log: capture the Flows: banner, any ⚠ lines, any ERROR-level lines, and every SeedLoader line",
+        "read the FULL boot log: capture the Flows: banner, any ⚠ lines, any ERROR-level lines, and the seed outcome. ⚠️ at the default log level (warn) SeedLoader prints NO success line, so a grep for one finds nothing on a healthy boot. Read the ready banner's `Seeds:` row instead — it is immune to the level (packages/runtime/src/seed-summary.ts), e.g. `Seeds:   com.example.showcase 132 rows`, and turns yellow with ⚠ and an `N ok / M errors` or `lost links` count when rows were dropped. `--log-level info` additionally prints `[Seeder] Seed loading complete {inserted, updated, skipped, errored}`; a load that dropped records logs `[Seeder] Seed loading completed with N dropped record(s)…` at warn and is visible at either level",
         "GET /_console/ and confirm the console shell HTML is served (200, text/html)",
         "GET /api/v1/meta/app?id=showcase_app and capture the merged app/nav metadata (?id= matches the App document's NAME, never the package id — ?id=com.example.showcase answers an empty items array, which reads exactly like missing metadata)",
         "cross-check the nav payload: the grp_data group lists the seeded objects (showcase_project, showcase_task, showcase_account, showcase_contact, showcase_invoice, showcase_field_zoo, …)"
@@ -38,9 +38,9 @@
           "evidence": "the curl output"
         },
         {
-          "clause": "the `Flows:` startup banner reports no ⚠ misauthored flows and no ERROR-level lines appear IN THE BOOT WINDOW — the window is part of the clause, because ordinary caller-error 4xx traffic also logs at ERROR",
+          "clause": "the `Flows:` startup banner carries no ⚠ line of a MISAUTHORED class — a flow name claimed by several definitions, a flow targeting an unknown object, a trigger NOT bound for any reason other than deployment policy, or flows declared while the automation engine is not enabled — and no ERROR-level lines appear IN THE BOOT WINDOW — the window is part of the clause, because ordinary caller-error 4xx traffic also logs at ERROR",
           "oracle": "log",
-          "verify": "grep the boot log for '⚠' in the Flows banner and for ERROR lines, SCOPED to the boot window — from process start to the first 200 on /api/v1/health (the same instant clause 0 records as time-to-healthy). ⚠️ A caller-error REFUSAL logs at ERROR level with a full stack BEFORE answering 4xx — measured on 17.1.0 with a `$fn` filter probe answering 400 INVALID_FILTER (#10257). So an unscoped grep over a log that also carries the run's own probe traffic reports ERROR lines for requests the platform refused CORRECTLY, and a clean boot reads as a boot failure. Cut the log at the health-green line before grepping, or capture the boot log to its own file before issuing the first request; seed rejections still count as failures (see #3415 — SeedLoader rejections were silent)",
+          "verify": "read each ⚠ line under the Flows banner and classify it. ⚠️ A stock boot DOES print ⚠ lines that are not misauthoring: each package-authored scheduled flow is listed as `⚠ flow '<name>' declares a '<type>' trigger but is NOT bound — disabled by deployment policy …`, because package-authored scheduled work is off by default (QA run #21056 counted two on stock showcase). That is the posture working, so a bare grep for '⚠' reads a clean boot as a FAIL (the four misauthored classes are the four ⚠ shapes printAutomationSummary in packages/cli/src/utils/format.ts prints). Then grep for ERROR lines, SCOPED to the boot window — from process start to the first 200 on /api/v1/health (the same instant clause 0 records as time-to-healthy). ⚠️ A caller-error REFUSAL logs at ERROR level with a full stack BEFORE answering 4xx — measured on 17.1.0 with a `$fn` filter probe answering 400 INVALID_FILTER (#10257). So an unscoped grep over a log that also carries the run's own probe traffic reports ERROR lines for requests the platform refused CORRECTLY, and a clean boot reads as a boot failure. Cut the log at the health-green line before grepping, or capture the boot log to its own file before issuing the first request; seed rejections still count as failures (see #3415 — SeedLoader rejections were silent)",
           "evidence": "the grepped log excerpt"
         },
         {
@@ -84,6 +84,12 @@
           "date": "2026-08-30",
           "change": "source-ref addition (2026-08-30 sweep, console-UI angle): the two live objectui e2e specs adjacent to this item's console-shell clause were referenced nowhere in the ledger — e2e/console-boot-indicator.spec.ts (objectui#2628, the pre-bundle white-page pin) and e2e/console-rendering.spec.ts (bootstrap/rendering blank-page pin). Added as source entries with the objectui-repo-only caveat (RUNNER.md standing fact), NOT as automated.ref — they pin the console build, not this item's boot protocol, so a run here may cite them as adjacent evidence but is not asked to execute them. No step/clause change",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-01",
+          "change": "checklist-accuracy findings of QA run #21056. steps[3] asked for every SeedLoader line, but at the default warn level a healthy boot prints none: it now names the level-immune `Seeds:` banner row and the --log-level info line. acceptance[2]'s 'no ⚠' collided with the stock `NOT bound — disabled by deployment policy` lines for package-authored scheduled flows: the clause now names the misauthored classes it fails on",
+          "ref": "#21060"
         }
       ]
     },
@@ -92,7 +98,7 @@
       "title": "Seed integrity: row counts match the authored seed, values land verbatim, replay is idempotent",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P0",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -107,7 +113,7 @@
         "authoring-time baseline for cross-checking the derivation: showcase_account=14, showcase_contact=32 (8 named + 24 bulk prospects), showcase_project=5, showcase_task=10, showcase_invoice=12, showcase_invoice_line=5, showcase_expense_report=4, showcase_expense_line=13, showcase_field_zoo=2",
         "for each seeded object, GET /api/v1/data/<object>?$top=1 and read the server total; build the expected-vs-actual table",
         "GET the Field Zoo 'Specimen — Full' row and spot-diff authored values (f_multiselect ['red','green'] as a set, f_lookup resolving to the Northwind account id, f_json nested object intact)",
-        "re-read the boot log's seed lines: every seed reports success; no rejection or partial-load line",
+        "read the seed outcome: every seed source reports success and none reports a rejection or a partial load. ⚠️ at the default log level (warn) SeedLoader prints NO success line, so a grep for one finds nothing on a healthy boot. Read the ready banner's `Seeds:` row instead — it is immune to the level (packages/runtime/src/seed-summary.ts), e.g. `Seeds:   com.example.showcase 132 rows`, and turns yellow with ⚠ and an `N ok / M errors` or `lost links` count when rows were dropped. `--log-level info` additionally prints `[Seeder] Seed loading complete {inserted, updated, skipped, errored}`; a load that dropped records logs `[Seeder] Seed loading completed with N dropped record(s)…` at warn and is visible at either level",
         "restart the server against the SAME file DB; re-run the count sweep and diff against the first sweep (upsert mode must no-op, not duplicate)"
       ],
       "acceptance": [
@@ -126,7 +132,7 @@
         {
           "clause": "the boot log reports every seed load as success — a rejection is a FAIL against the seed even when the server otherwise boots green (#3415: four of five projects were silently rejected once)",
           "oracle": "log",
-          "verify": "grep the boot log for SeedLoader/seed lines; no rejected/failed entries",
+          "verify": "the banner's `Seeds:` row is the plain dim form with no ⚠ and no error or lost-link count (or, at --log-level info, `[Seeder] Seed loading complete` reports errored: 0), and no `[Seeder] Seed loading completed with N dropped record(s)` warn line appears",
           "evidence": "the log excerpt"
         },
         {
@@ -156,7 +162,13 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial — makes the #3408/#3415 class of silent seed failure a standing P0 check with exact authored baselines", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-18", "change": "corrected the showcase_contact baseline from 33 (9 named + 24 bulk) to 32 (8 named + 24 bulk) — re-derived from examples/app-showcase/src/data/seed/index.ts, whose contacts block authors 8 literal records plus Array.from({length: 24}); the server serves 32. Every other count in the baseline re-derived unchanged. The stale value made a correct seed read as a silent partial load (#9334, #9417)", "ref": "#9386" }
+        { "revision": 2, "date": "2026-08-18", "change": "corrected the showcase_contact baseline from 33 (9 named + 24 bulk) to 32 (8 named + 24 bulk) — re-derived from examples/app-showcase/src/data/seed/index.ts, whose contacts block authors 8 literal records plus Array.from({length: 24}); the server serves 32. Every other count in the baseline re-derived unchanged. The stale value made a correct seed read as a silent partial load (#9334, #9417)", "ref": "#9386" },
+        {
+          "revision": 3,
+          "date": "2026-10-01",
+          "change": "checklist-accuracy finding of QA run #21056: steps[4] and acceptance[2] grep the boot log for SeedLoader lines, but at the default warn level a healthy boot prints none — they now read the level-immune `Seeds:` banner row (or the --log-level info `[Seeder] Seed loading complete` line)",
+          "ref": "#21060"
+        }
       ]
     },
     {
@@ -164,7 +176,7 @@
       "title": "Seeded admin signs in through the console; the session survives reload and re-authenticates cleanly after expiry",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P0",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -180,9 +192,9 @@
       ],
       "acceptance": [
         {
-          "clause": "login succeeds and lands in the console shell (nav + header rendered, not the login form)",
+          "clause": "login succeeds and lands in the console shell, not the login form — on stock showcase that is /_console/home, whose layout is the header plus the app launcher and deliberately NO sidebar nav (objectui app-shell HomeLayout)",
           "oracle": "screenshot",
-          "verify": "post-login screenshot shows the app shell",
+          "verify": "post-login screenshot shows the header and the launcher; the absent sidebar on /home is the design, never a failure of this clause",
           "evidence": "screenshot"
         },
         {
@@ -194,7 +206,7 @@
         {
           "clause": "an expired/cleared session is answered 401 by the SERVER on authed API calls — the deny side of the auth gate, proven on the wire",
           "oracle": "network",
-          "verify": "after clearing cookies, the authed API call in the trace returns 401 (auth is the better-auth passthrough at /api/v1/auth/** — packages/runtime/src/route-ledger.ts; plugin-auth/src/auth-route-ledger.ts)",
+          "verify": "after the SERVER-side sign-out of steps[4] (POST /api/v1/auth/sign-out — never a clearCookies() gesture, which expires nothing here), the authed API call in the trace returns 401 (auth is the better-auth passthrough at /api/v1/auth/** — packages/runtime/src/route-ledger.ts; plugin-auth/src/auth-route-ledger.ts)",
           "evidence": "the 401 trace"
         },
         {
@@ -223,7 +235,8 @@
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial", "ref": "#3358" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 3, "date": "2026-08-18", "change": "corrected step 5's expiry gesture and the clause-2 ?id= example. The console authenticates by bearer token in localStorage (auth-session-token), so the documented clearCookies() gesture expires nothing and leaves a fully authed shell rendering — the exact shape of the c3 failure mode, which nearly produced a false P0 (#9453 CF-8). True expiry is POST /api/v1/auth/sign-out. Also corrected ?id=com.example.showcase to the app name showcase_app (#9334)", "ref": "#9386" }
+        { "revision": 3, "date": "2026-08-18", "change": "corrected step 5's expiry gesture and the clause-2 ?id= example. The console authenticates by bearer token in localStorage (auth-session-token), so the documented clearCookies() gesture expires nothing and leaves a fully authed shell rendering — the exact shape of the c3 failure mode, which nearly produced a false P0 (#9453 CF-8). True expiry is POST /api/v1/auth/sign-out. Also corrected ?id=com.example.showcase to the app name showcase_app (#9334)", "ref": "#9386" },
+        { "revision": 4, "date": "2026-10-01", "change": "checklist-accuracy findings of QA run #21056: acceptance[2].verify still said 'after clearing cookies', contradicting the rev-3 sign-out in steps[4]; acceptance[0] asked for 'nav + header', but the post-login landing /_console/home renders the header and the launcher with no sidebar by design", "ref": "#21060" }
       ]
     },
     {
@@ -231,7 +244,7 @@
       "title": "Every showcase nav surface renders without page errors, and failures surface the error boundary — never a blank page",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P0",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -242,19 +255,19 @@
         ]
       },
       "steps": [
-        "run the pinned suite: pnpm -C examples/app-showcase test:smoke (the SURFACES array in e2e/showcase-smoke.spec.ts — 31 surfaces: pages, object lists, dashboards, reports, the view-gallery pages)",
+        "run the pinned suite: pnpm -C examples/app-showcase test:smoke (the SURFACES array in e2e/showcase-smoke.spec.ts — all 49 showcase_app nav destinations at revision 5: pages, object lists, the three filter slices, the tabular view, dashboards, reports, the view-gallery pages). On a shared box pass SMOKE_API_URL=http://localhost:<free port>: the config signs in, drives every page and boots `serve --dev -p <that port>` from that one URL, and reuses whatever already answers it — on the default port 3000 that can be somebody else's server. Where the browser cache holds a different chromium build than @playwright/test resolves (RUNNER.md Environment facts), pass OS_TEST_CHROMIUM_EXECUTABLE_PATH=/opt/pw-browsers/chromium",
         "GET /api/v1/meta/app?id=showcase_app and extract every nav destination from the response (?id= matches the app NAME; the package-id spelling returns an empty items array and would yield zero destinations)",
         "diff the served nav destinations against the SURFACES array; hand-walk any destination the suite does not cover (screenshot first, then DOM)",
         "on each hand-walked surface: wait for render, screenshot, then check for pageerror / empty <main> / placeholder leaks ('no actions configured')",
-        "chart surfaces (the chart:true entries in SURFACES — Delivery Operations, Chart Gallery, Command Center): the suite now POLLS boundingBox against a bounded deadline (SURFACE_BUDGET_MS in the spec) instead of reading it once after a fixed wait, so a chart red here is a real finding and not the measurement window — #7569 measured the difference: 3 fresh loads each drew 5 real charts, and polling every 400 ms returned null ONLY at t = 1.5 s, the old fixed measurement instant and exactly the recharts ResponsiveContainer initial-layout window, then non-null on all 19 later samples. Read WHICH assertion failed: 'no chart SVG laid out' means the box stayed null for the whole budget; a width/height failure means the chart laid out but collapsed (#2616 D). If you hand-walk a chart surface outside the suite, poll the same way — never sleep-then-read-once",
+        "chart surfaces (the chart:true entries in SURFACES — Delivery Operations, Chart Gallery, Command Center, Revenue Pulse, Hours by Status (Chart)): the suite now POLLS boundingBox against a bounded deadline (SURFACE_BUDGET_MS in the spec) instead of reading it once after a fixed wait, so a chart red here is a real finding and not the measurement window — #7569 measured the difference: 3 fresh loads each drew 5 real charts, and polling every 400 ms returned null ONLY at t = 1.5 s, the old fixed measurement instant and exactly the recharts ResponsiveContainer initial-layout window, then non-null on all 19 later samples. Read WHICH assertion failed: 'no chart SVG laid out' means the box stayed null for the whole budget; a width/height failure means the chart laid out but collapsed (#2616 D). If you hand-walk a chart surface outside the suite, poll the same way — never sleep-then-read-once",
         "probe the failure path: navigate to a nonexistent route under the app (/_console/apps/com.example.showcase/object_that_does_not_exist); screenshot what renders",
         "if ANY surface fails during the sweep, verify the failure presents as the shell's error boundary or a named empty/error state — capture it"
       ],
       "acceptance": [
         {
-          "clause": "no surface throws a pageerror, renders an empty <main>, or leaks a 'no actions configured' placeholder; chart surfaces draw a real SVG whose box is measured by POLLING until non-null within a bounded budget — never by a fixed wall-clock wait followed by a single boundingBox read, which measures the layout window rather than the product",
+          "clause": "no surface throws a pageerror, renders an empty <main>, stays on the console's boot splash ('Initializing application…'), or leaks a 'no actions configured' placeholder; chart surfaces draw a real SVG whose box is measured by POLLING until non-null within a bounded budget — never by a fixed wall-clock wait followed by a single boundingBox read, which measures the layout window rather than the product",
           "oracle": "test",
-          "verify": "pnpm -C examples/app-showcase test:smoke (SURFACES array in e2e/showcase-smoke.spec.ts) — green; the chart assertion polls boundingBox against a bounded deadline and keeps the last non-null sample, so a null-box failure and a collapsed-panel failure report as different assertions (#7569)",
+          "verify": "pnpm -C examples/app-showcase test:smoke (SURFACES array in e2e/showcase-smoke.spec.ts) — green; the main-content wait treats the boot splash as not-yet-rendered and the assertion refuses a surface still on it; the chart assertion polls boundingBox against a bounded deadline and keeps the last non-null sample, so a null-box failure and a collapsed-panel failure report as different assertions (#7569)",
           "evidence": "test run output + the failing assertion's message for any chart red"
         },
         {
@@ -278,6 +291,7 @@
       ],
       "negative": [
         "a surface that renders a blank <main> is a FAIL even with no console error — transitional emptiness must be ruled out by the screenshot-first protocol, then the persistent blank is the finding",
+        "the boot splash is NOT rendered content: 'Initializing application…' is text inside <main>, so a non-empty check passes on a surface that never rendered. QA run #21056 read it as the FIRST <main> text on 22 of 49 surfaces, and the suite's own non-chart check passed on it until revision 5. A hand walk waits past the splash before judging, exactly as the suite now does",
         "a bad route producing a white page (shell gone) is a FAIL of the error-boundary clause",
         "a chart red obtained from a SINGLE boundingBox read at a fixed instant is NOT a product finding and must not be filed as one — it measures the ResponsiveContainer layout window, and it cost a triage cycle every run until #7569 replaced that read with a bounded poll. Re-introducing any fixed sleep-then-read-once in this suite re-opens it. The converse holds both ways: a box that stays null through the WHOLE bounded poll, or a laid-out width ≤ 200 (the #2616 D collapsed-panel case), IS a FAIL"
       ],
@@ -293,7 +307,13 @@
         { "revision": 1, "date": "2026-08-07", "change": "initial — wraps the existing automated smoke as a checklist row so runs report it alongside manual items", "ref": "#3358" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 3, "date": "2026-08-11", "change": "de-flaked the chart clause's MEASUREMENT, both halves in one change: a null boundingBox read once at a fixed instant is the recharts ResponsiveContainer layout window, not a product defect (measured: null only at t=1.5s, non-null on all 19 later samples, 5 real charts on each of 3 fresh loads). The clause now requires a bounded poll-until-non-null, and the pinned suite was changed to match — showcase-smoke.spec.ts's fixed page.waitForTimeout(1500) plus single boundingBox() read are gone, replaced by deadline-bounded polling (the #7472/#7409 shape), keeping the last non-null sample so a collapsed panel (#2616 D) still fails on its width rather than as 'no chart SVG'", "ref": "#7569" },
-        { "revision": 4, "date": "2026-08-18", "change": "corrected the ?id= spelling from com.example.showcase to showcase_app. Found by grounding the #9334 finding against the tree rather than by report: this item was not among the two named there, yet carries the same defect and is load-bearing here — the step extracts every nav destination from a response the package-id spelling leaves empty", "ref": "#9386" }
+        { "revision": 4, "date": "2026-08-18", "change": "corrected the ?id= spelling from com.example.showcase to showcase_app. Found by grounding the #9334 finding against the tree rather than by report: this item was not among the two named there, yet carries the same defect and is load-bearing here — the step extracts every nav destination from a response the package-id spelling leaves empty", "ref": "#9386" },
+        {
+          "revision": 5,
+          "date": "2026-10-01",
+          "change": "the pin caught up with QA run #21056's three findings: SURFACES covered 31 of 49 served destinations, and the 18 the run hand-walked are now in it (Revenue Pulse and the Hours by Status chart report as chart surfaces); the non-chart check passed on the boot splash, and the wait and assertion now treat the splash as not rendered; the config hard-coded port 3000 and offered no browser override, and now reads SMOKE_API_URL for the server it boots and OS_TEST_CHROMIUM_EXECUTABLE_PATH for the browser. Measured on this branch: 49 passed on a free port with the container's chromium, and an instrumented run saw 29 of the 49 surfaces on the splash first",
+          "ref": "#21060"
+        }
       ]
     },
     {
@@ -477,22 +497,23 @@
       "title": "The built-in apps a stock boot REGISTERS (Setup / Account) render every merged-nav destination; app-level and entry-level gates are enforced, not errored — and Studio's deliberate absence is asserted, never hunted",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P0",
       "surface": "browser",
       "personas": [
         "seeded admin (admin@objectos.ai / admin123)",
-        "a plain member (fresh runtime sign-up — lands in member_default, holds neither setup.access nor studio.access)"
+        "a plain member — the SEEDED persona Mei (phone.demo@example.com / showcase123; examples/app-showcase/src/security/demo-personas.ts PHONE_DEMO_USER), who holds no position, so only the member_default baseline and neither setup.access nor studio.access. Not a fresh sign-up: the stock invite_only posture refuses an uninvited one 403 SELF_REGISTRATION_CLOSED"
       ],
       "fixtures": {
         "app": "showcase",
         "requires": [
           "the platform apps ship with @objectstack/platform-objects and are packaged one-app-per-package (ADR-0048) as com.objectstack.setup / com.objectstack.studio / com.objectstack.account — but only TWO of the three are loaded on a stock boot. The ADR-0048 registration loop registers exactly @objectstack/setup and @objectstack/account (packages/plugins/plugin-dev/src/dev-plugin.ts for os dev; packages/cli/src/commands/serve.ts for os serve), so a stock GET /api/v1/meta/app answers showcase_app + setup + account. The App documents are NAMED setup / account (setup.app.ts, account.app.ts) and every ?id= below matches the NAME, never the package id — present on any stock boot, no showcase-specific fixture",
-          "a second, non-admin persona: sign up a fresh user in-run to drive the app-level and entry-level permission gates (do not reuse the admin — wrong-persona masks the guard)"
+          "a second, non-admin persona to drive the app-level and entry-level permission gates: the seeded plain persona Mei (phone.demo@example.com / showcase123), whom seed-approval-demo.ts provisions with a loginable account on every dev boot (do not reuse the admin — wrong-persona masks the guard)"
         ],
         "knownGaps": [
           "the SSO Providers entry (nav_sso_providers → sys_sso_provider) is contributed ONLY when the external-IdP RP is wired (OS_SSO_ENABLED self-host / cloud planAllowsSso — plugin-auth auth-plugin.ts isSsoWired()). On a stock open-framework boot it is ABSENT by design (not gated-and-erroring); assert its absence, never treat it as a missing surface",
-          "Studio is NOT registered on a stock boot, by product decision — this is a carve-out to ASSERT, not a fixture to provision. STUDIO_APP is defined (packages/platform-objects/src/apps/studio.app.ts) and packaged (packages/apps/studio, com.objectstack.studio), but both boot paths deliberately skip it with the identical note: '@objectstack/studio is intentionally NOT default-loaded — the console ships a dedicated Studio surface at /_console/studio/<pkg>/<pillar>, so Studio no longer needs to exist as a navigable app tile' (plugin-dev/src/dev-plugin.ts and cli/src/commands/serve.ts, the ADR-0048 app-package loop in each — both register only setup and account). So ?id=studio answering 200 {\\\"items\\\":[]} is the CORRECT observation on every stock boot, not a showcase-specific gap and not a missing built-in. ⛔ Do not install the package to 'restore' it: that changes what the boot ships and is a maintainer decision, not a run's. The prior wave already walked everything reachable here — Setup 43/43 and Account 7/7 destinations, 50/50 ok, zero pageerror (#9453). Studio's own surfaces are covered by area studio-authoring against /_console/studio, not through a nav tile."
+          "Studio is NOT registered on a stock boot, by product decision — this is a carve-out to ASSERT, not a fixture to provision. STUDIO_APP is defined (packages/platform-objects/src/apps/studio.app.ts) and packaged (packages/apps/studio, com.objectstack.studio), but both boot paths deliberately skip it with the identical note: '@objectstack/studio is intentionally NOT default-loaded — the console ships a dedicated Studio surface at /_console/studio/<pkg>/<pillar>, so Studio no longer needs to exist as a navigable app tile' (plugin-dev/src/dev-plugin.ts and cli/src/commands/serve.ts, the ADR-0048 app-package loop in each — both register only setup and account). So ?id=studio answering 200 {\\\"items\\\":[]} is the CORRECT observation on every stock boot, not a showcase-specific gap and not a missing built-in. ⛔ Do not install the package to 'restore' it: that changes what the boot ships and is a maintainer decision, not a run's. The prior wave already walked everything reachable here — Setup 43/43 and Account 7/7 destinations, 50/50 ok, zero pageerror (#9453). Studio's own surfaces are covered by area studio-authoring against /_console/studio, not through a nav tile.",
+          "Browse Marketplace's catalog comes from the cloud registry (default https://cloud.objectos.ai, DEFAULT_CLOUD_URL; cloud ADR-0009 marketplace plugins). Where the environment denies that egress the surface renders the named state 'Failed to load marketplace · Forbidden' (QA run #21056, sandbox egress denied): score the catalog content blocked(environment) and the named error as the surface rendering honestly — never as a render failure of this item"
         ]
       },
       "steps": [
@@ -501,7 +522,7 @@
         "as admin, hand-walk each destination in each app: navigate, wait for render, SCREENSHOT FIRST, then read the DOM — assert no pageerror, no 'failed to load', no blank <main>, no 'no actions configured' placeholder",
         "Setup detail: confirm each settings URL entry (nav_settings_* → /apps/setup/system/settings/<namespace>) opens the settings namespace form (localization/company/branding/auth/mail/storage/ai/knowledge/feature_flags), and Users / Organization / Business Units / Teams / Sessions / OAuth Applications / Identity Links / User Preferences render",
         "Studio detail is NOT walked from here — the app is not registered on a stock boot (knownGap), so there is no merged nav to render. Its metadata:resource lists and component surfaces (App Builder, All Metadata Types, Packages, API Console, Flow Runs, Public Forms) are reached through the console surface at /_console/studio/<pkg>/<pillar> and are covered by area studio-authoring. What THIS item asserts about Studio is the absence itself, per clause 6",
-        "Account detail: confirm Profile (account:profile_card), Notifications (sys_inbox_message/mine), Approvals (sys_approval_request/my_pending), Linked Accounts (sys_account), Active Sessions (sys_session/mine), API Keys (sys_api_key/mine), OAuth Applications (sys_oauth_application/mine) each render",
+        "Account detail: confirm Profile (account:profile_card), Notifications (sys_inbox_message/mine), Approvals (sys_approval_request/my_pending), Linked Accounts (sys_account), Active Sessions (sys_session/mine), API Keys (sys_api_key/mine), OAuth Applications (sys_oauth_application/mine) and Connect an Agent (nav_connect_agent) each render — 8 Account destinations and 45 Setup destinations for the admin, re-measured 2026-10-01 (GET /api/v1/meta/app leaves; #9453 recorded 43 and 7). Recount from the payload each run",
         "confirm the gated entries resolve to ABSENT-not-erroring for the admin: nav_organizations (requiresService org-scoping) is absent in single-org mode; nav_jwks Signing Keys is ABSENT for EVERY persona, admin included — the entry was removed in #7544 because sys_jwks declares apiEnabled:false, so its list answers OBJECT_API_DISABLED (404) for all callers and no permission gate could prune it; SSO Providers is absent unless OS_SSO_ENABLED (knownGap)",
         "sign in as the plain member: attempt to open Setup (app name setup) — capture the app-level refusal (App.requiredPermissions setup.access); open Account (declares no requiredPermissions) — capture it opening. Studio is not part of this comparison: it is absent for EVERY persona including the admin, so a member failing to reach it proves nothing about the gate (the same reasoning #7544 applied to nav_jwks)",
         "as the member, GET /api/v1/meta/app for a reachable app and confirm every manage_platform_settings-gated entry (API Keys, the manage_platform_settings settings URLs) is ABSENT from the member's payload — the server prunes, the client does not merely hide. JWKS is deliberately NOT in this list any more: it is absent for admins too, so finding it absent for a member proves nothing about the gate (#7544)",
@@ -535,7 +556,7 @@
         {
           "clause": "the entry-level gate for Setup's permission-gated entries (nav_api_keys, the manage_platform_settings settings URLs) is enforced ONE LEVEL UP as a whole-app refusal: the member cannot obtain the setup app at all, so those entries are unreachable rather than pruned-from-a-served-nav. Assert the app-level absence; do NOT assert an admin-vs-member entry diff on stock fixtures, because there is no member-side Setup nav to diff",
           "oracle": "api",
-          "verify": "as the member, GET /api/v1/meta/app?id=setup → 200 {\"items\":[]}: no App document is served, so every entry inside it (including nav_api_keys and the manage_platform_settings settings URLs) is unreachable. ⚠️ Do NOT substitute the account app for this: account is the one app a member CAN obtain and it carries no permission-gated entries at all — every one of its entries is gated by requiresObject/requiresService (nav_account_api_keys → sys_api_key, nav_account_sessions → sys_session, nav_account_linked → sys_account, nav_account_approvals → requiresService approvals, nav_account_memberships → requiresService org-scoping; account.app.ts), which are PRESENCE gates that resolve identically for both personas. Admin and member account navs measured identical (7 vs 7) — that is the contract behaving as authored and it proves nothing about permission gating, so scoring the clause off it is a false pass. The prior wave recorded the same shape as a named limitation on its own c4 (#9453)",
+          "verify": "as the member, GET /api/v1/meta/app?id=setup → 200 {\"items\":[]}: no App document is served, so every entry inside it (including nav_api_keys and the manage_platform_settings settings URLs) is unreachable. ⚠️ Do NOT substitute the account app for this: account is the one app a member CAN obtain and it carries no permission-gated entries at all — every one of its entries is gated by requiresObject/requiresService (nav_account_api_keys → sys_api_key, nav_account_sessions → sys_session, nav_account_linked → sys_account, nav_account_approvals → requiresService approvals, nav_account_memberships → requiresService org-scoping; account.app.ts), which are PRESENCE gates that resolve identically for both personas. Admin and member account navs measured identical (7 vs 7 in #9453; 8 vs 8 re-measured 2026-10-01, nav_connect_agent having joined) — that is the contract behaving as authored and it proves nothing about permission gating, so scoring the clause off it is a false pass. The prior wave recorded the same shape as a named limitation on its own c4 (#9453)",
           "evidence": "the member's empty ?id=setup payload, plus the admin-vs-member account nav comparison shown as the CONTROL that carries no gated entries (not as the gate's proof)"
         },
         {
@@ -573,6 +594,12 @@
           "date": "2026-08-21",
           "change": "two corrections from the 17.1.0 sweep, both about premises that fail one level up. (1) B2/Studio: the item named THREE built-in apps, so on stock fixtures it could never exceed partial — c0/c1/c2 were blocked(fixture) for one reason. Verified at source rather than assumed: Studio's absence is a deliberate product decision at the BOOT layer, not a showcase choice — both os dev and os serve carry the identical note that @objectstack/studio is intentionally not default-loaded because the console ships a dedicated Studio surface at /_console/studio/<pkg>/<pillar>, and each registers only setup and account. Title, fixtures, steps 1/4/7 and clauses 0/1/2 now describe the two apps a stock boot registers; Studio's absence became an assertion with the carve-out recorded in knownGaps, and its surfaces stay covered by area studio-authoring. (2) A4/clause 4: the clause asked for permission-gated ENTRIES to be absent from the member's merged nav, but the member cannot obtain the setup app at all (GET /meta/app?id=setup → 200 items:[]), so no member-side Setup nav exists to diff — the gate is a whole-app refusal, which clause 3 already proves. Reworded for that case, with the account app named explicitly as a non-substitute: every account entry is gated by requiresObject/requiresService, so admin and member navs are identical (7 vs 7) by construction and scoring the clause off that comparison is a false pass (#10236 A4+B2, measured #10257, same shape as #9453's c4)",
           "ref": "#10236"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-01",
+          "change": "checklist-accuracy findings of QA run #21056, re-measured on a stock dev boot: Setup serves 45 destinations and Account 8 for the admin, Account 8 for the member too (acceptance[4]'s control reads 8 vs 8; steps[5] names the eighth, nav_connect_agent). The member persona is the seeded Mei, not a fresh sign-up, which invite_only refuses. knownGaps records the marketplace catalog's cloud egress dependency",
+          "ref": "#21060"
         }
       ]
     },

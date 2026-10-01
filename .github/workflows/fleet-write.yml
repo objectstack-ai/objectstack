@@ -104,7 +104,7 @@ jobs:
       # The action revokes the token in its post step.
       - name: Mint the fleet App token, narrowed to the target and the op table
         id: token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ vars.OS_FLEET_APP_ID }}
           private-key: ${{ secrets.OS_FLEET_PRIVATE_KEY }}

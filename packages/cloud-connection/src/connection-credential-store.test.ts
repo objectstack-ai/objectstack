@@ -112,7 +112,7 @@ describe('CloudConnectionPlugin credential behavior', () => {
         new ConnectionCredentialStore(credPath).write({ runtimeToken: 'oscc_stored', environmentId: 'env_1' });
         const rawApp = makeRawApp();
         const { ctx, fire } = makeCtx(rawApp, { auth: sessionAuth('admin'), manifest: { register: vi.fn() } });
-        const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ success: true, data: { items: [] } }), { status: 200 }));
+        const fetchSpy = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ success: true, data: { items: [] } }), { status: 200 }));
         vi.stubGlobal('fetch', fetchSpy);
         await new CloudConnectionPlugin({
             singleEnvironment: true, controlPlaneUrl: 'http://cloud.test', controlPlaneApiKey: '', credentialPath: credPath,
@@ -134,7 +134,7 @@ describe('CloudConnectionPlugin credential behavior', () => {
         store.write({ runtimeToken: 'oscc_stored', environmentId: 'env_1' });
         const rawApp = makeRawApp();
         const { ctx, fire } = makeCtx(rawApp, { auth: sessionAuth('admin'), manifest: { register: vi.fn() } });
-        const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ success: true }), { status: 200 }));
+        const fetchSpy = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ success: true }), { status: 200 }));
         vi.stubGlobal('fetch', fetchSpy);
         await new CloudConnectionPlugin({
             singleEnvironment: true, controlPlaneUrl: 'http://cloud.test', controlPlaneApiKey: '', credentialPath: credPath,
@@ -221,7 +221,7 @@ describe('CloudConnectionPlugin credential behavior', () => {
         store.write({ runtimeToken: 'oscc_stored', runtimeId: 'rt-1' });
         const rawApp = makeRawApp();
         const { ctx, fire } = makeCtx(rawApp, { auth: sessionAuth('admin'), manifest: { register: vi.fn() } });
-        const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ success: true }), { status: 200 }));
+        const fetchSpy = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ success: true }), { status: 200 }));
         vi.stubGlobal('fetch', fetchSpy);
         await new CloudConnectionPlugin({
             singleEnvironment: true, controlPlaneUrl: 'http://cloud.test', controlPlaneApiKey: '', credentialPath: credPath,
@@ -267,7 +267,7 @@ describe('CloudConnectionPlugin credential behavior', () => {
         new ConnectionCredentialStore(credPath).write({ runtimeToken: 'oscc_stored', runtimeId: 'rt-1' });
         const rawApp = makeRawApp();
         const { ctx, fire } = makeCtx(rawApp, { auth: sessionAuth('admin'), manifest: { register: vi.fn() } });
-        const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ success: true, data: { items: [{ id: 'p1' }] } }), { status: 200 }));
+        const fetchSpy = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ success: true, data: { items: [{ id: 'p1' }] } }), { status: 200 }));
         vi.stubGlobal('fetch', fetchSpy);
         await new CloudConnectionPlugin({
             singleEnvironment: true, controlPlaneUrl: 'http://cloud.test', controlPlaneApiKey: '', credentialPath: credPath,

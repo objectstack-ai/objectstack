@@ -173,7 +173,10 @@ interface PayloadCtx {
  * TEXT column, because `showcase_contributor`'s RLS selects invoices by
  * `owner == current_user.email`: a row created without it would be invisible to
  * its own creator, and the contributor's EDIT cell would fail for a record-level
- * reason while looking like a CRUD denial.
+ * reason while looking like a CRUD denial. `assignee` on `showcase_task` is set
+ * for the same reason — the same set selects tasks by
+ * `assignee == current_user.email` (`task_own_rows`), and the set's policies
+ * hold for this persona, which holds the set by a direct grant.
  */
 const PAYLOAD: Record<string, (c: PayloadCtx) => Record<string, unknown>> = {
   showcase_account: (c) => ({ name: c.mark, status: 'prospect' }),
@@ -222,7 +225,7 @@ const PAYLOAD: Record<string, (c: PayloadCtx) => Record<string, unknown>> = {
   // 'ignore'`, not by an index), so re-joining an already-joined pair is a
   // legal write rather than a 409 masquerading as a CRUD verdict.
   showcase_project_membership: (c) => ({ team: c.teamId, project: c.projectId, engagement: 'owner' }),
-  showcase_task: (c) => ({ title: c.mark, project: c.projectId, status: 'todo' }),
+  showcase_task: (c) => ({ title: c.mark, project: c.projectId, status: 'todo', assignee: c.email }),
   showcase_team: (c) => ({ name: c.mark }),
 };
 
