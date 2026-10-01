@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import {
   findHostConfig,
   composeForDeclarations,
+  createDeclarationBootLifecycle,
   buildSchemaMigrationPlugins,
   measureComposedCoverage,
   describeUnloadableHostConfig,
@@ -121,6 +122,57 @@ describe('composeForDeclarations', () => {
     }
     expect(composeForDeclarations(new Private()).read()).toBe('kept');
   });
+
+  // #21054 — host code does not run where the kernel contract says declaring
+  // is over. The kernel-level half (real ObjectKernel, phases actually fired)
+  // is in `schema-migration-plugins.declaration-boot-write-guard.test.ts`.
+  it('hands init() a context that withholds kernel:bootstrapped / kernel:listening and forwards everything else', async () => {
+    const registered: string[] = [];
+    const kernelCtx = {
+      hook: (name: string) => { registered.push(name); },
+      getService: (name: string) => `service:${name}`,
+    };
+    let seen: any;
+    const host = {
+      name: 'com.example.hooks-from-init',
+      async init(ctx: any): Promise<void> {
+        seen = ctx;
+        for (const phase of ['kernel:ready', 'kernel:bootstrapped', 'kernel:listening', 'kernel:shutdown', 'data:beforeInsert']) {
+          ctx.hook(phase, async () => { /* never run here */ });
+        }
+      },
+    };
+    const lifecycle = createDeclarationBootLifecycle();
+
+    await composeForDeclarations(host, lifecycle).init(kernelCtx as any);
+
+    // Registration is the phase where declaring happens (`kernel:ready`), the
+    // teardown of what init() opened, and anything that is not a boot phase.
+    expect(registered).toEqual(['kernel:ready', 'kernel:shutdown', 'data:beforeInsert']);
+    // Every other member is the kernel's own.
+    expect(seen.getService('objectql')).toBe('service:objectql');
+    expect(lifecycle.withheldHooks).toEqual([
+      { plugin: 'com.example.hooks-from-init', phase: 'kernel:bootstrapped', count: 1 },
+      { plugin: 'com.example.hooks-from-init', phase: 'kernel:listening', count: 1 },
+    ]);
+    expect(lifecycle.describe()).toContain(
+      'did not register 2 host hook(s) on post-declaration phases '
+      + '(com.example.hooks-from-init on kernel:bootstrapped, com.example.hooks-from-init on kernel:listening)',
+    );
+  });
+
+  it('withholds them with no lifecycle to record into, and a quiet boot describes nothing', async () => {
+    const registered: string[] = [];
+    const host = {
+      name: 'com.example.quiet',
+      async init(ctx: any): Promise<void> { ctx.hook('kernel:bootstrapped', async () => {}); },
+    };
+    await composeForDeclarations(host).init({ hook: (n: string) => { registered.push(n); } } as any);
+    expect(registered).toEqual([]);
+
+    // Nothing withheld ⇒ no note, so a host with no such hook renders as before.
+    expect(createDeclarationBootLifecycle().describe()).toBeNull();
+  });
 });
 
 describe('buildSchemaMigrationPlugins', () => {
@@ -231,6 +283,45 @@ describe('buildSchemaMigrationPlugins', () => {
     expect(loaded.hostConfigError).toBeNull();
     // Loading a real config runs `bundle-require`/esbuild — well past the 5 s
     // default on a cold, shared box.
+  }, 60_000);
+
+  it('composes the config\'s app WITHOUT its onEnable, and the lifecycle names it (#21054)', async () => {
+    // `examples/app-crm`'s shape: a stack with metadata, and a named
+    // `onEnable` export beside it. The AppPlugin this composition builds is
+    // the one door that hook reaches a declaration boot through.
+    const dir = tempProject();
+    const flag = `__os21054OnEnableRan_${Date.now()}`;
+    writeFileSync(
+      join(dir, 'objectstack.config.ts'),
+      [
+        'export default {',
+        "  manifest: { id: 'com.example.os21054unit', name: 'onEnable withheld', version: '0.0.0', type: 'app' },",
+        "  objects: [{ name: 'os21054_thing', fields: { name: { type: 'text' } } }],",
+        '};',
+        `export const onEnable = async () => { (globalThis as any)[${JSON.stringify(flag)}] = true; };`,
+        '',
+      ].join('\n'),
+    );
+
+    const out = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: dir, skipSeedData: true });
+    const app = out.plugins.find((p: any) => p?.name === 'plugin.app.com.example.os21054unit') as any;
+    expect(app, 'the config-derived AppPlugin must be composed').toBeDefined();
+
+    // Drive its Phase 2 the way the kernel would, over a minimal context.
+    const noop = () => { /* logged */ };
+    await app.start({
+      getService: () => ({ registry: {} }),
+      hook: noop,
+      trigger: async () => { /* none */ },
+      logger: { info: noop, warn: noop, error: noop, debug: noop },
+    });
+
+    expect((globalThis as any)[flag]).toBeUndefined();
+    expect(app.onEnableWithheld).toBe(true);
+    expect(out.lifecycle?.withheldOnEnable).toEqual(['plugin.app.com.example.os21054unit']);
+    expect(out.lifecycle?.describe()).toContain(
+      'did not execute runtime.onEnable of plugin.app.com.example.os21054unit',
+    );
   }, 60_000);
 });
 

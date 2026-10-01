@@ -20,13 +20,13 @@
     "typecheck": "tsc --noEmit && pnpm check:test-typecheck"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.30.1",
     "@objectstack/core": "workspace:*",
     "@objectstack/spec": "workspace:*"
   },
   "devDependencies": {
     "@objectstack/service-automation": "workspace:*",
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.6.3",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },

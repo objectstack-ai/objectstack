@@ -472,6 +472,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.data-door-stored-metadata-redaction.test.ts",
+      "verb": "findOne",
+      "pinned": 2
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.datasource-delete-prolongation.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -724,6 +729,11 @@
     {
       "file": "packages/metadata-protocol/src/protocol.item-name-grammar.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.layered-code-unshipped-name.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {

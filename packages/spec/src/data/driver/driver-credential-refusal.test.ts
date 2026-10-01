@@ -322,7 +322,7 @@ describe.each(URL_FAMILY)('$name — URL-embedded credential refusal (#8082)', (
 /**
  * The query-parameter spelling of the same secret (#8337) — refused only where
  * a MEASURED client reads it: turso `url`/`syncUrl` `?authToken=`
- * (`@libsql/core@0.17.4` assigns it OVER the binder-injected token) and
+ * (`@libsql/core@0.18.0` assigns it OVER the binder-injected token) and
  * postgres `url` `?password=` (`pg-connection-string@2.14.0` copies every
  * query parameter into the client config, winning over userinfo).
  */

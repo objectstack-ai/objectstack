@@ -130,7 +130,6 @@ table lists the ones that answer differently from local mode.
 | Operation | Refused call | Use instead |
 |:---|:---|:---|
 | Transactions | `beginTransaction()`, `commit()`, `rollback()` (and their deprecated aliases `commitTransaction()` and `rollbackTransaction()`), and `options.transaction` passed to any `RemoteTransport` method in the tree above, to `aggregate()` or to `syncSchemasBatch()` | The local or embedded-replica transport, which run Knex transactions and honour `options.transaction` |
-| Record numbers | `create()`, `bulkCreate()`, and an `upsert()` with no `id`, `_id` or `conflictKeys`, when a row leaves an `autonumber` field empty (`undefined`, `null` or `''`) | The local or embedded-replica transport, which generate record numbers, or a value you supply, which is written unchanged |
 | Deferring schema DDL | `setDeferredDdl(true)`, which `os migrate plan` calls. `setDeferredDdl(false)` is accepted | Run the command against a local SQLite copy of the database (a `file:` URL) |
 | Schema drift detection | `detectManagedDrift()` | `os migrate plan` against a local SQLite copy of the database (a `file:` URL) |
 | Planning the ADR-0104 media column move | `planMediaColumnMove()`, the column step of `os migrate files-to-references` | The local or embedded-replica transport, which plan it |
@@ -147,17 +146,29 @@ table lists the ones that answer differently from local mode.
   reads that and does not call `beginTransaction()`: it runs the callback with
   no transaction and logs a warning once per datasource, or, called with
   `require: true`, throws `TransactionUnsupportedError` before the callback runs.
-- **Record numbers.** Remote mode never generates one. The check uses the
-  `autonumber` fields this driver recorded when it synced the object's schema
-  (`syncSchema`, `syncSchemasBatch` or `initObjects`). An `upsert()` that
-  carries an `id`, `_id` or `conflictKeys` is not refused, because it may merge
-  into an existing row. If it inserts instead, the row is written with the field
-  empty and the driver logs a warning naming the row.
 - **Aggregation.** `aggregate()` called on the driver directly also refuses,
   with the same code, a `groupBy` entry that has a `dateGranularity`, and an
   `aggregations` entry with a non-empty `filter`. `engine.aggregate()` never
   sends either one to this driver: it fetches the rows and computes both in
   memory. The local transport also refuses a per-aggregation `filter`.
+
+#### Record numbers in remote mode
+
+An `autonumber` field a row leaves empty (`undefined`, `null` or `''`) is
+filled in remote mode as it is in local and embedded-replica mode: `create()`,
+`bulkCreate()` and `upsert()` issue the next value from the persistent
+`_objectstack_sequences` counter, rendered with the field's `autonumberFormat`
+(or `format`) and scoped per organization, per date token and per `{field}`
+token exactly as `SqlDriver` scopes it. The counter moves in one statement over
+the connection (`UPDATE … RETURNING`; on a cold counter, a bootstrap from the
+table's highest existing value followed by `INSERT … ON CONFLICT DO UPDATE …
+RETURNING`), so two processes writing to one database never draw the same
+number. A row that already carries a value keeps it (a seed replay or an
+import); an `upsert()` that merges into an existing row keeps the number
+already in the row. A `_objectstack_sequences` table in the legacy shape
+(created by a local-mode driver older than the `key_hash` column) is refused
+with `code: 'DATABASE_ERROR'` / `status: 500` and the remedy in the message;
+remote mode does not migrate it.
 
 Answered in remote mode, differently from local mode:
 

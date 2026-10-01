@@ -56,6 +56,22 @@
  * names hidden fields in both roles on one object, the aggregate refusal
  * speaks first — the engine's own order on an aggregate.
  *
+ * ## A member that names no field is refused (#20965)
+ *
+ * A member's `sql` is a column reference — a field, a relationship path ending
+ * in one — or `'*'`, which reads no field value (`@objectstack/spec`'s
+ * `CUBE_MEMBER_SQL`). Anything else (a SQL expression) names no field this
+ * gate can judge, so the gate cannot tell whether the caller may read what it
+ * reads. The parse refuses such a member, but `CubeRegistry` never parses: a
+ * cube handed to the service as configuration, built before the parse refused
+ * expressions or never put through it, still reaches this door. Such a member
+ * arrives here as a {@link NamedExpression} and is refused —
+ * {@link fieldReadUnjudgeableError}, `PERMISSION_DENIED` / 403, the engine's
+ * refusal shape — whoever the caller is: no grant makes an expression
+ * judgeable. ⛔ It is never stood down and never passed. It is refused on the
+ * object it was attributed to, ahead of that object's field verdicts, and
+ * only where the gate judges that object at all (the tiers below).
+ *
  * ## Fail direction
  *
  * - A provider THROWS → the query is refused (fail-closed) and the failure is
@@ -120,6 +136,27 @@ export interface NamedField {
   readonly role: FieldReadRole;
 }
 
+/**
+ * [#20965] A member whose `sql` is not a column reference and not `'*'`: it
+ * names no field this gate can judge, so it is refused (see the module header).
+ *
+ * `object` is the object the member reads from, the cube's base object;
+ * `member` is the member as the query named it. The member's `sql` is not
+ * carried: the refusal must not hand the cube author's text back to a caller.
+ */
+export interface NamedExpression {
+  readonly object: string;
+  readonly member: string;
+  readonly expression: true;
+}
+
+/** What a query reads, as the gate judges it: a field, or a member that names none. */
+export type NamedRead = NamedField | NamedExpression;
+
+function isNamedExpression(read: NamedRead): read is NamedExpression {
+  return (read as NamedExpression).expression === true;
+}
+
 /** Log sink — the subset of `Logger` this module uses (see `read-admission.ts`). */
 interface AdmissionLogger {
   error?(message: string, error?: Error): void;
@@ -151,6 +188,30 @@ export function fieldReadDeniedError(object: string, fields: readonly string[], 
 }
 
 /**
+ * [#20965] The refusal for a member that names no field this gate can judge —
+ * the same ADR-0112 envelope, `PERMISSION_DENIED` / 403, as every other
+ * refusal here.
+ *
+ * Names the object and the member as the query named it, and nothing else:
+ * the member's `sql` is the cube author's text, and a refusal that echoed it
+ * would hand that text to a caller who was refused for not being judged able
+ * to read it.
+ */
+export function fieldReadUnjudgeableError(object: string, member: string): Error {
+  const err = new Error(
+    `[Analytics] Access denied: member '${member}' on '${object}' is not a column reference — not a field, ` +
+      `a relationship path ending in one, or '*' — so the field-level read gate cannot tell which fields it ` +
+      'reads, and the query was not run (fail-closed). Name the column itself; a value derived from columns ' +
+      'is declared on a dataset, where every field it reads is named.',
+  ) as FieldRefusal & { member?: string };
+  err.code = PERMISSION_DENIED;
+  err.status = 403;
+  err.object = object;
+  err.member = member;
+  return err;
+}
+
+/**
  * The fail-closed refusal: the reader could not answer for `object`. Names the
  * object and nothing else — the cause is the operator's, logged at the site.
  */
@@ -172,7 +233,9 @@ function fieldReadUnresolvedError(object: string): Error {
  * @param named - Every field the query reads, in the order the query names
  *   them. The objects are judged in their first-named order, so the base
  *   object — named first by the caller's collector — speaks before a joined
- *   one, as it does on the engine path.
+ *   one, as it does on the engine path. [#20965] A member that names no field
+ *   ({@link NamedExpression}) is in the same list, on the object it reads
+ *   from, and refuses the query ahead of that object's field verdicts.
  * @param knownFields - The object's declared fields, or `undefined` when no
  *   list is available. A name the list does not carry is not a field of the
  *   object (a relationship path segment that names none, a system column the
@@ -185,21 +248,21 @@ function fieldReadUnresolvedError(object: string): Error {
  *   judged on its own: `undefined` from one leaves the other's verdict intact.
  */
 export async function assertNamedFieldsReadable(
-  named: readonly NamedField[],
+  named: readonly NamedRead[],
   provider: ReadableFieldsProvider,
   context: ExecutionContext | undefined,
   knownFields: (object: string) => readonly string[] | undefined,
   logger?: AdmissionLogger,
   queryable?: QueryableFieldsProvider,
 ): Promise<void> {
-  const byObject = new Map<string, NamedField[]>();
+  const byObject = new Map<string, NamedRead[]>();
   for (const f of named) {
     const list = byObject.get(f.object);
     if (list) list.push(f);
     else byObject.set(f.object, [f]);
   }
 
-  for (const [object, fields] of byObject) {
+  for (const [object, reads] of byObject) {
     let readable: readonly string[] | undefined;
     let queryableFields: readonly string[] | undefined;
     try {
@@ -217,6 +280,19 @@ export async function assertNamedFieldsReadable(
       throw fieldReadUnresolvedError(object);
     }
     if (readable === undefined && queryableFields === undefined) continue;
+
+    // [#20965] Ahead of the field verdicts, and whatever the answers carry: no
+    // grant makes a member that names no field judgeable.
+    const expression = reads.find(isNamedExpression);
+    if (expression) {
+      logger?.warn(
+        `[Analytics] field-level read admission refused member "${expression.member}" on "${object}" ` +
+          `(user ${String((context as { userId?: unknown } | undefined)?.userId ?? 'unknown')}) — ` +
+          `it is not a column reference, so no field it reads can be judged (fail-closed)`,
+      );
+      throw fieldReadUnjudgeableError(object, expression.member);
+    }
+    const fields = reads.filter((read): read is NamedField => !isNamedExpression(read));
 
     const known = knownFields(object);
     const knownSet = known ? new Set(known) : undefined;

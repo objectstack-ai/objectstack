@@ -32,6 +32,7 @@ import {
     SDUI_MANIFEST_SERVICE,
     isUsableSduiManifest,
     stampHtmlPageRequires,
+    findPageRequiresAbsentFromManifest,
     type RuntimePendingDeclarations,
 } from './runtime-authoring-gate.js';
 // [#7560] ADR-0070's read-only-package rule, shared with the `/packages`
@@ -83,6 +84,11 @@ import {
     // ObjectStackProtocolImplementation.tenantAuthoredWriteRefusal} to tell a
     // body that CLAIMS to be code-shipped from one that does not.
     isCodeArtifactBody,
+    // [#21059] The tenant marker the hydrator writes on every stored row it
+    // registers (ADR-0010 `_provenance: 'org'`) — read by
+    // {@link ObjectStackProtocolImplementation.getMetaItemLayered}'s code-layer
+    // fallback so a hydrated row is never answered as the code layer.
+    isTenantAuthored,
 } from '@objectstack/metadata-core';
 // [#5532] One vocabulary of "which driver read errors are benign", shared with
 // `sys-metadata-repository.ts` in this package and with `DatabaseLoader` in
@@ -98,7 +104,7 @@ import type {
 } from '@objectstack/spec/api';
 import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities, CapabilityDescriptor } from '@objectstack/spec/api';
 import type { ApiError, BatchOperationResult } from '@objectstack/spec/api';
-import { readServiceSelfInfo, readChannelRoute, isSubscribableChannel, CHANNEL_SURFACE_SLOTS, ErrorCode, standardErrorCodeForHttpStatus, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
+import { readServiceSelfInfo, readChannelRoute, readAuthFamilies, isSubscribableChannel, CHANNEL_SURFACE_SLOTS, ErrorCode, standardErrorCodeForHttpStatus, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
 import {
     parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, referenceTargetOf,
     AggregationFunction, DateGranularity, resolveSearchFieldResolution,
@@ -173,11 +179,18 @@ import {
 // `getMetaItems` / `getMetaItem` exits; the two named here are the exits that
 // decoration does not reach — `getMetaItemLayered`, which serves three RAW
 // layers, and `saveMetaItem`, which owes the redaction its write-path inverse.
+// [#21086] The stored-row helpers are the generic data door's half: `findData`
+// and `getData` serve `sys_metadata` / `sys_metadata_history` rows, whose
+// `metadata` column is the same stored body, through the same redactor.
 import {
     carryForwardRedactedValues,
     hasMetadataRedactor,
     redactMetadataItem,
     redactedPathsCarriedForward,
+    redactStoredMetadataRow,
+    redactStoredMetadataRows,
+    storedMetadataBodyGroupingRefusal,
+    storedMetadataBodyProjection,
 } from './metadata-redaction.js';
 import type {
     StoredFlowCanonicalization,
@@ -5043,6 +5056,12 @@ export class ObjectStackProtocolImplementation implements
      * off for the life of the process. A re-registered value is therefore seen
      * by the next publish.
      *
+     * The same read serves the two other moments ADR-0080 §5 meets a page's
+     * `requires`: the draft → active promotion ({@link promoteDraftForPublish}
+     * re-stamps the promoted body) and the load of stored pages
+     * ({@link loadMetaFromDb} reports a page naming a plugin the manifest does
+     * not carry). One channel, three readers — never a second manifest read.
+     *
      * `undefined` when nothing is registered: the save door then judges an html
      * page exactly as it did before the key existed, and the host that
      * registers nothing is the one that says so at boot. A registered value
@@ -6807,6 +6826,16 @@ export class ObjectStackProtocolImplementation implements
         // consumer had a key that worked against both.
         const name = 'ObjectStack API';
 
+        // [#21046] Which optional `/auth` route families are mounted — the
+        // registered auth service's OWN public-config answer, the object
+        // `GET /auth/config` serves, through the one reader the runtime
+        // dispatcher's `getDiscoveryInfo()` calls too (`readAuthFamilies`,
+        // `@objectstack/spec/api`). This builder never re-derives "is the admin
+        // plugin on" itself. `undefined` — no `auth` service in this kernel
+        // (then no `routes.auth` either), or one that publishes no public
+        // config — emits no key; the REST `/discovery` passes the value through.
+        const authFamilies = readAuthFamilies(registeredServices.get('auth'));
+
         return {
             // [#11235] The serving system's identity, DERIVED — an injected
             // `OS_RUNTIME_VERSION` stamp, falling back to this package's own
@@ -6840,6 +6869,7 @@ export class ObjectStackProtocolImplementation implements
             locale,
             services,
             capabilities,
+            ...(authFamilies ? { authFamilies } : {}),
         };
     }
 
@@ -9249,11 +9279,37 @@ export class ObjectStackProtocolImplementation implements
             // Prefer the artifact-only lookup so an overlay row hydrated
             // into the registry's plain key can't masquerade as the "code
             // default" layer; fall back to getItem for runtime-only items.
+            //
+            // [#21059] …and "runtime-only" is held to what it says. The plain
+            // key is one slot for two populations: an item registered at
+            // runtime with no package, and a stored row the hydrator put there
+            // ({@link hydrateOverlayIntoRegistry}, the boot `object` limb of
+            // {@link loadMetaFromDb}). For a name no package ships the
+            // artifact lookup misses, so `getItem` answered the hydrated row
+            // and the code layer became the stored body — but only once a
+            // hydration had run, so the same read answered `code: null` before
+            // it. The spec's layer 1 is "`null` when no artifact ships this
+            // item (it exists only as an overlay)", and #5707 / #5840 allow a
+            // layer only from a read that happened: a stored row is the overlay
+            // read below, never an artifact read.
+            //
+            // The discriminator is the tenant marker the hydrator ALREADY
+            // writes on every row it registers — ADR-0010 `_provenance: 'org'`,
+            // read through {@link isTenantAuthored}. ⛔ No new marker. A body
+            // that carries package-provenance stamps under a name no package
+            // ships is the same row: the hydrator restates its authorship over
+            // whatever its bytes claim, and a stamp is not an artifact read, so
+            // `resolveLockState` below reads this item's code layer as `null`
+            // too (triage's ruling, overturnable by the maintainer). A
+            // runtime-registered item with no package carries no tenant marker
+            // and keeps its code layer.
+            const runtimeOnly = (item: unknown): unknown =>
+                item !== undefined && isTenantAuthored(item) ? undefined : item;
             let regItem = this.lookupArtifactItem(request.type, request.name, request.packageId)
-                ?? this.engine.registry.getItem(request.type, request.name, request.packageId);
+                ?? runtimeOnly(this.engine.registry.getItem(request.type, request.name, request.packageId));
             if (regItem === undefined) {
                 const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
-                if (alt) regItem = this.engine.registry.getItem(alt, request.name, request.packageId);
+                if (alt) regItem = runtimeOnly(this.engine.registry.getItem(alt, request.name, request.packageId));
             }
             if (regItem !== undefined) code = regItem;
         }
@@ -11632,6 +11688,13 @@ export class ObjectStackProtocolImplementation implements
         // rows returned ungrouped, looking exactly like a served query.
         this.assertGroupByFieldsExist(request.object, options.groupBy);
         this.assertAggregationFieldsExist(request.object, options.aggregations);
+        // [#21086] A stored metadata body is served only as its type's read
+        // projection (see `redactStoredMetadataRows` below), and a GROUP KEY
+        // cannot be projected — so grouping by the body column of a
+        // stored-metadata table is refused, after the existence gates so an
+        // unknown name keeps its own answer.
+        const bodyGroupingRefusal = storedMetadataBodyGroupingRefusal(request.object, options.groupBy);
+        if (bodyGroupingRefusal) throw bodyGroupingRefusal;
 
         // Route to engine.aggregate() when the query has GROUP BY / aggregations.
         // engine.find() does not do in-memory aggregation fallback, so without
@@ -11721,7 +11784,19 @@ export class ObjectStackProtocolImplementation implements
         for (const k of ['object', 'count', 'joins', 'windowFunctions', 'cursor', 'distinct', 'having']) {
             delete options[k];
         }
-        const records = await this.engine.find(request.object, options);
+        // [#21086] The generic data door is a read exit for the stored metadata
+        // body too: a `sys_metadata` / `sys_metadata_history` row's `metadata`
+        // column is served as its type's read projection — the one `/meta`
+        // serves — so a stored credential is withheld here exactly as there.
+        // The row's `type` selects the redactor, so it is read even when the
+        // projection named only the body, and taken back off before serving.
+        const bodyProjection = storedMetadataBodyProjection(request.object, options.fields);
+        if (bodyProjection.addedType) options.fields = bodyProjection.fields;
+        const records = redactStoredMetadataRows(
+            request.object,
+            await this.engine.find(request.object, options),
+            { dropType: bodyProjection.addedType },
+        );
         // Pagination metadata. When a `limit` is present the response is a single
         // page, so `records.length` is the page size — NOT the match total. Run a
         // count over the same `where` so the client can render total pages and know
@@ -11823,6 +11898,10 @@ export class ObjectStackProtocolImplementation implements
                 : request.select;
             this.assertProjectionFieldsExist(request.object, queryOptions.fields, 'select');
         }
+        // [#21086] Same read projection as the list path (`findData`): the row's
+        // `type` is read even when `select` named only the body.
+        const bodyProjection = storedMetadataBodyProjection(request.object, queryOptions.fields);
+        if (bodyProjection.addedType) queryOptions.fields = bodyProjection.fields;
 
         // Support expand for single-record retrieval
         if (request.expand) {
@@ -11841,7 +11920,7 @@ export class ObjectStackProtocolImplementation implements
             return {
                 object: request.object,
                 id: request.id,
-                record: result
+                record: redactStoredMetadataRow(request.object, result, { dropType: bodyProjection.addedType }),
             };
         }
         throw recordNotFoundError(request.object, request.id);
@@ -18832,8 +18911,22 @@ export class ObjectStackProtocolImplementation implements
             name: request.name,
             org: orgId ?? 'env',
         } as Parameters<typeof repo.promoteDraft>[0];
+        // [#20312] ADR-0080 §5: `requires` is derived from the source at save,
+        // and this promotion is the second way a body reaches `active`. The
+        // draft's own `requires` was computed against whatever manifest the
+        // host had at the DRAFT's save — none at all for a draft saved before
+        // the host registered one — so carrying it forward would let a stale
+        // stamp, or no stamp, become the active row. The promoted body is
+        // re-stamped with the save door's own computation instead, against the
+        // manifest read now, through the same key. The gate above already
+        // refused a draft whose source does not compile or whose `requires`
+        // disagrees with it (exactly as an active save refuses them), so what
+        // reaches the stamp is a body it either fills in or re-spells. A host
+        // with no manifest promotes the draft as written, as it saves it.
+        const sduiManifest = this.resolveSduiManifest();
         try {
             const result = await repo.promoteDraft(ref, {
+                deriveActiveBody: (draftBody) => stampHtmlPageRequires(singularType, draftBody, sduiManifest),
                 // #4556 — NULL, not 'system', for an actor-less publish.
                 actor: request.actor ?? null,
                 source: 'protocol.publishMetaItem',
@@ -23235,6 +23328,11 @@ export class ObjectStackProtocolImplementation implements
      *     `_diagnostics`. This is that same read-side verdict, surfaced once
      *     at boot where operators look.
      *
+     * [#20312] A stored `page` gets one more report-only check, after it has
+     * loaded: a `requires` naming a plugin the deployment's SDUI manifest does
+     * not carry is reported, page and plugin named — ADR-0080 §5's "validated
+     * at save and load" — see {@link reportPageRequiresAbsentAtLoad}.
+     *
      * #5897 / ADR-0110 D3 — the return value can now say **"the store was not
      * read at all"**. `loaded: 0` alone cannot: it is equally the truth for an
      * empty store, an un-provisioned store, and a database this process could
@@ -23282,6 +23380,18 @@ export class ObjectStackProtocolImplementation implements
                 organization_id: null,
             };
             const records = await this.engine.find('sys_metadata', { where });
+            // [#20312] ADR-0080 §5 — a page's `requires` is validated at save
+            // AND at load. The deployment's manifest, read once for this load
+            // through the key the save door reads per publish (one channel,
+            // never a second reader), and only when a stored page is in hand.
+            // It is readable here on the host that registers it: `os serve`
+            // registers it before any plugin inits, and this hydration runs in
+            // `ObjectQLPlugin.start()`, after every init. A host that registers
+            // nothing gets `undefined` and no page is judged — the save door's
+            // posture on that host, announced by the host at boot.
+            const sduiManifest = (records as Array<{ type?: unknown }>).some(
+                (r) => (PLURAL_TO_SINGULAR[String(r.type)] ?? r.type) === 'page',
+            ) ? this.resolveSduiManifest() : undefined;
             for (const record of records) {
                 try {
                     const data = this.convertStoredItem(
@@ -23397,7 +23507,7 @@ export class ObjectStackProtocolImplementation implements
                         // env-wide rows") stops depending on a query filter
                         // staying correct, because the hydrator refuses an
                         // org-scoped row whatever selected it.
-                        this.hydrateOverlayIntoRegistry(
+                        const hydrated = this.hydrateOverlayIntoRegistry(
                             normalizedType,
                             data,
                             {
@@ -23405,6 +23515,13 @@ export class ObjectStackProtocolImplementation implements
                                 organizationId: (record as { organization_id?: string | null }).organization_id ?? null,
                             },
                         );
+                        // [#20312] Reported AFTER the page has loaded, and only
+                        // when it did: the report never decides whether the
+                        // page loads — a page is refused at save and reported
+                        // at load, never refused at load.
+                        if (hydrated && normalizedType === 'page') {
+                            this.reportPageRequiresAbsentAtLoad(String(record.name), data, sduiManifest);
+                        }
                     }
                     loaded++;
                 } catch (e) {
@@ -23496,6 +23613,44 @@ export class ObjectStackProtocolImplementation implements
             }
         }
         return { loaded, errors, invalid, storeUnavailable };
+    }
+
+    /**
+     * [#20312] The load half of ADR-0080 §5's plugin-presence check: one line
+     * for a stored page whose `requires` names a namespace no component in the
+     * deployment's SDUI manifest carries — a plugin the console this
+     * deployment serves does not load — naming the page and every such
+     * namespace.
+     *
+     * A diagnostic, never a verdict on the page: it is called only for a page
+     * that has already loaded, and it changes nothing about it. The page is
+     * served; what its source draws from the absent plugin is what will not
+     * render. That is a functional degradation visible to whoever opens the
+     * page, so the line is `warn` (AGENTS.md, "Degradation log levels").
+     *
+     * How a stored page gets here: it was saved on a host with no manifest
+     * (stored as written), or the plugin was removed from the console after
+     * the page's `requires` was stamped. A host with a manifest refuses the
+     * same page at save — the reason this is a report and not a refusal.
+     *
+     * `sduiManifest` is {@link resolveSduiManifest}'s answer for this load;
+     * `undefined` judges nothing, which is the save door's posture on a host
+     * that registered no manifest.
+     */
+    private reportPageRequiresAbsentAtLoad(name: string, body: unknown, sduiManifest: unknown): void {
+        const absent = findPageRequiresAbsentFromManifest('page', body, sduiManifest);
+        if (!absent || absent.length === 0) return;
+        const one = absent.length === 1;
+        const named = absent.map((ns) => `'${ns}'`).join(', ');
+        console.warn(
+            `[Protocol] [page_requires_plugin_absent] stored page/${name} requires ${named}, `
+            + `${one ? 'a namespace' : 'namespaces'} no component in this deployment's SDUI component manifest `
+            + `carries: the plugin${one ? ' that provides it is' : 's that provide them are'} not loaded in the `
+            + `console this deployment serves. The page is loaded and served anyway, and what its source draws `
+            + `from ${one ? 'that plugin' : 'those plugins'} will not render. Install ${one ? 'it' : 'them'} in `
+            + `that console, or take ${one ? 'its' : 'their'} components out of the page's source and save the `
+            + `page without \`requires\` — it is derived from the source at save.`,
+        );
     }
 
     /**

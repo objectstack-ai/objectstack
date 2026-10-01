@@ -30,9 +30,9 @@
   },
   "devDependencies": {
     "@objectstack/driver-sql": "workspace:*",
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.6.3",
     "better-sqlite3": "^13.0.3",
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },

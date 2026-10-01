@@ -439,6 +439,8 @@ describe('[#20122] per-aggregation filter — the walker\'s refusals belong to t
     ['a reference as an $in member', () => ({ amount: { $in: [{ $field: 'amount' }] } }), `${AT}.amount.$in`],
     ['a reference as a $nin member', () => ({ amount: { $nin: [1, { $field: 'amount' }] } }), `${AT}.amount.$nin`],
     ['a reference as a $contains pattern', () => ({ stage: { $contains: { $field: 'region' } } }), `${AT}.stage.$contains`],
+    // [#20981] Refused at the same path, as a non-boolean flag first now — the
+    // words are pinned in engine-aggregate-flag-comparand-refusal.test.ts.
     ['a reference under $exists', () => ({ amount: { $exists: { $field: 'amount' } } }), `${AT}.amount.$exists`],
     ['a fractional addDays', () => ({ amount: { $lte: { $field: 'amount', addDays: 1.5 } } }), `${AT}.amount.$lte`],
     ['a string addDays', () => ({ amount: { $lte: { $field: 'amount', addDays: '7' } } }), `${AT}.amount.$lte`],

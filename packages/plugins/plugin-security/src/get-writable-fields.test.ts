@@ -158,9 +158,13 @@ describe('getWritableFields — the answers the contract names', () => {
     expect(await plugin.getWritableFields('invoice', { isSystem: true })).toEqual(FIELDS);
   });
 
-  it('no permission sets resolved: the full field set, as the middleware skips its write gate', async () => {
-    const { plugin } = await boot([], { noBaseline: true });
-    expect(await plugin.getWritableFields('invoice', WRITER_CTX)).toEqual(FIELDS);
+  it('no permission sets resolved: the full field set minus the capability-gated field, which the write gate refuses', async () => {
+    const { plugin, middleware } = await boot([], { noBaseline: true });
+    // [#21063] The caller holds no capability, so `margin`'s
+    // `requiredPermissions` refuses it on write; nothing else is refused.
+    expect(await plugin.getWritableFields('invoice', WRITER_CTX)).toEqual(FIELDS.filter((f) => f !== 'margin'));
+    expect(await middlewareAdmits(middleware, 'update', WRITER_CTX, { margin: PAYLOAD_VALUE.margin })).toBe(false);
+    expect(await middlewareAdmits(middleware, 'update', WRITER_CTX, { secret: PAYLOAD_VALUE.secret })).toBe(true);
   });
 
   it('an unresolvable object is no answer (undefined), not an empty one', async () => {

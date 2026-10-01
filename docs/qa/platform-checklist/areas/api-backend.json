@@ -305,7 +305,7 @@
       "title": "Data-API query contract: every filter operator gives known answers; $-params, select, sort, expand honored; malformed input 400s with the exact code",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -324,10 +324,10 @@
         "for each operator variant below, run BOTH spellings against showcase_account (or showcase_task where the type fits): the POST /api/v1/data/showcase_account/query body form (where: {field: {$op: value}}) and the AST array form ([field, op, value] — spellings per AST_OPERATOR_MAP); e.g. where {status: {$eq: 'active'}}, {annual_revenue: {$gt: 10000000}}, {status: {$in: ['active','prospect']}}, {annual_revenue: {$between: [5000000, 50000000]}}, {name: {$contains: 'orth'}}, {name: {$startsWith: 'Con'}}, {churn_reason: {$null: true}}",
         "for each operator: compute the expected id set from the baseline locally and compare with the returned records — a known-answer check, not a smoke 200",
         "pagination window: GET /api/v1/data/showcase_account?$orderby=name&$top=3&$skip=2 and verify it equals rows 3–5 of the locally sorted baseline; also POST body limit/offset/top equivalents",
-        "selection: ?$select=name,status (and body fields: ['name','status']) — response objects carry exactly the requested keys (plus system identity keys); dotted related column fields: ['account.name'] on showcase_invoice",
+        "selection: ?$select=name,status (and body fields: ['name','status']) — response objects carry exactly the requested keys (plus system identity keys); then the dotted related column fields: ['account.name'] on showcase_invoice, which is REFUSED by design — 400 INVALID_FIELD whose message prescribes `expand` (a dotted path reaches the driver as a column name, matches none, and would fall back to every field)",
         "sort: $orderby / orderBy asc and desc on annual_revenue — full ordering compared to the locally sorted baseline, not just first row",
         "expand: as the CONTRIBUTOR (restricted persona), POST /api/v1/data/showcase_invoice/query with expand: {contact: {object: 'showcase_contact', fields: ['name']}} on an invoice they own — contributor holds NO showcase_contact grant, so the expanded row must be withheld/masked while their own invoice row returns (15.1 §A6: expand routes through the secured find path, #2850)",
-        "negative shapes: POST query where {status: {$nin: 'done'}} on showcase_task (scalar comparand for a collection operator — #5869) and the AST twin ['status','not_in','done']; GET with an unknown $-param (?$pageSize=5); GET with a bare unknown key (?not_a_field=x); sort on a nonexistent field; a where clause naming a nonexistent field",
+        "negative shapes: POST query where {status: {$nin: 'done'}} on showcase_task (scalar comparand for a collection operator — #5869) and the AST twin ['status','not_in','done'], plus the GET twin ?$filter=[\"status\",\"not_in\",\"done\"] (the two doors answer different codes — see the clause); GET with an unknown $-param (?$pageSize=5); GET with a bare unknown key (?not_a_field=x); sort on a nonexistent field; a where clause naming a nonexistent field",
         "boundary: where {status: {$in: []}} (must match NOTHING) and {status: {$nin: []}} (must match EVERYTHING) — both documented-legitimate, never 400 (filter-comparand-shape.ts)"
       ],
       "acceptance": [
@@ -344,10 +344,10 @@
           "evidence": "the two window responses"
         },
         {
-          "clause": "$select/fields narrows the payload to the requested columns (dotted related columns included) — no unrequested business fields leak",
+          "clause": "$select/fields narrows the payload to exactly the requested columns — no unrequested business fields leak; a dotted related column (fields: ['account.name']) is refused 400 INVALID_FIELD naming `expand` as the remedy, never answered with a wider row",
           "oracle": "api",
-          "verify": "key-set assertion on every returned record",
-          "evidence": "response bodies"
+          "verify": "key-set assertion on every returned record; the dotted probe shows status 400, code INVALID_FIELD, and a message naming `expand`",
+          "evidence": "response bodies + the dotted rejection"
         },
         {
           "clause": "sort orders the FULL result both directions; INVALID_SORT (400) answers a sort on a nonexistent field",
@@ -362,10 +362,10 @@
           "evidence": "both personas' responses"
         },
         {
-          "clause": "a scalar comparand on a collection operator answers 400 INVALID_FILTER naming the operator, the field, and the expected shape — never 500 DATABASE_ERROR (#5869, both doors: the $-object body AND the AST array spelling)",
+          "clause": "a scalar comparand on a collection operator is refused 400 naming the operator, the field and the expected array — never 500 DATABASE_ERROR, never a widened 200 (#5869). Since #20116 the two doors answer different codes: POST /query, in both the $-object body and the AST array spelling, is refused at the request schema with 400 VALIDATION_FAILED and a fields[] entry located on the slot (query.where.status.$nin for the $-object body, query.where for the AST spelling); GET ?$filter answers 400 INVALID_FILTER",
           "oracle": "api",
-          "verify": "both step-8 $nin probes: status 400, code INVALID_FILTER, message names the operator and field",
-          "evidence": "both rejections"
+          "verify": "the two step-8 POST probes: status 400, code VALIDATION_FAILED, a fields[] entry at the slot whose message names $nin, status and an ARRAY; the GET $filter twin: status 400, code INVALID_FILTER. Neither door returns rows",
+          "evidence": "both POST rejections + the GET rejection"
         },
         {
           "clause": "unknown inputs get their exact ledgered code: unknown $-param → 400 UNSUPPORTED_QUERY_PARAM (listing the supported $-params), unknown bare key or unknown where-field → 400 INVALID_FIELD (#4134 — a filter on a nonexistent field must NEVER answer 200 with rows, in either direction)",
@@ -387,7 +387,7 @@
         }
       ],
       "negative": [
-        "silent WIDENING is the catastrophic failure mode (#3899): a malformed query body (e.g. {\"filter\": {…}} — not a QueryAST key) must answer 400 VALIDATION_FAILED, never degrade into an unfiltered 200 full read; verify by asserting the malformed-body probe's status AND that its response row count is not the full table"
+        "silent WIDENING is the catastrophic failure mode (#3899): a malformed query body must never degrade into an unfiltered 200 full read. A mistyped clause (e.g. {\"limit\": \"ten\"}) answers 400 VALIDATION_FAILED at the request schema; an UNDECLARED top-level key (e.g. {\"not_a_query_key\": {…}}) is lowered as an implicit field filter and answers 400 INVALID_FIELD. ⛔ Do not probe with {\"filter\": {…}}: `filter` is a DECLARED transport spelling of `where` and is served. Verify by asserting each probe's status and code AND that no response carries the full table"
       ],
       "variants": [
         "op:eq",
@@ -417,7 +417,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/objectql/src/engine.test.ts ([#2850] expand sub-read through the secured find path = C4 only) + packages/objectql/src/engine-filter-array-lowering.test.ts (the #5869 list-comparand shape gate). ⚠️ The REST-contract clauses (operator answer sets, $top/$skip windowing, $select narrowing, sort + INVALID_SORT, INVALID_FILTER, UNSUPPORTED_QUERY_PARAM, the $in/$nin empty-list boundary) are NOT reached by these engine unit suites and remain manual"
+        "ref": "packages/objectql/src/engine.test.ts ([#2850] expand sub-read through the secured find path = C4 only) + packages/objectql/src/engine-filter-array-lowering.test.ts (the #5869 list-comparand shape gate). ⚠️ The REST-contract clauses (operator answer sets, $top/$skip windowing, $select narrowing, sort + INVALID_SORT, the scalar-comparand refusal on both doors, UNSUPPORTED_QUERY_PARAM, the $in/$nin empty-list boundary) are NOT reached by these engine unit suites and remain manual. The POST door's schema-failure envelope (400 VALIDATION_FAILED + fields[], protocol never called) is pinned with a MOCKED protocol by packages/rest/src/request-schema-gate.conformance.test.ts — the door posture, not this item's seeded probes"
       },
       "traps": [
         "seed-data-thin",
@@ -428,6 +428,13 @@
         "packages/spec/src/data/filter.zod.ts#AST_OPERATOR_MAP (AST_OPERATOR_MAP / FieldOperatorsSchema — the operator variant source)",
         "packages/spec/src/data/query.zod.ts#QueryAST (QueryAST keys)",
         "packages/metadata-protocol/src/protocol.ts#UNSUPPORTED_QUERY_PARAM (supported $-params + UNSUPPORTED_QUERY_PARAM #2926 ⑩, INVALID_FIELD #4134)",
+        "packages/spec/src/data/filter.zod.ts#checkFilterConditionComparands (the request-schema refusal of a scalar list comparand on the POST door, #20116 — the $-object spelling, located at query.where.<field>.$nin)",
+        "packages/spec/src/data/data-engine.zod.ts#lowerFoldedTransportValues (the AST/FilterArray spelling on the POST door, refused at query.where when it cannot be lowered)",
+        "packages/spec/src/data/data-engine.zod.ts#QueryTransportParamsSchema (`filter` is a declared transport spelling of `where` — why negative[0] no longer probes with it)",
+        "packages/rest/src/rest-server.ts (POST /data/:object/query answers a FindDataRequestSchema failure 400 VALIDATION_FAILED with fields[] via zodIssuesToFields)",
+        "packages/metadata-protocol/src/protocol.ts#assertProjectionFieldsExist (a dotted fields entry → 400 INVALID_FIELD prescribing expand, #7532)",
+        "packages/metadata-protocol/src/protocol.ts#assertQueryParamsAreFields (an undeclared leftover key → implicit field filter → 400 INVALID_FIELD, #4134)",
+        "packages/rest/src/rest-server-repeated-filter-param.test.ts + packages/rest/src/analytics-filter-refusal-envelope.test.ts (the schema-door 400 VALIDATION_FAILED posture since #20116)",
         "#5869 (commit 10c4ea9)",
         "release-15.1 plan §A6",
         "examples/app-showcase/src/data/seed/index.ts"
@@ -444,6 +451,12 @@
           "date": "2026-08-18",
           "change": "re-pointed automated.ref off a source module. packages/objectql/src/filter-comparand-shape.ts is not a test — it exports invalidFilterError / assertListComparandShapes / assertFilterIsMaterializable and declares no describe block; the #5869 gate is actually pinned by engine-filter-array-lowering.test.ts. Also recorded the pin's real reach, since it spans one clause of nine and a pass read off it would be a false green (#9401)",
           "ref": "#9386"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-01",
+          "change": "re-pointed to what the doors answer since #20116 (QA run #21056 scored acceptance[5] — the run record's A6 — FAIL; verifier disposition: stale clause, not a product defect). acceptance[5]: POST /query, both spellings, is refused at the request schema with 400 VALIDATION_FAILED + a located fields[] entry; GET $filter still answers 400 INVALID_FILTER; the step-8 GET twin was added. acceptance[2] and step 5: a dotted fields entry is refused 400 INVALID_FIELD by design, prescribing expand. negative[0]: {\"filter\": …} is a declared transport spelling of where, so the widening probe now uses a mistyped clause (400 VALIDATION_FAILED) and an undeclared key (400 INVALID_FIELD). Residual for the maintainer, not a defect: the same condition answers VALIDATION_FAILED on POST and INVALID_FILTER on GET (#8001 family)",
+          "ref": "#21060"
         }
       ]
     },
@@ -1389,7 +1402,7 @@
       "title": "A disabled packaged action is refused 409 ACTION_DISABLED at BOTH dispatch doors — after the capability gate (a 403 is never an oracle for the switch), before the param contract and the record load, durable across restart",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -1405,7 +1418,7 @@
           "showcase_portfolio_snapshot (ui/actions/index.ts — object-less/global, and the ONLY stock action with ai.exposed: true): the live MCP-door probe; its activation flip spells the object segment `global` (/actions/_activation/global/showcase_portfolio_snapshot)"
         ],
         "knownGaps": [
-          "The MCP door cannot be driven live with showcase_mark_done: the bridge's AI-exposure gate (actionAiExposureError, fail-closed on ai.exposed !== true) sits AHEAD of the activation consult, so a non-exposed action answers the exposure refusal regardless of its switch. showcase_portfolio_snapshot is the only stock ai.exposed action; if the MCP transport itself is not drivable in the run environment, score the MCP clause from the unit pin (action-activation-dispatch.test.ts 'door 2') and record which oracle the verdict rests on.",
+          "The MCP door cannot be driven live with showcase_mark_done: the bridge's AI-exposure gate (actionAiExposureError, fail-closed on ai.exposed !== true) sits AHEAD of the activation consult, so a non-exposed action answers the exposure refusal regardless of its switch. showcase_portfolio_snapshot is the only stock ai.exposed action. The MCP transport IS drivable live on a stock boot: the boot banner prints `MCP: http://localhost:<port>/api/v1/mcp`, and QA run #21056 drove POST /api/v1/mcp tools/call run_action against showcase_portfolio_snapshot (disabled → isError carrying code ACTION_DISABLED, status 409; re-enabled → ok). Score the MCP clause live; fall back to the unit pin (action-activation-dispatch.test.ts 'door 2') only where the endpoint is not mounted, and record which oracle the verdict rests on.",
           "The record-load half of the ordering proof has NO contrasting refusal: the REST door's record load is best-effort (try/catch in domains/actions.ts — a missing record passes an empty record for new-record actions), so a nonexistent recordId never 404s on its own, enabled or disabled. The record leg is proven by code order plus the absence of any read/side effect, never by expecting a 404 from the enabled control."
         ]
       },
@@ -1506,6 +1519,12 @@
           "date": "2026-09-04",
           "change": "ledger read-back detail only — the dispatch contract itself is UNCHANGED and no clause moved. #15024 dropped sys_metadata_activation's reserved organization_id column before it ever shipped (systemFields { tenant: false } removes it rather than leaving it unwritten), so step 2's row confirmation asked a runner to read a column that is not there. It now asserts the row's KEY SET carries no organization_id, because the value spelling passes VACUOUSLY once the column is gone (`row.organization_id ?? null` is `null` either way) — green for exactly the reason it should be red. automated.ref was stale in the same direction: it described the dogfood pin as asserting 'ONE install-level row with organization_id NULL', and that pin has been a key-set reading named 'writes ONE deployment-level row, and the TABLE has no tenant column at all' since #15024; the ref now quotes the pin's live name so a runner who opens the file finds it",
           "ref": "#15253"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-01",
+          "change": "knownGaps no longer presents a live MCP call as possibly undrivable: a stock boot mounts POST /api/v1/mcp (named in the boot banner), and QA run #21056 drove tools/call run_action live for clause 4. The unit pin stays the fallback where the endpoint is absent",
+          "ref": "#21060"
         }
       ]
     },
