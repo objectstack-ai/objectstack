@@ -336,11 +336,11 @@ describe('#8031 — GET /meta/:type/:name/published resolves from the published 
  * the stored row exactly as before. The predicate is ASKED of the protocol,
  * never re-derived here.
  *
- * The registry below ships ONE flow from a package — `_packageId` on its own
- * entry, the shape `lookupArtifactItem` reads off a partial registry — so the
- * real protocol's predicate, code layer and layered read all run unmocked over
- * this file's own engine double. The cold-boot proof over the real composition
- * is `flow-shipped-name-published-door.dogfood.test.ts`.
+ * The registry below ships ONE flow from a package — the package id stamped
+ * on the loader's own entry, the shape `lookupArtifactItem` reads off a
+ * partial registry — so the real protocol's predicate, code layer and layered
+ * read all run unmocked over this file's own engine double. The cold-boot proof over
+ * the real composition is `flow-shipped-name-published-door.dogfood.test.ts`.
  */
 describe('[#21002] the dispatcher published door follows the layered read for a shipped flow name', () => {
     const SHIPPED = 'pkg_flow';
@@ -356,7 +356,7 @@ describe('[#21002] the dispatcher published door follows the layered read for a 
     /** This file's engine double, with a registry that ships {@link SHIPPED} from a package. */
     function shippedHarness() {
         const { engine, rows } = makeStubEngine();
-        const loaderEntry = { ...flowBody(SHIPPED, 'LOADER'), _packageId: 'com.example.pkg', _provenance: 'package' };
+        const loaderEntry = { ...flowBody(SHIPPED, 'LOADER'), _packageId: 'com.example.pkg' };
         engine.registry = {
             registerItem: () => {},
             registerObject: () => {},
