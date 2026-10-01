@@ -298,11 +298,13 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
      * against the SERVED document. They prove two things at once: this suite
      * measures the same thing the card measured, and none of the thirteen was
      * disturbed by the fix. `field` moved 74 → 75 when it gained `picklist`
-     * (the shared-option-list reference), a declared key, not a derivation change.
+     * (the shared-option-list reference), a declared key, not a derivation change;
+     * `object` moved 43 → 44 the same way when it gained `imageField` (the
+     * record's picture, beside `nameField`).
      */
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
         agent: 26, app: 30, dashboard: 21, dataset: 16, field: 75, flow: 23,
-        hook: 22, object: 43, page: 24, position: 12, report: 21, skill: 17, tool: 14,
+        hook: 22, object: 44, page: 24, position: 12, report: 21, skill: 17, tool: 14,
     };
 
     it.each(Object.entries(CARD_PROPERTY_COUNTS))(
