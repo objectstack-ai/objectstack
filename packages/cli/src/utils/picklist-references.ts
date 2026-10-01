@@ -21,7 +21,7 @@
  * `extend` names the list it adds options to, and `PicklistExtensionSchema`
  * checks that name's spelling and nothing else. An `extend: 'industy'` beside
  * `picklists: [{ name: 'industry', … }]` parsed, validated and built the same
- * way, and the options it carried were added to a list nobody declared — the
+ * way, and the artifact shipped an extension of a list nobody declares — the
  * silence this module exists to remove, for a second collection.
  *
  * ## The walk is the boot path's
