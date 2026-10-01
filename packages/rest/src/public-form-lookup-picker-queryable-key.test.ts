@@ -394,3 +394,29 @@ describe('[#21062] a security service that cannot give the query answer passes o
         });
     }
 });
+
+/**
+ * The narrowing the changeset declares (`Clause-②: yes (narrowing)`). With a
+ * security service that cannot give the query answer, the fallback passes over
+ * every display field declaring a masking rule WHOEVER the caller is, so for a
+ * caller the rule is lifted for, a picker whose display fields all declare one
+ * goes from served to refused. Its control is the same caller and picker with
+ * the service that answers: served.
+ */
+describe('[#21062] the declared narrowing: a security service without the query answer refuses a picker whose display fields all declare a masking rule', () => {
+    let h: Harness;
+    beforeAll(async () => { h = await boot([MEMBER_SET, GUEST_UNMASK_SET]); }, 60_000);
+    afterAll(async () => { try { await h?.engine.destroy(); } catch { /* noop */ } });
+
+    it('a caller the rule is lifted for is refused 403 PERMISSION_DENIED, and the engine is never asked', async () => {
+        const served = await h.lookup('c_only');
+        expect(served.status, `control, the service that answers: ${JSON.stringify(served.body)}`).toBe(200);
+
+        for (const older of [withoutQueryAnswer(h.security), { ...h.security, getQueryableFields: async () => undefined }]) {
+            const before = h.finds().length;
+            const refused = await h.lookup('c_only', undefined, older);
+            expect({ status: refused.status, code: refused.body?.code }).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+            expect(h.finds().length - before, 'the engine was asked').toBe(0);
+        }
+    });
+});
