@@ -42,11 +42,12 @@
  *   would refuse a write the read shows whenever a policy spells its comparand
  *   another way: `record.start_time == '09:00'` against a stored `'09:00:00'`.
  *
- * Only the declaration decides which columns: a column the object does not
- * declare temporal is judged exactly as before, whatever its value looks like,
- * and an object whose schema cannot be loaded hands over no columns, so nothing
- * is put into any form. The types come from the declaration the write check
- * already reads (`declaredComparisonColumns`), never from the values.
+ * Only the declaration decides which columns: a column the object declares
+ * neither temporal nor multi-valued (below) is judged exactly as before,
+ * whatever its value looks like, and an object whose schema cannot be loaded
+ * hands over no columns, so nothing is put into any form. The types come from
+ * the declaration the write check already reads (`declaredComparisonColumns`),
+ * never from the values.
  *
  * The rule is total: a value it cannot read (junk, a `{placeholder}`, a
  * `{ $field }` reference) comes back unchanged and is judged as written.
@@ -54,14 +55,38 @@
  * `{ $field }` comparand are not compared as values of the column, and are left
  * as written, as the drivers leave them.
  *
- * ## What it does not carry
+ * ## [#21238] A declared multi-valued column: the image only
  *
- * The scalar wrap of a declared multi-valued column (`tags: 'x'` stored as
- * `['x']`) is the same raw-versus-stored split on another column class. It is
- * not folded here: the write door's wrap is objectql's
- * `normalizeMultiValueFields`, which no entry of `@objectstack/objectql`
- * exports, and this package depends on the engine only for its tests. A copy
- * of it would be a second rule.
+ * The same raw-versus-stored split held on another column class. A column the
+ * object declares multi-valued (the spec's `isMultiValueField`, over the same
+ * declared `type` and `multiple`) stores a LIST, and the write door stores a
+ * lone scalar as a one-member list: `tags: 'x'` is stored as `['x']`. The
+ * insert seam and the by-id update image are formed before that door runs, so
+ * judged raw, measured through `ObjectQL.insert` + `SecurityPlugin` + two SQL
+ * driver families as a member resolving a permission set:
+ *
+ * | `check` | written | write | stored | read under the same predicate |
+ * |---|---|---|---|---|
+ * | `record.tags.contains('x')` | `'x'` | 403 | `["x"]` | shown |
+ * | `!record.tags.contains('x')` | `'x'` | admitted | `["x"]` | hidden |
+ *
+ * So the post-image's value on each such column goes through
+ * `@objectstack/core`'s `multiValueStorageForm`, the rule objectql's record
+ * validator (`normalizeMultiValueFields`) stores it by. ⛔ No copy of it lives
+ * here. The door also leaves out the columns the engine owns (`system` /
+ * `readonly`), and the declaration this step reads does not carry those flags.
+ * That difference is outside what a caller steers: the engine strips a
+ * caller's value on such a column before its own seams, which judge the row it
+ * stores, so only a hook's own write there is judged wrapped while it is stored
+ * as written — the boundary the insert seam already states for the values the
+ * platform owns.
+ *
+ * The comparands are left as written, because the read pairs none with the
+ * wrap: `$contains` / `$notContains` take one MEMBER, and every scalar
+ * comparison on such a column is refused by the read
+ * (`JSON_COLUMN_INCOMPATIBLE_OPERATORS`), never compared with a list.
+ *
+ * ## What it does not carry
  *
  * `driver-mongodb` stores these columns through its own copy of the rule
  * (`mongodb-temporal.ts`), not through `temporalStorageForm`. Measured shape by
@@ -72,18 +97,24 @@
  * rule declares.
  */
 
-import { temporalStorageForm, type TemporalComparandKind } from '@objectstack/core';
+import { multiValueStorageForm, temporalStorageForm, type TemporalComparandKind } from '@objectstack/core';
 import { matchesFilterCondition, type MatchesFilterOptions } from '@objectstack/formula';
 import {
   CALENDAR_DATE_TYPES,
   CLOCK_TIME_TYPES,
   INSTANT_TYPES,
   filterSubtreeProvenanceOf,
+  isMultiValueField,
   markFilterSubtreeProvenance,
 } from '@objectstack/spec/data';
 
 /** The declared temporal columns of one object, by name, each with its storage rule's kind. */
 export type DeclaredTemporalColumns = ReadonlyMap<string, TemporalComparandKind>;
+
+/** [#21238] The declared multi-valued columns of one object, by name. */
+export type DeclaredMultiValueColumns = ReadonlySet<string>;
+
+const NO_MULTI_VALUE_COLUMNS: DeclaredMultiValueColumns = new Set();
 
 /**
  * The operators whose comparand is a VALUE of the column, compared with the
@@ -114,6 +145,20 @@ export function declaredTemporalColumns(columns: MatchesFilterOptions | undefine
   for (const [name, decl] of Object.entries(columns?.fields ?? {})) {
     const kind = temporalKindOfDeclaredType(decl.type);
     if (kind) out.set(name, kind);
+  }
+  return out;
+}
+
+/**
+ * [#21238] The columns `columns` declares multi-valued — the spec's
+ * `isMultiValueField` over each column's declared `type` and `multiple`, the
+ * one predicate the write door asks. Empty when the object hands over no
+ * declaration.
+ */
+export function declaredMultiValueColumns(columns: MatchesFilterOptions | undefined): DeclaredMultiValueColumns {
+  const out = new Set<string>();
+  for (const [name, decl] of Object.entries(columns?.fields ?? {})) {
+    if (isMultiValueField({ type: decl.type, multiple: decl.multiple === true })) out.add(name);
   }
   return out;
 }
@@ -215,24 +260,32 @@ export function storedFormCheckFilter<T>(filter: T, columns: DeclaredTemporalCol
 }
 
 /**
- * `image` with every declared temporal column's value in its storage form —
- * the row the driver will store. Copy-on-write: the caller's image is never
- * mutated, and an image with nothing to put into a form comes back as the
- * SAME object.
+ * `image` with every declared temporal column's value in its storage form, and
+ * [#21238] every declared multi-valued column's value in the form the write
+ * door stores it in (`multiValueStorageForm`) — the row the driver will store.
+ * Copy-on-write: the caller's image is never mutated, and an image with
+ * nothing to put into a form comes back as the SAME object.
  */
 export function storedFormImage(
   image: Record<string, unknown>,
   columns: DeclaredTemporalColumns,
+  multiValue: DeclaredMultiValueColumns = NO_MULTI_VALUE_COLUMNS,
 ): Record<string, unknown> {
   let out: Record<string, unknown> | undefined;
+  const put = (column: string, value: unknown, stored: unknown): void => {
+    if (stored === value) return;
+    out ??= { ...image };
+    out[column] = stored;
+  };
   for (const [column, kind] of columns) {
     if (!Object.prototype.hasOwnProperty.call(image, column)) continue;
     const value = image[column];
-    const stored = temporalStorageForm(value, kind);
-    if (stored !== value) {
-      out ??= { ...image };
-      out[column] = stored;
-    }
+    put(column, value, temporalStorageForm(value, kind));
+  }
+  for (const column of multiValue) {
+    if (!Object.prototype.hasOwnProperty.call(image, column)) continue;
+    const value = image[column];
+    put(column, value, multiValueStorageForm(value));
   }
   return out ?? image;
 }
@@ -254,9 +307,12 @@ export function storedFormCheckJudge(
   columns: MatchesFilterOptions | undefined,
 ): (image: Record<string, unknown>) => boolean {
   const temporal = declaredTemporalColumns(columns);
+  const multiValue = declaredMultiValueColumns(columns);
+  // The comparands are put into the temporal form only: on a multi-valued
+  // column the read pairs no comparand with the wrap (see the module note).
   const storedParts = parts.map((part) => storedFormCheckFilter(part, temporal));
   return (image) => {
-    const stored = storedFormImage(image, temporal);
+    const stored = storedFormImage(image, temporal, multiValue);
     return storedParts.every((part) => matchesFilterCondition(stored, part as never, columns));
   };
 }

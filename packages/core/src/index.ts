@@ -126,6 +126,13 @@ export * from './utils/temporal-comparand.js';
 // do not depend on each other, and each driver used to carry its own copy.
 export * from './utils/temporal-storage-form.js';
 
+// [#21238] …and the storage form of a value written to a declared multi-valued
+// column (a lone scalar stored as a one-member list). `@objectstack/objectql`'s
+// record validator applies it at the write door, and `@objectstack/plugin-security`'s
+// row-level write check applies it to the image it judges — one rule, here
+// because those two do not depend on each other at runtime.
+export * from './utils/multi-value-storage-form.js';
+
 // [#21007] …and the refusal a scalar comparison gets on a field stored as a
 // JSON column: the operator set and the words. `driver-sql` refuses it on
 // `where`, and `@objectstack/objectql` on the per-aggregation `filter` it
