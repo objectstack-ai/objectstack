@@ -101,7 +101,15 @@ function setup(overrides: Record<string, unknown> = {}) {
         protocol,
         { api: { requireAuth: false } } as any,
     );
-    (rest as any).resolveExecCtx = async () => ({ userId: 'u1', systemPermissions: ['manage_metadata'] });
+    // [#21087] `manage_platform_settings` beside `manage_metadata`: a read of a
+    // datasource-family type (`external_catalogs` below) is admitted on that
+    // capability before any handler runs, and this file is about the verdict
+    // a type NAME earns from the handler — so its caller holds what every
+    // declared type's read requires.
+    (rest as any).resolveExecCtx = async () => ({
+        userId: 'u1',
+        systemPermissions: ['manage_metadata', 'manage_platform_settings'],
+    });
     rest.registerRoutes();
     return { rest, protocol };
 }
