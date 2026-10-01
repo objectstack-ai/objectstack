@@ -14630,8 +14630,17 @@ export class ObjectStackProtocolImplementation implements
      * tenant-authored row it is, and the automation boot pull reports it as a
      * shadowed contender. What becomes of such rows (keep, refuse, migrate) is
      * not decided by this method.
+     *
+     * [#21002] PUBLIC so the published-snapshot doors can ASK it, never
+     * re-derive it. {@link getMetaItemLayered} decides its effective layer with
+     * this predicate, and `GET /meta/:type/:name/published` (the REST route
+     * and its dispatcher twin) reads that layered answer: when a stored row is
+     * present and this predicate holds for the answer's `type` and `name`, the
+     * effective layer — the loader's body — is what the door serves, and in
+     * every other case the door serves the stored row as before. One decision
+     * point for the three reads; the doors hold no copy of the rule.
      */
-    private isShippedFlowName(type: string, name: unknown): boolean {
+    isShippedFlowName(type: string, name: unknown): boolean {
         if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'flow') return false;
         if (typeof name !== 'string' || name === '') return false;
         return this.packagedArtifactOwner({ type: 'flow', name }) !== undefined;
