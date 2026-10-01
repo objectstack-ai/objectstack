@@ -242,16 +242,17 @@ for (const cell of CELLS) {
         const before = { ...reads };
         const res = await query({ measures: ['row_count'], dimensions: ['title_dim'] });
         expect(res.status, JSON.stringify(res.body)).toBe(200);
-        const groups = (res.body.rows as Array<{ title_dim: string; row_count: number | string }>)
-          .map((r) => [r.title_dim, Number(r.row_count)] as const)
+        // [#20889] `row_count` is a JSON number on every dialect — never `"2"`.
+        const groups = (res.body.rows as Array<{ title_dim: string; row_count: unknown }>)
+          .map((r) => [r.title_dim, r.row_count] as const)
           .sort(([a], [b]) => a.localeCompare(b));
         expect(groups).toEqual([['x', 2], ['y', 1]]);
         expect(reads.rawSql - before.rawSql, 'the native strategy answered').toBeGreaterThanOrEqual(1);
 
         const joined = await query({ measures: ['row_count'], dimensions: ['acct_name'] });
         expect(joined.status, JSON.stringify(joined.body)).toBe(200);
-        const joinedGroups = (joined.body.rows as Array<{ acct_name: string; row_count: number | string }>)
-          .map((r) => [r.acct_name, Number(r.row_count)] as const)
+        const joinedGroups = (joined.body.rows as Array<{ acct_name: string; row_count: unknown }>)
+          .map((r) => [r.acct_name, r.row_count] as const)
           .sort(([a], [b]) => a.localeCompare(b));
         expect(joinedGroups).toEqual([['A', 2], ['B', 1]]);
       });
