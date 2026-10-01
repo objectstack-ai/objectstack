@@ -256,7 +256,7 @@
       "source": [
         "docs/plans/release-15.1-test-plan.md §B4 (#3059)",
         "packages/connectors/connector-mcp/src/mcp-provider.ts (#3055 policy: default deny, strict-equality allowlist, both messages)",
-        "examples/app-showcase/objectstack.config.ts#declarativeStdio (declarativeStdio: ['node'] opt-in) + src/system/connectors/index.ts (the 'remove that option and boot fails loudly — try it' fixture note)"
+        "examples/app-showcase/objectstack.config.ts#plugins (declarativeStdio: ['node'] opt-in on the ConnectorMcpPlugin entry — re-pointed #18101: declarativeStdio is a key written INLINE in that constructor call, which the shared resolver does not read as a declaration, and the config itself is an anonymous default export, so plugins is the nearest enclosing key it does read) + src/system/connectors/index.ts (the 'remove that option and boot fails loudly — try it' fixture note)"
       ],
       "history": [
         {
@@ -1406,7 +1406,7 @@
         "packages/spec/src/shared/external-errors.ts#renderDiffMessage (renderDiffMessage + ExternalSchemaMismatchError — datasource, object, per-column diffs)",
         "packages/cli/src/commands/serve.ts#ExternalDatasourceServicePlugin (ADR-0015 federation block — ExternalDatasourceServicePlugin + createExternalValidationPlugin wired unconditionally, best-effort dynamic import)",
         "packages/spec/src/data/datasource.zod.ts#checkOnBoot (validation policy schema; checkOnBoot default true, the checkonboot/validateonboot alias rows are REJECTION-path did-you-means, not folds — enforced since #13149, so declared = enforced here now)",
-        "examples/app-showcase/src/system/datasources/showcase-external.datasource.ts#onMismatch (stock policy onMismatch:'warn' — deliberate, per its own comment)",
+        "examples/app-showcase/src/system/datasources/showcase-external.datasource.ts#ShowcaseExternalDatasource (stock policy onMismatch:'warn' — deliberate, per its own comment; re-pointed #18101: onMismatch is a key written INLINE in the external validation literal, which the shared resolver does not read as a declaration, and ShowcaseExternalDatasource is the datasource constant that declares it)",
         "docs/adr/0015-external-datasource-federation.md §5.2"
       ],
       "history": [
