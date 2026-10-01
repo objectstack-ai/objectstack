@@ -593,7 +593,7 @@ export const ENGINE_UPDATE_DISPATCH_CASES: readonly EngineUpdateDispatchCase[] =
   // [#11009] A PURE-id `where` stays by-id even under a declared `multi` —
   // there is no predicate the by-id path could drop, and LifecycleService's
   // guarded reap relies on this shape taking the per-record path.
-  { what: 'scalar where.id with multi:true and NOTHING else in where — still one by-id write (#11009)', data: { title: 'x' }, options: { where: { id: 'rec_1' }, multi: true }, expect: 'by-id', expectId: 'rec_1' },
+  { what: 'scalar where.id with multi:true and NOTHING else in where — still one by-id write', data: { title: 'x' }, options: { where: { id: 'rec_1' }, multi: true }, expect: 'by-id', expectId: 'rec_1' },
   // ── by-id via the PAYLOAD. A SCALAR `data.id` still outranks `where` and
   //    `multi` alike — that is the common, legal `update(o, { id, …fields })`
   //    spelling and objectstack#5748 left it exactly as it was.
@@ -606,16 +606,16 @@ export const ENGINE_UPDATE_DISPATCH_CASES: readonly EngineUpdateDispatchCase[] =
   // predicate the by-id path would silently discard — the last silent member
   // of the #5748/#11009 dropped-declaration family. The pin flips, it does
   // not disappear; the EQUAL spelling keeps its own passing pin right below.
-  { what: 'a SCALAR data.id beside a DIFFERENT scalar where.id — refused, no longer silently wins (#11142 reverses the #5748 pin for the unequal shape)', data: { id: 'rec_1', title: 'x' }, options: { where: { id: 'rec_2' } }, expect: 'reject' },
+  { what: 'a SCALAR data.id beside a DIFFERENT scalar where.id — refused; the payload id no longer silently wins over a where.id naming another row', data: { id: 'rec_1', title: 'x' }, options: { where: { id: 'rec_2' } }, expect: 'reject' },
   // [#11142] The equal-ids spelling stays honoured: the REST ingress folds
   // the path id into the payload (`{ ...data, id: request.id }` beside
   // `where: { id: request.id }`), so redundant-but-agreeing is a NORMAL
   // spelling, not a conflict.
-  { what: 'data.id === where.id — the redundant-but-agreeing spelling (REST folds the path id into the payload) stays by-id (#11142)', data: { id: 'rec_1', title: 'x' }, options: { where: { id: 'rec_1' } }, expect: 'by-id', expectId: 'rec_1' },
+  { what: 'data.id === where.id — the redundant-but-agreeing spelling (REST folds the path id into the payload) stays by-id', data: { id: 'rec_1', title: 'x' }, options: { where: { id: 'rec_1' } }, expect: 'by-id', expectId: 'rec_1' },
   // [#11142] `multi: true` cannot rescue the conflict: the payload id outranks
   // `multi` (#5748), so the call is still a by-id write carrying a where.id it
   // can never honour.
-  { what: 'a SCALAR data.id beside a DIFFERENT scalar where.id and multi:true — still refused, the payload id outranks multi (#11142)', data: { id: 'rec_1', title: 'x' }, options: { where: { id: 'rec_2' }, multi: true }, expect: 'reject' },
+  { what: 'a SCALAR data.id beside a DIFFERENT scalar where.id and multi:true — still refused, the payload id outranks multi', data: { id: 'rec_1', title: 'x' }, options: { where: { id: 'rec_2' }, multi: true }, expect: 'reject' },
   // [#11230] The OTHER half of the reversed #5748 pin, and the last silent arm
   // of this family: a DECLARED but NON-SCALAR `where.id` beside a scalar
   // payload id. It never had a row of its own in this case-set — the assertion
@@ -623,19 +623,19 @@ export const ENGINE_UPDATE_DISPATCH_CASES: readonly EngineUpdateDispatchCase[] =
   // data.id still outranks where and multi", first expectation) and is flipped
   // there. It gets rows HERE now, so every double bound to this case-set
   // inherits the refusal rather than each one re-deriving it.
-  { what: 'a SCALAR data.id beside an $in where.id and multi:true — refused; the row SET and the declared bulk intent were BOTH silently dropped (#11230 reverses the remaining half of the #5748 pin)', data: { id: 'rec_1', title: 'x' }, options: { where: { id: { $in: ['a', 'b'] } }, multi: true }, expect: 'reject' },
-  { what: 'a SCALAR data.id beside an $in where.id, no multi — refused (#11230)', data: { id: 'rec_1', title: 'x' }, options: { where: { id: { $in: ['a', 'b'] } } }, expect: 'reject' },
+  { what: 'a SCALAR data.id beside an $in where.id and multi:true — refused; the row SET and the declared bulk intent were BOTH silently dropped', data: { id: 'rec_1', title: 'x' }, options: { where: { id: { $in: ['a', 'b'] } }, multi: true }, expect: 'reject' },
+  { what: 'a SCALAR data.id beside an $in where.id, no multi — refused; the by-id write would silently drop the declared row SET', data: { id: 'rec_1', title: 'x' }, options: { where: { id: { $in: ['a', 'b'] } } }, expect: 'reject' },
   // [#19757] A 'SCALAR data.id beside an ARRAY where.id' row sat here. The
   // shared comparand-shape face now refuses an ARRAY in the equality slot at
   // the engine's lowering seam, BEFORE this dispatch runs (ruled 2026-09-23),
   // so the real engine answers it with the face's INVALID_FILTER / 400 and no
   // #11230 verdict for it is observable. Retired, not re-spelled: the two `$in`
   // rows above carry the #11230 "declared non-scalar where.id" refusal.
-  { what: 'a SCALAR data.id beside a NULL where.id — refused (#11230)', data: { id: 'rec_1', title: 'x' }, options: { where: { id: null } }, expect: 'reject' },
+  { what: 'a SCALAR data.id beside a NULL where.id — refused; a declared where.id that is not one primary key is never silently dropped', data: { id: 'rec_1', title: 'x' }, options: { where: { id: null } }, expect: 'reject' },
   // [#11230] The boundary that does NOT move: a FALSY scalar `where.id` IS a
   // scalar, so it is not this refusal's shape at all and keeps the #11142
   // verdict. Pinned so the reversal cannot creep over the truthiness rule.
-  { what: 'a SCALAR data.id beside a FALSY scalar where.id (0) — still by-id, a falsy id identifies no row (the #11142 boundary, untouched by #11230)', data: { id: 'rec_1', title: 'x' }, options: { where: { id: 0 } }, expect: 'by-id', expectId: 'rec_1' },
+  { what: 'a SCALAR data.id beside a FALSY scalar where.id (0) — still by-id, a falsy id identifies no row (it is a scalar, so neither the different-row nor the non-scalar refusal applies)', data: { id: 'rec_1', title: 'x' }, options: { where: { id: 0 } }, expect: 'by-id', expectId: 'rec_1' },
   // ── The payload's scalar test (objectstack#5748). A non-scalar `data.id`
   //    names no row, so it stops shadowing everything under it: the decision
   //    falls through to `where.id`, then `multi`, then `reject`. Before #5748
@@ -650,9 +650,9 @@ export const ENGINE_UPDATE_DISPATCH_CASES: readonly EngineUpdateDispatchCase[] =
   // predicate keys WITH a declared `multi` is a predicate call — every key
   // (the id included, as an equality term) rides the AST to
   // `driver.updateMany`, so the declared condition is honoured in full.
-  { what: 'scalar where.id + extra predicate keys + multi:true — the predicate path honours ALL of it (#11009)', data: { title: 'x' }, options: { where: { id: 'rec_1', status: 'draft' }, multi: true }, expect: 'multi' },
+  { what: 'scalar where.id + extra predicate keys + multi:true — the predicate path honours ALL of it', data: { title: 'x' }, options: { where: { id: 'rec_1', status: 'draft' }, multi: true }, expect: 'multi' },
   { what: 'multi with a FALSY data.id (0 does not identify a row)', data: { id: 0, title: 'x' }, options: { multi: true }, expect: 'multi' },
-  { what: 'operator object in data.id WITH multi:true — the declared bulk intent is honoured (#5748)', data: { id: { $in: ['a', 'b'] }, title: 'x' }, options: { multi: true }, expect: 'multi' },
+  { what: 'operator object in data.id WITH multi:true — the declared bulk intent is honoured', data: { id: { $in: ['a', 'b'] }, title: 'x' }, options: { multi: true }, expect: 'multi' },
   { what: 'array data.id with multi:true', data: { id: ['a', 'b'], title: 'x' }, options: { multi: true }, expect: 'multi' },
   // ── The rejects. Every one of these is a call a fake that mirrors the rule
   //    by hand tends to accept, and a running server answers 500 to.
@@ -672,7 +672,7 @@ export const ENGINE_UPDATE_DISPATCH_CASES: readonly EngineUpdateDispatchCase[] =
   // ── The typo shape #5748's B option was worried about, pinned LOUD: an
   //    operator object in the payload with NO declared bulk intent is a
   //    rejection, never a silent promotion to a bulk write.
-  { what: 'operator object in data.id, NO multi — rejected, NOT silently promoted to a bulk write (#5748)', data: { id: { $in: ['a', 'b'] }, title: 'x' }, options: undefined, expect: 'reject' },
+  { what: 'operator object in data.id, NO multi — rejected, NOT silently promoted to a bulk write', data: { id: { $in: ['a', 'b'] }, title: 'x' }, options: undefined, expect: 'reject' },
   { what: 'operator object in data.id, multi explicitly false', data: { id: { $in: ['a', 'b'] }, title: 'x' }, options: { multi: false }, expect: 'reject' },
   { what: 'array data.id, no multi', data: { id: ['a', 'b'], title: 'x' }, options: undefined, expect: 'reject' },
   { what: 'null data.id, no multi', data: { id: null, title: 'x' }, options: undefined, expect: 'reject' },
@@ -682,12 +682,12 @@ export const ENGINE_UPDATE_DISPATCH_CASES: readonly EngineUpdateDispatchCase[] =
   //    exactly like a working conditional write. Now they are loud: the
   //    refusal names the dropped keys and prescribes the predicate path
   //    (`multi: true`), which honours the full `where`.
-  { what: 'scalar where.id alongside other predicates, NO multi — the guard would be silently dropped (#11009)', data: { title: 'x' }, options: { where: { id: 'rec_1', tenant: 't1' } }, expect: 'reject' },
-  { what: 'scalar where.id + a CAS operator predicate, multi explicitly false (#11009 — the redeliver shape)', data: { title: 'x' }, options: { where: { id: 'rec_1', status: { $in: ['done'] } }, multi: false }, expect: 'reject' },
-  { what: 'scalar data.id + extra where predicate, no multi — same drop through the payload door (#11009)', data: { id: 'rec_1', title: 'x' }, options: { where: { tenant: 't1' } }, expect: 'reject' },
+  { what: 'scalar where.id alongside other predicates, NO multi — the guard would be silently dropped', data: { title: 'x' }, options: { where: { id: 'rec_1', tenant: 't1' } }, expect: 'reject' },
+  { what: 'scalar where.id + a CAS operator predicate, multi explicitly false — the redeliver shape, refused rather than dropping its CAS guard', data: { title: 'x' }, options: { where: { id: 'rec_1', status: { $in: ['done'] } }, multi: false }, expect: 'reject' },
+  { what: 'scalar data.id + extra where predicate, no multi — refused; the by-id write would silently drop the predicate, through the payload door', data: { id: 'rec_1', title: 'x' }, options: { where: { tenant: 't1' } }, expect: 'reject' },
   // The payload id outranks `multi` (#5748), so a declared `multi: true`
   // cannot re-route it onto the predicate path — and the unhonourable
   // predicate is REFUSED rather than silently dropped (the pre-#11009
   // behaviour) or silently promoted to a bulk write.
-  { what: 'scalar data.id + extra where predicate + multi:true — refused, the payload id cannot take the predicate path (#11009)', data: { id: 'rec_1', title: 'x' }, options: { where: { tenant: 't1' }, multi: true }, expect: 'reject' },
+  { what: 'scalar data.id + extra where predicate + multi:true — refused, the payload id cannot take the predicate path', data: { id: 'rec_1', title: 'x' }, options: { where: { tenant: 't1' }, multi: true }, expect: 'reject' },
 ];

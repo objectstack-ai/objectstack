@@ -129,7 +129,7 @@ export const OBJECT_SCHEMA_MASK_CASES: readonly ObjectSchemaMaskCase[] = [
     },
     {
         id: 'empty-readable-set/no-empty-fields-200',
-        why: 'D6 — `getReadableFields` answers `[]` only where its own posture read failed closed (#3545). An empty-fields 200 is "silently wrong UI AND cacheable poison", so the exit refuses instead.',
+        why: 'D6 — `getReadableFields` answers `[]` only where its own posture read failed closed. An empty-fields 200 is "silently wrong UI AND cacheable poison", so the exit refuses instead.',
         context: { userId: 'u_portal', systemPermissions: [] },
         readable: [],
         expect: { kind: 'fault' },
@@ -150,7 +150,7 @@ export const OBJECT_SCHEMA_MASK_CASES: readonly ObjectSchemaMaskCase[] = [
     },
     {
         id: 'write-capable-caller/exempt',
-        why: '[#7020] D4 is DERIVED from the #6603 write gate — whoever may write a schema sees all of it, by construction. A `manage_metadata`-only caller passes every write gate, so a projected GET here is the round trip that PUTs the invisible fields away. Holds NEITHER builder capability on purpose: that is the shape the two hand-kept sets used to separate.',
+        why: 'D4 is DERIVED from the schema write gate (`manage_metadata`) — whoever may write a schema sees all of it, by construction. A `manage_metadata`-only caller passes every write gate, so a projected GET here is the round trip that PUTs the invisible fields away. Holds NEITHER builder capability on purpose: that is the shape the two hand-kept sets used to separate.',
         context: { userId: 'u_author', systemPermissions: ['manage_metadata'] },
         readable: ['id'],
         expect: { kind: 'unmasked' },
