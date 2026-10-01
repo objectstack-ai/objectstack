@@ -5042,6 +5042,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`action-aria-retired`.',
   },
   {
+    id: 'action-block-endpoint-spelling-retired',
+    order: 55,
+    text:
+      'It also gives the executor target of an action one spelling on the page blocks that run '
+      + 'one. `ActionSchema` has always refused `endpoint` with the rename to `target`, while the '
+      + '`action:button` and `action:icon` component rows declared `endpoint` as a key of their own, '
+      + 'and the console\'s `api` handler reads `target` only — so an `api` button authored with '
+      + '`endpoint` was accepted by the props gate and called nothing. The rows now refuse it with '
+      + 'the same rename, read from the one alias table both share. The D2 conversion '
+      + '`action-block-endpoint-to-target` renames the key on an `api` action, where the rename is '
+      + 'lossless, retired from the load path so authors are refused at the door while stored rows '
+      + 'and `os migrate meta` replay it; an `endpoint` on a block with no `actionType` or another '
+      + 'one is left as stored and reported as a TODO. Its D3 record is the semantic entry '
+      + '`action-block-endpoint-spelling-retired`.',
+  },
+  {
     id: 'admin-export-wildcard-removed',
     order: 4,
     text:
@@ -6092,6 +6108,35 @@ const step18: MigrationStep = {
         + 'that name was meant to announce, or the author has moved the text to the placing '
         + "component's or list view's `aria` block, or confirmed the existing label already says it. "
         + 'With a screen reader, focusing an icon-only action announces its label.',
+    },
+    // #21005 — the D3 entry of the `action-block-endpoint-to-target` family (ruling
+    // B on #17152: one D3 entry per retirement family, even when D2 is lossless).
+    // The `action:button` / `action:icon` rows declared `endpoint` while
+    // `ActionSchema` refused it with the rename to `target`; the console's `api`
+    // handler reads `target` only. The rename is lossless on an `api` action and is
+    // declined, as a TODO, everywhere else — and it cannot reach code.
+    {
+      id: 'action-block-endpoint-spelling-retired',
+      surface: 'page.component.action:button.endpoint / page.component.action:icon.endpoint — the '
+        + 'endpoint an `api` action button calls, on the two page blocks that run an action',
+      replacement: '`target` — the one key the action runner dispatches an executor on, and the key '
+        + '`ActionSchema` already renames `endpoint` to.',
+      reason: 'The D2 conversion `action-block-endpoint-to-target` renames `endpoint` to `target` in '
+        + 'author sources and on every stored-row rehydration, for a block whose `actionType` is '
+        + '`api` — the one meaning the key declared, and the rename is lossless there. Three things '
+        + 'are left. A block that carries `endpoint` with no `actionType` was called through the '
+        + 'action runner\'s legacy API fallback, which a `target` with no type does not reach, so the '
+        + 'author has to add `actionType: \'api\'` as well. A block with another `actionType` never read '
+        + '`endpoint`, so only the author can say whether its value should become the `target` or be '
+        + 'deleted. And a block carrying both spellings with different values is left for the author '
+        + 'to keep one. Each is left as stored and reported as a TODO. Code is out of reach: a custom '
+        + 'action handler that read `endpoint` off the action it was handed reads nothing once the '
+        + 'block carries `target`.',
+      acceptanceCriteria: 'No `action:button` or `action:icon` block carries `endpoint` in source or '
+        + 'at rest; each block that called an endpoint names it as `target` with `actionType: \'api\'`. '
+        + 'Pressing such a button in the console sends one request to that endpoint, and `os validate` '
+        + 'reports no `component-props-unknown-key` finding for `endpoint`. No custom action handler '
+        + 'reads `endpoint` from an action dispatched by either block.',
     },
     {
       id: 'action-bulk-dispatch-contract-undeclared',
