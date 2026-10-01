@@ -298,6 +298,14 @@ export interface ISecurityService {
    * - `[]` — a real answer: this caller may read NO field of this object.
    *
    * A system context bypasses field-level security and yields the full field set.
+   *
+   * **A non-system caller who resolves no permission set** holds no
+   * permission-set field grant and no capability. No grant narrows its answer,
+   * and a field's own declarations still apply to it: a field that declares
+   * `requiredPermissions` is not served to it, so it is not in the answer,
+   * unless a `maskingRule` on the field turns that into a masked value, which
+   * is a served column and stays. Its answer is therefore the full field set
+   * minus the capability-gated fields it is not served.
    */
   getReadableFields(object: string, context?: SecurityContext): Promise<string[] | undefined>;
 
@@ -310,19 +318,23 @@ export interface ISecurityService {
    * that resolves to **zero** permission sets goes through the same baseline
    * resolution `/auth/me/permissions` uses (`security.baselinePermissionSets`:
    * the app-declared baseline COMPOSED with the platform `member_default`,
-   * #7555) instead of falling open to the full field set.
+   * #7555) instead of falling open to the data plane's answer for that caller.
    *
    * **Why the two differ rather than converge.** `getReadableFields` mirrors the
-   * engine middleware, which skips its whole field gate for a caller with no
-   * permission sets; on the DATA plane, reporting a narrowing the enforcement
-   * path would not apply is its own kind of drift, so falling open is the
-   * correct, drift-free answer there. The metadata plane has no such symmetry to
+   * engine middleware, which skips its permission-set GRANT gates for a caller
+   * with no permission sets but still applies each field's own declarations to
+   * it: a `maskingRule` serves the value masked, and a field's
+   * `requiredPermissions`, none of which that caller holds, keeps the field
+   * from being served. On the DATA plane, reporting a narrowing the enforcement
+   * path would not apply is its own kind of drift, so the full field set minus
+   * the capability-gated fields that caller is not served is the correct,
+   * drift-free answer there. The metadata plane has no such symmetry to
    * preserve — the question is disclosure, and D7 rules that a public/guest
    * deployment's schema exposure must be a deliberate permission-set decision
-   * rather than an accidental everything-default. It still falls open when the
-   * fallback set itself resolves to nothing (no `member_default` in the
-   * deployment at all): that is the "no FLS posture here" tier, not a restricted
-   * caller.
+   * rather than an accidental everything-default. It still answers as the data
+   * plane does when the fallback set itself resolves to nothing (no
+   * `member_default` in the deployment at all): that is the "no FLS posture
+   * here" tier, not a restricted caller.
    *
    * **Fails SOFT, with the same two distinct empty answers as
    * {@link getReadableFields}:** `undefined` is "no answer — use your own
@@ -396,6 +408,9 @@ export interface ISecurityService {
    * fields that gate refuses when a payload names them. Neither whether the
    * caller may create or edit the OBJECT nor a field's own rules (`readonly`,
    * `system`, a `formula` / `summary` / `autonumber` type) are part of the answer.
+   * A field's `requiredPermissions` is part of it, for every non-system caller:
+   * one who resolves no permission set holds no capability, so a field that
+   * declares it is refused in that caller's payload and is not in its answer.
    *
    * **Fails SOFT, with the same two distinct empty answers as
    * {@link getReadableFields}:** `undefined` is "no answer — use your own
