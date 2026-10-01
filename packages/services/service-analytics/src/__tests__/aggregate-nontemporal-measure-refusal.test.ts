@@ -369,11 +369,14 @@ describe('#16099 — the controls: every pair the table accepts still compiles',
     expect(unknown.sqls.length).toBe(1);
 
     // 2. a dotted relationship path — the hook answers for the BASE object
+    // [#21129] …and for it ALONE: the cube door reads a relationship-path
+    // column on the object its hop reaches (`account` here), so a hook that
+    // answered for every object would describe the column and refuse the pair.
     const sqls: string[] = [];
     const svc = new AnalyticsService({
       queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }),
       executeRawSql: async (_o: string, sql: string) => { sqls.push(sql); return [{ status: 'open', probe_measure: 1 }]; },
-      sourceFieldMeta: (_o: string, f: string) => (FIELD_TYPES[f] ? { type: FIELD_TYPES[f] } : undefined),
+      sourceFieldMeta: (o: string, f: string) => (o === 'duly_task' && FIELD_TYPES[f] ? { type: FIELD_TYPES[f] } : undefined),
     } as never);
     const rel = DatasetSchema.parse({
       name: 'task_metrics_rel', label: 'Task metrics', object: 'duly_task', include: ['account'],
@@ -382,6 +385,7 @@ describe('#16099 — the controls: every pair the table accepts still compiles',
     });
     const r2: any = await svc.queryDataset(rel as never, { dimensions: ['status'], measures: ['probe_measure'] } as never);
     expect(r2.rows.length).toBe(1);
+    expect(sqls.length).toBe(1);
 
     // 3. no `declaredFieldType` hook at all (no data engine wired)
     const bare: string[] = [];

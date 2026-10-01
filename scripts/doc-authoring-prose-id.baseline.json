@@ -176,10 +176,6 @@
  "packages/plugins/plugin-audit/src/translations/zh-CN.objects.generated.ts": {
   "#11507": 1
  },
- "packages/plugins/plugin-dev/src/dev-plugin.ts": {
-  "#3963": 1,
-  "#4818": 2
- },
  "packages/plugins/plugin-email/src/email-service.ts": {
   "#5172": 1
  },
@@ -188,9 +184,6 @@
  },
  "packages/plugins/plugin-email/src/templates/auth-templates.ts": {
   "#8019": 4
- },
- "packages/plugins/plugin-hono-server/src/hono-plugin.ts": {
-  "#4073": 1
  },
  "packages/plugins/plugin-security/src/bootstrap-system-capabilities.ts": {
   "#5876": 1,
@@ -483,13 +476,5 @@
  },
  "packages/triggers/trigger-record-change/src/record-change-trigger.ts": {
   "#3457": 1
- },
- "packages/verify/src/harness.ts": {
-  "#4719": 1
- },
- "packages/verify/src/rls.ts": {
-  "#1994": 3,
-  "#7685": 3,
-  "#7978": 3
  }
 }

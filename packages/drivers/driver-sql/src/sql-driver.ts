@@ -1110,6 +1110,45 @@ function rawStatementFaultError(cause: unknown): Error {
 }
 
 /**
+ * [#21227] The refusal {@link SqlDriver.readBackInsertedRows} raises when an
+ * INSERT was accepted but a row it wrote is not there to be read back.
+ *
+ * `create` and `bulkCreate` answer the stored record (`IDataDriver.create`).
+ * On a dialect whose INSERT returns no rows the driver reads what it wrote
+ * back by the id it wrote, and only a row removed between the two statements
+ * (a concurrent delete, a trigger) can be missing. There is then no stored
+ * record to answer. Answering the caller's payload in its place would look
+ * like a success while answering a row that is not stored, and would hide a
+ * read-back keyed on the wrong column for good, so the door refuses instead.
+ *
+ * `DATABASE_ERROR` / 500, the pair this file's other terminals declare for a
+ * fault the request did not cause. The message is composed and names only the
+ * object the caller passed. The ids, which are the driver's own values (the
+ * caller's `id` / `_id` or a minted nanoid, never a business column), travel
+ * under a non-enumerable `cause` for the server log, as in
+ * {@link backendStatementFaultError}.
+ */
+function insertedRowsNotReadBackError(object: string, missingIds: unknown[], writtenCount: number): Error {
+  const err = new Error(
+    `The database accepted the insert into object '${object}', but ${missingIds.length} of its ` +
+      `${writtenCount} row(s) could not be read back by the id this driver wrote, so the stored ` +
+      'record cannot be answered. This database returns no rows from an INSERT, so the driver ' +
+      'reads each written row back by its id, and a row removed between the two statements (a ' +
+      'concurrent delete or a trigger) leaves nothing to read. The write was not retried, because ' +
+      're-issuing it could duplicate a row that did land.',
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.DATABASE_ERROR;
+  err.status = 500;
+  Object.defineProperty(err, 'cause', {
+    value: new Error(`no row carries the written id(s) ${JSON.stringify(missingIds)} after the insert`),
+    enumerable: false,
+    writable: true,
+    configurable: true,
+  });
+  return err;
+}
+
+/**
  * [#9354] How long a widening ALTER waits for a metadata lock, in seconds.
  *
  * Named for the seam it arrived on; since #9542 it governs BOTH callers of
@@ -2291,6 +2330,55 @@ function refuseCrossRowIdentityMerge(
       `can absorb a primary-key-targeted merge: ${named}`,
   );
   return err;
+}
+
+/**
+ * [#21185] The wire identity of an upsert refused because its conflict landed
+ * on a row outside the organization the row is written under: the registered
+ * `UNIQUE_VIOLATION` / 409, the answer a colliding insert gets.
+ *
+ * ⛔ No new code, by the ruling on #21185 (record 5934879010). From the
+ * caller's organization the conflicting row does not exist — the caller cannot
+ * read it — so the call IS an insert, and that insert collides on an
+ * installation-wide key (the primary key, or a `unique: 'global'` column under
+ * ADR-0120 D1). A dedicated answer would tell the caller something `create()`
+ * does not; this one tells it exactly what `create()` already does, which is the
+ * oracle ADR-0120 records as the accepted cost of a `'global'` key.
+ */
+const UPSERT_UNIQUE_VIOLATION_CODE = 'UNIQUE_VIOLATION';
+/** @see {@link UPSERT_UNIQUE_VIOLATION_CODE} */
+const UPSERT_UNIQUE_VIOLATION_STATUS = 409;
+
+/**
+ * [#21185] Build the refusal above. One constructor for both faces —
+ * {@link SqlDriver.upsert} and the remote face `driver-turso` builds over it —
+ * so the two cannot answer one condition with two sentences (#5240).
+ *
+ * The sentence is the engine's duplicate-record sentence (`DuplicateRecordError`
+ * in `@objectstack/objectql`), in both of its forms: a single conflict key is
+ * named, several are not. ⛔ It names no organization, no tenant column and no
+ * value of the row the conflict landed on, and it carries no `cause` — there is
+ * no server error to attach, and anything read off that row would be the
+ * cross-organization detail the refusal exists to withhold. It does not begin
+ * with a SQL verb (the importer's sanitiser replaces such messages wholesale).
+ */
+function refuseUpsertConflictOutsideWrittenOrganization(object: string, mergeKeys: string[]): Error {
+  const err = new Error(
+    `Duplicate record refused on '${object}': ` +
+      (mergeKeys.length === 1
+        ? `a unique constraint on '${mergeKeys[0]}' already holds this value. `
+        : 'a unique constraint already holds these values. ') +
+      'No record was written.',
+  ) as Error & { code?: string; status?: number };
+  err.code = UPSERT_UNIQUE_VIOLATION_CODE;
+  err.status = UPSERT_UNIQUE_VIOLATION_STATUS;
+  return err;
+}
+
+/** [#21185] Is this the refusal above? Read off the envelope pair, which no dialect error carries. */
+function isUpsertFenceRefusal(error: unknown): boolean {
+  const e = error as { code?: unknown; status?: unknown } | null | undefined;
+  return e?.code === UPSERT_UNIQUE_VIOLATION_CODE && e?.status === UPSERT_UNIQUE_VIOLATION_STATUS;
 }
 
 /**
@@ -5831,6 +5919,38 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * [#21227] Whether this dialect's `INSERT … RETURNING *` answers the rows it
+   * STORED.
+   *
+   * `create` and `bulkCreate` answer the inserted record (`IDataDriver.create`).
+   * Where this is true they take it from the statement, in one round trip.
+   * Where it is false the statement answers no rows, and both doors read back
+   * what they wrote, by the ids they wrote ({@link readBackInsertedRows}).
+   *
+   * True for the SQLite and PostgreSQL families. knex compiles `RETURNING` for
+   * both, and the row it answers is the stored one, server-side column defaults
+   * included (measured on better-sqlite3 and on live PostgreSQL 16.14).
+   *
+   * False for the MySQL family, which has no `RETURNING`. knex's MySQL compiler
+   * drops the clause with a `.returning() is not supported by mysql` warning and
+   * answers `[insertId]`: ONE element whatever the row count, and `0` for this
+   * driver's string primary key. Measured on live MySQL 8.0.46 before this
+   * change: `create` answered `0`, a three-row `bulkCreate` answered `[0]`, and
+   * every row was stored. The auth adapter answers what `create` answers, so
+   * sign-up failed on MySQL with the user row stored and no account row.
+   *
+   * False, too, for a client this driver recognises as neither family (a Client
+   * constructor, a wire-only spelling such as `redshift`): reading back is
+   * correct on every dialect, and `RETURNING` is only the shortcut a dialect
+   * known to answer the stored row is given. The SQLite and PostgreSQL doors
+   * therefore pay no extra round trip, and the MySQL doors pay one SELECT per
+   * statement (per `create`, and per `bulkCreate` batch).
+   */
+  protected get insertReturnsStoredRows(): boolean {
+    return this.isSqlite || this.isPostgres;
+  }
+
+  /**
    * Per-granularity native SQL bucket support, computed from dialect.
    *
    * Must match `bucketDateValue()` in @objectstack/objectql exactly:
@@ -7142,10 +7262,15 @@ export class SqlDriver implements IDataDriver {
 
   /**
    * [#15267] Declared as `IDataDriver.create()` declares it: the inserted
-   * record, `formatOutput(...)` over the `returning('*')` row. The annotation
+   * record, `formatOutput(...)` over the stored row. The annotation
    * used to be an explicit `Promise<any>`, so the published `.d.ts` let a
    * caller read any member off the result; it is the contract's type now,
    * pinned by `sql-driver-doors-declared-types.test.ts`.
+   *
+   * [#21227] The stored row comes from the statement's own `returning('*')`
+   * where the dialect answers one, and from {@link readBackInsertedRows}
+   * where it does not ({@link insertReturnsStoredRows}: the MySQL family). The
+   * type was the contract's all along; on MySQL the VALUE was the insert id.
    */
   async create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown>> {
     const { _id, ...rest } = data;
@@ -7186,8 +7311,11 @@ export class SqlDriver implements IDataDriver {
       this.stampInsertTimestamps(object, formatted);
 
       try {
-        const result = await builder.insert(formatted).returning('*');
-        return this.formatOutput(object, result[0]);
+        if (this.insertReturnsStoredRows) {
+          const result = await builder.insert(formatted).returning('*');
+          return this.formatOutput(object, result[0]);
+        }
+        await builder.insert(formatted);
       } catch (error) {
         // #11627: on a table whose UNIQUE index is carried by a hash shadow,
         // `ER_DUP_ENTRY` quotes a binary digest and names the shadow index, so
@@ -7212,8 +7340,106 @@ export class SqlDriver implements IDataDriver {
           // rather than burning a second number for nothing.
           delete toInsert[reservation.field];
         }
+        continue;
       }
+
+      // [#21227] Reached only when the INSERT landed and answered no rows. The
+      // read sits OUTSIDE the try on purpose: a fault in it is not an insert
+      // failure, so it must never reach the collision re-seed above, whose
+      // retry would re-issue a write that already landed.
+      const [stored] = await this.readBackInsertedRows(
+        object,
+        this.rotationWriteTarget(object) ?? object,
+        [toInsert],
+        options,
+      );
+      return stored;
     }
+  }
+
+  /**
+   * [#21227] Read back the rows an INSERT on this call just wrote, by the ids
+   * it wrote: what `create` and `bulkCreate` answer on a dialect whose INSERT
+   * answers no rows ({@link insertReturnsStoredRows}).
+   *
+   * One row per written row, in the written order (`IN (…)` promises no
+   * order), each through `formatOutput()`, the same presentation
+   * `returning('*')` gets on the other dialects and `update`'s own read-back
+   * gets on every dialect.
+   *
+   * # The read key: the written id, which this driver always holds
+   *
+   * Every row reaches the INSERT carrying the id this driver gave it: the
+   * caller's `id`, else its `_id`, else a nanoid minted in `create` /
+   * `bulkCreate` before the statement is built. The id is never asked of the
+   * database, so no insert id is read: the managed `id` column is a
+   * `varchar(255)` PRIMARY KEY with no AUTO_INCREMENT, and the insert id
+   * MySQL reports for it is `0`. The column is resolved through
+   * {@link remoteColumn}, so an external object whose `columnMap` renames
+   * `id` is read by its physical column, as its INSERT was written.
+   *
+   * # The table: the write target
+   *
+   * The table the statement wrote, a rotation shard included, so the read
+   * looks where the row landed rather than at the base name.
+   *
+   * # Tenant scope: the tenants the rows were WRITTEN under
+   *
+   * Routed through {@link applyTenantScope} like every read door in this class
+   * (`check:tenant-chokepoint`), scoped as `upsert`'s identity probe
+   * (`assertMergeLandedOnSuppliedIdentity`) scopes its own read: to the tenant
+   * each row was written under. On an ordinary tenanted call that is the
+   * caller's org, which `injectTenantOnInsert` stamped. On an admin write that
+   * names a tenant in the row data (a documented authority: explicit values
+   * are never overwritten), a read scoped to the caller's ACTIVE org would miss
+   * a row that really landed. A batch may name several tenants, so the scope is
+   * their union through `tenantIds`, which `applyTenantScope` already compiles
+   * as `IN (…) OR IS NULL`; the caller's own `tenantIds` membership set is
+   * replaced, not widened. With no tenant field, or no tenant on the rows and
+   * none on the call, `applyTenantScope` leaves the read unscoped by its own
+   * contract. The ids are this call's own and `id` is the PRIMARY KEY, so the
+   * read cannot answer a row this call did not write, in any organization.
+   *
+   * # A row that is not there
+   *
+   * Refused with {@link insertedRowsNotReadBackError}, never answered with the
+   * payload: see that function for why.
+   */
+  private async readBackInsertedRows(
+    object: string,
+    writeTable: string,
+    written: Record<string, any>[],
+    options?: DriverOptions,
+  ): Promise<Record<string, unknown>[]> {
+    if (written.length === 0) return [];
+    const idColumn = this.remoteColumn(object, 'id', 'id');
+    const tenantField = this.resolveTenantField(object);
+    const writtenTenants = tenantField
+      ? [
+          ...new Set(
+            written
+              .map((row) => row[tenantField])
+              .filter((value) => value !== undefined && value !== null && value !== '')
+              .map(String),
+          ),
+        ]
+      : [];
+    const scopeOptions: DriverOptions = {
+      ...options,
+      tenantId: writtenTenants[0] ?? options?.tenantId,
+      tenantIds: writtenTenants.length > 0 ? writtenTenants : undefined,
+    };
+    const builder = this.getBuilder(writeTable, options);
+    this.applyTenantScope(builder, object, scopeOptions);
+    const stored: Record<string, any>[] = await builder.whereIn(
+      idColumn,
+      written.map((row) => row.id),
+    );
+    const byId = new Map<string, Record<string, any>>();
+    for (const row of stored) byId.set(String(row[idColumn]), row);
+    const missing = written.filter((row) => !byId.has(String(row.id))).map((row) => row.id);
+    if (missing.length > 0) throw insertedRowsNotReadBackError(object, missing, written.length);
+    return written.map((row) => this.formatOutput(object, byId.get(String(row.id))));
   }
 
   /**
@@ -8403,6 +8629,28 @@ export class SqlDriver implements IDataDriver {
    * be presented as a **gapless** series (an audit-grade invoice or contract
    * number). A customer with a compliance-grade gapless requirement is the
    * recorded restart condition for an opt-in gapless mode — it is not built.
+   *
+   * ## The tenant column, and why an upsert never re-parents a row (#21185)
+   *
+   * The object's tenant column ({@link resolveTenantField}) is on this list for
+   * `id`'s and `auto_number`'s argument: which organization owns a row is part
+   * of its identity, and an upsert that lands on an existing row keeps that
+   * row's organization — an explicit payload value does not move it on merge
+   * either. `update()` is the deliberate path that moves a row between
+   * organizations. Resolved through {@link remoteColumn} like the autonumber
+   * columns, so the name matches the write payload's physical keys.
+   *
+   * For a TENANT-SCOPED call this exclusion is a no-op, because the merge leg is
+   * fenced to rows of the written organization anyway (see {@link upsert} and
+   * {@link upsertTenantGuard}), where the stored and written values are equal.
+   * Its job is the call with NO tenant context — the lifecycle archiver's
+   * `cold.upsert(object, row, ['id'])`, a seed or a connector — which carries no
+   * organization fence: there, this entry is what keeps a payload's tenant value
+   * from re-parenting the row it merges into. Ruled on #21185 (record
+   * 5934879010, half 2), the #7011 / #8622 argument applied to the tenant column.
+   *
+   * The remote face (`driver-turso`) reads this same list, so the exclusion
+   * holds on both faces from one place.
    */
   protected insertOnlyUpsertColumns(object: string): Set<string> {
     // Same config resolution as `fillAutoNumberFields`: object name first,
@@ -8411,7 +8659,79 @@ export class SqlDriver implements IDataDriver {
     const cfgs = this.autoNumberFields[object] || this.autoNumberFields[tableName] || [];
     const columns = new Set<string>(['created_at', this.remoteColumn(object, 'id', 'id')]);
     for (const cfg of cfgs) columns.add(this.remoteColumn(object, cfg.name, cfg.name));
+    const tenantField = this.resolveTenantField(object);
+    if (tenantField) columns.add(this.remoteColumn(object, tenantField, tenantField));
     return columns;
+  }
+
+  /**
+   * [#21185] The organization fence for a tenant-scoped upsert, or `null` when
+   * the call carries none — read off the row AFTER `injectTenantOnInsert` has
+   * run, so `value` is the organization the row is WRITTEN under.
+   *
+   * A fence exists exactly when the call is tenant-scoped (a non-empty
+   * `options.tenantId`, the condition every tenant mechanism in this class keys
+   * on) on an object with a tenant column. Inside that set the merge leg may
+   * only land on a row whose stored tenant column equals the written one, for
+   * ANY conflict target — the primary key included, since `id` and a
+   * `unique: 'global'` column are both installation-wide (ADR-0120 D1). A
+   * conflict that lands anywhere else is refused with `UNIQUE_VIOLATION` and
+   * writes nothing.
+   *
+   * Why the WRITTEN organization and not the caller's active one: an admin may
+   * name another organization on the row ({@link injectTenantOnInsert}: explicit
+   * values are never overwritten), and that row really is written there — the
+   * reading #8807's identity probe already settled
+   * ({@link assertMergeLandedOnSuppliedIdentity}). On an ordinary call the two
+   * are the same value.
+   *
+   * Shared with the remote face (`driver-turso`), so both faces fence on one
+   * reading of "tenant-scoped".
+   */
+  protected upsertTenantGuard(
+    object: string,
+    row: Record<string, any>,
+    options?: DriverOptions,
+  ): { field: string; column: string; value: unknown } | null {
+    const tenantId = options?.tenantId;
+    if (tenantId === undefined || tenantId === null || tenantId === '') return null;
+    const field = this.resolveTenantField(object);
+    if (!field) return null;
+    const value = row[field];
+    // Unreachable after `injectTenantOnInsert`, which fills an empty slot from
+    // `tenantId` on exactly this condition; stated rather than assumed.
+    if (value === undefined || value === null || value === '') return null;
+    return { field, column: this.remoteColumn(object, field, field), value };
+  }
+
+  /**
+   * [#21185] The merge leg's organization predicate on the dialects whose
+   * `ON CONFLICT … DO UPDATE` takes a `WHERE`: the stored row's tenant column
+   * is NOT DISTINCT from the one the statement would have inserted
+   * (`excluded`). SQLite spells NULL-safe equality `IS`, PostgreSQL
+   * `IS NOT DISTINCT FROM` — the two dialects this is reached on (MySQL fences
+   * after the statement instead; see {@link upsert}).
+   *
+   * The target table is the write target's bare PHYSICAL name — the rotation
+   * shard when one is current, the federated remote table otherwise — because
+   * that is how both dialects name the INSERT target inside this clause.
+   */
+  private mergeLandsInWrittenOrganization(writeTable: string, column: string): Knex.Raw {
+    const table = this.physicalTableByObject[writeTable] ?? writeTable;
+    const notDistinct = this.isPostgres ? 'IS NOT DISTINCT FROM' : 'IS';
+    return this.knex.raw(`?? ${notDistinct} ??`, [`${table}.${column}`, `excluded.${column}`]);
+  }
+
+  /**
+   * [#21185] The refusal both faces throw when an upsert's conflict lands
+   * outside the written organization — `UNIQUE_VIOLATION` / 409. Protected so
+   * the remote face throws the one sentence this class builds.
+   */
+  protected upsertConflictRefusal(object: string, conflictKeys?: string[]): Error {
+    return refuseUpsertConflictOutsideWrittenOrganization(
+      object,
+      conflictKeys && conflictKeys.length > 0 ? conflictKeys : ['id'],
+    );
   }
 
   /**
@@ -8740,6 +9060,19 @@ export class SqlDriver implements IDataDriver {
    * The verdict itself is tenant-independent regardless: `id` is the PRIMARY
    * KEY, so at most one row in the table can carry it.
    *
+   * ⚠️ [#21185] The first two bullets no longer reach this method: a
+   * tenant-scoped call on a tenanted object is fenced to its organization, and
+   * on MySQL {@link assertMergeLandedInWrittenOrganization} runs in this
+   * check's place, reading under the written tenant and carrying #8807's
+   * verdict with it. What still arrives here is the third bullet — and there
+   * the written tenant must NOT become a scope: the tenant column is now
+   * insert-only, so a payload naming another organization than the stored
+   * row's is a merge that keeps the row's organization (measured on MariaDB
+   * 10.11 before this guard: the read scoped to the payload's tenant missed the
+   * merged row and answered this method's cross-row refusal for a merge that
+   * landed on the supplied id). So the written tenant is used only under a
+   * tenant context, and a call without one reads unscoped.
+   *
    * # The write target, not the object
    *
    * A rotation-sharded write lands in the current shard, so that is where the
@@ -8760,9 +9093,11 @@ export class SqlDriver implements IDataDriver {
     // cross-tenant write, and a no-op when neither exists. `tenantIds` is
     // dropped deliberately — the group-union posture widens a READ to a
     // membership set, and this is an identity probe for ONE row, not a read.
+    const tenantContext = options?.tenantId !== undefined && options?.tenantId !== null && options?.tenantId !== '';
     const scopeOptions: DriverOptions = {
       ...options,
-      tenantId: typeof writtenTenant === 'string' && writtenTenant !== '' ? writtenTenant : options?.tenantId,
+      tenantId:
+        tenantContext && typeof writtenTenant === 'string' && writtenTenant !== '' ? writtenTenant : options?.tenantId,
       tenantIds: undefined,
     };
     this.applyTenantScope(builder, object, scopeOptions);
@@ -8770,6 +9105,99 @@ export class SqlDriver implements IDataDriver {
     if (landed) return;
     const tableName = this.physicalTableByObject[writeTable] ?? writeTable;
     throw refuseCrossRowIdentityMerge(object, tableName, id, rivals);
+  }
+
+  /**
+   * [#21185] MySQL: after a tenant-scoped upsert's statement, did it land on a
+   * row of the organization the row is WRITTEN under? Runs inside the same
+   * transaction as the statement, so its throw rolls the write back.
+   *
+   * # Why MySQL needs a check where the other dialects need none
+   *
+   * SQLite and PostgreSQL fence the merge leg inside the statement
+   * (`ON CONFLICT … DO UPDATE SET … WHERE` the stored tenant column equals the
+   * written one — see {@link upsert}), so a row of another organization is
+   * never written at all. MySQL's `ON DUPLICATE KEY UPDATE` takes no `WHERE`
+   * (knex refuses to compile one: `.onConflict().merge().where() is not
+   * supported for mysql`). This is #8807's mechanism, reused as ruled: the
+   * statement and a read of the landed row run as one unit of work, and the
+   * read's failure undoes the write.
+   *
+   * # The read, and why its absence is exact
+   *
+   * The landed row is looked up by the values it matched on (`matchOn`, the
+   * conflict-key values the statement sent — or `id` when one of them is
+   * empty, the same choice the read-back makes), under the written tenant
+   * EXACTLY: {@link applyTenantScope} for the chokepoint, plus equality on the
+   * tenant column, which closes that scope's NULL-organization arm. The tenant
+   * column is insert-only ({@link insertOnlyUpsertColumns}), so a merge never
+   * writes the written tenant onto the row it lands on. Therefore a row
+   * matching those values under the written tenant exists exactly when the
+   * statement inserted there or merged into a row that was already there; its
+   * absence means the merge landed on a row of another organization, or on a
+   * row with none.
+   *
+   * # When #8807's check is owed too (`rivals` given)
+   *
+   * A primary-key target on a table carrying a rival UNIQUE key. `matchOn` is
+   * then the supplied `id`, so a found row is also #8807's verdict — the merge
+   * landed on the supplied identity — and that check is subsumed. A MISSING row
+   * has two causes the caller must be told apart, because they are two
+   * different refusals:
+   *
+   *  - the merge landed through a rival key on a row of the WRITTEN
+   *    organization — #8807's condition, answered with its own sentence
+   *    ({@link refuseCrossRowIdentityMerge}), exactly as before this card;
+   *  - it landed on a row of another organization — on the primary key (that
+   *    row wins a multi-key collision, measured for #8807) or through a rival
+   *    key — answered `UNIQUE_VIOLATION`.
+   *
+   * They are told apart by reading each rival key's sent values under the
+   * written tenant: a merge through that key left the row carrying them, in
+   * the written organization. Only a rival whose every column is in the
+   * payload can be read this way (a hash-shadow carrier's generated column is
+   * not); when none can, the answer is `UNIQUE_VIOLATION` — a refusal either
+   * way, and the write is rolled back either way.
+   *
+   * ⛔ Nothing read here reaches the caller: the refusal names no organization
+   * and no value of the row it landed on.
+   */
+  private async assertMergeLandedInWrittenOrganization(
+    object: string,
+    writeTable: string,
+    mergeKeys: string[],
+    matchOn: Record<string, unknown>,
+    sent: Record<string, unknown>,
+    guard: { column: string; value: unknown },
+    identity: { id: string | number; rivals: PhysicalIndex[] } | null,
+    options?: DriverOptions,
+  ): Promise<void> {
+    // The tenant scope of a ONE-row probe: the written tenant, with
+    // `tenantIds` dropped for #8807's reason (the group-union posture widens a
+    // READ to a membership set; this asks about one organization).
+    const scopeOptions: DriverOptions = { ...options, tenantId: String(guard.value), tenantIds: undefined };
+
+    const landedProbe = this.getBuilder(writeTable, options);
+    this.applyTenantScope(landedProbe, object, scopeOptions);
+    landedProbe.where(guard.column, guard.value as any);
+    for (const [column, value] of Object.entries(matchOn)) landedProbe.where(column, value as any);
+    if (await landedProbe.first('id')) return;
+
+    if (identity) {
+      for (const rival of identity.rivals) {
+        const probeable = rival.columns.length > 0 && rival.columns.every((c) => sent[c] !== undefined && sent[c] !== null);
+        if (!probeable) continue;
+        const rivalProbe = this.getBuilder(writeTable, options);
+        this.applyTenantScope(rivalProbe, object, scopeOptions);
+        rivalProbe.where(guard.column, guard.value as any);
+        for (const column of rival.columns) rivalProbe.where(column, sent[column] as any);
+        if (await rivalProbe.first('id')) {
+          const tableName = this.physicalTableByObject[writeTable] ?? writeTable;
+          throw refuseCrossRowIdentityMerge(object, tableName, identity.id, identity.rivals);
+        }
+      }
+    }
+    throw refuseUpsertConflictOutsideWrittenOrganization(object, mergeKeys);
   }
 
   // [#17690] The return is the contract's own type. It was `Promise<Record<string, any>>`, and the
@@ -8793,6 +9221,20 @@ export class SqlDriver implements IDataDriver {
     this.injectTenantOnInsert(object, toUpsert, options);
 
     const mergeKeys = conflictKeys && conflictKeys.length > 0 ? conflictKeys : ['id'];
+
+    // [#21185] The organization fence (ADR-0131 D8: the tenant predicate
+    // reaches every driver door, and the merge leg of an upsert was the one it
+    // did not). The conflict target is resolved against the WHOLE table — the
+    // primary key and a `unique: 'global'` column are installation-wide — so
+    // the row a tenant-scoped call collides with can belong to an organization
+    // the caller cannot read, and the merge leg used to write onto it, tenant
+    // column included. With a fence the merge may only land on a row whose
+    // stored tenant column equals the written one; a conflict anywhere else is
+    // refused with `UNIQUE_VIOLATION` and writes nothing. `null` for a call with
+    // no tenant context, which keeps the merge and relies on the tenant column
+    // being insert-only ({@link insertOnlyUpsertColumns}). See
+    // {@link upsertTenantGuard}.
+    const tenantGuard = this.upsertTenantGuard(object, toUpsert, options);
 
     // [#8621, #8755, #8807] Pre-flight the conflict target — see
     // {@link assertConflictTargetHonoured} for the mechanism and why it is
@@ -8830,6 +9272,13 @@ export class SqlDriver implements IDataDriver {
     // insert-only (#8622) and therefore a row merged on the primary key always
     // still carries it.
     const verifyIdentity = preflight.verifyIdentity === true;
+
+    // [#21185] MySQL's fence is a check after the statement, inside the same
+    // unit of work — `ON DUPLICATE KEY UPDATE` takes no `WHERE` — so it is owed
+    // whenever the call is fenced, not only when a rival UNIQUE key exists. See
+    // {@link assertMergeLandedInWrittenOrganization}.
+    const mysqlFence = this.isMysql && tenantGuard !== null;
+    const checkAfterStatement = verifyIdentity || mysqlFence;
 
     // #6943. Measured: `upsert` does NOT share `bulkCreate`'s shape. It is
     // single-row, so a stale counter costs it exactly one burned number per
@@ -8943,6 +9392,13 @@ export class SqlDriver implements IDataDriver {
       const noopMergeColumns = Object.keys(formatted).filter((c) => mergeKeys.includes(c));
       const columnsToMerge = mergeColumns.length > 0 ? mergeColumns : noopMergeColumns;
 
+      // [#21185] The fence for THIS attempt: the tenant column, and the value
+      // the row is written under in storage form (what the statement sends).
+      const fence = tenantGuard && {
+        column: tenantGuard.column,
+        value: formatted[tenantGuard.column] ?? tenantGuard.value,
+      };
+
       // The statement, plus [#8807]'s identity check when one is owed. The
       // builder is built HERE rather than above the comment block so it can be
       // bound to whichever transaction this write runs on — the caller's, the
@@ -8958,8 +9414,37 @@ export class SqlDriver implements IDataDriver {
         // this one is deliberately not scoped.
         const builder = this.getBuilder(writeTable, writeOptions);
         const insertion = builder.insert(formatted).onConflict(mergeKeys);
-        await (columnsToMerge.length > 0 ? insertion.merge(columnsToMerge) : insertion.merge());
-        if (verifyIdentity) {
+        const merging = columnsToMerge.length > 0 ? insertion.merge(columnsToMerge) : insertion.merge();
+        // [#21185] SQLite and PostgreSQL: the fence is a predicate INSIDE the
+        // merge statement — `… DO UPDATE SET … WHERE` the stored tenant column
+        // equals the written one — so a conflict on a row of another
+        // organization (or of none) leaves that row untouched, atomically, with
+        // no added round trip. The read-back below then finds no row under the
+        // written organization, and that is where the call refuses. NULL-safe
+        // on both (`IS` on SQLite, `IS NOT DISTINCT FROM` on PostgreSQL); the
+        // written value is never NULL here, so a stored NULL is "distinct", and
+        // a platform row with no organization is fenced off too. The target
+        // table is named by its bare physical name, which both dialects accept
+        // for the INSERT target in this clause, schema-qualified or not.
+        // MySQL takes no `WHERE` here; its fence runs after the statement.
+        await (fence && !this.isMysql ? merging.where(this.mergeLandsInWrittenOrganization(writeTable, fence.column)) : merging);
+        if (mysqlFence) {
+          // [#21185] One read, under the written tenant exactly; #8807's
+          // identity verdict rides on it when a rival key made one owed.
+          const matchOn: Record<string, unknown> = mergeKeys.every((k) => formatted[k] !== undefined && formatted[k] !== null)
+            ? Object.fromEntries(mergeKeys.map((k) => [k, formatted[k]]))
+            : { id: toUpsert.id };
+          await this.assertMergeLandedInWrittenOrganization(
+            object,
+            writeTable,
+            mergeKeys,
+            matchOn,
+            formatted,
+            fence!,
+            verifyIdentity ? { id: toUpsert.id, rivals: preflight.rivals ?? [] } : null,
+            writeOptions,
+          );
+        } else if (verifyIdentity) {
           // The tenant the row was WRITTEN under, read off the payload after
           // `injectTenantOnInsert` has run — the caller's org on an ordinary
           // call, an explicitly supplied one on an admin cross-tenant write.
@@ -8976,26 +9461,44 @@ export class SqlDriver implements IDataDriver {
       };
 
       try {
-        if (verifyIdentity && options?.transaction === undefined) {
+        if (checkAfterStatement && options?.transaction === undefined) {
           // [#8807] No caller transaction, so the driver opens one: the check
           // is only worth making if its failure can UNDO the write it judged,
           // and an autocommitted statement is already permanent by the time the
-          // row can be read back. Scoped to `verifyIdentity` so the ordinary
-          // upsert — every dialect but MySQL, and every MySQL table with no
-          // rival UNIQUE key — keeps its single autocommitted round trip.
+          // row can be read back. Scoped to the calls a check is owed on —
+          // `verifyIdentity`, and since #21185 every fenced MySQL call — so the
+          // ordinary upsert (SQLite, PostgreSQL, and a MySQL call with neither)
+          // keeps its single autocommitted round trip.
           //
-          // Inside a caller transaction the wrapper is deliberately NOT added:
-          // the statement is already transactional, and throwing hands the
-          // rollback decision to the owner of that transaction, exactly as the
-          // autonumber path above reasons about the same boundary.
+          // Inside a caller transaction #8807's wrapper is deliberately NOT
+          // added: the statement is already transactional, and throwing hands
+          // the rollback decision to the owner of that transaction, exactly as
+          // the autonumber path above reasons about the same boundary.
           await this.knex.transaction(async (trx) => {
             await runStatement({ ...options, transaction: trx });
+          });
+        } else if (mysqlFence) {
+          // [#21185] …but the organization fence does not hand that decision
+          // over. A cross-organization merge is never the caller's to keep, so
+          // inside a caller transaction the statement and its check run in a
+          // nested transaction — a SAVEPOINT on MySQL — and the check's throw
+          // rolls back to it: the other organization's row is restored before
+          // the refusal reaches the caller, whatever the caller then does with
+          // its own transaction.
+          await (options!.transaction as Knex.Transaction).transaction(async (savepoint) => {
+            await runStatement({ ...options, transaction: savepoint });
           });
         } else {
           await runStatement(options);
         }
         break;
       } catch (error) {
+        // [#21185] The fence's refusal is final: it is not the server's error,
+        // so neither the unbacked-target recogniser nor the autonumber re-seed
+        // below has anything to say about it, and a retry would be refused the
+        // same way. The pair is this driver's own envelope; no dialect error
+        // carries it.
+        if (isUpsertFenceRefusal(error)) throw error;
         // [#8445] Classified BEFORE the autonumber retry logic, for three
         // reasons that all point the same way. It is not an autonumber
         // collision — `collidingAutoNumberReservations` gates on
@@ -9051,6 +9554,24 @@ export class SqlDriver implements IDataDriver {
     const readback = this.getBuilder(object, options);
     if (matchedOn) for (const k of mergeKeys) readback.where(k, sent[k]);
     else readback.where('id', toUpsert.id);
+    if (tenantGuard) {
+      // [#21185] A fenced call reads back under the WRITTEN organization
+      // EXACTLY: the chokepoint scope for that tenant (`tenantIds` dropped, as
+      // for #8807's one-row probe), plus equality on the tenant column, which
+      // closes the scope's NULL-organization arm. A row the fence left alone —
+      // another organization's, or a platform row with none — is therefore not
+      // found, and that absence IS the refusal: the statement wrote nothing
+      // (SQLite / PostgreSQL), or rolled back (MySQL, where the same read ran
+      // inside the transaction first). Scoping to the caller's ACTIVE org
+      // instead would miss a row an admin really wrote under another
+      // organization and refuse a correct write.
+      const writtenTenant = sent[tenantGuard.column] ?? tenantGuard.value;
+      this.applyTenantScope(readback, object, { ...options, tenantId: String(writtenTenant), tenantIds: undefined });
+      readback.where(tenantGuard.column, writtenTenant);
+      const landed = await readback.first();
+      if (!landed) throw refuseUpsertConflictOutsideWrittenOrganization(object, mergeKeys);
+      return this.formatOutput(object, landed) || landed;
+    }
     this.applyTenantScope(readback, object, options);
     const result = await readback.first();
     return this.formatOutput(object, result) || toUpsert;
@@ -9185,13 +9706,16 @@ export class SqlDriver implements IDataDriver {
       const builder = this.getBuilder(this.rotationWriteTarget(object) ?? object, options);
 
       try {
-        const result = await builder.insert(formattedRows).returning('*');
-        // Read-back parity with create(): JSON columns come back as their stored
-        // strings from `returning('*')` — decode them so batch callers see the
-        // same shapes single-insert callers do.
-        return Array.isArray(result)
-          ? result.map((r) => this.formatOutput(object, r))
-          : result;
+        if (this.insertReturnsStoredRows) {
+          const result = await builder.insert(formattedRows).returning('*');
+          // Read-back parity with create(): JSON columns come back as their stored
+          // strings from `returning('*')` — decode them so batch callers see the
+          // same shapes single-insert callers do.
+          return Array.isArray(result)
+            ? result.map((r) => this.formatOutput(object, r))
+            : result;
+        }
+        await builder.insert(formattedRows);
       } catch (error) {
         if (!mayRetry || attempt >= AUTONUMBER_COLLISION_RETRIES) throw error;
         const colliding = await this.collidingAutoNumberReservations(error, reservationsPerRow.flat(), options);
@@ -9223,7 +9747,20 @@ export class SqlDriver implements IDataDriver {
             if (stale.has(this.autoNumberCounterKey(reservation))) delete rows[i][reservation.field];
           }
         }
+        continue;
       }
+
+      // [#21227] Reached only when the INSERT landed and answered no rows (the
+      // MySQL family answered `[insertId]`: one element for the whole batch,
+      // which the engine's one-result-per-row guard then refused after every
+      // row had been stored). ONE read for the batch, by the ids written, in
+      // the written order. Outside the try for the reason `create` gives.
+      return this.readBackInsertedRows(
+        object,
+        this.rotationWriteTarget(object) ?? object,
+        rows,
+        options,
+      );
     }
   }
 

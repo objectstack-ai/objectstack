@@ -5,13 +5,9 @@
 // caller, when it carries a principal, is now refused the object itself: the
 // ADR-0056 D2 deny baseline, so no row, masked or stored, leaves the door.
 //
-// Two doors that produce that caller on a real composition are driven here:
-//
-//  - the public form's lookup picker, which hands the engine a context naming
-//    the public-form profile, to a visitor with no session, on a deployment
-//    that registers no such profile; and
-//  - the record door, for a signed-in user on a deployment whose baseline is
-//    switched off (`fallbackPermissionSet: null`) and who holds no grant.
+// The door that produces that caller on a real composition is driven here:
+// the record door, for a signed-in user on a deployment whose baseline is
+// switched off (`fallbackPermissionSet: null`) and who holds no grant.
 //
 // What is asserted, by class: the scene is real (a system read carries the
 // stored value), and the door refuses at object admission (403,
@@ -19,8 +15,10 @@
 // The masker's zero-set reading is still reached on a real boot through the
 // public form submit's echo, pinned by `public-form-read-back-masking`.
 //
-// The picker-door case is shared with the card retiring the picker (#21180),
-// which deletes that door; whichever of the two lands second adapts this file.
+// [#21180] There used to be a second door — the public form's anonymous lookup
+// picker, re-pinned to this 403 by #21079. Ruling E retired the picker and
+// deleted its route; #21180 landed second, so that case and the public form it
+// booted left with the door.
 //
 // `bootStack` with the real `SecurityPlugin`, `ObjectQL`, SQL driver, REST and
 // auth layers. `@objectstack/plugin-security` resolves to its BUILT output
@@ -29,12 +27,11 @@
 
 import { describe, it, expect } from 'vitest';
 import { bootStack } from '@objectstack/verify';
-import { defineStack, defineView } from '@objectstack/spec';
+import { defineStack } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { SecurityPlugin } from '@objectstack/plugin-security';
 
 const CONTACT = 'zsmask_contact';
-const INQUIRY = 'zsmask_inquiry';
 const KEY = 'zsmask_code';
 /** Synthetic stored values. */
 const STORED = 'SYNTH5150VALUE';
@@ -52,40 +49,6 @@ const ZsmaskContact = ObjectSchema.create({
   },
 });
 
-const ZsmaskInquiry = ObjectSchema.create({
-  name: INQUIRY,
-  label: 'Zero-set Mask Inquiry',
-  pluralLabel: 'Zero-set Mask Inquiries',
-  sharingModel: 'public_read_write',
-  fields: {
-    subject: Field.text({ label: 'Subject', required: true }),
-    contact: Field.lookup(CONTACT, { label: 'Contact' }),
-  },
-});
-
-const data = { provider: 'object' as const, object: INQUIRY };
-const ZsmaskInquiryViews = defineView({
-  list: { label: 'Inquiries', type: 'grid', data, columns: [{ field: 'subject' }] },
-  formViews: {
-    intake: {
-      type: 'simple',
-      data,
-      sections: [
-        {
-          name: 'intake',
-          label: 'Intake',
-          columns: 1,
-          fields: [
-            { field: 'subject', required: true },
-            { field: 'contact', publicPicker: { displayFields: ['name', KEY] } },
-          ],
-        },
-      ],
-      sharing: { enabled: true, allowAnonymous: true, publicLink: '/forms/zsmask-intake' },
-    },
-  },
-});
-
 const zsmaskStack = defineStack({
   manifest: {
     id: 'com.dogfood.zero-set-mask',
@@ -93,10 +56,9 @@ const zsmaskStack = defineStack({
     version: '0.0.0',
     type: 'app',
     name: 'Zero-set Mask Fixture',
-    description: 'One object with one masked field, and a public form whose picker displays it.',
+    description: 'One object with one masked field.',
   },
-  objects: [ZsmaskContact, ZsmaskInquiry],
-  views: [ZsmaskInquiryViews],
+  objects: [ZsmaskContact],
 });
 
 type Stack = Parameters<typeof bootStack>[0];
@@ -121,20 +83,6 @@ async function expectRefusedAtAdmission(res: Response, what: string): Promise<vo
 }
 
 describe('[#20995] a caller who resolves no permission set, on a real boot: [#21079] refused at object admission', () => {
-  it(
-    'on the public form lookup door, to a visitor with no session, on a deployment without the public-form profile',
-    async () => {
-      const stack = await bootStack(zsmaskStack as unknown as Stack);
-      try {
-        await seedContact(stack);
-        await expectRefusedAtAdmission(await stack.api('/forms/zsmask-intake/lookup/contact'), 'the picker');
-      } finally {
-        await stack.stop();
-      }
-    },
-    120_000,
-  );
-
   it(
     'on the record door, to a signed-in user holding no grant on a deployment with no baseline',
     async () => {

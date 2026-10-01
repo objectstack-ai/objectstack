@@ -214,7 +214,9 @@ for equality alike. The check reads the field's declaration as well as its
 type: a `select`, `radio`, `lookup`, `user`, `file` or `image` field declared
 `multiple: true` holds a list stored as JSON, so `count_distinct` over it is
 refused too, although the table accepts the type. The analytics service
-refuses the same pair with `400 DATASET_INVALID` when a query is built; this
+refuses the same pair with `400 DATASET_INVALID` when a query is built — or,
+for a field reached through a relationship path, with `400 INVALID_FIELD` when
+the query runs, judged on the object the path reaches; this
 is the identical verdict,
 from the identical table, one door earlier. The rule stays silent wherever the
 field's type cannot be resolved (an object this stack does not define, a

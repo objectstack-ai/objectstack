@@ -176,9 +176,11 @@ export const TEMPORAL_SOURCE_FIELD_TYPES: ReadonlySet<string> = new Set([
  *
  * Tiered "cannot answer, do not block", the same way every other chain reading
  * `sourceFieldMeta` is: an unknown field type, a host with no data engine
- * wired, and a relationship-path measure (`account.closed_at`, which
- * `sourceFieldMeta` cannot resolve because it looks a column up on the BASE
- * object) all answer `undefined` and leave the column exactly as it was.
+ * wired, and a relationship-path measure whose caller looks its column up on
+ * the BASE object (`account.closed_at`, which the dataset door's enrichment
+ * asks of the dataset's own object) all answer `undefined` and leave the
+ * column exactly as it was. [#21129] The cube door's caller locates such a
+ * column on the object its last hop reaches, so it passes the real type.
  *
  * `undefined` is also the answer for every ACCEPTED pair whose `min`/`max` has
  * no single backend-independent value (booleans) and for every pair the spec

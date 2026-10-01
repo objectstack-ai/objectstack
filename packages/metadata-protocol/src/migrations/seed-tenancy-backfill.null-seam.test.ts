@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #10789 — `backfillSeedTenancy` reported `no-split` over a driver it never
+ * Commit 38bc74ed1 — `backfillSeedTenancy` reported `no-split` over a driver it never
  * queried, and its own `absent` branch was unreachable on a no-op seam.
  *
  * ## The defect
@@ -26,7 +26,7 @@
  * three dialect result-set shapes `normalizeRows` flattens — it means "I did not
  * run your query", and it was mapped onto "your query returned no rows".
  *
- * Same class, same consumer-side shape, as #10677 / PR #10788 landed for
+ * Same class, same consumer-side shape, as #10677 / commit 3a7ec2d3b landed for
  * `os migrate duplicates`: judge the seam by whether it returns a RESULT SET,
  * not by whether `execute` exists. No driver is named by the implementation.
  *

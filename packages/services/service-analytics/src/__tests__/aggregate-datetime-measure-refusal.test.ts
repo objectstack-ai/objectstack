@@ -470,21 +470,52 @@ describe('#16737 — the gate stands down rather than guessing', () => {
     expect(result.rows.length).toBe(1);
   });
 
+  const rel = () => DatasetSchema.parse({
+    name: 'contract_cycle_rel',
+    label: 'Contract cycle',
+    object: 'clm_contract',
+    include: ['account'],
+    dimensions: [{ name: 'status', field: 'status', type: 'string' }],
+    measures: [{ name: 'avg_acct', aggregate: 'avg', field: 'account.submitted_at' }],
+  });
+
   it('a RELATIONSHIP-PATH field → not judged, because the hook answers about the base object', async () => {
     // `account.submitted_at` is a column on `account`, not on `clm_contract`.
     // Judging it from `sourceFieldMeta('clm_contract', …)` would be answering
-    // about a different column that happens to share a name.
-    const { svc } = makeService([{ status: 'open', avg_acct: 1 }]);
-    const rel = DatasetSchema.parse({
-      name: 'contract_cycle_rel',
-      label: 'Contract cycle',
-      object: 'clm_contract',
-      include: ['account'],
-      dimensions: [{ name: 'status', field: 'status', type: 'string' }],
-      measures: [{ name: 'avg_acct', aggregate: 'avg', field: 'account.submitted_at' }],
+    // about a different column that happens to share a name. [#21129] The hook
+    // here answers about the base object ALONE, as this case says: the cube
+    // door locates the column on `account`, which it cannot describe, so no
+    // door judges the pair and its statement runs. `makeService`'s hook
+    // answers for every object, which is the next case.
+    const sqls: string[] = [];
+    const svc = new AnalyticsService({
+      queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }),
+      executeRawSql: async (_object: string, sql: string) => {
+        sqls.push(sql);
+        return [{ status: 'open', avg_acct: 1 }];
+      },
+      sourceFieldMeta: (o: string, f: string) => (o === 'clm_contract' && FIELD_TYPES[f] ? { type: FIELD_TYPES[f] } : undefined),
     });
-    const result: any = await svc.queryDataset(rel, { dimensions: ['status'], measures: ['avg_acct'] });
+    const result: any = await svc.queryDataset(rel(), { dimensions: ['status'], measures: ['avg_acct'] });
     expect(result.rows.length).toBe(1);
+    expect(sqls.length).toBe(1);
+  });
+
+  it('[#21129] …and where the hook describes the joined object, the cube door judges the column there: INVALID_FIELD / 400, before any statement', async () => {
+    // The compile check above still stands down on the dotted field; the
+    // query the dataset runs passes the cube door, which reads the declaration
+    // on the object the path's hop reaches (`hop-object.ts`) — here the
+    // compiled join's `account`.
+    const { svc, sqls } = makeService([{ status: 'open', avg_acct: 1 }]);
+    const err: any = await svc.queryDataset(rel(), { dimensions: ['status'], measures: ['avg_acct'] }).then(
+      () => undefined,
+      (e) => e,
+    );
+    expect(err?.code, err?.message).toBe('INVALID_FIELD');
+    expect(err?.status).toBe(400);
+    expect(err?.field).toBe('account.submitted_at');
+    expect(err?.object).toBe('account');
+    expect(sqls.length, 'no statement ran').toBe(0);
   });
 });
 

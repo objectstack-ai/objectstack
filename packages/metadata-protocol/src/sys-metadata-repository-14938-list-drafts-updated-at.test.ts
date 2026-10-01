@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#14938] `SysMetadataRepository.listDrafts` declares `updatedAt: string |
+ * [commit c383352cb] `SysMetadataRepository.listDrafts` declares `updatedAt: string |
  * null` and used to emit the raw `updated_at` column, so on Postgres and MySQL
  * it handed a JS `Date` through a field its own signature calls a string.
  *
@@ -92,7 +92,7 @@ const PG_INSTANT = new Date('2026-03-04T05:06:07.089Z');
 const PG_CREATED = new Date('2026-01-02T03:04:05.006Z');
 
 /**
- * Reachable on BOTH live dialects (#14409): mysql2 3.23.1 answers a module
+ * Reachable on BOTH live dialects (commit `3ecb7dc1a`): mysql2 3.23.1 answers a module
  * constant literally named `INVALID_DATE` for a zero `DATETIME`, and
  * postgres-date 1.0.7 builds `new Date(NaN)` for every year in 275760..294276
  * — years Postgres itself stores.

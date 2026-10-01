@@ -35,7 +35,7 @@
  * The `objects` and `permissions` gaps are the same defect at advisory
  * severity: they do not refuse, they manufacture findings that describe
  * nothing. Both are pinned below, because a closure that is uniform is the
- * property #9612/#10058 declared and a per-collection patch is what produced
+ * property #9612/commit 6f5a44976 declared and a per-collection patch is what produced
  * this card.
  *
  * ## The discriminating tests are the ones that expect SILENCE

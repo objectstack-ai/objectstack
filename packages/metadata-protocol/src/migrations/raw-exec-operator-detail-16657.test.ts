@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#16657] The operator records this package stores name the DIALECT, not the
+ * [commit 5a95b0e93] The operator records this package stores name the DIALECT, not the
  * driver's composed refusal.
  *
  * ## The regression
@@ -31,7 +31,7 @@
  *
  * ⚠️ That formula is now the WHOLE record at every site this change touched —
  * all nine in this package, fourteen across the repository. It was eight of
- * those nine until #17167: `seed-tenancy-backfill`'s ORGANIZATION probe spelled
+ * those nine until commit dc709b2cf: `seed-tenancy-backfill`'s ORGANIZATION probe spelled
  * `operatorFacingErrorText(e) || 'unknown error'` — the file's last fallback —
  * so where the channel was EMPTY that record read `'unknown error'` and never
  * `''`. Measured at that probe before the removal: a thrown `''`, a thrown
@@ -44,7 +44,7 @@
  * "the probe did not fail", so deleting the placeholder and putting NOTHING in
  * its place routes a thrown `''` down the benign `no-organization-yet` path
  * instead of the ambiguous one (measured by ablation, both before and after
- * #17167) — the "unknown read as zero" confusion #9261 exists to prevent. The
+ * commit dc709b2cf) — the "unknown read as zero" confusion #9261 exists to prevent. The
  * fact now travels in the TYPE (`string | undefined`), so the status arm is
  * pinned beside the record arm in the empty-channel case below: a re-added
  * placeholder and a lost discrimination each redden one of them.
@@ -233,7 +233,7 @@ describe('[#16657] seed-tenancy-backfill — the stored operator record', () => 
      * injectable refusal so a single run can be pointed at one seam at a time.
      *
      * `thrown` defaults to the declared raw-statement fault every case below
-     * asserts against; the empty-channel cases (#17167) pass their own value,
+     * asserts against; the empty-channel cases (commit dc709b2cf) pass their own value,
      * which is why it is a parameter rather than a second fixture.
      */
     function seamExec(refuse: (sql: string) => boolean, thrown: unknown = rawStatementFault()) {
@@ -383,7 +383,7 @@ describe('[#16657] seed-tenancy-backfill — the stored operator record', () => 
 
     it('an UNDECLARED refusal reads its own message channel at every site', async () => {
         // No site here carries a fallback any more — the ORGANIZATION probe's
-        // `|| 'unknown error'` was the last one and #17167 removed it, which
+        // `|| 'unknown error'` was the last one and commit dc709b2cf removed it, which
         // the empty-channel case below pins. This pin drives the duplicates
         // warning with a NON-EMPTY message, the shape for which the channel is
         // the whole answer at every site.

@@ -101,7 +101,7 @@
 // conclusion that gets re-derived from scratch otherwise:
 //
 // WHAT THE LEDGERS DO COVER — richly, and more than this table ever has.
-//   `packages/rest/src/rest-route-ledger.ts`: 83 audited rows over 18 families,
+//   `packages/rest/src/rest-route-ledger.ts`: 82 audited rows over 18 families,
 //     every route `@objectstack/rest` mounts, enumerated through
 //     `RestServer.getRoutes()` on a booted server and guarded per route by
 //     `rest-route-ledger.conformance.test.ts`. It reaches all 17 registrars;
@@ -332,18 +332,25 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     kinds: ['ROUTE_ENUMERATION'],
     probes: 1,
     keys: 18,
-    population: 83,
-    reachable: 83,
+    // [#21180] 83 / 83 / 0 -> 82 / 82 / 0: the anonymous lookup-picker row
+    // (`GET /api/v1/forms/:slug/lookup/:field`) left the ledger with its route.
+    // It carried `family: 'forms'`, a family the two surviving form rows still
+    // carry, so `reachable` moves with `population`, the blind spot stays 0 and
+    // `keys` stays 18 (18 distinct families before and after, re-derived).
+    population: 82,
+    reachable: 82,
     blindSpot: 0,
     populationRule: 'ledger rows inside REST_ROUTE_LEDGER; reachable = rows carrying a `family` (each distinct value mints a key)',
-    controls: { "route: '": 83, "family: '": 83, RestRouteLedgerEntry: 2 },
+    controls: { "route: '": 82, "family: '": 82, RestRouteLedgerEntry: 2 },
     note:
       'The audited disposition of every route @objectstack/rest mounts, enumerated through ' +
       'RestServer.getRoutes() on a booted server and guarded per route by rest-route-ledger.conformance.test.ts. ' +
       'That guard is why this file can be a population source and a regex table cannot: a mounted route with no ' +
       'row here is already RED in another package, so a new family cannot be silently absent from this file, ' +
       'and therefore cannot be silently absent from the authz ratchet either. 18 families; 1 classified by a ' +
-      'matrix row (metadata), 17 enumerated in the shrink-only baseline. Re-measured 91 -> 83 (19 -> 18 families) ' +
+      'matrix row (metadata), 17 enumerated in the shrink-only baseline. Re-measured 83 -> 82 when the anonymous ' +
+      'public-form lookup-picker row left with its route; it carried `family: forms`, which the surviving form rows ' +
+      'still carry, so `reachable` moved with `population` and the families stay 18. Earlier re-measured 91 -> 83 (19 -> 18 families) ' +
       'when the whole saved-report `reports` family left with its eight routes, all eight carrying the family, so ' +
       '`reachable` moved with `population`. Earlier re-measured 94 -> 91 when the ' +
       'three REST package read/delete rows (GET /packages, GET /packages/:id, DELETE /packages/:id) left the ' +
@@ -392,9 +399,9 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     kinds: ['ROUTE_ENUMERATION', 'TRIPWIRE'],
     probes: 3,
     keys: 1,
-    population: 72,
+    population: 71,
     reachable: 19,
-    blindSpot: 53,
+    blindSpot: 52,
     populationRule:
       'route registration sites — `this.routeManager.register(` call sites, LESS the one inside ' +
       '`registerPerItemRoute` (the shared forwarder, not a route; its extent is bounded by the declaration\'s own ' +
@@ -482,9 +489,19 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // registrar's comments did not name the term). None of the eight was
     // inside `registerMetadataEndpoints`, so `reachable` does not move and the
     // blind spot shrinks by exactly the eight routes that no longer exist.
+    // [#21180] 72 / 19 / 53 -> 71 / 19 / 52: the anonymous lookup-picker route
+    // (`GET /forms/:slug/lookup/:field`) was deleted with its handler — one
+    // direct `this.routeManager.register(` site (65 -> 64) inside
+    // `registerFormEndpoints`, NOT inside `registerMetadataEndpoints`, so it
+    // was a BLIND SPOT: `reachable` does not move and the blind spot shrinks by
+    // exactly that one route. Measured on the tree before the deletion and
+    // after it: 72 / 19 / 53 there, 71 / 19 / 52 here. The other controls did
+    // not move: the handler never called `enforceAuth` (the public-form routes
+    // bypass it), so that stays 56, and `registerFormEndpoints` survives, so
+    // `private register*Endpoints(` stays 16.
     controls: {
       'private register*Endpoints(': 16,
-      'this.routeManager.register(': 65,
+      'this.routeManager.register(': 64,
       // Both halves of the new rule carry their own control, so neither can go
       // silently to zero: a helper deleted and its routes inlined back would
       // still read population 80, and only these two controls would notice the
@@ -497,7 +514,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     note:
       'The single non-tripwire probe names ONE registrar of 16. The other 15 can never mint a key: ' +
       'registerCrudEndpoints, registerApprovalsEndpoints, registerDataActionEndpoints, ' +
-      'registerSharingRuleEndpoints, registerUiEndpoints and the rest. A runtime mount census reads 77/19/58. ' +
+      'registerSharingRuleEndpoints, registerUiEndpoints and the rest. A runtime mount census reads 76/19/57. ' +
       'registerUiEndpoints is NOT special — it is simply the registrar a census happened to walk past.',
   },
   {
@@ -679,7 +696,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
 /**
  * Entry points inside the probe table's OWN files that no mintable key can
  * reach, counting only the route/handler surfaces the ratchet's completeness
- * claim is about: rest-server.ts (53 static / 58 runtime), http-dispatcher.ts
+ * claim is about: rest-server.ts (52 static / 57 runtime), http-dispatcher.ts
  * (13) and domains/mcp.ts (1).
  *
  * hono-plugin.ts's 6 mounts are deliberately EXCLUDED from this total and
@@ -688,8 +705,11 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
  * not the six.
  */
 // [#20102] 75 / 80 -> 67 / 72: the retired saved-report routes left rest-server.ts.
-export const BLIND_SPOT_TOTAL_STATIC = 67;
-export const BLIND_SPOT_TOTAL_RUNTIME = 72;
+// [#21180] 67 / 72 -> 66 / 71: the retired anonymous lookup-picker route left
+// rest-server.ts as one blind-spot call site and one runtime mount (measured:
+// `RestServer.getRoutes()` against a bare protocol, 73 mounts -> 72).
+export const BLIND_SPOT_TOTAL_STATIC = 66;
+export const BLIND_SPOT_TOTAL_RUNTIME = 71;
 
 /**
  * Re-measure every row above from the same sources the probes read.

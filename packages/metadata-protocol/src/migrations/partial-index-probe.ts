@@ -41,7 +41,7 @@
  * message that discloses neither the statement nor the diagnostic — and carries
  * the dialect error whole under a non-enumerable `cause`. Read bare, `detail`
  * became *"the database refused to run a raw statement"* for every caller that
- * stores it. `operatorFacingErrorText` (`@objectstack/types`, #16657) reads the
+ * stores it. `operatorFacingErrorText` (`@objectstack/types`, commit 5a95b0e93) reads the
  * dialect's own words back out of that chain, so a stored record still names
  * `no such column: foo`. The envelope itself is left exactly as the driver
  * declared it: this is a READ of the cause, never a widening of the disclosure.
@@ -392,7 +392,7 @@ export async function probeThenReplaceIndex(
     } catch (err: unknown) {
         // `detail` is the OPERATOR-facing text: the dialect's own prose, read
         // out of the `cause` the raw seam attaches when it declares its fault
-        // (#16019/#16657 — see the module header). Callers STORE it, and a
+        // (#16019/commit 5a95b0e93 — see the module header). Callers STORE it, and a
         // stored record is the only copy its reader ever gets.
         // The VERDICT is taken from the error object itself, so a conflict
         // reported on `code` / `errno` / `cause` with unhelpful prose is still

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #10382 — this package's live-MySQL suites must not be able to share one
+ * Commit ee09d2119 — this package's live-MySQL suites must not be able to share one
  * database.
  *
  * ## Why this suite is structural, and what it is a control FOR

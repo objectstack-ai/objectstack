@@ -223,7 +223,12 @@ describe('#5364 saveMetaItem 422 expands union branches', () => {
  * fix that did not reach this envelope would be a fix nobody sees.
  */
 describe('#7510 the 422 for a broken ViewItem names its own key, not the container\'s', () => {
-    /** The card's repro: a form ViewItem whose field's `publicPicker` carries `sort`. */
+    /**
+     * The card's repro: a form ViewItem whose field carries an unknown subkey in
+     * a nested block. It was measured on `publicPicker.sort`; [#21180] retired
+     * that key (ruling E on #21079), so the repro rides on `keyField`, the other
+     * strict block a form field carries — same shape, same door.
+     */
     const pickerReproView = () => ({
         name: 'lead.contact',
         object: 'lead',
@@ -234,7 +239,7 @@ describe('#7510 the 422 for a broken ViewItem names its own key, not the contain
             data: { provider: 'object', object: 'lead' },
             sections: [{
                 label: 'About you',
-                fields: [{ field: 'owner', publicPicker: { displayFields: ['name'], sort: [{ field: 'email', order: 'desc' }] } }],
+                fields: [{ field: 'owner', keyField: { field: 'name', sort: [{ field: 'email', order: 'desc' }] } }],
             }],
         },
     });
@@ -257,7 +262,7 @@ describe('#7510 the 422 for a broken ViewItem names its own key, not the contain
         const unknownKey = err.issues.find((i: any) => i.code === 'unrecognized_keys');
         expect(unknownKey).toBeDefined();
         expect(unknownKey.message).toContain('`sort`');
-        expect(unknownKey.path).toBe('config.sections.0.fields.0.publicPicker');
+        expect(unknownKey.path).toBe('config.sections.0.fields.0.keyField');
 
         // ⛔ The measured misdirect, gone from the whole envelope: on
         // `origin/main` @ `9051802` this message was the container branch's.
@@ -268,7 +273,7 @@ describe('#7510 the 422 for a broken ViewItem names its own key, not the contain
     it('the same item minus the bad subkey still saves', async () => {
         const { protocol, rows } = makeProtocol();
         const item: any = pickerReproView();
-        delete item.config.sections[0].fields[0].publicPicker.sort;
+        delete item.config.sections[0].fields[0].keyField.sort;
 
         const result = await save(protocol, item, 'lead.contact');
 

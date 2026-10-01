@@ -6,7 +6,7 @@ import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts'
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 /**
- * #5127 / #11674 — pass 2 RESOLVES the target; does it have a record to write
+ * #5127 / commit 9a884c6e4 — pass 2 RESOLVES the target; does it have a record to write
  * it onto?
  *
  * #5127's finding: `resolveDeferredUpdates()` looked the source record's
@@ -16,7 +16,7 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
  * `referencesDeferred` nothing explained. #5127 made both roads to that state
  * loud.
  *
- * #11674 then removed one of the roads at the root. Pass 2 now writes back
+ * Commit 9a884c6e4 then removed one of the roads at the root. Pass 2 now writes back
  * through the internal id CAPTURED AT INSERT TIME, so a row this load actually
  * wrote can always be written back to — a natural key is no longer required.
  * What used to be the "PURE SILENT LOSS" (row written fine, composite
@@ -155,7 +155,7 @@ describe('pass 2 heals a row whose natural key evaluated empty (#5127 → #11674
    * What #5127 pinned here as "THE PURE SILENT LOSS" — row written fine,
    * composite externalId ['name', 'region'] evaluating to `''` because
    * `region` is blank, pass 2 resolving 'Alice' perfectly and then having no
-   * handle to write her id onto — is exactly the structural defect #11674
+   * handle to write her id onto — is exactly the structural defect commit 9a884c6e4
    * removed: pass 2 no longer re-resolves the source row through its
    * externalId at all. The id the row got when it was INSERTED is captured
    * then and written back through now, so the empty key costs nothing.
@@ -243,7 +243,7 @@ describe('pass 2 heals a row whose natural key evaluated empty (#5127 → #11674
   /**
    * The keyed sibling: same composite key, `region` filled in. The key
    * registers AND the internal id is captured, and the outcome is identical to
-   * the empty-key case above — which is the point of #11674: keyedness no
+   * the empty-key case above — which is the point of commit 9a884c6e4: keyedness no
    * longer decides whether a deferral can land, so the two paths are pinned to
    * the same healed outcome and cannot drift apart.
    */
@@ -368,10 +368,10 @@ describe('pass 2 finds no id because the source row failed in pass 1 (#5127)', (
 
 /**
  * The same "source row never landed" failure on a record with NO usable
- * natural key (#11674) — the composite key evaluates to `''` AND the pass-1
+ * natural key (commit 9a884c6e4) — the composite key evaluates to `''` AND the pass-1
  * insert fails, so neither the captured-internal-id channel nor the
  * natural-key fallback can name a row. This is the one way left to reach the
- * empty-key drop branch: before #11674 that branch claimed "The row itself WAS
+ * empty-key drop branch: before commit 9a884c6e4 that branch claimed "The row itself WAS
  * seeded" and prescribed fixing the externalId components, both of which would
  * be lies now (a row that seeds heals; the key is not the problem). The
  * rewritten line names the record by INDEX — the only handle a keyless record

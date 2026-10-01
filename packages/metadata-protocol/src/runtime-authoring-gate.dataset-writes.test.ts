@@ -88,7 +88,7 @@ describe('the host threads a dataset publish to the runtime gate (#19143)', () =
     expect((verdict.error as { code?: string }).code).toBe('INVALID_METADATA');
     expect((verdict.error as { status?: number }).status).toBe(422);
 
-    // The receipt the author reads back: rule id, name-keyed path (#10064), and
+    // The receipt the author reads back: rule id, name-keyed path (commit def0d3e63), and
     // the string they actually typed.
     const issues = (verdict.error as { issues?: Array<Record<string, unknown>> }).issues!;
     const wire = JSON.stringify(issues);

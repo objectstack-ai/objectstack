@@ -871,7 +871,7 @@ export class DevPlugin implements Plugin {
               + (mountCode !== undefined ? `code: ${String(mountCode)} — ` : '')
               + `${mountMessage}. OS_ALLOW_DEGRADED_TENANCY does NOT apply to this failure and will `
               + 'not get past it: it covers an ABSENT multi-org runtime the operator accepts doing '
-              + 'without, not a present one that declined. (#4818)',
+              + 'without, not a present one that declined.',
             );
           }
           ctx.logger.info(`  ✔ Organizations plugin enabled (posture '${tenancyPosture}': organization_id auto-stamp, per-org seed)`);
@@ -931,9 +931,9 @@ export class DevPlugin implements Plugin {
       if (!authMounted) {
         ctx.logger.warn(
           '  ✘ REST API NOT enabled: no auth is mounted in this stack, so no caller could ever '
-          + 'authenticate and anonymous access to object data is always denied (#3963). This is NOT a '
-          + 'missing-package problem — @objectstack/rest was never consulted. Install/enable '
-          + 'plugin-auth (or the `auth` tier), or drop the REST API from this dev stack.',
+          + 'authenticate and anonymous access to object data is always denied, with no setting that '
+          + 'turns that off. This is NOT a missing-package problem — @objectstack/rest was never '
+          + 'consulted. Install/enable plugin-auth (or the `auth` tier), or drop the REST API from this dev stack.',
         );
       } else {
         try {
@@ -997,7 +997,7 @@ export class DevPlugin implements Plugin {
             + 'requested multi-organization isolation must not serve traffic without it (ADR-0093 D5). '
             + 'The plugin reported (verbatim — the framework does not interpret it): '
             + `${err?.message ?? String(err)}. OS_ALLOW_DEGRADED_TENANCY does NOT apply: it covers an `
-            + 'ABSENT multi-org runtime, not a present one that declined. (#4818)',
+            + 'ABSENT multi-org runtime, not a present one that declined.',
           );
         }
         ctx.logger.error(`Failed to init child plugin ${plugin.name}: ${err.message}`);

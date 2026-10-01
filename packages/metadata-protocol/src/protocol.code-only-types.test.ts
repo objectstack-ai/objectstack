@@ -412,7 +412,7 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
             // so the probe body must be spec-valid — the door under test
             // (authorization) is unchanged, but a malformed body would 422
             // before proving anything about it. (`theme` was the specimen until
-            // #10485 retired that kind out of the spelling contract.)
+            // commit 35ad101bc retired that kind out of the spelling contract.)
             const result = await protocol.saveMetaItem({
                 type: 'webhook',
                 name: 'rc3_probe_webhook',
@@ -511,7 +511,7 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
             {
                 type: 'webhook', // no static registry entry (plugin-registered)
                 // [#6245] spec-valid body — webhook resolves a schema.
-                // (`theme` was the specimen until #10485 retired that kind.)
+                // (`theme` was the specimen until commit 35ad101bc retired that kind.)
                 item: { name: 'rc3_receipt_view', label: 'Receipt', object: 'task', triggers: ['create'], url: 'https://example.com/hook' },
             },
         ];
