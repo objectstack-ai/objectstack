@@ -11,7 +11,7 @@ interface CapturedRequest {
 }
 
 function makeFakeFetch(captured: CapturedRequest[], opts: { ok?: boolean; status?: number } = {}) {
-    return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    return (async (input: string | URL | Request, init?: RequestInit) => {
         const headers: Record<string, string> = {};
         if (init?.headers) {
             for (const [k, v] of Object.entries(init.headers as Record<string, string>)) {
