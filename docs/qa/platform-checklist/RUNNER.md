@@ -139,17 +139,19 @@ contradicts it, and correct it here when it does.
   section at all.** `runRlsProofs` runs only behind the flag
   (`packages/cli/src/commands/verify.ts`: `rls: Flags.boolean({ default: false })`, the
   proofs sit inside `if (flags.rls)`, and the report prints `if (rls)`). **Check:** the
-  last block of a bare run is the CRUD summary — `── 16 verified, 0 gaps, 0 FAILED, 1
-  needs-fixture, 7 skipped` on stock showcase — with no `PROVEN`/`HOLES` line anywhere.
+  last block of a bare run is the CRUD summary — `── 15 verified, 0 gaps, 0 FAILED, 1
+  needs-fixture, 8 skipped` on stock showcase — with no `PROVEN`/`HOLES` line anywhere.
   Adding `--rls` appends the RLS block. ⛔ Do not cite plain `verify` output as the
   oracle for an RLS clause — that run never consulted one.
 
   **The discriminator is the PRESENCE of a `PROVEN`/`HOLES` line, never its digits.**
   The counts move with the seed set and are recorded here only as the shape to expect:
-  the CRUD tail read `15 verified` through 2026-08-18 and reads `16` on 17.1.0 because
+  the CRUD tail read `15 verified` through 2026-08-18 and `16` on 17.1.0 because
   the showcase gained one object (`client-brief.object.ts`, added between the two sweep
-  subjects); a run whose digits differ has a different seed, not a regression. Re-derive
-  the number, do not file it.
+  subjects), and reads `15 verified … 1 needs-fixture, 8 skipped` again by 2026-10-01
+  (QA run #21056, re-measured for #21060): one object moved from verified to skipped,
+  the 24-object total unchanged. A run whose digits differ has a different seed, not a
+  regression. Re-derive the number, do not file it.
 
   ⚠️ **The `--rls` block prints TWO summary lines in DIFFERENT units — do not compare
   them.** `formatRlsReport` (`packages/verify/src/rls.ts`) emits a per-persona
@@ -160,7 +162,9 @@ contradicts it, and correct it here when it does.
   source stamps that unit into the line precisely so the two are not read as one number
   moving. Measured on 17.1.0: the total line reads
   `all personas: 38 PROVEN (38 consistent, 0 HOLES) · 226 NOT PROVEN`, alongside
-  `9 of 9 declared position(s) probed`. An older note here recorded
+  `9 of 9 declared position(s) probed`; re-measured 2026-10-01 (#21060), the total line is
+  unchanged and the positions read `10 of 10` — the showcase declares ten positions
+  now (digits only, as above). An older note here recorded
   `20 PROVEN … over 23 objects` — that was the per-persona line, so it is **not
   comparable** to the total rather than merely stale. Name which of the two lines you
   are quoting whenever you cite either.
@@ -174,7 +178,8 @@ contradicts it, and correct it here when it does.
   dies at browser launch — the error names the **headless-shell** variant it wanted
   (`Executable doesn't exist at .../chromium_headless_shell-1234/...`), which is the
   signature to recognise. Pass `launchOptions.executablePath=/opt/pw-browsers/chromium`
-  and the same specs pass (verified: Playwright launches through it, reporting Chromium
+  (for the smoke, `OS_TEST_CHROMIUM_EXECUTABLE_PATH=/opt/pw-browsers/chromium`, which the
+  config reads since #21060) and the same specs pass (verified: Playwright launches through it, reporting Chromium
   141.0.7390.37, and drives a real page). ⚠️ Use that **alias**, not the versioned
   `chromium-1194/chrome-linux/chrome` beneath it: `/opt/pw-browsers/chromium` is a
   symlink maintained by the image build, so it still resolves after the image moves to
@@ -182,7 +187,7 @@ contradicts it, and correct it here when it does.
   path copied out of this section is the `absence-inference` trap one level up.
   **The discriminator is uniformity:** a launch/environment failure
   takes down the whole run at once (`showcase-smoke.spec.ts` generates one test per
-  `SURFACES` entry — 31 today, so "31 failed" means all of them), while a product defect
+  `SURFACES` entry — 49 today, so "49 failed" means all of them), while a product defect
   fails selectively. ⛔ Do not file a whole-run red as a product defect before checking
   the browser resolved.
 

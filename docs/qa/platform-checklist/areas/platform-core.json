@@ -231,7 +231,7 @@
       "title": "Every showcase nav surface renders without page errors, and failures surface the error boundary — never a blank page",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P0",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -242,19 +242,19 @@
         ]
       },
       "steps": [
-        "run the pinned suite: pnpm -C examples/app-showcase test:smoke (the SURFACES array in e2e/showcase-smoke.spec.ts — 31 surfaces: pages, object lists, dashboards, reports, the view-gallery pages)",
+        "run the pinned suite: pnpm -C examples/app-showcase test:smoke (the SURFACES array in e2e/showcase-smoke.spec.ts — all 49 showcase_app nav destinations at revision 5: pages, object lists, the three filter slices, the tabular view, dashboards, reports, the view-gallery pages). On a shared box pass SMOKE_API_URL=http://localhost:<free port>: the config signs in, drives every page and boots `serve --dev -p <that port>` from that one URL, and reuses whatever already answers it — on the default port 3000 that can be somebody else's server. Where the browser cache holds a different chromium build than @playwright/test resolves (RUNNER.md Environment facts), pass OS_TEST_CHROMIUM_EXECUTABLE_PATH=/opt/pw-browsers/chromium",
         "GET /api/v1/meta/app?id=showcase_app and extract every nav destination from the response (?id= matches the app NAME; the package-id spelling returns an empty items array and would yield zero destinations)",
         "diff the served nav destinations against the SURFACES array; hand-walk any destination the suite does not cover (screenshot first, then DOM)",
         "on each hand-walked surface: wait for render, screenshot, then check for pageerror / empty <main> / placeholder leaks ('no actions configured')",
-        "chart surfaces (the chart:true entries in SURFACES — Delivery Operations, Chart Gallery, Command Center): the suite now POLLS boundingBox against a bounded deadline (SURFACE_BUDGET_MS in the spec) instead of reading it once after a fixed wait, so a chart red here is a real finding and not the measurement window — #7569 measured the difference: 3 fresh loads each drew 5 real charts, and polling every 400 ms returned null ONLY at t = 1.5 s, the old fixed measurement instant and exactly the recharts ResponsiveContainer initial-layout window, then non-null on all 19 later samples. Read WHICH assertion failed: 'no chart SVG laid out' means the box stayed null for the whole budget; a width/height failure means the chart laid out but collapsed (#2616 D). If you hand-walk a chart surface outside the suite, poll the same way — never sleep-then-read-once",
+        "chart surfaces (the chart:true entries in SURFACES — Delivery Operations, Chart Gallery, Command Center, Revenue Pulse, Hours by Status (Chart)): the suite now POLLS boundingBox against a bounded deadline (SURFACE_BUDGET_MS in the spec) instead of reading it once after a fixed wait, so a chart red here is a real finding and not the measurement window — #7569 measured the difference: 3 fresh loads each drew 5 real charts, and polling every 400 ms returned null ONLY at t = 1.5 s, the old fixed measurement instant and exactly the recharts ResponsiveContainer initial-layout window, then non-null on all 19 later samples. Read WHICH assertion failed: 'no chart SVG laid out' means the box stayed null for the whole budget; a width/height failure means the chart laid out but collapsed (#2616 D). If you hand-walk a chart surface outside the suite, poll the same way — never sleep-then-read-once",
         "probe the failure path: navigate to a nonexistent route under the app (/_console/apps/com.example.showcase/object_that_does_not_exist); screenshot what renders",
         "if ANY surface fails during the sweep, verify the failure presents as the shell's error boundary or a named empty/error state — capture it"
       ],
       "acceptance": [
         {
-          "clause": "no surface throws a pageerror, renders an empty <main>, or leaks a 'no actions configured' placeholder; chart surfaces draw a real SVG whose box is measured by POLLING until non-null within a bounded budget — never by a fixed wall-clock wait followed by a single boundingBox read, which measures the layout window rather than the product",
+          "clause": "no surface throws a pageerror, renders an empty <main>, stays on the console's boot splash ('Initializing application…'), or leaks a 'no actions configured' placeholder; chart surfaces draw a real SVG whose box is measured by POLLING until non-null within a bounded budget — never by a fixed wall-clock wait followed by a single boundingBox read, which measures the layout window rather than the product",
           "oracle": "test",
-          "verify": "pnpm -C examples/app-showcase test:smoke (SURFACES array in e2e/showcase-smoke.spec.ts) — green; the chart assertion polls boundingBox against a bounded deadline and keeps the last non-null sample, so a null-box failure and a collapsed-panel failure report as different assertions (#7569)",
+          "verify": "pnpm -C examples/app-showcase test:smoke (SURFACES array in e2e/showcase-smoke.spec.ts) — green; the main-content wait treats the boot splash as not-yet-rendered and the assertion refuses a surface still on it; the chart assertion polls boundingBox against a bounded deadline and keeps the last non-null sample, so a null-box failure and a collapsed-panel failure report as different assertions (#7569)",
           "evidence": "test run output + the failing assertion's message for any chart red"
         },
         {
@@ -278,6 +278,7 @@
       ],
       "negative": [
         "a surface that renders a blank <main> is a FAIL even with no console error — transitional emptiness must be ruled out by the screenshot-first protocol, then the persistent blank is the finding",
+        "the boot splash is NOT rendered content: 'Initializing application…' is text inside <main>, so a non-empty check passes on a surface that never rendered. QA run #21056 read it as the FIRST <main> text on 22 of 49 surfaces, and the suite's own non-chart check passed on it until revision 5. A hand walk waits past the splash before judging, exactly as the suite now does",
         "a bad route producing a white page (shell gone) is a FAIL of the error-boundary clause",
         "a chart red obtained from a SINGLE boundingBox read at a fixed instant is NOT a product finding and must not be filed as one — it measures the ResponsiveContainer layout window, and it cost a triage cycle every run until #7569 replaced that read with a bounded poll. Re-introducing any fixed sleep-then-read-once in this suite re-opens it. The converse holds both ways: a box that stays null through the WHOLE bounded poll, or a laid-out width ≤ 200 (the #2616 D collapsed-panel case), IS a FAIL"
       ],
@@ -293,7 +294,13 @@
         { "revision": 1, "date": "2026-08-07", "change": "initial — wraps the existing automated smoke as a checklist row so runs report it alongside manual items", "ref": "#3358" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 3, "date": "2026-08-11", "change": "de-flaked the chart clause's MEASUREMENT, both halves in one change: a null boundingBox read once at a fixed instant is the recharts ResponsiveContainer layout window, not a product defect (measured: null only at t=1.5s, non-null on all 19 later samples, 5 real charts on each of 3 fresh loads). The clause now requires a bounded poll-until-non-null, and the pinned suite was changed to match — showcase-smoke.spec.ts's fixed page.waitForTimeout(1500) plus single boundingBox() read are gone, replaced by deadline-bounded polling (the #7472/#7409 shape), keeping the last non-null sample so a collapsed panel (#2616 D) still fails on its width rather than as 'no chart SVG'", "ref": "#7569" },
-        { "revision": 4, "date": "2026-08-18", "change": "corrected the ?id= spelling from com.example.showcase to showcase_app. Found by grounding the #9334 finding against the tree rather than by report: this item was not among the two named there, yet carries the same defect and is load-bearing here — the step extracts every nav destination from a response the package-id spelling leaves empty", "ref": "#9386" }
+        { "revision": 4, "date": "2026-08-18", "change": "corrected the ?id= spelling from com.example.showcase to showcase_app. Found by grounding the #9334 finding against the tree rather than by report: this item was not among the two named there, yet carries the same defect and is load-bearing here — the step extracts every nav destination from a response the package-id spelling leaves empty", "ref": "#9386" },
+        {
+          "revision": 5,
+          "date": "2026-10-01",
+          "change": "the pin caught up with QA run #21056's three findings: SURFACES covered 31 of 49 served destinations, and the 18 the run hand-walked are now in it (Revenue Pulse and the Hours by Status chart report as chart surfaces); the non-chart check passed on the boot splash, and the wait and assertion now treat the splash as not rendered; the config hard-coded port 3000 and offered no browser override, and now reads SMOKE_API_URL for the server it boots and OS_TEST_CHROMIUM_EXECUTABLE_PATH for the browser. Measured on this branch: 49 passed on a free port with the container's chromium, and an instrumented run saw 29 of the 49 surfaces on the splash first",
+          "ref": "#21060"
+        }
       ]
     },
     {
