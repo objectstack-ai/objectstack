@@ -363,6 +363,25 @@ export interface IObjectQLEngine extends IDataEngine {
         fn: (opCtx: any, next: () => Promise<void>) => Promise<void>,
         options?: { object?: string },
     ): void;
+    /**
+     * Whether a middleware is registered FOR `objectName` — a
+     * `registerMiddleware(fn, { object: objectName })` — read off what the
+     * engine already holds (#21080). Read-only: it runs nothing and registers
+     * nothing.
+     *
+     * A global registration (no `object`, or `'*'`) matches every object at
+     * dispatch but is keyed to none, so it is not counted: the answer is about
+     * the gates an object carries by name, such as a per-object read gate.
+     *
+     * The consumer is a read path that runs no engine operation, so no engine
+     * middleware runs on it: the analytics native-SQL strategy declines an
+     * object this answers `true` for, and the engine serves it instead.
+     *
+     * OPTIONAL: an engine without it cannot answer, and that consumer treats
+     * the absence as "cannot say" and declines, so the probe is
+     * `typeof ql.hasObjectMiddleware === 'function'`.
+     */
+    hasObjectMiddleware?(objectName: string): boolean;
     /** Bind declarative Hook metadata — AppPlugin's app-bundle path. */
     bindHooks(
         hooks: unknown[] | undefined,

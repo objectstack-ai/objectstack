@@ -4824,7 +4824,7 @@ export class RestServer {
                         description:
                             'Atomic cross-object batch endpoint (POST {basePath}/batch): all-or-nothing '
                             + 'create/update/delete across objects in one transaction, with intra-batch '
-                            + '{ $ref: <opIndex> } parent references (#1604 / ADR-0034).',
+                            + '{ $ref: <opIndex> } parent references (ADR-0034).',
                     };
 
                     // [#7541] Global search — the same two-layer AND, for the
@@ -5314,6 +5314,26 @@ export class RestServer {
                         const typeRefusal = metaReadGate.metaTypeReadRefusal(req?.method, req?.params?.type, context);
                         if (typeRefusal) {
                             sendEnvelopeError(res, typeRefusal.status, typeRefusal.code, typeRefusal.message);
+                            return;
+                        }
+                        // [#21124] …and its write-side twin: a write of a
+                        // datasource definition is admitted on the capability
+                        // the datasource admin door requires for the same
+                        // create / update / remove. Asked here, before the
+                        // door's own authoring admission resolves the protocol,
+                        // so a refused caller writes nothing and is told the
+                        // same thing whether or not the name exists. The verb
+                        // judged is the ROUTE's declared one (`RouteEntry.method`
+                        // is required) — the door being entered. The decision
+                        // is `metaTypeWriteRefusal`, which the runtime
+                        // dispatcher's `/meta` entry asks too.
+                        const writeRefusal = metaReadGate.metaTypeWriteRefusal(
+                            entry.method,
+                            req?.params?.type,
+                            context,
+                        );
+                        if (writeRefusal) {
+                            sendEnvelopeError(res, writeRefusal.status, writeRefusal.code, writeRefusal.message);
                             return;
                         }
                         return (inner as (rq: any, rs: any) => unknown)(req, res);

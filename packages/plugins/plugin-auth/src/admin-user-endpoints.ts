@@ -375,6 +375,39 @@ async function bindUserToSoleOrganization(
 }
 
 /**
+ * The admin's decisions, the WHOLE of what {@link writeAdminAudit} puts in a
+ * ledger row's `metadata`. Closed on purpose: each member is either a decision
+ * that no field of the user stores, or a reference to another record.
+ *
+ * - `event` — which administrative operation this is.
+ * - `passwordGenerated` — the system minted the password rather than the admin
+ *   typing one. No field stores it; the credential is on `sys_account`.
+ * - `placeholderEmail` — the admin created a phone-only identity, so the
+ *   address on the account is a generated placeholder. The decision, never
+ *   the address.
+ * - `membershipCreated` — this call bound the membership (ADR-0093 D2).
+ * - `organizationId` — a reference to the organization bound to, a record of
+ *   its own; present only when one was resolved.
+ *
+ * ⛔ Never add a member that copies a value this operation writes into a field
+ * of the user (see {@link writeAdminAudit}): that value is already on the
+ * mirror row for the same write, in the snapshot column the ledger's read
+ * side narrows.
+ */
+type AdminAuditDecisions =
+  | {
+      event: 'user.admin_created';
+      placeholderEmail: boolean;
+      passwordGenerated: boolean;
+      membershipCreated: boolean;
+      organizationId?: string;
+    }
+  | {
+      event: 'user.admin_password_set';
+      passwordGenerated: boolean;
+    };
+
+/**
  * Best-effort explicit audit row for an admin identity operation. Never
  * throws; never includes password material (red line).
  *
@@ -413,9 +446,23 @@ async function bindUserToSoleOrganization(
  *    password was administratively reset. "The hook covers it, drop the
  *    explicit insert" would silently delete that trail.
  * 3. **Disjoint payloads.** The generic row is a field diff / row snapshot;
- *    this one records the admin's DECISIONS (`event`, `passwordGenerated`,
- *    `mustChangePassword`, `placeholderEmail`, `membershipCreated`), none of
- *    which is derivable from the stored row.
+ *    this one records the admin's DECISIONS ({@link AdminAuditDecisions}),
+ *    none of which is stored in a field of the user.
+ *
+ * **No field value of the user rides `metadata`.** The row's reference to the
+ * record is `object_name` + `record_id`; `metadata` carries only the
+ * decisions. A value this operation writes into a field of the user — the
+ * identity it was created with, its legacy role scalar, the must-change-password
+ * flag — is recorded by plugin-audit's mirror row for that same write, whose
+ * before/after snapshots the ledger's read side narrows to what each reader is
+ * served. `metadata` is free text that no read-time narrowing can map back to
+ * a field without deriving masking a second time, so a copy here would serve
+ * the value to a ledger reader the data plane withholds it from. Two guards
+ * hold that: the closed {@link AdminAuditDecisions} type refuses a field value
+ * written as a literal key at compile time (a conditional spread passes
+ * TypeScript's excess-property check, so it does not stop that spelling), and
+ * the pins in `admin-user-endpoints.test.ts` fail on any key outside the
+ * decision set and on any value this call wrote into the user.
  */
 async function writeAdminAudit(
   deps: AdminUserEndpointDeps,
@@ -423,7 +470,7 @@ async function writeAdminAudit(
     action: 'create' | 'update';
     actor: AdminActor;
     recordId: string;
-    metadata: Record<string, unknown>;
+    metadata: AdminAuditDecisions;
   },
 ): Promise<void> {
   const engine = deps.getDataEngine();
@@ -463,8 +510,8 @@ async function writeAdminAudit(
         + `${entry.recordId} was NOT written — the operation itself SUCCEEDED and the endpoint `
         + 'answers 200, so nothing looks wrong. plugin-audit is installed (sys_audit_log is '
         + 'registered), so this is a REFUSED write, not an absent plugin. This row carries the '
-        + "admin's decisions (event, passwordGenerated, mustChangePassword, placeholderEmail, "
-        + 'membershipCreated), none of which is derivable from the stored row, and for '
+        + "admin's decisions (event, passwordGenerated, placeholderEmail, membershipCreated), "
+        + 'none of which is stored in a field of the user, and for '
         + '/admin/set-user-password it is the only audit record that exists at all because '
         + "sys_account is in plugin-audit's SKIP_OBJECTS. Nothing retries this write, so the "
         + 'action stays permanently untrailed. Remedy: restore write access to sys_audit_log '
@@ -573,18 +620,17 @@ export async function runAdminCreateUser(
   // `membershipPolicy: 'invite-only'` (ADR-0093 D1) — see the helper.
   const membership = await bindUserToSoleOrganization(deps, userId);
 
+  // The decisions only. The values this call wrote into the user's fields —
+  // the identity, the role scalar, the must-change-password stamp — are on
+  // plugin-audit's mirror rows for those same writes (see `writeAdminAudit`).
   await writeAdminAudit(deps, {
     action: 'create',
     actor,
     recordId: userId,
     metadata: {
       event: 'user.admin_created',
-      email: email.toLowerCase(),
-      ...(phoneNumber ? { phoneNumber } : {}),
-      ...(role ? { role } : {}),
       placeholderEmail: !hasEmail,
       passwordGenerated: resolved.generated,
-      mustChangePassword: stamped,
       ...(membership.organizationId ? { organizationId: membership.organizationId } : {}),
       membershipCreated: membership.membershipCreated,
     },
@@ -679,10 +725,11 @@ export async function runAdminSetUserPassword(
     action: 'update',
     actor,
     recordId: userId,
+    // The must-change-password stamp is a field write on the user, recorded by
+    // plugin-audit's mirror row for it — not copied here (see `writeAdminAudit`).
     metadata: {
       event: 'user.admin_password_set',
       passwordGenerated: resolved.generated,
-      mustChangePassword: mustChangePassword && stamped,
     },
   });
 

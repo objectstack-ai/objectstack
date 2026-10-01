@@ -37,6 +37,21 @@ export {
   installCommentReadVisibility,
   parseCommentThreadId,
 } from './comment-access-hooks.js';
+// [#21120] The one-off rewrite of at-rest cleartext metadata-body copies this
+// writer left in `sys_audit_log` / `sys_activity`, and the pure planners the
+// CLI command (`os migrate audit-metadata-bodies`) drives.
+export {
+  migrateStoredMetadataBodyCopies,
+  planAuditRowPatch,
+  planActivityRowPatch,
+  redactLedgerSnapshotBody,
+  STORED_METADATA_BODY_AUDIT_OBJECTS,
+} from './stored-metadata-body-migration.js';
+export type {
+  MigrationLogger,
+  StoredMetadataBodyMigrationEngine,
+  StoredMetadataBodyMigrationReport,
+} from './stored-metadata-body-migration.js';
 export type {
   CommentAccessEngine,
   CommentAccessLogger,

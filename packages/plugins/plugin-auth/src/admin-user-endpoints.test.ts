@@ -704,3 +704,139 @@ describe('runAdminSetUserPassword', () => {
     expect(meta.passwordGenerated).toBe(true);
   });
 });
+
+// ── The ledger row records the admin's decisions, never a field value ──────
+//
+// `sys_audit_log.metadata` is free text. The ledger's read side narrows the
+// before/after snapshot columns to what each reader is served; it cannot
+// narrow `metadata` without mapping decision names back to fields, which would
+// derive masking a second time. So the producer must not put a value it wrote
+// into a field of the user there: that value is on plugin-audit's mirror row
+// for the same write, in a column the read side narrows. These pins hold the
+// row to its decisions and its reference (`object_name` + `record_id`).
+describe('admin ledger rows: decisions and a reference, never a field value of the user', () => {
+  const CREATE_DECISIONS = ['event', 'membershipCreated', 'passwordGenerated', 'placeholderEmail'];
+  const PASSWORD_SET_DECISIONS = ['event', 'passwordGenerated'];
+
+  /** Normalise a key so a camelCase metadata key and a snake_case field name compare equal. */
+  const norm = (k: string) => k.replace(/_/g, '').toLowerCase();
+
+  /** Every field this call wrote on the user, with the value it wrote. */
+  function userFieldWrites(m: ReturnType<typeof makeDeps>): Array<[string, unknown]> {
+    const writes: Array<[string, unknown]> = [];
+    for (const call of m.createUser.mock.calls) {
+      const { data, ...body } = call[0].body as Record<string, any>;
+      for (const [k, v] of Object.entries({ ...body, ...(data ?? {}) })) {
+        if (k !== 'password') writes.push([k, v]);
+      }
+    }
+    for (const [object, doc] of callsOf(m.engineUpdate)) {
+      if (object !== 'sys_user') continue;
+      for (const [k, v] of Object.entries(doc as Record<string, unknown>)) {
+        if (k !== 'id') writes.push([k, v]);
+      }
+    }
+    return writes;
+  }
+
+  /** The one ledger row the call wrote, with its metadata parsed. */
+  function ledgerRow(m: ReturnType<typeof makeDeps>, insert = m.engineCreate) {
+    const rows = callsOf(insert).filter(([object]) => object === 'sys_audit_log');
+    expect(rows).toHaveLength(1);
+    const row = rows[0][1] as Record<string, any>;
+    return { row, metadata: JSON.parse(row.metadata) as Record<string, unknown> };
+  }
+
+  /** No metadata key names a written field, and no metadata value is a written string value. */
+  function expectNoFieldValue(metadata: Record<string, unknown>, writes: Array<[string, unknown]>) {
+    expect(writes.length).toBeGreaterThan(0);
+    const keys = new Set(Object.keys(metadata).map(norm));
+    const blob = JSON.stringify(metadata);
+    for (const [field, value] of writes) {
+      expect(keys.has(norm(field)), `metadata names the written field ${field}`).toBe(false);
+      if (typeof value === 'string' && value.length > 0) {
+        expect(blob.includes(value), `metadata carries the value written to ${field}`).toBe(false);
+      }
+    }
+  }
+
+  it('create-user: the row carries the closed decision set and none of the values written into the user', async () => {
+    const m = makeDeps({ phoneNumberEnabled: () => true });
+    const res = await runAdminCreateUser(
+      m.deps,
+      makeRequest({
+        email: 'Ledger.Subject@Example.com',
+        name: 'Ledger Subject',
+        role: 'ledgerrole',
+        phoneNumber: '+8613811112222',
+        generatePassword: true,
+      }),
+      ACTOR,
+    );
+    expect(res.status).toBe(200);
+    const writes = userFieldWrites(m);
+    // Armed: the call really wrote the identity, the role scalar, the phone
+    // and the must-change-password stamp, so the row had them to copy.
+    expect(writes.map(([k]) => norm(k)).sort()).toEqual(
+      ['email', 'mustchangepassword', 'name', 'phonenumber', 'role'],
+    );
+
+    const { row, metadata } = ledgerRow(m);
+    expect(row.object_name).toBe('sys_user');
+    expect(row.record_id).toBe('user-9');
+    expect(Object.keys(metadata).sort()).toEqual(CREATE_DECISIONS);
+    expect(metadata).toMatchObject({ event: 'user.admin_created', placeholderEmail: false, passwordGenerated: true });
+    expectNoFieldValue(metadata, writes);
+  });
+
+  it('create-user, phone-only: the placeholder decision is recorded, the generated address is not', async () => {
+    const m = makeDeps({ phoneNumberEnabled: () => true });
+    const res = await runAdminCreateUser(
+      m.deps,
+      makeRequest({ phoneNumber: '+8613833334444', generatePassword: true }),
+      ACTOR,
+    );
+    expect(res.status).toBe(200);
+    const { metadata } = ledgerRow(m);
+    expect(Object.keys(metadata).sort()).toEqual(CREATE_DECISIONS);
+    expect(metadata.placeholderEmail).toBe(true);
+    expectNoFieldValue(metadata, userFieldWrites(m));
+  });
+
+  it('create-user, membership bound: the organization rides as a reference beside the decisions', async () => {
+    const m = makeDeps();
+    const engineInsert = vi.fn(async () => ({}));
+    const find = vi.fn(async (object: string) => (object === 'sys_organization' ? [{ id: 'org_only' }] : []));
+    m.deps.getDataEngine = () => ({ update: m.engineUpdate, insert: engineInsert, find });
+    const res = await runAdminCreateUser(
+      m.deps,
+      makeRequest({ email: 'bound.subject@example.com', role: 'boundrole', generatePassword: true }),
+      ACTOR,
+    );
+    expect(res.status).toBe(200);
+    const { metadata } = ledgerRow(m, engineInsert);
+    expect(Object.keys(metadata).sort()).toEqual([...CREATE_DECISIONS, 'organizationId'].sort());
+    expect(metadata).toMatchObject({ organizationId: 'org_only', membershipCreated: true });
+    expectNoFieldValue(metadata, userFieldWrites(m));
+  });
+
+  it('set-user-password: the row carries the closed decision set and not the stamp it wrote', async () => {
+    const m = makeDeps();
+    const res = await runAdminSetUserPassword(
+      m.deps,
+      makeRequest({ userId: 'user-9', generatePassword: true }),
+      ACTOR,
+    );
+    expect(res.status).toBe(200);
+    const writes = userFieldWrites(m);
+    // Armed: the stamp really was written on the user.
+    expect(writes.map(([k]) => norm(k))).toEqual(['mustchangepassword']);
+
+    const { row, metadata } = ledgerRow(m);
+    expect(row.object_name).toBe('sys_user');
+    expect(row.record_id).toBe('user-9');
+    expect(Object.keys(metadata).sort()).toEqual(PASSWORD_SET_DECISIONS);
+    expect(metadata).toMatchObject({ event: 'user.admin_password_set', passwordGenerated: true });
+    expectNoFieldValue(metadata, writes);
+  });
+});

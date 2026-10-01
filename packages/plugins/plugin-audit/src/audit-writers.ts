@@ -20,6 +20,23 @@ import { SECRET_MASK, collectMaskedReadFields } from '@objectstack/objectql/core
 // picker, the search companion and the approval inbox the day an author sets
 // `nameField` — the same argument the SECRET_MASK import above makes.
 import { referenceTargetOf, resolveDisplayField } from '@objectstack/spec/data';
+// [#21120] The family-wide stored-metadata-body seam. `sys_metadata` /
+// `sys_metadata_history` rows carry a serialized metadata BODY in their
+// `metadata` column (a datasource body holds stored credential material), and
+// this writer COPIES the whole audited row into `sys_audit_log.new_value` /
+// `old_value` and `sys_activity.metadata` at write time — a second,
+// admin-readable, at-rest copy. The copy is projected through the one shared
+// redactor so the credential is withheld here exactly as it is on every read
+// exit; `collectMaskedReadFields` cannot reach it, because the credential is
+// nested inside the serialized column, not a top-level secret field of the
+// stored-metadata table. ⛔ No second redaction dialect — the credential
+// definition is `getMetadataTypeRedactor`'s, consumed through this seam.
+import {
+  isStoredMetadataBodyObject,
+  redactStoredMetadataBody,
+  STORED_METADATA_BODY_COLUMN,
+  STORED_METADATA_TYPE_COLUMN,
+} from '@objectstack/spec/kernel';
 // [commit 1408fe385 / #10101] The platform-row organization resolver, imported rather
 // than owned. It started life in THIS file (commit 1408fe385, honouring #8287's ruling)
 // and was promoted to `@objectstack/metadata-core` by the maintainer ruling
@@ -1230,7 +1247,7 @@ export function installAuditWriters(
   const ledgerView = (
     objectName: string,
     record: any,
-    { dropComputed }: { dropComputed: boolean },
+    { dropComputed, storedType }: { dropComputed: boolean; storedType?: string },
   ): Record<string, any> | null => {
     if (!record || typeof record !== 'object') return null;
     const out: Record<string, any> = { ...record };
@@ -1241,6 +1258,22 @@ export function installAuditWriters(
       // row does not carry is never invented.
       if (!(field in out)) continue;
       out[field] = out[field] == null ? null : SECRET_MASK;
+    }
+    // [#21120] A stored metadata BODY (`sys_metadata` / `sys_metadata_history`)
+    // is not a top-level secret field, so the mask above never touches it. The
+    // audit copy is a credential read exit exactly like `/meta`, so the body is
+    // projected through the one shared redactor before it is recorded. The
+    // `type` that selects the redactor is passed in from the FULL row
+    // (`storedType`), because an update diff carries only the changed keys and
+    // its subset may not include the `type` column. Fail CLOSED: a body the
+    // redactor cannot judge is DROPPED from the recorded view rather than
+    // copied raw — the ledger records a change without its credential, never
+    // the credential.
+    if (isStoredMetadataBodyObject(objectName) && STORED_METADATA_BODY_COLUMN in out) {
+      const type = storedType ?? out[STORED_METADATA_TYPE_COLUMN];
+      const outcome = redactStoredMetadataBody(type, out[STORED_METADATA_BODY_COLUMN]);
+      if (outcome.ok) out[STORED_METADATA_BODY_COLUMN] = outcome.body;
+      else delete out[STORED_METADATA_BODY_COLUMN];
     }
     if (dropComputed) {
       const defs = getFieldDefs(objectName);
@@ -1325,6 +1358,20 @@ export function installAuditWriters(
     // reason — #4434 / #4550, restated in the #6656 ruling).
     const after: any = ctx.result;
     const before: any = (ctx as any).previous ?? null;
+
+    // [#21120] The metadata TYPE off the full row, read once from whichever
+    // side the action carries (create/update: `after`; delete: `before`). An
+    // update `diff` keeps only the changed keys, so its subset may not include
+    // the `type` column that selects the body's redactor — `ledgerView` is
+    // handed this so it can still project the `metadata` body. Non-stored
+    // objects ignore it.
+    const storedBodyType: string | undefined = isStoredMetadataBodyObject(ctx.object)
+      ? ((typeof after === 'object' && typeof after?.[STORED_METADATA_TYPE_COLUMN] === 'string'
+          ? after[STORED_METADATA_TYPE_COLUMN]
+          : typeof before === 'object' && typeof before?.[STORED_METADATA_TYPE_COLUMN] === 'string'
+            ? before[STORED_METADATA_TYPE_COLUMN]
+            : undefined) as string | undefined)
+      : undefined;
 
     // Resolve record id from after (insert/update) or before (delete) or input.
     let recordId: string | undefined =
@@ -1437,7 +1484,7 @@ export function installAuditWriters(
     let oldValue: Record<string, any> | null = null;
     let newValue: Record<string, any> | null = null;
     if (action === 'create') {
-      newValue = ledgerView(ctx.object, after, { dropComputed: true });
+      newValue = ledgerView(ctx.object, after, { dropComputed: true, storedType: storedBodyType });
     } else if (action === 'update') {
       // Detect on the raw values, record the masked ones — see the note on
       // `before`/`after` above. `diff` has already dropped computed fields, so
@@ -1445,10 +1492,10 @@ export function installAuditWriters(
       const d = diff(before || {}, after || {}, getFieldDefs(ctx.object));
       // If nothing meaningfully changed, skip the audit row to avoid noise.
       if (Object.keys(d.next).length === 0) return;
-      oldValue = ledgerView(ctx.object, d.old, { dropComputed: false });
-      newValue = ledgerView(ctx.object, d.next, { dropComputed: false });
+      oldValue = ledgerView(ctx.object, d.old, { dropComputed: false, storedType: storedBodyType });
+      newValue = ledgerView(ctx.object, d.next, { dropComputed: false, storedType: storedBodyType });
     } else if (action === 'delete') {
-      oldValue = ledgerView(ctx.object, before, { dropComputed: true });
+      oldValue = ledgerView(ctx.object, before, { dropComputed: true, storedType: storedBodyType });
     }
 
     const auditRow: Record<string, any> = {
@@ -1508,8 +1555,8 @@ export function installAuditWriters(
     // mask still applies, so no credential value can reach a user-facing
     // activity summary through the label.
     const { text: label, field: labelField } = recordLabel(
-      ledgerView(ctx.object, after, { dropComputed: false }) ??
-        ledgerView(ctx.object, before, { dropComputed: false }),
+      ledgerView(ctx.object, after, { dropComputed: false, storedType: storedBodyType }) ??
+        ledgerView(ctx.object, before, { dropComputed: false, storedType: storedBodyType }),
       recordId ?? '',
     );
     // [#21081] Which parent fields each text column carries a value of — the
@@ -1549,8 +1596,8 @@ export function installAuditWriters(
       // `value` is a secret's plaintext would be a leak in the metadata
       // itself, not a case worth preserving.
       const summaryFields = getFieldDefs(ctx.object);
-      const beforeView = ledgerView(ctx.object, before, { dropComputed: false });
-      const afterView = ledgerView(ctx.object, after, { dropComputed: false });
+      const beforeView = ledgerView(ctx.object, before, { dropComputed: false, storedType: storedBodyType });
+      const afterView = ledgerView(ctx.object, after, { dropComputed: false, storedType: storedBodyType });
       const milestone = matchMilestone(getObjectDef(ctx.object), beforeView, afterView);
       if (milestone) {
         // [#7290] The read is keyed on the tokens of the template that ACTUALLY
