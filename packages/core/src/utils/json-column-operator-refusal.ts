@@ -61,8 +61,8 @@
  * membership pair (`$contains`, `$notContains`) and the null predicates
  * (`$null`, `$exists`, `$empty`). `$contains` is the ONLY working membership
  * spelling on a JSON-array column and downstream code depends on it (#7398's
- * own tables) — `driver-sql` compiles it as a real per-dialect membership test
- * (#17590), and `$notContains` as its exact complement — while `IS NULL` asks
+ * own tables) — `driver-sql` compiles it as a real per-dialect membership test,
+ * and `$notContains` as its exact complement — while `IS NULL` asks
  * about the column's presence, which is a well-formed question whatever the
  * column holds.
  *
