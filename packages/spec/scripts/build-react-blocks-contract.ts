@@ -136,7 +136,7 @@ const blocks = REACT_BLOCKS.map((b) => {
 // states its provenance in the frontmatter `description` it emits instead.
 const contract = {
   adr: 'ADR-0081',
-  note: "Props each component accepts in kind:'react' page source. Reference blocks by their PascalCase tag. kind: data=declarative config (from the spec schema) · binding=connects to data · controlled=React state · callback=React function. These blocks are for DATA. Live data: const adapter = useAdapter(); adapter.find/findOne/create/update. STYLING (ADR-0065) — a page's source is runtime metadata, so the console's build-time Tailwind NEVER scans it: utility classNAMES silently produce no CSS. Do NOT use Tailwind className in page source. (a) Layout/chrome: inline style={} with hsl(var(--token)) theme colors — e.g. color:'hsl(var(--foreground))', background:'hsl(var(--card))', border:'1px solid hsl(var(--border))', and px/flex for layout. (b) Overlays: render <ObjectForm formType='drawer'|'modal' open onOpenChange> (a pre-styled Sheet/Dialog) — never hand-roll a fixed inset-0 backdrop.",
+  note: "Props each component accepts in kind:'react' page source. Reference blocks by their PascalCase tag. kind: data=declarative config (from the spec schema) · binding=connects to data · controlled=React state · callback=React function. These blocks are for DATA. Live data: const adapter = useAdapter(); adapter.find/findOne/create/update; const changed = useDataInvalidation('obj') is the data-invalidation bus nonce (a number that moves when a write to obj is reported) — name it in the deps of the effect that reads through useAdapter, so that read re-runs in place with no remount. STYLING (ADR-0065) — a page's source is runtime metadata, so the console's build-time Tailwind NEVER scans it: utility classNAMES silently produce no CSS. Do NOT use Tailwind className in page source. (a) Layout/chrome: inline style={} with hsl(var(--token)) theme colors — e.g. color:'hsl(var(--foreground))', background:'hsl(var(--card))', border:'1px solid hsl(var(--border))', and px/flex for layout. (b) Overlays: render <ObjectForm formType='drawer'|'modal' open onOpenChange> (a pre-styled Sheet/Dialog) — never hand-roll a fixed inset-0 backdrop.",
 };
 
 // markdown
@@ -169,7 +169,7 @@ for (const b of blocks) {
 }
 L.push('## Injected scope (closure variables, reference directly — not props)');
 L.push('');
-L.push('`React` · `useAdapter` · `data` · `variables` · `page`. Kanban/calendar/gantt/timeline/map of an object = `<ListView navigation={…} />` with the matching visualization, or `<Block type="object-kanban" …/>`.');
+L.push('`React` · `useAdapter` · `useDataInvalidation` · `data` · `variables` · `page`. Kanban/calendar/gantt/timeline/map of an object = `<ListView navigation={…} />` with the matching visualization, or `<Block type="object-kanban" …/>`.');
 L.push('');
 emit(OUT_MD, L.join('\n'));
 

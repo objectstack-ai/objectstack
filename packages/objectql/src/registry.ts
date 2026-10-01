@@ -64,6 +64,19 @@ import {
   formatNavContributionGroupDiagnostic,
   type NavContributionGroupDiagnostic,
 } from './nav-contribution-diagnostics.js';
+// The shared-picklist judgments (merge, served shape, unknown-name refusal) —
+// pure, so the registry and the engine plugin's load-time audit read one
+// spelling of each. See the module header.
+import {
+  collectPicklistReferences,
+  duplicatePicklistValueError,
+  findDuplicatePicklistValue,
+  mergePicklistOptions,
+  resolvePicklistFieldsOnto,
+  type PicklistContribution,
+  type PicklistOptionLike,
+  type PicklistReference,
+} from './picklist-resolution.js';
 
 /**
  * Reserved namespaces that do not get FQN prefix applied.
@@ -2050,6 +2063,18 @@ export class SchemaRegistry {
   private appNavContributions = new Map<string, Array<{ packageId?: string; group?: string; priority: number; items: any[] }>>();
 
   /**
+   * `picklistExtensions` — the options other packages ADD to a picklist,
+   * keyed `target picklist → declaring package → value → option`.
+   *
+   * Keyed by package so a re-registration of the same package (a manifest
+   * replay, an HMR rebuild) replaces its own contribution instead of
+   * colliding with it, while a value two DIFFERENT contributors declare is
+   * refused ({@link registerPicklistExtension}). The owning list itself lives
+   * in the generic item store under type `picklist`, like every other kind.
+   */
+  private picklistExtensionContributions = new Map<string, Map<string, { packageId: string | undefined; options: Map<string, PicklistOptionLike> }>>();
+
+  /**
    * Package ids that must be installed in a DISABLED state **when they have no
    * row yet**. Seeded once at boot (from persisted state) BEFORE any package
    * registration so that every registration path — boot artifact, marketplace
@@ -2434,7 +2459,10 @@ export class SchemaRegistry {
         merged = mergeObjectDefinitions(merged, contrib.definition, tenantAuthored);
       }
     }
-    return merged;
+    // A picklist-bound field is served with its list's options resolved onto
+    // it — here, in the fold every object read and the write door share, so
+    // the set a client is offered and the set a write is judged by are one.
+    return this.resolvePicklistFields(merged);
   }
 
   /**
@@ -2562,9 +2590,13 @@ export class SchemaRegistry {
   foldObjectExtendersOnto<T>(name: string, base: T): T {
     if (base === null || typeof base !== 'object') return base;
     const fqn = this.resolveObjectKey(name);
-    if (fqn === undefined) return base;
+    // With nothing to fold, the body still gets its picklist-bound fields
+    // resolved — the same step the fold below ends with — so a body this
+    // registry never saw is served in the one shape every other read uses.
+    // By reference when no field names a picklist.
+    if (fqn === undefined) return this.resolvePicklistFields(base);
     const contributors = this.objectContributors.get(fqn);
-    if (!contributors || !contributors.some((c) => c.ownership === 'extend')) return base;
+    if (!contributors || !contributors.some((c) => c.ownership === 'extend')) return this.resolvePicklistFields(base);
     return this.foldExtendersOntoDefinition(
       contributors,
       this.subtractExtenderContributions(contributors, base as unknown as ServiceObject),
@@ -3484,6 +3516,12 @@ export class SchemaRegistry {
     // so both load paths produce identical lock state.
     applyProtection(item as any, { packageId });
 
+    // A picklist's own values must not repeat any value its extensions
+    // already add — refused before anything is stored, like the extension
+    // side ({@link registerPicklistExtension}). Every resolved object depends
+    // on the list, so the merged-object cache is dropped once it lands (below).
+    if (type === 'picklist') this.assertPicklistValuesDistinct(baseName, item as any, packageId);
+
     // Spec-conformance DIAGNOSTIC — deliberately not a gate (#3903).
     //
     // Registration proceeds on failure because refusing here would unhook the
@@ -3653,6 +3691,7 @@ export class SchemaRegistry {
     }
 
     collection.set(storageKey, item);
+    if (type === 'picklist') this.invalidateAll();
     this.log(`[Registry] Registered ${type}: ${storageKey}`);
   }
 
@@ -3679,6 +3718,9 @@ export class SchemaRegistry {
    * Universal Unregister Method
    */
   unregisterItem(type: string, name: string) {
+    // Every resolved object may carry this list's options; the removal below
+    // is synchronous, so the next fold re-resolves against the store without it.
+    if (type === 'picklist') this.invalidateAll();
     const collection = this.metadata.get(type);
     if (!collection) {
       console.warn(`[Registry] Attempted to unregister non-existent ${type}: ${name}`);
@@ -3836,6 +3878,10 @@ export class SchemaRegistry {
     if (removed.length > 0) {
       this.log(`[Registry] Unregistered ${removed.length} item(s) from package: ${packageId}`);
     }
+    // The package's `picklistExtensions` leave with it, and every resolved
+    // object is re-derived without its lists and its added values.
+    const droppedExtensions = this.unregisterPicklistExtensionsByPackage(packageId);
+    if (droppedExtensions || removed.some((r) => r.startsWith('picklist/'))) this.invalidateAll();
     return { removed, orphanedOverlays };
   }
 
@@ -4698,6 +4744,155 @@ export class SchemaRegistry {
   }
 
   // ==========================================
+  // Shared picklists
+  // ==========================================
+
+  /**
+   * Add a `picklistExtensions` entry's options to the picklist it names.
+   *
+   * ADDITIVE ONLY, and refused rather than resolved when it is not: a value
+   * the list already carries — from its owner or from another package's
+   * extension — throws `INVALID_METADATA` naming both declarations, and
+   * nothing is stored. Last-wins would let a second package silently replace
+   * an option the owner declared.
+   *
+   * The target need not be registered yet: packages register in dependency
+   * order, not picklist order, and an object resolves its options lazily on
+   * the next fold, so the extension is held until the list arrives. A target
+   * that never arrives is not this method's to judge — the boot audit
+   * ({@link findUnresolvedPicklistReferences}, {@link findOrphanPicklistExtensions})
+   * refuses the fields that name it and the extensions that extend it.
+   *
+   * Re-registration by the same package replaces that package's own
+   * contribution value by value, so a manifest replay is idempotent.
+   */
+  registerPicklistExtension(
+    extension: { extend: string; options: readonly PicklistOptionLike[] },
+    packageId?: string,
+  ): void {
+    const target = extension.extend;
+    const packageKey = packageId ?? '';
+    const own = this.picklistExtensionContributions.get(target)?.get(packageKey);
+    const merged = new Map<string, PicklistOptionLike>(own?.options);
+    for (const option of extension.options ?? []) {
+      if (option && typeof option === 'object' && option.value !== undefined) merged.set(String(option.value), option);
+    }
+    const candidate: PicklistContribution = { packageId, kind: 'extension', options: [...merged.values()] };
+    const others = this.picklistContributions(target).filter(
+      (c) => !(c.kind === 'extension' && (c.packageId ?? '') === packageKey),
+    );
+    // The candidate's own list first: a value repeated INSIDE this one entry
+    // is refused too, and against the owner's values it then reads in merge
+    // order (the list first, this extension second).
+    const repeated = findDuplicatePicklistValue([{ ...candidate, options: extension.options ?? [] }]);
+    const duplicate = repeated ?? findDuplicatePicklistValue([...others, candidate]);
+    if (duplicate) throw duplicatePicklistValueError(target, duplicate);
+
+    let byPackage = this.picklistExtensionContributions.get(target);
+    if (!byPackage) this.picklistExtensionContributions.set(target, byPackage = new Map());
+    byPackage.set(packageKey, { packageId, options: merged });
+    this.invalidateAll();
+    this.log(`[Registry] Registered picklist extension: ${target} (+${extension.options?.length ?? 0}) from ${packageId}`);
+  }
+
+  /**
+   * The resolved options of a picklist — its own, then every extension's, in
+   * registration order — or `undefined` when no picklist of that name is
+   * registered. Extensions held for an unregistered list resolve nothing on
+   * their own: a list exists only once its owner declares it.
+   */
+  resolvePicklistOptions(name: string): PicklistOptionLike[] | undefined {
+    const contributions = this.picklistContributions(name);
+    if (!contributions.some((c) => c.kind === 'picklist')) return undefined;
+    return mergePicklistOptions(contributions);
+  }
+
+  /**
+   * Every field of every packaged object that names a picklist no registered
+   * package declares — the load-time audit's input.
+   *
+   * Judged over the PACKAGED contributors only (`own` and `extend`), never an
+   * `overlay` and never a tenant-authored body: those come out of
+   * `sys_metadata`, and a stored row must not be able to fail a boot. A
+   * tenant field naming an unknown list is still never served options and
+   * never accepts a value — the fold drops whatever options it carried and
+   * the record validator refuses the field.
+   */
+  findUnresolvedPicklistReferences(): PicklistReference[] {
+    const unresolved: PicklistReference[] = [];
+    for (const [fqn, contributors] of this.objectContributors) {
+      for (const contributor of contributors) {
+        if (contributor.ownership === 'overlay' || isTenantAuthored(contributor.definition)) continue;
+        for (const ref of collectPicklistReferences(fqn, contributor.definition, contributor.packageId)) {
+          if (this.resolvePicklistOptions(ref.picklist) === undefined) unresolved.push(ref);
+        }
+      }
+    }
+    return unresolved;
+  }
+
+  /**
+   * Every `picklistExtensions` entry whose target list no registered package
+   * declares — the second half of the load-time audit. Held extensions are
+   * legal while the boot fills; once it is sealed, one still held adds its
+   * options to nothing.
+   */
+  findOrphanPicklistExtensions(): Array<{ picklist: string; packageId: string | undefined }> {
+    const orphans: Array<{ picklist: string; packageId: string | undefined }> = [];
+    for (const [target, byPackage] of this.picklistExtensionContributions) {
+      if (this.resolvePicklistOptions(target) !== undefined) continue;
+      for (const entry of byPackage.values()) orphans.push({ picklist: target, packageId: entry.packageId });
+    }
+    return orphans;
+  }
+
+  /** The owning list's options (when registered) followed by every extension's. */
+  private picklistContributions(name: string): PicklistContribution[] {
+    const contributions: PicklistContribution[] = [];
+    const base = this.getItem<{ options?: PicklistOptionLike[]; _packageId?: string }>('picklist', name);
+    if (base) {
+      contributions.push({ packageId: base._packageId, kind: 'picklist', options: Array.isArray(base.options) ? base.options : [] });
+    }
+    for (const entry of this.picklistExtensionContributions.get(name)?.values() ?? []) {
+      contributions.push({ packageId: entry.packageId, kind: 'extension', options: [...entry.options.values()] });
+    }
+    return contributions;
+  }
+
+  /**
+   * The list half of the additive rule: a picklist registered AFTER an
+   * extension already added one of its values is refused the same way, so the
+   * verdict does not depend on which package registered first.
+   */
+  private assertPicklistValuesDistinct(
+    name: string,
+    picklist: { options?: PicklistOptionLike[] },
+    packageId: string | undefined,
+  ): void {
+    const extensions = this.picklistContributions(name).filter((c) => c.kind === 'extension');
+    const duplicate = findDuplicatePicklistValue([
+      { packageId, kind: 'picklist', options: Array.isArray(picklist?.options) ? picklist.options : [] },
+      ...extensions,
+    ]);
+    if (duplicate) throw duplicatePicklistValueError(name, duplicate);
+  }
+
+  /** Resolve every picklist-bound field of a body (by reference when there is none). */
+  private resolvePicklistFields<T>(body: T): T {
+    return resolvePicklistFieldsOnto(body, (picklist) => this.resolvePicklistOptions(picklist));
+  }
+
+  /** Drop a package's `picklistExtensions`; `true` when it had any. */
+  private unregisterPicklistExtensionsByPackage(packageId: string): boolean {
+    let dropped = false;
+    for (const [target, byPackage] of this.picklistExtensionContributions) {
+      if (byPackage.delete(packageId)) dropped = true;
+      if (byPackage.size === 0) this.picklistExtensionContributions.delete(target);
+    }
+    return dropped;
+  }
+
+  // ==========================================
   // Reset (for testing)
   // ==========================================
 
@@ -4747,6 +4942,7 @@ export class SchemaRegistry {
     this.namespaceRegistry.clear();
     this.metadata.clear();
     this.appNavContributions.clear();
+    this.picklistExtensionContributions.clear();
     this._objectRevision += 1;
     this.log('[Registry] Reset complete');
   }

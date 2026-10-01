@@ -178,6 +178,12 @@ const ARTIFACT_FIELD_TO_TYPE: Record<string, string> = {
     ragPipelines: 'rag_pipeline',
     hooks: 'hook',
     mappings: 'mapping',
+    // Shared option lists. Registered as items here so the artifact boot
+    // serves `GET /meta/picklist` like every other kind; what a FIELD is
+    // served with is resolved by the ObjectQL registry, which also merges
+    // `picklistExtensions` into the list they name — that collection is not a
+    // kind of its own and has no entry here (see check:stack-collection-maps).
+    picklists: 'picklist',
     analyticsCubes: 'analytics_cube',
     connectors: 'connector',
     emailTemplates: 'email_template',
