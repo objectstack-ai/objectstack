@@ -219,10 +219,15 @@ describe('[#21087] metaTypeReadRefusal — the type-level read admission', () =>
         expect(metaTypeReadRefusal(verb, 'datasource', REFUSED.member)).toBeUndefined();
     });
 
-    it('admits a holder of the capability, and a system caller', () => {
+    it('admits a holder of the capability', () => {
         expect(metaTypeReadRefusal('GET', 'datasource', HOLDER)).toBeUndefined();
         expect(metaTypeReadRefusal('GET', 'external_catalog', { userId: 'u', systemPermissions: ['manage_platform_settings'] })).toBeUndefined();
-        expect(metaTypeReadRefusal('GET', 'datasource', { isSystem: true })).toBeUndefined();
+    });
+
+    it('reads the held set alone — `isSystem` is no second policy beside the capability', () => {
+        expect(metaTypeReadRefusal('GET', 'datasource', { userId: 'u', isSystem: true, systemPermissions: [] }))
+            .toMatchObject({ status: 403, code: 'PERMISSION_DENIED' });
+        expect(metaTypeReadRefusal('GET', 'datasource', { isSystem: true })).toMatchObject({ status: 401, code: 'UNAUTHENTICATED' });
     });
 
     it('refuses the authoring capabilities and an unrelated grant alike', () => {

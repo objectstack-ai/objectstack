@@ -1721,11 +1721,16 @@ export type MetaTypeReadRefusal =
  * context.
  *
  * Answers `undefined` — go on, nothing sent — for a write, for an unlisted
- * type, for a system caller (never set on inbound HTTP; the bypass every other
- * capability gate on `/meta` honours), and for a caller whose resolved
- * `systemPermissions` hold the row's capability. Otherwise the refusal. The
- * message names the capability and nothing else: a refused caller learns
- * which grant to ask for, never whether a name exists.
+ * type, and for a caller whose resolved `systemPermissions` hold the row's
+ * capability. Otherwise the refusal. The message names the capability and
+ * nothing else: a refused caller learns which grant to ask for, never whether
+ * a name exists.
+ *
+ * ⛔ No `isSystem` arm. Both transports resolve a `/meta` caller from the
+ * request itself, and inbound HTTP never carries `isSystem`, so such an arm
+ * could only ever be dead — and the datasource admin door reads the held set
+ * alone, deliberately, so that the capability is the one policy. Admitting the
+ * same callers means asking the same question.
  */
 export function metaTypeReadRefusal(
     method: unknown,
@@ -1742,9 +1747,8 @@ export function metaTypeReadRefusal(
     if (!Object.prototype.hasOwnProperty.call(META_TYPE_READ_CAPABILITIES, folded)) return undefined;
     const capability = META_TYPE_READ_CAPABILITIES[folded];
     const ctx = caller && typeof caller === 'object'
-        ? caller as { userId?: unknown; isSystem?: unknown; systemPermissions?: unknown }
+        ? caller as { userId?: unknown; systemPermissions?: unknown }
         : undefined;
-    if (ctx?.isSystem === true) return undefined;
     if (!ctx?.userId) {
         return { status: ANONYMOUS_DENY_STATUS, code: ANONYMOUS_DENY_CODE, message: ANONYMOUS_DENY_MESSAGE };
     }
