@@ -275,8 +275,8 @@ export function refuseUngrantedActivationAuthoring(
         handled: true,
         response: deps.error(
             `Enabling or disabling ${artifact.subject} requires the \`${ACTIVATION_AUTHORING_CAPABILITY}\` capability — ` +
-            `switching a shipped artifact off is functionally equivalent to deleting it for as long as it stays off ` +
-            `(#10243).`,
+            `switching a shipped artifact off is functionally equivalent to deleting it for as long as it stays off, ` +
+            `and the switch is not scoped to the caller's organization.`,
             ACTIVATION_DENY_STATUS,
             { code: ACTIVATION_DENY_CODE },
         ),

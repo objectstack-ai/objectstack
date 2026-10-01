@@ -229,7 +229,7 @@ export function planEndpointTarget(endpoint: ApiEndpoint): EndpointTargetPlan {
                     `Endpoint '${endpoint.name}' declares type 'object_operation' but `
                     + `objectParams.${!object ? 'object' : 'operation'} is missing.`,
                 hint: 'An object_operation endpoint must declare both `objectParams.object` and '
-                    + '`objectParams.operation`; publish rejects the incomplete form (#5040 E7).',
+                    + '`objectParams.operation`; publish rejects the incomplete form.',
             };
         }
         return { kind: 'object_operation', object, operation };
@@ -252,7 +252,7 @@ export function planEndpointTarget(endpoint: ApiEndpoint): EndpointTargetPlan {
         reason: `Endpoint '${endpoint.name}' declares type '${endpoint.type}', which this runtime does not execute.`,
         hint: "Only 'object_operation' and 'flow' endpoints execute in 17.x. 'script' and 'proxy' "
             + 'are rejected at publish pending their own rulings — script reachability through the '
-            + 'automation service is unverified, and proxy is an outbound (SSRF) surface (#5040 §7-3).',
+            + 'automation service is unverified, and proxy is an outbound (SSRF) surface.',
     };
 }
 

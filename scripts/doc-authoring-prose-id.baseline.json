@@ -437,69 +437,6 @@
  "packages/qa/downstream-contract/src/stack.ts": {
   "#2035": 1
  },
- "packages/runtime/src/action-execution.ts": {
-  "#11519": 1,
-  "#5933": 1
- },
- "packages/runtime/src/app-plugin.ts": {
-  "#8686": 1
- },
- "packages/runtime/src/dispatcher-error-vocabulary.ts": {
-  "#12772": 1,
-  "#5085": 2,
-  "#8885": 1,
-  "#9106": 1,
-  "#9223": 1,
-  "#9232": 1,
-  "#9460": 2,
-  "#9968": 1
- },
- "packages/runtime/src/domains/activation-gate.ts": {
-  "#10243": 1
- },
- "packages/runtime/src/domains/auth.ts": {
-  "#5085": 1
- },
- "packages/runtime/src/endpoint-executor.ts": {
-  "#5040": 2
- },
- "packages/runtime/src/endpoint-policy.ts": {
-  "#5040": 1
- },
- "packages/runtime/src/resolve-project-database.ts": {
-  "#6469": 1
- },
- "packages/runtime/src/route-ledger.ts": {
-  "#10145": 4,
-  "#10179": 1,
-  "#10243": 2,
-  "#12038": 11,
-  "#12160": 1,
-  "#12702": 1,
-  "#3584": 2,
-  "#3656": 1,
-  "#3718": 2,
-  "#3801": 1,
-  "#3913": 1,
-  "#4327": 1,
-  "#5040": 2,
-  "#5519": 2,
-  "#5561": 1,
-  "#5682": 1,
-  "#6593": 1,
-  "#7019": 1,
-  "#7526": 2,
-  "#9180": 2,
-  "#9406": 2
- },
- "packages/runtime/src/sandbox/body-runner.ts": {
-  "#4345": 1,
-  "#4352": 1,
-  "#7448": 1
- },
- "packages/runtime/src/standalone-stack.ts": {
-  "#3276": 3
- },
  "packages/services/service-analytics/src/analytics-service.ts": {
   "#3867": 1,
   "#5222": 1,
