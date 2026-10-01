@@ -35,7 +35,7 @@
  * ## ⚠️ Why the doors call this module EXPLICITLY, before spawning
  *
  * Not from an oclif flag `parse`, and not from `Flags.integer({ min, max })`.
- * MEASURED against this checkout's `@oclif/core` 4.13.3 — see
+ * MEASURED against this checkout's `@oclif/core` 5.1.2 — see
  * {@link describePortSource} for the runtime probe and its numbers — a flag's
  * `parse` never runs over that flag's `default`, and `Flags.integer`'s
  * `min`/`max` never runs over one either. `serve` reads `$OS_PORT`/`$PORT`
@@ -95,13 +95,13 @@ export type PortInputSource = '--port' | 'OS_PORT' | 'PORT' | 'the built-in defa
  * signal that separates `--port` from the environment here, because
  * `PORT`/`OS_PORT` never reach flag parsing at all — they are read by the
  * `default` expression on the flag. MEASURED against this checkout's
- * `@oclif/core` (4.13.3), both in `lib/parser/parse.js` and at runtime: the
+ * `@oclif/core` (5.1.2), both in `lib/parser/parse.js` and at runtime: the
  * default branch's value function is `async () => flag.default`, and unlike
  * the argv and `flag.env` branches it never calls `parseFlagOrThrowError`. A
  * flag's own `parse` therefore cannot see a default, which is exactly why the
  * validation this function feeds lives at the consumer instead of on the flag.
  *
- * ⚠️ RE-MEASURED for #12673 against the same `@oclif/core` 4.13.3, by driving
+ * ⚠️ RE-MEASURED for #12673 against the same `@oclif/core` 5.1.2, by driving
  * `Parser.parse` directly. Two results, and the second closes off the cheap
  * repair the issue asked about:
  *
@@ -372,7 +372,7 @@ export function strictPortReading(raw: string): number | null {
  * that fails silently when a future author forgets to pass it.
  *
  * `os start` normalises before forwarding — its `--port` is a `Flags.integer`
- * (parser `/^-?\d+$/` in `@oclif/core` 4.13.3), so the child receives
+ * (parser `/^-?\d+$/` in `@oclif/core` 5.1.2), so the child receives
  * `PORT=8080` for an `--port 08080`, and a spelling this notice fires on can
  * only reach it through the environment, under its own name.
  *
