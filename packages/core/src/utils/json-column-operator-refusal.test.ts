@@ -64,9 +64,9 @@ describe('[#21067] jsonColumnOperatorRefusalText — the words, by hash', () => 
   const MESSAGE = { sha: '67066b5d8a47b148f5b37a61b737c9c63762cfc8ac5a7696301d5c6b581dafb7', length: 461 };
 
   it.each([
-    ['an operator', '$in', false, { sha: 'e4ce64d5f72fe5794de485122271c348ae4c52de85b69e62ab8a7ef6482e2c08', length: 373 }],
-    ['$between', '$between', false, { sha: '0c50370be031654cff317942f8555e54a961b9ca205a8fc7caa3077c0274465f', length: 378 }],
-    ['the bare equality spelling', '=', true, { sha: 'eeaab21b40858e3d71bfc98f198e818aaaa6658f003b0b80e2b146d16ff31cc7', length: 387 }],
+    ['an operator', '$in', false, { sha: '02eceb6b6edd8e7440667e93b72c4c933b6bb30eba7dc428cbf6f63bf8e81612', length: 381 }],
+    ['$between', '$between', false, { sha: '1a25619f00bf3b117ca282429b9ad35cbd60b0ae284eb3a59fa6b928d57e3edc', length: 391 }],
+    ['the bare equality spelling', '=', true, { sha: 'aa3b34fbf03ade7ccf8762f3c97777361dea94cadfbfe7d4bba9ed183591dce1', length: 393 }],
   ] as const)('%s', (_name, op, bare, diagnostic) => {
     const text = jsonColumnOperatorRefusalText('members', op, bare);
     expect({ sha: sha256(text.message), length: text.message.length }).toEqual(MESSAGE);
@@ -125,16 +125,20 @@ describe('[#21067] jsonColumnOperatorRefusalText — whole on the wire, and true
     for (const [op, bare] of SPELLINGS) {
       const { message, diagnostic } = jsonColumnOperatorRefusalText('members', op, bare);
       for (const text of [message, diagnostic]) {
-        expect(text, op).toContain('a scalar comparison or text operator at a multi-value or JSON field');
+        expect(text, op).toContain('a scalar comparison or text operator');
+        expect(text, op).toContain('at a multi-value or JSON field, which such an operator cannot test for one member.');
         expect(text, op).not.toMatch(/this driver|JSON TEXT|serializ|matched nothing|asked to exclude/);
       }
+      // The diagnostic names the operator in the reason too — the bare spelling's as `=`.
+      expect(diagnostic, op).toContain(`it aims "${op}", a scalar comparison or text operator, at`);
     }
   });
 
   it('the diagnostic is the message with the names put back: same reason, same remedy with the field in it', () => {
     const { message, diagnostic } = jsonColumnOperatorRefusalText('members', '$nin', false);
     const reason = message.slice(message.indexOf(': ') + 2, message.indexOf(' Use "$contains"'));
-    expect(diagnostic.startsWith(`Operator "$nin" on field "members" WAS NOT APPLIED: ${reason} `)).toBe(true);
+    expect(diagnostic.startsWith('Operator "$nin" on field "members" WAS NOT APPLIED: ')).toBe(true);
+    expect(diagnostic).toContain(reason.replace('a scalar comparison or text operator at', '"$nin", a scalar comparison or text operator, at'));
     expect(diagnostic.endsWith('{ "$or": [{ "members": { "$contains": "a" } }, { "members": { "$contains": "b" } }] }).')).toBe(true);
     // An author-marked refusal puts this text on the wire (driver-sql's #8220
     // arm): for a field name of an ordinary length it is whole there too.

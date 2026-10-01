@@ -124,7 +124,7 @@ function expectJsonColumnRefusal(err: WireBearingError, op: string, field: strin
   // declaration, not this driver's storage form: the same words are printed by
   // faces that store no JSON text.
   expect(err.message).toContain('WAS NOT APPLIED');
-  expect(err.message).toContain('a scalar comparison or text operator at a multi-value or JSON field');
+  expect(err.message).toContain(`it aims "${op}", a scalar comparison or text operator, at a multi-value or JSON field`);
   expect(err.message).toContain(`{ "${field}": { "$contains": "a" } }`);
 }
 

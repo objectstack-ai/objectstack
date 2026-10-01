@@ -44,7 +44,7 @@
  * "withheld" sentence included, by a pin that runs it through that function
  * (`json-column-operator-refusal.test.ts`). The diagnostic names the field four
  * times, so its length grows with the name. It is whole on the wire for a field
- * name of up to 35 characters when an author-marked refusal discloses it. Its
+ * name of up to 32 characters when an author-marked refusal discloses it. Its
  * order (what was refused, why, then the remedy) leaves the any-of example
  * last, so a longer name pushes that out first.
  *
@@ -146,11 +146,15 @@ export interface JsonColumnOperatorRefusalText {
 /**
  * [#21067] Why the operator was refused, in words true on every face that
  * prints them — see the module docblock. Shared by both texts, so the message
- * and the diagnostic cannot come to give two reasons.
+ * and the diagnostic cannot come to give two reasons; the diagnostic passes
+ * `op` and so names the operator, the bare spelling's as `=`.
  */
-const REFUSAL_REASON =
-  'it aims a scalar comparison or text operator at a multi-value or JSON field, which such an ' +
-  'operator cannot test for one member.';
+function refusalReason(op?: string): string {
+  const operator = op === undefined
+    ? 'a scalar comparison or text operator'
+    : `"${op}", a scalar comparison or text operator,`;
+  return `it aims ${operator} at a multi-value or JSON field, which such an operator cannot test for one member.`;
+}
 
 /** The prescription, spelled with `name` in the field position. */
 function containsRemedy(name: string): string {
@@ -201,10 +205,11 @@ function containsRemedy(name: string): string {
  * mechanism ("a field this driver stores as a JSON TEXT column", and the two
  * wrong answers SQL gave), which is untrue where the engine's per-aggregation
  * `filter` and `driver-memory` print them; the reason is now
- * {@link REFUSAL_REASON}. And the message ran to 748 characters, so the REST
- * envelope cut it at 499 and no caller read the end of the any-of example or
- * the sentence saying the field and the operator were withheld; it is now 461.
- * The mechanism above stays here, where the next author reads it.
+ * {@link refusalReason}'s. And the message ran to 748 characters, so the REST
+ * envelope cut it at 499, partway through the sentence explaining the refusal,
+ * and no caller read the sentence saying the field and the operator were
+ * withheld; it is now 461. The mechanism above stays here, where the next
+ * author reads it.
  */
 export function jsonColumnOperatorRefusalText(
   field: string,
@@ -216,9 +221,9 @@ export function jsonColumnOperatorRefusalText(
     : `Operator "${op}" on field "${field}"`;
   return {
     message:
-      `A constraint in this filter WAS NOT APPLIED: ${REFUSAL_REASON} ${containsRemedy('FIELD')} ` +
+      `A constraint in this filter WAS NOT APPLIED: ${refusalReason()} ${containsRemedy('FIELD')} ` +
       `The field and the operator are withheld from the message; the full diagnostic is in the ` +
       `server log.`,
-    diagnostic: `${subject} WAS NOT APPLIED: ${REFUSAL_REASON} ${containsRemedy(field)}`,
+    diagnostic: `${subject} WAS NOT APPLIED: ${refusalReason(op)} ${containsRemedy(field)}`,
   };
 }
