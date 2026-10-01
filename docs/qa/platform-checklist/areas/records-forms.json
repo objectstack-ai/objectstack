@@ -4055,7 +4055,7 @@
         {
           "clause": "PER-VARIANT: each supported transform lands exactly its documented output on the created rows — none copies; constant writes params.value ignoring the source; map translates valueMap hits AND passes an unmapped raw value through unchanged; split distributes trimmed parts across its target list; join concatenates with the separator dropping empty members",
           "oracle": "api",
-          "verify": "per-variant row re-reads against the switch arms in packages/rest/src/import-mapping.ts — one observed conversion per variant, none inferred from a sibling",
+          "verify": "per-variant row re-reads against the switch arms in packages/core/src/utils/import-mapping.ts — one observed conversion per variant, none inferred from a sibling",
           "evidence": "the vector files + per-variant row reads"
         },
         {
@@ -4094,7 +4094,7 @@
       },
       "source": [
         "packages/spec/src/data/mapping.zod.ts#TransformType (TransformType — none/constant/lookup/split/join/javascript/map, 7 members, named export pinned above)",
-        "packages/rest/src/import-mapping.ts#transform (format guard + the javascript refusal naming #2611), (the per-transform switch + around-the-seam unknown-transform refusal)",
+        "packages/rest/src/import-mapping.ts#resolveNamedMapping (format guard + the javascript refusal naming #2611), packages/core/src/utils/import-mapping.ts#transform (the per-transform switch + around-the-seam unknown-transform refusal)",
         "examples/app-showcase/src/data/mappings/index.ts#showcase_inquiry_feed (showcase_inquiry_feed — the stock none+map carrier)",
         "cross-ref: records-forms.named-import-mapping (header mapping, idempotence, unknown-name refusal — kept there; this item is the transform axis)"
       ],
