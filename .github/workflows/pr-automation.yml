@@ -739,8 +739,9 @@ jobs:
                This is said HERE rather than in that refusal on purpose. The step below
                prints the two-class remedy (COLLISION vs DELIBERATE CORRECTION), but on
                this class it never speaks: a PR that only corrects somebody else's note
-               adds none of its own, so THIS step fails first and the steps after it
-               are skipped.
+               adds none of its own, so THIS step fails first and that step is skipped.
+               The ADR-0087 disposition and major-bump steps after it still run and
+               judge the note you changed -- read their verdicts on this run too.
 
                A PR that corrects a pending note AND releases something of its own does
                both: route 1 for its own release, under a name that cannot collide
@@ -929,10 +930,49 @@ jobs:
       # `check-*.mjs` gates: its fixtures are the only place the red directions are
       # pinned, and each of them was verified to flip green when the corresponding
       # check is ablated. Real temp git repositories, well under a second.
+      #
+      # ── Past a designed red (#20784) ─────────────────────────────────────────
+      #
+      # This step and the two after it (the allow-major read and the major guard)
+      # name `!cancelled()`, so they run whatever the steps above concluded. Two
+      # steps above are RED BY DESIGN on the DELIBERATE CORRECTION class, and the
+      # red is left standing on purpose: `Require a changeset` on a PR that only
+      # corrects somebody else's pending note (route 0), and the empty-changeset
+      # step on one that corrects a note AND adds its own (the foreign-changeset
+      # refusal). Under GitHub's implicit `success()` either red skipped all three
+      # verdicts below, on exactly the PRs most likely to carry a breaking
+      # changeset, so neither the ADR-0087 disposition nor the level axis was ever
+      # read on them in CI. Both gates judge `M` rows as well as `A`, so a
+      # correction-only PR has something for them to judge. The job stays red on
+      # that class; it now reports every verdict on the same run.
+      #
+      # ⛔ Not `always()`: a cancelled run must still stop.
+      #
+      # `steps.diffbase.outputs.merge_base != ''` is what `!cancelled()` costs,
+      # and it is not optional. Under the implicit `success()` an unusable base
+      # skipped these steps too, so a non-empty `$MERGE_BASE` came for free. Run
+      # past a red, they would also run past `Require a usable diff base`, where
+      # the base is the empty string, and all three changeset scripts read
+      # `--base ""` as NO base and answer against `origin/main` at exit 0
+      # (measured). That is the base-free reading #6129 and #7005 removed: a
+      # verdict about a base this job refused to trust. So each of the three names
+      # the input it consumes. Nothing else needs a guard: the two scripts import
+      # only node builtins and repo-local modules, so a failed install cannot
+      # change their verdict, and an unwritten label output is not 'true', which
+      # is the enforcing direction every read in this job already takes (#4690).
+      #
+      # The set is CLOSED. Each step above reads an output that an earlier step
+      # may not have written (the count, the settled label), so each keeps the
+      # implicit `success()`: `Require a changeset` run past a failed count would
+      # test an empty `$ADDED` and announce a green (see the note on `Require a
+      # usable diff base`). check-empty-changeset.mjs's consumer battery pins
+      # this shape: the three steps, their two conjuncts, and no `always()`.
       - name: Require an ADR-0087 disposition on a declared-breaking changeset
         if: >-
-          steps.labels.outputs.skip != 'true'
+          !cancelled()
+          && steps.labels.outputs.skip != 'true'
           && steps.labels_settled.outputs.skip != 'true'
+          && steps.diffbase.outputs.merge_base != ''
         env:
           MERGE_BASE: ${{ steps.diffbase.outputs.merge_base }}
         run: |
@@ -1005,10 +1045,16 @@ jobs:
         id: allow_major
         # Both skip-changeset reads, for the same reason the guard below names
         # them: a PR the changeset gate exempts must not pay an API call for a
-        # guard that is not going to run.
+        # guard that is not going to run. The same argument gives it the guard's
+        # other two conjuncts: `!cancelled()`, because this read is the guard's
+        # input and the guard runs past a designed red (#20784, the note on the
+        # ADR-0087 step), and the `merge_base` read, because without a base the
+        # guard does not run and this call would buy nothing.
         if: >-
-          steps.labels.outputs.skip != 'true'
+          !cancelled()
+          && steps.labels.outputs.skip != 'true'
           && steps.labels_settled.outputs.skip != 'true'
+          && steps.diffbase.outputs.merge_base != ''
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -1037,17 +1083,24 @@ jobs:
         # version. During the launch window we ship breaking changes as `minor`.
         # Add the `allow-major` PR label when a whole-stack major is intended.
         #
-        # The first two clauses keep this step exempt exactly when the changeset
-        # check above is: before #5580 the `skip-changeset` label skipped the whole
-        # job, this step included, and a live-read label must not quietly re-arm
-        # it. Both reads are named for the same reason -- after #6378 the exemption
-        # can be established by either one, and a step that honoured only the fast
-        # path would re-arm itself on precisely the PRs the settling read rescued.
+        # `!cancelled()` and the `merge_base` clause are the pair the note on the
+        # ADR-0087 step argues (#20784): this verdict is read even when a step
+        # above is red by design, and never against a base this job could not
+        # resolve. ⛔ Not `always()`.
         #
-        # The third clause is the LIVE `allow-major` read directly above (#5620),
-        # never the event payload. Its comment block carries the argument: what the
-        # payload read cost, where this diverges from #5580's `skip-changeset` read
-        # and why, the residual it leaves, and what re-arms the whole thing.
+        # The two skip-changeset clauses keep this step exempt exactly when the
+        # changeset check above is: before #5580 the `skip-changeset` label skipped
+        # the whole job, this step included, and a live-read label must not
+        # quietly re-arm it. Both reads are named for the same reason -- after
+        # #6378 the exemption can be established by either one, and a step that
+        # honoured only the fast path would re-arm itself on precisely the PRs the
+        # settling read rescued.
+        #
+        # The `allow_major` clause is the LIVE `allow-major` read directly above
+        # (#5620), never the event payload. Its comment block carries the
+        # argument: what the payload read cost, where this diverges from #5580's
+        # `skip-changeset` read and why, the residual it leaves, and what re-arms
+        # the whole thing.
         #
         # `--base` takes the same merge base the two gates above take, for the
         # same #6129 reason one defect along (#7005). This script used to read
@@ -1067,8 +1120,10 @@ jobs:
         # without the fork -- #6129's argument, which never depended on how big
         # the stock was.
         if: >-
-          steps.labels.outputs.skip != 'true'
+          !cancelled()
+          && steps.labels.outputs.skip != 'true'
           && steps.labels_settled.outputs.skip != 'true'
+          && steps.diffbase.outputs.merge_base != ''
           && steps.allow_major.outputs.allow != 'true'
         env:
           MERGE_BASE: ${{ steps.diffbase.outputs.merge_base }}
