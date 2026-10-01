@@ -1,8 +1,4 @@
 {
- "packages/cli/src/utils/i18n-extract.ts": {
-  "#12069": 1,
-  "#8765": 1
- },
  "packages/connectors/connector-mcp/src/mcp-provider.ts": {
   "#3055": 2
  },
