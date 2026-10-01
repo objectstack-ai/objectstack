@@ -225,12 +225,12 @@ const WIDGET_HISTORY =
  * parses and reaches no renderer. The #20960 census measured that at objectui
  * `main` `5262f7dd` over every key this repo's examples wrote here (`format`,
  * `currency`, `color`, `suffix`, `showLegend`, `horizontal`,
- * `showDataLabels`): each had a reader only on the legacy inline arm, which a
- * widget carrying a `dataset` never reaches, so each was removed from its
- * producer rather than declared. ⛔ A key is declared here only with a read
- * site on the dataset-bound path, and it then joins
- * `CONSUMED_WIDGET_OPTION_KEYS` in `@objectstack/sdui-parser`
- * (`check:widget-option-census`).
+ * `showDataLabels`): none is read on that path — only the legacy inline arm,
+ * which a widget carrying a `dataset` never reaches, spreads the bag into
+ * component props — so each was removed from its producer rather than
+ * declared. ⛔ A key is declared here only with a read site on the
+ * dataset-bound path, and it then joins `CONSUMED_WIDGET_OPTION_KEYS` in
+ * `@objectstack/sdui-parser` (`check:widget-option-census`).
  *
  * Presentation has declared homes instead: a number's face is the dataset
  * MEASURE's `format` + `currency`, a tile's accent is the widget's
