@@ -121,7 +121,7 @@ function makeHarness(rows: StoredRow[]) {
                     return (r as unknown as Record<string, unknown>)[k] === v;
                 }),
             );
-            // `check:objectql-double-limit` (#10978) — hold the caller's bound,
+            // `check:objectql-double-limit` (commit 4c9780c7a) — hold the caller's bound,
             // applied AFTER the filter and BY PRESENCE.
             return opts?.limit === undefined ? matched : matched.slice(0, opts.limit);
         },

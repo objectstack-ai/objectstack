@@ -63,7 +63,7 @@ export function showcaseAppDefaultSecurity(extraObjectGrants?: ObjectGrants): Se
     // which reads as a security regression rather than a missing declaration.
     throw new Error(
       '[dogfood] the showcase stack declares no `isDefault` permission set — the CLI wiring ' +
-        'these fixtures model cannot be reproduced (#5491)',
+        'these fixtures model cannot be reproduced, and the platform baseline alone grants a member no object access',
     );
   }
   const appDefault = PermissionSetSchema.parse(declaredDefault) as PermissionSet;

@@ -52,18 +52,45 @@
  *   dimension `sql` (the member itself when the cube declares none). A bare
  *   identifier is a column of the cube's object. A dotted identifier path
  *   (`account.hq`, a dataset dimension over an `include`d relationship) is the
- *   last segment, on the object the cube's own `joins` entry for that path
- *   names — the alias the dataset compiler registers and the strategy joins.
+ *   last segment, on the object the path's last hop reaches — [#21232] asked
+ *   of the one hop resolver (`hop-object.ts`'s `columnObjectOf`): the cube's
+ *   declared join at that path, else the relationship field's declared
+ *   `reference`, else the alias. That is the object both strategies join and
+ *   read for the path, so the door judges the column the statement groups by.
  *   Measured on the base the same way as the table above: a dataset dimension
  *   over `account.hq` (a `json` field of the joined object) answered one group
  *   per document on SQLite and 500 on PostgreSQL, like a base-object one.
  *
  * **Not judged** (the same "cannot answer, do not block" tiering as every
  * sibling gate in `ensureCube`): a host that wires no `sourceFieldMeta`, a cube
- * whose `sql` is not a bare object name, an expression `sql`, a dotted path
- * the cube declares no join for (a synthetic traversal: which object it lands
- * on is the strategy's guess, not a declaration), and every other field type.
- * The same tiers hold for the two #20912 judgements below.
+ * whose `sql` is not a bare object name, an expression `sql`, a column whose
+ * object the host does not describe (a hop the host cannot resolve reads its
+ * alias, and an alias that names no described object answers nothing), and
+ * every other field type. The same tiers hold for the two #20912 judgements
+ * below.
+ *
+ * ## [#21232] A relationship path the cube declares no join for
+ *
+ * Until #21232 the door located a dotted path's object through `cube.joins`
+ * alone and stood down on a path the cube declares no join for — while the
+ * strategies, through the one hop resolver, joined the lookup's declared
+ * target and grouped by its column. Measured on `origin/main` `3a7b6eb0`
+ * through `POST /api/v1/analytics/query` on the real dispatcher route, a
+ * configured cube over `deal` whose lookup `owner` (`reference` a person
+ * object holding `prefs` `json` and `labels` `tags`) has no declared join,
+ * beside `account` (declared join, `hq` `json`):
+ *
+ * | member | face | SQLite | PostgreSQL 16.14 |
+ * |:--|:--|:--|:--|
+ * | dimension over `owner.prefs` / `owner.labels` | native | 200, one group per serialized value | **500 `DATABASE_ERROR`** |
+ * | the same | ObjectQL | 400, the engine's `groupBy[1]` (a position the caller never wrote) | same |
+ * | `count_distinct` over `owner.prefs` / `owner.labels` | native | 200, 2 / 2 | **500** |
+ * | the same | ObjectQL | 400, its cross-object refusal (no `field` / `object`) | same |
+ * | control — the same two members over `account.hq` | both | 400 `INVALID_FIELD`, this door | same |
+ *
+ * Every row now answers this door's `INVALID_FIELD` / 400 on both faces and
+ * both dialects, naming the member, `field` the path and `object` the
+ * reference's target.
  *
  * ## [#20912] The engine's second class, and its second door
  *
@@ -94,7 +121,7 @@
  *   `isAggregateCompatibleWithFieldType`), or `isMultiValueField` says the
  *   declaration is a list. The member resolves the way the strategies resolve
  *   a measure (cube-qualified, flattened), and its column the way a dimension's
- *   does (`columnOf`, a declared join included). An authored measure, a
+ *   does (`columnOf`, through the one hop resolver). An authored measure, a
  *   suffix-inferred one (`tags_count_distinct`) and a compiled dataset's are
  *   one population here; a `count` measure compares nothing and is not judged.
  *
@@ -124,6 +151,7 @@
  *
  * @see https://github.com/objectstack-ai/objectstack/issues/20807
  * @see https://github.com/objectstack-ai/objectstack/issues/20912
+ * @see https://github.com/objectstack-ai/objectstack/issues/21232
  */
 
 import type { Cube, ValueShapeFieldDef } from '@objectstack/spec/data';
@@ -136,6 +164,7 @@ import {
 import type { AnalyticsQuery } from '@objectstack/spec/contracts';
 import type { AnalyticsRequestKey } from './dataset-refusal.js';
 import { invalidMemberError } from './dataset-refusal.js';
+import { columnObjectOf, type HopReference } from './hop-object.js';
 
 /** The declared `FieldType` vocabulary — the only types the compatibility table can answer for. */
 const DECLARED_FIELD_TYPES: ReadonlySet<string> = new Set(FieldType.options);
@@ -178,19 +207,28 @@ function groupedMembers(query: AnalyticsQuery): GroupedMember[] {
 }
 
 /**
- * The column a dimension `sql` reads, or `null` when this door cannot pin one.
- * A dotted path's object is the cube's DECLARED join at that path — the alias
- * is the path with its dots as `__`, as the dataset compiler registers it and
- * the strategy joins it — and a path with no declared join is not judged.
+ * The column a dimension `sql` reads, or `null` when this door cannot pin one
+ * (an expression). [#21232] A dotted path's column is its last segment, on the
+ * object the path's last hop reaches: {@link columnObjectOf}, the one hop
+ * resolver (`hop-object.ts`) — the cube's declared join, else the
+ * relationship field's declared `reference` through `referenceOf`, else the
+ * alias — which is the object both strategies join and read for that path.
+ * ⛔ No second walk.
  */
-function columnOf(cube: Cube, baseObject: string, sql: string): DimensionColumn | null {
+function columnOf(
+  cube: Cube,
+  baseObject: string,
+  sql: string,
+  referenceOf: HopReference | undefined,
+): DimensionColumn | null {
   const path = sql.trim();
   if (BARE_IDENTIFIER.test(path)) return { object: baseObject, column: path, path };
   if (!IDENTIFIER_PATH.test(path)) return null;
-  const segments = path.split('.');
-  const column = segments.pop() as string;
-  const joined = (cube.joins as Record<string, { name?: unknown } | undefined> | undefined)?.[segments.join('__')]?.name;
-  return typeof joined === 'string' && joined !== '' ? { object: joined, column, path } : null;
+  return {
+    object: columnObjectOf(cube, baseObject, path, referenceOf),
+    column: path.slice(path.lastIndexOf('.') + 1),
+    path,
+  };
 }
 
 /**
@@ -280,6 +318,10 @@ function refusal(
  *   `FieldType` and its `multiple` flag — or `undefined` when nothing
  *   authoritative answers. The flag is half the verdict: a `select` with
  *   `multiple: true` is a list stored as JSON, whatever its type name says.
+ * @param referenceOf - [#21232] The host's answer for a relationship field's
+ *   declared target — tier 2 of the one hop resolver (`hop-object.ts`), the
+ *   same function the field gate and both strategies resolve a hop with — or
+ *   `undefined` for a host that cannot answer (a hop then reads its alias).
  *
  * The words put the verdict first, then that the query did not run, then the
  * route, then the reason: a door that bounds a 4xx message keeps the front of
@@ -291,9 +333,10 @@ export function assertNoStructuredJsonDimension(
   baseObject: string,
   sqlOf: (member: string) => string,
   declaredValueShape: (object: string, field: string) => ValueShapeFieldDef | undefined,
+  referenceOf: HopReference | undefined,
 ): void {
   for (const { member, param } of groupedMembers(query)) {
-    const target = columnOf(cube, baseObject, sqlOf(member));
+    const target = columnOf(cube, baseObject, sqlOf(member), referenceOf);
     if (!target) continue;
     const shape = declaredValueShape(target.object, target.column);
     if (typeof shape?.type !== 'string') continue;
@@ -328,7 +371,7 @@ export function assertNoStructuredJsonDimension(
   for (const member of query.measures ?? []) {
     const entry = measureEntryOf(cube, member);
     if (entry?.type !== 'count_distinct' || typeof entry.sql !== 'string') continue;
-    const target = columnOf(cube, baseObject, entry.sql);
+    const target = columnOf(cube, baseObject, entry.sql, referenceOf);
     if (!target) continue;
     const shape = declaredValueShape(target.object, target.column);
     if (typeof shape?.type !== 'string') continue;

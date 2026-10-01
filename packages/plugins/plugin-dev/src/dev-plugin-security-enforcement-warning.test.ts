@@ -118,7 +118,7 @@ async function boot(ctx: any, options: Record<string, unknown> = {}) {
   return plugin;
 }
 
-describe('[#10036] the "nothing is enforced" warning must fire when SecurityPlugin.start() bailed', () => {
+describe('the "nothing is enforced" warning must fire when SecurityPlugin.start() bailed', () => {
   // ── The state the warning describes, constructed for real ───────────────
   //
   // SecurityPlugin registers `security.permissions` / `security.rls` /

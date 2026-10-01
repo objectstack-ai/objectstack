@@ -98,7 +98,7 @@ export const durableSuspendStack = defineStack({
     version: '0.0.0',
     type: 'app',
     name: 'Durable Suspend Fixture',
-    description: 'Single-object app whose screen flow suspends, persists, and resumes after a cold boot (#4470).',
+    description: 'Single-object app whose screen flow suspends, persists, and resumes after a cold boot.',
   },
   objects: [SuspendNote],
   flows: [flowDurableSuspend],

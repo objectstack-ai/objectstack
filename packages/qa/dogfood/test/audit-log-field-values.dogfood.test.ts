@@ -39,6 +39,13 @@
 //   still served to it.
 // - The control is served every snapshot byte-identical to the row at rest.
 //
+// [#21175] The ledger's parent-record read gate composes on the same read
+// path: the deleted record's rows (its create and delete snapshots) are served
+// to no caller that is not system context, so the doors below serve the live
+// record's rows only. They are still WRITTEN, and the armed check still reads
+// every class in them at rest; what the redaction does with them is pinned on
+// its own function in plugin-audit's `audit-log-field-redaction.test.ts`.
+//
 // Fixtures are synthetic. ⚠️ No test title states a value.
 // `@objectstack/plugin-audit` resolves through its BUILT output here (a
 // ledgered pair in `scripts/check-test-source-alias.mjs`), so a verdict on a
@@ -116,6 +123,8 @@ const READERS: Record<ClassName | 'control' | 'wildcard', string[]> = {
 };
 
 type Row = Record<string, any>;
+/** The values of the live record — the record whose rows the doors serve. */
+const LIVE = (c: ClassName) => STORED[c].slice(0, 2);
 const rowsOf = (body: any): Row[] => body?.records ?? body?.data ?? (Array.isArray(body) ? body : []);
 const recordOf = (body: any): Row => body?.record ?? body;
 
@@ -240,7 +249,7 @@ describe('[#21155] the compliance ledger serves a parent field value only to a r
   for (const c of CLASSES) {
     it(`${c}: no ledger row served to the reader carries a stored value of its class, through any door`, async () => {
       const doors = await servedRows(c);
-      expect(doors.list.length).toBeGreaterThanOrEqual(4);
+      expect(doors.list.length).toBeGreaterThanOrEqual(2);
       for (const rows of Object.values(doors)) {
         const blob = JSON.stringify(rows);
         for (const v of STORED[c]) expect(blob).not.toContain(v);
@@ -251,14 +260,14 @@ describe('[#21155] the compliance ledger serves a parent field value only to a r
       const { list } = await servedRows(c);
       const blob = JSON.stringify(list);
       for (const other of CLASSES.filter((o) => o !== c)) {
-        for (const v of STORED[other]) expect(blob).toContain(v);
+        for (const v of LIVE(other)) expect(blob).toContain(v);
       }
     });
   }
 
   it('wildcard: a reader granted the ledger by the platform read-only set is served no value of a class the data plane withholds from it', async () => {
     const doors = await servedRows('wildcard');
-    expect(doors.list.length).toBeGreaterThanOrEqual(4);
+    expect(doors.list.length).toBeGreaterThanOrEqual(2);
     for (const rows of Object.values(doors)) {
       const blob = JSON.stringify(rows);
       for (const c of CLASSES) for (const v of STORED[c]) expect(blob).not.toContain(v);
@@ -270,7 +279,7 @@ describe('[#21155] the compliance ledger serves a parent field value only to a r
     const doors = await servedRows('control');
     for (const rows of Object.values(doors)) {
       const blob = JSON.stringify(rows);
-      for (const c of CLASSES) for (const v of STORED[c]) expect(blob).toContain(v);
+      for (const c of CLASSES) for (const v of LIVE(c)) expect(blob).toContain(v);
     }
     for (const row of doors.list) {
       expect(row.old_value).toBe(atRest.get(row.id)?.old_value);

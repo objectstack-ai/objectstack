@@ -31,6 +31,17 @@
  * dataset whose `field` is not a column reference is refused too, and a saved
  * plain-column dataset is still served.
  *
+ * [#21220] The contract now refuses that `field` text one step earlier, at parse:
+ * `DatasetSchema` holds a dimension's and measure's `field` to a column reference,
+ * and this route parses every dataset it is handed — inline and saved alike —
+ * before calling `queryDataset`. So on THIS route both cases are answered by the
+ * route's own validation, `400 VALIDATION_FAILED` naming the path
+ * (`dimensions.N.field`), still before any strategy or driver runs and still
+ * without echoing the expression. The service door's `403 PERMISSION_DENIED`
+ * stays as defence in depth for a dataset that reaches `queryDataset` without
+ * that parse, and is pinned where it is reachable: in `service-analytics`'s
+ * `inline-dataset-field-admission-door.test.ts`.
+ *
  * The second block pins the ordering the ruling's execution notes name. A
  * DECLARED fault is withheld even when its text is one the heuristic does not
  * know (declared wins); an UNDECLARED knex-shaped fault still falls to the
@@ -51,9 +62,11 @@
  * first) and only that case goes RED (`ANALYTICS_QUERY_FAILED` in place of the
  * producer's code); the neighbouring "phrase the heuristic does not know"
  * case stays GREEN, which is precisely why it could not stand in for this one.
- * The first block's leg: remove the caller-content gate and the expression
- * reaches the real driver again — the refusal flips from `403 PERMISSION_DENIED`
- * to the `500 DATABASE_ERROR` relay this file once asserted.
+ * The first block's leg (since #21220): admit anything in the contract's
+ * column-reference pattern and the route's parse passes the expression on — the
+ * refusal flips from `400 VALIDATION_FAILED` to the service door's
+ * `403 PERMISSION_DENIED`; remove that door as well and it reaches the real driver,
+ * the `500 DATABASE_ERROR` relay this file once asserted.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
@@ -222,20 +235,28 @@ describe('[#16019] a driver fault on the raw-SQL path reaches the caller by decl
     await driver.disconnect();
   });
 
-  it('[#21177] a caller-supplied dimension-field expression is refused 403 PERMISSION_DENIED at the door — before any strategy or driver runs', async () => {
+  it('[#21177 / #21220] a caller-supplied dimension-field expression is refused 400 VALIDATION_FAILED at the route\'s parse — before any strategy or driver runs', async () => {
+    const execute = vi.spyOn(driver, 'execute');
     const route = buildRoute(async () => realAnalytics(driver));
     const res = await post(route, { dataset: expressionDataset, selection: { measures: ['account_count'], dimensions: ['folded_name'] } });
 
-    expect(res.statusCode).toBe(403);
-    expect(res.body.code).toBe('PERMISSION_DENIED');
-    // Caller text that names no attributable field is refused at the door,
-    // not evaluated — the driver never ran, so there is no driver fault line.
+    expect(res.statusCode).toBe(400);
+    expect(res.body.code).toBe('VALIDATION_FAILED');
+    // The contract's refusal, at the expression's own path (`detail` is the
+    // parse's issue list, cut at 1000 characters — read, not re-parsed).
+    expect(res.body.detail).toMatch(/"code":\s*"invalid_format"/);
+    expect(res.body.detail).toMatch(/"path":\s*\[\s*"dimensions",\s*1,\s*"field"\s*\]/);
+    // Caller text that names no column is refused before it is evaluated — the
+    // driver never ran, so there is no driver fault line.
+    expect(execute).not.toHaveBeenCalled();
     expect(warned.filter((m) => m.includes('[sql-driver] DATABASE_ERROR'))).toHaveLength(0);
-    // ⛔ The refusal names the member and its object (both the caller's own
-    // input), never the caller's `field` expression text or the compiled statement.
+    // ⛔ The refusal names the path, never the caller's `field` expression text
+    // or a compiled statement. The statement check reads the keywords as the
+    // strategies emit them (upper case): the prescription itself tells the
+    // author, in prose, to "Group by the column itself".
     const body = JSON.stringify(res.body);
     expect(body).not.toMatch(/translate/i);
-    expect(body).not.toMatch(/SELECT|GROUP BY/i);
+    expect(body).not.toMatch(/\bSELECT\b|\bGROUP BY\b/);
   });
 
   it('POSITIVE CONTROL: a legitimate dataset on declared fields → 200 with rows', async () => {
@@ -248,10 +269,11 @@ describe('[#16019] a driver fault on the raw-SQL path reaches the caller by decl
   });
 
   // [#21177] The route's SAVED branch: `body.datasetName` loads the dataset from
-  // metadata and calls the same `queryDataset`, so the door judges a saved
-  // dataset's own `field` text exactly as it judges an inline one. The expression
-  // here is one SQLite can run, so without the door it would be served (200).
-  it('[#21177] a SAVED dataset (body.datasetName) whose dimension field is not a column reference is refused 403 PERMISSION_DENIED — nothing executed', async () => {
+  // metadata and calls the same `queryDataset`. [#21220] It parses the loaded
+  // row through `DatasetSchema` first, exactly as it parses an inline one, so a
+  // row stored before the contract narrowed is refused there. The expression
+  // here is one SQLite can run, so without a refusal it would be served (200).
+  it('[#21177 / #21220] a SAVED dataset (body.datasetName) whose dimension field is not a column reference is refused 400 VALIDATION_FAILED — nothing executed', async () => {
     const saved = {
       ...dataset,
       name: 'account_metrics_saved_expr',
@@ -261,11 +283,12 @@ describe('[#16019] a driver fault on the raw-SQL path reaches the caller by decl
     const route = buildRoute(async () => realAnalytics(driver), [saved]);
     const res = await post(route, { datasetName: saved.name, selection: { measures: ['account_count'], dimensions: ['lowered_name'] } });
 
-    expect(res.statusCode).toBe(403);
-    expect(res.body.code).toBe('PERMISSION_DENIED');
+    expect(res.statusCode).toBe(400);
+    expect(res.body.code).toBe('VALIDATION_FAILED');
+    expect(res.body.detail).toMatch(/"code":\s*"invalid_format"/);
+    expect(res.body.detail).toMatch(/"path":\s*\[\s*"dimensions",\s*0,\s*"field"\s*\]/);
     expect(execute).not.toHaveBeenCalled();
     const body = JSON.stringify(res.body);
-    expect(body).toContain('lowered_name');
     expect(body).not.toMatch(/lower\(name\)/i);
   });
 

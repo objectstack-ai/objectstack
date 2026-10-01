@@ -5368,6 +5368,24 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'selected and no walker can move that intent into the dataset.',
   },
   {
+    id: 'dataset-member-field-expression-refused',
+    order: 58,
+    text:
+      'It also holds an ADR-0021 dataset\'s `field` — `dimensions[].field` and `measures[].field` — to '
+      + 'the accept set the cube members it compiles to already hold, from one shared declaration: a '
+      + 'field of the dataset\'s object, a relationship path ending in one, and on a measure also '
+      + '`\'*\'` (ADR-0021 "zero raw SQL / zero raw expressions"; ADR-0049 enforce-or-remove). The '
+      + 'slot was a bare string that parsed any expression, while the analytics dataset door already '
+      + 'refused one on every query, so an expression could be saved and never answered. It is now '
+      + 'refused at parse with a prescription naming the ADR-0021 form — a measure with its own '
+      + 'structured `filter`, or `derived: { op, of: [...] }` over named measures — and so are an '
+      + 'empty string (a count omits `field` instead) and `\'*\'` on a dimension, which names no '
+      + 'axis. The one lossless repair is D2: `dataset-count-measure-empty-field-removed` drops a '
+      + '`count` measure\'s empty `field`, which still counts rows. An expression has no mechanical '
+      + 'rewrite into a column, so the semantic entry `dataset-member-field-expression-refused` '
+      + 'carries the rest.',
+  },
+  {
     id: 'duration-keys-unit-in-key',
     order: 24,
     text:
@@ -9193,6 +9211,70 @@ const step18: MigrationStep = {
         + 'joined object. A measure column over such a pair also stops carrying a corrected '
         + '`fields[].type`, because the pair no longer produces a column at all.',
     },
+    // #21220 (ADR-0049 enforce-or-remove) — an ADR-0021 dataset dimension's and
+    // measure's `field` is a column reference, the accept set the cube members it
+    // compiles to hold since `cube-member-sql-expression-retired`, from one shared
+    // declaration. The D3 entry of the `dataset-count-measure-empty-field-removed`
+    // family: that D2 conversion carries the one lossless repair (a `count`
+    // measure's empty `field` is dropped, and the measure still counts rows); this
+    // entry carries the rest, which has no mechanical rewrite — an expression
+    // becomes a measure filter, a derived measure or a field of the object, and
+    // only the author knows which.
+    {
+      id: 'dataset-member-field-expression-refused',
+      // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
+      // inside a code span AND a table cell.
+      surface:
+        'datasets[].dimensions[].field and datasets[].measures[].field (ui.DatasetDimensionSchema.field / '
+        + 'ui.DatasetMeasureSchema.field) authored as anything but a column reference — a SQL expression '
+        + '(an arithmetic, an aggregate, a CASE, a subquery, a function call), a quoted or $-prefixed '
+        + 'spelling, a padded or empty string, a broken path, or * on a dimension',
+      replacement:
+        'a column reference: a field of the dataset\'s object (`amount`), or a relationship path ending '
+        + 'in one (`account.amount`) whose relationships are declared in `include`; on a measure also '
+        + '`\'*\'` for a count, and a count may omit `field` altogether (never `field: \'\'`). A derived '
+        + 'value takes its ADR-0021 form: a conditional count or sum is a measure with its own structured '
+        + '`filter` (`{ name: \'done_count\', aggregate: \'count\', filter: { status: \'done\' } }`), and a '
+        + 'ratio, sum, difference or product of measures is `derived: { op, of: [...] }` over measures '
+        + 'named in the same dataset (`{ name: \'done_rate\', derived: { op: \'ratio\', of: '
+        + '[\'done_count\', \'task_count\'] }, format: \'0.0%\' }`). A dimension that bucketed a column '
+        + 'with an expression has no expression form: group by the column itself, or keep the bucket as a '
+        + 'field of the object and name that field',
+      reason:
+        'The dataset layer was declared to take no raw SQL (ADR-0021 "zero raw SQL / zero raw '
+        + 'expressions"), and its `field` was documented as a field or a relationship path, but the slot '
+        + 'was a bare string and parsed anything — declared, never enforced (ADR-0049). The runtime had '
+        + 'already closed the other end for an expression: the analytics dataset door refuses one with a '
+        + '403 refusal, inline or saved, because an expression names no single field and no platform '
+        + 'check can judge which fields it reads. So an expression could be saved and never answered. '
+        + 'That door never judged an empty `field` — it skips one. The cube members a dataset compiles '
+        + 'to were narrowed to the same accept set earlier (`cube-member-sql-expression-retired`); the '
+        + 'dataset compiler copies `field` '
+        + 'into the member\'s `sql` verbatim, so the two slots now share one declaration. A dimension '
+        + 'additionally refuses `\'*\'`: grouping by every column is no axis, and both analytics '
+        + 'strategies answered such a dimension with a 500 database fault. An empty string is refused on both: '
+        + 'a dimension groups by nothing, and a count spells "no field" by omitting the key. One empty '
+        + 'string had a working row and has a lossless repair: a `count` measure with `field: \'\'` (the '
+        + 'shape a blank Field box in Studio\'s dataset inspector stores) compiled to the row count on '
+        + 'SQLite\'s native-SQL path, and without the key it compiles to `COUNT(*)` — the D2 conversion '
+        + '`dataset-count-measure-empty-field-removed` drops it from stored rows and sources. Everything '
+        + 'else has no mechanical rewrite into a column: an expression becomes a measure filter, a derived '
+        + 'measure or a field of the object, and a ratio changes scale on the way (a `derived` ratio is a '
+        + '0–1 fraction, so an expression that multiplied by 100 returned percentage points). ADR-0021 / '
+        + 'ADR-0049 / ADR-0087',
+      acceptanceCriteria:
+        'Every dataset parses: `DatasetSchema`, the dataset write door and defineStack refuse a '
+        + 'non-column `field` at `dimensions.N.field` / `measures.N.field` with a prescription that names '
+        + 'the column-reference contract and the ADR-0021 form, so the sweep is mechanical — parse each '
+        + 'dataset, and each refusal is one member to change. A count measure that carried `field: \'\'` '
+        + 'loses the key by the D2 conversion, parses, and still counts rows; a non-count measure or a '
+        + 'dimension with an empty `field` is left as stored and refused until it names a column. For '
+        + 'each moved measure, a query over a fixture where the '
+        + 'condition excludes rows returns the figure the expression meant (a ratio: the same value '
+        + 'divided by 100 when the expression returned percentage points). A dimension or measure whose '
+        + '`field` is a column or a relationship path parses byte-identically to before.',
+      conversionIds: ['dataset-count-measure-empty-field-removed'],
+    },
     {
       id: 'datasource-config-mongo-options-credential-refused',
       surface: 'datasource.config.options.auth.password (mongodb) — a login credential written ' +
@@ -9495,6 +9577,55 @@ const step18: MigrationStep = {
         + 'compile (input type `never`) and `DriverOptionsSchema.parse({ timeout: 5000 })` fails with '
         + 'the rename prescription naming `timeoutMs`; `{ timeoutMs: 5000 }` parses to the same '
         + 'number.',
+    },
+    // #21226 — registered by the change that put the caller's tenant scope on the
+    // remote libSQL face's doors, not by a later reconciliation. A driver call is
+    // code, never stack metadata, so there is no authored source for the chain to
+    // rewrite and no schema tombstone: this entry is the migration channel beside
+    // the changeset's FROM → TO table, as for its sibling
+    // `driver-upsert-cross-organization-conflict-refused`.
+    {
+      id: 'driver-remote-doors-tenant-scoped',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span already, and a nested backtick would close it.
+      surface:
+        'IDataDriver find, findOne, count, aggregate, update, delete, bulkUpdate, bulkDelete, '
+        + 'updateMany, deleteMany, create and bulkCreate on TursoDriver\'s remote (libSQL) face, '
+        + 'called with a tenant context',
+      replacement:
+        'a tenant-scoped call on the remote face reaches the rows the local face reaches for the '
+        + 'same options: the caller\'s organization, rows with no organization, and under the group '
+        + 'posture the caller\'s membership set. A by-id `update` outside that scope answers `null`, '
+        + 'a by-id `delete` answers `false`, and a predicate write counts only the rows in scope. '
+        + '`create` stamps the caller\'s organization on a row that names none. To reach rows of '
+        + 'every organization, call without `tenantId`, as on the local face',
+      reason:
+        'The engine hands every driver the caller\'s organization as `DriverOptions.tenantId`, and '
+        + 'the group posture\'s membership set as `tenantIds` (ADR-0131 D8, ADR-0105 D2). '
+        + 'TursoDriver\'s local face applies them through `SqlDriver.applyTenantScope` on every read '
+        + 'and on every update and delete predicate, and stamps the organization on insert. Its remote '
+        + 'face compiles its own statements, and its doors received no driver options: their '
+        + 'statements carried the caller\'s filter and nothing else, and a remote `create` wrote no '
+        + 'organization. Where the engine\'s Layer 0 wall composes a predicate above the driver, that '
+        + 'wall held other organizations\' rows back. Where it composes none (the posture in which '
+        + 'Layer 0 is inert, or an elevated caller that carries its organization), the driver scope '
+        + 'is the only fence, and on the remote face there was none. The remote doors now compile the '
+        + 'local face\'s own predicate, by asking the same chokepoint, and AND it onto each '
+        + 'statement, so the two faces answer the same rows by construction. The remote `create` '
+        + 'stamps the organization as the local `create` does. `distinct` still refuses a '
+        + 'tenant-scoped call on the remote face. The call signatures are unchanged, so nothing '
+        + 'reaches the compiler. Code that relied on a tenant-scoped remote call reaching another '
+        + 'organization\'s rows now gets the miss answer each door already declares, and a remote '
+        + '`create` that relied on landing a row with no organization now finds it under the '
+        + 'caller\'s. ADR-0131 D8 / ADR-0087.',
+      acceptanceCriteria:
+        'No caller of a remote-mode TursoDriver passes `tenantId` and expects to read, count, '
+        + 'aggregate, update or delete a row of another organization; a caller that means to reach '
+        + 'every organization calls without a tenant context, as on the local face. No caller relies '
+        + 'on a tenant-scoped remote `create` landing a row with no organization. Proven when a '
+        + 'tenant-scoped call on each door answers the same rows on the remote face as on the local '
+        + 'face for the same options: another organization\'s row excluded, `null`, `false` or '
+        + 'untouched, and the caller\'s own rows and rows with no organization answered as before.',
     },
     // Registered by the change that removed the three methods (#20822, PR #20988),
     // not by a later reconciliation.

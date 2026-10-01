@@ -22791,7 +22791,7 @@ export class ObjectStackProtocolImplementation implements
             }
         }
         // [commit 75e66fc8e] Diff RAW, then redact the EMITTED values — maintainer ruling
-        // (comment 5299845282), Option B. The comparison runs on the stored
+        // (recorded in that commit's message), Option B. The comparison runs on the stored
         // bodies untouched, so a credential ROTATION still registers as a
         // changed path; only the values leaving this function are taken from
         // the type's redacted projection of those same bodies.

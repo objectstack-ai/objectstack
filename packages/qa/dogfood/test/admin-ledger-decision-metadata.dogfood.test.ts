@@ -36,10 +36,19 @@
 // no capability, so every class applies to it. The seeded platform admin
 // creates one user and then resets its password, so both explicit rows exist.
 //
+// Every reader can also OPEN that user through the data door. The ledger's
+// parent-record read gate (`audit-log-read-visibility.ts`) serves a row about a
+// record only to a caller who can read that record, and a member reads only its
+// own user row by default. So each reader's sets add view-all on `sys_user` —
+// a row-scope grant, not a field one: the classes above still apply, which the
+// armed check below measures — and a reader who could not open the subject
+// would be served none of its rows, so the classes would measure nothing.
+//
 // ## What is asserted
 //
 // - `beforeAll` (`assertArmed`): both explicit rows exist at rest, and the
-//   mirror rows at rest carry every class; the mirror rows served to each
+//   mirror rows at rest carry every class; every reader opens the subject
+//   through the data door; the mirror rows served to each
 //   reader withhold exactly its class (the security service's own answer is
 //   engaged for it), and the control is served every class.
 // - Per class, through the list door, the by-id door and a list projected to
@@ -125,13 +134,19 @@ const fixtureStack = defineStack({
 });
 
 const read = { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false };
-const grants = { [USER]: read, [LEDGER]: read };
+/** View-all on the user object: the subject's ledger rows reach only a reader who can open the subject. */
+const grants = { [USER]: { ...read, viewAllRecords: true }, [LEDGER]: read };
 const withheldField = { [`${USER}.${FIELD.withheld}`]: { readable: false, editable: false } };
 const unmaskSet = PermissionSetSchema.parse({ name: 'ald_unmask_set', label: 'ALD unmask', objects: grants, systemPermissions: [CAP_UNMASK] });
 const gatedReadSet = PermissionSetSchema.parse({ name: 'ald_gated_read_set', label: 'ALD gated read', objects: grants, systemPermissions: [CAP_READ] });
 const withholdSet = PermissionSetSchema.parse({ name: 'ald_withhold_set', label: 'ALD withhold', objects: grants, fields: withheldField });
-/** Withholds the field and grants no object: beside the platform read-only set. */
-const withholdOnlySet = PermissionSetSchema.parse({ name: 'ald_withhold_only_set', label: 'ALD withhold only', objects: {}, fields: withheldField });
+/** Withholds the field and grants only view-all on the user object: beside the platform read-only set, which grants the ledger read. */
+const withholdOnlySet = PermissionSetSchema.parse({
+  name: 'ald_withhold_only_set',
+  label: 'ALD withhold only',
+  objects: { [USER]: { allowRead: true, viewAllRecords: true } },
+  fields: withheldField,
+});
 
 /** Each reader, and the sets that make exactly its class apply. */
 const READERS: Record<ClassName | 'control' | 'wildcard', string[]> = {
@@ -280,6 +295,19 @@ describe('the admin identity rows on the compliance ledger carry decisions, neve
         },
         armed: (o) => o.events.includes(CREATE_EVENT) && o.events.includes(PASSWORD_SET_EVENT) && o.mirrorCarries.length === 3,
         describe: (o) => `events: ${o.events.join(',') || 'none'}; mirror carries: ${o.mirrorCarries.join(',') || 'none'}`,
+      }),
+      armedWhen({
+        control: 'every reader opens the subject user through the data door',
+        disarmedBy: 'the ledger serves a row about a record only to a caller who can read that record, so a reader who could not open the subject would be served none of its rows and every class case below would measure an empty list',
+        observe: async () => {
+          const status: Record<string, number> = {};
+          for (const who of Object.keys(READERS) as Reader[]) {
+            status[who] = (await stack.apiAs(token[who], 'GET', `/data/${USER}/${subjectId}`)).status;
+          }
+          return status;
+        },
+        armed: (o) => Object.values(o).every((s) => s === 200),
+        describe: (o) => JSON.stringify(o),
       }),
       armedWhen({
         control: 'the mirror rows served to each reader withhold exactly its class, and the control is served every class',
