@@ -36,7 +36,7 @@
   "devDependencies": {
     "@objectstack/lint": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.6.3",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },
