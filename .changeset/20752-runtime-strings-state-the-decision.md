@@ -8,7 +8,7 @@ Clause-②: no
 
 Strings `@objectstack/runtime` shows to callers, authors and operators pointed at an issue-tracker number for the reason behind them. The number goes; where the sentence did not already say what was decided, it now does.
 
-- The enablement refusal (`POST /automation/:name/toggle`, `POST /actions/_activation/:object/:action`) adds that the switch is not scoped to the caller's organization, which is why `manage_metadata` gates it.
+- The enablement refusal (`POST /actions/_activation/:object/:action`) adds that the switch is not scoped to the caller's organization, which is why `manage_metadata` gates it.
 - The doubled post-success navigation warning (`[action-contract]`) says the contract refuses a pair of destinations rather than ranking them, and that "declared `onSuccess` wins" is the console renderer's interim precedence, not a contract.
 - The legacy database notice says `dev`, `start` and `migrate` now share one default database file.
 - The `BodyRunner` warning for a `log` capability with no logger says the capability writes only to the factory's logger, never to `console`.
