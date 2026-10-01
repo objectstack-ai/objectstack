@@ -219,7 +219,10 @@ const CUBE_DIMENSION_NAME_REMOVED = cubeMemberNameRemoved('dimensions.<dimension
  * quoted identifier, a `$`-prefixed spelling, an empty string. Such a value
  * names no single field, so no platform check could judge which fields it
  * reads, and the two strategies never agreed on it: the raw-SQL path emitted
- * it verbatim, and `ObjectQLStrategy#resolveMeasureAggregation` refused it.
+ * it verbatim, while `ObjectQLStrategy#resolveMeasureAggregation` refuses only
+ * the `number` / `string` / `boolean` partition (`EXPRESSION_METRIC_TYPES`)
+ * and forwards an expression under an aggregate type as a field name, which
+ * fails downstream.
  * A derived value has a declared home the platform CAN judge — an ADR-0021
  * dataset, where a conditional count or sum is a measure with its own
  * structured `filter`, and a ratio / sum / difference / product of measures is
