@@ -1,11 +1,11 @@
 ---
 '@objectstack/cli': patch
-'@objectstack/runtime': patch
+'@objectstack/runtime': minor
 ---
 
 fix(cli): `os migrate plan` / `apply` no longer run the app's `onEnable` or a host plugin's post-declaration hooks during their boot
 
-Clause-②: no
+Clause-②: yes (widening)
 
 The two schema commands boot the host's stack to read what it declares. That boot ran the
 config's `onEnable`, and every `kernel:bootstrapped` / `kernel:listening` hook a host plugin
@@ -30,3 +30,8 @@ The boot now composes host code for its declarations only:
 The plan itself is unchanged: the same tables, the same pending DDL, the same drift. `apply`
 still flushes the DDL the operator confirms and still runs the coverage pass. The platform's own
 plugins are untouched, so the value-shape gate announcement still prints.
+
+`@objectstack/runtime` widens its public surface, additively: `AppPlugin`, exported from the
+package root, gains the optional constructor option `skipOnEnable` (default `false`) and the
+read-only getter `onEnableWithheld`. A composition that does not pass the option gets exactly
+the behaviour it had, `onEnable` included.
