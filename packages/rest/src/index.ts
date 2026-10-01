@@ -32,7 +32,7 @@ export {
     parseXlsxToRows,
 } from './import-prepare.js';
 export type { PreparedImport, PrepareImportResult } from './import-prepare.js';
-export { runImport } from './import-runner.js';
+export { runImport } from '@objectstack/core';
 export type {
     ImportAction,
     ImportRowResult,
@@ -42,9 +42,9 @@ export type {
     ImportProtocolLike,
     ImportProtocolRequest,
     RunImportOptions,
-} from './import-runner.js';
-export { coerceRow } from './import-coerce.js';
-export type { CoerceContext, RefResolver } from './import-coerce.js';
+} from '@objectstack/core';
+export { coerceRow } from '@objectstack/core';
+export type { CoerceContext, RefResolver } from '@objectstack/core';
 export { buildFieldMetaMap } from './export-format.js';
 export type { ExportFieldMeta } from './export-format.js';
 

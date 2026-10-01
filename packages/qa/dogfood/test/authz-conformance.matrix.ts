@@ -10,7 +10,7 @@
 // file exists and that the row ↔ proof pairing is MUTUAL (#7976 below), AND
 // ratchets completeness at ROUTE-FAMILY AND DISPATCHER-DOMAIN granularity over
 // the two route ledgers, plus a curated table of named gates and transport
-// tripwires (`discover()`: 18 probes over 13 named source files) — a new REST
+// tripwires (`discover()`: 19 probes over 14 named source files) — a new REST
 // route FAMILY or dispatcher DOMAIN is UNCLASSIFIED, a deleted named guard is
 // STALE, and either breaks CI.
 //
@@ -67,14 +67,16 @@
 // The ledgers supply the POPULATION; the classification stays a reviewed row
 // here.
 //
-// Of the 40 ledger keys, 6 are classified by rows below that already pinned
-// the same surface through a probe; the other 34 are enumerated one by one,
-// dated, and pinned SHRINK-ONLY in `authz-ledger-population.baseline.ts`. That
-// list can only get shorter: growth, staleness, a classified entry left behind
-// or a duplicate each fail CI. Before 2026-08-31 those 34 surfaces minted no
-// key at all, so nothing about them was visible in either direction.
+// Of the 39 ledger keys, 7 are classified by rows below that already pinned
+// the same surface through a probe; the other 32 are enumerated one by one,
+// dated, and pinned SHRINK-ONLY in `authz-ledger-population.baseline.ts`,
+// whose MAX note dates every step down from the 34 of 40 it held on the
+// 2026-08-31 adoption day. That list can only get shorter: growth, staleness,
+// a classified entry left behind or a duplicate each fail CI. Before
+// 2026-08-31 those surfaces minted no key at all, so nothing about them was
+// visible in either direction.
 //
-// Each of the 18 probes DECLARES its instrument kind
+// Each of the 19 probes DECLARES its instrument kind
 // (ROUTE_ENUMERATION / GATE_PIN / TRIPWIRE — see the companion test), and a
 // non-tripwire probe that mints ZERO keys fails as a DEAD PROBE. That closes a
 // blind-spot mechanism neither UNCLASSIFIED nor STALE can reach: both are
@@ -96,15 +98,15 @@
 // [commit 2ce1eb41b] That completeness is over ROUTES, not over primitives: a primitive
 // enforced by a predicate inside an existing resolver adds no entry point, so
 // it can be neither UNCLASSIFIED nor STALE. Measured against the rows below:
-// 44 of 51 carry no `covers` key at all (7 rows, 15 keys, every one an
-// HTTP/transport pin), and 38 of the file's 44 `enforced` rows are exactly
+// 44 of 52 carry no `covers` key at all (8 rows, 17 keys, every one an
+// HTTP/transport pin), and 38 of the file's 45 `enforced` rows are exactly
 // that in-resolver shape — the ADR-0049/#8613 `active` rows and the ADR-0091
 // grant-validity-window row among them (see their own blocks further down)
 // are the normal case, not an exception. Of the
-// 15 `covers` keys that DO exist, 5 are GATE pins tied to the enforcement call
+// 17 `covers` keys that DO exist, 6 are GATE pins tied to the enforcement call
 // itself, not merely a function name — delete `shouldDenyAnonymous` from
-// `/actions`, `/automation` or `/packages`, or drop the MCP context-threading
-// / stdio principal binding, and the pinned key vanishes from source, its row
+// `/actions`, `/automation`, `/packages` or `/analytics`, or drop the MCP
+// context-threading / stdio principal binding, and the pinned key vanishes from source, its row
 // goes STALE, and CI catches the regression. That anti-regression property is
 // real and is what this file mechanically delivers. Outside the curated
 // table, "one row per primitive, each in EXACTLY ONE honest state" is a
@@ -268,6 +270,20 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     // four routes @objectstack/rest mounts itself.
     covers: ['packages:domains/packages.ts:anonymous-gate', 'dispatcher-domain:route-ledger.ts:/packages'],
     note: 'Ungated, a guest-principal caller reached the whole domain: `GET /packages` (the id ENUMERATION face — first step of the chain), `GET /packages/:id/export` (27 metadata types read whole), and — destructively — `POST /packages/:id/discard-drafts` (drop every pending draft) and `POST /packages/:id/publish-drafts` (promote every draft to active + load seed rows + flip ADR-0045 visibility). Gating the DOMAIN rather than each route keeps a newly added package route from arriving ungated. Engine-internal / SDK internal calls never enter this HTTP handler. The per-route capability gates are unit-pinned in runtime/domains/packages-capability-gate.test.ts.' },
+  // #21061 — the analytics dispatcher domain. Every face (cube read, SQL echo,
+  // meta) converges on ONE handler body, `handleAnalyticsRequest`, so one
+  // domain-wide floor there covers them all — the `/packages` shape above. Its
+  // REST sibling, the analytics dataset door, already opened with `enforceAuth`;
+  // this domain was the one data-serving dispatcher domain without the floor.
+  { id: 'anonymous-deny-analytics', summary: 'anonymous-deny on the analytics dispatcher surface', state: 'enforced',
+    enforcement: 'runtime/domains/analytics.ts handleAnalyticsRequest — shouldDenyAnonymous DOMAIN-WIDE as the handler\'s FIRST statement, ahead of the service-availability probe (so a 401-vs-404 difference cannot fingerprint whether the analytics capability is installed) and ahead of the AnalyticsQuery body validation (so an anonymous malformed body is a 401, never a 400 describing the contract); every face answers the dispatcher-wrapper 401 UNAUTHENTICATED, and object admission and the read scope for a signed-in caller stay with the security layer behind the service',
+    proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
+    // The DISPATCHER domain only, at ledger granularity, beside the gate pin —
+    // the same pairing the `/packages` row makes. ⛔ NOT the REST `analytics`
+    // family (the dataset door), a different registrar on a different server,
+    // which stays in the shrink-only baseline.
+    covers: ['analytics:domains/analytics.ts:anonymous-gate', 'dispatcher-domain:route-ledger.ts:/analytics'],
+    note: 'Ungated, an unauthenticated caller — carried to the domain as the guest envelope — was answered 200 on every analytics face on a stock boot, with aggregates over arbitrary objects, while the record doors and the dataset door on the same boot answered it 401. Gating the DOMAIN rather than each face keeps a newly added analytics face from arriving ungated. This row is the door half only: a non-system caller who resolves NO permission set being granted object admission and an unscoped read by that absence is a security-layer question for every door at once, deliberately not copied into service-analytics; it is tracked on its own card. The per-face unit pins (anonymous 401 with the service never consulted, malformed body and empty slot still 401, signed-in control unchanged) live in runtime/domains/analytics-anonymous-deny.test.ts.' },
 
   // ── #2992 / ADR-0096 D4 — latent execution surfaces (pre-wiring identity
   // admission). Neither surface is reachable by a client today; these rows

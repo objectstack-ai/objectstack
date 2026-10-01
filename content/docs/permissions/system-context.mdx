@@ -10,7 +10,7 @@ the seed loader replaying package fixtures, a plugin's boot reconciler, a
 service self-write, a migration.
 
 This page is **the authority** for what that flag actually does. It exists
-because the flag is not one concept: it is a single boolean read at **108
+because the flag is not one concept: it is a single boolean read at **109
 distinct sites across 19 packages**, and knowing three of those behaviours gives
 no hint that the other hundred-and-four exist. Every documented app-side bug
 traced to `isSystem` had the same shape — the metadata was complete and correct,
@@ -138,7 +138,7 @@ that silently does not happen.
 
 ### 3. Sharing (`plugin-sharing`)
 
-The largest single consumer — **17 of the 108 sites**.
+The largest single consumer — **17 of the 109 sites**.
 
 | # | Behaviour when `isSystem` | What you get / what you lose | Anchor |
 |:--|:---|:---|:---|
@@ -172,7 +172,7 @@ The largest single consumer — **17 of the 108 sites**.
 | 48 | Action `requiredPermissions` bypassed | runtime | Get: engine self-invocation runs any action | `packages/runtime/src/action-execution.ts#actionPermissionError` |
 | 49 | `manage_metadata` bypassed on metadata writes | runtime, rest | Get: schema writes without the capability — and, because REST's save door and the stored-version read doors ask one save verdict, an app's full stored version on `/layers`, `?layers=true` and `/diff`, whatever its entry gates withhold | `packages/runtime/src/domains/meta.ts#handleMetadataRequest`, `packages/rest/src/rest-server.ts#registerMetadataEndpointsInner`, `packages/rest/src/rest-server.ts#metaSaveVerdict` |
 | 50 | The shared metadata-write verdict itself returns `allowed` | metadata-core | Get: the one function all of row 49's doors consult answers yes before any capability is examined | `packages/metadata-core/src/meta-write-capability.ts#metaWriteCapabilityVerdict` |
-| 51 | Anonymous-deny seam satisfied on the domain dispatchers and the package/federation routes | runtime, rest | Get: passes with no `userId` | `packages/runtime/src/domains/actions.ts#handleActionsRequest`, `packages/runtime/src/domains/ai.ts#handleAIRequest`, `packages/runtime/src/domains/automation.ts#handleAutomationRequest`, `packages/runtime/src/domains/meta.ts#handleMetadataRequest`, `packages/runtime/src/domains/security.ts#handleSecurityRequest`, `packages/runtime/src/domains/packages.ts#handlePackagesRequest`, `packages/rest/src/external-datasource-routes.ts#registerExternalDatasourceRoutes`, `packages/rest/src/package-routes.ts#refusePackageRequest` |
+| 51 | Anonymous-deny seam satisfied on the domain dispatchers and the package/federation routes | runtime, rest | Get: passes with no `userId` | `packages/runtime/src/domains/actions.ts#handleActionsRequest`, `packages/runtime/src/domains/ai.ts#handleAIRequest`, `packages/runtime/src/domains/automation.ts#handleAutomationRequest`, `packages/runtime/src/domains/meta.ts#handleMetadataRequest`, `packages/runtime/src/domains/security.ts#handleSecurityRequest`, `packages/runtime/src/domains/packages.ts#handlePackagesRequest`, `packages/runtime/src/domains/analytics.ts#handleAnalyticsRequest`, `packages/rest/src/external-datasource-routes.ts#registerExternalDatasourceRoutes`, `packages/rest/src/package-routes.ts#refusePackageRequest` |
 | 52 | MCP principal check satisfied | runtime | Get: MCP surface reachable with no user | `packages/runtime/src/domains/mcp.ts#handleMcpRequest` |
 | 53 | Package REST route capability gate bypassed | rest | Get: a marketplace publish over REST (`POST /packages/publish`, the one route the REST registrar mounts since #14503) without `manage_metadata`; the package read cohort (`studio.access` / `setup.access`) is enforced by the dispatcher `/packages` domain's own read gate, where the reads are served | `packages/rest/src/package-routes.ts#refusePackageRequest` |
 | 54 | Package domain capability gates bypassed | runtime | Get: package management and package-inventory reads without the capability | `packages/runtime/src/domains/packages.ts#requireManageMetadata`, `#requireReadCapability` |
@@ -281,7 +281,7 @@ Ownership injection, `readonly` bypass and sharing materialisation are
 independent decisions, and a seed loader plausibly wants the first two but not
 the third. The concept is nevertheless **staying as one boolean**:
 
-- **Shipped semantics.** `isSystem` is a published contract with 108 read sites
+- **Shipped semantics.** `isSystem` is a published contract with 109 read sites
   in 19 packages. Splitting it is a breaking contract change across all of them.
   (The ruling was taken when the census read 80 sites in 18 packages; the count
   has grown, which strengthens rather than weakens the argument.)
@@ -355,16 +355,16 @@ still holds equal to the census on every pull request:
 | Appearances of the bare identifier `isSystem` in non-test sources | 813 | — |
 | — parsed as a declaration | 22 | ✅ |
 | — parsed as an object-literal / type key (producers and option objects) | 310 | — |
-| — parsed as a property **read** | 114 | ✅ |
+| — parsed as a property **read** | 115 | ✅ |
 | — parsed in some other syntactic position (a local, a cast, a conditional) | 9 | ✅ |
 | — the remainder: text inside comments and string literals | 358 | — |
 | Of those reads: reads of one of the unrelated metadata fields | 6 | ✅ |
-| Of those reads: reads of `ExecutionContext.isSystem` | **108** | ✅ |
-| — behaviour-bearing (rows 1–61 above) | 105 | ✅ |
+| Of those reads: reads of `ExecutionContext.isSystem` | **109** | ✅ |
+| — behaviour-bearing (rows 1–61 above) | 106 | ✅ |
 | — carry the flag onward only (rows 62–64 above) | 3 | ✅ |
 | Packages containing at least one elevation read | **19** | ✅ |
-| Files containing at least one elevation read | 46 | ✅ |
-| — the distinct symbols those reads live in — what this page anchors | 91 | ✅ |
+| Files containing at least one elevation read | 47 | ✅ |
+| — the distinct symbols those reads live in — what this page anchors | 92 | ✅ |
 | — of those files, the ones holding more than one read in one symbol | 8 | ✅ |
 
 The six rows marked — are a **dated decomposition, not a live claim**: they were
@@ -428,7 +428,7 @@ same resolver, and the same registration shape, that holds `docs/adr/**`.
 Renaming a symbol is now a loud red instead of a silent misdirection.
 
 ⚠️ **The precision that costs, priced here rather than buried.** A symbol anchor
-cannot say WHICH read inside a function it means, and **8** of the **46**
+cannot say WHICH read inside a function it means, and **8** of the **47**
 anchored files hold more than one read inside a single symbol. So the population
 check runs per file at symbol granularity: every file the census finds a read in
 must be anchored, and the set of symbols this page cites into that file must

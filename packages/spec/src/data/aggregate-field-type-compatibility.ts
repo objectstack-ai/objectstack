@@ -10,9 +10,9 @@
  * in the dataset compiler (#16099) and the authoring-time lint rule — so the
  * two cannot drift into two accounts of one pair. The table has a third
  * reader, the engine's `aggregate` door, which refuses a query-time pair the
- * table refuses — the `count_distinct` row since #20808 (the JSON-stored rows
- * below), the other rows since #20914; objectql's `aggregate-field-type-door.ts`
- * names the rows it judges.
+ * table refuses, on every row: `count_distinct` since #20808 (the JSON-stored
+ * rows below), and `sum`, `avg`, `min` and `max` since #20914 (`count` refuses
+ * no type, so its row never refuses there).
  *
  * ## Why this exists
  *
@@ -95,8 +95,8 @@
  *   refused the statement (`could not identify an equality operator for type
  *   json`, a 500), on every member of both classes. `count` is untouched:
  *   counting rows compares no value. The one other JSON-stored shape, a
- *   multi-capable type flagged `multiple: true` (`select`, `lookup`, `user`,
- *   `file`, `image`), is invisible to a per-TYPE table, so the engine's
+ *   multi-capable type flagged `multiple: true` (`select`, `radio`, `lookup`,
+ *   `user`, `file`, `image`), is invisible to a per-TYPE table, so the engine's
  *   aggregate door refuses it by the declaration (`isMultiValueField`) beside
  *   this row's verdict. ⛔ No per-backend JSON distinctness is defined to
  *   make the pair answerable: no caller of it was measured.
@@ -138,8 +138,7 @@
  *
  * It refuses nothing itself. The refusals are the consumer legs — the dataset
  * compile leg and the authoring lint leg on every row, and the engine's
- * `aggregate` door at query time (#20808, #20914 — the door names the rows it
- * judges); a
+ * `aggregate` door at query time, on every row too (#20808, #20914); a
  * consumer that cannot resolve a field's type (a relationship PATH it has no
  * metadata for) must NOT call the predicate with a guess — "cannot answer, do
  * not block" is the consumer's tier, not this table's.
@@ -226,7 +225,7 @@ export const AGGREGATE_FIELD_TYPE_COMPATIBILITY: Readonly<Record<AggregationFunc
  * May `aggregate` be applied to a field of `fieldType`? The single predicate
  * both consumer legs call, so one pair cannot be accepted at authoring and
  * refused at compile time — and the one the engine's `aggregate` door asks for
- * a query-time pair (#20808, #20914).
+ * a query-time pair, on every row of the table (#20808, #20914).
  *
  * Fail-closed on vocabulary AND on shape: a value outside `AggregationFunction`
  * or outside `FieldType` answers `false`, and so does anything that is not a

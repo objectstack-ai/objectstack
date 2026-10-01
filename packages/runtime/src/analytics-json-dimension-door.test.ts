@@ -48,6 +48,13 @@ import { DatasetSchema } from '@objectstack/spec/ui';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 
+// [#21061] The analytics domain refuses an anonymous caller first (ADR-0056 D2),
+// so this harness signs its caller in: an `auth` slot in the shape
+// `resolveExecutionContext` reads answers a session for every request. Only
+// identity is stubbed; the route, the service and every expectation are
+// unchanged. Anonymity is pinned in `domains/analytics-anonymous-deny.test.ts`.
+const SIGNED_IN_AUTH = { api: { getSession: async () => ({ user: { id: 'usr_analytics_caller' } }) } };
+
 const OBJECT = 'analytics_json_dim_ledger';
 const CUBE = 'json_dim_ledger';
 const DATASET = 'json_dim_ledger_ds';
@@ -189,8 +196,8 @@ for (const cell of CELLS) {
                 const rec = (verb: string) => (path: string, handler: Handler) => { handlers[`${verb} ${path}`] = handler; };
                 const server = { get: rec('GET'), post: rec('POST'), put: rec('PUT'), delete: rec('DELETE'), patch: rec('PATCH') };
                 const kernel = {
-                    getService: (name: string) => (name === 'analytics' ? analytics : undefined),
-                    getServiceAsync: async (name: string) => (name === 'analytics' ? analytics : undefined),
+                    getService: (name: string) => (name === 'analytics' ? analytics : name === 'auth' ? SIGNED_IN_AUTH : undefined),
+                    getServiceAsync: async (name: string) => (name === 'analytics' ? analytics : name === 'auth' ? SIGNED_IN_AUTH : undefined),
                 };
                 const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
                 await plugin.start?.({

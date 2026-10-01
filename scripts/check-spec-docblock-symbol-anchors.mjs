@@ -596,7 +596,7 @@ export const CENSUS_RESIDUAL = Object.freeze([
     kind: 'line-anchor',
     count: 1,
     dated: '2026-09-09',
-    repair: 'cite the symbol in `packages/rest/src/import-mapping.ts`, or drop to a file-level anchor',
+    repair: 'cite the symbol in `packages/core/src/utils/import-mapping.ts` (`applyMappingToRows`), or drop to a file-level anchor',
   },
   {
     doc: 'packages/spec/src/data/filter-array-declaration.test.ts',

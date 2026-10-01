@@ -36,7 +36,6 @@ export default class EnvironmentsCreate extends Command {
   static override examples = [
     '$ os environments create --org 00000000-0000-0000-0000-000000000000 --name Staging',
     '$ os environments create --org $ORG --name Dev --plan free',
-    '$ os environments create --org $ORG --name "Clone" --clone-from <source-id> --no-activate',
     '$ os environments create --org $ORG --name CRM --artifact ./examples/app-crm/dist/objectstack.json',
   ];
 
@@ -57,7 +56,12 @@ export default class EnvironmentsCreate extends Command {
     artifact: Flags.string({
       description: 'Path to a locally-compiled objectstack.json artifact to bind into this environment',
     }),
-    'clone-from': Flags.string({ description: 'Clone schema from an existing environment id' }),
+    // No `--clone-from`. It sent `clone_from_environment_id`, which the control
+    // plane's create schema does not declare and strips unread, so a create that
+    // passed it answered success and made an EMPTY environment: an accepted-and-
+    // dropped flag reports success for work that never happened (the same reason
+    // `--template` is gone). Environments are created empty; oclif's own
+    // "Nonexistent flag" refusal is the answer a user who still passes it gets.
     activate: Flags.boolean({
       description: 'Activate the new environment for subsequent CLI calls',
       default: true,
@@ -102,7 +106,6 @@ export default class EnvironmentsCreate extends Command {
         display_name: flags.name,
         plan: flags.plan,
         driver: flags.driver,
-        clone_from_environment_id: flags['clone-from'],
         ...(metadata ? { metadata } : {}),
       });
 

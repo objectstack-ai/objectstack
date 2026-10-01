@@ -17028,8 +17028,8 @@ export class ObjectQL implements IObjectQLEngine {
       // the `count_distinct` row (memory counted equal documents apart, SQLite
       // compared serialized text, PostgreSQL answered 500); [#20914] took the
       // other rows — `max` over a `json` field answered a document in memory, a
-      // string on SQLite and a 500 on PostgreSQL. The `sum` row is held back by
-      // that card's census (see the door's header).
+      // string on SQLite and a 500 on PostgreSQL; `sum` over one answered `0`,
+      // `0` and a 500. Every row of the table is asked (see the door's header).
       assertAggregationFieldTypesAccepted(object, this._registry.getObject(object), query.aggregations);
       // [#10576] The per-aggregation `filter` (`AggregationNodeSchema.filter`,
       // the contract half of #10413) is a second filter position on this verb,
