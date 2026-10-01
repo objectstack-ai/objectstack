@@ -49,6 +49,11 @@ import type { KeySetGuidance } from '../shared/suggestions.zod';
 // [#13855] The section → field-group reference form, shared with
 // `FormSectionSchema` (view.zod.ts) so one mixing rule serves both escape hatches.
 import { SectionGroupKeySchema, sectionGroupReferenceRefinement } from '../shared/section-group-reference';
+// [#20928] `object-master-detail-form`'s `details[].columns` is the SAME inline
+// grid column a relationship field's `inlineColumns` and a form view's
+// `subforms[].columns` take, referenced rather than copied: all three carriers
+// feed one objectui grid.
+import { InlineGridColumnSchema } from '../data/field.zod';
 
 // ---------------------------------------------------------------------------
 // CLOSED AGAINST UNKNOWN KEYS as of #4001 batch A -- all 31 object sites.
@@ -4810,11 +4815,82 @@ const MASTER_DETAIL_FORM_TYPE_RETIRED: ReadonlyMap<string, string> = new Map([
 ]);
 
 /**
+ * [#20928] What `details: z.array(z.unknown())` cost: the block's detail entries
+ * were the third carrier of the inline grid column, beside a relationship
+ * field's `inlineColumns` and a form view's `subforms[].columns`, and the only
+ * one nothing judged. An entry key the renderer does not read, a grid column
+ * key the grid does not read, and `scale` on a `currency` column — refused on
+ * both other carriers under ruling B on #19629 (5791803339) and remedy 乙 on
+ * #19910 (5805782503) — all published green here.
+ */
+const MASTER_DETAIL_DETAIL_HISTORY =
+  'Until this shape was closed a detail entry parsed as `z.unknown()` — a key the renderer does '
+  + 'not read published clean and was ignored in silence.';
+
+/**
+ * One `object-master-detail-form` detail collection (#20928) — STRICT, and
+ * exactly the twelve keys objectui's `MasterDetailForm` reads off an entry
+ * (`packages/plugin-form/src/MasterDetailForm.tsx`, its
+ * `MasterDetailDetailConfig` and every `d.<key>` read in the file, read at the
+ * `.objectui-sha` pin `31971ff1e28f`). A key nobody reads is not declared.
+ *
+ * `columns` IS {@link InlineGridColumnSchema}, the same object a relationship
+ * field's `inlineColumns` and a form view's `subforms[].columns` take: the
+ * renderer hydrates an authored list with the same `hydrateColumns` and draws
+ * it in the same grid, so every rule the column carries holds here too, with
+ * its own prescription. A column that declares no `type` takes it from the
+ * child field when the grid hydrates it, which this schema cannot see;
+ * `defineStack`'s cross-reference check judges that resolved type
+ * (`collectHydratedInlineColumnErrors` in `stack.zod.ts`).
+ *
+ * The keys the entry shares with a form view's `subforms[]` entry take that
+ * entry's types and alias table, so one concept is spelled one way on both
+ * child-collection surfaces. The three it adds are the renderer's own:
+ * `formFields` (the per-row expand form), `inlineMode` (the two form factors
+ * a relationship field's `inlineEdit` names; absence takes the relationship's
+ * own resolution) and `sortField` (the line-position field the grid stamps on
+ * drag-reorder). `title` and `addLabel` are plain strings because the
+ * renderer draws them as a React child and a button label without resolving a
+ * locale map.
+ *
+ * A factory called inside {@link ObjectMasterDetailFormPropsSchema}'s own lazy
+ * body, the way a form view's `subforms[]` entry is built inline in its
+ * parent's: a standalone `lazySchema` here would be a function-typed proxy that
+ * nothing exports, which the schema-graph walks (`alias-integrity.test.ts`)
+ * never descend into, so its alias table would go unjudged.
+ */
+function masterDetailDetailEntry() {
+  return strictObject({
+    surface: 'this `object-master-detail-form` detail entry',
+    history: MASTER_DETAIL_DETAIL_HISTORY,
+    aliases: {
+      object: 'childObject', childObjectName: 'childObject', child: 'childObject',
+      foreignKey: 'relationshipField', relationField: 'relationshipField', parentField: 'relationshipField',
+      fields: 'columns', label: 'title', sumField: 'amountField', rollupField: 'totalField',
+    },
+  }, {
+    childObject: z.string().describe('Child object whose records are entered inline'),
+    relationshipField: z.string().optional().describe('FK on the child pointing back to the parent (auto-detected from the child\'s master_detail/lookup field when omitted)'),
+    columns: z.array(InlineGridColumnSchema).optional().describe("Editable grid columns (derived from the child object when omitted). Each entry is the strict, name-keyed inline grid column a relationship field's `inlineColumns` takes ({ name, label?, type?, … } — objectui GridColumn); identity-only entries ({ name }) hydrate everything else from the child object's fields. Unknown keys and the retired `field` spelling are refused at parse."),
+    formFields: z.array(z.string()).optional().describe("Child field names for the per-row expand form (derived from the child object's editable fields when omitted)"),
+    inlineMode: z.enum(['grid', 'form']).optional().describe("Inline-edit form factor: 'grid' = editable cells; 'form' = read-only list + per-row full form. Resolved from the relationship field's `inlineEdit` when omitted"),
+    amountField: z.string().optional().describe('Numeric child column summed for the running total'),
+    sortField: z.string().optional().describe('Child field holding the line sort position, stamped on drag-reorder (derived from a `position` / `sort_order` / … field when omitted)'),
+    totalField: z.string().optional().describe('Parent field to receive the rolled-up sum'),
+    title: z.string().optional().describe('Section title'),
+    minRows: z.number().optional().describe('Minimum number of rows'),
+    maxRows: z.number().optional().describe('Maximum number of rows'),
+    addLabel: z.string().optional().describe('Add-row button label'),
+  });
+}
+
+/**
  * `object-master-detail-form` (objectui `plugin-form/src/MasterDetailForm.tsx`
  * @ `eb7f586b`). Parent + child line items entered together (ADR-0001). The
  * child collections come from `details` — the FK and editable-grid columns
  * are auto-derived from the child object's metadata (`deriveMasterDetail.ts`),
- * so `details[].columns` is an override, not a requirement.
+ * so `details[].columns` is an override, not a requirement. Each entry is the
+ * strict {@link masterDetailDetailEntry} since #20928.
  *
  * `formType` speaks the MEASURED vocabulary — `simple` / `tabbed` — since
  * #11873 (the spec half of objectui#5939, which tightened the objectui
@@ -4847,8 +4923,8 @@ export const ObjectMasterDetailFormPropsSchema = lazySchema(() => strictObject({
   }).optional().describe("Parent form presentation — the two variants the renderer honours for the parent half"),
   sections: z.array(z.unknown()).optional().describe('Parent form sections'),
   fields: z.array(z.unknown()).optional().describe('Parent fields shown'),
-  details: z.array(z.unknown()).optional()
-    .describe('Detail collections ({ title, childObject, addLabel?, columns?, relationshipField? } — FK and columns auto-derive from child metadata)'),
+  details: z.array(masterDetailDetailEntry()).optional()
+    .describe('Detail collections — each a strict entry ({ childObject, title?, addLabel?, columns?, relationshipField?, … }) whose `columns` are the inline grid columns a relationship field\'s `inlineColumns` takes; the FK and columns auto-derive from child metadata when omitted'),
   title: I18nLabelSchema.optional().describe('Form title'),
   submitText: I18nLabelSchema.optional().describe('Submit button label'),
   cancelText: I18nLabelSchema.optional().describe('Cancel button label'),
@@ -4859,6 +4935,16 @@ export const ObjectMasterDetailFormPropsSchema = lazySchema(() => strictObject({
 }));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ObjectMasterDetailFormProps = z.input<typeof ObjectMasterDetailFormPropsSchema>;
+/**
+ * Post-parse shape of {@link ObjectMasterDetailFormProps} — defaults applied,
+ * transforms run (ADR-0122). #20928 — `details[].columns` now carries
+ * `InlineGridColumnSchema`, whose own input ≠ infer (its `readonlyWhen` /
+ * `requiredWhen` bare-string predicates normalize to Expression envelopes,
+ * which is why `InlineGridColumnParsed` exists). So the block leaves the
+ * type-alias convention pin's isomorphic family (its Iso line deleted with
+ * this alias), taking the `ObjectGridPropsParsed` route its comment prescribes.
+ */
+export type ObjectMasterDetailFormPropsParsed = z.infer<typeof ObjectMasterDetailFormPropsSchema>;
 
 /**
  * The flat per-field spellings `ObjectMap` reads as the ObjectView / ListView

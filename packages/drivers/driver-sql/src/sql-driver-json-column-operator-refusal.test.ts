@@ -120,10 +120,12 @@ function expectJsonColumnRefusal(err: WireBearingError, op: string, field: strin
   expect(err.message).toContain(op);
   expect(err.message).toContain(field);
   // The three things the message owes a caller: that the filter did NOT run,
-  // why (the column is JSON text), and what to write instead.
+  // why, and what to write instead. [#21067] The why is the field's
+  // declaration, not this driver's storage form: the same words are printed by
+  // faces that store no JSON text.
   expect(err.message).toContain('WAS NOT APPLIED');
-  expect(err.message).toContain('JSON TEXT column');
-  expect(err.message).toContain('$contains');
+  expect(err.message).toContain(`it aims "${op}", a scalar comparison or text operator, at a multi-value or JSON field`);
+  expect(err.message).toContain(`{ "${field}": { "$contains": "a" } }`);
 }
 
 /**

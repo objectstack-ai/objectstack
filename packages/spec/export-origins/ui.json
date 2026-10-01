@@ -293,6 +293,7 @@
     "ObjectMapPropsParsed": "src/ui/component.zod.ts#ObjectMapPropsParsed (type)",
     "ObjectMapPropsSchema": "src/ui/component.zod.ts#ObjectMapPropsSchema (const)",
     "ObjectMasterDetailFormProps": "src/ui/component.zod.ts#ObjectMasterDetailFormProps (type)",
+    "ObjectMasterDetailFormPropsParsed": "src/ui/component.zod.ts#ObjectMasterDetailFormPropsParsed (type)",
     "ObjectMasterDetailFormPropsSchema": "src/ui/component.zod.ts#ObjectMasterDetailFormPropsSchema (const)",
     "ObjectMetricProps": "src/ui/component.zod.ts#ObjectMetricProps (type)",
     "ObjectMetricPropsParsed": "src/ui/component.zod.ts#ObjectMetricPropsParsed (type)",

@@ -2,7 +2,7 @@
 '@objectstack/spec': minor
 ---
 
-The import row report and the validate-only answer can now say which fields a write drops. `ImportRowResultSchema` and each `ValidateDataResponseSchema.results[]` row gain an optional `droppedFields`: an array of `DroppedFieldsEventSchema`, the engine's own strip event. So the reason vocabulary is the engine's (`readonly`, `readonly_when`, `primary_key`, `computed`), and there is no second enum. The row still succeeds: `ok`, `action` and `valid` are unchanged. The key is declared ahead of its producer. A server that does not produce the report omits the key, so an absent key alone does not prove nothing was dropped.
+The import row report and the validate-only answer can now say which fields a write drops. `ImportRowResultSchema` and each `ValidateDataResponseSchema.results[]` row gain an optional `droppedFields`: an array of `DroppedFieldsEventSchema`, the engine's own strip event. So the reason vocabulary is the engine's (`readonly`, `readonly_when`, `primary_key`, `computed`), and there is no second enum. The row still succeeds: `ok`, `action` and `valid` are unchanged. A server that does not produce the report omits the key, so an absent key alone does not prove nothing was dropped.
 
 `ImportRowResultSchema` also declares `warnings`, which the REST import dry run already serves: the findings the validate verdict admits, in the `ValidateDataIssue` shape, on an ok dry-run row. Until now `ImportRowResultSchema.parse` stripped the key, and readers typed by the spec could not see it.
 

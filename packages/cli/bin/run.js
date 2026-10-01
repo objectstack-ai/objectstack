@@ -5,7 +5,7 @@
 // `files` never names the directory — see scripts/check-published-files.mjs).
 //
 // It used to be `await execute({ type: 'esm', dir: import.meta.url })`. What is
-// inlined below IS `execute()` from @oclif/core 4.13.3, verbatim apart from the
+// inlined below IS `execute()` from @oclif/core 5.1.2, verbatim apart from the
 // added lines, because `execute` swallows the error into `handle()` and
 // there is no hook between the two. `handle()` writes the parse error and then
 // a full usage dump; #10111 needs one unmistakable line to reach stderr FIRST,
@@ -31,7 +31,7 @@ import { flush, handle, run, settings } from '@oclif/core';
  * `development`/`test`, with no baseline and only two declared exceptions.
  *
  * What was missing is that **this file never asserted it about itself.**
- * `@oclif/core@4.13.3`'s `lib/config/ts-path.js` skips its TypeScript path
+ * `@oclif/core@5.1.2`'s `lib/config/ts-path.js` skips its TypeScript path
  * lookup only when `isProd()`, which `lib/util/util.js` defines as
  * `['development', 'test'].includes(process.env.NODE_ENV ?? '')` negated. So an
  * ambient `NODE_ENV` — exported by a developer, or inherited by any child this
