@@ -4183,6 +4183,104 @@
           "ref": "claude/issue-18682-predicate-relationship-traversal"
         }
       ]
+    },
+    {
+      "id": "records-forms.picklist-shared-across-objects",
+      "title": "One shared picklist on two objects: both are served the same resolved options, a package extension adds to both, a value outside the set is refused, and a locale switch relabels",
+      "since": null,
+      "status": "planned",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a picklist declared once (`*.picklist.ts`) and referenced by `Field.select({ picklist })` on two showcase objects, a `picklistExtensions` entry that adds one value to it, and `picklists.NAME` labels for a second locale. Stock showcase has none of these, and nothing serves a picklist until the runtime layer (#19519) lands, so the fixture arrives with it"
+        ]
+      },
+      "acceptance": [
+        {
+          "clause": "both objects' fields are served with the SAME resolved `options` (the picklist's own values plus the extension's) beside the `picklist` name, and each object's form offers exactly that set",
+          "oracle": "api",
+          "verify": "read both objects' field metadata: each field parses as packages/spec/src/data/picklist.zod.ts#PicklistServedFieldSchema and the two option lists are equal; then enumerate the options each object's form offers",
+          "evidence": "both served field bodies + both form option enumerations"
+        },
+        {
+          "clause": "the write door judges both objects against the resolved set: the extension's value persists on object A, and a value outside the set is refused on object B, the refusal naming the picklist",
+          "oracle": "api",
+          "verify": "POST the extension's value to object A and re-read the row; POST an out-of-set value to object B and capture the refusal envelope",
+          "evidence": "the re-read + the refusal envelope"
+        },
+        {
+          "clause": "switching the locale relabels the options on both objects from the picklist's `picklists.NAME.options.VALUE` translations, and the stored values do not change",
+          "oracle": "api",
+          "verify": "read both objects' field metadata under each locale; a picklist-bound field takes its option labels through packages/spec/src/system/i18n-resolver.ts#translateObject, and the values are identical across locales",
+          "evidence": "both served bodies under each locale"
+        }
+      ],
+      "negative": [
+        "a picklist-bound field served WITHOUT `options` is a FAIL: renderers, the record validator and filter pickers read `options`, so they would have nothing to offer or judge",
+        "a value outside the set accepted with 200 on either object is a FAIL: hiding it in the form is a client courtesy, and the write door is the boundary",
+        "a field naming a picklist that does not exist, served as an empty option list, is a FAIL: it must be refused loudly at load, naming the field and the package",
+        "an extension that duplicates, replaces or removes a base value is a FAIL: extensions are additive only, and a duplicate is refused loudly rather than last-wins"
+      ],
+      "source": [
+        "#18164 design of record (comment 5715762696), items 1 to 6: the kind, the field reference, server resolution, the additive package extension, the translation face, and the verification sentence that this item and records-forms.picklist-org-append split between them",
+        "#19518, the spec layer (landed as addbbf02ab): packages/spec/src/data/picklist.zod.ts#PicklistSchema",
+        "#19518, the extension shape: packages/spec/src/data/picklist.zod.ts#PicklistExtensionSchema",
+        "#19519, the runtime layer this item waits on (load before `object`, additive merge, resolve at serve time, write validation against the resolved set); its acceptance sentence is this item's three clauses"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-09-30",
+          "change": "initial — planned. The spec layer landed (#19518), but no runtime reads a picklist yet (packages/spec/liveness/picklist.json grades every key `planned`), so there is nothing to drive. The acceptance clauses are drafted from the design of record and #19519's acceptance; steps arrive with #19519, in the edit that promotes this item after a run in which it passes. The locale relabel sits on this item rather than on the organization item because it is phase-1 behaviour, and a promotion needs the whole item to pass",
+          "ref": "#19518"
+        }
+      ]
+    },
+    {
+      "id": "records-forms.picklist-org-append",
+      "title": "An organization appends a value to a shared picklist without changing the app source: that organization can write it, and another organization is refused",
+      "since": null,
+      "status": "planned",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "an admin of organization A (appends the value, then writes it)",
+        "a member of organization B (the same app and picklist, without A's value)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two organizations on one environment, each with its own signed-in persona, sharing one app whose object has a picklist-bound field"
+        ],
+        "knownGaps": [
+          "NOT DECLARED: the per-organization overlay is phase 2 of the picklist design. The picklist row of packages/spec/src/kernel/metadata-plugin.zod.ts#DEFAULT_METADATA_TYPE_REGISTRY carries `allowOrgOverride: false`, the one opt-in ADR-0005 allows for an organization overlay, and ruling 5904864936 on #18164 defers the overlay to its own sub-issue, filed when a customer requirement measures it. Nothing here can run until that sub-issue lands the overlay. Package-level extension (phase 1) is records-forms.picklist-shared-across-objects"
+        ]
+      },
+      "negative": [
+        "organization B writing the value that only organization A appended, accepted with 200, is a FAIL: the appended value belongs to A's overlay alone",
+        "an organization overlay that removes or renames a value the owning package declared is a FAIL: the overlay adds values only, and removal or rename stays with the owning package",
+        "an append that needed an edit to the app source or to the owning package does not demonstrate this item: the capability is appending without touching either"
+      ],
+      "source": [
+        "#18164 design of record (comment 5715762696), item 4 (a per-organization overlay of the picklist shape, additive only, whose allowance was left to the maintainer as an open point) and item 6 (the verification sentence: org A adds a value, A writes it, B is refused)",
+        "#18164 ruling 5904864936 (the overlay stays deferred to its own sub-issue on a measured customer requirement) and #19518 Scope 5 (not declared in the spec layer)",
+        "docs/adr/0005-metadata-customization-overlay.md (`allowOrgOverride` on the type registry is the only org-overlay opt-in)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-09-30",
+          "change": "initial — planned. The docs/NORTH-STAR.md feature-map line names per-organization append as half of the shared-picklist feature, and the design of record's verification sentence names this behaviour, so the ledger holds it as a planned requirement rather than leaving it off. It carries no acceptance clauses: neither the overlay's schema nor its write door is designed yet, and a clause would be written against a design nobody has settled",
+          "ref": "#19518"
+        }
+      ]
     }
   ]
 }

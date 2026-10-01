@@ -16,10 +16,10 @@ The shape in a protocol-16 project:
 }
 ```
 
-The chain deletes the key (`field-mapping-transform-removed`) and the schema
-tombstones it, so the parse error *is* the prescription: the union had five
-members and **no runtime ever executed any of them**. The customer wrote it
-because they wanted a transformation, and that need is real regardless.
+The chain deletes the key (`field-mapping-transform-removed`), then all of
+`fieldMappings` (`connector-sync-keys-removed`), whose tombstone *is* the
+prescription: **nothing ever ran any connector field mapping**. The customer
+wrote it because they wanted a transformation, and that need is real regardless.
 
 The prescription names one live target; the rest is the business decision:
 
@@ -29,10 +29,10 @@ The prescription names one live target; the rest is the business decision:
 | multi-source, multi-stage transformation | **nothing** — the L2 ETL layer retired at 17, unexecuted. Do it where it runs: warehouse ELT, a `flow`, a job. |
 | nothing — the value was already correct | delete the key and record that the transformation never ran. |
 
-That third row is frequently the truth: the member never executed, so the
-connector has been landing raw values for as long as it has been running.
-Whether the downstream data is wrong is a question only the owner can answer —
-exactly the kind of finding the report exists to surface.
+That third row is frequently the truth: no connector sync ever ran, so no value
+ever passed through this mapping. Where the data really comes from, and whether
+it is right, only the owner can answer — exactly the kind of finding the report
+exists to surface.
 
 ### 3.4 The report — the human half
 
@@ -44,7 +44,7 @@ maintainer can read in five minutes and a year from now. Write
 # Protocol 16 → 17 upgrade — <project>
 
 **Status:** complete | complete with N open decisions
-**Spec:** <installed @objectstack/spec version>  ·  **Chain:** 16 → 17
+**Spec:** <installed @objectstack/spec version>  ·  **Chain:** 16 → 18
 **Verified:** `os validate` green · `tsc --noEmit` green · replay-from-17 applies 0 mechanical changes
 
 ## 1 · Mechanical (applied by the chain)
@@ -64,7 +64,7 @@ _N sites, M conversions. Ported into sources from `os migrate meta --out`._
 - **Options:** import-mapping `transform` · ETL step · delete
 - **Decision:** delete — owner confirmed the values arrive pre-scaled.
   _Decided by: <who>, <date>._
-- **Verified:** `os validate` green; connector sync run against staging, 200 rows, values unchanged.
+- **Verified:** `os validate` green; nothing ever read the key, so no data changes.
 
 ## 3 · Open decisions
 

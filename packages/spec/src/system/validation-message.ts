@@ -41,6 +41,16 @@
  * (`invalid_option_value`, `invalid_datetime`, `invalid_type_array`, …) are
  * rendering detail and never appear on the wire.
  *
+ * `invalid_date_range` / `invalid_datetime_range` (#20846) are two more
+ * `invalid_date` sentences, for a value the kind's rule reads but whose year
+ * falls outside the kind's supported years. "Must be a valid date (ISO-8601)"
+ * is false for such a value — `0500-07-15T10:00:00Z` is valid ISO 8601 — and
+ * sends its author to rewrite a spelling when the year is what is refused. The
+ * years come from `{{firstYear}}` / `{{lastYear}}`, which the refusing door
+ * fills from `@objectstack/core`'s `SUPPORTED_TEMPORAL_YEARS`, the range it
+ * judges by; ⛔ no template spells the numbers, so the sentence cannot drift
+ * from the range it names.
+ *
  * The `import_*` keys are the CSV/XLSX importer's cell-coercion failures
  * (`rest/import-coerce.ts`) — "this cell is not a number" rather than "this
  * value violates a constraint". They live here because they land in the same
@@ -55,8 +65,11 @@
  * `{{name}}` placeholders, matching `II18nService.t()`'s convention, filled from
  * the error's `constraint` values (`min`, `maxLength`, `actual`, `allowed`, …)
  * plus `{{value}}` (the offending value), `{{label}}` (the field's display name
- * in the caller's locale) and `{{field}}` (its API name). An unknown placeholder
- * is left verbatim so a broken override is visible rather than silently blank.
+ * in the caller's locale) and `{{field}}` (its API name). A few are filled from
+ * the refusing door's message-only parameters, which name a fact of the
+ * platform rather than a constraint of the field and are never shipped on the
+ * error (`{{firstYear}}` / `{{lastYear}}` above). An unknown placeholder is
+ * left verbatim so a broken override is visible rather than silently blank.
  */
 
 import { resolveBundleLocale } from './i18n-resolver';
@@ -102,6 +115,11 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     invalid_boolean: '{{label}} must be true or false',
     invalid_date: '{{label}} must be a valid date (ISO-8601)',
     invalid_datetime: '{{label}} must be a valid datetime (ISO-8601)',
+    // `invalid_date`'s range sentences (#20846): a value the kind's rule reads,
+    // in a year outside the kind's supported years. The years are parameters
+    // the refusing door fills from the range it judges by, never literals here.
+    invalid_date_range: '{{label}} must be a date in the years {{firstYear}} to {{lastYear}}',
+    invalid_datetime_range: '{{label}} must be a datetime whose UTC year falls in the years {{firstYear}} to {{lastYear}}',
     invalid_time: '{{label}} must be a valid time (HH:MM or HH:MM:SS)',
     // `invalid_time`'s second sentence: a time of day written with a `Z` or an
     // offset. A `time` field is a zone-less wall clock, so the sentence says
@@ -152,6 +170,8 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     invalid_boolean: '{{label}}必须是 true 或 false',
     invalid_date: '{{label}}必须是有效的日期(ISO-8601)',
     invalid_datetime: '{{label}}必须是有效的日期时间(ISO-8601)',
+    invalid_date_range: '{{label}}必须是 {{firstYear}} 年至 {{lastYear}} 年之间的日期',
+    invalid_datetime_range: '{{label}}必须是 UTC 年份在 {{firstYear}} 年至 {{lastYear}} 年之间的日期时间',
     invalid_time: '{{label}}必须是有效的时间(HH:MM 或 HH:MM:SS)',
     invalid_time_zoned: '{{label}}是不带时区的时刻:请去掉 Z 或时区偏移(HH:MM 或 HH:MM:SS),表示时间点请改用日期时间字段',
     invalid_option: '{{label}}必须是以下值之一:{{allowed}}',
@@ -192,6 +212,8 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     invalid_boolean: '{{label}}は true または false で入力してください',
     invalid_date: '{{label}}は有効な日付(ISO-8601)を入力してください',
     invalid_datetime: '{{label}}は有効な日時(ISO-8601)を入力してください',
+    invalid_date_range: '{{label}}は {{firstYear}} 年から {{lastYear}} 年までの日付を入力してください',
+    invalid_datetime_range: '{{label}}は UTC の年が {{firstYear}} 年から {{lastYear}} 年までの日時を入力してください',
     invalid_time: '{{label}}は有効な時刻(HH:MM または HH:MM:SS)を入力してください',
     invalid_time_zoned: '{{label}}はタイムゾーンを持たない時刻です。Z やオフセットを外す(HH:MM または HH:MM:SS)か、時点を表すには日時フィールドを使ってください',
     invalid_option: '{{label}}は次のいずれかを指定してください:{{allowed}}',
@@ -232,6 +254,8 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     invalid_boolean: '{{label}} debe ser true o false',
     invalid_date: '{{label}} debe ser una fecha válida (ISO-8601)',
     invalid_datetime: '{{label}} debe ser una fecha y hora válidas (ISO-8601)',
+    invalid_date_range: '{{label}} debe ser una fecha entre los años {{firstYear}} y {{lastYear}}',
+    invalid_datetime_range: '{{label}} debe ser una fecha y hora cuyo año UTC esté entre los años {{firstYear}} y {{lastYear}}',
     invalid_time: '{{label}} debe ser una hora válida (HH:MM o HH:MM:SS)',
     invalid_time_zoned: '{{label}} es una hora del día sin zona horaria: quite la Z o el desfase (HH:MM o HH:MM:SS), o use un campo de fecha y hora para un instante',
     invalid_option: '{{label}} debe ser uno de: {{allowed}}',

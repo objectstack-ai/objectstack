@@ -332,9 +332,17 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     if (typeof ctx.getReadScope !== 'function') return null;
     const cube = query.cube ? ctx.getCube(query.cube) : undefined;
     if (!cube) return null;
-    const objects = [this.extractObjectName(cube)];
-    for (const alias of Object.keys(cube.joins ?? {})) {
-      objects.push(cube.joins?.[alias]?.name ?? alias);
+    // [#20933] The scopes the door resolved, over the set it resolved them for:
+    // an object read through a relationship path carries its scope too, and a
+    // reference in it declines the query exactly as one in a declared join's
+    // does. The cube's own objects stand in only for a context built without
+    // that set.
+    const scoped = (ctx as DatasetScopedStrategyContext).readScopedObjects;
+    const objects = scoped ? [...scoped] : [this.extractObjectName(cube)];
+    if (!scoped) {
+      for (const alias of Object.keys(cube.joins ?? {})) {
+        objects.push(cube.joins?.[alias]?.name ?? alias);
+      }
     }
     for (const objectName of objects) {
       const scope = ctx.getReadScope(objectName);

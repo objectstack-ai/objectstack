@@ -164,9 +164,11 @@ function makeStubEngine() {
         registry: {
             registerItem: () => {},
             registerObject: () => {},
-            // No declared package namespace → publishPackageDrafts skips the
+            // The base the drafts are bound to is INSTALLED — a flow may be
+            // saved only into a package the registry holds (#20863) — and its
+            // manifest declares no namespace → publishPackageDrafts skips the
             // ADR-0028 prefix check (legacy-grandfathered path).
-            getPackage: () => undefined,
+            getPackage: (id: string) => (id === PKG ? { manifest: { id: PKG } } : undefined),
         },
     };
     return { engine, rows, historyRows };

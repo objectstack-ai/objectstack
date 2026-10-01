@@ -498,3 +498,52 @@ describe('coerceRow — cell-coercion messages are localized (#3957)', () => {
     expect(errors[0].message).toBe('qty:“abc”不是有效的数字');
   });
 });
+
+/**
+ * [#20846] A `date` / `datetime` cell in a year outside the kind's supported
+ * years that this reader does not take (`+010000-01-01`, more than four year
+ * digits) was refused "is not a valid date" — false for an ISO 8601 expanded
+ * year, and a prompt to re-spell a value no spelling of year 10000 makes
+ * admissible. It takes the write door's range sentence for its kind, with the
+ * write door's code, `invalid_date`. A malformed cell keeps the import's own
+ * sentence (the CONTROL), and so does a number.
+ */
+describe('[#20846] coerceRow — a readable date / datetime cell outside its years names the years', () => {
+  const meta = new Map<string, ExportFieldMeta>([
+    ['due', { name: 'due', type: 'date', label: 'Due' }],
+    ['at', { name: 'at', type: 'datetime', label: 'At' }],
+  ]);
+  const only = async (row: Record<string, unknown>, locale?: string) => {
+    const { errors } = await coerceRow(row, meta, { locale });
+    expect(errors).toHaveLength(1);
+    return errors[0];
+  };
+
+  it('a date or datetime in year 10000, the extended ISO spelling', async () => {
+    expect(await only({ due: '+010000-01-01' })).toEqual({
+      field: 'due', code: 'invalid_date', message: 'Due must be a date in the years 0001 to 9999',
+    });
+    expect(await only({ at: ' +010000-01-01T00:00:00.000Z ' })).toEqual({
+      field: 'at', code: 'invalid_date', message: 'At must be a datetime whose UTC year falls in the years 1000 to 9999',
+    });
+    expect((await only({ at: '-000001-01-01T00:00:00.000Z' })).message)
+      .toBe('At must be a datetime whose UTC year falls in the years 1000 to 9999');
+  });
+
+  it('in the caller\'s locale', async () => {
+    expect((await only({ due: '+010000-01-01' }, 'zh-CN')).message).toBe('Due必须是 0001 年至 9999 年之间的日期');
+  });
+
+  it('CONTROL — a malformed cell, or a number, keeps the import\'s own sentence', async () => {
+    expect(await only({ due: 'not-a-date' })).toEqual({ field: 'due', code: 'invalid_date', message: 'Due: "not-a-date" is not a valid date' });
+    expect(await only({ at: 'not-a-date' })).toEqual({ field: 'at', code: 'invalid_date', message: 'At: "not-a-date" is not a valid datetime' });
+    const y10000 = Date.parse('+010000-01-01T00:00:00.000Z');
+    expect((await only({ due: y10000 })).message).toBe(`Due: "${y10000}" is not a valid date`);
+  });
+
+  it('CONTROL — a cell this reader takes, in a year outside the kind\'s, passes here and meets the write door', async () => {
+    const { data, errors } = await coerceRow({ due: '0000-06-15', at: '0500-07-15T10:00:00Z' }, meta, {});
+    expect(errors).toEqual([]);
+    expect(data).toEqual({ due: '0000-06-15', at: '0500-07-15T10:00:00.000Z' });
+  });
+});

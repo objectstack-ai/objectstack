@@ -71,6 +71,19 @@ export interface DatasetScope {
 export interface DatasetScopedStrategyContext extends StrategyContext {
   getDatasetScope?(cubeName: string): DatasetScope | undefined;
   /**
+   * [#20933] Every object whose read scope `getReadScope` answers for this
+   * query — `AnalyticsService.queryObjects`, the one set the object-level
+   * admission read: the base object, every join the cube declares, and every
+   * object a member reaches through a relationship path.
+   *
+   * For a strategy that must look at the scopes BEFORE it compiles, so it reads
+   * them over the set the door scoped instead of re-deriving which objects the
+   * query reads. `undefined` when the context carries no read scope at all.
+   * Declared HERE rather than on the spec's {@link StrategyContext} for the
+   * reason `getDatasetScope` is: nothing about it is an authorable surface.
+   */
+  readScopedObjects?: readonly string[];
+  /**
    * [#14079] The DECLARED type of `field` on `objectName` — `'number'`,
    * `'boolean'`, `'text'`, … — or `undefined` when the host cannot answer (no
    * data engine wired, an object or field it does not know).

@@ -216,10 +216,13 @@ function makeStubEngine(options?: { liveObjects?: unknown[]; livePermissions?: u
                 if (type === 'permission') return options?.livePermissions ?? [liveReadonlySet];
                 return [];
             },
-            // No declared package namespace → the ADR-0028 prefix pre-flight is
-            // skipped (legacy-grandfathered path), and `resolveWritePackageScope`
-            // narrows nothing.
-            getPackage: () => undefined,
+            // The base the drafts are bound to is INSTALLED — a flow may be
+            // saved only into a package the registry holds (#20863) — and its
+            // manifest declares no namespace → the ADR-0028 prefix pre-flight is
+            // skipped (legacy-grandfathered path); it declares no dependencies
+            // and no live object carries a package stamp, so
+            // `resolveWritePackageScope`'s closure removes nothing.
+            getPackage: (id: string) => (id === PKG ? { manifest: { id: PKG } } : undefined),
         },
     };
     return { engine, rows, historyRows };
