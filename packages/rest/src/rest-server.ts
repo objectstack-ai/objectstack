@@ -5301,6 +5301,24 @@ export class RestServer {
                         const anonymousPublicRead = !context?.userId
                             && RestServer.isPublicAudienceRead(entry, req);
                         if (!anonymousPublicRead && this.enforceAuth(req, res, context)) return;
+                        // [#21087] The type-level read admission — a read of a
+                        // datasource-family type is admitted on the capability
+                        // that type's own door requires. Asked HERE, for the same
+                        // reason the anonymous deny is: every `/meta` route,
+                        // present and future, inherits it, and it runs before any
+                        // handler reads the store, so a refused caller is told
+                        // the same thing whether or not the name exists. The
+                        // decision is `metaTypeReadRefusal` in
+                        // `./meta-item-read-gate.ts`, the one the runtime
+                        // dispatcher's `/meta` entry asks too; this seam only
+                        // writes it, in the ADR-0112 envelope the plain read's
+                        // other `403 PERMISSION_DENIED` (an app the caller may
+                        // not open) is written in.
+                        const typeRefusal = metaReadGate.metaTypeReadRefusal(req?.method, req?.params?.type, context);
+                        if (typeRefusal) {
+                            sendEnvelopeError(res, typeRefusal.status, typeRefusal.code, typeRefusal.message);
+                            return;
+                        }
                         return (inner as (rq: any, rs: any) => unknown)(req, res);
                     },
                 } as any);
@@ -8494,7 +8512,26 @@ export class RestServer {
                                         : {}),
                                 });
                                 if (layered?.overlay !== undefined && layered?.overlay !== null) {
-                                    publishedOverlay = layered.overlay;
+                                    // [#21002, ADR-0126 §2] When the layered
+                                    // read put the LOADER's body over this stored
+                                    // row — a shipped flow name, decided by the
+                                    // protocol's `isShippedFlowName` — this door
+                                    // serves that effective layer, not the row:
+                                    // `flow` is Regime C, "never an overlay read
+                                    // path". The predicate is ASKED of its owner
+                                    // with the answer's own `type` / `name`,
+                                    // never re-derived here, so this door and
+                                    // `getMetaItemLayered` read one rule. Every
+                                    // other stored row is served exactly as
+                                    // before — an `object` too, whose effective
+                                    // layer differs from its row by folding, not
+                                    // by this decision — and so is every row of a
+                                    // protocol that brings no such predicate.
+                                    const shippedFlow: { isShippedFlowName?(type: string, name: unknown): boolean } = publishedProtocol;
+                                    publishedOverlay = typeof shippedFlow.isShippedFlowName === 'function'
+                                        && shippedFlow.isShippedFlowName(layered.type, layered.name)
+                                        ? layered.effective
+                                        : layered.overlay;
                                 }
                             } catch (overlayError: any) {
                                 // [#5532] The overlay read is NOT blanket-swallowed,
