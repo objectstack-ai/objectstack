@@ -18,6 +18,7 @@ import { installReadAuditWriter, type ReadAuditWriterHandle } from './read-audit
 import { createAuthEventAuditSink } from './auth-event-audit.js';
 import { installCommentAccessHooks, installCommentReadVisibility } from './comment-access-hooks.js';
 import { installActivityReadVisibility } from './activity-read-visibility.js';
+import { installActivityFieldRedaction, type ActivityFieldVisibilitySource } from './activity-field-redaction.js';
 
 /**
  * [#8992] Read/view audit configuration — the per-object opt-in, closed.
@@ -288,10 +289,32 @@ export class AuditPlugin implements Plugin {
       if (typeof (engine as any).registerMiddleware === 'function') {
         installActivityReadVisibility(engine as any, ctx.logger);
         ctx.logger.info('AuditPlugin: sys_activity parent-record read visibility installed');
+        // [#21081] …and of each row it keeps, the value-bearing columns serve a
+        // parent field only to a reader the security service serves that field
+        // unmasked. The service is resolved on EVERY read, for the reason the
+        // approval snapshot gives: the security plugin may register after this
+        // one, and a resolver captured now would pin "no service" — i.e. never
+        // redact — for the life of the process. `getService` throws on an empty
+        // slot, so a deployment without the security plugin (no field-level
+        // security anywhere) serves rows exactly as before.
+        installActivityFieldRedaction(
+          engine as any,
+          () => {
+            try {
+              const sec = ctx.getService<ActivityFieldVisibilitySource>('security');
+              return sec && typeof sec.getReadableFields === 'function' ? sec : undefined;
+            } catch {
+              return undefined;
+            }
+          },
+          ctx.logger,
+        );
+        ctx.logger.info('AuditPlugin: sys_activity field redaction installed');
       } else {
         ctx.logger.warn(
-          'AuditPlugin: engine has no middleware seam — sys_activity READ visibility NOT installed ' +
-            '(activity about records the caller cannot read would be listable)',
+          'AuditPlugin: engine has no middleware seam — sys_activity READ visibility and field redaction NOT ' +
+            'installed (activity about records the caller cannot read would be listable, and an activity row ' +
+            'would serve every parent field value it carries)',
         );
       }
     });

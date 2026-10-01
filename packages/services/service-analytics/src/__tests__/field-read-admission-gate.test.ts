@@ -15,11 +15,18 @@
  * The route-level half, over the real `SecurityPlugin`, `ObjectQL` and
  * `SqlDriver`, compares each refusal with the engine's own answer:
  * `packages/rest/src/analytics-field-permission-gate.test.ts`.
+ *
+ * [#20965] A member that resolves to neither a field nor `'*'` is refused, in
+ * the same envelope, and never stood down — see the block of that name below.
+ * Its fixture, `AUTHORED`'s two expression members, is written around the
+ * parse: `CubeSchema` refuses both, and the registry never parses, which is
+ * how a cube configured before that refusal (or never put through it) still
+ * reaches the gate.
  */
 
 import { describe, it, expect, vi } from 'vitest';
 import { DatasetSchema } from '@objectstack/spec/ui';
-import type { Cube } from '@objectstack/spec/data';
+import { CubeSchema, type Cube } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { AnalyticsService } from '../analytics-service.js';
 import { AnalyticsServicePlugin } from '../plugin.js';
@@ -61,6 +68,16 @@ const AUTHORED: Cube = {
   },
   joins: { owner: { name: OWNER }, hidden_link: { name: OWNER } },
 } as Cube;
+
+/** [#20965] A declared member with no `sql` string at all — refused at parse, unparsed here. */
+const NO_SQL: Cube = {
+  name: 'fr_no_sql',
+  title: 'No sql',
+  sql: LEDGER,
+  public: true,
+  measures: { count: { type: 'count', sql: '*', label: 'Count' } },
+  dimensions: { bare: { type: 'string', label: 'Bare' } },
+} as unknown as Cube;
 
 /** A registered dataset whose OWN filter, and one of whose measures' filter, name a hidden field. */
 const SCOPED_DATASET = DatasetSchema.parse({
@@ -105,7 +122,7 @@ function makeService(opts: {
 }) {
   const executed: string[] = [];
   const service = new AnalyticsService({
-    cubes: [AUTHORED],
+    cubes: [AUTHORED, NO_SQL],
     datasets: [SCOPED_DATASET, MEASURE_FILTER_DATASET],
     queryCapabilities: opts.capabilities,
     getReadableFields: opts.getReadableFields,
@@ -201,11 +218,7 @@ describe('[#20917] analytics — the field-level read gate at the door', () => {
       expect(grouped).toBe(aggregateSentence(LEDGER, ['hidden_text']));
     });
 
-    it('stands down where no field can be named: an authored expression member, and an object the reader has no answer for', async () => {
-      const { service, executed } = makeService({ capabilities: nativeSqlOnly, getReadableFields: readable });
-      await service.query({ cube: 'fr_authored', measures: ['expression_total'], dimensions: ['expression_flag'] } as never, CALLER);
-      expect(executed).toHaveLength(1);
-
+    it('stands down for an object the reader has no answer for', async () => {
       const unanswered = makeService({ capabilities, getReadableFields: (object) => (object === OWNER ? undefined : READABLE[object]) });
       await unanswered.service.query({ cube: 'fr_authored', measures: ['count'], dimensions: ['alias_owner_code'] } as never, CALLER);
       expect(unanswered.executed.length).toBeGreaterThan(0);
@@ -276,6 +289,94 @@ describe('[#20917] analytics — the field-level read gate at the door', () => {
   });
 });
 
+// ── [#20965] A member that names no field ─────────────────────────────────────
+
+/** The cube author's expression text — which no refusal may hand back to the caller. */
+const AUTHORED_EXPRESSIONS = [
+  (AUTHORED.measures as Record<string, { sql: string }>).expression_total.sql,
+  (AUTHORED.dimensions as Record<string, { sql: string }>).expression_flag.sql,
+];
+
+/** A member the query names itself, spelled as no column is. */
+const NAMED_EXPRESSION = 'hidden_number * 2';
+
+interface ExpressionCase {
+  label: string;
+  query: Record<string, unknown>;
+  member: string;
+}
+
+const EXPRESSION_REFUSED: readonly ExpressionCase[] = [
+  { label: 'an aggregated expression measure', query: { cube: 'fr_authored', measures: ['expression_total'] }, member: 'expression_total' },
+  { label: 'a grouped expression dimension', query: { cube: 'fr_authored', measures: ['count'], dimensions: ['expression_flag'] }, member: 'expression_flag' },
+  { label: 'a filtered expression member', query: { cube: 'fr_authored', measures: ['count'], where: { expression_flag: 1 } }, member: 'expression_flag' },
+  { label: 'an expression member as an order key', query: { cube: 'fr_authored', measures: ['count'], dimensions: ['title'], order: { expression_flag: 'asc' } }, member: 'expression_flag' },
+  { label: 'a declared member with no sql string', query: { cube: 'fr_no_sql', measures: ['count'], dimensions: ['bare'] }, member: 'bare' },
+  { label: 'a member the query names itself that is not a column reference', query: { cube: 'fr_authored', measures: ['count'], dimensions: [NAMED_EXPRESSION] }, member: NAMED_EXPRESSION },
+];
+
+describe('[#20965] the field-level read gate — a member that names no field is refused, never stood down', () => {
+  it('the fixture is written around the parse: CubeSchema refuses exactly the members the gate now refuses', () => {
+    for (const [cube, paths] of [
+      [AUTHORED, ['dimensions.expression_flag.sql', 'measures.expression_total.sql']],
+      [NO_SQL, ['dimensions.bare.sql']],
+    ] as const) {
+      const parsed = CubeSchema.safeParse(cube);
+      expect(parsed.success).toBe(false);
+      expect(parsed.error?.issues.map((issue) => issue.path.join('.')).sort()).toEqual(paths);
+    }
+  });
+
+  describe.each(STRATEGY_PATHS)('$label', ({ capabilities }) => {
+    it.each(EXPRESSION_REFUSED)('$label: refused PERMISSION_DENIED / 403 on both doors, before any strategy ran, without the author\'s text', async ({ query, member }) => {
+      const { service, executed } = makeService({ capabilities, getReadableFields: readable });
+      for (const run of [() => service.query(query as never, CALLER), () => service.generateSql(query as never, CALLER)]) {
+        const refusal = await run().then(() => null, (e: unknown) => e as Record<string, unknown>);
+        expect(refusal).toMatchObject({ code: 'PERMISSION_DENIED', status: 403, object: LEDGER, member });
+        for (const text of AUTHORED_EXPRESSIONS) expect(String(refusal?.message)).not.toContain(text);
+      }
+      expect(executed).toEqual([]);
+    });
+
+    it('no grant makes it judgeable: a reader answering every field of the object still refuses it', async () => {
+      const { service, executed } = makeService({ capabilities, getReadableFields: (object) => FIELDS[object] });
+      await expect(
+        service.query({ cube: 'fr_authored', measures: ['expression_total'] } as never, CALLER),
+      ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403, object: LEDGER, member: 'expression_total' });
+      expect(executed).toEqual([]);
+    });
+
+    it('it is refused ahead of a hidden field on the same object', async () => {
+      const { service } = makeService({ capabilities, getReadableFields: readable });
+      await expect(
+        service.query({ cube: 'fr_authored', measures: ['expression_total'], dimensions: ['alias_code'] } as never, CALLER),
+      ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403, object: LEDGER, member: 'expression_total' });
+    });
+
+    it('every field member is judged as before: a query naming none of the cube\'s expression members gets the field verdicts', async () => {
+      const { service, executed } = makeService({ capabilities, getReadableFields: readable });
+      await expect(
+        service.query({ cube: 'fr_authored', measures: ['alias_total'] } as never, CALLER),
+      ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403, object: LEDGER, fields: ['hidden_number'] });
+      expect(executed).toEqual([]);
+      await service.query({ cube: 'fr_authored', measures: ['count'], dimensions: ['title', 'alias_owner_region'] } as never, CALLER);
+      expect(executed.length).toBeGreaterThan(0);
+    });
+
+    it('\'*\' still counts (the control): a count names no field and is served, beside a field member and alone', async () => {
+      const beside = makeService({ capabilities, getReadableFields: vi.fn(readable) });
+      await beside.service.query({ cube: 'fr_authored', measures: ['count'], dimensions: ['title'] } as never, CALLER);
+      expect(beside.executed.length).toBeGreaterThan(0);
+
+      const getReadableFields = vi.fn(readable);
+      const alone = makeService({ capabilities, getReadableFields });
+      await alone.service.query({ cube: 'fr_authored', measures: ['count'] } as never, CALLER);
+      expect(alone.executed.length).toBeGreaterThan(0);
+      expect(getReadableFields).not.toHaveBeenCalled();
+    });
+  });
+});
+
 // ── The plugin's bridge to the `security` service ─────────────────────────────
 
 function fakeEngine() {
@@ -298,7 +399,7 @@ function fakeEngine() {
   };
 }
 
-async function bootPlugin(security?: () => unknown) {
+async function bootPlugin(security?: () => unknown, cubes?: Cube[]) {
   const { engine, reads } = fakeEngine();
   const registered: Record<string, unknown> = {};
   const error = vi.fn();
@@ -312,7 +413,7 @@ async function bootPlugin(security?: () => unknown) {
     replaceService: (name: string, svc: unknown) => { registered[name] = svc; },
     logger: { info() {}, warn() {}, error, debug() {} },
   };
-  await new AnalyticsServicePlugin({ queryCapabilities: nativeSqlOnly }).init(ctx as never);
+  await new AnalyticsServicePlugin({ queryCapabilities: nativeSqlOnly, ...(cubes ? { cubes } : {}) }).init(ctx as never);
   return { service: registered.analytics as AnalyticsService, reads, error };
 }
 
@@ -342,6 +443,18 @@ describe('[#20917] analytics plugin — the field-level half of the "security" b
   it('applies no field-level gate when no security service is registered at all', async () => {
     const { service, reads } = await bootPlugin(undefined);
     await service.query(groupedHidden as never, CALLER);
+    expect(reads).toHaveLength(1);
+  });
+
+  it('[#20965] refuses a configured cube\'s expression member through the security service\'s reader — `cubes` reach the registry unparsed', async () => {
+    const getReadableFields = vi.fn(async (object: string) => READABLE[object]);
+    const { service, reads } = await bootPlugin(() => ({ ...objectAndRowsOpen, getReadableFields }), [AUTHORED]);
+    await expect(
+      service.query({ cube: 'fr_authored', measures: ['expression_total'] } as never, CALLER),
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403, object: LEDGER, member: 'expression_total' });
+    expect(reads).toEqual([]);
+    expect(getReadableFields).toHaveBeenCalledWith(LEDGER, CALLER);
+    await service.query({ cube: 'fr_authored', measures: ['count'], dimensions: ['title'] } as never, CALLER);
     expect(reads).toHaveLength(1);
   });
 });

@@ -37,6 +37,7 @@
     "api/AuditMetaItemRequest",
     "api/AuditMetaItemResponse",
     "api/AuthEndpoint",
+    "api/AuthFamilies",
     "api/AuthFeaturesConfig",
     "api/AuthProvider",
     "api/AuthProviderInfo",
