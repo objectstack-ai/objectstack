@@ -283,11 +283,19 @@ const WRITE_KEYS: ReadonlySet<string> = new Set([
 /**
  * [#20929] Keys whose array entries are INLINE CHILD COLLECTIONS: each entry
  * names its child object in `childObject` and the child's grid in `columns`.
- * Today that is a form view's `subforms` (`FormViewSchema.subforms`, on a view
- * container's `form` and on every `formViews` entry), whose `columns` is the
- * same `InlineGridColumnSchema` a relationship field's `inlineColumns` takes.
+ * That is a form view's `subforms` (`FormViewSchema.subforms`, on a view
+ * container's `form` and on every `formViews` entry) and, since #20928, an
+ * `object-master-detail-form` page block's `details`
+ * (`ComponentPropsMap['object-master-detail-form']`). On both, `columns` is the
+ * same `InlineGridColumnSchema` a relationship field's `inlineColumns` takes,
+ * and `amountField` / `relationshipField` / `totalField` mean the same thing.
+ *
+ * A page's slot map also has a `details` key, whose value is one page
+ * component or an array of them. A component carries none of a child entry's
+ * keys at its own level (they sit under its `properties`), so reading it as an
+ * entry credits nothing and skips nothing.
  */
-const CHILD_COLLECTION_KEYS: ReadonlySet<string> = new Set(['subforms']);
+const CHILD_COLLECTION_KEYS: ReadonlySet<string> = new Set(['subforms', 'details']);
 
 /**
  * [#20951] Keys of a child collection entry whose value names a field of the

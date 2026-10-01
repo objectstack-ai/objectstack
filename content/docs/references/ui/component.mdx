@@ -950,7 +950,7 @@ Sort field and direction pair
 | **formType** | `Enum<'simple' \| 'tabbed'>` | optional | Parent form presentation — the two variants the renderer honours for the parent half |
 | **sections** | `any[]` | optional | Parent form sections |
 | **fields** | `any[]` | optional | Parent fields shown |
-| **details** | `any[]` | optional | Detail collections (`{ title, childObject, addLabel?, columns?, relationshipField? }` — FK and columns auto-derive from child metadata) |
+| **details** | `{ childObject: string; relationshipField?: string; columns?: object[]; formFields?: string[]; … }[]` | optional | Detail collections — each a strict entry (`{ childObject, title?, addLabel?, columns?, relationshipField?, … }`) whose `columns` are the inline grid columns a relationship field's `inlineColumns` takes; the FK and columns auto-derive from child metadata when omitted |
 | **title** | `string \| Record<string, string>` | optional | Form title |
 | **submitText** | `string \| Record<string, string>` | optional | Submit button label |
 | **cancelText** | `string \| Record<string, string>` | optional | Cancel button label |
@@ -958,6 +958,23 @@ Sort field and direction pair
 | **initialValues** | `Record<string, any>` | optional | Prefill values for the parent (create mode) |
 | **initialData** | `Record<string, any>` | optional | Alternate spelling of `initialValues` the renderer also reads |
 | **taxRateField** | `string` | optional | Child field holding the per-line tax rate (line-items totals) |
+
+### Nested Shape: `ObjectMasterDetailFormProps.details[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **childObject** | `string` | ✅ | Child object whose records are entered inline |
+| **relationshipField** | `string` | optional | FK on the child pointing back to the parent (auto-detected from the child's master_detail/lookup field when omitted) |
+| **columns** | `{ name: string; label?: string; type?: Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| 'lookup' \| 'file'>; width?: number; … }[]` | optional | Editable grid columns (derived from the child object when omitted). Each entry is the strict, name-keyed inline grid column a relationship field's `inlineColumns` takes (`{ name, label?, type?, … }` — objectui GridColumn); identity-only entries (`{ name }`) hydrate everything else from the child object's fields. Unknown keys and the retired `field` spelling are refused at parse. |
+| **formFields** | `string[]` | optional | Child field names for the per-row expand form (derived from the child object's editable fields when omitted) |
+| **inlineMode** | `Enum<'grid' \| 'form'>` | optional | Inline-edit form factor: 'grid' = editable cells; 'form' = read-only list + per-row full form. Resolved from the relationship field's `inlineEdit` when omitted |
+| **amountField** | `string` | optional | Numeric child column summed for the running total |
+| **sortField** | `string` | optional | Child field holding the line sort position, stamped on drag-reorder (derived from a `position` / `sort_order` / … field when omitted) |
+| **totalField** | `string` | optional | Parent field to receive the rolled-up sum |
+| **title** | `string` | optional | Section title |
+| **minRows** | `number` | optional | Minimum number of rows |
+| **maxRows** | `number` | optional | Maximum number of rows |
+| **addLabel** | `string` | optional | Add-row button label |
 
 
 ---

@@ -398,7 +398,7 @@ describe('ImportRequestSchema — mappingName declared (#10330)', () => {
 
 /**
  * The row report carries two optional keys that ride on an `ok` row:
- * `droppedFields` (the engine's strip report, declared ahead of its producer)
+ * `droppedFields` (the engine's per-row strip report, which the import runner copies)
  * and `warnings` (served by the REST dry run before it was declared). The
  * schema is a plain, non-strict `z.object`, so an undeclared key is not
  * refused — it is STRIPPED by `parse`. Each pin therefore asserts the key

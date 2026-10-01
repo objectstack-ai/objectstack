@@ -38,6 +38,7 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import { lowerFilterCondition, markFilterSubtreeProvenance } from '@objectstack/spec/data';
+import { jsonColumnOperatorRefusalText } from '@objectstack/core';
 import { RemoteTransport } from './remote-transport.js';
 import { TursoDriver } from './turso-driver.js';
 import { asLibsqlClient, makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
@@ -51,6 +52,11 @@ const POLICY_COL = 'secret_policy_col';
 const SECRET = 'PSECRET_LITERAL';
 const SECRET_NUM = 7770123;
 const UNDECLARED_KEY = '$psecret_combinator';
+/**
+ * [#21178] The one column the half-2 transport is told is stored as JSON — the
+ * JSON-column gate's refusal needs the driver's rule injected to be reachable.
+ */
+const POLICY_JSON_COL = 'secret_policy_json_col';
 
 type Door = {
   /** The `RemoteTransport` method this row drives — asserted by the error's stack. */
@@ -171,6 +177,16 @@ const DOORS: readonly Door[] = [
     secrets: [POLICY_COL, SECRET],
     klass: 'a value this transport cannot bind',
   },
+  // ── #21178: the JSON-column gate, born in the seam ─────────────────────────
+  {
+    // The class is read from the shared builder, never spelled here: its words
+    // belong to `@objectstack/core`, and the operator it names in prose
+    // (`$nin`) is the class, not a secret — the FIELD is what is withheld.
+    builder: 'jsonColumnOperator',
+    where: () => ({ [POLICY_JSON_COL]: { $nin: [SECRET] } }),
+    secrets: [POLICY_JSON_COL],
+    klass: jsonColumnOperatorRefusalText(POLICY_JSON_COL, '$nin', false).message,
+  },
 ];
 
 /**
@@ -237,6 +253,19 @@ const ARMS: readonly Door[] = [
     secrets: [POLICY_COL, '$in[1]'],
     klass: 'A comparand in this filter is undefined',
     label: "{ secret_policy_col: { $in: ['a', undefined] } }",
+  },
+  // [#21178] The gate's two bare-equality positions: a value and `null`.
+  {
+    builder: 'jsonColumnOperator',
+    where: () => ({ [POLICY_JSON_COL]: SECRET }),
+    secrets: [POLICY_JSON_COL],
+    klass: jsonColumnOperatorRefusalText(POLICY_JSON_COL, '=', true).message,
+  },
+  {
+    builder: 'jsonColumnOperator',
+    where: () => ({ [POLICY_JSON_COL]: null }),
+    secrets: [POLICY_JSON_COL],
+    klass: jsonColumnOperatorRefusalText(POLICY_JSON_COL, '=', true).message,
   },
 ];
 
@@ -341,6 +370,9 @@ function transport() {
   const t = new RemoteTransport();
   t.setClient(client as any);
   t.setDiagnosticSink((m) => sink.push(m));
+  // [#21178] Only `POLICY_JSON_COL` is a JSON column, so every other row
+  // compiles exactly as it does on a transport handed no rule at all.
+  t.setJsonColumnResolver((_object, field) => field === POLICY_JSON_COL);
   return { t, sink, client };
 }
 

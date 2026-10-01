@@ -15625,29 +15625,39 @@ export class ObjectQL implements IObjectQLEngine {
    * DECLARED relation.
    *
    * The multi-value spelling is `$contains`, which is what the refusal itself
-   * prescribes and the one membership spelling every driver here answers:
-   * `driver-sql` (and `driver-sqlite-wasm` / `driver-turso`, which extend it)
-   * lowers it to `LIKE '%v%'` over the serialization, `driver-mongodb` to
-   * `$regex` over the array, and `driver-memory` to a mingo `$regex`, which
-   * matches per ELEMENT. No public filter surface is widened: `$contains` is
+   * prescribes and the one membership spelling every driver here answers. On a
+   * column the driver holds declared multi-valued it asks MEMBERSHIP, as
+   * `FILTER_OPERATORS`' `$contains` docblock (`@objectstack/spec`) declares for
+   * a JSON-stored column: `driver-sql` (and `driver-sqlite-wasm` and the local
+   * `driver-turso`, which extend it) compiles a per-dialect membership
+   * construct, `driver-memory` a mingo `$elemMatch`, and `driver-mongodb` the
+   * same `$elemMatch`. No public filter surface is widened: `$contains` is
    * already declared, and this is the only construction site that changes.
    *
-   * `$contains` is a SUBSTRING test, so on every one of those backends it
-   * answers a SUPERSET: with ids `acc_1` and `acc_10`, a row holding `acc_10`
-   * also matches a probe for `acc_1`. That is why the caller narrows the rows
-   * exactly through {@link ObjectQL.storedReferenceIncludes} — over-matching
-   * here would make `cascade` DELETE and `set_null` clear rows that never
-   * referenced this record, which is worse than the 400 being fixed. The
-   * pushdown's only job is to keep the probe from reading the whole table.
+   * Membership answers EXACTLY on a well-formed slot, but a backend that does
+   * not hold the declaration (a table it was never told about) answers the
+   * SUBSTRING reading instead, which is a SUPERSET: with ids `acc_1` and
+   * `acc_10`, a row holding `acc_10` also matches a probe for `acc_1`. That is
+   * why the caller still narrows the rows exactly through
+   * {@link ObjectQL.storedReferenceIncludes} — over-matching here would make
+   * `cascade` DELETE and `set_null` clear rows that never referenced this
+   * record, which is worse than the 400 being fixed. The pushdown's only job is
+   * to keep the probe from reading the whole table.
+   *
+   * ⚠️ Membership is array-only on every backend that answers it, so a slot
+   * holding an off-shape bare scalar (the write door never stores one, it wraps
+   * a scalar; out-of-band data can) is not matched by the pushdown, and the
+   * scalar arm of {@link ObjectQL.storedReferenceIncludes} never sees that row.
    *
    * The `$or` limb covers the other direction — a FALSE NEGATIVE, which on an
    * integrity guard is the fail-OPEN that #8895 ruled out. An id needing JSON
-   * escaping (a quote, a backslash) appears in a SQL backend's serialized text
-   * in its ESCAPED form, so a probe for the raw id would miss the row that
-   * holds it; a document/in-memory backend compares the element itself and
-   * needs the RAW form. Both are asked whenever they differ, and the exact
-   * narrowing discards whatever the extra limb over-matched. Identical for an
-   * ordinary id, which is every id this engine generates.
+   * escaping (a quote, a backslash) appears in the serialized text in its
+   * ESCAPED form, so a backend answering the substring reading over that text
+   * would miss the row for the raw id; a membership test, and a document or
+   * in-memory backend, compares the element itself and needs the RAW form. Both
+   * are asked whenever they differ, and the exact narrowing discards whatever
+   * the extra limb over-matched. Identical for an ordinary id, which is every
+   * id this engine generates.
    */
   private referenceProbeFilter(
     fieldName: string,
@@ -16210,8 +16220,9 @@ export class ObjectQL implements IObjectQLEngine {
           if (isMissingTableError(error, childName)) continue;
           throw error;
         }
-        // [#9362] The multi-value pushdown above is a SUPERSET, so the exact
-        // answer is taken here, on the rows themselves. Everything below —
+        // [#9362] The multi-value pushdown above can be a SUPERSET (the
+        // substring reading, on a backend without the declaration), so the
+        // exact answer is taken here, on the rows themselves. Everything below —
         // the `restrict` count in the 409 envelope, the `cascade` recursion,
         // the `set_null` write — reads `dependents`, so narrowing anywhere
         // later would leave one of them acting on a row that never referenced

@@ -382,7 +382,7 @@ export function binNamesOf(pkg) {
  * `os` invocation, whatever the user actually ran:
  *
  *     (node:1922) Warning: Error
- *     module: @oclif/core@4.13.3
+ *     module: @oclif/core@5.1.2
  *     task: findCommand (migrate:file-column-move)
  *     plugin: @objectstack/cli
  *     message: command migrate:file-column-move not found

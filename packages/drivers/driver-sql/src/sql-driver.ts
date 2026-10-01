@@ -25,6 +25,10 @@ import { AggregationFunction, emptyGroupValueFor } from '@objectstack/spec/data'
 // presenter its counts and totals take — defined once in core, for this
 // driver's `aggregate()` and the analytics native-SQL face alike.
 import { AGGREGATE_ANSWER_KIND, presentAsNumber } from '@objectstack/core';
+// [#20387, #11635, #21042] What each aggregate function's operand ACCUMULATES
+// IN, the boolean-aggregand cast, and the one column-class predicate both read
+// — defined once in core too, for the same two faces.
+import { aggregandColumnClass, aggregandOperandSql, type AggregandColumnClass } from '@objectstack/core';
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES, isMultiValueField } from '@objectstack/spec/data';
 // [#16318] The per-field-type physical representation of the NUMERIC family.
 // `os generate migration` reads the SAME table, in both of its formats — that
@@ -363,14 +367,11 @@ const NUMERIC_SCALAR_TYPES = new Set<string>([
   'integer', 'int', 'float',
 ]);
 
-/**
- * [#20387] Whether a numeric field type's column holds FRACTIONS rather than
- * integers: the exact-decimal members of `NUMERIC_COLUMN_REPRESENTATION` and
- * the driver's `float` alias. Read into {@link SqlDriver.fractionalNumericFields}.
- */
-function isFractionalNumericType(type: string): boolean {
-  return type === 'float' || numericColumnFor(type)?.kind === 'exact';
-}
+// [#20387, #21042] Whether a column holds FRACTIONS — the exact-decimal members
+// of `NUMERIC_COLUMN_REPRESENTATION` and this driver's `float` alias — is the
+// `'fractional'` class of `aggregandColumnClass` (`@objectstack/core`), the one
+// predicate the analytics native-SQL face asks too. Read into
+// {@link SqlDriver.fractionalNumericFields}.
 
 /**
  * The builtin audit-timestamp columns every managed object carries. They are
@@ -1539,66 +1540,13 @@ const SQL_AGGREGATE_FUNCTIONS: ReadonlyMap<string, SqlAggregateLowering> = new M
 // `'number'` presenter, so the analytics native-SQL face presents a count or a
 // total with this driver's own rule.
 
-/**
- * [#20387] What each declared aggregate function ACCUMULATES IN on PostgreSQL
- * and MySQL — the arithmetic half of the one-double policy
- * {@link AGGREGATE_ANSWER_KIND} states for the answer's type.
- *
- * - `'double'` — `avg`, over every declared numeric or boolean aggregand.
- * - `'double-over-fractional'` — `sum`, over a declared column whose values are
- *   fractions (`fractionalNumericFields`: the exact-decimal family and the
- *   driver's `float` alias). A `sum` over an integer-valued column (`rating`,
- *   the `integer` / `int` aliases, a boolean) stays the database's exact
- *   integer total, rounded once to the double by the presenter.
- * - `'as-stored'` — `count` / `count_distinct` (a count is an exact integer)
- *   and `min` / `max` (a value OF the column; no arithmetic happens).
- *
- * Why: the engine's rows path (`objectql`'s `in-memory-aggregation.ts`) and
- * SQLite add JS doubles, while PostgreSQL's `numeric` and MySQL's `DECIMAL`
- * add exact decimals. Measured on live PostgreSQL 16.13 and MySQL 8.0.46 over
- * a `number` column holding `0.1` and `0.2`: `sum` answered `0.3` natively and
- * `0.30000000000000004` on SQLite and every rows path, so
- * `having { s: { $eq: 0.3 } }` kept the group on those two native faces only.
- * `avg` over an INTEGER column diverged too, which is why `avg` is `'double'`
- * whatever the column holds: MySQL rounds a `DECIMAL` average to
- * `div_precision_increment` (4) places (`avg` of 1, 2, 2 answered `1.6667`),
- * and PostgreSQL's `numeric` average rounds to 16 places before the presenter
- * rounds again (`11 / 9` answered `1.2222222222222222`, JS
- * `1.2222222222222223`; 10 of 27,962 integer pairs measured).
- *
- * The operand is the column's TEXT, parsed as a double —
- * `cast(cast(x as text) as double precision)` on PostgreSQL,
- * `cast(cast(x as char) as double)` on MySQL — because that is the value the
- * SQL client hands `find()`, and so the value the rows path adds. For an
- * exact-decimal column it is the plain cast (both servers convert a decimal to
- * a double through its text); for a binary `real` / `FLOAT` column, which a
- * table created before the exact-decimal columns still carries, the plain cast
- * would widen the binary32 value (`0.1` → `0.10000000149011612`) where the
- * client reads `0.1`. MySQL's `CAST(… AS DOUBLE)` needs 8.0.17 or later.
- *
- * ⚠️ Residual, stated: on PostgreSQL and MySQL the double sums are added in
- * scan order, one after another, without compensation. SQLite (3.43+) adds with
- * compensated (Kahan-Babuska-Neumaier) summation, and since #20489 so does the
- * engine's rows path (`in-memory-aggregation.ts`, `compensatedSum`), so a group
- * of three or more fractions can still differ in the last place between the
- * PostgreSQL / MySQL native faces and those two (`0.1 + 0.2 + 0.3`: PostgreSQL /
- * MySQL `0.6000000000000001`, SQLite and the rows path `0.6`). Two addends
- * cannot differ, which is why the pin is `0.1 + 0.2`.
- *
- * A `Record` over `AggregationFunction` for the same reason as
- * {@link AGGREGATE_ANSWER_KIND}: a function added to the vocabulary without an
- * answer here fails `tsc`.
- */
-const AGGREGATE_ACCUMULATION: Readonly<
-  Record<AggregationFunction, 'double' | 'double-over-fractional' | 'as-stored'>
-> = {
-  count: 'as-stored',
-  count_distinct: 'as-stored',
-  sum: 'double-over-fractional',
-  avg: 'double',
-  min: 'as-stored',
-  max: 'as-stored',
-};
+// [#20387, #21042] `AGGREGATE_ACCUMULATION` — what each declared aggregate
+// function ACCUMULATES IN on PostgreSQL and MySQL, the arithmetic half of the
+// one-double policy — lives in `@objectstack/core` (`utils/aggregate-answer.ts`)
+// with its docblock, beside the boolean-aggregand cast and the column-class
+// predicate both read. {@link SqlDriver.aggregate} asks them through
+// `aggregandOperandSql`, so the analytics native-SQL face accumulates the same
+// operand with this driver's own rule.
 
 /**
  * [#5907] The aggregate vocabulary the Query Protocol DECLARES, read from the
@@ -10041,25 +9989,19 @@ export class SqlDriver implements IDataDriver {
         // #11249's `false`/`true` for the order statistics) pins ALL FOUR as
         // numbers: `sum`/`avg` arithmetic over 1/0, `min`/`max` the `0`/`1`
         // the cast computes, presented as-is (see the presentation note
-        // below). `cast(?? as int)` keeps the column in a knex identifier
-        // binding exactly as the uncast form does. `count`/`count_distinct`
-        // are deliberately NOT cast (both lower to `count`, defined over
-        // boolean everywhere — their answers were correct before this and
-        // must not move).
-        const castBooleanAggregand =
-          this.isPostgres &&
-          lowering.sql !== 'count' &&
-          fieldExpr !== '*' &&
-          table !== null &&
-          (this.booleanFields[table]?.includes(fieldExpr) ?? false);
-        const columnExpr = castBooleanAggregand ? 'cast(?? as int)' : '??';
+        // below). `count`/`count_distinct` are deliberately NOT cast (both
+        // lower to `count`, defined over boolean everywhere — their answers
+        // were correct before this and must not move).
         // [#20387] `sum` / `avg` accumulate in double on PostgreSQL and MySQL,
         // the arithmetic SQLite and the engine's rows path already use, so one
         // query answers one number on every face (`AGGREGATE_ACCUMULATION`).
-        // Still one `??` binding: the wrap is SQL text around it.
-        const argExpr = fieldExpr !== '*' && this.accumulatesInDouble(funcName, table, fieldExpr)
-          ? this.doubleAccumulationOperand(columnExpr)
-          : columnExpr;
+        // [#21042] Both policies, and the order they compose in, are
+        // `aggregandOperandSql` (`@objectstack/core`), read with this column's
+        // class from the registries below — the rule the analytics native-SQL
+        // face applies too. Still one `??` binding: the cast and the wrap are
+        // SQL text around it, so the column stays a knex identifier binding.
+        const aggregandClass = fieldExpr === '*' ? undefined : this.aggregandColumnClassOf(table, fieldExpr);
+        const argExpr = aggregandOperandSql(funcName, aggregandClass, this.dialectName, '??');
         const rawFunc = lowering.distinct
           ? `${lowering.sql}(distinct ${argExpr})`
           : `${lowering.sql}(${argExpr})`;
@@ -10181,37 +10123,26 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * [#20387] Whether {@link aggregate} accumulates this aggregation's operand in
-   * double — `AGGREGATE_ACCUMULATION` read against the column's declaration.
+   * [#20387, #11635, #21042] The class {@link aggregate}'s operand policies read
+   * for one aggregated column (`aggregandColumnClass`, `@objectstack/core`),
+   * answered from this driver's registries of the column's declaration:
+   * `booleanFields` is the `'boolean'` class, `fractionalNumericFields` (filled
+   * by the predicate itself) the `'fractional'` one, and the rest of
+   * `numericFields` the `'integral'` one. Every other column — and an unknown
+   * table — is in no class, so it keeps the database's own arithmetic, as
+   * before.
    *
-   * PostgreSQL and MySQL only. SQLite stores the fractional family as REAL
+   * The policies apply on PostgreSQL and MySQL only (`aggregandOperandSql`
+   * reads the dialect). SQLite stores the fractional family as REAL
    * (`ColumnCompiler_SQLite3.prototype.decimal` is `'float'`), so its `sum` /
-   * `avg` already add doubles. A column this driver has no numeric or boolean
-   * declaration for keeps the database's own arithmetic, as before.
+   * `avg` already add doubles.
    */
-  protected accumulatesInDouble(func: AggregationFunction, table: string | null, field: string): boolean {
-    if (table === null || !(this.isPostgres || this.isMysql)) return false;
-    switch (AGGREGATE_ACCUMULATION[func]) {
-      case 'double':
-        return (this.numericFields[table]?.includes(field) ?? false)
-          || (this.booleanFields[table]?.includes(field) ?? false);
-      case 'double-over-fractional':
-        return this.fractionalNumericFields[table]?.includes(field) ?? false;
-      case 'as-stored':
-        return false;
-    }
-  }
-
-  /**
-   * [#20387] The operand of a double-accumulated `sum` / `avg`: the column's
-   * text, parsed as a double — the value the SQL client hands `find()`, and so
-   * the value the rows path adds. See `AGGREGATE_ACCUMULATION` for why the text
-   * and not a plain cast.
-   */
-  protected doubleAccumulationOperand(operand: string): string {
-    return this.isPostgres
-      ? `cast(cast(${operand} as text) as double precision)`
-      : `cast(cast(${operand} as char) as double)`;
+  protected aggregandColumnClassOf(table: string | null, field: string): AggregandColumnClass | undefined {
+    if (table === null) return undefined;
+    if (this.booleanFields[table]?.includes(field)) return 'boolean';
+    if (this.fractionalNumericFields[table]?.includes(field)) return 'fractional';
+    if (this.numericFields[table]?.includes(field)) return 'integral';
+    return undefined;
   }
 
   /**
@@ -11478,8 +11409,9 @@ export class SqlDriver implements IDataDriver {
         if (NUMERIC_SCALAR_TYPES.has(type) && !isMultiValuedColumn(type, field)) numericCols.push(name);
         // [#16318] The authorable half only — see {@link numericValueFields}.
         if (NUMERIC_VALUE_TYPES.has(type) && !isMultiValuedColumn(type, field)) numericValueCols.push(name);
-        // [#20387] See {@link fractionalNumericFields}.
-        if (isFractionalNumericType(type) && !isMultiValuedColumn(type, field)) fractionalCols.push(name);
+        // [#20387, #21042] See {@link fractionalNumericFields}: the predicate's
+        // `'fractional'` class, scalar only by the predicate's own reading.
+        if (aggregandColumnClass({ type, multiple: field?.multiple }) === 'fractional') fractionalCols.push(name);
         if (type === 'date') dateCols.push(name);
         if (type === 'datetime') datetimeCols.push(name);
         if (type === 'time') timeCols.push(name);
@@ -11583,8 +11515,9 @@ export class SqlDriver implements IDataDriver {
         if (NUMERIC_VALUE_TYPES.has(type) && !isMultiValuedColumn(type, field)) {
           numericValueCols.push(name);
         }
-        // [#20387] See {@link fractionalNumericFields}.
-        if (isFractionalNumericType(type) && !isMultiValuedColumn(type, field)) {
+        // [#20387, #21042] See {@link fractionalNumericFields}: the predicate's
+        // `'fractional'` class, scalar only by the predicate's own reading.
+        if (aggregandColumnClass({ type, multiple: field?.multiple }) === 'fractional') {
           fractionalCols.push(name);
         }
         if (type === 'date') {

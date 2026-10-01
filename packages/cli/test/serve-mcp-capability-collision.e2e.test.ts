@@ -63,7 +63,7 @@ const HERE = resolve(fileURLToPath(import.meta.url), '..');
  * genuinely reaches it (#11707).
  *
  * Both halves of that are load-bearing and neither works alone. @oclif/core
- * 4.13.3 skips its TypeScript path lookup only when `isProd()` —
+ * 5.1.2 skips its TypeScript path lookup only when `isProd()` —
  * `!['development', 'test'].includes(process.env.NODE_ENV ?? '')` — so under a
  * child `NODE_ENV` of `development` or `test` it rewrites the command target
  * from the declared `./dist/commands` to `./src/commands` and transpiles, and

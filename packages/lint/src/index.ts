@@ -395,6 +395,9 @@ export type {
   DashboardActionRefSeverity,
 } from './validate-dashboard-action-refs.js';
 
+export { validateDashboardWidgetOptions } from './validate-dashboard-widget-options.js';
+export type { DashboardWidgetOptionFinding } from './validate-dashboard-widget-options.js';
+
 export { validateFilterTokens, FILTER_TOKEN_UNKNOWN } from './validate-filter-tokens.js';
 export { validateFlowFilterTokens, FLOW_FILTER_TOKEN_UNKNOWN } from './validate-flow-filter-tokens.js';
 export type { FlowFilterTokenFinding } from './validate-flow-filter-tokens.js';
