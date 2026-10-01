@@ -3,6 +3,7 @@
   "globalDependencies": ["tsconfig.json", "tsup.config.ts"],
   "globalEnv": ["OS_SKIP_DTS"],
   "globalPassThroughEnv": ["VITEST_MAX_WORKERS"],
+  "agentGuidance": false,
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
