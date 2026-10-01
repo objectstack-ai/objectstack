@@ -89,7 +89,18 @@
  *     broader rule: it keeps the `readonly`, `richtext` and `json` fields the
  *     grid leaves out. Both the fields and the condition the form is offered
  *     under are the spec's; the hidden, system and computed fields stay
- *     uncredited.
+ *     uncredited. An authored `formFields` list is read against the child
+ *     under the same condition ({@link creditAuthoredRowForm}).
+ *
+ *     NOT credited: a row form opened with NO field list — an authored grid
+ *     (`inlineColumns`, or an entry's authored `columns` and
+ *     `relationshipField`) in the `form` factor, with no `formFields`. The
+ *     renderer then opens the child's default object form, which draws every
+ *     visible field the way the child's own create and edit forms do. No
+ *     spec derivation states that form's field set, and this rule counts the
+ *     default layout nowhere else (only a KEYED section of
+ *     {@link creditFieldGroupLayout} is a site), so whether it counts here is
+ *     not decided by this rule.
  *
  * One consumer is the relationship itself: a `lookup` or `master_detail`
  * field that sets `inlineEdit` is the inline grid's join key — the renderer
@@ -351,9 +362,23 @@ const CHILD_ENTRY_FORM_FIELDS_KEY = 'formFields';
  * Unlike a `subforms` or `details` entry it derives nothing: with no authored
  * `columns` it draws no column, and it offers no per-row expand form. So it is
  * read as a {@link ChildEntryKind} `panel`: the authored columns and the
- * {@link CHILD_ENTRY_FIELD_KEYS} against the child, nothing derived.
+ * {@link CHILD_ENTRY_FIELD_KEYS} against the child, nothing derived — and
+ * the two keys of {@link PANEL_CHILD_QUERY_KEYS}, walked in the child's
+ * context.
  */
 const CHILD_ENTRY_COMPONENT_TYPES: ReadonlySet<string> = new Set(['record:line_items']);
+
+/**
+ * [#21091] Keys of a `panel` entry that shape the CHILD query, so every field
+ * they name is a field of `childObject`. `LineItemsPanel` (at the same pin)
+ * converts `sort` (`SortConfig[]`) to the child fetch's order and merges
+ * `filter` (any shape `toFilterNode` accepts: rule array, AST, field-keyed
+ * map) into its `$filter`, beside the relationship condition. The general walk
+ * reads them as it reads any sort or filter — behaviour sites, a predicate
+ * map's keys included — but with `childObject` as the context instead of the
+ * page's object, which is the parent here.
+ */
+const PANEL_CHILD_QUERY_KEYS: ReadonlySet<string> = new Set(['sort', 'filter']);
 
 /**
  * How a child collection entry draws its child: a `collection` (a `subforms`
@@ -696,20 +721,31 @@ function creditDerivedRowForm(
  * against the entry's `childObject`.
  *
  * Each name is a child field the per-row expand form draws — when the form is
- * offered. `isInlineRowFormOffered` decides that only when the entry DECLARES
- * its `inlineMode`: an omitted one is resolved by the renderer (from the
- * relationship's `inlineEdit`, or from the child's shape), which this rule
- * does not reproduce, so the list is credited as drawn. With a declared mode
- * and a form that is never offered, the list names its fields without drawing
- * them: a carrier a removal must clean, as `inlineColumns` is on a field that
- * does not set `inlineEdit`.
+ * offered, which `isInlineRowFormOffered` decides from the entry's form
+ * factor, its form fields and its grid's columns. The renderer resolves an
+ * entry one of two ways (objectui `MasterDetailForm.tsx` at the `.objectui-sha`
+ * pin `31971ff1e28f`), and the lint feeds the predicate what each one feeds the
+ * expand control:
  *
- * The grid the comparison counts is the entry's authored `columns` when it
- * has any, and the derived grid otherwise. A derived grid is counted only
- * when the entry names its `relationshipField`: without one the renderer
- * detects the relationship and leaves it out of the grid, and this rule keeps
- * no copy of that detection, so it cannot count that grid and credits the
- * list as drawn. A name the child does not declare is counted unresolved.
+ *   - **Kept as authored** — the entry names BOTH its `relationshipField` and
+ *     at least one column. Nothing is derived: the form factor is the
+ *     declared `inlineMode`, or none at all, and the grid is the authored
+ *     columns. So the predicate decides exactly, and an omitted mode offers
+ *     the form only when the list is longer than the grid.
+ *   - **Derived** — anything else. A declared `inlineMode` is kept, and an
+ *     omitted one is resolved from the relationship's `inlineEdit`, else
+ *     from the child's shape — a resolution this rule does not reproduce, so
+ *     with an omitted mode the list is credited as drawn. With a declared
+ *     mode the predicate decides whenever the grid can be counted: authored
+ *     columns, or the derived grid when the entry names its
+ *     `relationshipField` (without one the renderer detects the relationship
+ *     and leaves it out of the grid, and this rule keeps no copy of that
+ *     detection, so the list is credited as drawn).
+ *
+ * A list the form is never offered for names its fields without drawing
+ * them: a carrier a removal must clean, as `inlineColumns` is on a field that
+ * does not set `inlineEdit`. A name the child does not declare is counted
+ * unresolved.
  */
 function creditAuthoredRowForm(
   ledger: ConsumerLedger,
@@ -722,14 +758,16 @@ function creditAuthoredRowForm(
   if (!Array.isArray(formFields)) return;
   const inlineMode = formFactorOf(entry.inlineMode);
   const relationshipField = strName(entry.relationshipField);
+  const authoredColumns = hasAuthoredColumns(entry.columns);
+  const keptAsAuthored = relationshipField !== undefined && authoredColumns;
   const childFields = childObject === undefined ? undefined : ledger.fieldMapByObject.get(childObject);
-  const columns = hasAuthoredColumns(entry.columns)
+  const columns = authoredColumns
     ? (entry.columns as unknown[])
     : relationshipField !== undefined && childFields !== undefined
       ? deriveInlineGridColumns({ fields: childFields }, { relationshipField })
       : undefined;
-  const offered =
-    inlineMode === undefined || columns === undefined || isInlineRowFormOffered({ inlineMode, formFields, columns });
+  const decidable = columns !== undefined && (keptAsAuthored || inlineMode !== undefined);
+  const offered = !decidable || isInlineRowFormOffered({ inlineMode, formFields, columns });
   formFields.forEach((value: unknown, i: number) => {
     const field = strName(value);
     if (field === undefined || !ledger.objectsByField.has(field)) return;
@@ -865,11 +903,16 @@ function walk(
         ledger.unresolved += 1;
       }
     }
+    // [#21091] A `record:line_items` block's `properties` is a child entry,
+    // and that entry's child-query keys name fields of its `childObject`.
+    const panel = key === 'properties' && typeof rec.type === 'string' && CHILD_ENTRY_COMPONENT_TYPES.has(rec.type);
+    if (childEntry === 'panel' && PANEL_CHILD_QUERY_KEYS.has(key)) {
+      walk(ledger, value, strName(rec.childObject), root, childPath, childSegments, key);
+      continue;
+    }
     // A map KEYED by object name — `translations[].en.objects.crm_x`,
     // `permissions[].objects.crm_x` — names its object in a position no
     // `object:` lookup reaches.
-    // [#21091] A `record:line_items` block's `properties` is a child entry.
-    const panel = key === 'properties' && typeof rec.type === 'string' && CHILD_ENTRY_COMPONENT_TYPES.has(rec.type);
     walk(ledger, value, ledger.isObject(key) ? key : inner, root, childPath, childSegments, key, panel ? 'panel' : undefined);
   }
 }

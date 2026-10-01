@@ -1075,8 +1075,21 @@ describe('[#21091] validateFieldConsumers — an inline collection reads its joi
       expect(notes?.carriers).toEqual(['pages[0].regions[0].components[0].properties.details[0].formFields[0]']);
     });
 
-    it('an omitted `inlineMode` is the renderer\'s to resolve: the list is credited as drawn', () => {
+    it('kept as authored (`relationshipField` and `columns`), an omitted `inlineMode` is no form factor: one form field against two columns is never offered, so the list is a carrier', () => {
       const details = [entry({ columns: [{ name: 'qty' }, { name: 'name' }], formFields: ['notes'] })];
+      expect(verdicts(stack(LOOKUP, { details }))['itm.notes']).toBe('carrier-only');
+    });
+
+    it('kept as authored, an omitted `inlineMode` with more form fields than grid columns: the form is offered, and its fields credited', () => {
+      const details = [entry({ formFields: ['notes', 'spec'] })];
+      const findings = verdicts(stack(LOOKUP, { details }));
+      expect(findings['itm.notes']).toBeUndefined();
+      expect(findings['itm.spec']).toBeUndefined();
+      expect(findings['itm.frozen']).toBe('inert');
+    });
+
+    it('derived (no authored columns), an omitted `inlineMode` is resolved by the renderer from the child, which this rule does not reproduce: the list is credited as drawn', () => {
+      const details = [{ childObject: 'itm', relationshipField: 'ord', formFields: ['notes'] }];
       expect(verdicts(stack(LOOKUP, { details }))['itm.notes']).toBeUndefined();
     });
 
@@ -1134,6 +1147,26 @@ describe('[#21091] validateFieldConsumers — an inline collection reads its joi
       expect(verdicts(block(properties))).toEqual({ 'ord.notes': 'inert', 'itm.frozen': 'inert', 'itm.secret': 'inert' });
     });
 
+    it('its `sort[].field` and a field-keyed `filter` name CHILD fields: credited there, and the parent twin stays reported', () => {
+      const properties = { childObject: 'itm', relationshipField: 'ord', columns: [{ name: 'qty' }], sort: [{ field: 'notes', order: 'desc' }], filter: { spec: 'x' } };
+      expect(verdicts(block(properties))).toEqual({ 'ord.notes': 'inert', 'itm.frozen': 'inert', 'itm.secret': 'inert' });
+    });
+
+    it('a rule-array `filter` names a CHILD field the same way', () => {
+      const properties = { childObject: 'itm', relationshipField: 'ord', columns: [{ name: 'qty' }], filter: [{ field: 'frozen', operator: 'equals', value: 'x' }] };
+      expect(verdicts(block(properties))).toEqual({ 'ord.notes': 'inert', 'itm.notes': 'inert', 'itm.spec': 'inert', 'itm.secret': 'inert' });
+    });
+
+    it('control: a `sort` and `filter` read against the child do not credit a field only the parent declares', () => {
+      const properties = { childObject: 'itm', relationshipField: 'ord', columns: [{ name: 'qty' }], sort: [{ field: 'notes' }] };
+      const s = block(properties);
+      const [ord, itm] = s.objects as AnyRec[];
+      const { notes: _dropped, ...childFields } = itm.fields as AnyRec;
+      s.objects = [ord, { ...itm, fields: childFields }];
+      // The child no longer declares `notes`: the sort names nothing it has, and the parent's `notes` stays reported.
+      expect(verdicts(s)['ord.notes']).toBe('inert');
+    });
+
     it('control: the same properties under a component type that is no child entry credit no child column', () => {
       const s = block({ childObject: 'itm', columns: [{ name: 'qty' }] });
       const page = (s.pages as AnyRec[])[0];
@@ -1144,10 +1177,32 @@ describe('[#21091] validateFieldConsumers — an inline collection reads its joi
   });
 
   /**
+   * The boundary the pin does NOT cover: a row form opened with no field
+   * list. An authored grid in the `form` factor with no `formFields` makes the
+   * renderer open the child's default object form, which draws every visible
+   * child field the way the child's own create and edit forms do. No spec
+   * derivation states that form's field set, so this rule credits none of it
+   * — pinned here so the boundary is a reading, not an omission.
+   */
+  describe('boundary: a row form opened with no field list is not credited', () => {
+    it('authored `inlineColumns` with `inlineEdit: form`: the child fields outside the columns stay reported', () => {
+      expect(verdicts(stack({ ...LOOKUP, inlineEdit: 'form', inlineColumns: [{ name: 'qty' }] }))).toEqual(GRID_ONLY);
+    });
+
+    it('a detail entry kept as authored with `inlineMode: form` and no `formFields`: the same', () => {
+      const details = [{ childObject: 'itm', relationshipField: 'ord', columns: [{ name: 'qty' }], inlineMode: 'form' }];
+      expect(verdicts(stack(LOOKUP, { details }))).toEqual(GRID_ONLY);
+    });
+  });
+
+  /**
    * The family's closing check, one row per position the card enumerates:
    * after it, `field-no-consumers` reports no inert verdict on any of these,
    * and the control — a child field nothing draws or names — stays inert in
-   * every one of the same stacks.
+   * every one of the same stacks. "The per-row expand form" here is the form
+   * the spec derives (`deriveInlineRowFormFields`) and an authored
+   * `formFields` list the form is offered for — not a form opened with no
+   * field list (the boundary above).
    */
   describe('the enumeration pin', () => {
     const form = (subform: AnyRec): { form: AnyRec } => ({ form: { type: 'simple', data, subforms: [subform] } });
@@ -1161,7 +1216,7 @@ describe('[#21091] validateFieldConsumers — an inline collection reads its joi
       ["a subform entry's `relationshipField`", stack(LOOKUP, form({ childObject: 'itm', columns: [{ name: 'name' }], relationshipField: 'ord' })), 'itm.ord'],
       ['an authored `inlineColumns` member', stack({ ...LOOKUP, inlineEdit: 'grid', inlineColumns: [{ name: 'notes' }] }), 'itm.notes'],
       ['an authored `subforms[].columns` member', stack(LOOKUP, form({ childObject: 'itm', columns: [{ name: 'spec' }] })), 'itm.spec'],
-      ["a detail entry's authored `formFields` member", stack(LOOKUP, { details: [{ childObject: 'itm', columns: [{ name: 'qty' }], formFields: ['frozen'] }] }), 'itm.frozen'],
+      ["a detail entry's authored `formFields` member", stack(LOOKUP, { details: [{ childObject: 'itm', relationshipField: 'ord', columns: [{ name: 'qty' }], formFields: ['frozen'], inlineMode: 'form' }] }), 'itm.frozen'],
       [
         'a `record:line_items` block\'s column',
         {
@@ -1175,6 +1230,23 @@ describe('[#21091] validateFieldConsumers — an inline collection reads its joi
         },
         'itm.notes',
       ],
+      ...([
+        ['a `record:line_items` block\'s `sort[].field`', { sort: [{ field: 'spec', order: 'asc' }] }, 'itm.spec'],
+        ['a `record:line_items` block\'s field-keyed `filter`', { filter: { frozen: 'x' } }, 'itm.frozen'],
+        ['a `record:line_items` block\'s rule-array `filter`', { filter: [{ field: 'notes', operator: 'equals', value: 'x' }] }, 'itm.notes'],
+      ] as [string, AnyRec, string][]).map(([label, extra, key]): [string, AnyRec, string] => [
+        label,
+        {
+          ...stack(LOOKUP),
+          pages: [{
+            name: 'ord_record',
+            type: 'record',
+            object: 'ord',
+            regions: [{ name: 'main', components: [{ type: 'record:line_items', properties: { childObject: 'itm', relationshipField: 'ord', columns: [{ name: 'qty' }], ...extra } }] }],
+          }],
+        },
+        key,
+      ]),
     ];
 
     it.each(rows)('%s is not reported', (_label, s, key) => {
