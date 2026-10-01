@@ -5043,7 +5043,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
   },
   {
     id: 'action-block-endpoint-spelling-retired',
-    order: 54,
+    order: 55,
     text:
       'It also gives the executor target of an action one spelling on the page blocks that run '
       + 'one. `ActionSchema` has always refused `endpoint` with the rename to `target`, while the '
