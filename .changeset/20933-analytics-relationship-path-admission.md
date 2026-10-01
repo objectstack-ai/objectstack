@@ -8,7 +8,7 @@ Clause-②: no (narrowing)
 
 <!-- adr-0087: not-required (no-migration-prescription) No authorable key, export or stored shape is removed or renamed. The change refuses, or row-scopes, what the native-SQL strategy read from an object reached through an undeclared relationship path, the way a declared join to the same object already was; there is nothing for `objectstack migrate meta` to rewrite. -->
 
-**BREAKING for analytics queries on a SQL deployment that read a related object through a relationship path the cube does not declare.**
+**BREAKING for analytics queries that read a related object through a relationship path the cube does not declare: on a SQL deployment, and on `POST /api/v1/analytics/sql` whichever strategy serves the cube.**
 
 **What changed.** The analytics door admits and row-scopes one object set
 before either strategy runs. It held the cube's base object and the joins the

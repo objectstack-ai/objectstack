@@ -8,7 +8,7 @@ Clause-②: yes (narrowing)
 
 <!-- adr-0087: not-required (no-migration-prescription) No authorable key, export or stored shape is removed or renamed. The change refuses analytics queries that read a field the caller's field-level permissions hide, which the engine already refuses on the data API and on the ObjectQL strategy, so there is nothing for `objectstack migrate meta` to rewrite. The one public-surface addition is a new optional service hook. -->
 
-**BREAKING for analytics queries on a SQL deployment that read a field the caller may not read.**
+**BREAKING for analytics queries that read a field the caller may not read: on a SQL deployment, and on `POST /api/v1/analytics/sql` whichever strategy serves the cube.**
 
 **What changed.** `POST /api/v1/analytics/query`, `POST /api/v1/analytics/sql`
 and `POST /api/v1/analytics/dataset/query` now judge every field a query reads
