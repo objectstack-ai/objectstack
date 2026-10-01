@@ -287,7 +287,12 @@ describe('PageAccordionProps variant (#6776)', () => {
 // same file's `ComponentRegistry.register('accordion', …)` publishes the key to
 // the Studio block designer at `:1220` (the `items` input, documented as
 // `[{ label, icon?, collapsed?, children }]`). Measured at the pin this repo
-// builds against — `.objectui-sha` = `e420df310`. Re-derived at that pin
+// builds against — `.objectui-sha` = `31971ff1e`. Re-derived at that pin
+// 2026-10-01: `containers.tsx` is byte-identical across the hop from
+// `e420df310` (`git diff --quiet`), and both anchors were re-READ in place and
+// still say what this block says: the icon block `1171-1177`, inside
+// `PageAccordionRenderer`'s `AccordionTrigger`, and the input `1220`, inside
+// the `register('accordion', …)` inputs. At `e420df310`, re-derived at that pin
 // 2026-09-30: `containers.tsx` changed again across the hop from `db11afd49` (40
 // insertions, 26 deletions: objectui#11166's `page:header` breadcrumb slot and
 // objectui#11212's fail-closed permission gates), every hunk of it at `:1286`
@@ -402,8 +407,13 @@ describe('PageTabsProps items[].value / items[].count (#5775)', () => {
 // same file's `ComponentRegistry.register('tabs', …)` publishes the key to the
 // Studio block designer at `:1005` (the `items` input, documented as
 // `[{ label, value?, icon?, count?, visibleWhen?, children }]`). Measured at
-// the pin this repo builds against — `.objectui-sha` = `e420df310`. Re-derived at
-// that pin 2026-09-30: `containers.tsx` changed again across the hop from
+// the pin this repo builds against — `.objectui-sha` = `31971ff1e`. Re-derived at
+// that pin 2026-10-01: `containers.tsx` is byte-identical across the hop from
+// `e420df310` (`git diff --quiet`), and both anchors were re-READ in place and
+// still say what this block says: the icon block `946-952`, inside
+// `PageTabsRenderer`'s `TabsTrigger`, and the input `1005`, inside the
+// `register('tabs', …)` inputs. At `e420df310`, re-derived at that pin
+// 2026-09-30: `containers.tsx` changed again across the hop from
 // `db11afd49` (40 insertions, 26 deletions: objectui#11166's `page:header`
 // breadcrumb slot and objectui#11212's fail-closed permission gates), every hunk
 // of it at `:1286` or below, so both anchors were re-READ in place and NEITHER
@@ -3677,7 +3687,11 @@ describe('ObjectKanbanPropsSchema quickAdd is retired (#17260)', () => {
 // #9881 and commit 60e0f900a recorded the accordion and tab items; these two close the set.
 //
 // The button record re-measured at the pin this repo builds against —
-// `.objectui-sha` = `e420df310`, re-derived there 2026-09-30: `button.tsx`,
+// `.objectui-sha` = `31971ff1e`, re-derived there 2026-10-01: `button.tsx`,
+// `lazy-icon.tsx`, `resolve-icon.ts` and the generated
+// `lucide-record-icon-names.ts` are byte-identical to `e420df310`
+// (`git diff --quiet`), so every anchor below holds unmoved and was re-read in
+// place. At `e420df310`, 2026-09-30: `button.tsx`,
 // `lazy-icon.tsx`, `resolve-icon.ts` and the generated
 // `lucide-record-icon-names.ts` are byte-identical to `db11afd49`, so every
 // anchor below holds unmoved and was re-read in place. At `db11afd49`,
@@ -3823,8 +3837,12 @@ describe('ObjectMetricPropsSchema icon liveness (#10053)', () => {
 //
 // The acceptance the card names, pinned: each row's KEY SET is the one the
 // renderer's read points support at the pin this repo builds against
-// (`.objectui-sha` = `e420df310`; re-measured there 2026-09-30 — all three
-// renderers changed on the hop off `db11afd49`, `ObjectMap.tsx` in one docblock
+// (`.objectui-sha` = `31971ff1e`; re-measured there 2026-10-01 —
+// `ObjectMap.tsx`, `ObjectGantt.tsx`, `ObjectTree.tsx` and `record-source.ts`
+// are byte-identical across the hop off `e420df310` (`git diff --quiet`), so
+// every anchor below holds unmoved and the set of `schema.*` keys each renderer
+// reads is the one recorded at `e420df310`. At `e420df310`, 2026-09-30 — all
+// three renderers changed on the hop off `db11afd49`, `ObjectMap.tsx` in one docblock
 // only, `ObjectGantt.tsx` +85/-26 (objectui#11141's inclusive date-only end,
 // objectui#8348, objectui#11070) and `ObjectTree.tsx` +29/-26, and the set of
 // `schema.*` keys each reads is the same at both pins. ⚠️ One read changed

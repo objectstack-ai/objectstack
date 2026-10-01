@@ -772,8 +772,12 @@ export const PageTabsProps = strictObject({
      * false candidate a component over).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `e420df310`; re-derived at that pin 2026-09-30 —
-     * `containers.tsx` changed again across the hop from `db11afd49` (40
+     * (`.objectui-sha` = `31971ff1e`; re-derived at that pin 2026-10-01 —
+     * `containers.tsx` is byte-identical across the hop from `e420df310`
+     * (`git diff --quiet`), so both anchors were re-READ in place, each still
+     * the read point this record names: `946-952` and `1005`. At `e420df310`
+     * (2026-09-30) `containers.tsx` changed again across the hop from
+     * `db11afd49` (40
      * insertions, 26 deletions: objectui#11166's `page:header` breadcrumb slot
      * and objectui#11212's fail-closed permission gates), every hunk at `:1286`
      * or below, so both anchors were re-READ in place and NEITHER moved, each
@@ -2064,8 +2068,12 @@ export const PageAccordionProps = strictObject({
      * re-derive the same false candidate).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `e420df310`; re-derived at that pin 2026-09-30 —
-     * `containers.tsx` changed again across the hop from `db11afd49` (40
+     * (`.objectui-sha` = `31971ff1e`; re-derived at that pin 2026-10-01 —
+     * `containers.tsx` is byte-identical across the hop from `e420df310`
+     * (`git diff --quiet`), so both anchors were re-READ in place, each still
+     * the read point this record names: `1171-1177` and `1220`. At `e420df310`
+     * (2026-09-30) `containers.tsx` changed again across the hop from
+     * `db11afd49` (40
      * insertions, 26 deletions: objectui#11166's `page:header` breadcrumb slot
      * and objectui#11212's fail-closed permission gates), every hunk at `:1286`
      * or below, so both anchors were re-READ in place and NEITHER moved, each
@@ -5268,8 +5276,12 @@ const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * `object-tree` (objectui `plugin-tree/src/ObjectTree.tsx` plus the registry
  * shell `plugin-tree/src/index.tsx`, read at the pin this repo builds against
- * — `.objectui-sha` = `e420df310`, re-measured there 2026-09-30:
- * `plugin-tree/src/index.tsx` is byte-identical to `db11afd49`;
+ * — `.objectui-sha` = `31971ff1e`, re-measured there 2026-10-01:
+ * `plugin-tree/src/index.tsx`, `ObjectTree.tsx` and
+ * `core/src/utils/record-source.ts` are byte-identical to `e420df310`
+ * (`git diff --quiet`), so every anchor below holds unmoved and was re-read in
+ * place. At `e420df310` (2026-09-30)
+ * `plugin-tree/src/index.tsx` was byte-identical to `db11afd49`;
  * `core/src/utils/record-source.ts` changed (+38/-27) and its three rungs MOVED
  * by 8 with their text byte-identical; `ObjectTree.tsx` changed (+29/-26,
  * objectui#8348), and TWO anchors changed CONTENT, both toward this row, and
@@ -5488,8 +5500,20 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * `object-timeline` (objectui `plugin-timeline/src/ObjectTimeline.tsx`, the
  * presentational `plugin-timeline/src/renderer.tsx` it composes into, and the
  * registry shell `plugin-timeline/src/index.tsx` — all read at the pin this
- * repo builds against (`.objectui-sha` = `e420df310`), re-measured there
- * 2026-09-30: `ObjectTimeline.tsx` is byte-identical to `db11afd49`, so every
+ * repo builds against (`.objectui-sha` = `31971ff1e`), re-measured there
+ * 2026-10-01: `renderer.tsx` is byte-identical to `e420df310`, so its three
+ * anchors hold unmoved; `ObjectTimeline.tsx` changed (+42/-2, objectui#8654:
+ * a typed `navigation` member on the component's props, and the navigation
+ * read without its cast), every anchor below line 173 MOVING by 35 (by 40
+ * past the navigation read) with its cited text byte-identical, and ONE
+ * changing CONTENT, toward this row: the navigation binding `:753-756` ->
+ * `:793-796` now reads `schema.navigation` where it read
+ * `(schema as any).navigation`; `index.tsx` changed (+21/-0, objectui#8654: a
+ * `navigation` input on both registrations, with its shared description), the
+ * `variant` input MOVING `374-375` -> `393-394` byte-identical and `:333` not
+ * moving. The `schema.*` read set of all three is unchanged — `navigation`
+ * was read before, through the cast. At `e420df310` (2026-09-30)
+ * `ObjectTimeline.tsx` was byte-identical to `db11afd49`, so every
  * anchor in it held unmoved and was re-read in place; `index.tsx` changed
  * (+17/-0, objectui#8220: `filter` / `sort` inputs on both registrations, in
  * the array forms this row declares, and their shared descriptions above the
@@ -5540,32 +5564,32 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * directions: nothing accepted a real key and nothing refused a typo.
  *
  * Read points per key, in `ObjectTimeline.tsx` unless named otherwise:
- * `objectName` (`:256` the fetch gate, `:336-339` the object-def load through
- * `useSettledSchema`, `:374` the `fetchesForItself` gate — the check that
+ * `objectName` (`:291` the fetch gate, `:371-374` the object-def load through
+ * `useSettledSchema`, `:409` the `fetchesForItself` gate — the check that
  * sat inside the fetch effect at `:420` is hoisted to render scope at this
- * pin, where `:375` also subscribes the invalidation bus on it
- * (objectui#10623) and the effect reads it at `:479` — `:381` / `:439`
+ * pin, where `:410` also subscribes the invalidation bus on it
+ * (objectui#10623) and the effect reads it at `:514` — `:416` / `:474`
  * inside the fetch effect,
- * `:750` the pull-to-refresh gate, `:561` the entry composition and `:755`
- * the navigation binding), `timeline` (`:273`,
+ * `:785` the pull-to-refresh gate, `:596` the entry composition and `:795`
+ * the navigation binding), `timeline` (`:308`,
  * the canonical nested config every field resolution prefers), `filter`
- * (`:361`, read once through `useResolvedFilter`, which resolves its context
- * tokens — objectui#10666 — and holds the result; `:362` keys the fetch on
- * it and `:440` sends it to `$filter`, where `f8a9d0fb0` sent `schema.filter`
- * verbatim at `:341` / `:405`), `sort` (`:364`, `:441` — through
+ * (`:396`, read once through `useResolvedFilter`, which resolves its context
+ * tokens — objectui#10666 — and holds the result; `:397` keys the fetch on
+ * it and `:475` sends it to `$filter`, where `f8a9d0fb0` sent `schema.filter`
+ * verbatim at `:341` / `:405`), `sort` (`:399`, `:476` — through
  * the shared `convertSortToQueryParams` sink, as `object-calendar`'s does),
- * `limit` (`:442`, the fetch's one top-level `$top`, through
+ * `limit` (`:477`, the fetch's one top-level `$top`, through
  * `resolveRowLimit(schema.limit, DEFAULT_TIMELINE_LIMIT)` with the default
- * `100` at `:29` and the refused-cap diagnostic at `:290`), `items` (`:254`, `:374`, `:546`,
- * `:771` — the authored pass-through that short-circuits the object query),
- * `data` (`:255`, `:374`, `:501`, `:503` — the pre-fetched record source,
+ * `100` at `:29` and the refused-cap diagnostic at `:325`), `items` (`:289`, `:409`, `:581`,
+ * `:811` — the authored pass-through that short-circuits the object query),
+ * `data` (`:290`, `:409`, `:536`, `:538` — the pre-fetched record source,
  * read off REACT PROPS rather than `schema`; the door's own docblock carries
  * how an authored key reaches that channel and why a `schema.*` sweep alone
  * publishes a false refusal),
- * `descriptionField` (`:537`), `mapping` (`:510`, `:535`, `:537`, `:538`),
- * `variant` (`:809`) and `navigation` (`:753-756` → `:888` → `:943-944`).
+ * `descriptionField` (`:572`), `mapping` (`:545`, `:570`, `:572`, `:573`),
+ * `variant` (`:849`) and `navigation` (`:793-796` → `:928` → `:983-984`).
  * Four more are read by the presentational renderer off the schema this
- * component spreads into it (`effectiveSchema`, `:872-891`): `dateFormat`
+ * component spreads into it (`effectiveSchema`, `:912-931`): `dateFormat`
  * (`plugin-timeline/src/renderer.tsx:1569`, every variant — its number was the
  * same at `53ded82bf` and `87af769e9`, as `plugin-timeline/src/index.tsx:333`'s
  * also was, which is why the number alone is never the reading) and the gantt
@@ -5580,8 +5604,8 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  *    ({@link OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE}) — the runtime handoff
  *    `ListView` emits, not a second authoring spelling;
  *  - `bind` — the objectui data-scope key the section header above rules out
- *    for every block in this family (`:294` here);
- *  - `className` (`:875`) — a node-level key on `PageComponentSchema`, not a
+ *    for every block in this family (`:329` here);
+ *  - `className` (`:915`) — a node-level key on `PageComponentSchema`, not a
  *    per-block prop;
  *  - `onItemClick` / `onRowClick` — host callbacks JSON cannot carry.
  *
@@ -5595,10 +5619,10 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * reference, for the reason the ruling gives.
  *
  * ⚠️ `variant: 'gantt'` is declared because the registration declares it
- * (`plugin-timeline/src/index.tsx:374-375`) and the renderer reads it — but the
+ * (`plugin-timeline/src/index.tsx:393-394`) and the renderer reads it — but the
  * OBJECT-BOUND composed path REFUSES it loudly (objectui#6655,
- * `ObjectTimeline.tsx:809-811`:
- * `:809` gates on `!hasAuthoredItems && schema.variant === 'gantt'` and `:811`
+ * `ObjectTimeline.tsx:849-851`:
+ * `:849` gates on `!hasAuthoredItems && schema.variant === 'gantt'` and `:851`
  * renders `timeline-unsupported-variant`. ⚠️ The `:518` this clause carried is
  * that gate at the RETIRED `53ded82bf` and a comment line at this pin. It sat on
  * a line the 2026-09-22 conversion never touched — and so did eight other
@@ -5650,7 +5674,17 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
    * first publishes a refusal for a key the renderer honours.
    *
    * Read points at the pin this repo builds against (`.objectui-sha` =
-   * `e420df310`, re-READ there 2026-09-30 — the file is byte-identical to
+   * `31971ff1e`, re-READ there 2026-10-01 — the file changed across the hop
+   * from `e420df310` (+42/-2, objectui#8654's typed `navigation` member and
+   * cast-free navigation read), all of it above or away from these reads, so
+   * every anchor MOVED by 35 with its cited read byte-identical: `:255` ->
+   * `:290`, `:374` -> `:409`, `:479` -> `:514`, `:501` -> `:536`, `:503` ->
+   * `:538`, `:653` -> `:688`. One was re-pointed rather than moved: the
+   * start/end bindings this record carried as `621-622` began one line early,
+   * on the `rawData.map` head, at `e420df310` too, where the two bindings are
+   * `622-623`; they are `657-658` here. `SchemaRenderer.tsx` and
+   * `record-source.ts` are byte-identical, so the prop channel above still
+   * carries the key. At `e420df310`, 2026-09-30, the file was byte-identical to
    * `db11afd49`, so every anchor held unmoved; and the prop channel above
    * still carries the key here: `SchemaRenderer` strips an authored `data`
    * prop only on the types `core`'s `RECORD_SOURCE_DATA_ARM_BY_TYPE` puts on
@@ -5669,13 +5703,13 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
    * `recordDisplayValueAt` (`:653`, objectui#10530), not `item[titleField]`.
    * At `f8a9d0fb0` the file was byte-identical to `62597c588` and
    * `87af769e9`, where they were re-READ 2026-09-22), all in
-   * `ObjectTimeline.tsx`: `:255` seeds the loading state off it, `:374`
+   * `ObjectTimeline.tsx`: `:290` seeds the loading state off it, `:409`
    * SKIPS the object query when it is present (the gate the effect reads at
-   * `:479`), `:501` tracks it, and `:503`
+   * `:514`), `:536` tracks it, and `:538`
    * is the row source itself — `(props as any).data || boundData ||
    * fetchedData`, so it wins over both the data-scope binding and the fetch.
    * Unlike `items` one line down, these rows are RECORDS: they go through the
-   * same `timeline` field bindings a fetched row takes (`:621-622`, `:653`).
+   * same `timeline` field bindings a fetched row takes (`:657-658`, `:688`).
    */
   data: z.array(z.unknown()).optional()
     .describe("Pre-fetched records — read FIRST as the rail's row source, ahead of the data-scope binding and the fetch, and composed into entries through the same `timeline` field bindings a fetched row takes; authoring it suppresses the object query entirely. Distinct from `items`, which is the already-composed entry shape and wins over this key when both are written"),
@@ -5868,20 +5902,27 @@ export const ComponentPropsMap = {
   // set from this map's keys), on the three-part evidence that vocabulary's
   // string-arm ledger asks of a type admitted without an enum member — all
   // measured at the pin this repo builds against (`.objectui-sha` =
-  // `e420df310`; re-measured there 2026-09-30: `data-list.tsx`,
+  // `31971ff1e`; re-measured there 2026-10-01: `public-blocks.ts` and
+  // `block-types.ts` byte-identical to `e420df310`; `data-list.tsx` changed
+  // (+48/-6, objectui#11168 slice 2: both registrations publish their
+  // spec-declared inputs), the `definition-list` registration not moving and
+  // the `repeater` one MOVING `205` -> `233`, each still in the `element`
+  // namespace; `block-config.ts` changed (+17/-4) above the two inspectors,
+  // which MOVED `283-317` -> `296-330` byte-identical. At `e420df310`,
+  // 2026-09-30: `data-list.tsx`,
   // `public-blocks.ts` and `block-types.ts` byte-identical to `db11afd49`, and
   // `block-config.ts` changed (+12/-3) outside the two inspectors — two
   // line-neutral one-line edits above them and an insertion below — so every
   // anchor below held unmoved; at `db11afd49`, 2026-09-29, all four files were
   // byte-identical to `dd3f7e1be`):
   //  - registration: `@object-ui/components` registers both in the `element`
-  //    namespace (`components/src/renderers/basic/data-list.tsx:75`, `:205`);
+  //    namespace (`components/src/renderers/basic/data-list.tsx:75`, `:233`);
   //  - publication: both are `PUBLIC_BLOCKS` members
   //    (`core/src/registry/public-blocks.ts:117-118`), which is how the
   //    tracked `sdui.manifest.json` carries both;
   //  - authorship: the Studio page designer's palette offers both
   //    (`app-shell/src/views/metadata-admin/previews/block-types.ts:136-137`),
-  //    each with its own inspector (`previews/block-config.ts:283-317`), so
+  //    each with its own inspector (`previews/block-config.ts:296-330`), so
   //    stored pages hold them.
   'element:definition-list': ElementDefinitionListPropsSchema,
   'element:repeater': ElementRepeaterPropsSchema,
@@ -5915,7 +5956,10 @@ export const ComponentPropsMap = {
   // authority for map and gantt while tree's rung-1 `data` read stayed
   // undeclared on every face. Key sets measured from the renderers' read
   // points at the pin this repo builds against (`.objectui-sha` =
-  // `e420df310`), all three re-measured there 2026-09-30 (all three renderers
+  // `31971ff1e`), all three re-measured there 2026-10-01 (`ObjectMap.tsx`,
+  // `ObjectGantt.tsx` and `ObjectTree.tsx` are byte-identical to `e420df310`,
+  // so no declared key set moved and no read point died. At `e420df310`,
+  // 2026-09-30, all three renderers
   // changed and were re-READ: `ObjectMap.tsx` in one docblock, `ObjectGantt.tsx`
   // in objectui#11141's inclusive date-only end, and `ObjectTree.tsx`, whose
   // rung-1 call now passes the `view-data` arm this row declares and whose
@@ -5949,7 +5993,13 @@ export const ComponentPropsMap = {
   // it — so `object-timeline` was unjudged in both directions, a real key and
   // a typo riding through alike. Key set measured from the renderer's read
   // points at the pin this repo builds against (`.objectui-sha` =
-  // `e420df310`), re-measured there 2026-09-30 (`ObjectTimeline.tsx`
+  // `31971ff1e`), re-measured there 2026-10-01 (`renderer.tsx` byte-identical
+  // to `e420df310`; `ObjectTimeline.tsx` and `index.tsx` changed for
+  // objectui#8654 — a typed `navigation` member read without its cast, and a
+  // `navigation` input on both registrations — both re-READ, the `schema.*`
+  // read set unchanged, since `navigation` was already read and is declared
+  // on this row, and every anchor moved with its text byte-identical but the
+  // one navigation read. At `e420df310`, 2026-09-30: `ObjectTimeline.tsx`
   // byte-identical to `db11afd49`; `index.tsx` gained `filter` / `sort` inputs,
   // objectui#8220, and `renderer.tsx` changed, objectui#11141, both re-READ,
   // the `schema.*` read set unchanged and every anchor moved with its text
