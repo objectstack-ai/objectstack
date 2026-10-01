@@ -1868,7 +1868,7 @@ describe('#21127 — a stack authoring `mapping.connectorSource` lints clean, an
     // `object.externalSharingModel` is `planned` + `authorWarn` in tree — the
     // legal shape: a consumer is being built, keep the key, it does nothing yet.
     const findings = lintLivenessProperties({
-      objects: [{ ...FX_ACCOUNT, externalSharingModel: 'read' }],
+      objects: [{ ...FX_ACCOUNT, externalSharingModel: 'private' }],
       mappings: [FX_PULL],
     });
     const planned = findings.filter((f) => f.rule === 'liveness-planned-property');

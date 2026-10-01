@@ -119,7 +119,7 @@ beforeAll(() => {
     dirs[label] = dir;
   };
   make('card', stack());
-  make('control', stack({ externalSharingModel: 'read' }));
+  make('control', stack({ externalSharingModel: 'private' }));
 });
 
 afterAll(() => {
