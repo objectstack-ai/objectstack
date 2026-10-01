@@ -118,9 +118,14 @@ function project(row: Record<string, unknown>, fields: unknown): Record<string, 
     return out;
 }
 
+/** Plain field equality only — a combinator or an operator value is refused, never misread. */
 function matches(row: Record<string, unknown>, where: unknown): boolean {
     if (!where || typeof where !== 'object') return true;
-    return Object.entries(where as Record<string, unknown>).every(([k, v]) => row[k] === v);
+    return Object.entries(where as Record<string, unknown>).every(([k, v]) => {
+        if (k.startsWith('$')) throw new Error(`stub engine: combinator '${k}' is not implemented`);
+        if (v !== null && typeof v === 'object') throw new Error(`stub engine: operator value on '${k}' is not implemented`);
+        return row[k] === v;
+    });
 }
 
 function makeProtocol(rows: Record<string, Record<string, unknown>[]> = ROWS) {
