@@ -62,7 +62,6 @@ const result = AIChatWindowProps.parse(data);
 | **description** | `string` | optional | Action description, forwarded to the runner — the parameter dialog shows it under its title |
 | **target** | `string` | optional | Executor target, forwarded to the runner: the URL, script name, flow name or API endpoint, per `actionType` |
 | **openIn** | `Enum<'self' \| 'new-tab'>` | optional | For a `url` action: `self` navigates in place, `new-tab` opens a new browser tab |
-| **endpoint** | `string` | optional | API endpoint for an `api` action, forwarded to the runner |
 | **method** | `string` | optional | HTTP method for an `api` action, forwarded to the runner |
 | **bodyExtra** | `any` | optional | Static request-body fields for an `api` action, forwarded to the runner |
 | **bodyShape** | `any` | optional | How an `api` action shapes its request body, forwarded to the runner |
@@ -118,7 +117,6 @@ const result = AIChatWindowProps.parse(data);
 | **params** | `any` | optional | Action parameters, forwarded to the runner: an array is the list of inputs to collect from the user; an object is forwarded as the static parameter values |
 | **target** | `string` | optional | Executor target, forwarded to the runner: the URL, script name, flow name or API endpoint, per `actionType` |
 | **openIn** | `Enum<'self' \| 'new-tab'>` | optional | For a `url` action: `self` navigates in place, `new-tab` opens a new browser tab |
-| **endpoint** | `string` | optional | API endpoint for an `api` action, forwarded to the runner |
 | **method** | `string` | optional | HTTP method for an `api` action, forwarded to the runner |
 | **bodyExtra** | `any` | optional | Static request-body fields for an `api` action, forwarded to the runner |
 | **bodyShape** | `any` | optional | How an `api` action shapes its request body, forwarded to the runner |

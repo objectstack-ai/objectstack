@@ -287,12 +287,15 @@ describe('createDatasource', () => {
 
 describe('updateDatasource', () => {
   it('patches a runtime record and rewraps the secret, removing the old ref', async () => {
+    // Seeded spec-valid (#21058): a supplied secret puts the whole record under
+    // `DatasourceSchema`, and a row with no `config` is not one.
     const { service, store, secrets, removedSecrets } = makeHarness({
       seed: [
         {
           name: 'reporting',
           driver: 'postgres',
           origin: 'runtime',
+          config: { host: 'db.internal', database: 'analytics' },
           external: { credentialsRef: 'sys_secret://datasource/reporting#0' },
         },
       ],
@@ -314,9 +317,19 @@ describe('updateDatasource', () => {
 
   it('preserves the existing credentialsRef when external is patched without a new secret', async () => {
     const ref = 'sys_secret://datasource/reporting#0';
+    // Seeded spec-valid (#21058): `allowWrites` is a federation key, which
+    // `DatasourceSchema` admits only on a non-managed datasource, and the
+    // patched record is judged whole.
     const { service, store } = makeHarness({
       seed: [
-        { name: 'reporting', driver: 'postgres', origin: 'runtime', external: { credentialsRef: ref } },
+        {
+          name: 'reporting',
+          driver: 'postgres',
+          schemaMode: 'external',
+          origin: 'runtime',
+          config: { host: 'db.internal', database: 'analytics' },
+          external: { credentialsRef: ref },
+        },
       ],
     });
     await service.updateDatasource('reporting', { external: { allowWrites: true } });

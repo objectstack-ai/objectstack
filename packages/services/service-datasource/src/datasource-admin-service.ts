@@ -24,13 +24,18 @@
  *    service, and is separate from the one above — rows written before #8078
  *    can and do hold inline cleartext, which is why it is stated on its own
  *    rather than treated as a consequence.
+ *  - A record reaches the store only once `DatasourceSchema` accepts it as it
+ *    will be stored, the bound `credentialsRef` included (#21058) — the same
+ *    contract the build and meta doors enforce, so this door cannot persist a
+ *    row the meta read path then reports `valid: false`. A `label`/`active`-only
+ *    edit is the one write not judged.
  *  - Removal is refused while objects are still bound to the datasource — and
  *    (#6504) equally refused when the bound-object count could not be taken
  *    over a COMPLETE object set, since an under-count and "nothing is bound"
  *    are the same zero.
  */
 
-import { validateDriverConfig } from '@objectstack/spec/data';
+import { DatasourceSchema, validateDriverConfig } from '@objectstack/spec/data';
 import type { IPubSub } from '@objectstack/spec/contracts';
 import { assertDatasourcePoolSupported } from './datasource-pool-support.js';
 import { datasourceConnectivityChanged } from './datasource-connectivity-change.js';
@@ -48,6 +53,42 @@ import type { Logger } from './logger.js';
 
 /** Datasource name rule (mirrors `DatasourceSchema.name`). */
 const NAME_RE = /^[a-z_][a-z0-9_]*$/;
+
+/**
+ * Stand-in for the `credentialsRef` a supplied secret WILL be bound under,
+ * used only by the record judgement ({@link DatasourceAdminService.recordRefusal}).
+ *
+ * The real ref does not exist until `writeSecret` runs, and the judgement has
+ * to run before anything is written — a refused record must leave no secret
+ * behind. Any non-empty string is equivalent here: `DatasourceSchema`'s
+ * refinements read a binding through the connect path's own truthy test
+ * (`if (credentialsRef)`), never through the ref's content. It never reaches
+ * the store: the judged record is a copy.
+ */
+const PENDING_SECRET_REF = 'pending:secret-binding';
+
+/**
+ * Stand-in `name` for the record the test door judges. A probe's subject is
+ * the connection, not the datasource's identity: the console's "Test
+ * connection" sends `{ driver, config, secret }` and no name at all, and
+ * the test door has never judged one. `DatasourceSchema` requires a name, so
+ * the judged copy carries this fixed, rule-conforming one.
+ */
+const PROBE_DRAFT_NAME = 'connection_test_draft';
+
+/**
+ * The patch keys whose write leaves the record judgement out (#21058). Exactly
+ * the two the existing gates already exempt: renaming a datasource and taking
+ * it out of service (`active: false`) must stay possible on a row stored before
+ * a gate landed. Every other patched key, and any supplied secret, is a change
+ * to what the record binds, and the record is judged whole.
+ */
+const RECORD_JUDGED_PATCH_KEYS = ['driver', 'schemaMode', 'config', 'external', 'pool'] as const;
+
+/** A copy of `record` carrying the binding a supplied secret is about to create. */
+function withPendingSecretRef(record: StoredDatasource): StoredDatasource {
+  return { ...record, external: { ...(record.external ?? {}), credentialsRef: PENDING_SECRET_REF } };
+}
 
 /**
  * [#13805] Cluster channel for datasource record writes — the DRIVER
@@ -538,6 +579,18 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
+    // [#21058] And the pairing, by the same reasoning one level up: a mongo
+    // `url` that names no user (or a composed config with no `username`)
+    // drops a supplied secret on the factory's floor — `buildMongoAuth` /
+    // `buildMongoUrl` never read it — so the probe connects anonymously and
+    // reports green for a pairing `createDatasource` refuses. Judged on the
+    // record a Save would persist, as create judges it, minus the identity the
+    // probe does not have.
+    const refusal = this.recordRefusal(
+      this.withSecretBinding({ ...this.toRecord({ ...input, name: PROBE_DRAFT_NAME }), origin: 'runtime' }, secret),
+      'This connection draft is not a valid datasource.',
+    );
+    if (refusal) return { ok: false, error: refusal };
     const queryTimeoutMs = (input.external as { queryTimeoutMs?: number } | undefined)?.queryTimeoutMs;
     try {
       return await this.config.probe({
@@ -576,6 +629,9 @@ export class DatasourceAdminService implements IDatasourceAdminService {
       ...this.toRecord(input),
       origin: 'runtime',
     };
+    // [#21058] Before the secret write: a refused record must leave nothing
+    // behind, the bound secret included.
+    this.assertValidRecord(this.withSecretBinding(record, secret));
 
     if (secret) {
       const credentialsRef = await this.config.writeSecret(secret, { name: input.name });
@@ -640,6 +696,21 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // takes it out of service.
     if (patch.pool !== undefined || patch.driver !== undefined) {
       assertDatasourcePoolSupported({ driver: merged.driver, pool: merged.pool, name });
+    }
+    // [#21058] The whole merged record, with the binding it will carry — the
+    // existing `credentialsRef` (preserved above), or the one a supplied secret
+    // is about to write. Before `writeSecret`, so a refusal neither mints a new
+    // secret nor unbinds the old one. Skipped only for a `label`/`active`-only
+    // write, the exemption the two gates above already make.
+    //
+    // Judged BEFORE the redacted-credential restore below, for the reason that
+    // block states: the subject is what the author wrote, not the stored
+    // material the read path withheld from them. The cross-field verdicts do
+    // not move across the restore — it grafts back credential keys and swaps a
+    // url for its stored twin, which names the same user (`redactUrlPassword`
+    // keeps the userinfo username).
+    if (secret !== undefined || RECORD_JUDGED_PATCH_KEYS.some((key) => patch[key] !== undefined)) {
+      this.assertValidRecord(this.withSecretBinding(merged, secret));
     }
 
     if (secret) {
@@ -963,6 +1034,47 @@ export class DatasourceAdminService implements IDatasourceAdminService {
       .map((issue) => (issue.path.length ? `config.${issue.path.join('.')}: ${issue.message}` : issue.message))
       .join('\n');
     throw new Error(`Invalid configuration for driver '${driver}'.\n${detail}`);
+  }
+
+  /**
+   * Judge a record as it will be persisted against `DatasourceSchema` — the
+   * contract the build door (`os build`) and the meta door
+   * (`PUT /api/v1/meta/datasource/:name`) already enforce (#21058).
+   *
+   * {@link assertValidConfig} sees `config` alone, so every refinement that
+   * reads two fields at once never ran here: a mongo `config.url` naming no
+   * user (or a composed config with no `username`) beside a bound
+   * `external.credentialsRef` — a pair whose secret the driver factory never
+   * reads — and `schemaMode: 'external'` with no `external` block. The admin
+   * door accepted both, and the meta read path reported the stored row
+   * `valid: false` from then on.
+   *
+   * The WHOLE schema is parsed, deliberately, not a picked subset of its
+   * refinements: zod runs a refinement only once the record has parsed
+   * structurally, so a record that fails structurally (no `config`, a pool key
+   * the schema does not declare) would otherwise skip the very refinements
+   * this judges. ⛔ No refinement is restated here; the spec is the one copy.
+   *
+   * @returns the refusal message, or `undefined` when the record is valid.
+   */
+  private recordRefusal(record: StoredDatasource, heading: string): string | undefined {
+    const result = DatasourceSchema.safeParse(record);
+    if (result.success) return undefined;
+    const detail = result.error.issues
+      .map((issue) => (issue.path.length ? `${issue.path.join('.')}: ${issue.message}` : issue.message))
+      .join('\n');
+    return `${heading}\n${detail}`;
+  }
+
+  /** {@link recordRefusal} for a write door: refuses by throwing (a `400` at the route). */
+  private assertValidRecord(record: StoredDatasource): void {
+    const refusal = this.recordRefusal(record, `Invalid datasource '${record.name}'.`);
+    if (refusal) throw new Error(refusal);
+  }
+
+  /** `record` as the record judgement must see it: with the binding `secret` will create, when one is supplied. */
+  private withSecretBinding(record: StoredDatasource, secret: SecretInput | undefined): StoredDatasource {
+    return secret ? withPendingSecretRef(record) : record;
   }
 
   private assertValidName(name: string | undefined): void {
