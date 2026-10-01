@@ -83,6 +83,7 @@ import type { IObjectQLEngine } from '@objectstack/core';
 // lifecycle gate read, so a third read-only signal added there reaches this
 // door too (that shared-rule argument is the module's whole reason to exist).
 import { isWritablePackage } from './package-writability.js';
+import { packagedBaseRegimePrescription, packagedBaseRegimeSentence } from './packaged-base-regime.js';
 
 /**
  * Canonicalise a driver-materialised timestamp into the ISO-8601 string the
@@ -529,7 +530,7 @@ export class SysMetadataRepository implements MetadataRepository {
     // resolution below) on purpose — `undefined` means "the caller named no
     // base", which is the ordinary env-local overlay and must keep the
     // type-door codes; `?? null` there is a ROW-KEY default, a different fact.
-    this.assertAllowed(ref.type, opts.intent, opts.packageId);
+    this.assertAllowed(ref, 'save', opts.intent, opts.packageId);
 
     const state: OverlayState = opts.state ?? 'active';
     const body = (spec ?? {}) as Record<string, unknown>;
@@ -766,7 +767,7 @@ export class SysMetadataRepository implements MetadataRepository {
     // [#6960] The DELETE verb's own gate — see {@link assertDeleteAllowed}.
     // `put` keeps calling `assertAllowed` directly; the ruling moved removal
     // only.
-    this.assertDeleteAllowed(ref.type, opts.intent);
+    this.assertDeleteAllowed(ref, opts.intent);
 
     const state: OverlayState = opts.state ?? 'active';
     const result = await this.withTxn(async (ctx) => {
@@ -1586,10 +1587,12 @@ export class SysMetadataRepository implements MetadataRepository {
    *    purpose and warns against symmetrising either way.
    */
   private assertAllowed(
-    type: string,
+    ref: { type: string; name: string },
+    operation: 'save' | 'delete',
     intent: MetadataWriteIntent = 'override-artifact',
     packageId?: string | null,
   ): void {
+    const { type } = ref;
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
     const allowedByRegistry = OVERLAY_ALLOWED_TYPES.has(singular) || OVERLAY_ALLOWED_TYPES.has(type);
     if (allowedByRegistry) return;
@@ -1631,6 +1634,24 @@ export class SysMetadataRepository implements MetadataRepository {
     // [#8146] The hatch unlocks the TYPE — for a write that named no base, or
     // named a writable one. It never reaches the package dimension.
     if (hatchOpen) return;
+
+    // [#20910, ADR-0126 §2] An item a code package ships, of a type with a
+    // Regime C row, is refused with the row-built sentence — the SAME one the
+    // protocol's package door answers on an environment-scoped kernel, which
+    // never reaches here for this write — naming the type's sanctioned path. A
+    // locked Regime C base is customized by its clone or switched off, never by
+    // opening this hatch, so the list-and-hatch sentence below would prescribe
+    // the wrong door. Reached only with the hatch CLOSED (it returned above).
+    // Every type with no regime row keeps that sentence, byte for byte.
+    if (intent !== 'runtime-only') {
+      const regimeSentence = packagedBaseRegimeSentence(singular, ref.name, operation);
+      if (regimeSentence !== undefined) {
+        const err: any = new Error(regimeSentence);
+        err.code = 'NOT_OVERRIDABLE';
+        err.status = 403;
+        throw err;
+      }
+    }
 
     const allowed = [
       ...OVERLAY_ALLOWED_TYPES,
@@ -1744,8 +1765,20 @@ export class SysMetadataRepository implements MetadataRepository {
    */
   static readOnlyBaseOverrideError(type: string, packageId: string, hatchOpen = false): Error {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
-    const err: any = new Error(
-      `Cannot overlay '${type}' in package '${packageId}': that package is read-only `
+    // [#20910, ADR-0126 §2] With the hatch CLOSED, a type with a Regime C row is
+    // told its row's sanctioned path — not the hatch: a locked Regime C base is
+    // customized by its clone or switched off, and the hatch is not that type's
+    // sanctioned path. The opener is shortened to the lock, so the prescription
+    // and its ADR-0126 citation arrive whole inside the REST door's
+    // 500-character bound (pinned with a long package id). The hatch-OPEN
+    // remedy, the code, the status, `lockSource`, `packageId` and `docs` are
+    // the same for every type; every type with no regime row keeps both
+    // remedies below, byte for byte.
+    const regimePrescription = hatchOpen ? undefined : packagedBaseRegimePrescription(singular);
+    const err: any = new Error(regimePrescription !== undefined
+      ? `Cannot overlay '${type}' in package '${packageId}': that package is read-only, and its packaged base `
+        + `is locked against in-place edits. ${regimePrescription}`
+      : `Cannot overlay '${type}' in package '${packageId}': that package is read-only `
       + `(provided by code or an installed app) and the type has no per-org overlay channel `
       + `(allowOrgOverride=false), so this item is locked against runtime edits. `
       // [#8146] The prescription is chosen by whether the hatch is ALREADY
@@ -1761,8 +1794,7 @@ export class SysMetadataRepository implements MetadataRepository {
         : `Edit the source artifact and redeploy, or set OS_METADATA_WRITABLE=${singular} `
           + `to grant a runtime escape hatch on this TYPE (it does not unlock package writability, `
           + `so pair it with a package-less write).`)
-      + ` See docs/adr/0010-metadata-protection-model.md.`,
-    );
+      + ` See docs/adr/0010-metadata-protection-model.md.`);
     err.code = 'ITEM_LOCKED';
     err.status = 403;
     err.lockSource = 'package';
@@ -1817,14 +1849,15 @@ export class SysMetadataRepository implements MetadataRepository {
    *    precisely the artifact-backed case the ruling names.
    */
   private assertDeleteAllowed(
-    type: string,
+    ref: { type: string; name: string },
     intent: MetadataWriteIntent = 'override-artifact',
   ): void {
+    const { type } = ref;
     if (intent !== 'runtime-only') {
       const singular = PLURAL_TO_SINGULAR[type] ?? type;
       if (OVERLAY_CAPABLE_TYPES.has(singular) || OVERLAY_CAPABLE_TYPES.has(type)) return;
     }
-    this.assertAllowed(type, intent);
+    this.assertAllowed(ref, 'delete', intent);
   }
 
   private whereFor(
