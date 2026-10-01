@@ -112,13 +112,13 @@ describe('sys_activity read visibility — the plugin read path', () => {
     }, { object: OPEN });
 
     // Every row below is written by the real audit writer's CRUD mirror.
-    ids.mine = (await engine.insert(OWNED, { name: 'mine', owner: MEMBER.userId }, { context: SYS } as any)).id;
-    ids.theirs = (await engine.insert(OWNED, { name: 'theirs', owner: OTHER.userId }, { context: SYS } as any)).id;
-    await engine.update(OWNED, { name: 'theirs, renamed' }, { where: { id: ids.theirs }, context: SYS } as any);
-    ids.board1 = (await engine.insert(OPEN, { name: 'board one' }, { context: SYS } as any)).id;
-    ids.board2 = (await engine.insert(OPEN, { name: 'board two' }, { context: SYS } as any)).id;
-    ids.gone = (await engine.insert(OPEN, { name: 'board gone' }, { context: SYS } as any)).id;
-    await engine.delete(OPEN, { where: { id: ids.gone }, context: SYS } as any);
+    ids.mine = (await engine.insert(OWNED, { name: 'mine', owner: MEMBER.userId }, { context: SYS })).id;
+    ids.theirs = (await engine.insert(OWNED, { name: 'theirs', owner: OTHER.userId }, { context: SYS })).id;
+    await engine.update(OWNED, { name: 'theirs, renamed' }, { where: { id: ids.theirs }, context: SYS });
+    ids.board1 = (await engine.insert(OPEN, { name: 'board one' }, { context: SYS })).id;
+    ids.board2 = (await engine.insert(OPEN, { name: 'board two' }, { context: SYS })).id;
+    ids.gone = (await engine.insert(OPEN, { name: 'board gone' }, { context: SYS })).id;
+    await engine.delete(OPEN, { where: { id: ids.gone }, context: SYS });
 
     // Rows no CRUD mirror writes, but an app's own server action can: one that
     // names no parent, one that names an object no registry knows, and one
@@ -129,10 +129,10 @@ describe('sys_activity read visibility — the plugin read path', () => {
       { type: 'note', summary: 'unknown parent', object_name: 'act_unregistered', record_id: 'x1' },
       { type: 'note', summary: 'self parent', object_name: ACTIVITY, record_id: 'a1' },
     ]) {
-      await engine.insert(ACTIVITY, { ...row, timestamp: stamp }, { context: SYS } as any);
+      await engine.insert(ACTIVITY, { ...row, timestamp: stamp }, { context: SYS });
     }
 
-    allRows = await engine.find(ACTIVITY, { context: SYS } as any);
+    allRows = await engine.find(ACTIVITY, { context: SYS });
   }, 120_000);
 
   afterAll(async () => {
@@ -159,37 +159,37 @@ describe('sys_activity read visibility — the plugin read path', () => {
   });
 
   it('control: the parent stand-in answers a member exactly the records it owns', async () => {
-    const owned = await engine.find(OWNED, { context: MEMBER } as any);
+    const owned = await engine.find(OWNED, { context: MEMBER });
     expect(owned.map((r: Row) => r.id)).toEqual([ids.mine]);
   });
 
   it('find: a member reads only the activity of records it can read', async () => {
-    const rows = await engine.find(ACTIVITY, { context: MEMBER } as any);
+    const rows = await engine.find(ACTIVITY, { context: MEMBER });
     expect(pairs(rows)).toEqual([`${OPEN}/${ids.board1}`, `${OPEN}/${ids.board2}`, `${OWNED}/${ids.mine}`].sort());
   });
 
   it('find: another member reads its own record’s activity, not the first member’s', async () => {
-    const rows = await engine.find(ACTIVITY, { context: OTHER } as any);
+    const rows = await engine.find(ACTIVITY, { context: OTHER });
     expect(pairs(rows)).toEqual(
       [`${OPEN}/${ids.board1}`, `${OPEN}/${ids.board2}`, `${OWNED}/${ids.theirs}`, `${OWNED}/${ids.theirs}`].sort(),
     );
   });
 
   it('count: the list total is narrowed identically to the rows', async () => {
-    expect(await engine.count(ACTIVITY, {}, { context: MEMBER } as any)).toBe(3);
+    expect(await engine.count(ACTIVITY, {}, { context: MEMBER })).toBe(3);
   });
 
   it('findOne: a row whose parent the member cannot read is absent by id', async () => {
     const hidden = allRows.find((r) => r.object_name === OWNED && r.record_id === ids.theirs)!;
     const shown = allRows.find((r) => r.object_name === OWNED && r.record_id === ids.mine)!;
-    expect(await engine.findOne(ACTIVITY, { where: { id: hidden.id }, context: MEMBER } as any)).toBeNull();
-    expect((await engine.findOne(ACTIVITY, { where: { id: shown.id }, context: MEMBER } as any))?.id).toBe(shown.id);
+    expect(await engine.findOne(ACTIVITY, { where: { id: hidden.id }, context: MEMBER })).toBeNull();
+    expect((await engine.findOne(ACTIVITY, { where: { id: shown.id }, context: MEMBER }))?.id).toBe(shown.id);
   });
 
   it('aggregate: a grouped count sees only the readable rows', async () => {
     const groups = await engine.aggregate(
       ACTIVITY,
-      { groupBy: ['object_name'], aggregations: [{ function: 'count', alias: 'n' }], context: MEMBER } as any,
+      { groupBy: ['object_name'], aggregations: [{ function: 'count', alias: 'n' }], context: MEMBER },
     );
     const byObject = Object.fromEntries(groups.map((g: Row) => [g.object_name ?? 'NULL', Number(g.n)]));
     expect(byObject).toEqual({ [OPEN]: 2, [OWNED]: 1 });
@@ -198,13 +198,13 @@ describe('sys_activity read visibility — the plugin read path', () => {
   it('a query scoped to a record the member cannot read returns nothing', async () => {
     const rows = await engine.find(
       ACTIVITY,
-      { where: { object_name: OWNED, record_id: ids.theirs }, context: MEMBER } as any,
+      { where: { object_name: OWNED, record_id: ids.theirs }, context: MEMBER },
     );
     expect(rows).toEqual([]);
   });
 
   it('rows whose parent no longer exists, or that name no readable parent, stay out', async () => {
-    const rows = await engine.find(ACTIVITY, { context: MEMBER } as any);
+    const rows = await engine.find(ACTIVITY, { context: MEMBER });
     const seen = new Set(rows.map((r: Row) => r.object_name ?? 'NULL'));
     expect(rows.some((r: Row) => r.record_id === ids.gone)).toBe(false);
     for (const name of ['NULL', 'act_unregistered', ACTIVITY]) expect(seen.has(name)).toBe(false);
@@ -212,22 +212,22 @@ describe('sys_activity read visibility — the plugin read path', () => {
 
   it('a list read probes each parent object once, not once per row', async () => {
     parentProbes.length = 0;
-    await engine.find(ACTIVITY, { context: OTHER } as any);
+    await engine.find(ACTIVITY, { context: OTHER });
     const perObject = parentProbes.filter((p) => p.userId === OTHER.userId).map((p) => `${p.object}:${p.operation}`);
     expect(perObject.sort()).toEqual([`${OPEN}:find`, `${OWNED}:find`]);
   });
 
   it('an admin, who reads every record, keeps every row about a record that exists', async () => {
-    const rows = await engine.find(ACTIVITY, { context: ADMIN } as any);
+    const rows = await engine.find(ACTIVITY, { context: ADMIN });
     const existing = allRows.filter(
       (r) => (r.object_name === OWNED || r.object_name === OPEN) && r.record_id !== ids.gone,
     );
     expect(pairs(rows)).toEqual(pairs(existing));
-    expect(await engine.count(ACTIVITY, {}, { context: ADMIN } as any)).toBe(existing.length);
+    expect(await engine.count(ACTIVITY, {}, { context: ADMIN })).toBe(existing.length);
   });
 
   it('a system read is not narrowed', async () => {
-    const rows = await engine.find(ACTIVITY, { context: SYS } as any);
+    const rows = await engine.find(ACTIVITY, { context: SYS });
     expect(rows.length).toBe(allRows.length);
   });
 });
