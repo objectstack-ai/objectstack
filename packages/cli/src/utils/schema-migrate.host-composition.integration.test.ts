@@ -5,6 +5,10 @@ import { existsSync, mkdtempSync, mkdirSync, writeFileSync, appendFileSync, read
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+// Loaded at module top, so the first transform is paid during collection
+// rather than inside a clocked test body (`check:test-source-alias`).
+import { AppPlugin } from '@objectstack/runtime';
+import { loadConfig } from './config.js';
 import { bootSchemaStack } from './schema-migrate.js';
 
 /**
@@ -939,8 +943,6 @@ describe('a plan runs no app lifecycle hook (#21054)', () => {
   });
 
   it('POSITIVE CONTROL: the same code, composed as a served boot composes it, runs both hooks and prints the lines', async () => {
-    const { loadConfig } = await import('./config.js');
-    const { AppPlugin } = await import('@objectstack/runtime');
     const { config } = await loadConfig(join(dir, 'objectstack.config.ts'));
 
     writeFileSync(hookLog, '');
