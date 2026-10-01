@@ -15,11 +15,11 @@
     {
       "id": 2,
       "prompt": "Add a dashboard chart showing 30-day rolling revenue (a moving average / running total over time). Model the data need.",
-      "expected_output": "Recognizes that a window/rolling calculation is BEYOND the dataset envelope (a dataset has no window/having grammar and compareTo only does previous-period/year). Escalates to a hand-authored Cube (raw SQL) or a stored/materialized rolling field — it does not pretend a dataset date-bucket or a plain measure expresses a moving window.",
+      "expected_output": "Recognizes that a window/rolling calculation is BEYOND the dataset envelope (a dataset has no window/having grammar and compareTo only does previous-period/year). Escalates to a stored/materialized rolling field or app code, not a Cube — it does not pretend a dataset date-bucket or a plain measure expresses a moving window.",
       "note": "The must_not_contain on 'dateGranularity' is deliberately strict: proposing date bucketing as the fix is the classic wrong answer. It can flag an otherwise-correct answer that merely mentions the field in passing — treat such a flag as a review cue, not an automatic fail.",
       "files": [],
       "assertions": {
-        "must_contain": ["window", "Cube"],
+        "must_contain": ["window"],
         "must_not_contain": ["dateGranularity"]
       }
     },
