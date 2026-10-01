@@ -36,9 +36,16 @@
  *
  * # What is asserted
  *
- * The issued value — the caller-visible answer — on a cold bootstrap over a
- * stored row, and on the create that follows a bypass write landing ABOVE a
- * warm counter. Per dialect cell: SQLite always runs; live Postgres and MySQL
+ * The number the create issued, on a cold bootstrap over a stored row and on
+ * the create that follows a bypass write landing ABOVE a warm counter — read
+ * back from the stored row through the driver's own `findOne`, by an id the
+ * test chose. Not from `create`'s return value: on MySQL that is not the row.
+ * Knex does not support `.returning()` there, so `create` hands back the insert
+ * id (measured on a live MySQL 8.0.46: `0`, with the row stored correctly), and
+ * an assertion on it fails every case, controls included, whatever the scan
+ * does. The stored row is the one reading every cell can make.
+ *
+ * Per dialect cell: SQLite always runs; live Postgres and MySQL
  * run where provisioned (the `Temporal Conformance (live PG + MySQL)` job runs
  * this whole package against both) and are declared un-run otherwise. On those
  * two the backslash was already the default escape, so their cells pin that
@@ -109,6 +116,17 @@ function suite(cell: DialectCell) {
       );
     };
 
+    let seq = 0;
+
+    /** Create one row and answer the autonumber it was STORED with (see the header). */
+    const issue = async (data: Record<string, unknown>): Promise<unknown> => {
+      const id = `issued-${++seq}`;
+      await driver.create(TABLE, { id, ...data });
+      const row = await driver.findOne(TABLE, { where: { id } });
+      expect(row, `row ${id} was not stored`).not.toBeNull();
+      return row!.so_no;
+    };
+
     beforeEach(async () => {
       driver = new SqlDriver(cell.config());
       await reset();
@@ -126,8 +144,7 @@ function suite(cell: DialectCell) {
         await driver.initObjects([objectWith(c.format)]);
         await bypassInsert([c.render(7)]);
 
-        const created = await driver.create(TABLE, { title: 'first issued' });
-        expect(created.so_no).toBe(c.render(8));
+        expect(await issue({ title: 'first issued' })).toBe(c.render(8));
       });
 
       it(`${c.label}: the #5495 re-seed moves a warm counter past rows a bypass write landed (${role})`, async () => {
@@ -135,13 +152,12 @@ function suite(cell: DialectCell) {
 
         // Warm the counter on an EMPTY table, so this test does not depend on
         // the cold scan above: there is nothing for the bootstrap to find.
-        expect((await driver.create(TABLE, { title: 'warm' })).so_no).toBe(c.render(1));
+        expect(await issue({ title: 'warm' })).toBe(c.render(1));
 
         // Rows 2..30 land above the counter. Nothing tells the sequence.
         await bypassInsert(Array.from({ length: 29 }, (_, i) => c.render(i + 2)));
 
-        const created = await driver.create(TABLE, { title: 'after the seeds' });
-        expect(created.so_no).toBe(c.render(31));
+        expect(await issue({ title: 'after the seeds' })).toBe(c.render(31));
       });
     }
 
@@ -149,8 +165,7 @@ function suite(cell: DialectCell) {
       await driver.initObjects([objectWith('{region}-{0000}')]);
       await bypassInsert(['north_east-0007'], 'north_east');
 
-      const created = await driver.create(TABLE, { region: 'north_east', title: 'first issued' });
-      expect(created.so_no).toBe('north_east-0008');
+      expect(await issue({ region: 'north_east', title: 'first issued' })).toBe('north_east-0008');
     });
   });
 }
