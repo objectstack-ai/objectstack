@@ -16,6 +16,7 @@
  * | `opened_at $lt {2027_years_ago}` | 200, the 1500 row (`-1-…` read as 2001) | 400 |
  * | `opened_at $lt {1977_years_ago}` | 200, no row | 400 (the `datetime` floor) |
  * | `placed_on $gt {8000_years_from_now}` | 200, both rows | 400 |
+ * | `opens_at` (`time`, 09:00 and 12:00) `$gt {8000_years_from_now}` | 200, both rows (compared as text) | 400 |
  *
  * The right answer to each was no row. Every refusal sits beside its control:
  * a placeholder resolved inside the range answers the right rows. InMemoryDriver
@@ -45,12 +46,13 @@ const LEDGER = {
     customer_id: { name: 'customer_id', type: 'text' as const },
     placed_on: { name: 'placed_on', type: 'date' as const },
     opened_at: { name: 'opened_at', type: 'datetime' as const },
+    opens_at: { name: 'opens_at', type: 'time' as const },
   },
 };
 
 const ROWS = [
-  { id: 'r2026', customer_id: 'c1', placed_on: '2026-03-01', opened_at: '2026-03-01T10:00:00.000Z' },
-  { id: 'r1500', customer_id: 'c2', placed_on: '1500-03-01', opened_at: '1500-03-01T10:00:00.000Z' },
+  { id: 'r2026', customer_id: 'c1', placed_on: '2026-03-01', opened_at: '2026-03-01T10:00:00.000Z', opens_at: '09:00:00' },
+  { id: 'r1500', customer_id: 'c2', placed_on: '1500-03-01', opened_at: '1500-03-01T10:00:00.000Z', opens_at: '12:00:00' },
 ];
 
 /** field · operator · placeholder · the resolved value and year a refusal names */
@@ -61,6 +63,8 @@ const REFUSED: ReadonlyArray<readonly [string, string, string, string]> = [
   ['placed_on', '$lt', '{2027_years_ago}', '"-000001-09-30" (the year -1)'],
   // The `datetime` floor of 1000 applies to a resolved placeholder as to a literal.
   ['opened_at', '$lt', '{1977_years_ago}', '"0049-09-30" (the year 49)'],
+  // A `time` column keeps no time of day from an instant with no four-digit year.
+  ['opens_at', '$gt', '{8000_years_from_now}', '"+010026-09-30" (the year 10026)'],
 ];
 
 /** field · operator · placeholder · the ids `where` answers — inside the range, the control */

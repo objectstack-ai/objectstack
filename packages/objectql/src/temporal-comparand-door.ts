@@ -199,14 +199,18 @@
  * $lt "{1977_years_ago}"        200, no row        (0049-10-01, below the datetime floor)
  * ```
  *
- * The right answer to the first two is no row, and a literal of each value is
- * refused here. {@link assertResolvedTemporalTokensInRange} and
+ * …and on a `time` field (rows at 09:00 and 12:00), `$gt "{8000_years_from_now}"`
+ * answered both rows: the instant has no four-digit year, so the `time` rule
+ * kept no time of day from it and it compared as text. A literal of each
+ * resolved value is refused here, and the first two answered rows where the
+ * right answer was none. {@link assertResolvedTemporalTokensInRange} and
  * {@link assertHavingResolvedTemporalTokensInRange} close it: the engine's
  * resolution stage hands them the caller's condition and its resolution, the
  * same walk takes both trees side by side, and a comparand written as a date
  * macro is refused when core's `isOutsideTemporalYearRange` puts the value it
- * resolved to outside its column's years — `INVALID_FILTER` / 400, in this
- * door's year-class words, naming the placeholder and the year. ⛔ Not a
+ * resolved to outside its column's years (on a `time` column, the four-digit
+ * years of the instant, the [#20480] class) — `INVALID_FILTER` / 400, in this
+ * door's words for that class, naming the placeholder and the year. ⛔ Not a
  * second pass of the door: every other comparand was judged before
  * resolution. Core's resolver spells a day outside 0001..9999 in the
  * expanded-year form (`+010026-10-01`, `-000001-10-01`), so the range reads
@@ -249,10 +253,9 @@ export interface UninterpretableTemporalComparand {
  * field's years: the placeholder as written, and the value it resolved to.
  */
 export interface ResolvedTokenOutsideYears extends UninterpretableTemporalComparand {
-  kind: 'date' | 'datetime';
   /** The placeholder as the caller wrote it, braces included. */
   token: string;
-  /** The value it resolved to (`value` is the same, for the year class). */
+  /** The value it resolved to. */
   value: unknown;
 }
 
@@ -803,12 +806,16 @@ export type ResolvedTokenJudge = (written: unknown, resolved: unknown) => void;
 
 /**
  * [#20844] Judge one comparand the caller wrote as a relative-date
- * placeholder, by the year of the value it resolved to and nothing else: core's
- * `isOutsideTemporalYearRange` of that value for the column's kind, the range
- * the door asks of a literal. A literal comparand was judged by the door
- * before resolution, and a context placeholder (`{current_user_id}`) names no
- * year, so neither is this judgement's. A `time` column names no year either
- * (core's range says so of every `time` value).
+ * placeholder, by the year of the value it resolved to and nothing else — the
+ * year class the door asks of a literal of the column's kind: core's
+ * `isOutsideTemporalYearRange` for a `date` or a `datetime`, and [#20480] for a
+ * `time` column, which has no year of its own, the class of an instant the
+ * `time` rule keeps no time of day from because its UTC year has no
+ * four-digit spelling — asked as the door asks it, of core's predicate and of
+ * the four-digit years, so year 0 (`0000-…`) reads as it does for a literal.
+ * A literal comparand was judged by the door before resolution, and a context
+ * placeholder (`{current_user_id}`) names no year, so neither is this
+ * judgement's.
  */
 function judgeResolvedToken(
   kind: TemporalComparandKind,
@@ -817,10 +824,11 @@ function judgeResolvedToken(
   resolved: unknown,
   path: string,
 ): ResolvedTokenOutsideYears | null {
-  if (kind === 'time') return null;
   if (classifyFilterToken(written)?.kind !== 'date-macro') return null;
-  if (!isOutsideTemporalYearRange(resolved, kind)) return null;
-  return { field, kind, token: written as string, value: resolved, path };
+  const outside = kind === 'time'
+    ? isUninterpretableTemporalComparand('time', resolved) && isInstantOutsideFourDigitYears(resolved)
+    : isOutsideTemporalYearRange(resolved, kind);
+  return outside ? { field, kind, token: written as string, value: resolved, path } : null;
 }
 
 /** [#20844] The placeholder, where it sits, and what it resolved to — for the message. */
@@ -831,6 +839,25 @@ function resolvedTokenPhrase(hit: ResolvedTokenOutsideYears): string {
 
 /** [#20844] The fix for a placeholder, ahead of the year class's own for a literal. */
 const RESOLVED_TOKEN_REMEDY = 'Use a relative-date placeholder whose offset lands inside those years.';
+
+/**
+ * [#20844] A hit's words, in the door's sentences for the class a literal of
+ * the same value takes: the kind's year class for a `date` or a `datetime`,
+ * and [#20480] the `time` class for a `time` column.
+ */
+function resolvedTokenWords(hit: ResolvedTokenOutsideYears): { cls: string; where: string; having: string; remedy: string } {
+  if (hit.kind === 'time') {
+    const time = TIME_OUTSIDE_FOUR_DIGIT_YEARS;
+    return { cls: time.why, where: time.where, having: time.having, remedy: REMEDY.time };
+  }
+  const yearClass = yearClassOutside(hit.kind, hit.value);
+  return {
+    cls: `${yearClass.year}, the years a ${hit.kind} value may name`,
+    where: yearClass.where,
+    having: yearClass.having,
+    remedy: `${RESOLVED_TOKEN_REMEDY} ${yearClass.remedy}`,
+  };
+}
 
 /**
  * [#20844] Refuse a relative-date placeholder in `where` (or, by `path`, a
@@ -855,12 +882,11 @@ export function assertResolvedTemporalTokensInRange(
   if (!fields || typeof fields !== 'object') return;
   const hit = walkCondition({ ...whereScope(fields), judge: judgeResolvedToken }, written, resolved, path, 0);
   if (!hit) return;
-  const yearClass = yearClassOutside(hit.kind, hit.value);
+  const words = resolvedTokenWords(hit);
   throw invalidFilterError(
     `${operation}('${object}'): filter on '${hit.field}' compares a declared ${hit.kind} field against `
-    + `${resolvedTokenPhrase(hit)}, ${yearClass.year}, the years a ${hit.kind} value may name, so it is `
-    + `not a ${hit.kind} value this platform can interpret. ${yearClass.where} The filter was NOT applied. `
-    + `${RESOLVED_TOKEN_REMEDY} ${yearClass.remedy}`,
+    + `${resolvedTokenPhrase(hit)}, ${words.cls}, so it is not a ${hit.kind} value this platform can `
+    + `interpret. ${words.where} The filter was NOT applied. ${words.remedy}`,
   );
 }
 
@@ -878,11 +904,10 @@ export function assertHavingResolvedTemporalTokensInRange(
 ): void {
   const hit = walkCondition({ ...havingScope(classes), judge: judgeResolvedToken }, written, resolved, 'having', 0);
   if (!hit) return;
-  const yearClass = yearClassOutside(hit.kind, hit.value);
+  const words = resolvedTokenWords(hit);
   throw invalidFilterError(
     `aggregate('${object}'): ${havingColumnPhrase(hit, query)} compares against ${resolvedTokenPhrase(hit)}, `
-    + `${yearClass.year}, the years a ${hit.kind} value may name, so it is not a ${hit.kind} `
-    + `value this platform can interpret. ${yearClass.having} The \`having\` was NOT applied. `
-    + `${RESOLVED_TOKEN_REMEDY} ${yearClass.remedy}`,
+    + `${words.cls}, so it is not a ${hit.kind} value this platform can interpret. ${words.having} `
+    + `The \`having\` was NOT applied. ${words.remedy}`,
   );
 }

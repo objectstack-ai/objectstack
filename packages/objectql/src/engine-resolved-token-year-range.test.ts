@@ -18,6 +18,7 @@
  * | `opened_at $lt {1977_years_ago}` | `0049-10-01` | no row | no row | 400 (the `datetime` floor) |
  * | `placed_on $gt {8000_years_from_now}` | `10026-10-01` | both rows | both rows | 400 |
  * | `having` `max(opened_at) $gt {8000_years_from_now}` | `10026-10-01` | both groups | — | 400 |
+ * | `opens_at` (`time`, 09:00 / 12:00) `$gt {8000_years_from_now}` | `10026-10-01`, compared as text | both rows | both rows | 400 (the [#20480] class) |
  * | `judgeFilter` of the first two | | `{ ok: true }` | | refused |
  *
  * The right answer to each `$gt` / `$lt` above was no row; a literal of each
@@ -233,6 +234,31 @@ describe('[#20844] a relative-date placeholder resolved outside its column\'s ye
     expect(engine.judgeFilter('ledger', { opened_at: { $gt: '{100_years_ago}' } })).toEqual({ ok: true });
     expect(engine.judgeFilter('ledger', { opened_at: { $lt: '{1977_years_ago}' } })).toMatchObject({ ok: false, code: 'INVALID_FILTER', status: 400 });
     expect(engine.judgeFilter('ledger', { placed_on: { $lt: '{1977_years_ago}' } })).toEqual({ ok: true });
+  });
+
+  // [#20480] A `time` column keeps the time of day of an instant whose UTC
+  // year has four digits, and no other: a literal past them is refused by the
+  // door in that class's words, and so is a placeholder resolved past them.
+  it('a time column refuses a placeholder resolved to an instant outside the four-digit years, in the time class\'s words', async () => {
+    for (const [token, resolved, year] of PAST_BOTH.filter(([t]) => t !== '{2026_years_ago}')) {
+      for (const [position, call] of positions('opens_at', '$gt', token)) {
+        const err = await refusalOf(call());
+        const at = `${position} opens_at $gt ${token}`;
+        expect(err, at).not.toBeNull();
+        expect(err!.code, at).toBe('INVALID_FILTER');
+        expect(err!.status, at).toBe(400);
+        expect(err!.message, at).toContain(`"${token}"`);
+        expect(err!.message, at).toContain(`resolved to "${resolved}" (the year ${year})`);
+        expect(err!.message, at).toContain('so no time of day is read from it');
+      }
+    }
+    expect(reads).toHaveLength(0);
+    // Year 0 has a four-digit spelling (`0000-…`), so a time of day is read
+    // from it, as from a literal; so is every year inside 0001..9999.
+    for (const token of ['{2026_years_ago}', '{1977_years_ago}', '{100_years_ago}']) {
+      await expect(engine.find('ledger', { where: { opens_at: { $gt: token } } }), token).resolves.toEqual([]);
+    }
+    expect(reads).toHaveLength(3);
   });
 
   it('a placeholder on a column with no year, or a context placeholder, is not this judgement\'s', async () => {
