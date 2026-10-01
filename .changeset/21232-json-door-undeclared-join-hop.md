@@ -10,7 +10,7 @@ Clause-②: no (narrowing)
 
 **BREAKING**: this narrows what `POST /api/v1/analytics/query` and its dry run `POST /api/v1/analytics/sql` accept, on both strategies and every driver. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
 
-The column of a dotted path is now located by the one hop resolver both strategies join and read it through: the cube's declared join at that path, else the relationship field's declared `reference`, else the relationship's own name for a host that cannot answer. Before, the door read the cube's declared joins alone and stood down on a path the cube declares no join for. This reverses one clause of the earlier entries for this door in the same release, which listed such a path as unchanged.
+The column of a dotted path is now located by the one hop resolver both strategies join and read it through: the cube's declared join at that path, else the relationship field's declared `reference`, else the relationship's own name for a host that cannot answer. Before, the door read the cube's declared joins alone and stood down on a path the cube declares no join for.
 
 **Before and after**, measured on a configured cube over an object whose lookup the cube declares no join for — `owner`, declaring `reference` a person object — and a member over that lookup. An ad-hoc query's inferred cube declares no join at all, and a dotted dimension on it (`owner.prefs`) now gets the same refusal:
 
