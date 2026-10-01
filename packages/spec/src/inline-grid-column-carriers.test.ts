@@ -424,7 +424,7 @@ describe('#20901 — the `field` → `name` respelling is a chain step on the fo
  */
 const MASTER_DETAIL_PROPS = ComponentPropsMap['object-master-detail-form'];
 
-/** Every key objectui's `MasterDetailForm` reads off a detail entry (the `.objectui-sha` pin `e420df310f5b`). */
+/** Every key objectui's `MasterDetailForm` reads off a detail entry (the `.objectui-sha` pin `31971ff1e28f`). */
 const FULL_DETAIL_ENTRY = {
   childObject: 'crm_invoice_line',
   relationshipField: 'invoice',

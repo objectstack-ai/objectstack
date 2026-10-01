@@ -4832,7 +4832,7 @@ const MASTER_DETAIL_DETAIL_HISTORY =
  * exactly the twelve keys objectui's `MasterDetailForm` reads off an entry
  * (`packages/plugin-form/src/MasterDetailForm.tsx`, its
  * `MasterDetailDetailConfig` and every `d.<key>` read in the file, read at the
- * `.objectui-sha` pin `e420df310f5b`). A key nobody reads is not declared.
+ * `.objectui-sha` pin `31971ff1e28f`). A key nobody reads is not declared.
  *
  * `columns` IS {@link InlineGridColumnSchema}, the same object a relationship
  * field's `inlineColumns` and a form view's `subforms[].columns` take: the
