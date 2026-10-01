@@ -44,12 +44,6 @@ export type {
   // checking with it.
   SqlWindowFunctionSpec,
   SqlWindowFunctionQuery,
-  // The autonumber reservation a write draws (#5495): what `fillAutoNumberFields`
-  // reports and the collision re-seed consumes. Exported so a subclass that
-  // issues numbers over another transport (`TursoDriver`'s remote face) can
-  // override the re-seed primitives with their declared parameter type instead
-  // of a structural copy of it.
-  AutoNumberReservation,
 } from './sql-driver.js';
 
 // [#5222] The cross-field `{ $field }` push-down conformance corpus: one

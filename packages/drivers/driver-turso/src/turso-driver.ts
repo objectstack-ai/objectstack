@@ -31,7 +31,6 @@
 import {
   SqlDriver,
   GLOBAL_TENANT,
-  type AutoNumberReservation,
   type IntrospectedSchema,
   type ManagedDriftEntry,
   type SqlDriverConfig,
@@ -2536,7 +2535,7 @@ export class TursoDriver extends SqlDriver {
    */
   protected override async autoNumberValueExists(
     queryRunner: Parameters<SqlDriver['autoNumberValueExists']>[0],
-    reservation: AutoNumberReservation,
+    reservation: Parameters<SqlDriver['autoNumberValueExists']>[1],
   ): Promise<boolean> {
     if (!this.isRemote) return super.autoNumberValueExists(queryRunner, reservation);
     const col = quoteSequenceName(reservation.field);
@@ -2557,7 +2556,9 @@ export class TursoDriver extends SqlDriver {
    * same "never rewind" rule the inherited version applies in its transaction,
    * without needing one.
    */
-  protected override async resyncSequenceToDataMax(reservation: AutoNumberReservation): Promise<void> {
+  protected override async resyncSequenceToDataMax(
+    reservation: Parameters<SqlDriver['resyncSequenceToDataMax']>[0],
+  ): Promise<void> {
     if (!this.isRemote) return super.resyncSequenceToDataMax(reservation);
     await this.ensureRemoteSequencesTable();
     const resolvedTenantId = this.resolveSequenceTenantId(reservation.tenantField, reservation.tenantId);

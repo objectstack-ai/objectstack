@@ -38,5 +38,5 @@ now honoured.
 `@objectstack/driver-sql`: the sequence rules a second transport shares are
 now `protected` members of `SqlDriver` (`resolveSequenceTenantId`,
 `defineSequencesTable`, `maxAutonumberCounter`, `escapeLikePrefix`,
-`sequencesTableName`, `autoNumberCollisionRetries`), and the
-`AutoNumberReservation` type is exported. No behaviour changes on any dialect.
+`sequencesTableName`, `autoNumberCollisionRetries`). No export is added and no
+behaviour changes on any dialect.
