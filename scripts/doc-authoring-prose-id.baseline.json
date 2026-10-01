@@ -65,9 +65,6 @@
  "packages/connectors/connector-mcp/src/mcp-provider.ts": {
   "#3055": 2
  },
- "packages/drivers/driver-mongodb/src/test-mongod.ts": {
-  "#5517": 3
- },
  "packages/lint/src/authoring-rules.ts": {
   "#4463": 3,
   "#4716": 2,
@@ -186,28 +183,6 @@
  },
  "packages/lint/src/validate-widget-bindings.ts": {
   "#2501": 1
- },
- "packages/metadata-core/src/contract-suite.ts": {
-  "#7856": 1
- },
- "packages/metadata-core/src/engine-delete-dispatch.ts": {
-  "#11009": 4
- },
- "packages/metadata-core/src/engine-findone-predicate.ts": {
-  "#11767": 1,
-  "#3896": 1,
-  "#4346": 1
- },
- "packages/metadata-core/src/engine-update-dispatch.ts": {
-  "#11009": 6,
-  "#11142": 4,
-  "#11230": 4,
-  "#5748": 4
- },
- "packages/metadata-core/src/object-schema-fls-contract.ts": {
-  "#3545": 1,
-  "#6603": 1,
-  "#7020": 1
  },
  "packages/plugins/plugin-approvals/src/approval-service.ts": {
   "#10153": 1,

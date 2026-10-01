@@ -102,7 +102,8 @@ export type AppPluginSecurityMetadataRegistrar = 'app-plugin' | 'artifact-door';
  * 
  * Responsibilities:
  * 1. Register App Manifest as a service (for ObjectQL discovery)
- * 2. Execute Runtime `onEnable` hook (for code logic)
+ * 2. Execute Runtime `onEnable` hook (for code logic) — withheld on a
+ *    declaration boot that passes `skipOnEnable`
  * 3. Auto-load i18n translation bundles into the kernel's i18n service
  */
 export class AppPlugin implements Plugin {
@@ -172,6 +173,26 @@ export class AppPlugin implements Plugin {
      */
     private readonly skipSeedData: boolean;
     /**
+     * Do not execute the bundle's `onEnable` (#21054) — the same one-shot
+     * schema commands as {@link skipSeedData}, for the same reason one step
+     * further. `os migrate plan` / `apply` compose this app for what it
+     * DECLARES; `onEnable` is the app's imperative code, and what it does —
+     * register handlers, drivers and lifecycle hooks, read and write data —
+     * belongs to a served boot. Measured on `examples/app-crm`: its `onEnable`
+     * hooks `kernel:bootstrapped` and reads `sys_position` /
+     * `sys_permission_set`, tables the plan's composition never declares, so
+     * every plan printed six `DATABASE_ERROR` lines.
+     *
+     * Read HERE, by the executor, rather than arranged by stripping the member
+     * off a copy of the bundle: this method alone resolves which object owns
+     * the hook (`bundle.default` before the bundle itself), a stripped copy
+     * would re-state that rule at the call site, and the boot would then log
+     * "No runtime.onEnable function found" about an app that has one.
+     */
+    private readonly skipOnEnable: boolean;
+    /** Set by `start()` when {@link skipOnEnable} withheld an `onEnable` the bundle carries. */
+    private onEnableWithheldFlag = false;
+    /**
      * See {@link AppPluginSecurityMetadataRegistrar}. Public and readonly so a
      * composition test can pin which registrar a boot shape declared.
      */
@@ -229,14 +250,29 @@ export class AppPlugin implements Plugin {
         return this.grantBindingResult;
     }
 
+    /**
+     * `true` once `start()` found an `onEnable` on this bundle and did NOT run
+     * it, because the composition passed `skipOnEnable` (#21054). `false` on
+     * every boot that runs it and on a bundle that carries none — so a caller
+     * reporting what its boot withheld names only what was really there.
+     */
+    get onEnableWithheld(): boolean {
+        return this.onEnableWithheldFlag;
+    }
+
     constructor(
         bundle: any,
         projectContext?: AppPluginProjectContext,
-        opts: { skipSeedData?: boolean; securityMetadataRegistrar?: AppPluginSecurityMetadataRegistrar } = {},
+        opts: {
+            skipSeedData?: boolean;
+            skipOnEnable?: boolean;
+            securityMetadataRegistrar?: AppPluginSecurityMetadataRegistrar;
+        } = {},
     ) {
         this.bundle = bundle;
         this.projectContext = projectContext;
         this.skipSeedData = opts.skipSeedData ?? false;
+        this.skipOnEnable = opts.skipOnEnable ?? false;
         // Refused loudly rather than defaulted: a misspelt registrar would
         // otherwise fall through to whichever branch the typo happened to
         // miss, and both branches are silent about what they did not do.
@@ -1015,8 +1051,16 @@ export class AppPlugin implements Plugin {
             ? stackBundle
             : this.bundle;
 
-        if (runtime && typeof runtime.onEnable === 'function') {
-             ctx.logger.info('Executing runtime.onEnable', { 
+        if (runtime && typeof runtime.onEnable === 'function' && this.skipOnEnable) {
+             // [#21054] A declaration boot: the hook exists and is withheld,
+             // and the boot says so rather than reading as an app without one.
+             this.onEnableWithheldFlag = true;
+             ctx.logger.info(
+                 'runtime.onEnable NOT executed — this boot composes the app for its declarations only (skipOnEnable)',
+                 { appName: this.name, appId },
+             );
+        } else if (runtime && typeof runtime.onEnable === 'function') {
+             ctx.logger.info('Executing runtime.onEnable', {
                  appName: this.name,
                  appId 
              });

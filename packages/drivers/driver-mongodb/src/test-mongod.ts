@@ -152,7 +152,7 @@ export function printMongodNotice(
     write(`${message}\n`);
 }
 
-/** The one line a gated-off suite prints. Names the issue and the switch. */
+/** The one line a gated-off suite prints. Names the reason and the switch. */
 export function mongodSkipReason(suite: string, env: NodeJS.ProcessEnv = process.env): string {
     const raw = env[MONGOD_TESTS_ENV];
     const misset = raw === undefined || raw === ''
@@ -160,8 +160,8 @@ export function mongodSkipReason(suite: string, env: NodeJS.ProcessEnv = process
         : ` (${MONGOD_TESTS_ENV} is set to "${raw}", which does NOT enable it — only "1" does)`;
     return (
         `[driver-mongodb] SKIP ${suite} — needs a real mongod, and mongodb-memory-server would `
-        + 'download a ~123 MB binary; retired from default test runs by #5517 (concurrent downloads '
-        + `made green runs exit 1). Set ${MONGOD_TESTS_ENV}=1 to run it${misset}.`
+        + 'download a ~123 MB binary; retired from default test runs because concurrent downloads '
+        + `made green runs exit 1. Set ${MONGOD_TESTS_ENV}=1 to run it${misset}.`
     );
 }
 
@@ -246,7 +246,7 @@ export function installAbandonedDownloadGuard(options: RejectionGuardOptions = {
             return;
         }
         warn(
-            '[driver-mongodb] Ignoring the abandoned MongoDB binary download of #5517 '
+            '[driver-mongodb] Ignoring the MongoDB binary download abandoned by a concurrent-download race '
             + `(${(reason as Error).message}). Another worker won the race and renamed the archive; `
             + 'the suite that lost it has already degraded to a named skip, and this rejection must '
             + 'not fail an otherwise green run.',
@@ -299,7 +299,7 @@ export async function createTestMongod(suite: string): Promise<MongoMemoryServer
                 () => reject(new Error(
                     `timed out after ${ACQUIRE_TIMEOUT_MS / 1000}s waiting for the MongoDB binary `
                     + '(fastdl.mongodb.org unreachable or hanging, or another worker holds the '
-                    + 'download — #5517)',
+                    + 'download)',
                 )),
                 ACQUIRE_TIMEOUT_MS,
             );

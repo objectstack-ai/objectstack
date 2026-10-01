@@ -4276,8 +4276,10 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
   /**
    * RETIRED (#17260, ADR-0049 enforce-or-remove — the spec half of the
    * objectui#8285 director-seat ruling, decision batch #91, 2026-09-08:
-   * option B, `quickAdd` leaves `object-kanban` and stays only on the
-   * React-host `kanban-ui` block).
+   * option B, `quickAdd` leaves `object-kanban`. The ruling named the
+   * React-host `kanban-ui` block as where the control stays; objectui has
+   * since retired that block (objectui#8257), so `object-kanban` offers no
+   * quick-add control and no block a document can name offers one either).
    *
    * Measured at the objectui pin this repo builds against
    * (`.objectui-sha` = `e420df310`; re-measured there 2026-09-30 —
@@ -4337,14 +4339,19 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * and could not tell which side was wrong. The tombstone collapses both
    * halves onto one answer.
    *
-   * The control itself is NOT withdrawn from the platform: it stays on
-   * `kanban-ui`, the block a React host renders directly and can hand the
-   * runtime function to. ⚠️ Re-read at `e420df310`: objectui retired the
-   * schema-only `kanban-ui` registration long before this pin (objectui#8257;
-   * 0 registrations at `dd3f7e1be`, `db11afd49` and this pin), and the pair
-   * now lives on the exported `KanbanRenderer` React component a host mounts
-   * directly (`plugin-kanban/src/index.tsx:345-346`), not on any block a
-   * document can name. Sources are stripped by the D2 conversion
+   * The control is not withdrawn from objectui's React layer, but no metadata
+   * node reaches it. The ruling kept it on `kanban-ui`, the block a React host
+   * renders directly and can hand the runtime function to. ⚠️ Re-read at
+   * `e420df310`: objectui retired the schema-only `kanban-ui` registration
+   * long before this pin (objectui#8257; 0 registrations at `dd3f7e1be`,
+   * `db11afd49` and this pin), and the pair now lives on the exported
+   * `KanbanRenderer` React component a host mounts directly
+   * (`plugin-kanban/src/index.tsx:345-346`), not on any block a document can
+   * name. ⛔ So the tombstone below prescribes "delete the key" and names no
+   * block: this spec declares no `kanban-ui` component type, so a node an
+   * author wrote there would save clean (the type is an unregistered custom
+   * string) and resolve no renderer, which is the dead metadata this
+   * retirement exists to remove. Sources are stripped by the D2 conversion
    * `object-kanban-quick-add-removed` (a pure lossless delete — the key never
    * had an effect to preserve).
    */
@@ -4353,8 +4360,7 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
     + 'the board forwarded it, but the per-column affordance is gated on both `quickAdd` and '
     + '`onQuickAdd`, and `onQuickAdd` is a host-supplied function JSON cannot carry and no '
     + 'producer ever put on an `object-kanban` node, so authoring it was a parse-clean no-op. '
-    + 'Delete the key. The quick-add control is unchanged on the `kanban-ui` block, where a React '
-    + 'host supplies the `onQuickAdd` slot the control needs. '
+    + 'Delete the key; `object-kanban` offers no quick-add control. '
     + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
   ),
   coverImageField: z.string().optional().describe('Image field rendered as the card cover'),

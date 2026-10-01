@@ -32,6 +32,7 @@ import {
 } from './view.zod';
 import { FieldSchema } from '../data/field.zod';
 import { ALL_CONVERSIONS } from '../conversions/registry';
+import { MIGRATIONS_BY_MAJOR } from '../migrations/registry';
 import { strictObjectDeclarations } from '../shared/strict-object';
 
 describe('PageHeaderProps', () => {
@@ -3578,8 +3579,9 @@ describe('ObjectKanbanPropsSchema limit — the row cap four objectui faces alre
 
 // #17260 — the board's per-column quick-add switch, retired by the
 // objectui#8285 director-seat ruling (comment 5583979207, decision batch #91,
-// 2026-09-08; ruled option B: `quickAdd` leaves `object-kanban` and stays only
-// on the React-host `kanban-ui` block). Unlike `limit` above — a key four
+// 2026-09-08; ruled option B: `quickAdd` leaves `object-kanban`; the ruling
+// named the React-host `kanban-ui` block as where it stays, and objectui has
+// since retired that block, objectui#8257). Unlike `limit` above — a key four
 // objectui faces already implemented, so the spec was the half that was wrong
 // — `quickAdd` was FORWARDED and never read: at the pin this repo builds
 // against (`.objectui-sha` = `e420df310`; re-measured there 2026-09-30 —
@@ -3627,9 +3629,45 @@ describe('ObjectKanbanPropsSchema quickAdd is retired (#17260)', () => {
   it('rejects the retired `quickAdd` with the prescription, not a bare unknown-key verdict', () => {
     // The prescription IS the payload: the author who hits this got
     // `unknown-prop` from objectui's html tier before — the same message a
-    // typo gets — so the refusal has to say where the control still works.
+    // typo gets — so the refusal has to say what to do instead: delete the key.
     expect(() => kanban.parse({ objectName: 'showcase_task', quickAdd: true }))
-      .toThrow(/`quickAdd`.*removed.*`kanban-ui`/s);
+      .toThrow(/`quickAdd`.*removed.*Delete the key/s);
+  });
+
+  it('prescribes no block objectui does not register — the remedy names no `kanban-ui`', () => {
+    // `kanban-ui` is a node type objectui retired (objectui#8257) and this spec
+    // never declared, so `PageComponentSchema` accepts it as an unregistered
+    // custom string: an author steered there writes a node that saves clean and
+    // resolves no renderer. The control itself has no metadata route, so the
+    // one sentence every copy shares is "delete the key" — pinned on the
+    // refusal, the D2 conversion's summary, the D3 entry's three texts and
+    // step 18's rationale (the paragraph the upgrade guide prints).
+    const refused = kanban.safeParse({ objectName: 'showcase_task', quickAdd: true });
+    expect(refused.success).toBe(false);
+    const issue = (refused.error?.issues ?? []).find((i) => i.path.join('.') === 'quickAdd');
+    expect(issue?.code).toBe('invalid_type'); // the refusal itself is unchanged
+    const tombstone = issue?.message ?? '';
+    expect(tombstone).toContain('Delete the key; `object-kanban` offers no quick-add control.');
+
+    const conversion = ALL_CONVERSIONS.find((c) => c.id === 'object-kanban-quick-add-removed');
+    const step18 = MIGRATIONS_BY_MAJOR[18];
+    const semantic = step18?.semantic.find((m) => m.id === 'object-kanban-quick-add-retired');
+    expect(conversion).toBeDefined();
+    expect(semantic).toBeDefined();
+    expect(step18?.rationale).toContain('retires `object-kanban`\'s `quickAdd`');
+    const remedyTexts = [
+      tombstone,
+      conversion?.summary ?? '',
+      semantic?.replacement ?? '',
+      semantic?.reason ?? '',
+      semantic?.acceptanceCriteria ?? '',
+      step18?.rationale ?? '',
+    ];
+    for (const text of remedyTexts) {
+      expect(text.length).toBeGreaterThan(0);
+      expect(text).not.toContain('kanban-ui');
+    }
+    expect(semantic?.replacement).toContain('Delete the key; `object-kanban` offers no quick-add control.');
   });
 
   it('does not materialize the retired `quickAdd` on a clean parse', () => {

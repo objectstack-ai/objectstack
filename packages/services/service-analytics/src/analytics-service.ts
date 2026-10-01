@@ -51,6 +51,7 @@ import {
   assertNamedFieldsReadable,
   type QueryableFieldsProvider,
   type NamedField,
+  type NamedRead,
   type FieldReadRole,
   type ReadableFieldsProvider,
 } from './field-read-admission.js';
@@ -418,10 +419,14 @@ const IDENTIFIER_PATH = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$/;
  *   hidden relationship field discloses which record each row points to, and
  *   the engine judges a path's first segment on the local object for the same
  *   reason.
- * - Anything else is an EXPRESSION the cube's author wrote (`CASE WHEN …`,
- *   `SUM(…)`, `*`). It names no field this gate can attribute, so it adds
- *   nothing — the author's declaration of a derived value, the way a formula
- *   field is.
+ * - `'*'` reads no field value — the row wildcard a `count` uses — so it
+ *   names nothing (`[]`).
+ * - [#20965] Anything else is not a column reference: `null`. It names no
+ *   field this gate can judge, so the caller refuses the member
+ *   (`NamedExpression`, `field-read-admission.ts`) — ⛔ never an empty list,
+ *   which would pass it. The parse refuses such a `sql` (#20943), but the
+ *   registry never parses, so a cube built before that, or never put through
+ *   it, still reaches here.
  */
 function fieldsOfColumnSql(
   cube: Cube,
@@ -429,10 +434,11 @@ function fieldsOfColumnSql(
   sql: string,
   role: FieldReadRole,
   referenceOf: HopReference | undefined,
-): NamedField[] {
+): NamedField[] | null {
   const path = sql.trim();
+  if (path === '*') return [];
   if (BARE_IDENTIFIER.test(path)) return [{ object: baseObject, field: path, role }];
-  if (!IDENTIFIER_PATH.test(path)) return [];
+  if (!IDENTIFIER_PATH.test(path)) return null;
   const segments = path.split('.');
   const hops = resolvePathHops(cube, baseObject, segments.slice(0, -1), referenceOf);
   const out: NamedField[] = hops.map((hop) => ({ object: hop.from, field: hop.field, role }));
@@ -466,6 +472,13 @@ function fieldsOfColumnSql(
  * it is policy, and the engine's own field guard never judges policy
  * predicates — they may name fields the caller cannot read.
  *
+ * [#20965] A member that resolves to neither a field nor `'*'` — a declared
+ * member whose `sql` is not a column reference (or is not a string), an
+ * undeclared one whose own spelling is not — is read as a `NamedExpression`
+ * on the base object, which the field gate refuses. `NativeSQLStrategy` emits
+ * such a `sql` into its statement as written, so passing it would let the
+ * statement read fields no verdict was reached for.
+ *
  * A cube whose `sql` is not a bare object name names no attributable field.
  *
  * [#20986] `referenceOf` answers a relationship field's declared target: the
@@ -476,15 +489,20 @@ function namedQueryFields(
   cube: Cube,
   datasetScope: DatasetScope | undefined,
   referenceOf: HopReference | undefined,
-): NamedField[] {
+): NamedRead[] {
   const baseObject = typeof cube.sql === 'string' ? cube.sql.trim() : '';
   if (!baseObject || !BARE_IDENTIFIER.test(baseObject)) return [];
-  const out: NamedField[] = [];
+  const out: NamedRead[] = [];
   const name = (member: string, kind: 'dimension' | 'measure' | 'any', role: FieldReadRole) => {
     if (typeof member !== 'string' || member === '') return;
     const entry = declaredMemberEntry(cube, member, kind);
-    const sql = entry ? entry.sql : kind === 'measure' ? undefined : member;
-    if (typeof sql === 'string') out.push(...fieldsOfColumnSql(cube, baseObject, sql, role, referenceOf));
+    // An undeclared measure reads nothing: both strategies refuse a measure the
+    // cube does not carry.
+    if (!entry && kind === 'measure') return;
+    const sql = entry ? entry.sql : member;
+    const fields = typeof sql === 'string' ? fieldsOfColumnSql(cube, baseObject, sql, role, referenceOf) : null;
+    if (fields) out.push(...fields);
+    else out.push({ object: baseObject, member, expression: true });
   };
   const filterMembers = (where: unknown): string[] => {
     if (!where || typeof where !== 'object') return [];
@@ -1778,6 +1796,10 @@ export class AnalyticsService implements IAnalyticsService {
    * query names, BEFORE a strategy is selected — `NativeSQLStrategy` compiles
    * members straight into a statement no middleware sees, so the engine's field
    * guard could never reach it. See `field-read-admission.ts`.
+   *
+   * [#20965] A member that resolves to neither a field nor `'*'` is refused
+   * here too, `PERMISSION_DENIED` / 403, ahead of the field verdicts on its
+   * object ({@link namedQueryFields}).
    *
    * A no-op when no provider is wired (no security service) or when the query
    * names no field.

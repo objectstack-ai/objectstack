@@ -99,6 +99,64 @@ describe('AppPlugin', () => {
         // Check context passed to onEnable
         const callArg = onEnableSpy.mock.calls[0][0];
         expect(callArg.ql).toBe(mockQL);
+        // Nothing was withheld on a boot that did not ask for it.
+        expect(plugin.onEnableWithheld).toBe(false);
+    });
+
+    // [#21054] A declaration boot (`os migrate plan` / `apply`) composes the
+    // app for what it declares; its `onEnable` is not executed, and the boot
+    // says so instead of reading as an app without one.
+    describe('skipOnEnable', () => {
+        it('withholds onEnable, logs that it did, and reports it', async () => {
+            const onEnableSpy = vi.fn();
+            const plugin = new AppPlugin(
+                { id: 'com.test.declaring', onEnable: onEnableSpy },
+                undefined,
+                { skipOnEnable: true },
+            );
+            vi.mocked(mockContext.getService).mockReturnValue({ registry: {} });
+
+            await plugin.start!(mockContext);
+
+            expect(onEnableSpy).not.toHaveBeenCalled();
+            expect(plugin.onEnableWithheld).toBe(true);
+            expect(mockContext.logger.info).toHaveBeenCalledWith(
+                expect.stringContaining('runtime.onEnable NOT executed'),
+                expect.objectContaining({ appId: 'com.test.declaring' }),
+            );
+            expect(mockContext.logger.info).not.toHaveBeenCalledWith(
+                'Executing runtime.onEnable',
+                expect.anything(),
+            );
+        });
+
+        it('withholds the hook wherever the executor resolves it — `bundle.default` included', async () => {
+            const onEnableSpy = vi.fn();
+            const plugin = new AppPlugin(
+                { id: 'com.test.module', default: { onEnable: onEnableSpy } },
+                undefined,
+                { skipOnEnable: true },
+            );
+            vi.mocked(mockContext.getService).mockReturnValue({ registry: {} });
+
+            await plugin.start!(mockContext);
+
+            expect(onEnableSpy).not.toHaveBeenCalled();
+            expect(plugin.onEnableWithheld).toBe(true);
+        });
+
+        it('reports nothing withheld for a bundle that carries no onEnable', async () => {
+            const plugin = new AppPlugin({ id: 'com.test.static' }, undefined, { skipOnEnable: true });
+            vi.mocked(mockContext.getService).mockReturnValue({ registry: {} });
+
+            await plugin.start!(mockContext);
+
+            expect(plugin.onEnableWithheld).toBe(false);
+            expect(mockContext.logger.debug).toHaveBeenCalledWith(
+                'No runtime.onEnable function found',
+                expect.anything(),
+            );
+        });
     });
 
     it('start should warn if objectql not found', async () => {
