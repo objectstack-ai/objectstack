@@ -5,6 +5,7 @@
  * field stored as a JSON column — a `multiple: true` field, an inherently
  * multi-value option type (`tags`, `multiselect`, `checkboxes`) or a
  * structured-JSON type (`json`, `address`, …): the operator set and the words.
+ * [#21009] The text operators other than the membership pair get it too.
  *
  * ## Two faces, one rule
  *
@@ -30,15 +31,18 @@
  * `$contains` is the membership spelling on such a column (`FILTER_OPERATORS`'
  * `$contains` docblock, `@objectstack/spec`), and it is what the refusal
  * prescribes — `$contains` for one member, an `$or` of `$contains` for any-of.
- * That is why it is ABSENT from the set below, with the rest of the text family
- * and the null predicates.
+ * That is why it is ABSENT from the set below, with its complement
+ * `$notContains` and the null predicates. [#21009] The remainder of the text
+ * family is IN the set: it has no membership reading, so it matched the
+ * serialization.
  */
 
 /**
  * [#7398] Operators whose SQL lowering compares a column's STORED SCALAR to a
  * value — every spelling either of `driver-sql`'s two comparison emitters
  * answers (`applyFilterCondition`'s plain-column switch and
- * `applyNormalizedComparison`'s normalised arms).
+ * `applyNormalizedComparison`'s normalised arms). [#21009] Or MATCHES that
+ * stored scalar as text: the text family other than the membership pair.
  *
  * The bare infix forms are here for the same reason they are in `driver-sql`'s
  * `SCALAR_COMPARAND_OPERATORS`: `applyNormalizedComparison` really does
@@ -53,15 +57,40 @@
  * the halves and compiling the compound would be the same wrong answer at one
  * more spelling.
  *
- * Deliberately ABSENT, and this is the load-bearing half of the set: the `LIKE`
- * family (`$contains`, `$notContains`, `$startsWith`, `$endsWith`,
- * `$icontains`) and the null predicates (`$null`, `$exists`). `$contains` is
- * the ONLY working membership spelling on a JSON-array column and downstream
- * code depends on it (#7398's own tables), while `IS NULL` asks about the
- * column's presence, which is a well-formed question whatever the column holds.
+ * Deliberately ABSENT, and this is the load-bearing half of the set: the
+ * membership pair (`$contains`, `$notContains`) and the null predicates
+ * (`$null`, `$exists`, `$empty`). `$contains` is the ONLY working membership
+ * spelling on a JSON-array column and downstream code depends on it (#7398's
+ * own tables) — `driver-sql` compiles it as a real per-dialect membership test,
+ * and `$notContains` as its exact complement — while `IS NULL` asks
+ * about the column's presence, which is a well-formed question whatever the
+ * column holds.
  *
  * [#21007] Moved here from `driver-sql`, unchanged, so the per-aggregation
  * `filter` refuses exactly the operators `where` refuses.
+ *
+ * [#21009] The remainder of the text family joined the set: `$startsWith`,
+ * `$endsWith`, `$icontains`, and the staged pattern pair `$like` / `$ilike`
+ * that `driver-sql` answers ahead of `FILTER_OPERATORS`. None has a membership
+ * reading, so on a JSON column each matched the SERIALIZATION as text, and the
+ * answers were wrong the same three ways the equality family's were. Measured
+ * through `POST /api/v1/data/:object/query` on a multi-value lookup holding
+ * `["u1","u2"]`:
+ *
+ * - SQLite: `$startsWith: '['` and `$endsWith: ']'` matched EVERY row with a
+ *   value, while `$startsWith: 'u1'` matched none; `$icontains: 'U1'` matched
+ *   the row holding only `u10`, and `$icontains: '","'` matched every row with
+ *   two members.
+ * - PostgreSQL: a `json` column has no `LIKE` operator, so all five failed at
+ *   query time — a `500` `DATABASE_ERROR` for a filter the caller can fix.
+ * - The per-aggregation `filter` counted `0` for `$startsWith`, `$endsWith` and
+ *   `$icontains` (it already refuses the staged pair as unsupported).
+ *
+ * Each now gets this set's `400`. ⛔ No membership reading is invented for a
+ * prefix, suffix or case-folded test: the prescription stays `$contains`. The
+ * infix spellings `like` / `ilike` are not members because no emitter answers
+ * them as operators — the normalised arms carry no text family, and the
+ * operator switch refuses them as unsupported.
  */
 export const JSON_COLUMN_INCOMPATIBLE_OPERATORS: ReadonlySet<string> = new Set([
   '$eq', '=', '==',
@@ -70,6 +99,7 @@ export const JSON_COLUMN_INCOMPATIBLE_OPERATORS: ReadonlySet<string> = new Set([
   '$in', 'in',
   '$nin', 'nin', 'not_in', 'notin',
   '$between', 'between',
+  '$startsWith', '$endsWith', '$icontains', '$like', '$ilike',
 ]);
 
 /** The two texts of one JSON-column refusal — see {@link jsonColumnOperatorRefusalText}. */
@@ -116,6 +146,11 @@ export interface JsonColumnOperatorRefusalText {
  * [#21007] Moved here from `driver-sql`'s `jsonColumnOperatorError`, byte for
  * byte, so `where` and the per-aggregation `filter` print one sentence. The
  * caller builds the error: this returns only the text.
+ *
+ * [#21009] The text family that joined the set reads these same words,
+ * unchanged. Its prescription holds as written — membership is `$contains` —
+ * while the "scalar comparison" wording and the two directions the closing
+ * sentence names are the equality family's.
  */
 export function jsonColumnOperatorRefusalText(
   field: string,

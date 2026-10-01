@@ -30,7 +30,7 @@ export default class DbClean extends Command {
   static override flags = {
     database: Flags.string({
       char: 'd',
-      description: 'SQLite database URL/path (defaults to $OS_DATABASE_URL, then the project database via the shared #6469 resolution)',
+      description: 'SQLite database URL/path (defaults to $OS_DATABASE_URL, then the one project database that os dev, os start and os migrate all resolve)',
       env: 'OS_DATABASE_URL',
     }),
   };

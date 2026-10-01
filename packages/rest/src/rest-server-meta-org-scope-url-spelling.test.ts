@@ -132,7 +132,9 @@ function boot(execCtx: any) {
 /** The request object the route handed to the protocol. */
 const requestFrom = (fn: any) => fn.mock.calls[0][0];
 
-const AUTHORIZED = { userId: 'u1', systemPermissions: ['manage_metadata'], tenantId: ORG };
+// [#21124] `manage_platform_settings` too: these suites iterate every registered type, and a
+// `datasource` write is admitted only with it (`metaTypeWriteRefusal`, the type-level write admission).
+const AUTHORIZED = { userId: 'u1', systemPermissions: ['manage_metadata', 'manage_platform_settings'], tenantId: ORG };
 
 async function writeWith(type: string) {
     const b = boot(AUTHORIZED);

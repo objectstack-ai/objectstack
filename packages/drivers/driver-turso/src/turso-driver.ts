@@ -2615,17 +2615,6 @@ export class TursoDriver extends SqlDriver {
     }
   }
 
-  /**
-   * The `auto_number` columns of `object`, looked up as `fillAutoNumberFields`
-   * looks them up (object name first, then the physical table it maps to), so
-   * the columns named insert-only to the transport are exactly the ones a
-   * number was issued for.
-   */
-  private remoteAutoNumberColumns(object: string, table: string): string[] {
-    const cfgs = this.autoNumberFields[object] || this.autoNumberFields[table];
-    return cfgs ? cfgs.map((cfg) => cfg.name) : [];
-  }
-
   // [#15267] The override declares the contract's type, as both of its branches
   // already do: `RemoteTransport.create()` answers `Record<string, unknown>`
   // through the generic `formatRemoteRow`, and the local branch forwards to
@@ -2683,7 +2672,19 @@ export class TursoDriver extends SqlDriver {
       // going unused exactly as it does on the local faces (a gap in the
       // sequence, never a renumbering). An explicit payload value does not
       // renumber a merged row either; `update()` is the renumbering path.
-      const insertOnly = this.remoteAutoNumberColumns(object, table);
+      //
+      // [#21166] The insert-only set is `insertOnlyUpsertColumns` itself, the
+      // list the local faces build their merge set from, so it names `id` and
+      // `created_at` beside the autonumber columns. This face once handed the
+      // transport the autonumber columns alone, from a lookup of its own, so a
+      // merge on a business key (`conflictKeys: ['email']`) wrote
+      // `"id" = excluded."id"` and replaced the stored row's primary key with
+      // the payload's, or with the nanoid minted for the insert that lost
+      // (#8622's re-key, on this face). One list, so the faces cannot drift on
+      // which columns a merge may write. A remote object never renames a
+      // column (`remoteTableFor` refuses a renaming column map first), so the
+      // list's physical names are the names the transport writes.
+      const insertOnly = [...this.insertOnlyUpsertColumns(object)];
       const written = await this.writeRemoteRowWithAutoNumbers(object, { ...data }, options, (filled) =>
         this.remoteTransport!.upsert(object, this.toRemoteWriteForms(object, filled), conflictKeys, table, insertOnly),
       );

@@ -71,6 +71,7 @@ import {
     metaReadOrganizationId,
     metaRequestLocale,
     metaTypeReadRefusal,
+    metaTypeWriteRefusal,
     projectMetaObjectSchema,
     refuseUnknownMetaListType,
     STORED_VERSION_DOOR_POLICY,
@@ -930,6 +931,22 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         return {
             handled: true,
             response: deps.error(typeReadRefusal.message, typeReadRefusal.status, { code: typeReadRefusal.code }),
+        };
+    }
+
+    // [#21124] …and the write-side twin, asked at the same point of the same
+    // predicate `RestServer`'s registrar asks: a write verb on a `/meta` path
+    // whose type is a datasource definition is admitted on the capability the
+    // datasource admin door requires for the same create / update / remove —
+    // before the `PUT` branch's own authoring admission resolves the protocol,
+    // so a refused caller writes nothing, whatever route shape the request
+    // took and whether or not the name exists. A request that names no verb is
+    // a read (see above), so it is never judged here.
+    const typeWriteRefusal = metaTypeWriteRefusal(method, parts[0], _context.executionContext);
+    if (typeWriteRefusal) {
+        return {
+            handled: true,
+            response: deps.error(typeWriteRefusal.message, typeWriteRefusal.status, { code: typeWriteRefusal.code }),
         };
     }
 

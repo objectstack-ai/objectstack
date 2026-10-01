@@ -218,7 +218,7 @@ export function nodeEnvCheck(env: NodeJS.ProcessEnv = process.env): HealthCheckR
       + '      • local development     → NODE_ENV=development (what `os dev` already sets)\n'
       + '      Unset reads as production everywhere: `os serve` and `os doctor` resolve the\n'
       + '      `.env*` cascade for node_env=production, and the /discovery `environment` field\n'
-      + '      advertises "production" (#5673). That is the safe direction — a client asking\n'
+      + '      advertises "production". That is the safe direction — a client asking\n'
       + '      "am I talking to production?" is never told "development" by an omission — but\n'
       + '      it also makes an oversight look identical to a deliberate production deployment,\n'
       + '      and this row is the only place the difference is visible.\n'
@@ -1403,7 +1403,7 @@ const DEPRECATED_PATTERNS: Array<{
     // Pointing at the removed key sent authors to a silently-stripped spelling.
     pattern: /\breference_filters\b|\breferenceFilters\b/,
     description: 'retired lookup-scoping key: reference_filters / referenceFilters',
-    replacement: 'Use lookupFilters (camelCase) — `referenceFilters` was removed in #2377',
+    replacement: 'Use lookupFilters (camelCase) — `referenceFilters` was removed from FieldSchema as a key no runtime read (ADR-0049 enforce-or-remove)',
   },
   {
     pattern: /\bunique_name\b/,
@@ -1541,7 +1541,7 @@ export function configLoadFailureCheck(err: unknown): HealthCheckResult {
     message: `Could not load config for analysis (config checks skipped) — ${reportRowHeadline(cause)}`,
     fix:
       '`os serve` loads this same file the same way — bundle-require, under the `.env*`\n'
-      + '      cascade named above (#5397) — and prints this error in full, so a config that\n'
+      + '      cascade named above — and prints this error in full, so a config that\n'
       + '      lands here is one the server cannot boot either.\n'
       + '      The config-aware checks were SKIPPED, not passed: platform protocol,\n'
       + '      circular dependencies, unused objects, orphan views, dashboard integrity.\n'

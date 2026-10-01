@@ -11,8 +11,9 @@ states that the next pull's starting point is read from the TARGET field a
 `fieldMapping` entry copies it onto (an unmapped one is refused at pull time), and
 `watermark` states the one-response limit: the connector's paging is not followed,
 so a paged endpoint yields its first page only. The liveness ledger's
-`connectorSource` rows are `live` and keep `authorWarn` (nothing schedules a pull
-yet). The retired `connector.syncConfig` prescription and the
-`connector-sync-keys-retired` upgrade entry say the same, and the entry's
-acceptance criterion no longer claims the connector is validated at authoring.
+`connectorSource` rows are `live`, with no author warning: that nothing schedules a
+pull yet is said on the key's description. The retired `connector.syncConfig`
+prescription and the `connector-sync-keys-retired` upgrade entry say the same, and
+the entry's acceptance criterion no longer claims the connector is validated at
+authoring.
 No key, value or default changed.

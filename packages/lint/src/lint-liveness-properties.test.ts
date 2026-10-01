@@ -1855,3 +1855,53 @@ describe('the hint a warned row shows an author (#16094, #21096)', () => {
     }
   });
 });
+
+// ── #21127: the shipped ledgers carry no warned `live` row ──
+//
+// `mapping.connectorSource` was re-graded `live` with its `authorWarn` kept, so
+// `describe()` threw its ledger-integrity error (asserted LOUD by design in
+// the COVERAGE block above) and `os validate` / `os lint` exited 1 on every
+// stack that authored the binding. The row now carries no warning, and
+// `check:liveness` refuses the combination at every depth; these pins hold the
+// author's side of it against the REAL ledgers.
+describe('#21127 — a stack authoring `mapping.connectorSource` lints clean, and a warned `planned` row still warns', () => {
+  // The card's fixture: one object, one mapping that authors the binding.
+  const FX_ACCOUNT = {
+    name: 'fx_account',
+    label: 'Account',
+    fields: { name: { type: 'text', label: 'Name' }, external_id: { type: 'text', label: 'External ID' } },
+  };
+  const FX_PULL = {
+    name: 'fx_account_pull',
+    label: 'Account pull',
+    sourceFormat: 'json',
+    targetObject: 'fx_account',
+    mode: 'upsert',
+    fieldMapping: [
+      { source: 'id', target: 'external_id', transform: 'none' },
+      { source: 'name', target: 'name', transform: 'none' },
+    ],
+    connectorSource: { connector: 'crm_api', action: 'request' },
+  };
+
+  it('REAL LEDGER: the card\'s fixture lints without throwing, and nothing is said about the live binding', () => {
+    expect(authorWarnedProperties('mapping').has('connectorSource')).toBe(false);
+    const findings = lintLivenessProperties({ objects: [FX_ACCOUNT], mappings: [FX_PULL] });
+    expect(findings.filter((f) => f.message.includes('connectorSource'))).toEqual([]);
+    // Anti-vacuity: an unreadable ledger also yields no finding, and says so
+    // under its own rule id — which must not be what made this quiet.
+    expect(findings.filter((f) => f.rule === LIVENESS_LEDGER_UNREADABLE)).toEqual([]);
+  });
+
+  it('REAL LEDGER (the control): a `planned` row with `authorWarn` still warns, in the same call', () => {
+    // `object.externalSharingModel` is `planned` + `authorWarn` in tree — the
+    // legal shape: a consumer is being built, keep the key, it does nothing yet.
+    const findings = lintLivenessProperties({
+      objects: [{ ...FX_ACCOUNT, externalSharingModel: 'private' }],
+      mappings: [FX_PULL],
+    });
+    const planned = findings.filter((f) => f.rule === 'liveness-planned-property');
+    expect(planned.map((f) => f.message).join(' | ')).toContain('externalSharingModel');
+    expect(findings.filter((f) => f.message.includes('connectorSource'))).toEqual([]);
+  });
+});

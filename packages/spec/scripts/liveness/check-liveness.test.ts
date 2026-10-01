@@ -1556,3 +1556,118 @@ describe('check:liveness — a tombstoned key may not be graded `live` (#19062)'
     expect(line).not.toContain('FORBIDDEN');
   });
 });
+
+// ── #21127: a `live` row never opts into `authorWarn` ──
+//
+// The author-side lint (`packages/lint/src/lint-liveness-properties.ts`) picks
+// the verdict it shows from a warned row's STATUS, and its `describe()` throws
+// on `live` by design — so a warned `live` row turns `os validate` / `os lint`
+// into exit 1 for every stack that authors the key. `mapping.connectorSource`
+// shipped that row, a CONTAINER that drills into `children`, which is exactly
+// the row the graded walk never reads. Every case runs the REAL gate via
+// `--ledger-root`, for the #5623 reason the blocks above state.
+//
+// The carriers are derived from the shipped ledgers by SHAPE — a top-level
+// `live` container row with `children`, and a `live` drilled child — never named,
+// for the #19062 reason: a named row is a moving verdict. Adding `authorWarn:
+// true` to a `live` row moves no status, so the count shards stay byte-identical
+// and the red run has exactly one cause.
+
+/** What a derived carrier is: a coordinate in one shipped ledger. */
+interface WarnCarrier {
+  type: string;
+  /** `prop` or `prop.child` — the row the fixture marks. */
+  path: string;
+}
+
+/** Every `(type, path)` the shipped ledgers carry with a given shape, sorted. */
+function liveRows(shape: 'container' | 'child'): WarnCarrier[] {
+  const out: WarnCarrier[] = [];
+  for (const file of readdirSync(LEDGERS).filter((f) => f.endsWith('.json')).sort()) {
+    const type = file.slice(0, -'.json'.length);
+    const props: Record<string, any> = JSON.parse(readFileSync(path.join(LEDGERS, file), 'utf8')).props ?? {};
+    for (const [prop, row] of Object.entries(props)) {
+      if (shape === 'container' && row?.status === 'live' && row?.children && row?.authorWarn !== true) {
+        out.push({ type, path: prop });
+      }
+      if (shape === 'child') {
+        for (const [child, crow] of Object.entries<any>(row?.children ?? {})) {
+          if (crow?.status === 'live' && !crow?.children && crow?.authorWarn !== true) {
+            out.push({ type, path: `${prop}.${child}` });
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+describe('check:liveness — a `live` row may not opt into `authorWarn` (#21127)', () => {
+  let tmp: string;
+
+  beforeAll(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), 'os-liveness-authorwarn-'));
+  });
+  afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+  /** Copy the shipped ledgers and mark one row `authorWarn: true`, read back from disk. */
+  function sampleWarned(name: string, carrier: WarnCarrier): string {
+    const root = path.join(tmp, name);
+    cpSync(LEDGERS, root, { recursive: true });
+    const file = path.join(root, `${carrier.type}.json`);
+    const ledger = JSON.parse(readFileSync(file, 'utf8'));
+    const [prop, child] = carrier.path.split('.');
+    const row = child ? ledger.props[prop].children[child] : ledger.props[prop];
+    row.authorWarn = true;
+    writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
+    // Proof the edit reached disk — an editor's exit code is not evidence.
+    const back = JSON.parse(readFileSync(file, 'utf8')).props[prop];
+    expect((child ? back.children[child] : back).authorWarn, `${carrier.type}/${carrier.path} not marked on disk`).toBe(true);
+    return root;
+  }
+
+  // THE CONTROL, and the census. Green on a verbatim copy, and the line names
+  // the population it asked: a `planned` row with `authorWarn` is the legal
+  // shape (a consumer is being built — keep the key, it does nothing yet), so
+  // the shipped ledgers carry some and the gate leaves them alone.
+  it('is green on the shipped ledgers, which carry warned `planned` rows and no warned `live` one', () => {
+    const { status, output } = runGate();
+    expect(status, output).toBe(0);
+    expect(output).toContain('no `live` row opts into an author warning');
+    const line = output.split('\n').find((l) => l.startsWith('author warnings:')) ?? '';
+    expect(line, 'the gate must publish the population it asked').not.toBe('');
+    const reached = Number(/^author warnings: (\d+) /.exec(line)?.[1] ?? 0);
+    expect(reached, 'a walk reaching zero warned rows is a degraded walk, not a clean tree').toBeGreaterThan(0);
+    expect(line).toMatch(/\bplanned [1-9]\d*\b/);
+    expect(line).toContain('; 0 on a `live` row.');
+    expect(line).not.toContain('FORBIDDEN');
+  });
+
+  // The regression's own shape: a `live` CONTAINER row, whose status the graded
+  // walk never reads because only its children are classified.
+  it('FAILS when a `live` container row that drills into `children` opts in', () => {
+    const [carrier] = liveRows('container');
+    expect(carrier, 'no top-level `live` row with `children` in the shipped ledgers to carry the sample').toBeDefined();
+
+    const { status, output } = runGate(sampleWarned('container', carrier));
+    expect(status, output).toBe(1);
+    expect(output).toContain('✗ 1 `live` ledger row(s) opt into `authorWarn` — the author-side lint throws on them:');
+    expect(output).toContain(`    ${carrier.type}/${carrier.path}\n`);
+    // The prescription travels with the finding, and rules out the wrong fix.
+    expect(output).toContain('Do NOT teach `describe()` a `live` branch');
+    // ONE cause: a second ✗ block would mean the sample dragged another check in.
+    expect(output.split('\n').filter((l) => l.startsWith('✗')), output).toHaveLength(1);
+  });
+
+  // The lint reads a container's direct children too, and the walk goes to any
+  // depth `children` nests — a drilled `live` row is the same crash.
+  it('FAILS when a drilled `live` child row opts in', () => {
+    const [carrier] = liveRows('child');
+    expect(carrier, 'no drilled `live` child row in the shipped ledgers to carry the sample').toBeDefined();
+
+    const { status, output } = runGate(sampleWarned('child', carrier));
+    expect(status, output).toBe(1);
+    expect(output).toContain(`    ${carrier.type}/${carrier.path}\n`);
+    expect(output.split('\n').filter((l) => l.startsWith('✗')), output).toHaveLength(1);
+  });
+});
