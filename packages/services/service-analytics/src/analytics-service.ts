@@ -1884,8 +1884,11 @@ export class AnalyticsService implements IAnalyticsService {
       // the result-column enrichment already reads. Same source, one call
       // shape, so a host that wired `sourceFieldMeta` gets the compile-time
       // refusal with no second hook to remember.
-      declaredFieldType: (object: string, field: string) =>
-        this.sourceFieldMeta?.(object, field)?.type,
+      declaredValueShape: (object: string, field: string) => {
+        const meta = this.sourceFieldMeta?.(object, field);
+        if (typeof meta?.type !== 'string' || meta.type === '') return undefined;
+        return { type: meta.type, multiple: meta.multiple === true };
+      },
     });
   }
 
@@ -2787,7 +2790,11 @@ export class AnalyticsService implements IAnalyticsService {
         if (!entry) return member;
         return typeof entry.sql === 'string' ? entry.sql : '';
       },
-      (o, field) => fieldMeta(o, field)?.type,
+      (o, field) => {
+        const meta = fieldMeta(o, field);
+        if (typeof meta?.type !== 'string' || meta.type === '') return undefined;
+        return { type: meta.type, multiple: meta.multiple === true };
+      },
     );
   }
 
