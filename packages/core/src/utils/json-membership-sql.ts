@@ -9,7 +9,7 @@
  * `FILTER_OPERATORS.$contains` (`@objectstack/spec/data`) makes the operator a
  * membership test on a `multiple: true` field or a JSON-stored type, and a
  * substring test on a scalar string column. `@objectstack/driver-sql` answered
- * it (#17590) with the two functions below, module-private there. The
+ * it (commit e04a0aff2) with the two functions below, module-private there. The
  * analytics service compiles its own SQL for the same operator in two places,
  * the ADR-0021 D-C read scope and the native `where`, and both kept answering
  * substring, so a read scope admitted rows its policy excluded.
@@ -27,7 +27,7 @@
  * ## The `'unknown'` dialect: one `null`, two answers
  *
  * The predicate answers `null` there, before either emitter is called.
- * `driver-sql` keeps its pre-#17590 `LIKE` residue on that answer, as its
+ * `driver-sql` keeps the `LIKE` residue it emitted before commit e04a0aff2, as its
  * `applyJsonMembership` says. The analytics read scope and `where` REFUSE it
  * instead, each in its own envelope: on a read scope the substring residue is
  * a scope admitting rows its policy excludes.
@@ -55,7 +55,7 @@ export interface JsonMembershipEmitters {
 }
 
 /**
- * [#17590, director ruling 2026-09-12] The JSON scalars a `$contains` comparand
+ * [commit e04a0aff2, director ruling 2026-09-12] The JSON scalars a `$contains` comparand
  * denotes when the column it is aimed at holds a JSON array — the comparand
  * half of {@link jsonMembershipPredicate}.
  *
@@ -114,7 +114,7 @@ export function jsonMembershipCandidates(value: unknown): string[] {
 }
 
 /**
- * [#17590, director ruling 2026-09-12] The one place a `$contains` MEMBERSHIP
+ * [commit e04a0aff2, director ruling 2026-09-12] The one place a `$contains` MEMBERSHIP
  * test over a JSON-stored column becomes SQL — the column and every value
  * emitted through the caller's {@link JsonMembershipEmitters}, left to right.
  *
@@ -161,7 +161,7 @@ export function jsonMembershipCandidates(value: unknown): string[] {
  * - **MySQL → `JSON_CONTAINS(col, '[<candidate>]')`**, the same array-wrapped
  *   candidate and the same containment rule, including the same FALSE for a
  *   scalar or object root. Measured directly on live MySQL 8.0.46 — the cell
- *   the card carried only as a second-hand reading from #17343's CI.
+ *   the card carried only as a second-hand reading from the CI of commit 82cb69fed.
  * - **SQLite → a `json_each` scan**, because SQLite has no containment
  *   operator. `typeof(os_member.key) = 'integer'` is the array-only condition:
  *   `json_each` gives an array element an INTEGER key, an object member a TEXT
@@ -172,7 +172,7 @@ export function jsonMembershipCandidates(value: unknown): string[] {
  *   number 1, and a divergence from the other two arms. Taking the TYPE NAME
  *   for those three cases is exact, because `'true'`/`'false'`/`'null'` ARE
  *   their own JSON text.
- * - **`'unknown'` → `null`**, and the caller falls back to the pre-#17590
+ * - **`'unknown'` → `null`**, and the caller falls back to the pre-e04a0aff2
  *   `LIKE` shape. `dialectName` is `'unknown'` for a knex client this driver
  *   does not model (mssql, oracle), where none of the three constructs above
  *   parses. Emitting the old shape is not an endorsement of it — it is the only
@@ -200,7 +200,7 @@ export function jsonMembershipCandidates(value: unknown): string[] {
  *
  * @see jsonMembershipCandidates — the comparand half.
  * @see SqlDriver.isJsonColumn — the population, unchanged by this card (#17469).
- * @see https://github.com/objectstack-ai/objectstack/issues/17590
+ * @see commit e04a0aff2 — the landing that ruled the membership reading in.
  */
 export function jsonMembershipPredicate(
   dialect: JsonMembershipDialect,
