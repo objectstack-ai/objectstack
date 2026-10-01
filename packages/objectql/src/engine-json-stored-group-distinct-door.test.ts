@@ -286,14 +286,12 @@ describe('[#20808] a groupBy on a multi-value field, and a count_distinct on a J
     // A driver-internal alias on an introspected object: the table cannot answer, so no block.
     expect(judge({ fields: { f: { type: 'object' } } }, distinct('f'))).not.toThrow();
     expect(judge({ fields: { f: { type: 'integer' } } }, distinct('f'))).not.toThrow();
-    // `count` compares no value, so its row accepts a JSON-stored field; `sum`
-    // is the row the #20914 census held back for triage.
-    for (const fn of ['count', 'sum']) {
-      expect(judge(PROBE, [{ function: fn, field: 'meta', alias: 'n' }]), fn).not.toThrow();
-    }
-    // [#20914] Flipped: the door asks every row now, and the `avg`, `min` and
-    // `max` rows refuse a `json` field — the same envelope, at the same position.
-    for (const fn of ['avg', 'min', 'max']) {
+    // `count` compares no value, so its row accepts a JSON-stored field.
+    expect(judge(PROBE, [{ function: 'count', field: 'meta', alias: 'n' }]), 'count').not.toThrow();
+    // [#20914] Flipped: the door asks every row now, and the `sum`, `avg`,
+    // `min` and `max` rows refuse a `json` field — the same envelope, at the
+    // same position. (`sum` passed here while the census held its row.)
+    for (const fn of ['sum', 'avg', 'min', 'max']) {
       let thrown: Thrown = null;
       try { judge(PROBE, [{ function: fn, field: 'meta', alias: 'n' }])(); } catch (e) { thrown = e as Thrown; }
       expect(envelopeOf(thrown), fn).toEqual(ENVELOPE);

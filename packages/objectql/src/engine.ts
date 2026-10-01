@@ -17028,8 +17028,8 @@ export class ObjectQL implements IObjectQLEngine {
       // the `count_distinct` row (memory counted equal documents apart, SQLite
       // compared serialized text, PostgreSQL answered 500); [#20914] took the
       // other rows — `max` over a `json` field answered a document in memory, a
-      // string on SQLite and a 500 on PostgreSQL. The `sum` row is held back by
-      // that card's census (see the door's header).
+      // string on SQLite and a 500 on PostgreSQL; `sum` over one answered `0`,
+      // `0` and a 500. Every row of the table is asked (see the door's header).
       assertAggregationFieldTypesAccepted(object, this._registry.getObject(object), query.aggregations);
       // [#10576] The per-aggregation `filter` (`AggregationNodeSchema.filter`,
       // the contract half of #10413) is a second filter position on this verb,
@@ -17151,13 +17151,18 @@ export class ObjectQL implements IObjectQLEngine {
               //     refused. Refused in `where`'s words for that comparison, which
               //     withhold the fields, the operator and the reason; the
               //     withheld half goes to this log, as the driver writes its own.
+              //     [#21007] …and, last, `where`'s JSON-column rule: a scalar
+              //     comparison (`$in`, `$nin`, `$eq`, an ordering, implicit
+              //     equality, …) on a field declared JSON-stored is refused in
+              //     `where`'s words — counted by the fallback, `$nin` counted the
+              //     very rows it was asked to exclude. Same withholding, same log.
               const typed = normalizeFilterComparandTypes(numeric, `aggregate('${object}')`, `aggregations[${i}].filter`);
               assertAggregationFilterIsEvaluable(typed, i, {
                   object,
                   fields: (this._registry.getObject(object) as { fields?: unknown } | undefined)?.fields,
                   reportWithheld: (diagnostic) => this.logger.warn(
                       `aggregate('${object}'): INVALID_FILTER — refusal detail withheld from the response, as it `
-                      + `is for the same cross-field comparison in a where. Full diagnostic: ${diagnostic}`,
+                      + `is for the same refusal in a where. Full diagnostic: ${diagnostic}`,
                   ),
               });
               if (typed !== aggFilter) {

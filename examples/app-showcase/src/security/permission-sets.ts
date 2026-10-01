@@ -69,6 +69,14 @@ export const ContributorPermissionSet = definePermissionSet({
     'showcase_project.budget_remaining': { readable: true, editable: false },
   },
   // Row-level security — contributors only see tasks assigned to them.
+  //
+  // No policy below lists `positions`, deliberately. A set's row-level policies
+  // are part of what the set grants, so they hold for EVERY holder of the set,
+  // whichever way it is held: through the `contributor` position binding
+  // (bind-position-sets.ts) or granted directly (the delegated admin below may
+  // hand this set out). `positions` narrows a policy to callers holding one of
+  // the listed positions (ADR-0090 P2) — a tool for a policy on a baseline set
+  // every member resolves, not for a set that is itself the grant.
   rowLevelSecurity: [
     {
       name: 'task_own_rows',
@@ -77,7 +85,6 @@ export const ContributorPermissionSet = definePermissionSet({
       object: 'showcase_task',
       operation: 'select' as const,
       using: 'assignee == current_user.email',
-      positions: ['contributor'],
       enabled: true,
     },
     // Owner RLS on the MASTER invoice. Because `showcase_invoice_line` is
@@ -92,7 +99,6 @@ export const ContributorPermissionSet = definePermissionSet({
       object: 'showcase_invoice',
       operation: 'select' as const,
       using: 'owner == current_user.email',
-      positions: ['contributor'],
       enabled: true,
     },
     // [ADR-0058 D4] RLS `check` — write-side post-image validation (NOT a read
@@ -108,7 +114,6 @@ export const ContributorPermissionSet = definePermissionSet({
       object: 'showcase_invoice',
       operation: 'update' as const,
       check: 'owner == current_user.email',
-      positions: ['contributor'],
       enabled: true,
     },
   ],
