@@ -1,6 +1,6 @@
 {
   "type": "mapping",
-  "_note": "MappingSchema (#2611 reusable import mapping). Consumers: the REST import path — resolveNamedMapping fetches the artifact by name and validates it against the request (packages/rest/src/import-mapping.ts:60-107), applyMappingToRows runs the fieldMapping pipeline (:115-167), and import-prepare adopts the artifact's mode/upsertKey as request defaults (packages/rest/src/import-prepare.ts:321-326); objectui's ImportWizard offers registered mappings in a saved-mapping picker (@940ba24 packages/plugin-grid/src/ImportWizard.tsx:979). Seeded 2026-08-01 (#4488) at 8 of 11 live; 7 of 7 live since #4509 removed the three that were not. The IMPORT half of the schema is real and loudly enforced (unsupported transforms/formats are 400s, not silent skips — Prime Directive #10). What left in 17.0.0: the EXPORT half (`extractQuery` — no exporter reads a mapping artifact at all) and the two tuning knobs (`errorPolicy`, `batchSize` — error handling belongs to the import REQUEST, and the write path sizes its own batches). Rows DELETED rather than kept: MappingSchema is strict, so the keys left the walked shape and a retained row would report ORPHAN. Both knobs were unwarnable (schema defaults materialize at parse, so the lint could not tell authored from supplied) — removal was the only channel that could reach an author, which is why they went out inside the 17.0.0 window rather than after a deprecation cycle. 2026-08-28 (commit 8f10a79f7): all seven `path:NNN` citations in this file were re-anchored to their consuming symbols. This is the one file in batch 4 whose lines were mostly RIGHT — repaired and re-measured by commit 905019b1b on 2026-08-23 — and it is kept as the counter-example: five of the seven landed on the read or inside the statement that performs it, and the two that did not (`mode`, `upsertKey`) had already drifted five lines in five days, onto a guard and a comment inside the right function. Correctness of a line is a property of the day it was measured; the anchor is what makes it a property of the code.",
+  "_note": "MappingSchema (#2611 reusable import mapping). Consumers: the REST import path — resolveNamedMapping fetches the artifact by name and validates it against the request (packages/rest/src/import-mapping.ts:60-107), applyMappingToRows runs the fieldMapping pipeline (packages/core/src/utils/import-mapping.ts since #20919, which moved it beside the import runner so the connector sync executor applies the same pipeline; rest re-exports it), and import-prepare adopts the artifact's mode/upsertKey as request defaults (packages/rest/src/import-prepare.ts:321-326); objectui's ImportWizard offers registered mappings in a saved-mapping picker (@940ba24 packages/plugin-grid/src/ImportWizard.tsx:979). Seeded 2026-08-01 (#4488) at 8 of 11 live; 7 of 7 live since #4509 removed the three that were not. The IMPORT half of the schema is real and loudly enforced (unsupported transforms/formats are 400s, not silent skips — Prime Directive #10). What left in 17.0.0: the EXPORT half (`extractQuery` — no exporter reads a mapping artifact at all) and the two tuning knobs (`errorPolicy`, `batchSize` — error handling belongs to the import REQUEST, and the write path sizes its own batches). Rows DELETED rather than kept: MappingSchema is strict, so the keys left the walked shape and a retained row would report ORPHAN. Both knobs were unwarnable (schema defaults materialize at parse, so the lint could not tell authored from supplied) — removal was the only channel that could reach an author, which is why they went out inside the 17.0.0 window rather than after a deprecation cycle. 2026-08-28 (commit 8f10a79f7): all seven `path:NNN` citations in this file were re-anchored to their consuming symbols. This is the one file in batch 4 whose lines were mostly RIGHT — repaired and re-measured by commit 905019b1b on 2026-08-23 — and it is kept as the counter-example: five of the seven landed on the read or inside the statement that performs it, and the two that did not (`mode`, `upsertKey`) had already drifted five lines in five days, onto a guard and a comment inside the right function. Correctness of a line is a property of the day it was measured; the anchor is what makes it a property of the code.",
   "props": {
     "name": {
       "status": "live",
@@ -29,7 +29,7 @@
     "fieldMapping": {
       "status": "live",
       "verifiedAt": "2026-08-28",
-      "evidence": "packages/rest/src/import-mapping.ts#resolveNamedMapping (the `transform === 'javascript'` refusal — implement-or-reject-loudly, there is no server sandbox); packages/rest/src/import-mapping.ts#applyMappingToRows (the pipeline itself: source/target/transform/params, with none/constant/map/split/join applied here and `lookup` copied through for the pipeline's reference resolution)",
+      "evidence": "packages/rest/src/import-mapping.ts#resolveNamedMapping (the `transform === 'javascript'` refusal — implement-or-reject-loudly, there is no server sandbox); packages/core/src/utils/import-mapping.ts#applyMappingToRows (the pipeline itself: source/target/transform/params, with none/constant/map/split/join applied here and `lookup` copied through for the pipeline's reference resolution)",
       "note": "Lines re-measured 2026-08-23 (commit 905019b1b): the second range ended at :167 in a 164-line file — the file shrank under the citation and no gate could see it, since the FILE still resolved. The consumer never moved: the javascript rejection is the loop at :95-102 (was :98-105) and the pipeline is applyMappingToRows at :112-164 (was :115-167); the three inline line refs below were off by the same three lines and are corrected with them. the pipeline itself: source/target/transform/params all consumed. none/constant/map/split/join applied in applyMappingToRows (`params.separator` :121, `.value` :129, `.valueMap` :134); `lookup` copies through for the pipeline's metaMap reference resolution; `javascript` is REJECTED with a 400 (no server sandbox — implement-or-reject-loudly). SUB-WALK BOUNDARY, resolved: `params`' lookup-specific keys (`object`/`fromField`/`toField`/`autoCreate`) were read by nothing — reference resolution comes from the target object's own field definitions, not from these — and were REMOVED in the 17.x line (commit 15d58dbf1, ADR-0049 enforce-or-remove; strict deletion, so nothing dead remains one level below the drill). Every spelling — the four canonical keys and their eleven ex-aliases — now lands on a guidance prescription at parse; the mapping-lookup-params-removed conversion (protocol 18) strips them from stored sources. The surviving params keys (`value`/`valueMap`/`separator`) are all consumed by applyMappingToRows. 2026-08-28: RE-ANCHORED (commit 8f10a79f7) — both ranges land inside their functions (their endpoints `:102` and `:164` are the functions' own closing braces), so this is the grammar migration. Worth recording beside the 2026-08-23 entry above: that repair moved these pointers three lines and they were right for five days; the anchor is the version that does not need re-measuring. Re-closed by hand against 8cb96ec41."
     },
     "mode": {
@@ -45,46 +45,54 @@
       "note": "adopted as the upsert match fields when the request names none. 2026-08-28: RE-ANCHORED (commit 8f10a79f7) — `:325` sat on a comment line two lines above the read, inside the right function. The grammar migration, not a repair. Re-closed by hand against 8cb96ec41."
     },
     "connectorSource": {
-      "status": "planned",
-      "verifiedAt": "2026-09-30",
+      "status": "live",
+      "verifiedAt": "2026-10-01",
+      "evidence": "packages/services/service-automation/src/connector-pull.ts#pullConnectorSource (reads the binding through the protocol's `getMetaItem({ type: 'mapping', name })`, makes ONE action call on the declared connector, and writes through `@objectstack/core`'s `runImport` — the import door's runner)",
       "authorWarn": true,
-      "authorHint": "`connectorSource` is declared but not executed yet — nothing pulls from the connector until the sync executor ships; schedule the pull with a `job` once it does.",
-      "note": "PLANNED, seeded 2026-09-30 contract-first — the target-side half of the connector-attached sync family, ruled ENFORCE on the maintainer's criterion with the definition MOVED here from the retired `connector.syncConfig` / `connector.fieldMappings` (both `dead` tombstone rows in connector.json): every mainstream platform binds a sync to its TARGET, and this type already carries the executed target half (`targetObject`, `fieldMapping`, `mode`, `upsertKey`, all live). `connectorSource` adds only where the rows come from — a `rest` / `openapi` connector instance, the action that reads them and an optional timestamp watermark; version 1 is a one-way pull, full or incremental, credentials are the instance's own ADR-0097 static `auth`, and the cadence is a `job` (no schedule key, by the 2026-09-10 ruling). NOTHING READS IT YET: the pull executor is the next stage of the same card, so `authorWarn` is set — an author who writes the binding today is told the pull does not run, which is the whole difference between this row and the silent `syncConfig` it replaces. Re-verify to `live` when the executor reads it, citing it as file#symbol; the children flip with it.",
+      "authorHint": "`connectorSource` is pulled when a job drives it; nothing schedules it until stage ③ — schedule the pull with a `job` once that stage lands.",
+      "note": "Seeded 2026-09-30 `planned`, contract-first — the target-side half of the connector-attached sync family, ruled ENFORCE on the maintainer's criterion with the definition MOVED here from the retired `connector.syncConfig` / `connector.fieldMappings` (both `dead` tombstone rows in connector.json): every mainstream platform binds a sync to its TARGET, and this type already carries the executed target half (`targetObject`, `fieldMapping`, `mode`, `upsertKey`, all live). `connectorSource` adds only where the rows come from — a `rest` / `openapi` connector instance, the action that reads them and an optional timestamp watermark; version 1 is a one-way pull, full or incremental, credentials are the instance's own ADR-0097 static `auth`, and the cadence is a `job` (no schedule key, by the 2026-09-10 ruling). LIVE since 2026-10-01 (#20919, stage ②): `@objectstack/service-automation`'s connector sync executor reads every key below and writes through the import runner, which moved to `@objectstack/core` so the executor writes through the same runner, coercion and row verdicts as the import door. `authorWarn` STAYS, reworded: nothing schedules a pull until the `job` stage lands (stage ③), so an author who writes the binding today is told the pull runs only when a job drives it — the whole difference between this row and the silent `syncConfig` it replaces. Drop the warning when the job stage lands.",
       "children": {
         "connector": {
-          "status": "planned",
-          "verifiedAt": "2026-09-30",
-          "note": "Planned with its container: names the connector instance to pull through (a `connectors[]` entry with provider `rest` or `openapi`). No reader yet — see `connectorSource`."
+          "status": "live",
+          "verifiedAt": "2026-10-01",
+          "evidence": "packages/services/service-automation/src/connector-pull.ts#pullConnectorSource (`registry.getConnectorOrigin` → only a `declarative` instance; `providerOf` → only `rest` / `openapi`; a plugin-registered or unknown connector is refused)",
+          "note": "Read by the executor: names the `connectors[]` instance to pull through. A plugin-registered connector, an unregistered name, a degraded instance or a provider other than `rest` / `openapi` is refused before the action runs."
         },
         "action": {
-          "status": "planned",
-          "verifiedAt": "2026-09-30",
-          "note": "Planned with its container: the connector action that reads the records (`request` on `rest`, an operation key on `openapi`). No reader yet — see `connectorSource`."
+          "status": "live",
+          "verifiedAt": "2026-10-01",
+          "evidence": "packages/services/service-automation/src/connector-pull.ts#pullConnectorSource (`registry.resolveConnectorAction(connector, action)`; an undeclared action is refused)",
+          "note": "Read by the executor: the connector action that reads the records (`request` on `rest`, an operation key on `openapi`), called ONCE per pull."
         },
         "input": {
-          "status": "planned",
-          "verifiedAt": "2026-09-30",
-          "note": "Planned with its container: fixed action input sent on every pull. Declared `z.record(z.string(), z.unknown())`, so it is not a container for this walk. No reader yet — see `connectorSource`."
+          "status": "live",
+          "verifiedAt": "2026-10-01",
+          "evidence": "packages/services/service-automation/src/connector-pull.ts#pullConnectorSource (copied as the action input; the watermark is merged into its `query`)",
+          "note": "Read by the executor: fixed action input sent on every pull, with `watermark.param` added to its `query`. Declared `z.record(z.string(), z.unknown())`, so it is not a container for this walk."
         },
         "recordsPath": {
-          "status": "planned",
-          "verifiedAt": "2026-09-30",
-          "note": "Planned with its container: where in the action's result the record array sits (omitted ⇒ the result's `body`). No reader yet — see `connectorSource`."
+          "status": "live",
+          "verifiedAt": "2026-10-01",
+          "evidence": "packages/services/service-automation/src/connector-pull.ts#pullConnectorSource (`atPath(result, recordsPath ?? 'body')`; a non-array there, or a non-object record, is refused)",
+          "note": "Read by the executor: where in the action's result the record array sits (omitted ⇒ the result's `body`). A non-array at the path is refused loudly, never read as zero records."
         },
         "watermark": {
-          "status": "planned",
-          "verifiedAt": "2026-09-30",
-          "note": "Planned with its container: the timestamp-incremental half (omitted ⇒ a full pull). No reader yet — see `connectorSource`.",
+          "status": "live",
+          "verifiedAt": "2026-10-01",
+          "evidence": "packages/services/service-automation/src/connector-pull.ts#pullConnectorSource (the W1 read: the highest stored value of the target field `fieldMapping` copies `watermark.field` onto)",
+          "note": "Read by the executor: the timestamp-incremental half (omitted ⇒ a full pull). No storage of its own — the starting point is read from the target at pull time.",
           "children": {
             "field": {
-              "status": "planned",
-              "verifiedAt": "2026-09-30",
-              "note": "Planned with its container: the pulled record's last-modified field, whose highest value is the next pull's starting point. No reader yet — see `connectorSource`."
+              "status": "live",
+              "verifiedAt": "2026-10-01",
+              "evidence": "packages/services/service-automation/src/connector-pull.ts#pullConnectorSource (`watermarkTarget` finds the transform-`none` `fieldMapping` entry copying it; none ⇒ refused before the action runs)",
+              "note": "Read by the executor: the pulled record's last-modified field. The starting point is the highest value STORED in the target field a `fieldMapping` entry copies it onto unchanged; an unmapped one is refused at pull time."
             },
             "param": {
-              "status": "planned",
-              "verifiedAt": "2026-09-30",
-              "note": "Planned with its container: the read action's query parameter that receives that starting point. No reader yet — see `connectorSource`."
+              "status": "live",
+              "verifiedAt": "2026-10-01",
+              "evidence": "packages/services/service-automation/src/connector-pull.ts#pullConnectorSource (`input.query[param]` receives the starting point)",
+              "note": "Read by the executor: the read action's query parameter that receives that starting point (`query[param]` on both `rest` and `openapi`)."
             }
           }
         }

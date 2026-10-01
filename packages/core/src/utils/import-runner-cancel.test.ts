@@ -25,7 +25,7 @@ import { runImport, type ImportProtocolLike } from './import-runner';
  * type; that re-opens the seam.
  */
 type CreateArgs = Parameters<ImportProtocolLike['createData']>[0];
-import type { ExportFieldMeta } from './export-format.js';
+import type { ExportFieldMeta } from './import-field-meta.js';
 
 const metaMap = new Map<string, ExportFieldMeta>([
   ['name', { name: 'name', type: 'text' }],
