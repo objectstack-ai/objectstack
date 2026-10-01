@@ -34,12 +34,11 @@
 import {
   SUPPORTED_TEMPORAL_YEARS,
   isOutsideTemporalYearRange,
-  isUninterpretableTemporalComparand,
   temporalStorageForm,
-  zonedWallClockToUtcMs,
-  type WallClockParts,
-} from '@objectstack/core';
-import type { ExportFieldMeta } from './export-format.js';
+} from './temporal-storage-form.js';
+import { isUninterpretableTemporalComparand } from './temporal-comparand.js';
+import { zonedWallClockToUtcMs, type WallClockParts } from './datetime.js';
+import type { ExportFieldMeta } from './import-field-meta.js';
 import {
   SINGLE_OPTION_TYPES as OPTION_TYPES,
   MULTI_OPTION_TYPES,

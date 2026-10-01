@@ -88,7 +88,7 @@ import { dirname, resolve } from 'node:path';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import type { FindDataRequest } from '@objectstack/spec/api';
 import { RestServer } from './rest-server.js';
-import type { ImportProtocolLike } from './import-runner.js';
+import type { ImportProtocolLike } from '@objectstack/core';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const sourceOf = (file: string) => readFileSync(resolve(HERE, file), 'utf8');
