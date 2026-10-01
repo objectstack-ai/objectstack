@@ -932,9 +932,8 @@ export class DevPlugin implements Plugin {
         ctx.logger.warn(
           '  ✘ REST API NOT enabled: no auth is mounted in this stack, so no caller could ever '
           + 'authenticate and anonymous access to object data is always denied, with no setting that '
-          + 'turns that off. This is NOT a '
-          + 'missing-package problem — @objectstack/rest was never consulted. Install/enable '
-          + 'plugin-auth (or the `auth` tier), or drop the REST API from this dev stack.',
+          + 'turns that off. This is NOT a missing-package problem — @objectstack/rest was never '
+          + 'consulted. Install/enable plugin-auth (or the `auth` tier), or drop the REST API from this dev stack.',
         );
       } else {
         try {
