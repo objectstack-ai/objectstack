@@ -173,8 +173,9 @@ function typedReadDoors(rest: any): string[] {
 function readShapes(rest: any): Array<{ label: string; path: string; query: Record<string, string> }> {
     const shapes = typedReadDoors(rest).map((path) => ({ label: path.slice(META.length), path, query: {} as Record<string, string> }));
     const item = `${META}/:type/:name`;
-    for (const query of [{ state: 'draft' }, { preview: 'draft' }, { layers: 'true' }, { package: 'crm' }]) {
-        shapes.push({ label: `/:type/:name?${Object.keys(query)[0]}=${Object.values(query)[0]}`, path: item, query });
+    const switches: Array<[string, string]> = [['state', 'draft'], ['preview', 'draft'], ['layers', 'true'], ['package', 'crm']];
+    for (const [key, value] of switches) {
+        shapes.push({ label: `/:type/:name?${key}=${value}`, path: item, query: { [key]: value } });
     }
     return shapes;
 }
