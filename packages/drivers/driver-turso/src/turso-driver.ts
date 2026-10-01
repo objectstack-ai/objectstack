@@ -40,7 +40,7 @@ import { StandardErrorCode } from '@objectstack/spec/api';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import type { DriverOptions, FilterCondition } from '@objectstack/spec/data';
 import type { Client } from '@libsql/client';
-import { RemoteTransport } from './remote-transport.js';
+import { RemoteTransport, type RemoteTenantScope } from './remote-transport.js';
 import {
   backfillRemoteCanonicalColumns,
   type RemoteBackfillClient,
@@ -807,6 +807,37 @@ const REMOTE_HAS_NO_KNEX_CONNECTION =
   'Remote mode builds the SQL driver\'s Knex with no connection and sends every statement to the ' +
   'remote database through the libSQL client instead.';
 
+// ── The tenant scope on the remote face ──────────────────────────────────────
+
+/**
+ * [#21226] What Knex's SQLite compiler answers for the bare probe
+ * {@link TursoDriver.remoteTenantScope} hands the tenant-scope chokepoint:
+ * `select *` when the chokepoint added nothing (no tenant context, or no
+ * tenant column), and `select * where <predicate>` when it scoped the call.
+ */
+const REMOTE_SCOPE_PROBE_UNSCOPED = 'select *';
+const REMOTE_SCOPE_PROBE_PREFIX = 'select * where ';
+
+/**
+ * [#21226] The refusal for a tenant-scoped remote call whose scope compiled to
+ * a shape {@link TursoDriver.remoteTenantScope} does not read: anything beside
+ * `where` terms (a limit, an order, a join), or a statement that does not open
+ * with the probe's own prefix. Unreachable while `SqlDriver.applyTenantScope`
+ * only adds a `where` group. It exists so a change there fails a call instead
+ * of sending it without the scope, or with a fragment that is not a predicate:
+ * fail toward isolation, never toward exposure.
+ */
+function refuseUnreadableRemoteTenantScope(object: string): never {
+  const err = new Error(
+    `The tenant scope for "${object}" could not be put on the remote statement: the SQL driver's ` +
+      'tenant-scope chokepoint compiled to a shape the remote face does not read, so the call is ' +
+      'refused rather than sent without the scope. This is a defect in the driver, not in the request.',
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.INTERNAL_ERROR;
+  err.status = 500;
+  throw err;
+}
+
 /** How the REMOTE face answers one public `SqlDriver` member. */
 export type RemoteFaceAnswer =
   /** `TursoDriver` redeclares it, and its remote arm answers from the remote database or from this face's own state. */
@@ -851,7 +882,8 @@ export const REMOTE_FACE_ANSWERS = {
   aggregate: 'remote',
   execute: 'remote',
   // `SELECT DISTINCT`, compiled by the transport. A tenant-scoped call is
-  // refused: no remote read applies the tenant scope.
+  // refused: this door's statement carries no tenant scope (the other read
+  // doors carry it since #21226).
   distinct: 'remote',
   // Transactions: none on this face (ADR-0119 D1).
   beginTransaction: 'refused',
@@ -2113,9 +2145,13 @@ export class TursoDriver extends SqlDriver {
     if (this.isRemote) {
       const table = this.remoteTableFor(object, 'find');
       const remoteQuery = this.toRemoteReadQuery(object, query);
+      // [#21226] The caller's tenant scope, as the local face scopes `findRows`.
+      const scope = this.remoteTenantScope(object, options);
       return this.formatRemoteRows(
         object,
-        await this.remoteReadExit(object, { where: query?.where }, () => this.remoteTransport!.find(object, remoteQuery, table)),
+        await this.remoteReadExit(object, { where: query?.where }, () =>
+          this.remoteTransport!.find(object, remoteQuery, table, scope),
+        ),
       );
     }
     return super.find(object, query, options);
@@ -2132,9 +2168,12 @@ export class TursoDriver extends SqlDriver {
     if (this.isRemote) {
       const table = this.remoteTableFor(object, 'findOne');
       const remoteQuery = this.toRemoteReadQuery(object, query, { singleRowLookup: true });
+      const scope = this.remoteTenantScope(object, options);
       return this.formatRemoteRow(
         object,
-        await this.remoteReadExit(object, { where: query?.where }, () => this.remoteTransport!.findOne(object, remoteQuery, table)),
+        await this.remoteReadExit(object, { where: query?.where }, () =>
+          this.remoteTransport!.findOne(object, remoteQuery, table, scope),
+        ),
       );
     }
     return super.findOne(object, query, options);
@@ -2241,6 +2280,63 @@ export class TursoDriver extends SqlDriver {
       if (renamed.length > 0) refuseRemoteColumnMap(object, door, renamed);
     }
     return this.physicalTableByObject[object] ?? object;
+  }
+
+  /**
+   * [#21226] The caller's tenant scope for a REMOTE statement on `object`,
+   * compiled by the local face's own chokepoint, or `undefined` when the call
+   * is unscoped. Every remote door that reads rows or picks rows to write
+   * hands it to `RemoteTransport`, which ANDs it onto the statement's `WHERE`.
+   *
+   * # The gap this closes
+   *
+   * The engine threads the caller's organization to every driver as
+   * `DriverOptions.tenantId` (ADR-0131 D8). On the local face
+   * {@link SqlDriver.applyTenantScope} puts it on every read and on every
+   * update and delete predicate. The remote branches of `find`, `findOne`,
+   * `count`, `aggregate`, `update`, `delete`, `bulkUpdate`, `bulkDelete`,
+   * `updateMany` and `deleteMany` handed `RemoteTransport` no `DriverOptions`,
+   * so their statements carried the caller's filter and nothing else, and
+   * `create` stamped no organization on the row. Only `distinct()` refused,
+   * because its source stated the gap. Where the engine's Layer 0 wall composes
+   * a predicate above the driver, it held other organizations' rows back. Where
+   * it composes none (the `single` posture, or an elevated caller that carries
+   * its organization), the driver scope is the only fence, and this face had
+   * none.
+   *
+   * # One rule, compiled, not a copy
+   *
+   * This method does not restate the predicate. It hands
+   * {@link SqlDriver.applyTenantScope} a bare Knex query builder and compiles
+   * what the chokepoint added. So the rule's decisions all stay in that one
+   * method:
+   *  - the NULL-organization arm (a platform row with no organization is no
+   *    other tenant's);
+   *  - the `group` posture's membership set (`tenantIds`, the union Layer 0
+   *    enforces);
+   *  - the exits for a call with no tenant context and for an object with no
+   *    tenant column.
+   * The two faces therefore answer the same row set by construction. Compiling
+   * needs no connection: this face's Knex has none
+   * (`REMOTE_HAS_NO_KNEX_CONNECTION`), and nothing here runs a statement on
+   * it. The fragment is SQLite, the dialect the remote database speaks, in the
+   * identifier quoting Knex's SQLite compiler uses.
+   *
+   * A compiled shape this method cannot read is refused, never sent unscoped
+   * ({@link refuseUnreadableRemoteTenantScope}).
+   */
+  private remoteTenantScope(object: string, options: DriverOptions | undefined): RemoteTenantScope | undefined {
+    const probe = this.knex.queryBuilder();
+    this.applyTenantScope(probe, object, options);
+    // The chokepoint may add `where` terms and nothing else: a limit, an order
+    // or a join cannot ride into a remote `WHERE`.
+    if (probe.clone().clearWhere().toSQL().sql !== REMOTE_SCOPE_PROBE_UNSCOPED) {
+      refuseUnreadableRemoteTenantScope(object);
+    }
+    const { sql, bindings } = probe.toSQL();
+    if (sql === REMOTE_SCOPE_PROBE_UNSCOPED) return undefined;
+    if (!sql.startsWith(REMOTE_SCOPE_PROBE_PREFIX)) refuseUnreadableRemoteTenantScope(object);
+    return { sql: sql.slice(REMOTE_SCOPE_PROBE_PREFIX.length), args: [...bindings] };
   }
 
   /**
@@ -2635,11 +2731,17 @@ export class TursoDriver extends SqlDriver {
     this.assertRemoteTransactionUnsupported(options, 'create');
     if (this.isRemote) {
       const table = this.remoteTableFor(object, 'create');
+      // [#21226] The caller's organization is stamped on the row, as the local
+      // face's `create` stamps it (`injectTenantOnInsert`, before the record
+      // numbers, which are issued per organization). Without it the row landed
+      // with no organization. An explicit value on the row is kept.
+      const row: Record<string, any> = { ...data };
+      this.injectTenantOnInsert(object, row, options);
       // The record numbers are issued HERE, on the layer that holds the
       // schema, before the transport builds its INSERT — see "Autonumber on
       // the remote face" at the top of this file. A row that already carries
       // its number (seed replay, import) is written through unchanged.
-      const written = await this.writeRemoteRowWithAutoNumbers(object, { ...data }, options, (filled) =>
+      const written = await this.writeRemoteRowWithAutoNumbers(object, row, options, (filled) =>
         this.remoteTransport!.create(object, this.toRemoteWriteForms(object, filled), table),
       );
       return this.formatRemoteRow(object, written);
@@ -2656,7 +2758,14 @@ export class TursoDriver extends SqlDriver {
     this.assertRemoteTransactionUnsupported(options, 'update');
     if (this.isRemote) {
       const table = this.remoteTableFor(object, 'update');
-      return this.formatRemoteRow(object, await this.remoteTransport!.update(object, id, this.toRemoteWriteForms(object, data), table));
+      // [#21226] The key AND the caller's tenant scope, on the write and on its
+      // read-back, as `SqlDriver.update` scopes both: a row outside the scope
+      // is untouched and the answer is `null`.
+      const scope = this.remoteTenantScope(object, options);
+      return this.formatRemoteRow(
+        object,
+        await this.remoteTransport!.update(object, id, this.toRemoteWriteForms(object, data), table, scope),
+      );
     }
     return super.update(object, id, data, options);
   }
@@ -2735,7 +2844,11 @@ export class TursoDriver extends SqlDriver {
 
   override async delete(object: string, id: string | number, options?: DriverOptions): Promise<boolean> {
     this.assertRemoteTransactionUnsupported(options, 'delete');
-    if (this.isRemote) return this.remoteTransport!.delete(object, id, this.remoteTableFor(object, 'delete'));
+    if (this.isRemote) {
+      const table = this.remoteTableFor(object, 'delete');
+      // [#21226] The key AND the caller's tenant scope, as `SqlDriver.delete`.
+      return this.remoteTransport!.delete(object, id, table, this.remoteTenantScope(object, options));
+    }
     return super.delete(object, id, options);
   }
 
@@ -2744,7 +2857,10 @@ export class TursoDriver extends SqlDriver {
     if (this.isRemote) {
       const table = this.remoteTableFor(object, 'count');
       const remoteQuery = this.toRemoteQuery(object, query);
-      return this.remoteReadExit(object, { where: query?.where }, () => this.remoteTransport!.count(object, remoteQuery, table));
+      const scope = this.remoteTenantScope(object, options);
+      return this.remoteReadExit(object, { where: query?.where }, () =>
+        this.remoteTransport!.count(object, remoteQuery, table, scope),
+      );
     }
     return super.count(object, query, options);
   }
@@ -2778,8 +2894,12 @@ export class TursoDriver extends SqlDriver {
       // [#20424] The caller's own query is what the fault is attributed
       // against, as `SqlDriver.aggregate` does locally: its groupBy and
       // aggregation fields, and the `where` before `toRemoteFilter` rewrote it.
+      //
+      // [#21226] The rows are narrowed to the caller's tenant scope before they
+      // are grouped, as `SqlDriver.aggregate` scopes its builder.
+      const scope = this.remoteTenantScope(object, options);
       return this.remoteReadExit(object, query, () =>
-        this.remoteTransport!.aggregate(object, this.toRemoteQuery(object, query), table),
+        this.remoteTransport!.aggregate(object, this.toRemoteQuery(object, query), table, scope),
       );
     }
     return super.aggregate(object, query, options);
@@ -3333,14 +3453,21 @@ export class TursoDriver extends SqlDriver {
       const formatted = Array.isArray(updates)
         ? updates.map((u) => ({ ...u, data: this.toRemoteWriteForms(object, u.data) }))
         : updates;
-      return this.formatRemoteRows(object, await this.remoteTransport!.bulkUpdate(object, formatted, table));
+      // [#21226] Each row's update carries the caller's tenant scope, as each of
+      // `SqlDriver.bulkUpdate`'s goes through the scoped `update`.
+      const scope = this.remoteTenantScope(object, options);
+      return this.formatRemoteRows(object, await this.remoteTransport!.bulkUpdate(object, formatted, table, scope));
     }
     return super.bulkUpdate(object, updates, options);
   }
 
   override async bulkDelete(object: string, ids: Array<string | number>, options?: DriverOptions): Promise<void> {
     this.assertRemoteTransactionUnsupported(options, 'bulkDelete');
-    if (this.isRemote) return this.remoteTransport!.bulkDelete(object, ids, this.remoteTableFor(object, 'bulkDelete'));
+    if (this.isRemote) {
+      const table = this.remoteTableFor(object, 'bulkDelete');
+      // [#21226] The id set AND the caller's tenant scope, as `SqlDriver.bulkDelete`.
+      return this.remoteTransport!.bulkDelete(object, ids, table, this.remoteTenantScope(object, options));
+    }
     return super.bulkDelete(object, ids, options);
   }
 
@@ -3348,7 +3475,14 @@ export class TursoDriver extends SqlDriver {
     this.assertRemoteTransactionUnsupported(options, 'updateMany');
     if (this.isRemote) {
       const table = this.remoteTableFor(object, 'updateMany');
-      return this.remoteTransport!.updateMany(object, this.toRemoteQuery(object, query), this.toRemoteWriteForms(object, data), table);
+      // [#21226] The caller's filter AND tenant scope, as `SqlDriver.updateMany`.
+      return this.remoteTransport!.updateMany(
+        object,
+        this.toRemoteQuery(object, query),
+        this.toRemoteWriteForms(object, data),
+        table,
+        this.remoteTenantScope(object, options),
+      );
     }
     return super.updateMany(object, query, data, options);
   }
@@ -3357,7 +3491,13 @@ export class TursoDriver extends SqlDriver {
     this.assertRemoteTransactionUnsupported(options, 'deleteMany');
     if (this.isRemote) {
       const table = this.remoteTableFor(object, 'deleteMany');
-      return this.remoteTransport!.deleteMany(object, this.toRemoteQuery(object, query), table);
+      // [#21226] The caller's filter AND tenant scope, as `SqlDriver.deleteMany`.
+      return this.remoteTransport!.deleteMany(
+        object,
+        this.toRemoteQuery(object, query),
+        table,
+        this.remoteTenantScope(object, options),
+      );
     }
     return super.deleteMany(object, query, options);
   }
@@ -3632,9 +3772,15 @@ export class TursoDriver extends SqlDriver {
    * and the `find()` presentation of each value, deduplicated.
    *
    * A tenant-scoped call is refused. `SqlDriver.distinct` puts the tenant scope
-   * on its statement, and no remote read here applies it, so an answer would
-   * list every organization's values for the column. The condition is the
-   * scope's own: a non-empty `tenantId` on an object with a tenant field.
+   * on its statement, and {@link RemoteTransport.compileDistinct} carries none,
+   * so an answer would list every organization's values for the column. The
+   * condition is the scope's own: a non-empty `tenantId` on an object with a
+   * tenant field.
+   *
+   * [#21226] The other remote read doors now carry the scope
+   * ({@link remoteTenantScope}). This one still refuses: answering the scoped
+   * call instead would accept a call the face refuses today, a widening this
+   * change does not make.
    */
   override async distinct(
     object: string,

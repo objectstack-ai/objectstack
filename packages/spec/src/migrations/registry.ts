@@ -5503,6 +5503,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'the one-line fix where a node meant every branch.',
   },
   {
+    id: 'form-field-public-picker-retired',
+    order: 56,
+    text:
+      'Finally, it retires the form field\'s `publicPicker` block (ADR-0087 D2, immediate — the '
+      + 'maintainer\'s ruling E, which reverses the earlier ruling that had declared it): an '
+      + 'anonymous public form no longer offers record search. The block opted a lookup, '
+      + '`master_detail` or `user` field on a public form into a picker served by an '
+      + 'unauthenticated route; that route is deleted, and the public-form resolve route now '
+      + 'leaves those three field types off the anonymous rendering unconditionally. The schema '
+      + 'refuses the key with the prescription; the mechanical conversion '
+      + '`form-field-public-picker-removed` strips it from old sources and stored rows (lossless '
+      + 'in effect — its only reader was the deleted route), and the semantic entry asks the '
+      + 'author how a visitor should now choose: a `select` field with static `options`, or a '
+      + 'form behind sign-in.',
+  },
+  {
     id: 'form-view-option-default-retired',
     order: 19,
     text:
@@ -9480,6 +9496,55 @@ const step18: MigrationStep = {
         + 'the rename prescription naming `timeoutMs`; `{ timeoutMs: 5000 }` parses to the same '
         + 'number.',
     },
+    // #21226 — registered by the change that put the caller's tenant scope on the
+    // remote libSQL face's doors, not by a later reconciliation. A driver call is
+    // code, never stack metadata, so there is no authored source for the chain to
+    // rewrite and no schema tombstone: this entry is the migration channel beside
+    // the changeset's FROM → TO table, as for its sibling
+    // `driver-upsert-cross-organization-conflict-refused`.
+    {
+      id: 'driver-remote-doors-tenant-scoped',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span already, and a nested backtick would close it.
+      surface:
+        'IDataDriver find, findOne, count, aggregate, update, delete, bulkUpdate, bulkDelete, '
+        + 'updateMany, deleteMany, create and bulkCreate on TursoDriver\'s remote (libSQL) face, '
+        + 'called with a tenant context',
+      replacement:
+        'a tenant-scoped call on the remote face reaches the rows the local face reaches for the '
+        + 'same options: the caller\'s organization, rows with no organization, and under the group '
+        + 'posture the caller\'s membership set. A by-id `update` outside that scope answers `null`, '
+        + 'a by-id `delete` answers `false`, and a predicate write counts only the rows in scope. '
+        + '`create` stamps the caller\'s organization on a row that names none. To reach rows of '
+        + 'every organization, call without `tenantId`, as on the local face',
+      reason:
+        'The engine hands every driver the caller\'s organization as `DriverOptions.tenantId`, and '
+        + 'the group posture\'s membership set as `tenantIds` (ADR-0131 D8, ADR-0105 D2). '
+        + 'TursoDriver\'s local face applies them through `SqlDriver.applyTenantScope` on every read '
+        + 'and on every update and delete predicate, and stamps the organization on insert. Its remote '
+        + 'face compiles its own statements, and its doors received no driver options: their '
+        + 'statements carried the caller\'s filter and nothing else, and a remote `create` wrote no '
+        + 'organization. Where the engine\'s Layer 0 wall composes a predicate above the driver, that '
+        + 'wall held other organizations\' rows back. Where it composes none (the posture in which '
+        + 'Layer 0 is inert, or an elevated caller that carries its organization), the driver scope '
+        + 'is the only fence, and on the remote face there was none. The remote doors now compile the '
+        + 'local face\'s own predicate, by asking the same chokepoint, and AND it onto each '
+        + 'statement, so the two faces answer the same rows by construction. The remote `create` '
+        + 'stamps the organization as the local `create` does. `distinct` still refuses a '
+        + 'tenant-scoped call on the remote face. The call signatures are unchanged, so nothing '
+        + 'reaches the compiler. Code that relied on a tenant-scoped remote call reaching another '
+        + 'organization\'s rows now gets the miss answer each door already declares, and a remote '
+        + '`create` that relied on landing a row with no organization now finds it under the '
+        + 'caller\'s. ADR-0131 D8 / ADR-0087.',
+      acceptanceCriteria:
+        'No caller of a remote-mode TursoDriver passes `tenantId` and expects to read, count, '
+        + 'aggregate, update or delete a row of another organization; a caller that means to reach '
+        + 'every organization calls without a tenant context, as on the local face. No caller relies '
+        + 'on a tenant-scoped remote `create` landing a row with no organization. Proven when a '
+        + 'tenant-scoped call on each door answers the same rows on the remote face as on the local '
+        + 'face for the same options: another organization\'s row excluded, `null`, `false` or '
+        + 'untouched, and the caller\'s own rows and rows with no organization answered as before.',
+    },
     // Registered by the change that removed the three methods (#20822, PR #20988),
     // not by a later reconciliation.
     {
@@ -12205,6 +12270,35 @@ const step18: MigrationStep = {
         + 'warn line is the locator for a row that exists only in `sys_metadata`. A non-blank '
         + 'predicate parses and registers byte-identically to before, and a non-string in these '
         + 'slots keeps its own earlier refusal (at `registerFlow` and `objectstack validate`).',
+    },
+    // #21180 — ADR-0087 D2, immediate retirement (the maintainer's ruling E on
+    // #21079, comment 5933054144, reversing the #7467 ruling) — the D3 entry of the
+    // `form-field-public-picker-removed` family (ruling B on #17152: one D3 entry
+    // per retirement family, even when D2 is lossless). Registered key:
+    // `ui/FormField:publicPicker`. The strip changes nothing a visitor sees — the
+    // resolve route already leaves the field off the anonymous rendering — but the
+    // visitor's way to choose a value is gone, and only the author can say what
+    // replaces it.
+    {
+      id: 'form-field-public-picker-retired',
+      surface: 'view.form.sections[].fields[].publicPicker — the anonymous public-form record-search picker',
+      replacement: 'No record search on an anonymous public form. For a choice from a fixed list, a '
+        + '`select` field with static `options`. For a choice of an existing record, the same form '
+        + 'behind sign-in, where the lookup field renders with the signed-in user\'s access.',
+      reason: 'The D2 conversion `form-field-public-picker-removed` deletes `publicPicker` from every '
+        + 'form field, and the delete is lossless in effect: the block\'s only reader was the '
+        + 'anonymous lookup route, which is gone, and the public-form resolve route now leaves '
+        + 'lookup, `master_detail` and `user` fields off the anonymous rendering whatever the row '
+        + 'carries. What the strip cannot decide is the visitor\'s path. A public form that used the '
+        + 'picker let an anonymous visitor search and pick a record; after the upgrade that field is '
+        + 'simply absent from the form, so a submission arrives without the value. Whether the '
+        + 'choice was really from a small fixed set (a `select` with static `options`), or needs a '
+        + 'real record and therefore a signed-in user, is a product decision only the author can make.',
+      acceptanceCriteria: 'No form field carries `publicPicker`; the parse refuses it. Every public '
+        + 'form that had carried one either replaces the lookup field with a `select` field whose '
+        + 'static `options` list the allowed choices, or is served behind sign-in, or the author has '
+        + 'confirmed the form works without the value. Fetching the public form anonymously '
+        + '(`GET /forms/:slug`) shows no lookup, `master_detail` or `user` field in its sections.',
     },
     // The D3 entry of the `form-view-option-default-removed` family, which landed
     // in commit c459da6bc: a maintainer-ruled narrowing on the objectui#6263
@@ -23235,6 +23329,24 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `element-input-target-variable-removed` (a page component IS a stack
     // collection member, unlike the `kernel/Manifest:loading` family).
     'ui/ElementTextInputProps:targetVariable',
+    // #21180 — ADR-0087 D2, immediate retirement, by the maintainer's ruling E on
+    // #21079 (comment 5933054144), which reverses the #7467 ruling that had
+    // declared the key. The block opted a lookup / `master_detail` / `user` field
+    // on an ANONYMOUS public form into a record-search picker served by an
+    // unauthenticated route (`GET /forms/:slug/lookup/:field`). The ruling retired
+    // the capability: the route is deleted, and the public-form resolve route now
+    // leaves those three field types off the anonymous rendering unconditionally.
+    // Zero producers measured before the ruling — no example, template, plugin or
+    // first-party UI caller declared one.
+    //
+    // `retiredKey()` on the form field's shape, for the prescription. Sources are
+    // rewritten by the D2 conversion `form-field-public-picker-removed`; the D3
+    // record is `form-field-public-picker-retired`.
+    //
+    // Registered under 18, not 17: the tombstone ships on the 17.x line
+    // (launch-window convention — accept-set narrowings ride minor releases) and
+    // the prescription lives at the major boundary where `migrate meta` users look.
+    'ui/FormField:publicPicker',
     // #20161 (ADR-0049 enforce-or-remove). `JoinedReportBlock.chart` declared an
     // inline chart on one block of a `joined` report, and no renderer ever drew it:
     // at the `.objectui-sha` pin `f8a9d0fb0596`, `DatasetReportRenderer`'s joined
@@ -25604,6 +25716,14 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // exported value schema with no consumer reads as a capability). See
     // `18.ui__Theme.ts` for the retirement record and the ruling.
     'ui/ColorPalette',
+    // `ui/FormFieldPublicPicker` (`displayFields`, `maxResults`, `filter`,
+    // `object`) leaves with its only carrier, `FormFieldBaseSchema.publicPicker`,
+    // tombstoned in this same major under ADR-0087 D2 by the maintainer's ruling E
+    // on #21079: anonymous public forms no longer offer record search, so nothing
+    // replaces the shape — a fixed choice is a `select` field with static
+    // `options`, and a record choice belongs on a form behind sign-in. See
+    // `retired-keys/18.ui__FormField__publicPicker.ts` for the retirement record.
+    'ui/FormFieldPublicPicker',
     // #11027 — `ui/ResponsiveConfig` (the per-breakpoint LAYOUT block: grid
     // columns / visibility / display order on the Tailwind `xs…2xl` axis). Its
     // last authorable carrier, `page.components[].responsive`, is tombstoned in

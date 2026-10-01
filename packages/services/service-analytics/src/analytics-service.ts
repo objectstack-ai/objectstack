@@ -3245,7 +3245,7 @@ export class AnalyticsService implements IAnalyticsService {
    * structured-JSON field — `INVALID_FIELD` / 400, naming the member the caller
    * wrote — before either strategy builds anything. The rule, the
    * measurements and the envelope are {@link assertNoStructuredJsonDimension}'s
-   * (`structured-json-dimension-door.ts`); this method supplies the two
+   * (`structured-json-dimension-door.ts`); this method supplies the three
    * answers only the service has.
    *
    * - The dimension `sql` a member resolves to is {@link declaredMemberEntry}'s
@@ -3254,6 +3254,10 @@ export class AnalyticsService implements IAnalyticsService {
    *   and the member itself when the cube declares none — the column the
    *   strategies group by in that case.
    * - Its declared type is {@link AnalyticsServiceConfig.sourceFieldMeta}'s.
+   * - [#21232] A relationship-path column is located on the object its last
+   *   hop reaches by the one hop resolver, with {@link hopReference}: the
+   *   answer the field gate admitted the path with and the strategies join it
+   *   by.
    *
    * Runs after the dimension source-field gate on every `ensureCube` path, so a
    * member naming a column the object does not have is answered as that first.
@@ -3279,6 +3283,7 @@ export class AnalyticsService implements IAnalyticsService {
         if (typeof meta?.type !== 'string' || meta.type === '') return undefined;
         return { type: meta.type, multiple: meta.multiple === true };
       },
+      this.hopReference,
     );
   }
 

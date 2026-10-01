@@ -950,6 +950,25 @@ export type DeclaredValueShapeResolver = (object: string, field: string) => Valu
 export type JsonColumnResolver = (object: string, field: string) => boolean;
 
 /**
+ * [#21226] The caller's tenant scope, as ONE compiled predicate: a SQL
+ * fragment and its bind values, which a scoped door ANDs onto its own `WHERE`.
+ *
+ * The driver builds it, and this class never decides it. `TursoDriver` asks the
+ * local face's own chokepoint, `SqlDriver.applyTenantScope`, for the predicate
+ * and hands over what that compiles to: the NULL-organization arm, the `group`
+ * posture's membership set, and the no-tenant-context exit are all that
+ * method's. This class is told WHICH rows, not WHY, as with the upsert `fence`
+ * (#21185). Absent means the call carries no scope (no tenant context, or no
+ * tenant column), and the statement is the one it was before.
+ */
+export interface RemoteTenantScope {
+  /** A self-contained boolean SQL expression with `?` placeholders. */
+  readonly sql: string;
+  /** The values for the fragment's placeholders, in order. */
+  readonly args: readonly unknown[];
+}
+
+/**
  * Remote transport that executes all queries via @libsql/client.
  *
  * Handles SQL generation, filter compilation, and result mapping for
@@ -1255,10 +1274,15 @@ export class RemoteTransport {
   // the backend's own `no such table`, and `aggregate` answered an empty list,
   // while the local face of the same driver answered from the mapped table.
 
-  async find(object: string, query: any, table: string = object): Promise<Record<string, unknown>[]> {
+  async find(
+    object: string,
+    query: any,
+    table: string = object,
+    scope?: RemoteTenantScope,
+  ): Promise<Record<string, unknown>[]> {
     await this.ensureConnected();
 
-    const { sql, args } = this.buildSelectSQL(object, query, table);
+    const { sql, args } = this.buildSelectSQL(object, query, table, scope);
 
     try {
       const result = await this.client!.execute({ sql, args });
@@ -1302,7 +1326,8 @@ export class RemoteTransport {
         let lastError: unknown = error;
         for (const rung of rungs) {
           try {
-            const fallback = this.buildSelectSQL(object, rung, table);
+            // [#21226] Each rung keeps the tenant scope, as it keeps the WHERE.
+            const fallback = this.buildSelectSQL(object, rung, table, scope);
             const result = await this.client!.execute({ sql: fallback.sql, args: fallback.args });
             return this.mapRows(result);
           } catch (rungError) {
@@ -1328,9 +1353,14 @@ export class RemoteTransport {
    * missing. Neither the contract nor any caller outside these tests spelled it
    * that way, so the branch is gone here too: one driver, one spelling.
    */
-  async findOne(object: string, query: any, table: string = object): Promise<Record<string, unknown> | null> {
+  async findOne(
+    object: string,
+    query: any,
+    table: string = object,
+    scope?: RemoteTenantScope,
+  ): Promise<Record<string, unknown> | null> {
     if (query && typeof query === 'object') {
-      const results = await this.find(object, { ...query, limit: 1 }, table);
+      const results = await this.find(object, { ...query, limit: 1 }, table, scope);
       return results[0] || null;
     }
 
@@ -1347,7 +1377,12 @@ export class RemoteTransport {
    * `SqlDriver.aggregate` and `TursoDriver.aggregate` took, because all three are
    * one door and a caller may not be told three different things about it.
    */
-  async aggregate(object: string, query: DriverQuery, table: string = object): Promise<Record<string, unknown>[]> {
+  async aggregate(
+    object: string,
+    query: DriverQuery,
+    table: string = object,
+    scope?: RemoteTenantScope,
+  ): Promise<Record<string, unknown>[]> {
     await this.ensureConnected();
     this.assertSafeIdentifier(object);
 
@@ -1502,7 +1537,9 @@ export class RemoteTransport {
     let sql = `SELECT ${selectParts.join(', ')} FROM ${this.tableSql(table)}`;
     const args: any[] = [];
 
-    const { whereClauses, args: whereArgs } = this.buildWhereSQL(object, query?.where);
+    // [#21226] The tenant scope narrows the rows BEFORE they are grouped, as
+    // `SqlDriver.aggregate` scopes its builder.
+    const { whereClauses, args: whereArgs } = this.scopedWhereSQL(object, query?.where, scope);
     if (whereClauses) {
       sql += ` WHERE ${whereClauses}`;
       args.push(...whereArgs);
@@ -1626,6 +1663,7 @@ export class RemoteTransport {
     id: string | number,
     data: Record<string, unknown>,
     table: string = object,
+    scope?: RemoteTenantScope,
   ): Promise<Record<string, unknown> | null> {
     await this.ensureConnected();
 
@@ -1633,16 +1671,30 @@ export class RemoteTransport {
     const setClauses = columns.map((col) => `"${col}" = ?`).join(', ');
     const values = columns.map((col) => this.serializeValue(data[col]));
 
-    const sql = `UPDATE ${this.tableSql(table)} SET ${setClauses} WHERE "id" = ?`;
-    await this.client!.execute({ sql, args: [...values, id] });
+    // [#21226] The key AND, on a scoped call, the tenant scope — on the write
+    // and on the read-back, as `SqlDriver.update` scopes both. A row outside
+    // the scope is neither written nor read, and the answer is the miss arm
+    // (`null`), the local face's answer for it.
+    const byId = this.byIdWhereSQL(id, scope);
+    const sql = `UPDATE ${this.tableSql(table)} SET ${setClauses} WHERE ${byId.sql}`;
+    await this.client!.execute({ sql, args: [...values, ...byId.args] });
 
     // Fetch updated row
     const result = await this.client!.execute({
-      sql: `SELECT * FROM ${this.tableSql(table)} WHERE "id" = ?`,
-      args: [id],
+      sql: `SELECT * FROM ${this.tableSql(table)} WHERE ${byId.sql}`,
+      args: [...byId.args],
     });
     const rows = this.mapRows(result);
     return rows[0] ?? null;
+  }
+
+  /**
+   * [#21226] `"id" = ?`, AND the tenant scope on a scoped call. Unscoped, the
+   * clause is the one the by-id doors always sent.
+   */
+  private byIdWhereSQL(id: string | number, scope: RemoteTenantScope | undefined): { sql: string; args: any[] } {
+    if (!scope) return { sql: `"id" = ?`, args: [id] };
+    return { sql: `"id" = ? AND (${scope.sql})`, args: [id, ...scope.args] };
   }
 
   /**
@@ -1736,9 +1788,11 @@ export class RemoteTransport {
     // `['id']` target the two readings are the same statement.
     const keyColumns = mergeKeys.every((k) => toUpsert[k] !== undefined && toUpsert[k] !== null) ? mergeKeys : ['id'];
     // [#21185] A fenced call reads back under the written organization exactly
-    // — this face applies no tenant scope to any other read, and a read-back
-    // that found another organization's row would hand its columns to the
-    // caller. Not found means the predicate above left the row alone.
+    // (the local face's own read-back, not the chokepoint scope the other
+    // doors carry since #21226: that scope admits a row with no organization),
+    // and a read-back that found another organization's row would hand its
+    // columns to the caller. Not found means the predicate above left the row
+    // alone.
     const fenceSql = fence ? ` AND "${fence.column}" = ?` : '';
     const fenceArgs = fence ? [this.serializeValue(fence.value)] : [];
     const result = await this.client!.execute({
@@ -1750,19 +1804,31 @@ export class RemoteTransport {
     return rows[0] || toUpsert;
   }
 
-  async delete(object: string, id: string | number, table: string = object): Promise<boolean> {
+  async delete(
+    object: string,
+    id: string | number,
+    table: string = object,
+    scope?: RemoteTenantScope,
+  ): Promise<boolean> {
     await this.ensureConnected();
+    // [#21226] The key AND the tenant scope, as `SqlDriver.delete` scopes it.
+    const byId = this.byIdWhereSQL(id, scope);
     const result = await this.client!.execute({
-      sql: `DELETE FROM ${this.tableSql(table)} WHERE "id" = ?`,
-      args: [id],
+      sql: `DELETE FROM ${this.tableSql(table)} WHERE ${byId.sql}`,
+      args: byId.args,
     });
     return result.rowsAffected > 0;
   }
 
-  async count(object: string, query?: any, table: string = object): Promise<number> {
+  async count(
+    object: string,
+    query?: any,
+    table: string = object,
+    scope?: RemoteTenantScope,
+  ): Promise<number> {
     await this.ensureConnected();
 
-    const { whereClauses, args } = this.buildWhereSQL(object, query?.where);
+    const { whereClauses, args } = this.scopedWhereSQL(object, query?.where, scope);
     let sql = `SELECT COUNT(*) as count FROM ${this.tableSql(table)}`;
     if (whereClauses) sql += ` WHERE ${whereClauses}`;
 
@@ -1829,34 +1895,48 @@ export class RemoteTransport {
     object: string,
     updates: Array<{ id: string | number; data: Record<string, unknown> }>,
     table: string = object,
+    scope?: RemoteTenantScope,
   ): Promise<Record<string, unknown>[]> {
     const results: Record<string, unknown>[] = [];
     for (const { id, data } of updates) {
-      const updated = await this.update(object, id, data, table);
+      const updated = await this.update(object, id, data, table, scope);
       if (updated) results.push(updated);
     }
     return results;
   }
 
-  async bulkDelete(object: string, ids: Array<string | number>, table: string = object): Promise<void> {
+  async bulkDelete(
+    object: string,
+    ids: Array<string | number>,
+    table: string = object,
+    scope?: RemoteTenantScope,
+  ): Promise<void> {
     await this.ensureConnected();
     if (ids.length === 0) return;
 
     const placeholders = ids.map(() => '?').join(', ');
+    // [#21226] The id set AND the tenant scope, as `SqlDriver.bulkDelete`.
+    const scopeSql = scope ? ` AND (${scope.sql})` : '';
     await this.client!.execute({
-      sql: `DELETE FROM ${this.tableSql(table)} WHERE "id" IN (${placeholders})`,
-      args: ids as any[],
+      sql: `DELETE FROM ${this.tableSql(table)} WHERE "id" IN (${placeholders})${scopeSql}`,
+      args: [...ids, ...(scope ? scope.args : [])] as any[],
     });
   }
 
-  async updateMany(object: string, query: any, data: Record<string, unknown>, table: string = object): Promise<number> {
+  async updateMany(
+    object: string,
+    query: any,
+    data: Record<string, unknown>,
+    table: string = object,
+    scope?: RemoteTenantScope,
+  ): Promise<number> {
     await this.ensureConnected();
 
     const columns = Object.keys(data);
     const setClauses = columns.map((col) => `"${col}" = ?`).join(', ');
     const setValues = columns.map((col) => this.serializeValue(data[col]));
 
-    const { whereClauses, args: whereArgs } = this.buildWhereSQL(object, query?.where);
+    const { whereClauses, args: whereArgs } = this.scopedWhereSQL(object, query?.where, scope);
     let sql = `UPDATE ${this.tableSql(table)} SET ${setClauses}`;
     if (whereClauses) sql += ` WHERE ${whereClauses}`;
 
@@ -1864,10 +1944,15 @@ export class RemoteTransport {
     return result.rowsAffected;
   }
 
-  async deleteMany(object: string, query: any, table: string = object): Promise<number> {
+  async deleteMany(
+    object: string,
+    query: any,
+    table: string = object,
+    scope?: RemoteTenantScope,
+  ): Promise<number> {
     await this.ensureConnected();
 
-    const { whereClauses, args } = this.buildWhereSQL(object, query?.where);
+    const { whereClauses, args } = this.scopedWhereSQL(object, query?.where, scope);
     let sql = `DELETE FROM ${this.tableSql(table)}`;
     if (whereClauses) sql += ` WHERE ${whereClauses}`;
 
@@ -2608,7 +2693,12 @@ export class RemoteTransport {
    * `orderBy` is likewise an ANSWER — #4363's carve-out for an unpaged
    * unordered read — and emitting no ORDER BY for it is correct.
    */
-  private buildSelectSQL(object: string, query: any, table: string): { sql: string; args: any[] } {
+  private buildSelectSQL(
+    object: string,
+    query: any,
+    table: string,
+    scope?: RemoteTenantScope,
+  ): { sql: string; args: any[] } {
     const fields = query.fields && Array.isArray(query.fields) && query.fields.length > 0
       ? query.fields.map((f: string) => `"${this.mapSortField(f)}"`).join(', ')
       : '*';
@@ -2616,8 +2706,8 @@ export class RemoteTransport {
     let sql = `SELECT ${fields} FROM ${this.tableSql(table)}`;
     const allArgs: any[] = [];
 
-    // WHERE
-    const { whereClauses, args: whereArgs } = this.buildWhereSQL(object, query.where);
+    // WHERE — the caller's filter and, on a scoped call, the tenant scope.
+    const { whereClauses, args: whereArgs } = this.scopedWhereSQL(object, query.where, scope);
     if (whereClauses) {
       sql += ` WHERE ${whereClauses}`;
       allArgs.push(...whereArgs);
@@ -2712,15 +2802,39 @@ export class RemoteTransport {
    * every refusal that predates it keeps its own wording and its own way of
    * naming a location, so threading this parameter changes no existing message.
    */
+  /**
+   * [#21226] The caller's `WHERE`, compiled by {@link buildWhereSQL}, AND the
+   * tenant scope the driver handed over. With no scope the answer is
+   * {@link buildWhereSQL}'s own, so an unscoped statement is byte-identical to
+   * the one this transport sent before. With one, both sides are
+   * parenthesized: a top-level `OR` in the caller's filter must not escape the
+   * scope. An empty caller filter is vacuously TRUE (#1073), so the scope
+   * stands alone.
+   */
+  private scopedWhereSQL(
+    object: string,
+    filters: unknown,
+    scope: RemoteTenantScope | undefined,
+  ): { whereClauses: string; args: any[] } {
+    const compiled = this.buildWhereSQL(object, filters);
+    if (!scope) return compiled;
+    if (!compiled.whereClauses) return { whereClauses: `(${scope.sql})`, args: [...scope.args] };
+    return {
+      whereClauses: `(${compiled.whereClauses}) AND (${scope.sql})`,
+      args: [...compiled.args, ...scope.args],
+    };
+  }
+
   private buildWhereSQL(
     object: string,
     filters: any,
     path = 'where',
   ): { whereClauses: string; args: any[] } {
     // [#8220] Resolve a redacted refusal's provenance at the OUTERMOST frame
-    // only — `path === 'where'` is true exactly for the six external call
-    // sites, and the root they hand over is the tree the read-scope merge
-    // boundaries marked. Recursive frames rethrow untouched so one refusal is
+    // only — `path === 'where'` is true exactly for the external call sites
+    // (`compileDistinct`, and `scopedWhereSQL` for every other door, #21226),
+    // and the root they hand over is the caller's own filter, the tree the
+    // read-scope merge boundaries marked; the tenant scope is ANDed on after. Recursive frames rethrow untouched so one refusal is
     // resolved once, against the whole tree. Fail-closed like the SqlDriver
     // seam: 'author' swaps in the full text; 'policy', unmarked, unreachable
     // and ambiguous all keep the redaction.

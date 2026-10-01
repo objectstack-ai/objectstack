@@ -1295,10 +1295,11 @@ export function graftNormalizedOperators(authored: unknown, parsed: unknown): un
  * `saveMeta` persists the authored body verbatim (deliberately: `parsed.data`
  * strips the Studio-only auxiliary fields that ride along with an overlay). A
  * Studio-saved public form therefore reached every `sections`-reading consumer
- * still spelled `groups`, and `packages/rest`'s three `/forms/:slug` routes
- * degrade on exactly that: an empty published field schema, an empty
- * `allowedFields` whitelist on submit (#6920), and `403 LOOKUP_NOT_PUBLIC` for
- * every field. Same shape of gap as {@link graftNormalizedOperators}, and the
+ * still spelled `groups`, and `packages/rest`'s `/forms/:slug` routes degraded
+ * on exactly that: an empty published field schema, an empty `allowedFields`
+ * whitelist on submit (#6920), and a 403 for every field on the anonymous
+ * lookup picker (a route since retired, #21180). Same shape of gap as
+ * {@link graftNormalizedOperators}, and the
  * same consequence — while saves keep minting the authored spelling, the alias
  * can never be retired and the objectui-side folds cannot be removed.
  *
@@ -22790,7 +22791,7 @@ export class ObjectStackProtocolImplementation implements
             }
         }
         // [commit 75e66fc8e] Diff RAW, then redact the EMITTED values — maintainer ruling
-        // (comment 5299845282), Option B. The comparison runs on the stored
+        // (recorded in that commit's message), Option B. The comparison runs on the stored
         // bodies untouched, so a credential ROTATION still registers as a
         // changed path; only the values leaving this function are taken from
         // the type's redacted projection of those same bodies.

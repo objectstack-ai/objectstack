@@ -4,8 +4,8 @@
 // anchor enforcement. The submit route must never accept `owner_id` /
 // `organization_id` / audit columns from a visitor, not even via an explicit
 // section declaration (the insert-forge of #3004, but with no credentials at
-// all). The resolve/lookup routes must agree with the submit boundary so a
-// form never collects what the submit refuses.
+// all). The resolve route must agree with the submit boundary so a form
+// never collects what the submit refuses.
 //
 // [#6601 / #6920] And a form that declares NO fields publishes nothing and
 // accepts nothing — one rule on both planes. #3022 originally pinned the
@@ -14,6 +14,7 @@
 // block for what replaced it and what was kept.
 
 import { describe, it, expect, vi } from 'vitest';
+import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import { RestServer } from './rest-server';
 
 // [#10126] Pay the first transform of these dist-resolved workspace deps at MODULE
@@ -86,14 +87,14 @@ const ticketObject = {
   },
 };
 
-function buildServer(sections: any[] | undefined) {
+function buildServer(sections: any[] | undefined, object: any = ticketObject) {
   const createData = vi.fn().mockResolvedValue({ object: 'ticket', id: 'rec_1', record: {} });
   const protocol: any = {
     getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
     getMetaTypes: vi.fn().mockResolvedValue([]),
     getMetaItems: vi.fn(async ({ type }: { type: string }) => {
       if (type === 'view') return [formView(sections)];
-      if (type === 'object') return [ticketObject];
+      if (type === 'object') return [object];
       return [];
     }),
     createData,
@@ -107,7 +108,6 @@ function buildServer(sections: any[] | undefined) {
     createData,
     resolve: find('GET', '/forms/:slug'),
     submit: find('POST', '/forms/:slug/submit'),
-    lookup: find('GET', '/forms/:slug/lookup/:field'),
   };
 }
 
@@ -419,38 +419,95 @@ describe('GET /forms/:slug — the published schema IS the declared field set (#
   });
 });
 
-describe('GET /forms/:slug/lookup/:field — no picker on managed anchors (#3022)', () => {
-  it('refuses a publicPicker declared on owner_id (would open anonymous sys_user search)', async () => {
-    // [#7467] Rebuilt THROUGH the schema. The original fixture was a raw
-    // object handed straight to the stubbed reader — it never met a parse
-    // door, which is exactly why nobody noticed that `publicPicker` was not
-    // declarable and this route was unreachable for every spec-valid form.
-    // Since #7467 the declaration IS spec-valid (proved here through the real
-    // `ViewMetadataSchema`), so this pin now says what it always meant to:
-    // even a form that legally authors a picker on a server-managed anchor
-    // gets 403 — the anchor refusal is the ROUTE's own boundary, not a
-    // side effect of the schema refusing the form.
-    const { ViewMetadataSchema } = await import('@objectstack/spec/ui');
-    const authored = {
-      name: 'ticket.contact_form',
-      object: 'ticket',
-      viewKind: 'form',
-      config: {
-        type: 'simple',
-        data: { provider: 'object', object: 'ticket' },
-        sections: [{ label: 'Details', fields: [{ field: 'owner_id', publicPicker: { displayFields: ['name'] } }] }],
-        sharing: { allowAnonymous: true, publicLink: '/forms/test' },
-      },
-    };
-    const parsed = ViewMetadataSchema.safeParse(authored);
-    expect(parsed.success, `the fixture must be SPEC-VALID for this pin to mean anything: ${JSON.stringify((parsed as any).error?.issues)}`).toBe(true);
+describe('[#21180] GET /forms/:slug — lookup, master_detail and user fields are stripped unconditionally', () => {
+  // Ruling E on #21079 (comment 5933054144): anonymous public forms no longer
+  // take these three field types. The strip already existed; until this card a
+  // `publicPicker` block on the field's section entry was the opt-in that kept
+  // the field. The opt-in is retired, so the strip is unconditional — pinned
+  // here with a STORED pre-retirement row that still carries the block (the
+  // reader hands the routes the raw row), because that row is exactly what the
+  // old condition would have kept.
+  const crmObject = {
+    name: 'ticket',
+    label: 'Ticket',
+    fields: {
+      subject: { type: 'text', label: 'Subject' },
+      contact_id: { type: 'lookup', reference: 'contact', label: 'Contact' },
+      account_id: { type: 'master_detail', reference: 'account', label: 'Account' },
+      assignee: { type: 'user', label: 'Assignee' },
+    },
+  };
 
-    const { lookup } = buildServer([
-      { fields: [{ field: 'owner_id', publicPicker: { displayFields: ['name'] } }] },
-    ]);
+  it('all three are left off the anonymous rendering, even with a stored picker block; the text field survives', async () => {
+    const { resolve } = buildServer([{
+      label: 'Details',
+      fields: [
+        'subject',
+        { field: 'contact_id', publicPicker: { displayFields: ['name'] } },
+        { field: 'account_id', publicPicker: { displayFields: ['name'] } },
+        { field: 'assignee', publicPicker: { displayFields: ['name'] } },
+      ],
+    }], crmObject);
     const res = mockRes();
-    await lookup.handler({ params: { slug: 'test', field: 'owner_id' }, query: {} } as any, res);
-    expect(res.statusCode).toBe(403);
-    expect(res.body.code).toBe('LOOKUP_NOT_PUBLIC');
+    await resolve.handler({ params: { slug: 'test' }, headers: {} } as any, res);
+    expect(res.statusCode).toBe(200);
+    const rendered = res.body.form.sections.flatMap((s: any) =>
+      (s.fields ?? []).map((f: any) => (typeof f === 'string' ? f : f.field)));
+    // The plain text field is the control: the strip is by TYPE, not a blanket drop.
+    expect(rendered).toEqual(['subject']);
+  });
+});
+
+describe('[#21180] GET /forms/:slug/lookup/:field is gone — it answers what any unregistered path answers', () => {
+  // The anonymous record-search picker route is deleted, not refused: no
+  // registered route matches the path, so the adapter's own unmatched-request
+  // answer is the whole response. Driven through the real `HonoHttpServer`
+  // (the adapter `os serve` mounts), with the unmatched-request seam installed
+  // the way `HonoServerPlugin.start()` installs it, because "unregistered" is
+  // the adapter's statement, not a handler's. The control is a sibling path of
+  // the same shape that never existed; the lit control is the registered
+  // resolve route on the same harness, which answers its own envelope.
+  async function answer(path: string) {
+    const server = new HonoHttpServer(0);
+    const protocol: any = {
+      getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
+      getMetaTypes: vi.fn().mockResolvedValue([]),
+      getMetaItems: vi.fn(async ({ type }: { type: string }) => {
+        if (type === 'view') return [formView([{ fields: ['subject', 'owner_id'] }])];
+        if (type === 'object') return [ticketObject];
+        return [];
+      }),
+      findData: vi.fn().mockResolvedValue({ records: [{ id: 'usr_1', name: 'Ada' }] }),
+    };
+    const rest = new RestServer(server as any, protocol, { api: { requireAuth: false } } as any);
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+    rest.registerRoutes();
+    server.installNotFoundSeam();
+    const res: Response = await server.getRawApp().fetch(new Request(`http://local${path}`));
+    return { status: res.status, body: (await res.json()) as any, findData: protocol.findData };
+  }
+
+  it('no route is registered for the path', () => {
+    const rest = new RestServer(mockServer() as any, {} as any, { api: { requireAuth: false } } as any);
+    rest.registerRoutes();
+    const forms = rest.getRoutes().filter((r) => r.path.includes('/forms/')).map((r) => `${r.method} ${r.path}`);
+    expect(forms.some((r) => r.includes('/lookup/'))).toBe(false);
+    // Anti-vacuity: the two surviving public-form routes are still mounted.
+    expect(forms.some((r) => r.startsWith('GET ') && r.endsWith('/forms/:slug'))).toBe(true);
+    expect(forms.some((r) => r.startsWith('POST ') && r.endsWith('/forms/:slug/submit'))).toBe(true);
+  });
+
+  it('the old picker path and a never-registered sibling get the same answer, and nothing is searched', async () => {
+    const picker = await answer('/api/v1/forms/test/lookup/owner_id?q=a');
+    const control = await answer('/api/v1/forms/test/never_registered/owner_id?q=a');
+    expect(picker.status).toBe(404);
+    expect(picker.body?.error?.code).toBe('ENDPOINT_NOT_FOUND');
+    expect(picker.status).toBe(control.status);
+    expect(JSON.stringify(picker.body).replace('/lookup/', '/never_registered/')).toBe(JSON.stringify(control.body));
+    expect(picker.findData).not.toHaveBeenCalled();
+    // Lit control: the same harness DOES dispatch a registered public-form route.
+    const resolved = await answer('/api/v1/forms/test');
+    expect(resolved.status).toBe(200);
+    expect(resolved.body?.slug).toBe('test');
   });
 });

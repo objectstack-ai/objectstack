@@ -23,7 +23,7 @@
 //
 // ## Why this file drives more than one field
 //
-// ⛔ An earlier measurement (PR #13244) drove ONE hidden field, which happened
+// ⛔ An earlier measurement (commit 889ec5b42) drove ONE hidden field, which happened
 // not to be a priority name, saw it dropped, and reported *"hidden is dropped
 // by declaration"*. That reading was true of the field it drove and false of
 // the class — a **false clearance**: a result that reads as general because
@@ -43,7 +43,7 @@
 // and "true of the class": it drives EVERY priority name hidden at once.
 //
 // ⚠️ The sibling harness `packages/rest/src/ui-view-route-tenancy.measurement.test.ts`
-// (#13214 / PR #13258) drives the same defect through the REST route and pins
+// (commit 3d10755f0, for the card commit cc837dbfe fixed) drives the same defect through the REST route and pins
 // the pre-fix answer as a measurement. It belongs to that card and is
 // deliberately not edited here; this file is the pin next to the code.
 

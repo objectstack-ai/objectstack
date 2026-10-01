@@ -19,7 +19,7 @@
  * channel exists and the sentence is the SOLE carrier of the author's
  * prescription. Commit 809e61221 reached the same verdict for the sibling 409.
  *
- * The maintainer ruling on #11017 (2026-08-22, option D) resolved it by
+ * The maintainer ruling of 2026-08-22 (option D, landed as commit d806081dd) resolved it by
  * reusing commit 82cb6e849/#11099's per-face rendering rather than by declaring a
  * response contract for `duplicatePackage`: faces that already carry a
  * structured `issues[]` drop the prose restatement; the duplicate face keeps
