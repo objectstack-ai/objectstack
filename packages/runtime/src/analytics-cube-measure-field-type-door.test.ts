@@ -86,6 +86,12 @@ const quiet = { debug() {}, info() {}, warn() {}, error() {}, child() { return q
 
 // ── harness (the shape `analytics-authored-cube-format-granularity.test.ts` uses) ──
 
+// The analytics domain refuses an anonymous caller first (ADR-0056 D2), so this
+// harness signs its caller in the way that file does: an `auth` slot in the
+// shape `resolveExecutionContext` reads answers a session for every request.
+// Only identity is stubbed; the route, the service and the engine are real.
+const SIGNED_IN_AUTH = { api: { getSession: async () => ({ user: { id: 'usr_analytics_caller' } }) } };
+
 type Handler = (req: unknown, res: unknown) => unknown;
 
 function makeFakeServer() {
@@ -101,8 +107,8 @@ function makeFakeServer() {
 
 function makeCtx(fakeServer: unknown, analytics: unknown) {
     const kernel = {
-        getService: (name: string) => (name === 'analytics' ? analytics : undefined),
-        getServiceAsync: async (name: string) => (name === 'analytics' ? analytics : undefined),
+        getService: (name: string) => (name === 'analytics' ? analytics : name === 'auth' ? SIGNED_IN_AUTH : undefined),
+        getServiceAsync: async (name: string) => (name === 'analytics' ? analytics : name === 'auth' ? SIGNED_IN_AUTH : undefined),
     };
     return {
         getKernel: () => kernel,
