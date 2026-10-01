@@ -1117,6 +1117,21 @@ export interface AnalyticsServiceConfig {
    * says once, in its log, that the rest reach the engine unjudged.
    */
   judgeFilter?: ReadScopeFilterJudge;
+  /**
+   * [#21080] Does the data engine hold a middleware registered FOR
+   * `objectName` — `IObjectQLEngine.hasObjectMiddleware` — or `undefined` when
+   * this host cannot say?
+   *
+   * `NativeSQLStrategy` runs no engine operation, so no engine middleware runs
+   * on it, the per-object read gates included. It declines a query that reads
+   * an object this answers `true` OR `undefined` for, and the engine path
+   * serves it with the caller's context. `AnalyticsServicePlugin` wires it from
+   * the data engine, answering `undefined` when that engine lacks the member.
+   *
+   * A host that wires nothing keeps the native path for every object, and is
+   * told once, at construction, when it also wires `executeRawSql`.
+   */
+  hasObjectMiddleware?: (objectName: string) => boolean | undefined;
   /** Pre-defined datasets to compile + register at construction (ADR-0021). */
   datasets?: Dataset[];
   /**
@@ -1444,7 +1459,23 @@ export class AnalyticsService implements IAnalyticsService {
         }
         return config.judgeFilter(objectName, where, options);
       },
+      // [#21080] The engine's answer to "is a middleware registered for this
+      // object?", passed through untouched, `undefined` included:
+      // `NativeSQLStrategy` declines on `true` and on `undefined`, so the
+      // engine path serves the object and its middlewares run.
+      hasObjectMiddleware: config.hasObjectMiddleware,
     };
+    // [#21080] …and a host that wires raw SQL without that answer is told so,
+    // once: the native path then serves every object, gated ones included.
+    if (config.executeRawSql && typeof config.hasObjectMiddleware !== 'function') {
+      this.logger.warn(
+        '[Analytics] executeRawSql is configured without hasObjectMiddleware, so NativeSQLStrategy cannot ask ' +
+          'the data engine which objects carry a middleware registered for them. It serves every object as raw ' +
+          'SQL, and per-object engine middlewares (read gates among them) do not run on that path. Supply ' +
+          'hasObjectMiddleware from the engine (IObjectQLEngine.hasObjectMiddleware); AnalyticsServicePlugin ' +
+          'wires it from the data engine.',
+      );
+    }
 
     // Build strategy chain (built-in + custom, sorted by priority)
     // InMemoryStrategy is NOT built-in — it lives in @objectstack/driver-memory

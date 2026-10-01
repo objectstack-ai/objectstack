@@ -322,8 +322,59 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // fail-closed. The emitters' refusals stay as the backstop. See
     // {@link jsonConstructOnUnknownDialectIn}.
     if (this.jsonConstructOnUnknownDialectIn(query, ctx)) return false;
+    // ── [#21080] DECLINE an object an engine middleware is registered for ──
+    //
+    // Triage's ruling on #21080 (5925681388): 「The engine answers, read-only,
+    // whether an object carries an engine middleware registered for that
+    // object … The native-SQL strategy's `canHandle` declines such an
+    // object. The declined query routes to the ObjectQL strategy, and the
+    // engine's middlewares run.」 ⛔ No per-object list here, ⛔ no gate
+    // registers twice.
+    //
+    // This strategy executes raw SQL through the driver, so no engine
+    // operation runs and no engine middleware does. It applies the security
+    // service's object admission and read filter (`read-admission.ts`,
+    // `read-scope-sql.ts`) and nothing else, and the per-object read gates
+    // live in the engine as middlewares: a member admitted to such an object
+    // read grouped results and counts over rows the engine never serves it.
+    // Declining hands the query to the ObjectQL strategy, which hands it to
+    // the engine with the caller's context. The mechanism of the declines
+    // above, for the same reason: what this strategy cannot serve as the
+    // engine would, the engine serves.
+    //
+    // ⚠️ It FAILS CLOSED, unlike the "cannot answer, do not block" hooks: an
+    // `undefined` answer (no engine, or one without the member) declines
+    // too. A gate this strategy cannot see is not one it may skip. The cost
+    // is the native fast path for every gated object, and on an engine that
+    // cannot answer, for every object. See {@link readsObjectWithEngineMiddleware}.
+    if (this.readsObjectWithEngineMiddleware(query, ctx)) return false;
     const caps = ctx.queryCapabilities(query.cube);
     return caps.nativeSql && typeof ctx.executeRawSql === 'function';
+  }
+
+  /**
+   * [#21080] Does this query read an object the engine holds a middleware
+   * for — or one it cannot answer about? See the decline at {@link canHandle}.
+   *
+   * The objects are the ones the statement reads: the set the door admitted
+   * and scoped (`readScopedObjects` — the base object, every declared join and
+   * every object a relationship path reaches), or, for a context built
+   * without that set, the cube's base object and declared joins, as
+   * {@link crossFieldComparisonIn} reads them. Each is asked of the context's
+   * `hasObjectMiddleware`; `true` and `undefined` both decline.
+   *
+   * A context with no hook asks nothing: it is one a host built without the
+   * engine's answer, and `AnalyticsService` says so once when it wires raw SQL.
+   */
+  private readsObjectWithEngineMiddleware(query: AnalyticsQuery, ctx: StrategyContext): boolean {
+    const scopedCtx = ctx as DatasetScopedStrategyContext;
+    if (typeof scopedCtx.hasObjectMiddleware !== 'function') return false;
+    const cube = query.cube ? ctx.getCube(query.cube) : undefined;
+    if (!cube) return false;
+    const objects = scopedCtx.readScopedObjects
+      ? [...scopedCtx.readScopedObjects]
+      : [this.extractObjectName(cube), ...Object.keys(cube.joins ?? {}).map((alias) => cube.joins?.[alias]?.name ?? alias)];
+    return objects.some((object) => scopedCtx.hasObjectMiddleware!(object) !== false);
   }
 
   /**
