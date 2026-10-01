@@ -130,6 +130,13 @@
 // `{ owners: { $in: ['u1'] } }` counted 0 and `{ owners: { $nin: ['u1'] } }`
 // counted the very rows holding `u1`, where the same `where` is a 400 on every
 // SQL dialect. See {@link assertAggregationFilterSparesJsonStoredFields}.
+//
+// [#20981] …and on BOTH positions a non-boolean `$exists` / `$null` is refused
+// `INVALID_FILTER` / 400 in the words every driver's `where` refuses it in,
+// judged once before any row and per row as the floor, beside `$empty`'s gate.
+// Before, `$exists` was read by truthiness (`"false"` kept the valued rows) and
+// a third `$null` value constrained nothing. See
+// {@link nonBooleanFlagComparandError}.
 
 import type { FilterCondition } from '@objectstack/spec/data';
 // [#20099] The reference's own declaration, so a malformed `addDays` is refused
@@ -258,7 +265,8 @@ const CONDITION_OPERATORS = [
  * positions the SQL family compiles one in. Every other position (a list
  * member, a text pattern, `$exists` / `$null`) is refused by
  * {@link assertHavingIsEvaluable} rather than compared against the reference
- * OBJECT, which matched nothing.
+ * OBJECT, which matched nothing. [#20981] The two flags' slot is refused as a
+ * non-boolean first ({@link nonBooleanFlagComparandError}), as `$empty`'s is.
  */
 const REFERENCE_COMPARISON_OPERATORS: ReadonlySet<string> = new Set([
   '$eq', '$ne', '$gt', '$gte', '$lt', '$lte',
@@ -361,8 +369,9 @@ function unknownOperator(
  * `FieldOperatorsSchema` declares `$empty: z.boolean()`: `true` asks for the
  * empty rows, `false` for their exact complement. A third value is refused
  * rather than read — this face refuses the malformations it can see, where a
- * two-branch reading would silently constrain nothing (the lenient `$null`
- * arm's standing hazard).
+ * two-branch reading would silently constrain nothing (the hazard the `$null`
+ * arm carried until [#20981] refused its third value too — see
+ * {@link nonBooleanFlagComparandError}).
  */
 function emptyFlagComparandError(field: string, value: unknown, path: string): Error {
   const shown = JSON.stringify(value) ?? String(value);
@@ -371,6 +380,94 @@ function emptyFlagComparandError(field: string, value: unknown, path: string): E
     + `received ${shown}. @objectstack/spec FieldOperatorsSchema declares $empty as a boolean: true `
     + `asks for the empty rows, false for their exact complement.`,
   );
+}
+
+/**
+ * [#20981] `$exists` or `$null` received a comparand that is not a boolean.
+ *
+ * `FieldOperatorsSchema` declares both flags `z.boolean()`, and every driver's
+ * `where` refuses a third value — the #5347 ruling for `$null`, applied to
+ * `$exists` by the 2026-08-06 ruling on #5298: `driver-sql` (with
+ * `driver-sqlite-wasm` and Turso local), Turso's remote transport,
+ * `driver-memory`, `driver-mongodb` and `service-analytics`. This face read one
+ * anyway, and the engine evaluates it itself, so the answer was the same on
+ * every driver. Measured through `engine.aggregate` on driver-memory and
+ * driver-sql (better-sqlite3), `origin/main` `7a606a9a3`, over a text column
+ * holding `'won'` on one row and no value on two:
+ *
+ * | comparand | `$exists` (the old `!!target` read) | `$null` (the old two-branch read) |
+ * |:--|:--|:--|
+ * | `"yes"`, `1`, `"false"` | the VALUED rows / the `won` group | every row and every group |
+ * | `0`, `null` | the no-value rows / the null group | every row and every group |
+ *
+ * So `$exists` answered by truthiness — `"false"` the string kept the valued
+ * side — and `$null` constrained nothing at all: the widening direction.
+ *
+ * ## The words are the comparand doors', not this face's
+ *
+ * Verbatim the diagnostic `driver-sql`'s `nonBooleanExistsComparandError` /
+ * `nonBooleanNullComparandError` build — the text `driver-memory` and
+ * `driver-mongodb` give on the wire — with its "this driver" clause re-aimed
+ * at the backend it names, as `driver-memory`'s copy re-aims it. One condition,
+ * one wording (#5240). The text has no importable home: each face spells it,
+ * this package cannot depend on a driver, and neither `@objectstack/core` nor
+ * the spec exports it — so this is a declared verbatim copy, the drivers'
+ * `describeFilterOperand` / `safeShapePreview` rendering of the received value
+ * included ({@link describeFlagOperand}), held to the drivers' first sentence
+ * by `packages/rest`'s `aggregation-flag-comparand-refusal.test.ts` beside the
+ * `where` twin rather than by an import.
+ *
+ * Unlike `driver-sql`'s `where`, the message is not withheld: no read scope is
+ * merged into a per-aggregation `filter` or a `having`, and this face's other
+ * comparand refusals (`$empty`, `$icontains`) name the field and the value too.
+ */
+function nonBooleanFlagComparandError(op: '$exists' | '$null', field: string, value: unknown, path: string): Error {
+  const head = `Operator "${op}" on field "${field}" requires a boolean comparand (true or false). `
+    + `Received ${describeFlagOperand(value)} at ${path}. `
+    + `@objectstack/spec FieldOperatorsSchema declares ${op} as a boolean. `;
+  if (op === '$exists') {
+    return invalidFilterError(
+      head
+      + `It is refused rather than coerced for the same reason $null is: a non-boolean lands on whichever side `
+      + `the backend's two-branch conditional happens to default to, and those defaults point in `
+      + `OPPOSITE directions — driver-sql's \`=== false\` test compiles IS NOT NULL for anything `
+      + `but false, a \`=== true\` test compiles IS NULL for anything but true. Note "false" the `
+      + `STRING is truthy, so it lands on the side opposite the false it was written to mean.`,
+    );
+  }
+  return invalidFilterError(
+    head
+    + `It is refused rather than coerced because the backends read a non-boolean in OPPOSITE directions — `
+    + `driver-sql compiled IS NULL (anything but false), driver-memory's query path and driver-mongodb `
+    + `compiled IS NOT NULL (anything but true), and driver-memory's matcher dropped the `
+    + `constraint entirely. Note "false" the STRING is truthy, so it landed on the side opposite `
+    + `the false it was written to mean.`,
+  );
+}
+
+/**
+ * [#20981] The drivers' rendering of a received comparand — `describeFilterOperand`
+ * then `safeShapePreview` in parentheses (`string ("yes")`, `number (1)`,
+ * `null (null)`), verbatim, so {@link nonBooleanFlagComparandError} reads byte
+ * for byte as the `where` refusal of the same flag does.
+ */
+function describeFlagOperand(value: unknown): string {
+  let kind: string;
+  if (value === null) kind = 'null';
+  else if (Array.isArray(value)) kind = 'array';
+  else if (typeof value !== 'object') kind = typeof value;
+  else {
+    const ctor = (value as { constructor?: { name?: string } }).constructor;
+    kind = ctor?.name && ctor.name !== 'Object' ? ctor.name : 'object';
+  }
+  let shown: string;
+  try {
+    const json = JSON.stringify(value);
+    shown = typeof json !== 'string' ? typeof value : json.length > 80 ? `${json.slice(0, 77)}...` : json;
+  } catch {
+    shown = typeof value;
+  }
+  return `${kind} (${shown})`;
 }
 
 /**
@@ -470,7 +567,9 @@ function bareFieldReferenceError(field: string, spec: Record<string, unknown>, p
 
 /**
  * [#20099] A `{ $field }` reference outside the six scalar comparisons — a
- * `$in` / `$nin` member, a text pattern, an `$exists` / `$null` operand.
+ * `$in` / `$nin` member, a text pattern. [#20981] An `$exists` / `$null`
+ * operand no longer gets here: the flag gate refuses it as a non-boolean first
+ * ({@link nonBooleanFlagComparandError}), as `$empty`'s gate always did.
  * Before this, the walker compared the reference OBJECT itself and matched
  * nothing (`$nin` kept everything). `$between` endpoints never get here: the
  * shared comparand-shape face refuses them first, in its own words.
@@ -922,6 +1021,9 @@ export function assertHavingIsFilterCondition(having: unknown): void {
  *   own {@link unknownOperator} words;
  * - an `$icontains` comparand that is not a non-empty string —
  *   {@link icontainsComparandError};
+ * - [#20444] an `$empty` comparand that is not a boolean —
+ *   {@link emptyFlagComparandError}; [#20981] and an `$exists` / `$null` one,
+ *   in the drivers' words — {@link nonBooleanFlagComparandError};
  * - a bare `{ field: { $field } }` — {@link bareFieldReferenceError};
  * - a reference outside the six scalar comparisons —
  *   {@link fieldReferencePositionError};
@@ -1307,6 +1409,12 @@ function assertConditionIsEvaluable(
     // comparand that is not a boolean.
     if (op === '$empty' && typeof target !== 'boolean') {
       throw emptyFlagComparandError(field, target, `${path}.${op}`);
+    }
+    // [#20981] …and its two siblings, by the same declaration and for the same
+    // reason. Before the reference-position check below as well, as `$empty`'s
+    // gate is: a `{ $field }` in a flag's slot is a non-boolean first.
+    if ((op === '$exists' || op === '$null') && typeof target !== 'boolean') {
+      throw nonBooleanFlagComparandError(op, field, target, `${path}.${op}`);
     }
     if (!(CONDITION_OPERATORS as readonly string[]).includes(op)) {
       throw unknownOperator(op, 'condition', keys, scope.clause);
@@ -1714,6 +1822,12 @@ function checkCondition(
     if (op === '$empty' && typeof target !== 'boolean') {
       throw emptyFlagComparandError(field, target, `${path}.${op}`);
     }
+    // [#20981] …and `$exists` / `$null` beside it: the floor under the one-time
+    // judgment (assertConditionIsEvaluable), for a caller evaluating rows
+    // directly. Above the no-value exit for the same reason.
+    if ((op === '$exists' || op === '$null') && typeof target !== 'boolean') {
+      throw nonBooleanFlagComparandError(op, field, target, `${path}.${op}`);
+    }
     // [#21007] A scalar comparison on a declared JSON-stored column — refused,
     // as `where` refuses it. The backstop under the one-time judgment
     // (assertAggregationFilterSparesJsonStoredFields), for a row that gets here.
@@ -1769,14 +1883,16 @@ function checkCondition(
       }
       case '$in': if (!Array.isArray(target) || !listHolds(target.map(form), stored)) return false; break;
       case '$nin': if (Array.isArray(target) && listHolds(target.map(form), stored)) return false; break;
-      case '$exists': {
-        const exists = value !== undefined && value !== null;
-        if (exists !== !!target) return false;
+      // [#20981] Both flags are booleans here — the gate above refused every
+      // other comparand — so each arm reads the flag itself. `$exists` read
+      // `!!target` (truthiness: `"false"` asked for the valued rows), and `$null`
+      // tested `=== true` / `=== false` only, so a third value constrained
+      // nothing. `$exists` is "has a value" (#5298), the exact mirror of `$null`.
+      case '$exists':
+        if ((value !== undefined && value !== null) !== target) return false;
         break;
-      }
       case '$null':
-        if (target === true && value != null) return false;
-        if (target === false && value == null) return false;
+        if ((value === undefined || value === null) !== target) return false;
         break;
       // [#20444] The staged emptiness flag, judged BY VALUE — the aggregated
       // row carries no field declaration of its own, so this face takes the

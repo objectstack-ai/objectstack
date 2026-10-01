@@ -646,6 +646,8 @@ describe('[#20099] having — a { $field } reference resolves against the aggreg
     ['a reference as a $nin member', () => ({ total: { $nin: [1, { $field: 'max_cap' }] } }), 'having.total.$nin'],
     ['a reference as a $contains pattern', () => ({ customer_id: { $contains: { $field: 'customer_id' } } }), 'having.customer_id.$contains'],
     ['a reference as a $startsWith pattern', () => ({ customer_id: { $startsWith: { $field: 'customer_id' } } }), 'having.customer_id.$startsWith'],
+    // [#20981] These two are refused at the same path as a non-boolean flag
+    // first now — the words are pinned in engine-aggregate-flag-comparand-refusal.test.ts.
     ['a reference under $exists', () => ({ total: { $exists: { $field: 'max_cap' } } }), 'having.total.$exists'],
     ['a reference under $null', () => ({ total: { $null: { $field: 'max_cap' } } }), 'having.total.$null'],
     ['a reference naming no column', () => ({ total: { $gt: { $field: 'nope' } } }), 'having.total.$gt'],

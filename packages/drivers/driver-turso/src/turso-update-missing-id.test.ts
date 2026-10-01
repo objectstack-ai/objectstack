@@ -34,7 +34,8 @@
  *
  * The card measured that NO landed test pinned the miss posture on this driver
  * (`turso-driver.test.ts:138,731` and
- * `turso-remote-autonumber-refusal.test.ts:369` all read `update()` results
+ * `turso-remote-autonumber-generation.test.ts`'s `update()` case — the
+ * refusal suite at `:369` when this was measured — all read `update()` results
  * over rows that EXIST), so every pin here is net-new coverage.
  *
  * # The pins, and what each alone would miss
