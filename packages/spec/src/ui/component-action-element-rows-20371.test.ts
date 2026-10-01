@@ -81,8 +81,11 @@ describe('key sets, asserted whole — measured from the renderers\' read points
   // (`execute({ ...forwarded })`). `undoable` / `recordIdField` are forwarded
   // by the button only. `objectName` joined the forward with the pin that
   // carries it; the four renderers forward it, the two containers per member.
+  // `endpoint` is forwarded too and deliberately NOT declared (#21005): no
+  // console `api` handler reads it, and the rows refuse it with
+  // `ActionSchema`'s rename onto `target` (`component-action-row-endpoint-21005.test.ts`).
   const FORWARDED = [
-    'params', 'description', 'target', 'openIn', 'endpoint', 'method', 'bodyExtra', 'bodyShape',
+    'params', 'description', 'target', 'openIn', 'method', 'bodyExtra', 'bodyShape',
     'operation', 'patch', 'confirmText', 'successMessage', 'errorMessage', 'refreshAfter',
     'locations', 'toast', 'resultDialog', 'onSuccess', 'objectName',
   ];
