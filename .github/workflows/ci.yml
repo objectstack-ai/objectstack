@@ -1653,8 +1653,11 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # ⛔ THE DOGFOOD PACKAGE'S DEPENDENCY CLOSURE IS BUILT HERE, IN A RUN
-      # THAT CARRIES NO PASSTHROUGH, so that the sharded run in the next step
-      # can be `--only` (#16395's shape, applied to this job by #16886).
+      # THAT CARRIES NO PASSTHROUGH. (#20820: the next step no longer needs this
+      # for correctness -- it carries its shard in the task env `OS_TEST_SHARD`,
+      # so it plans and replays this same closure itself, with no `--only`. The
+      # step stays as its own stall-guard site, and the closure replays there.
+      # The measurement below is the history of the `-- --shard=k/3` shape.)
       #
       # Turbo folds a run-level passthrough into the hash of EVERY task in the
       # run, not only the task that receives it -- and `-- --shard=k/3` is the
