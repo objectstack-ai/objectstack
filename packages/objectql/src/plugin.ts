@@ -26,6 +26,7 @@ import {
 import type { IMetadataService } from '@objectstack/spec/contracts';
 import type { ServiceObject } from '@objectstack/spec/data';
 import {
+  collectManifestPicklistExtensions,
   collectManifestPicklistNames,
   collectManifestPicklistReferences,
   describeUnresolvedPicklistReferences,
@@ -475,10 +476,14 @@ export class ObjectQLPlugin implements Plugin {
         if (this.picklistVocabularySealed) {
           const declared = new Set<string>();
           for (const manifest of ordered) for (const name of collectManifestPicklistNames(manifest)) declared.add(name);
+          const known = (name: string) => declared.has(name) || ql.registry.resolvePicklistOptions(name) !== undefined;
           const unresolved = ordered
             .flatMap((manifest) => collectManifestPicklistReferences(manifest, artifactPackageId(manifest)))
-            .filter((ref) => !declared.has(ref.picklist) && ql.registry.resolvePicklistOptions(ref.picklist) === undefined);
-          const refusal = describeUnresolvedPicklistReferences(unresolved);
+            .filter((ref) => !known(ref.picklist));
+          const orphans = ordered
+            .flatMap((manifest) => collectManifestPicklistExtensions(manifest, artifactPackageId(manifest)))
+            .filter((ext) => !known(ext.picklist));
+          const refusal = describeUnresolvedPicklistReferences(unresolved, orphans);
           if (refusal) throw refusal;
         }
 
@@ -595,13 +600,15 @@ export class ObjectQLPlugin implements Plugin {
     ctx.hook('kernel:ready', async () => {
         // A field naming a picklist no package declares fails the boot, naming
         // the field and the package — never served as a select with nothing to
-        // choose. Judged HERE because every package has registered by now, so
+        // choose — and so does an extension of such a list, whose values would
+        // otherwise go nowhere. Judged HERE because every package has registered by now, so
         // "not declared" is final; a list a later package declares would
         // otherwise read as missing (AGENTS.md, startup registry reads). From
         // here on the vocabulary is sealed and each late artifact is judged as
         // it arrives (the `manifest` service above).
         const unresolvedPicklists = describeUnresolvedPicklistReferences(
             this.ql?.registry.findUnresolvedPicklistReferences() ?? [],
+            this.ql?.registry.findOrphanPicklistExtensions() ?? [],
         );
         if (unresolvedPicklists) throw unresolvedPicklists;
         this.picklistVocabularySealed = true;

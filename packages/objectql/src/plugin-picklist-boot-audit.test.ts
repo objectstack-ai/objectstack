@@ -57,6 +57,17 @@ describe('the picklist boot audit', () => {
     expect(err.message).toContain("field 'pb_account.industry' (package 'com.test.boot.app') references picklist 'industry'");
   });
 
+  it('fails the boot on an extension of a list nothing declares', async () => {
+    const { kernel, use } = kernelWith(
+      new ObjectQLPlugin(),
+      registering('ext', [{ id: 'com.test.boot.ext', name: 'ext', picklistExtensions: [{ extend: 'industy', options: [{ label: 'X', value: 'x' }] }] }]),
+    );
+    await use();
+    const err: any = await kernel.bootstrap().then(() => undefined, (e) => e);
+    expect(err).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+    expect(err.message).toContain("a `picklistExtensions` entry (package 'com.test.boot.ext') extends picklist 'industy'");
+  });
+
   it('boots when the list arrives from a package registered LATER in the same boot', async () => {
     const { kernel, use } = kernelWith(
       new ObjectQLPlugin(),
@@ -78,6 +89,17 @@ describe('the picklist boot audit', () => {
       .toThrow(/field 'pb_account\.industry' \(package 'com\.test\.late'\) references picklist 'industry'/);
     const ql: any = kernel.getService('objectql');
     expect(ql.registry.getObject('pb_account')).toBeUndefined();
+  });
+
+  it('after the boot, an artifact extending an unknown list is refused before ANY of it registers', async () => {
+    const { kernel, use } = kernelWith(new ObjectQLPlugin());
+    await use();
+    await kernel.bootstrap();
+    const manifest: any = kernel.getService('manifest');
+    expect(() => manifest.register({ id: 'com.test.late', name: 'late', picklistExtensions: [{ extend: 'industy', options: [{ label: 'X', value: 'x' }] }] }))
+      .toThrow(/extends picklist 'industy'/);
+    const ql: any = kernel.getService('objectql');
+    expect(ql.registry.findOrphanPicklistExtensions()).toEqual([]);
   });
 
   it('after the boot, an artifact that brings its own list — or names a registered one — registers', async () => {

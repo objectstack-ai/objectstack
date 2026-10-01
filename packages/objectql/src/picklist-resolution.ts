@@ -188,24 +188,41 @@ export function collectPicklistReferences(
   return refs;
 }
 
+/** A `picklistExtensions` entry whose `extend` names a list no loaded package declares. */
+export interface OrphanPicklistExtension {
+  picklist: string;
+  packageId: string | undefined;
+}
+
 /**
- * The load-time refusal for fields naming a picklist nothing declares — every
- * one of them, so an author fixes the set in one pass. `undefined` when there
- * are none.
+ * The load-time refusal for picklist names nothing declares — every field
+ * that references one, and every `picklistExtensions` entry that extends one,
+ * so an author fixes the whole set in one pass. `undefined` when there are
+ * none.
+ *
+ * An extension of an undeclared list is refused for the same reason the
+ * field is: its options would otherwise be held for a list that never
+ * arrives, and the values an author added would silently go nowhere.
  */
 export function describeUnresolvedPicklistReferences(
   unresolved: readonly PicklistReference[],
+  orphanExtensions: readonly OrphanPicklistExtension[] = [],
 ): PicklistMetadataError | undefined {
-  if (unresolved.length === 0) return undefined;
-  const lines = unresolved.map(
-    (r) => `field '${r.object}.${r.field}' (${describePackage(r.packageId)}) references picklist '${r.picklist}'`,
-  );
+  if (unresolved.length === 0 && orphanExtensions.length === 0) return undefined;
+  const lines = [
+    ...unresolved.map(
+      (r) => `field '${r.object}.${r.field}' (${describePackage(r.packageId)}) references picklist '${r.picklist}'`,
+    ),
+    ...orphanExtensions.map(
+      (e) => `a \`picklistExtensions\` entry (${describePackage(e.packageId)}) extends picklist '${e.picklist}'`,
+    ),
+  ];
   return picklistMetadataError(
-    `${unresolved.length === 1 ? 'A field references a picklist' : `${unresolved.length} fields reference picklists`} `
+    `${lines.length === 1 ? 'A picklist is named' : `${lines.length} picklist names are used`} `
     + `that no loaded package declares: ${lines.join('; ')}. A field bound to a picklist takes its options `
-    + 'from that list and has none of its own, so it cannot be served or written until the list exists. '
-    + 'Declare the picklist (a `*.picklist.ts` file, or `defineStack({ picklists })`) in the package or in '
-    + 'one it depends on, or correct the name.',
+    + 'from that list and has none of its own, and an extension adds options to a list that must exist, so '
+    + 'neither can take effect until the list does. Declare the picklist (a `*.picklist.ts` file, or '
+    + '`defineStack({ picklists })`) in the package or in one it depends on, or correct the name.',
   );
 }
 
@@ -249,4 +266,15 @@ export function collectManifestPicklistNames(manifest: any): Set<string> {
     }
   }
   return names;
+}
+
+/** The `picklistExtensions` targets one manifest brings, nested plugins included. */
+export function collectManifestPicklistExtensions(manifest: any, packageId: string | undefined): OrphanPicklistExtension[] {
+  const out: OrphanPicklistExtension[] = [];
+  for (const source of manifestSources(manifest)) {
+    for (const ext of Array.isArray(source?.picklistExtensions) ? source.picklistExtensions : []) {
+      if (typeof ext?.extend === 'string') out.push({ picklist: ext.extend, packageId });
+    }
+  }
+  return out;
 }

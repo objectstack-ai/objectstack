@@ -4760,7 +4760,8 @@ export class SchemaRegistry {
    * order, not picklist order, and an object resolves its options lazily on
    * the next fold, so the extension is held until the list arrives. A target
    * that never arrives is not this method's to judge — the boot audit
-   * ({@link findUnresolvedPicklistReferences}) refuses the FIELDS that name it.
+   * ({@link findUnresolvedPicklistReferences}, {@link findOrphanPicklistExtensions})
+   * refuses the fields that name it and the extensions that extend it.
    *
    * Re-registration by the same package replaces that package's own
    * contribution value by value, so a manifest replay is idempotent.
@@ -4828,6 +4829,21 @@ export class SchemaRegistry {
       }
     }
     return unresolved;
+  }
+
+  /**
+   * Every `picklistExtensions` entry whose target list no registered package
+   * declares — the second half of the load-time audit. Held extensions are
+   * legal while the boot fills; once it is sealed, one still held adds its
+   * options to nothing.
+   */
+  findOrphanPicklistExtensions(): Array<{ picklist: string; packageId: string | undefined }> {
+    const orphans: Array<{ picklist: string; packageId: string | undefined }> = [];
+    for (const [target, byPackage] of this.picklistExtensionContributions) {
+      if (this.resolvePicklistOptions(target) !== undefined) continue;
+      for (const entry of byPackage.values()) orphans.push({ picklist: target, packageId: entry.packageId });
+    }
+    return orphans;
   }
 
   /** The owning list's options (when registered) followed by every extension's. */

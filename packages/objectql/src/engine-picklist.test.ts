@@ -279,11 +279,21 @@ describe('picklist — an unknown name', () => {
     expect(engine.registry.findUnresolvedPicklistReferences()).toEqual([]);
   });
 
+  it('an extension of a list nothing declares is reported with its package — its values would go nowhere', async () => {
+    const engine = await bootEngine();
+    engine.registerApp({ id: 'com.test.orphan', name: 'orphan', picklistExtensions: [{ extend: 'industy', options: [{ label: 'X', value: 'x' }] }] });
+    const orphans = engine.registry.findOrphanPicklistExtensions();
+    expect(orphans).toEqual([{ picklist: 'industy', packageId: 'com.test.orphan' }]);
+    expect(describeUnresolvedPicklistReferences([], orphans)!.message)
+      .toContain("a `picklistExtensions` entry (package 'com.test.orphan') extends picklist 'industy'");
+  });
+
   it('nothing is reported once every list resolves', async () => {
     const engine = await bootEngine();
     engine.registerApp(CORE);
     engine.registerApp(HEALTH);
     expect(engine.registry.findUnresolvedPicklistReferences()).toEqual([]);
+    expect(engine.registry.findOrphanPicklistExtensions()).toEqual([]);
   });
 });
 
