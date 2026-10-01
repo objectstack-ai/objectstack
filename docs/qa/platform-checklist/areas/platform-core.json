@@ -9,7 +9,7 @@
       "title": "Showcase boots clean: health + ready 200, no degraded startup banners, console + app metadata served",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P0",
       "surface": "mixed",
       "preconditions": [
@@ -19,7 +19,7 @@
         "boot examples/app-showcase via `objectstack dev --ui --seed-admin -p <port> -d file:/tmp/<run>/data.db`",
         "poll GET http://localhost:<port>/api/v1/health until 200; record time-to-healthy",
         "GET /api/v1/ready and record the status (the readiness probe is a separate route — packages/runtime/src/route-ledger.ts)",
-        "read the FULL boot log: capture the Flows: banner, any ⚠ lines, any ERROR-level lines, and every SeedLoader line",
+        "read the FULL boot log: capture the Flows: banner, any ⚠ lines, any ERROR-level lines, and the seed outcome. ⚠️ at the default log level (warn) SeedLoader prints NO success line, so a grep for one finds nothing on a healthy boot. Read the ready banner's `Seeds:` row instead — it is immune to the level (packages/runtime/src/seed-summary.ts), e.g. `Seeds:   com.example.showcase 132 rows`, and turns yellow with ⚠ and an `N ok / M errors` or `lost links` count when rows were dropped. `--log-level info` additionally prints `[Seeder] Seed loading complete {inserted, updated, skipped, errored}`; a load that dropped records logs `[Seeder] Seed loading completed with N dropped record(s)…` at warn and is visible at either level",
         "GET /_console/ and confirm the console shell HTML is served (200, text/html)",
         "GET /api/v1/meta/app?id=showcase_app and capture the merged app/nav metadata (?id= matches the App document's NAME, never the package id — ?id=com.example.showcase answers an empty items array, which reads exactly like missing metadata)",
         "cross-check the nav payload: the grp_data group lists the seeded objects (showcase_project, showcase_task, showcase_account, showcase_contact, showcase_invoice, showcase_field_zoo, …)"
@@ -38,9 +38,9 @@
           "evidence": "the curl output"
         },
         {
-          "clause": "the `Flows:` startup banner reports no ⚠ misauthored flows and no ERROR-level lines appear IN THE BOOT WINDOW — the window is part of the clause, because ordinary caller-error 4xx traffic also logs at ERROR",
+          "clause": "the `Flows:` startup banner carries no ⚠ line of a MISAUTHORED class — a flow name claimed by several definitions, a flow targeting an unknown object, a trigger NOT bound for any reason other than deployment policy, or flows declared while the automation engine is not enabled — and no ERROR-level lines appear IN THE BOOT WINDOW — the window is part of the clause, because ordinary caller-error 4xx traffic also logs at ERROR",
           "oracle": "log",
-          "verify": "grep the boot log for '⚠' in the Flows banner and for ERROR lines, SCOPED to the boot window — from process start to the first 200 on /api/v1/health (the same instant clause 0 records as time-to-healthy). ⚠️ A caller-error REFUSAL logs at ERROR level with a full stack BEFORE answering 4xx — measured on 17.1.0 with a `$fn` filter probe answering 400 INVALID_FILTER (#10257). So an unscoped grep over a log that also carries the run's own probe traffic reports ERROR lines for requests the platform refused CORRECTLY, and a clean boot reads as a boot failure. Cut the log at the health-green line before grepping, or capture the boot log to its own file before issuing the first request; seed rejections still count as failures (see #3415 — SeedLoader rejections were silent)",
+          "verify": "read each ⚠ line under the Flows banner and classify it. ⚠️ A stock boot DOES print ⚠ lines that are not misauthoring: each package-authored scheduled flow is listed as `⚠ flow '<name>' declares a '<type>' trigger but is NOT bound — disabled by deployment policy …`, because package-authored scheduled work is off by default (QA run #21056 counted two on stock showcase). That is the posture working, so a bare grep for '⚠' reads a clean boot as a FAIL (the four misauthored classes are the four ⚠ shapes printAutomationSummary in packages/cli/src/utils/format.ts prints). Then grep for ERROR lines, SCOPED to the boot window — from process start to the first 200 on /api/v1/health (the same instant clause 0 records as time-to-healthy). ⚠️ A caller-error REFUSAL logs at ERROR level with a full stack BEFORE answering 4xx — measured on 17.1.0 with a `$fn` filter probe answering 400 INVALID_FILTER (#10257). So an unscoped grep over a log that also carries the run's own probe traffic reports ERROR lines for requests the platform refused CORRECTLY, and a clean boot reads as a boot failure. Cut the log at the health-green line before grepping, or capture the boot log to its own file before issuing the first request; seed rejections still count as failures (see #3415 — SeedLoader rejections were silent)",
           "evidence": "the grepped log excerpt"
         },
         {
@@ -84,6 +84,12 @@
           "date": "2026-08-30",
           "change": "source-ref addition (2026-08-30 sweep, console-UI angle): the two live objectui e2e specs adjacent to this item's console-shell clause were referenced nowhere in the ledger — e2e/console-boot-indicator.spec.ts (objectui#2628, the pre-bundle white-page pin) and e2e/console-rendering.spec.ts (bootstrap/rendering blank-page pin). Added as source entries with the objectui-repo-only caveat (RUNNER.md standing fact), NOT as automated.ref — they pin the console build, not this item's boot protocol, so a run here may cite them as adjacent evidence but is not asked to execute them. No step/clause change",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-01",
+          "change": "checklist-accuracy findings of QA run #21056. steps[3] asked for every SeedLoader line, but at the default warn level a healthy boot prints none: it now names the level-immune `Seeds:` banner row and the --log-level info line. acceptance[2]'s 'no ⚠' collided with the stock `NOT bound — disabled by deployment policy` lines for package-authored scheduled flows: the clause now names the misauthored classes it fails on",
+          "ref": "#21060"
         }
       ]
     },
@@ -92,7 +98,7 @@
       "title": "Seed integrity: row counts match the authored seed, values land verbatim, replay is idempotent",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P0",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -107,7 +113,7 @@
         "authoring-time baseline for cross-checking the derivation: showcase_account=14, showcase_contact=32 (8 named + 24 bulk prospects), showcase_project=5, showcase_task=10, showcase_invoice=12, showcase_invoice_line=5, showcase_expense_report=4, showcase_expense_line=13, showcase_field_zoo=2",
         "for each seeded object, GET /api/v1/data/<object>?$top=1 and read the server total; build the expected-vs-actual table",
         "GET the Field Zoo 'Specimen — Full' row and spot-diff authored values (f_multiselect ['red','green'] as a set, f_lookup resolving to the Northwind account id, f_json nested object intact)",
-        "re-read the boot log's seed lines: every seed reports success; no rejection or partial-load line",
+        "read the seed outcome: every seed source reports success and none reports a rejection or a partial load. ⚠️ at the default log level (warn) SeedLoader prints NO success line, so a grep for one finds nothing on a healthy boot. Read the ready banner's `Seeds:` row instead — it is immune to the level (packages/runtime/src/seed-summary.ts), e.g. `Seeds:   com.example.showcase 132 rows`, and turns yellow with ⚠ and an `N ok / M errors` or `lost links` count when rows were dropped. `--log-level info` additionally prints `[Seeder] Seed loading complete {inserted, updated, skipped, errored}`; a load that dropped records logs `[Seeder] Seed loading completed with N dropped record(s)…` at warn and is visible at either level",
         "restart the server against the SAME file DB; re-run the count sweep and diff against the first sweep (upsert mode must no-op, not duplicate)"
       ],
       "acceptance": [
@@ -126,7 +132,7 @@
         {
           "clause": "the boot log reports every seed load as success — a rejection is a FAIL against the seed even when the server otherwise boots green (#3415: four of five projects were silently rejected once)",
           "oracle": "log",
-          "verify": "grep the boot log for SeedLoader/seed lines; no rejected/failed entries",
+          "verify": "the banner's `Seeds:` row is the plain dim form with no ⚠ and no error or lost-link count (or, at --log-level info, `[Seeder] Seed loading complete` reports errored: 0), and no `[Seeder] Seed loading completed with N dropped record(s)` warn line appears",
           "evidence": "the log excerpt"
         },
         {
@@ -156,7 +162,13 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial — makes the #3408/#3415 class of silent seed failure a standing P0 check with exact authored baselines", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-18", "change": "corrected the showcase_contact baseline from 33 (9 named + 24 bulk) to 32 (8 named + 24 bulk) — re-derived from examples/app-showcase/src/data/seed/index.ts, whose contacts block authors 8 literal records plus Array.from({length: 24}); the server serves 32. Every other count in the baseline re-derived unchanged. The stale value made a correct seed read as a silent partial load (#9334, #9417)", "ref": "#9386" }
+        { "revision": 2, "date": "2026-08-18", "change": "corrected the showcase_contact baseline from 33 (9 named + 24 bulk) to 32 (8 named + 24 bulk) — re-derived from examples/app-showcase/src/data/seed/index.ts, whose contacts block authors 8 literal records plus Array.from({length: 24}); the server serves 32. Every other count in the baseline re-derived unchanged. The stale value made a correct seed read as a silent partial load (#9334, #9417)", "ref": "#9386" },
+        {
+          "revision": 3,
+          "date": "2026-10-01",
+          "change": "checklist-accuracy finding of QA run #21056: steps[4] and acceptance[2] grep the boot log for SeedLoader lines, but at the default warn level a healthy boot prints none — they now read the level-immune `Seeds:` banner row (or the --log-level info `[Seeder] Seed loading complete` line)",
+          "ref": "#21060"
+        }
       ]
     },
     {

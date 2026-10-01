@@ -455,7 +455,7 @@
         {
           "revision": 3,
           "date": "2026-10-01",
-          "change": "re-pointed to what the doors answer since #20116 (QA run #21056 scored clause 6 FAIL; verifier disposition: stale clause, not a product defect). acceptance[5]: POST /query, both spellings, is refused at the request schema with 400 VALIDATION_FAILED + a located fields[] entry; GET $filter still answers 400 INVALID_FILTER; the step-8 GET twin was added. acceptance[2] and step 5: a dotted fields entry is refused 400 INVALID_FIELD by design, prescribing expand. negative[0]: {\"filter\": …} is a declared transport spelling of where, so the widening probe now uses a mistyped clause (400 VALIDATION_FAILED) and an undeclared key (400 INVALID_FIELD). Residual for the maintainer, not a defect: the same condition answers VALIDATION_FAILED on POST and INVALID_FILTER on GET (#8001 family)",
+          "change": "re-pointed to what the doors answer since #20116 (QA run #21056 scored acceptance[5] — the run record's A6 — FAIL; verifier disposition: stale clause, not a product defect). acceptance[5]: POST /query, both spellings, is refused at the request schema with 400 VALIDATION_FAILED + a located fields[] entry; GET $filter still answers 400 INVALID_FILTER; the step-8 GET twin was added. acceptance[2] and step 5: a dotted fields entry is refused 400 INVALID_FIELD by design, prescribing expand. negative[0]: {\"filter\": …} is a declared transport spelling of where, so the widening probe now uses a mistyped clause (400 VALIDATION_FAILED) and an undeclared key (400 INVALID_FIELD). Residual for the maintainer, not a defect: the same condition answers VALIDATION_FAILED on POST and INVALID_FILTER on GET (#8001 family)",
           "ref": "#21060"
         }
       ]
@@ -1402,7 +1402,7 @@
       "title": "A disabled packaged action is refused 409 ACTION_DISABLED at BOTH dispatch doors — after the capability gate (a 403 is never an oracle for the switch), before the param contract and the record load, durable across restart",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -1418,7 +1418,7 @@
           "showcase_portfolio_snapshot (ui/actions/index.ts — object-less/global, and the ONLY stock action with ai.exposed: true): the live MCP-door probe; its activation flip spells the object segment `global` (/actions/_activation/global/showcase_portfolio_snapshot)"
         ],
         "knownGaps": [
-          "The MCP door cannot be driven live with showcase_mark_done: the bridge's AI-exposure gate (actionAiExposureError, fail-closed on ai.exposed !== true) sits AHEAD of the activation consult, so a non-exposed action answers the exposure refusal regardless of its switch. showcase_portfolio_snapshot is the only stock ai.exposed action; if the MCP transport itself is not drivable in the run environment, score the MCP clause from the unit pin (action-activation-dispatch.test.ts 'door 2') and record which oracle the verdict rests on.",
+          "The MCP door cannot be driven live with showcase_mark_done: the bridge's AI-exposure gate (actionAiExposureError, fail-closed on ai.exposed !== true) sits AHEAD of the activation consult, so a non-exposed action answers the exposure refusal regardless of its switch. showcase_portfolio_snapshot is the only stock ai.exposed action. The MCP transport IS drivable live on a stock boot: the boot banner prints `MCP: http://localhost:<port>/api/v1/mcp`, and QA run #21056 drove POST /api/v1/mcp tools/call run_action against showcase_portfolio_snapshot (disabled → isError carrying code ACTION_DISABLED, status 409; re-enabled → ok). Score the MCP clause live; fall back to the unit pin (action-activation-dispatch.test.ts 'door 2') only where the endpoint is not mounted, and record which oracle the verdict rests on.",
           "The record-load half of the ordering proof has NO contrasting refusal: the REST door's record load is best-effort (try/catch in domains/actions.ts — a missing record passes an empty record for new-record actions), so a nonexistent recordId never 404s on its own, enabled or disabled. The record leg is proven by code order plus the absence of any read/side effect, never by expecting a 404 from the enabled control."
         ]
       },
@@ -1519,6 +1519,12 @@
           "date": "2026-09-04",
           "change": "ledger read-back detail only — the dispatch contract itself is UNCHANGED and no clause moved. #15024 dropped sys_metadata_activation's reserved organization_id column before it ever shipped (systemFields { tenant: false } removes it rather than leaving it unwritten), so step 2's row confirmation asked a runner to read a column that is not there. It now asserts the row's KEY SET carries no organization_id, because the value spelling passes VACUOUSLY once the column is gone (`row.organization_id ?? null` is `null` either way) — green for exactly the reason it should be red. automated.ref was stale in the same direction: it described the dogfood pin as asserting 'ONE install-level row with organization_id NULL', and that pin has been a key-set reading named 'writes ONE deployment-level row, and the TABLE has no tenant column at all' since #15024; the ref now quotes the pin's live name so a runner who opens the file finds it",
           "ref": "#15253"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-01",
+          "change": "knownGaps no longer presents a live MCP call as possibly undrivable: a stock boot mounts POST /api/v1/mcp (named in the boot banner), and QA run #21056 drove tools/call run_action live for clause 4. The unit pin stays the fallback where the endpoint is absent",
+          "ref": "#21060"
         }
       ]
     },
