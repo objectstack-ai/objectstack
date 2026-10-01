@@ -4,6 +4,9 @@
   "globalEnv": ["OS_SKIP_DTS"],
   "globalPassThroughEnv": ["VITEST_MAX_WORKERS"],
   "agentGuidance": false,
+  "remoteCache": {
+    "signature": true
+  },
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
