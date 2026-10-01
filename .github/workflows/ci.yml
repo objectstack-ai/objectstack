@@ -1632,8 +1632,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-v3-
 
-      # Shard-scoped key: the turbo test hash differs per shard (pass-through
-      # args are part of the task hash). Restore-only on PRs — see the Restore
+      # Shard-scoped key: the turbo test hash differs per shard (the task-declared
+      # env `OS_TEST_SHARD` is part of the task hash). Restore-only on PRs — see the Restore
       # Turbo cache comment in the test job; the save step at the end of this
       # job seeds from main only. The job-level catch-all (same as Test Core's)
       # is what keeps a NEW shard number warm before main has ever saved it:
@@ -1659,10 +1659,10 @@ jobs:
       # step stays as its own stall-guard site, and the closure replays there.
       # The measurement below is the history of the `-- --shard=k/3` shape.)
       #
-      # Turbo folds a run-level passthrough into the hash of EVERY task in the
-      # run, not only the task that receives it -- and `-- --shard=k/3` is the
-      # whole reason each shard gets its own invocation at all (the next step's
-      # comment says what those args are for). Measured on turbo 2.10.10,
+      # (History.) Turbo folds a run-level passthrough into the hash of EVERY
+      # task in the run, not only the task that receives it -- and the old leg's
+      # `-- --shard=k/3` was the whole reason each shard got its own invocation
+      # (the next step's comment says what carries the slice now). Measured on turbo 2.10.10,
       # `--filter=@objectstack/dogfood`, `turbo run test ... --dry=json`
       # (67 tasks: 66 `build` + 1 `test`):
       #
