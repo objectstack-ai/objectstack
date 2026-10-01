@@ -24,23 +24,37 @@
  *   pins do not read positions across groups, so a reorder alone cannot turn
  *   them red — and a dropped notice cannot hide behind a correct order.
  *
+ * ## The pairing pins (PAIR)
+ *
+ * Where a semantic entry declares in `conversionIds` that it judges a
+ * conversion's applied edits, ② prints that entry's headline beside those
+ * edits, marked review: once under each run of the conversion's edits, counting
+ * them. It is a copy, never a move: ③ still prints the entry, and ③'s lines and
+ * count stay the chain's. Declared links only, never prose: the pins enumerate
+ * the links off the registry and replay each linked conversion's own fixture,
+ * so a link the spec lane authors later is covered on the day it lands.
+ *
  * ## Why in-process, over a real chain run
  *
  * The inputs are not fabricated: the stack below is replayed through the real
  * `applyMetaMigrations` and parsed by the real `ObjectStackDefinitionSchema`,
  * exactly as the command does, and `printMigrationReport` is the function the
  * command's text face calls with them. Spawning the CLI would add a process
- * and a config load and pin nothing more about the order.
+ * and a config load and pin nothing more about the order. One pin adds a link
+ * to a real result, and says so: the spec allows a link to a conversion an
+ * EARLIER step replays, and none is authored yet.
  */
 
 import { stripVTControlCharacters } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ObjectStackDefinitionSchema, formatZodIssue, normalizeStackInput } from '@objectstack/spec';
+import { ALL_CONVERSIONS, ObjectStackDefinitionSchema, formatZodIssue, normalizeStackInput } from '@objectstack/spec';
 import {
   applyMetaMigrations,
+  MIGRATIONS_BY_MAJOR,
   MIGRATION_MAJORS,
   MIGRATION_SUPPORT_FLOOR,
   type MigrationChainResult,
+  type MigrationTodo,
 } from '@objectstack/spec/migrations';
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import { printMigrationReport, type MigrationReport } from './meta.js';
@@ -102,10 +116,19 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** Replay the chain the way the command does, print the report, return its lines. */
-function run(stack: Record<string, unknown>, fromMajor: number, toMajor: number): Run {
+/**
+ * Replay the chain the way the command does, print the report, return its lines.
+ * `amend` edits the chain's result before it is printed — one pin uses it, to
+ * add a link no registry entry declares yet.
+ */
+function run(
+  stack: Record<string, unknown>,
+  fromMajor: number,
+  toMajor: number,
+  amend: (result: MigrationChainResult) => MigrationChainResult = (r) => r,
+): Run {
   const normalized = normalizeStackInput(stack, { convert: false });
-  const result = applyMetaMigrations(normalized, fromMajor, toMajor);
+  const result = amend(applyMetaMigrations(normalized, fromMajor, toMajor));
   const parsed = ObjectStackDefinitionSchema.safeParse(result.stack);
   const report: MigrationReport = {
     result,
@@ -255,5 +278,218 @@ describe('no notice, edit or refusal is dropped, merged or reworded (SET)', () =
       ...noticeLines(result),
     ].filter((l) => l.trim() !== ''); // a multi-paragraph `reason` carries blank lines of its own
     expect(lines.filter((l) => l.trim() !== '').sort()).toEqual(accounted.sort());
+  });
+});
+
+/**
+ * Two flows, each with an edge-branched decision carrying two conditioned
+ * out-edges and no `mode` — the shape `flow-decision-mode-inclusive-explicit`
+ * rewrites, twice — and a dashboard `refreshInterval`, whose conversion no
+ * semantic entry names.
+ */
+const decisionFlow = (name: string) => ({
+  name,
+  label: name,
+  type: 'autolaunched',
+  status: 'active',
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
+    { id: 'verdict', type: 'decision', label: 'Verdict?' },
+    { id: 'refuse', type: 'end', label: 'Refuse' },
+    { id: 'convert', type: 'end', label: 'Convert' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'verdict' },
+    { id: 'e2', source: 'verdict', target: 'refuse', condition: "lead.status != 'confirmed'" },
+    { id: 'e3', source: 'verdict', target: 'convert', condition: "lead.status == 'confirmed'" },
+  ],
+});
+const DECISION_STACK = {
+  manifest: { id: 'com.example.report-pairing', name: 'Report Pairing', version: '1.0.0', type: 'app' },
+  objects: [{ name: 'rp_lead', label: 'Lead', fields: { status: { type: 'text', label: 'Status' } } }],
+  flows: [decisionFlow('rp_lead_verdict'), decisionFlow('rp_lead_recheck')],
+  dashboards: [{ name: 'rp_kpi', label: 'KPI', widgets: [], refreshInterval: 300 }],
+};
+
+/** One `time` default with a `Z` — a single edit by `time-default-utc-suffix-dropped`. */
+const TIME_STACK = {
+  manifest: { id: 'com.example.report-pairing-time', name: 'Report Pairing Time', version: '1.0.0', type: 'app' },
+  objects: [{
+    name: 'rp_shift',
+    label: 'Shift',
+    fields: { starts_at: { type: 'time', label: 'Starts at', defaultValue: '09:00Z' } },
+  }],
+};
+
+const DECISION_CONVERSION = 'flow-decision-mode-inclusive-explicit';
+const DECISION_JUDGE = 'flow-decision-edge-branching-first-match';
+const TIME_CONVERSION = 'time-default-utc-suffix-dropped';
+const TIME_JUDGE = 'time-default-zone-refused';
+
+const REVIEW_RE = /^ {6}↳ review /;
+
+/** The review line a judge prints under `edits` edits — written from the entry's data, not from the printer. */
+function reviewLine(judge: MigrationTodo, edits: number): string {
+  const subject = edits === 1 ? 'the edit above' : `the ${edits} edits above`;
+  return `      ↳ review ${subject} against the manual change [protocol ${judge.toMajor}] ${judge.surface} → ${judge.replacement}`;
+}
+
+/** Every link the registry declares: a semantic entry, and a conversion id it names. */
+function declaredLinks(): Array<{ toMajor: number; entry: string; conversionId: string }> {
+  return MIGRATION_MAJORS.flatMap((m) =>
+    MIGRATIONS_BY_MAJOR[m]!.semantic.flatMap((s) =>
+      (s.conversionIds ?? []).map((conversionId) => ({ toMajor: m, entry: s.id, conversionId })),
+    ),
+  );
+}
+
+function todoOf(result: MigrationChainResult, id: string): MigrationTodo {
+  const todo = result.todos.find((t) => t.id === id);
+  expect(todo, `the chain reports the semantic entry ${id}`).toBeDefined();
+  return todo!;
+}
+
+/** The index of the last line of the first run of edits by `conversionId`, and the run's length. */
+function runOf(lines: string[], conversionId: string): { last: number; length: number } {
+  const isEdit = (l: string | undefined) => l !== undefined && l.startsWith('    • ') && l.endsWith(` (${conversionId})`);
+  const first = lines.findIndex((l) => isEdit(l));
+  expect(first, `an applied edit by ${conversionId} is printed`).toBeGreaterThan(-1);
+  let last = first;
+  while (isEdit(lines[last + 1])) last += 1;
+  return { last, length: last - first + 1 };
+}
+
+/** The review lines printed directly under line `i`. */
+function reviewsUnder(lines: string[], i: number): string[] {
+  const out: string[] = [];
+  for (let j = i + 1; j < lines.length && REVIEW_RE.test(lines[j]!); j += 1) out.push(lines[j]!);
+  return out;
+}
+
+describe('an applied edit a semantic entry judges prints that entry beside it, marked review (PAIR)', () => {
+  it('prints the judge once under the run of edits it judges, counting them', () => {
+    const { result, lines } = run(DECISION_STACK, MIGRATION_SUPPORT_FLOOR, TERMINUS);
+    const edits = result.applied.filter((a) => a.conversionId === DECISION_CONVERSION);
+    expect(edits, 'anti-vacuity: both decisions were rewritten').toHaveLength(2);
+    const { last, length } = runOf(lines, DECISION_CONVERSION);
+    expect(length).toBe(2);
+    expect(reviewsUnder(lines, last)).toEqual([reviewLine(todoOf(result, DECISION_JUDGE), 2)]);
+    // Beside the edit, i.e. inside ②: after its header, before ③'s.
+    expect(last).toBeGreaterThan(indexOf(lines, APPLIED_HEADER_RE));
+    expect(last + 1).toBeLessThan(indexOf(lines, SEMANTIC_HEADER_RE));
+  });
+
+  it('says "the edit above" under a run of one', () => {
+    const { result, lines } = run(TIME_STACK, MIGRATION_SUPPORT_FLOOR, TERMINUS);
+    const { last, length } = runOf(lines, TIME_CONVERSION);
+    expect(length).toBe(1);
+    expect(reviewsUnder(lines, last)).toEqual([reviewLine(todoOf(result, TIME_JUDGE), 1)]);
+  });
+
+  it('prints an edit no entry judges exactly as before, with no review line under it', () => {
+    const { result, lines } = run(DECISION_STACK, MIGRATION_SUPPORT_FLOOR, TERMINUS);
+    const linked = new Set(result.todos.flatMap((t) => t.conversionIds ?? []));
+    const unjudged = result.applied.filter((a) => !linked.has(a.conversionId));
+    expect(unjudged.length, 'anti-vacuity: the dashboard edit has no judge').toBeGreaterThan(0);
+    for (const a of unjudged) {
+      const i = lines.indexOf(`    • ${a.path}: ${a.from} → ${a.to} (${a.conversionId})`);
+      expect(i, `unjudged edit printed: ${a.path}`).toBeGreaterThan(-1);
+      expect(reviewsUnder(lines, i), `no review line under ${a.path}`).toEqual([]);
+    }
+    // ②'s own lines are the chain's, byte-identical and in order, review lines aside.
+    expect(lines.filter((l) => l.startsWith('    • '))).toEqual(appliedLines(result));
+    expect(lines.filter((l) => APPLIED_HEADER_RE.test(l))).toEqual([
+      `  Applied ${result.applied.length} mechanical change(s):`,
+    ]);
+  });
+
+  it('prints no review line at all where no applied conversion is linked', () => {
+    const { result, lines } = run(FINDINGS_STACK, MIGRATION_SUPPORT_FLOOR, TERMINUS);
+    const linked = new Set(result.todos.flatMap((t) => t.conversionIds ?? []));
+    expect(linked.size, 'anti-vacuity: the chain does carry links').toBeGreaterThan(0);
+    expect(result.applied.some((a) => linked.has(a.conversionId))).toBe(false);
+    expect(lines.filter((l) => REVIEW_RE.test(l))).toEqual([]);
+  });
+
+  it('keeps every semantic entry in ③ — the judge included — with the chain\'s count and bytes', () => {
+    const { result, lines } = run(DECISION_STACK, MIGRATION_SUPPORT_FLOOR, TERMINUS);
+    const header = indexOf(lines, SEMANTIC_HEADER_RE);
+    expect(lines[header]).toBe(`  ${result.todos.length} manual change(s) require your judgment:`);
+    const expected = noticeLines(result);
+    expect(lines.slice(header + 1, header + 1 + expected.length)).toEqual(expected);
+    const entries = lines.slice(header + 1).filter((l) => /^ {4}⚠ \[protocol \d+\] /.test(l));
+    expect(entries).toHaveLength(result.todos.length);
+    const judge = todoOf(result, DECISION_JUDGE);
+    expect(entries).toContain(`    ⚠ [protocol ${judge.toMajor}] ${judge.surface} → ${judge.replacement}`);
+  });
+
+  it('prints nothing but the groups and the review lines the declared links call for', () => {
+    const { report, result, lines } = run(DECISION_STACK, MIGRATION_SUPPORT_FLOOR, TERMINUS);
+    // Written without the printer's run logic: a real chain replays one
+    // conversion at a time, so a conversion's edits are one run and its count
+    // is the run's length.
+    const runs = new Map<string, number>();
+    for (const [i, a] of result.applied.entries()) {
+      if (i > 0 && result.applied[i - 1]!.conversionId !== a.conversionId) {
+        expect(runs.has(a.conversionId), `${a.conversionId} edits are contiguous`).toBe(false);
+      }
+      runs.set(a.conversionId, (runs.get(a.conversionId) ?? 0) + 1);
+    }
+    const reviews = result.todos.flatMap((t) =>
+      (t.conversionIds ?? []).filter((id) => runs.has(id)).map((id) => reviewLine(t, runs.get(id)!)),
+    );
+    expect(reviews.length, 'anti-vacuity: the stack exercises a link').toBeGreaterThan(0);
+    const accounted = [
+      ...lines.filter((l) => VERDICT_RE.test(l) || APPLIED_HEADER_RE.test(l) || SEMANTIC_HEADER_RE.test(l)),
+      ...refusalLines(report),
+      ...appliedLines(result),
+      ...reviews,
+      ...noticeLines(result),
+    ].filter((l) => l.trim() !== '');
+    expect(lines.filter((l) => l.trim() !== '').sort()).toEqual(accounted.sort());
+  });
+
+  it('pairs every link the registry declares, replayed over the linked conversion\'s own fixture', () => {
+    const links = declaredLinks();
+    // Anti-vacuity, and the two links authored when the printer learned to pair.
+    expect(links).toEqual(expect.arrayContaining([
+      expect.objectContaining({ entry: DECISION_JUDGE, conversionId: DECISION_CONVERSION }),
+      expect.objectContaining({ entry: TIME_JUDGE, conversionId: TIME_CONVERSION }),
+    ]));
+    for (const link of links) {
+      const conversion = ALL_CONVERSIONS.find((c) => c.id === link.conversionId);
+      expect(conversion, `${link.entry} names a registered conversion`).toBeDefined();
+      printed = [];
+      const { result, lines } = run(
+        conversion!.fixture.before as Record<string, unknown>,
+        MIGRATION_SUPPORT_FLOOR,
+        TERMINUS,
+      );
+      const { last, length } = runOf(lines, link.conversionId);
+      expect(
+        reviewsUnder(lines, last),
+        `${link.entry} is printed beside the ${link.conversionId} edits`,
+      ).toContain(reviewLine(todoOf(result, link.entry), length));
+    }
+  });
+
+  it('pairs across hops: a link to a conversion an earlier step replays', () => {
+    // No authored link crosses a hop yet, though `SemanticMigration.conversionIds`
+    // allows one, so this pin adds it: a protocol-18 entry made to judge a
+    // protocol-17 conversion. Everything else is the chain's own result.
+    const earlier = 'action-execute-to-target';
+    const conversion = ALL_CONVERSIONS.find((c) => c.id === earlier)!;
+    const judgeId = DECISION_JUDGE;
+    const { result, lines } = run(
+      conversion.fixture.before as Record<string, unknown>,
+      MIGRATION_SUPPORT_FLOOR,
+      TERMINUS,
+      (r) => ({ ...r, todos: r.todos.map((t) => (t.id === judgeId ? { ...t, conversionIds: [earlier] } : t)) }),
+    );
+    const judge = todoOf(result, judgeId);
+    const edit = result.applied.find((a) => a.conversionId === earlier);
+    expect(edit?.toMajor, 'anti-vacuity: the edit comes from an earlier hop').toBeLessThan(judge.toMajor);
+    const { last, length } = runOf(lines, earlier);
+    expect(reviewsUnder(lines, last)).toEqual([reviewLine(judge, length)]);
   });
 });

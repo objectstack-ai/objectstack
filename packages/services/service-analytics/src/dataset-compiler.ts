@@ -1,10 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Cube, Metric, Dimension as CubeDimension, CubeJoin } from '@objectstack/spec/data';
+import type { ValueShapeFieldDef } from '@objectstack/spec/data';
 import {
   AGGREGATE_FIELD_TYPE_COMPATIBILITY,
   AggregationFunction,
   isAggregateCompatibleWithFieldType,
+  isMultiValueField,
 } from '@objectstack/spec/data';
 import type { Dataset, DatasetMeasure, DatasetDimension } from '@objectstack/spec/ui';
 import { resolveI18nLabel } from '@objectstack/spec/ui';
@@ -159,10 +161,11 @@ export interface DatasetCompileOptions {
    */
   isExternalObject?: (objectName: string) => boolean;
   /**
-   * [#16737 / #16099] The DECLARED `FieldType` of `field` on `objectName`, or
-   * `undefined` when nothing authoritative can answer. Supplied by the host
-   * from the same `AnalyticsServiceConfig.sourceFieldMeta` the result-column
-   * enrichment reads.
+   * [#16737 / #16099] The DECLARATION of `field` on `objectName` — its
+   * `FieldType` and its `multiple` flag — or `undefined` when nothing
+   * authoritative can answer. Supplied by the host from the same
+   * `AnalyticsServiceConfig.sourceFieldMeta` the result-column enrichment
+   * reads, in the shape the strategies' `declaredValueShape` hook carries.
    *
    * It is what makes {@link assertAggregateFieldTypeCompatible} decidable at
    * COMPILE time — the compile leg of the director ruling (decision batch #59,
@@ -170,8 +173,14 @@ export interface DatasetCompileOptions {
    * `AGGREGATE_FIELD_TYPE_COMPATIBILITY` in `@objectstack/spec`. Absent hook,
    * unknown object, unknown field → the pair is not judged, matching every
    * other probe on this interface.
+   *
+   * [#20912] It carries the declaration, not the type alone, because the
+   * table is per TYPE and cannot see `multiple: true`: a `select` flagged
+   * `multiple` is a list stored as JSON, and `count_distinct` over it splits
+   * across backends exactly as over `tags`. This option was
+   * `declaredFieldType` (the type alone) until then.
    */
-  declaredFieldType?: (objectName: string, field: string) => string | undefined;
+  declaredValueShape?: (objectName: string, field: string) => ValueShapeFieldDef | undefined;
 }
 
 /** Map a dataset measure's aggregate to the Cube metric `type`. */
@@ -217,15 +226,17 @@ function aggregateToMetricType(m: DatasetMeasure): Metric['type'] {
  *   does not exist on PostgreSQL).
  * - [#20808] `count_distinct` COMPARES the stored values for equality, and
  *   reaches this sentence only over a JSON-stored field (the table's
- *   `count_distinct` row refuses the structured-JSON and multi-option types):
- *   the in-memory driver counted equal documents apart, SQLite compared the
- *   serialized text, and PostgreSQL has no equality operator for `json`.
+ *   `count_distinct` row refuses the structured-JSON and multi-option types;
+ *   [#20912] `isMultiValueField` refuses a multi-capable type declared
+ *   `multiple: true`, and `column` then names the flag): the in-memory driver
+ *   counted equal documents apart, SQLite compared the serialized text, and
+ *   PostgreSQL has no equality operator for `json`.
  *
  * `count` accepts every type and never reaches this sentence.
  */
-const DIVERGENCE_BY_AGGREGATE = (aggregate: string, fieldType: string): string =>
+const DIVERGENCE_BY_AGGREGATE = (aggregate: string, fieldType: string, column = `\`${fieldType}\` column`): string =>
   aggregate === 'count_distinct'
-    ? `"${aggregate}" COMPARES the stored values for equality, so over a \`${fieldType}\` column `
+    ? `"${aggregate}" COMPARES the stored values for equality, so over a ${column} `
       + 'the answer is decided by how each backend compares a JSON-stored value rather than by '
       + 'the data — one counts every row apart, one compares the serialized text, another has no '
       + 'equality for the type and fails at query time — and one dataset would mean two things '
@@ -362,7 +373,7 @@ const REMEDY_BY_SOURCE_CLASS = (fieldType: string, aggregate: string): string =>
  *
  * ## Tiering — "cannot answer, do not block", the same as every sibling probe
  *
- * - No `declaredFieldType` hook (no data engine wired) → not judged.
+ * - No `declaredValueShape` hook (no data engine wired) → not judged.
  * - A field the hook cannot resolve → not judged.
  * - A RELATIONSHIP-PATH field (`account.closed_at`) → not judged. The hook
  *   resolves a column on the BASE object, so it would answer about a different
@@ -379,32 +390,45 @@ function assertAggregateFieldTypeCompatible(
   datasetName: string,
   objectName: string,
   measure: DatasetMeasure,
-  declaredFieldType?: (objectName: string, field: string) => string | undefined,
+  declaredValueShape?: (objectName: string, field: string) => ValueShapeFieldDef | undefined,
 ): void {
-  if (!declaredFieldType) return;
+  if (!declaredValueShape) return;
   const aggregate = measure.aggregate;
   const field = measure.field;
   if (!aggregate || !field) return;
   // A dotted reference resolves on a JOINED object; this hook answers for the
   // base one. Not judged rather than judged wrongly.
   if (field.includes('.')) return;
-  const fieldType = declaredFieldType(objectName, field);
-  if (!fieldType) return;
+  const shape = declaredValueShape(objectName, field);
+  if (!shape?.type) return;
+  const fieldType = shape.type;
+  // [#20912] …and the DECLARATION half the per-type table cannot see, asked
+  // the way the engine's `count_distinct` door asks it: `isMultiValueField`
+  // beside the table's row. A multi-capable type flagged `multiple: true`
+  // (`select`, `lookup`, …) is a list stored as JSON — the very storage the
+  // row refuses `tags` for. Only `count_distinct` can be moved by it: the
+  // `sum` / `avg` / `min` / `max` rows accept no multi-capable type, and
+  // `count` reads no value.
+  const flaggedList = aggregate === 'count_distinct'
+    && isMultiValueField(shape)
+    && isAggregateCompatibleWithFieldType(aggregate, fieldType);
   // [#17560] Every aggregate is judged, through this one door. ⛔ There is no
   // scope condition here any more — the VERDICT is the spec table's and only
-  // the spec table's.
-  if (isAggregateCompatibleWithFieldType(aggregate, fieldType)) return;
+  // the spec table's, plus the declaration above.
+  if (isAggregateCompatibleWithFieldType(aggregate, fieldType) && !flaggedList) return;
 
   const accepted = AGGREGATE_FIELD_TYPE_COMPATIBILITY[aggregate];
+  const declared = flaggedList ? `\`${fieldType}\` with \`multiple: true\`` : `\`${fieldType}\``;
   // [#5716] `DATASET_INVALID` / 400 — a verdict about the dataset DOCUMENT,
   // decided from metadata alone before any query runs, and fixable only by the
   // author who wrote the pair.
   throw datasetInvalidError(
     `[dataset-compiler] dataset "${datasetName}" measure "${measure.name}" applies aggregate ` +
     `"${aggregate}" to field "${field}", which object "${objectName}" declares as ` +
-    `\`${fieldType}\`. That pair is not accepted: ` +
-    `${DIVERGENCE_BY_AGGREGATE(aggregate, fieldType)}` +
-    `"${aggregate}" accepts: ${accepted.join(', ')}. ` +
+    `${declared}. That pair is not accepted: ` +
+    `${DIVERGENCE_BY_AGGREGATE(aggregate, fieldType, flaggedList ? `${declared} column` : undefined)}` +
+    `"${aggregate}" accepts: ${accepted.join(', ')}` +
+    `${flaggedList ? ', none of them with `multiple: true`' : ''}. ` +
     `${REMEDY_BY_SOURCE_CLASS(fieldType, aggregate)}`,
   );
 }
@@ -686,7 +710,7 @@ export function compileDataset(
     // declared type can carry. Placed after the join-declaration check so a
     // dotted field is refused for the reason it is actually wrong (an
     // undeclared relationship) before this gate stands down on it.
-    assertAggregateFieldTypeCompatible(dataset.name, dataset.object, m, options?.declaredFieldType);
+    assertAggregateFieldTypeCompatible(dataset.name, dataset.object, m, options?.declaredValueShape);
     // Filed under its name (`measures[m.name]` below), with no inner copy —
     // the same #20300 retirement as the dimension's.
     const metric: Metric = {

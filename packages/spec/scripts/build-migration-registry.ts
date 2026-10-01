@@ -90,7 +90,7 @@
  *   pnpm --filter @objectstack/spec check:migration-registry     # --self-test && --check
  */
 
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -144,6 +144,10 @@ export interface Entry {
  * FUNCTION (one id → one name), never reversible — the id is written inside the
  * file, and two ids that collided on a name would collide as an add/add
  * conflict, which is the behaviour duplicates should get anyway.
+ *
+ * `build-schemas.ts` names the file each of its registration remedies asks for
+ * through this same function, so a gate never prints a name this generator
+ * would refuse.
  */
 export function shardNameFor(major: number, id: string): string {
   return `${major}.${id.replaceAll('/', '__').replaceAll(':', '__')}.ts`;
@@ -423,58 +427,79 @@ function selfTest(): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// main
+// main — only when node RAN this file, never when something imported it
 // ---------------------------------------------------------------------------
+//
+// `build-schemas.ts` imports `shardNameFor`, `KINDS` and `ENTRIES_DIR`, so every
+// remedy it prints names the entry file THIS rule accepts — the one naming rule
+// `entries/README.md` documents, read rather than restated beside it. An import
+// must therefore run nothing: write mode rewrites `registry.ts`. Spelled as
+// `check-generated.ts` spells it, realpath on BOTH sides — node resolves
+// symlinks for the module graph but leaves `argv[1]` as typed, and a guard that
+// compared the two raw would turn `check:migration-registry` into exit 0 with
+// no output. `build-migration-registry-entry.test.ts` pins both directions.
 
-const argv = process.argv.slice(2);
+function main(argv: readonly string[]): void {
+  if (argv.includes('--self-test')) {
+    const failures = selfTest();
+    if (failures.length) {
+      console.error('build-migration-registry --self-test FAILED:\n' + failures.map((f) => `  - ${f}`).join('\n'));
+      process.exit(1);
+    }
+    console.log('build-migration-registry --self-test: ok');
+    if (argv.length === 1) process.exit(0);
+  }
 
-if (argv.includes('--self-test')) {
-  const failures = selfTest();
-  if (failures.length) {
-    console.error('build-migration-registry --self-test FAILED:\n' + failures.map((f) => `  - ${f}`).join('\n'));
+  const check = argv.includes('--check');
+  const registryPath = join(pkgRoot, REGISTRY_PATH);
+  const source = readFileSync(registryPath, 'utf8');
+
+  const byKind = {} as Record<Kind, Entry[]>;
+  const errors: string[] = [];
+  for (const { kind } of KINDS) {
+    const loaded = loadEntries(kind);
+    byKind[kind] = loaded.entries;
+    errors.push(...loaded.errors);
+  }
+
+  const { text, errors: spliceErrors } = renderRegistry(source, byKind);
+  errors.push(...spliceErrors);
+
+  if (errors.length) {
+    console.error('build-migration-registry: the entry directories are not readable as a registry.\n');
+    for (const e of errors) console.error(`  ✗ ${e}`);
     process.exit(1);
   }
-  console.log('build-migration-registry --self-test: ok');
-  if (argv.length === 1) process.exit(0);
-}
 
-const check = argv.includes('--check');
-const registryPath = join(pkgRoot, REGISTRY_PATH);
-const source = readFileSync(registryPath, 'utf8');
+  const counts = KINDS.map(({ kind }) => `${byKind[kind].length} ${kind}`).join(', ');
 
-const byKind = {} as Record<Kind, Entry[]>;
-const errors: string[] = [];
-for (const { kind } of KINDS) {
-  const loaded = loadEntries(kind);
-  byKind[kind] = loaded.entries;
-  errors.push(...loaded.errors);
-}
-
-const { text, errors: spliceErrors } = renderRegistry(source, byKind);
-errors.push(...spliceErrors);
-
-if (errors.length) {
-  console.error('build-migration-registry: the entry directories are not readable as a registry.\n');
-  for (const e of errors) console.error(`  ✗ ${e}`);
-  process.exit(1);
-}
-
-const counts = KINDS.map(({ kind }) => `${byKind[kind].length} ${kind}`).join(', ');
-
-if (check) {
-  if (text !== source) {
-    console.error(
-      `✗ ${REGISTRY_PATH} is stale — its generated regions do not match ${ENTRIES_DIR}/.\n\n` +
-        '  Run:  pnpm --filter @objectstack/spec gen:migration-registry\n\n' +
-        '  If you reached this after resolving a merge conflict INSIDE a marked region: do not\n' +
-        '  hand-merge it. The entry files are the source and git merged them as a set; the only\n' +
-        '  correct resolution is to regenerate. This gate exists because a resolution that drops\n' +
-        "  one side's entry produces no other error anywhere (#6957).",
-    );
-    process.exit(1);
+  if (check) {
+    if (text !== source) {
+      console.error(
+        `✗ ${REGISTRY_PATH} is stale — its generated regions do not match ${ENTRIES_DIR}/.\n\n` +
+          '  Run:  pnpm --filter @objectstack/spec gen:migration-registry\n\n' +
+          '  If you reached this after resolving a merge conflict INSIDE a marked region: do not\n' +
+          '  hand-merge it. The entry files are the source and git merged them as a set; the only\n' +
+          '  correct resolution is to regenerate. This gate exists because a resolution that drops\n' +
+          "  one side's entry produces no other error anywhere (#6957).",
+      );
+      process.exit(1);
+    }
+    console.log(`✓ ${REGISTRY_PATH} is current (${counts})`);
+  } else {
+    if (text !== source) writeFileSync(registryPath, text);
+    console.log(`✓ wrote ${REGISTRY_PATH} (${counts})`);
   }
-  console.log(`✓ ${REGISTRY_PATH} is current (${counts})`);
-} else {
-  if (text !== source) writeFileSync(registryPath, text);
-  console.log(`✓ wrote ${REGISTRY_PATH} (${counts})`);
 }
+
+const invokedDirectly = (() => {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+})();
+
+if (invokedDirectly) main(process.argv.slice(2));

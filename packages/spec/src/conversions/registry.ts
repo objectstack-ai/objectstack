@@ -7818,8 +7818,8 @@ const metricFiltersRemoved: MetadataConversion = {
   summary:
     "cube metric key 'filters' removed (#10414, ADR-0049 — no strategy ever read it: the "
     + 'authored raw-SQL condition was parsed and dropped, and the query returned the '
-    + "unfiltered aggregate. Filter at query time with `where`, fold the condition into the "
-    + "metric's own `sql` expression, or use an ADR-0021 dataset measure's structured `filter`)",
+    + "unfiltered aggregate. Filter at query time with `where`, or use an ADR-0021 dataset "
+    + "measure's structured `filter`; a metric's own `sql` is a column reference)",
   apply(stack, emit) {
     return mapCollection(stack, 'analyticsCubes', (cube, path) => {
       const measures = cube.measures;

@@ -104,9 +104,10 @@ is rejected rather than dropped.
 
 There is no `filters` key and no `aggregations` key. `filters` is rejected at the REST
 door with a 400 naming `where`. There is no per-metric filter key either — the cube
-metric's `filters` was removed (#10414: no strategy ever read it); fold a per-metric
-condition into the metric's own `sql` expression, or use an ADR-0021 dataset measure's
-structured `filter`.
+metric's `filters` was removed (#10414: no strategy ever read it). A measure that counts
+or sums only some rows is an ADR-0021 dataset measure with its own structured `filter`;
+a cube member's `sql` is a column reference (a field, a relationship path ending in one,
+or `'*'`), never a SQL expression (#20943).
 
 ```typescript
 const revenueByStatus = await analytics.query({
