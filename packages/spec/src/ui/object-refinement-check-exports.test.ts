@@ -62,6 +62,7 @@ import {
   DashboardWidgetSchema,
   checkDashboardWidgetStageOrder,
   checkDashboardWidgetMetricMeasureArity,
+  checkDashboardWidgetDimensionlessMeasureArity,
 } from './dashboard.zod';
 import * as ui from './index';
 
@@ -334,6 +335,63 @@ const metricMeasureArityFixtures: Fixture[] = [
   },
 ];
 
+/**
+ * objectui#8894 ruling D's principle on the chart families — a widget with NO
+ * dimension takes two or more measures only on a type in
+ * `DASHBOARD_WIDGET_MULTI_MEASURE_TYPES`.
+ *
+ * Its own base, WITHOUT `dimensions`: `WIDGET` above carries one, and the
+ * dimension is the variable this check turns — so no stage-order or metric
+ * fixture reaches it, and no fixture here carries `options.stageOrder`, which
+ * keeps the three exports' vectors separable for leg 2's bijection. The two
+ * metric-family rows are ACCEPTING paths of THIS export: that refusal is the
+ * sibling's, and the parse leg reads it from the sibling's direct call.
+ */
+const DIMLESS_WIDGET = { id: 'stage_widget', dataset: 'contracts' } as const;
+
+const dimensionlessMeasureArityFixtures: Fixture[] = [
+  ...(['pie', 'donut', 'funnel', 'scatter', 'radar', 'treemap', 'sankey'] as const).map((type) => ({
+    label: `two measures on a dimensionless \`${type}\``,
+    value: { ...DIMLESS_WIDGET, type, values: ['amount_sum', 'count'] },
+    refusesAt: ['values'],
+  })),
+  {
+    label: 'three measures on a `donut` whose `dimensions` is an EMPTY array',
+    value: { ...DIMLESS_WIDGET, type: 'donut', dimensions: [], values: ['amount_sum', 'count', 'avg_days'] },
+    refusesAt: ['values'],
+  },
+  {
+    label: 'two measures on a `pie` WITH a dimension — out of this rule',
+    value: { ...DIMLESS_WIDGET, type: 'pie', dimensions: ['status'], values: ['amount_sum', 'count'] },
+    refusesAt: [],
+  },
+  {
+    label: 'ONE measure on a dimensionless `pie`',
+    value: { ...DIMLESS_WIDGET, type: 'pie', values: ['amount_sum'] },
+    refusesAt: [],
+  },
+  {
+    label: 'three measures on a dimensionless `table` — in the multi-measure set',
+    value: { ...DIMLESS_WIDGET, type: 'table', values: ['amount_sum', 'count', 'avg_days'] },
+    refusesAt: [],
+  },
+  {
+    label: 'three measures on a dimensionless `horizontal-bar` — likewise',
+    value: { ...DIMLESS_WIDGET, type: 'horizontal-bar', values: ['amount_sum', 'count', 'avg_days'] },
+    refusesAt: [],
+  },
+  {
+    label: 'two measures on a dimensionless `metric` — the sibling\'s refusal, not this one\'s',
+    value: { ...DIMLESS_WIDGET, type: 'metric', values: ['amount_sum', 'count'] },
+    refusesAt: [],
+  },
+  {
+    label: 'two measures on a dimensionless widget that declares NO type (the `metric` default)',
+    value: { ...DIMLESS_WIDGET, values: ['amount_sum', 'count'] },
+    refusesAt: [],
+  },
+];
+
 // ---------------------------------------------------------------------------
 // The population — every mirrored spec object that carries an object-level check
 // ---------------------------------------------------------------------------
@@ -380,6 +438,11 @@ const MIRRORED: MirroredSchema[] = [
         name: 'checkDashboardWidgetMetricMeasureArity',
         check: checkDashboardWidgetMetricMeasureArity,
         fixtures: metricMeasureArityFixtures,
+      },
+      {
+        name: 'checkDashboardWidgetDimensionlessMeasureArity',
+        check: checkDashboardWidgetDimensionlessMeasureArity,
+        fixtures: dimensionlessMeasureArityFixtures,
       },
     ],
     cleanFixtures: [{ ...WIDGET, type: 'horizontal-bar' }],
@@ -513,9 +576,10 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
 // ---------------------------------------------------------------------------
 
 describe('`./index` (the `@objectstack/spec/ui` surface) exports the same function objects', () => {
-  // NOT the full export list: the two widget checks —
-  // `checkDashboardWidgetStageOrder` and
-  // `checkDashboardWidgetMetricMeasureArity` — are catalogued in `MIRRORED`
+  // NOT the full export list: the three widget checks —
+  // `checkDashboardWidgetStageOrder`,
+  // `checkDashboardWidgetMetricMeasureArity` and
+  // `checkDashboardWidgetDimensionlessMeasureArity` — are catalogued in `MIRRORED`
   // above (legs 1-2) and carry their own legs 3-4 — barrel identity and
   // attached-by-identifier — beside the schema they guard, in
   // `dashboard.test.ts`. Read this `it.each` as the rows that live here, not as

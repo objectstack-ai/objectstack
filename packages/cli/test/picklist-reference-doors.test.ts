@@ -3,7 +3,7 @@
 /**
  * The `picklist` kind through the three authoring doors, over the real CLI.
  *
- * Three facts, each read off a real `os` process:
+ * Five facts, each read off a real `os` process:
  *
  *   1. A stack declaring a picklist and a select field that names it validates,
  *      builds and lints with no refusal — and the artifact `os build` writes
@@ -14,6 +14,12 @@
  *      exited 0 and the misspelt reference shipped.
  *   3. `os lint`'s R8 (`field/select-missing-options`) does not report the
  *      picklist-bound field — it names its options source.
+ *   4. A `picklistExtensions` entry whose `extend` names a picklist the stack
+ *      declares validates and builds, the artifact carrying it as authored.
+ *   5. One whose `extend` names no picklist the stack declares is REFUSED by
+ *      `os validate`, naming the extension and the list it names, and `os
+ *      build` refuses the same stack and writes no artifact. Before this, both
+ *      doors exited 0 and the options were added to a list nobody declared.
  *
  * The walk and both verdicts are pinned in `src/utils/picklist-references.test.ts`
  * and R8 in `@objectstack/lint`; this file holds the DOORS to them.
@@ -92,18 +98,36 @@ const stack = (picklist: string) => ({
   apps: [{ name: 'pickdoor_app', label: 'Pick Door' }],
 });
 
+/**
+ * The same stack with a correct field reference and one `picklistExtensions`
+ * entry adding an option to the list `extend` names — the only thing that
+ * varies between the control and the refusal below.
+ */
+const extensionStack = (extend: string) => ({
+  ...stack('industry'),
+  picklistExtensions: [{ extend, options: [{ label: 'Healthcare', value: 'healthcare' }] }],
+});
+
 let okDir: string;
 let danglingDir: string;
+let extensionOkDir: string;
+let extensionDanglingDir: string;
 
 beforeAll(() => {
   okDir = mkdtempSync(join(tmpdir(), 'os-picklist-ok-'));
   writeDefineStackConfig(okDir, stack('industry'));
   danglingDir = mkdtempSync(join(tmpdir(), 'os-picklist-dangling-'));
   writeDefineStackConfig(danglingDir, stack('industy'));
+  extensionOkDir = mkdtempSync(join(tmpdir(), 'os-picklist-ext-ok-'));
+  writeDefineStackConfig(extensionOkDir, extensionStack('industry'));
+  extensionDanglingDir = mkdtempSync(join(tmpdir(), 'os-picklist-ext-dangling-'));
+  writeDefineStackConfig(extensionDanglingDir, extensionStack('industy'));
 });
 
 afterAll(() => {
-  for (const dir of [okDir, danglingDir]) if (dir) rmSync(dir, { recursive: true, force: true });
+  for (const dir of [okDir, danglingDir, extensionOkDir, extensionDanglingDir]) {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 const picklistRules = (list: unknown): string[] =>
@@ -170,6 +194,60 @@ describe('a field naming a picklist the stack does not declare is refused', () =
     expect(run.code, run.stdout + run.stderr).toBe(1);
     const errors = jsonOf(run).errors as Array<{ rule?: string }>;
     expect(errors.map((e) => e.rule)).toEqual(['picklist-reference-unknown']);
+    expect(existsSync(out)).toBe(false);
+  }, RUN_TIMEOUT_MS);
+});
+
+describe('a picklist extension naming a picklist the stack declares passes both doors', () => {
+  it('os validate accepts it, with no picklist-reference finding', async () => {
+    const run = await runCli(['validate', '--json'], extensionOkDir);
+    expect(run.code, run.stdout + run.stderr).toBe(0);
+    const doc = jsonOf(run);
+    expect(doc.valid).toBe(true);
+    expect(picklistRules(doc.warnings)).toEqual([]);
+  }, RUN_TIMEOUT_MS);
+
+  it('os build writes the artifact, carrying the extension as authored', async () => {
+    const out = join(extensionOkDir, 'dist', 'objectstack.json');
+    const run = await runCli(['build', '--json', '-o', out], extensionOkDir);
+    expect(run.code, run.stdout + run.stderr).toBe(0);
+    expect(picklistRules(jsonOf(run).warnings)).toEqual([]);
+    const artifact = JSON.parse(readFileSync(out, 'utf8')) as {
+      picklistExtensions?: Array<{ extend?: string }>;
+    };
+    expect(artifact.picklistExtensions?.map((e) => e.extend)).toEqual(['industry']);
+  }, RUN_TIMEOUT_MS);
+});
+
+describe('a picklist extension naming no picklist the stack declares is refused', () => {
+  it('os validate refuses it, naming the extension and the missing list', async () => {
+    const run = await runCli(['validate', '--json'], extensionDanglingDir);
+    expect(run.code, run.stdout + run.stderr).toBe(1);
+    const doc = jsonOf(run);
+    expect(doc.valid).toBe(false);
+    const errors = doc.errors as Array<{ rule?: string; where?: string; message?: string; path?: string }>;
+    expect(errors).toHaveLength(1);
+    expect(errors[0].rule).toBe('picklist-reference-unknown');
+    expect(errors[0].where).toContain('industy');
+    expect(errors[0].message).toContain("'industy'");
+    expect(errors[0].path).toBe('picklistExtensions[0].extend');
+  }, RUN_TIMEOUT_MS);
+
+  it('the text face says so too, with the same exit status', async () => {
+    const run = await runCli(['validate'], extensionDanglingDir);
+    expect(run.code).toBe(1);
+    expect(run.stdout).toContain('picklist extension "industy"');
+    expect(run.stdout).toContain("'industy'");
+    expect(run.stdout).toContain('picklistExtensions[0].extend');
+  }, RUN_TIMEOUT_MS);
+
+  it('os build refuses the same stack and writes no artifact', async () => {
+    const out = join(extensionDanglingDir, 'dist', 'objectstack.json');
+    const run = await runCli(['build', '--json', '-o', out], extensionDanglingDir);
+    expect(run.code, run.stdout + run.stderr).toBe(1);
+    const errors = jsonOf(run).errors as Array<{ rule?: string; path?: string }>;
+    expect(errors.map((e) => e.rule)).toEqual(['picklist-reference-unknown']);
+    expect(errors[0].path).toBe('picklistExtensions[0].extend');
     expect(existsSync(out)).toBe(false);
   }, RUN_TIMEOUT_MS);
 });
