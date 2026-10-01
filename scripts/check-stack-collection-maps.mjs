@@ -619,15 +619,6 @@ const SITES = [
           'ADR-0090 D3 positions reach the registry through the security bootstrap, which reads them off the '
           + 'stack directly; the loop\'s sibling `permissions` entry is what makes the absence look like a gap.',
       },
-      {
-        direction: 'missing',
-        keys: ['picklists', 'picklistExtensions'],
-        reason:
-          'PENDING the picklist runtime layer (#19519): the spec declares `picklists` and '
-          + '`picklistExtensions` ahead of their reader, by ruling (the spec layer lands first). Registering '
-          + 'them — and merging the extensions into their target list — is that layer\'s work, so this row '
-          + 'goes STALE, and fails, the day it lands. The liveness ledger grades the same keys `planned`.',
-      },
     ],
   },
   {
@@ -687,12 +678,12 @@ const SITES = [
       },
       {
         direction: 'missing',
-        keys: ['picklists', 'picklistExtensions'],
+        keys: ['picklistExtensions'],
         reason:
-          'PENDING the picklist runtime layer (#19519): the spec declares `picklists` and '
-          + '`picklistExtensions` ahead of their reader, by ruling (the spec layer lands first). Registering '
-          + 'them — and merging the extensions into their target list — is that layer\'s work, so this row '
-          + 'goes STALE, and fails, the day it lands. The liveness ledger grades the same keys `planned`.',
+          'registered by a DIFFERENT seam rather than dropped: an extension is not an item of its own — it '
+          + 'has no name, only the list it adds options to — so it never becomes a metadata item. The '
+          + 'ObjectQL registry merges it into that list (additive only, a repeated value refused), which is '
+          + 'where every field bound to the list reads its options; `picklists` itself IS mapped here.',
       },
     ],
   },

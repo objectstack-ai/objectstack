@@ -71,6 +71,13 @@ import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 
+// [#21061] The analytics domain refuses an anonymous caller first (ADR-0056 D2),
+// so this harness signs its caller in: an `auth` slot in the shape
+// `resolveExecutionContext` reads answers a session for every request. Only
+// identity is stubbed; the route, the service and every expectation are
+// unchanged. Anonymity is pinned in `domains/analytics-anonymous-deny.test.ts`.
+const SIGNED_IN_AUTH = { api: { getSession: async () => ({ user: { id: 'usr_analytics_caller' } }) } };
+
 // ── harness (the shape the sibling withhold test uses) ───────────────────────
 
 function makeFakeServer() {
@@ -92,8 +99,8 @@ function makeFakeServer() {
 
 function makeCtx(fakeServer: any, analytics: unknown) {
     const kernel = {
-        getService: (name: string) => (name === 'analytics' ? analytics : undefined),
-        getServiceAsync: async (name: string) => (name === 'analytics' ? analytics : undefined),
+        getService: (name: string) => (name === 'analytics' ? analytics : name === 'auth' ? SIGNED_IN_AUTH : undefined),
+        getServiceAsync: async (name: string) => (name === 'analytics' ? analytics : name === 'auth' ? SIGNED_IN_AUTH : undefined),
     };
     return {
         getKernel: () => kernel,

@@ -9776,6 +9776,35 @@ export class SqlDriver implements IDataDriver {
       return envelope;
     }
 
+    // [#20821] The second class, keyed on a fact THIS driver recorded: a table
+    // whose DDL it deferred (`os migrate plan` / `apply` boot with
+    // {@link setDeferredDdl}), read before that DDL ran. On a database the dry
+    // run found empty, every boot reader of `sys_metadata`,
+    // `sys_metadata_activation` and `sys_migration` lands here, and each one
+    // already answers from the refusal (nothing restored, nothing attached,
+    // "not verified"). The plan lists the same tables as `create_table`, so
+    // the refusal is the state the operator is being shown, not a fault.
+    //
+    // ⛔ All three conditions, or it warns below: DDL is deferred on this
+    // driver; the targeted table is in its OWN deferred set (a missing table
+    // nobody in this boot declared is information, not this class); and the
+    // one shared predicate holds over the envelope's declared target. ⛔ The
+    // set is consulted, never the reason: a table that exists answers its read
+    // whatever the deferral, and any other refusal on it still warns.
+    if (
+      this.deferredDdl &&
+      this.deferredSchemaObjects.has(targetedTable) &&
+      isMissingTableError(envelope, object)
+    ) {
+      this.logger.debug?.(
+        `[sql-driver] '${object}' does not exist yet: this driver deferred its DDL (a dry run ` +
+          'records the create-table instead of performing it), so the read is refused until the ' +
+          'deferred work is applied. The refusal goes back to the caller unchanged: ' +
+          dialectText,
+      );
+      return envelope;
+    }
+
     this.logger.warn(
       `[sql-driver] DATABASE_ERROR — the backend refused a read on '${object}'` +
         (typeof code === 'string' && code.length > 0 ? ` (${code})` : '') +

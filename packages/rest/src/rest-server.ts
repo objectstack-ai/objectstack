@@ -345,7 +345,7 @@ import {
     exportContentDisposition,
     type ExportFieldMeta,
 } from './export-format.js';
-import { runImport } from './import-runner.js';
+import { runImport } from '@objectstack/core';
 // [#16581] The public picker's authoring-dialect → parser-grammar lowering.
 import { lowerViewFilterRules } from './view-filter-rule-lowering.js';
 import { prepareImportRequest } from './import-prepare.js';
