@@ -200,11 +200,12 @@ export type RetiredDefaultResidue = Readonly<Record<string, boolean | number | s
  * ## The class of retirement this exists for
  *
  * {@link retiredKey} makes a removal audible in both authoring channels (the
- * `tsc` tombstone input type + the parse-time prescription). That is the right posture for a key
- * an author WROTE — but a key that carried a Zod `.default(…)` has a third
- * population nobody authored: **every artifact built by a released toolchain
- * has the key MATERIALIZED at its default in every entry**, because the parse
- * that built the artifact emitted the default. Refusing that emitted default
+ * `tsc` tombstone input type + the parse-time prescription). That is the right
+ * posture for a key an author WROTE — but a key that carried a Zod
+ * `.default(…)` has a third population nobody authored: **every artifact
+ * built by a released toolchain has the key MATERIALIZED at its default in
+ * every entry**, because the parse that built the artifact emitted the
+ * default. Refusing that emitted default
  * sentences every previously built artifact — marketplace packages, installed
  * environments — to death on the next runtime upgrade, over a value that is
  * behaviourally identical to absence for the key's entire history. (The
@@ -232,8 +233,8 @@ export type RetiredDefaultResidue = Readonly<Record<string, boolean | number | s
  * The authoring surface keeps every refusal the retirement established: the
  * shape still declares the key as a {@link retiredKey} tombstone (`z.input`
  * stays the tombstone input type, so writing the key in TypeScript source fails
- * `tsc` exactly as before), the JSON-schema/authorable-surface artifacts still publish the
- * `[REMOVED]` tombstone row, and a non-default value is refused with the
+ * `tsc` exactly as before), the JSON-schema/authorable-surface artifacts still
+ * publish the `[REMOVED]` tombstone row, and a non-default value is refused with the
  * original prescription everywhere. What changes is only the disposition of
  * the **emitted default in already-parsed data** — provenance that JSON cannot
  * carry, which is why the discrimination is by value, as ruled.
