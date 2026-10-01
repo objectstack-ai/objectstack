@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import type { ErrorReporter } from '../contracts.js';
 import {
     NoopErrorReporter,
     InMemoryErrorReporter,
@@ -9,7 +10,7 @@ import {
 
 describe('NoopErrorReporter', () => {
     it('captures without throwing or recording anything', () => {
-        const r = new NoopErrorReporter();
+        const r: ErrorReporter = new NoopErrorReporter();
         expect(() => r.captureException(new Error('boom'), { x: 1 })).not.toThrow();
     });
 });

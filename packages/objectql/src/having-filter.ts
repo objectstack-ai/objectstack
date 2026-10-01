@@ -120,6 +120,16 @@
 // matched: `{ owners: { $contains: 'u1' } }` counted 0 where the same `where`
 // counted 2, and `$notContains` counted every row, the members included. See
 // {@link storedArrayHasMember} and {@link declaredJsonStoredFields}.
+//
+// [#21007] …and on that same declared population, the per-aggregation `filter`
+// REFUSES the scalar comparisons `where` refuses there — the equality and
+// ordering family, `$between`, `$in` / `$nin` and implicit equality — with
+// `where`'s code and words (`INVALID_FILTER` / 400, `@objectstack/core`'s
+// `jsonColumnOperatorRefusalText`), judged once on the filter before any driver
+// is asked. Before, the walker compared the whole stored array against a scalar:
+// `{ owners: { $in: ['u1'] } }` counted 0 and `{ owners: { $nin: ['u1'] } }`
+// counted the very rows holding `u1`, where the same `where` is a 400 on every
+// SQL dialect. See {@link assertAggregationFilterSparesJsonStoredFields}.
 
 import type { FilterCondition } from '@objectstack/spec/data';
 // [#20099] The reference's own declaration, so a malformed `addDays` is refused
@@ -169,6 +179,10 @@ import { STRUCTURED_JSON_TYPES, isMultiValueField } from '@objectstack/spec/data
 // `filter-comparand-shape.ts` rather than re-declared here — see the note on
 // {@link invalidFilterError} and on {@link unknownOperator} below.
 import { invalidFilterError } from './filter-comparand-shape.js';
+// [#21007] The operators `where` refuses on a column stored as JSON, and the
+// words it refuses them in — one set and one sentence, shared with `driver-sql`
+// rather than copied from it.
+import { JSON_COLUMN_INCOMPATIBLE_OPERATORS, jsonColumnOperatorRefusalText } from '@objectstack/core';
 
 const LOGICAL_OPERATORS = ['$and', '$or', '$not'] as const;
 
@@ -842,6 +856,13 @@ export function declaredFieldClasses(fields: unknown): Map<string, AggregatedCol
  * No usable field map (a registry-less host) ⇒ an empty set, and the arms keep
  * the substring reading, as `driver-sql` does for a table it was never told
  * about.
+ *
+ * [#21007] The same set is the population on which the per-aggregation `filter`
+ * REFUSES the scalar comparisons `where` refuses on a JSON column
+ * ({@link assertAggregationFilterSparesJsonStoredFields}). Here the two halves
+ * of the population DO arrive alike: no earlier door refuses `$eq` / `$in` / …
+ * on a structured-JSON field, so a `json` field's `{ meta: { $eq: 'a' } }` is
+ * refused here, as `where` refuses it.
  */
 export function declaredJsonStoredFields(fields: unknown): Set<string> {
   const stored = new Set<string>();
@@ -968,6 +989,16 @@ export function assertHavingIsEvaluable(
  * fixing it does not reveal one they could have been told about already.
  * {@link assertAggregationFilterReferencesAreDeclared} carries the words.
  *
+ * [#21007] …and, last, the column-type rule `where` applies on every SQL
+ * dialect: a scalar comparison — the equality and ordering family, `$between`,
+ * `$in` / `$nin`, implicit equality — aimed at a field the object declares
+ * JSON-stored is refused, in `where`'s words, with the field and the operator
+ * withheld from the message and handed to the host's log, as `where` does.
+ * {@link assertAggregationFilterSparesJsonStoredFields} carries it. Judged here,
+ * on the FILTER, because the per-row walk never meets an empty table or a
+ * short-circuited `$or` branch: a refusal raised there would be the data's
+ * (#20122's rule).
+ *
  * Read-only.
  */
 export function assertAggregationFilterIsEvaluable(
@@ -977,7 +1008,101 @@ export function assertAggregationFilterIsEvaluable(
 ): void {
   const clause = aggregationFilterClause(index);
   assertNodeIsEvaluable(filter, clause.root, { clause });
-  if (declared) assertAggregationFilterReferencesAreDeclared(filter, clause.root, declared);
+  if (declared) {
+    assertAggregationFilterReferencesAreDeclared(filter, clause.root, declared);
+    assertAggregationFilterSparesJsonStoredFields(filter, clause.root, declared);
+  }
+}
+
+/**
+ * [#21007] Refuse a scalar comparison aimed at a field the object declares
+ * JSON-stored ({@link declaredJsonStoredFields}: a structured-JSON type, or a
+ * multi-valued field) — every operator `@objectstack/core`'s
+ * `JSON_COLUMN_INCOMPATIBLE_OPERATORS` names, and implicit equality, whatever
+ * the comparand (`null` and an empty list included, as `where` refuses them).
+ *
+ * The per-aggregation `filter` gave the three wrong answers `driver-sql`'s
+ * `where` refused (#7398): the stored array never equals a scalar, so `$in` /
+ * `$eq` counted nothing, `$nin` / `$ne` counted the rows they were asked to
+ * exclude, and the orderings compared an array by JS coercion. Measured through
+ * `POST /data/:object/query` on SQLite and PostgreSQL 16, beside the 400 the same
+ * `where` answers on both. So one filter got a 400 in `where` and a wrong count
+ * here; now it gets the 400 in both, in the same words.
+ *
+ * The WORDS are `where`'s — `jsonColumnOperatorRefusalText`, the text `driver-sql`
+ * refuses with — and so is the disclosure: the message names neither the field
+ * nor the operator, and the full diagnostic (both named, plus this position) goes
+ * to `declared.reportWithheld`, the host's server log, as
+ * {@link assertAggregationFilterReferencesAreDeclared} does for the cross-field
+ * refusal. What answers on such a field is unchanged: `$contains` /
+ * `$notContains` (membership), `$exists`, `$null` and `$empty`.
+ *
+ * The same traversal {@link assertAggregationFilterReferencesAreDeclared} takes,
+ * after it: the walk has already refused every unknown `$` key, so the arms
+ * here meet only declared operators. A plain object with no `$` key is not a
+ * condition this rule reads; the engine's no-operator-object door refuses it
+ * earlier. No usable field map (a registry-less host) ⇒ nothing is judged.
+ *
+ * THIS is the complete door. The per-row arm in {@link checkCondition} is a
+ * backstop that fires only on a row that reaches it, and many never do: an
+ * empty table has no row, and the spec's filter lowering (rule 3) rewrites a
+ * negation into `$or: [{ f: { $null: true } }, { f: { $ne: v } }]` (and gives a
+ * `$not` operand an `{ f: { $null: false } }` conjunct), so on a row with no
+ * value the `$null` arm decides and the walker never reaches the comparison.
+ * Measured with this call removed: a `json` field null in every row answered
+ * `$ne` / `$nin` / `$not $in` with every row counted. Hence [#21007]'s second
+ * caller, `applyInMemoryAggregation`, which a host may call with a field map
+ * and no engine in front of it — it calls this same function, once per
+ * aggregation, before any row is judged.
+ *
+ * `declared` needs only the field map and where the diagnostic goes; the
+ * object's name is the reference rule's, not this one's.
+ */
+export function assertAggregationFilterSparesJsonStoredFields(
+  filter: unknown,
+  root: string,
+  declared: Pick<AggregationFilterDeclaration, 'fields' | 'reportWithheld'>,
+): void {
+  const jsonStored = declaredJsonStoredFields(declared.fields);
+  if (jsonStored.size === 0) return;
+  const refuse = (field: string, op: string, bare: boolean, path: string): never => {
+    const { message, diagnostic } = jsonColumnOperatorRefusalText(field, op, bare);
+    declared.reportWithheld(`At ${path}: ${diagnostic}`);
+    throw invalidFilterError(message);
+  };
+  const walk = (cond: unknown, path: string): void => {
+    if (!cond || typeof cond !== 'object') return;
+    for (const [key, value] of Object.entries(cond)) {
+      const here = `${path}.${key}`;
+      if (key === '$and' || key === '$or') {
+        const branches = Array.isArray(value) ? value : [value];
+        branches.forEach((c, i) => walk(c, `${here}[${i}]`));
+        continue;
+      }
+      if (key === '$not') {
+        walk(value, here);
+        continue;
+      }
+      if (key.startsWith('$') || !jsonStored.has(key)) continue;
+      if (isImplicitEquality(value)) refuse(key, '=', true, here);
+      for (const op of Object.keys(value as Record<string, unknown>)) {
+        if (JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op)) refuse(key, op, false, `${here}.${op}`);
+      }
+    }
+  };
+  walk(filter, root);
+}
+
+/**
+ * [#21007] A column condition that is IMPLICIT equality — a comparand rather
+ * than an operator map: a primitive, `null`, a `Date` or an array. The same
+ * split {@link checkCondition} makes before it compares.
+ */
+function isImplicitEquality(condition: unknown): boolean {
+  return typeof condition !== 'object'
+    || condition === null
+    || condition instanceof Date
+    || Array.isArray(condition);
 }
 
 /**
@@ -1524,6 +1649,19 @@ function storedArrayHasMember(value: unknown, comparand: unknown): boolean {
  * `$contains` asks whether its comparand is a MEMBER of the stored array
  * ({@link storedArrayHasMember}) and `$notContains` its exact complement; on
  * any other column both keep the substring test.
+ *
+ * [#21007] …and a scalar comparison on such a column — implicit equality, or an
+ * operator in `JSON_COLUMN_INCOMPATIBLE_OPERATORS` — is REFUSED, in `where`'s
+ * withheld words. The COMPLETE door is
+ * {@link assertAggregationFilterSparesJsonStoredFields}, which judges the filter
+ * once, before any row is read, and reports the diagnostic; `engine.aggregate`
+ * and `applyInMemoryAggregation` both call it. This arm is only the BACKSTOP
+ * for a row that reaches it — a caller evaluating rows directly through
+ * `matchesAggregationFilter`. It sits above the no-value exit, so a row with no
+ * value that reaches it is refused too; but its REACH is the row's: an empty
+ * row set never gets here, and neither does a row on which a short-circuited
+ * `$or` / `$and` branch has already decided (the spec lowering's rule 3 puts a
+ * `$null` arm ahead of every negation).
  */
 function checkCondition(
   value: any,
@@ -1540,12 +1678,10 @@ function checkCondition(
   // to mirror the Filter Protocol's memory evaluation. [#20148] A `Date` bound
   // is compared as an instant ({@link instantsOf}). [#20176] On a temporal
   // column, both sides in the column's storage form first.
-  if (
-    typeof condition !== 'object'
-    || condition === null
-    || condition instanceof Date
-    || Array.isArray(condition)
-  ) {
+  if (isImplicitEquality(condition)) {
+    // [#21007] Not on a declared JSON-stored column: a stored array never equals
+    // a scalar, and `where` refuses the spelling there.
+    if (jsonStored) throw invalidFilterError(jsonColumnOperatorRefusalText(field, '=', true).message);
     return comparandEquals(form(value), form(condition));
   }
 
@@ -1577,6 +1713,12 @@ function checkCondition(
     // no-value exit for the #7158 reason the gate above gives.
     if (op === '$empty' && typeof target !== 'boolean') {
       throw emptyFlagComparandError(field, target, `${path}.${op}`);
+    }
+    // [#21007] A scalar comparison on a declared JSON-stored column — refused,
+    // as `where` refuses it. The backstop under the one-time judgment
+    // (assertAggregationFilterSparesJsonStoredFields), for a row that gets here.
+    if (jsonStored && JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op)) {
+      throw invalidFilterError(jsonColumnOperatorRefusalText(field, op, false).message);
     }
     if (value === undefined && !NO_VALUE_ANSWERED_BY_OPERATOR.has(op)) return false;
     // [#20099] A `{ $field }` reference as the whole comparand of a scalar

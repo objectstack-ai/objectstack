@@ -49,6 +49,18 @@ const singular = (type: unknown): string => String(type ?? '').replace(/s$/, '')
 /** A member-level caller: authenticated, and nothing else. */
 const MEMBER = { userId: 'u_member', isSystem: false, systemPermissions: [] as string[] };
 
+/**
+ * [#21087] The narrowest caller a `datasource` read admits: a datasource-family
+ * type is read under `manage_platform_settings`, the capability the datasource
+ * admin door requires, asked before any branch reads the store — so a member's
+ * datasource list never reaches the protocol this file faults. Holding it and
+ * nothing else keeps the fault path the subject here.
+ */
+const PLATFORM_SETTINGS_HOLDER = { userId: 'u_settings', isSystem: false, systemPermissions: ['manage_platform_settings'] };
+
+/** The caller each row reads as: a member wherever a member is admitted. */
+const READER: Record<string, typeof MEMBER> = { flow: MEMBER, datasource: PLATFORM_SETTINGS_HOLDER };
+
 /** The store fault the protocol raises when its `sys_metadata` read fails (`metadataStoreUnavailableError`). */
 function storeFault(): Error {
     return Object.assign(new Error('The metadata store could not be read, so whether this item exists is unknown.'), {
@@ -57,7 +69,7 @@ function storeFault(): Error {
     });
 }
 
-function boot(protocol: Record<string, unknown>) {
+function boot(protocol: Record<string, unknown>, caller: typeof MEMBER = MEMBER) {
     const metadata = { list: vi.fn(async (type: string) => clone(STORED[singular(type)] ?? [])) };
     const services: Record<string, unknown> = {
         protocol,
@@ -67,7 +79,7 @@ function boot(protocol: Record<string, unknown>) {
     const get = (n: string) => services[n] ?? null;
     const kernel: any = { context: { getService: get }, getService: get, getServiceAsync: async (n: string) => get(n) };
     const dispatcher = new HttpDispatcher(kernel);
-    (dispatcher as any).timedResolveExecutionContext = async () => clone(MEMBER);
+    (dispatcher as any).timedResolveExecutionContext = async () => clone(caller);
     const list = async (type: string) => {
         const res = await dispatcher.dispatch('GET', `/meta/${type}`, undefined, {}, { request: { headers: {} } } as any);
         return { status: res.response?.status ?? 0, body: res.response?.body };
@@ -84,7 +96,7 @@ describe('#20590 — a protocol fault on the list read is answered as itself', (
                 getMetaTypes: vi.fn(async () => ({ types: Object.keys(STORED) })),
                 getMetaItems: vi.fn(async () => { throw storeFault(); }),
             };
-            const { list, metadata } = boot(protocol);
+            const { list, metadata } = boot(protocol, READER[type]);
             const res = await list(type);
             expect(text(res.body)).not.toContain(credential);
             expect({ status: res.status, code: res.body?.error?.code }).toEqual({ status: 503, code: 'SERVICE_UNAVAILABLE' });

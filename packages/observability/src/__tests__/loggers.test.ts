@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import type { Logger } from '../contracts.js';
 import { NoopLogger, ConsoleLogger, JsonLogger } from '../loggers.js';
 
 function makeSink() {
@@ -15,7 +16,7 @@ function makeSink() {
 
 describe('NoopLogger', () => {
     it('discards every call', () => {
-        const l = new NoopLogger();
+        const l: Logger = new NoopLogger();
         expect(() => {
             l.debug('x');
             l.info('x');
@@ -26,7 +27,7 @@ describe('NoopLogger', () => {
     });
 
     it('child() returns a logger that also discards', () => {
-        const l = new NoopLogger();
+        const l: Logger = new NoopLogger();
         const c = l.child?.({ foo: 'bar' });
         expect(c).toBeDefined();
         expect(() => c?.info('hi')).not.toThrow();

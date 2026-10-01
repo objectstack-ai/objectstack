@@ -20,13 +20,14 @@
   },
   "scripts": {
     "build": "tsup --config ../../tsup.config.ts && node ../../scripts/check-dts-emitted.mjs",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
     "@objectstack/spec": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.6.3",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },

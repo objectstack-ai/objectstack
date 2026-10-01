@@ -1,0 +1,66 @@
+// The TEST-layer type-check program (#20800 -- the last three packages of the
+// #4311 ledger, graduated by the #15048 / #15050 road: a sibling program named
+// by the `typecheck` script). `tsconfig.json` beside this one stays exactly as
+// it is: it is the BUILD config. `package.json`'s `typecheck` script NAMES this
+// sibling (`tsc --noEmit -p tsconfig.test.json`), because a config no script
+// invokes reads as coverage and delivers none.
+//
+// WHAT THE BUILD CONFIG ALREADY DID. `tsconfig.json` includes `src` with no
+// test exclusion, so the program that reads these tests always existed; the
+// package simply declared no `typecheck` script, so nothing ever ran it. That
+// is the `service-automation` / `service-cluster` shape, not the
+// exclude-and-compensate one, and AGENTS.md forbids ADDING such an exclusion.
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - MODULE SEMANTICS and `lib`, nothing else. vitest runs these files as ESM
+//     through esbuild on a Node that has the ES2022 builtins, and the root
+//     config's `lib` is ES2020. The build leg of the script (`tsc --noEmit`)
+//     keeps the stricter NodeNext reading of the same files.
+//   - STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`, `noUnusedParameters`,
+//     `noImplicitReturns`, `noFallthroughCasesInSwitch`, `rootDir`, `paths` and
+//     `types` are all INHERITED and none is re-declared. ⚠️ A child that declared
+//     its own `paths` would REPLACE the parent map, so this file declares none.
+//     Nothing here may loosen a type rule; if a test does not compile, that is
+//     the finding.
+//
+// MEASURED at f8178ffece (origin/main), the workspace closure built first
+// (`turbo run build --filter='@objectstack/observability^...'`), BEFORE any
+// fix, once per config (`tsc --noEmit --pretty false [--listFiles] -p <config>`):
+//
+//   program under this config     401 files (16 of them this package's `src`),
+//                                 all 7 of its `src/**/*.test.ts` in it
+//   BUILD config (tsconfig.json)  11  = TS2554 x10 + TS2552 x1
+//   THIS config                   11  = TS2554 x10 + TS2552 x1
+//
+// The two readings AGREE, so this package carried no config-tier pile at all and
+// all 11 were code tier from the start. Two shapes, both in the test layer:
+//   - TS2554 x10 ("Expected 0 arguments, but got N"): `error-exporters.test.ts`
+//     x1, `loggers.test.ts` x6, `metrics-exporters.test.ts` x3. Each is a call on
+//     the concrete `NoopErrorReporter` / `NoopLogger` / `NoopMetricsRegistry`
+//     whose methods are declared with NO parameters (a legal narrowing of the
+//     interface), so the CLASS type has arity 0 while the contract every consumer
+//     calls through (`ErrorReporter`, `Logger`, `MetricsRegistry`) has the real
+//     one. The fix declares the instance as the contract it is used through
+//     (`const r: ErrorReporter = new NoopErrorReporter()`), so the test makes the
+//     call a consumer makes. The source signature was NOT widened.
+//   - TS2552 x1 (`otlp-http.test.ts`, 14): the fake `fetch` named `RequestInfo`,
+//     a DOM-lib name this program does not have (`RequestInit` comes from
+//     `@types/node`, `RequestInfo` does not). Typed to the call site it stubs:
+//     `string | URL | Request`.
+// No cast was added, no `@ts-expect-error`.
+//
+// AFTER: 0 and 0. There is NO `test-typecheck-debt.json` beside this config, and
+// its ABSENCE is the zero: any error in any file here is red immediately, with no
+// ledger to be added to -- the same call `metadata-fs` and
+// `trigger-record-change` recorded.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

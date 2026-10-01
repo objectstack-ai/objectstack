@@ -805,19 +805,32 @@ const ROOT_PROGRAM_COUPLED_SCRIPT = 'scripts/check-test-typecheck.mts';
 // they were not already. Repaired by the #5286 route -- a `tsconfig.test.json`
 // over the test layer, named by a new `typecheck` script -- so the entry is
 // deleted rather than lowered.
+//
+// `@objectstack/cloud-connection`, `@objectstack/observability` and
+// `@objectstack/hono` GRADUATED from this ledger together (#20800, the last
+// three packages of #4311; entries: 13 / 11 / 3 raw, each repaired to 0). Same
+// road in as `service-automation` above: no `typecheck` script at all, and a
+// BUILD `tsconfig.json` that does NOT exclude tests, so the program that would
+// have read them existed and was never invoked. Repaired by the #5286 route -- a
+// sibling `tsconfig.test.json`, named by a new `typecheck` script of the
+// zero-residue shape (`tsc --noEmit && tsc --noEmit -p tsconfig.test.json`, no
+// per-file ledger) -- so the entries are deleted rather than lowered. Measured
+// BOTH ways before any fix (build config vs the new test config): cloud-connection
+// 13 vs 11, observability 11 vs 11, hono 3 vs 3, so every entry's count was
+// confirmed exactly under the build config. Only cloud-connection carried a
+// config tier (TS2550 x2, `Array#at` under lib ES2020 -- rewritten to vitest's
+// `mock.lastCall` rather than widening the shared BUILD config, the
+// `service-storage` call above); the rest were test shapes, each fixed at its
+// cause: a `vi.fn(async () => ...)` mock typed to the `fetch(url, init)` call it
+// stubs (TS2493 x11), a Noop instance declared as the contract it is called
+// through (TS2554 x10), a fake `fetch` parameter typed without a DOM-only name
+// (TS2552), a Hono app declaring the context variable the middleware sets
+// (TS2769 x2, TS18046). `hono`'s "3" was not its whole pile: tsc withholds
+// declaration-emit diagnostics while a semantic error stands, so once the 3 were
+// fixed the test config showed 4 more (TS2883 on the `vi.fn()` fields of
+// `src/__mocks__/runtime.ts`, annotated `Mock`) that the build config never shows.
+// No cast, no `@ts-expect-error`, no `src` signature widened.
 const DEBT = {
-  '@objectstack/cloud-connection': {
-    errors: 13,
-    note: 'code-tier 11 (TS2493 tuple indexing) + 2 config-tier.',
-  },
-  '@objectstack/hono': {
-    errors: 3,
-    note: 'all code-tier (TS2769/TS18046).',
-  },
-  '@objectstack/observability': {
-    errors: 11,
-    note: 'all code-tier (TS2554 wrong arity x10, TS2552).',
-  },
   '@objectstack/spec-monorepo': {
     errors: 26,
     compositionAt: 80,
