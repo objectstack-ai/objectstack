@@ -59,7 +59,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server.js';
-import { parseDateCell } from './import-coerce.js';
+import { parseDateCell } from '@objectstack/core';
 
 const OBJECT = 'import_time_fraction_20722';
 const HOST_ZONE = 'America/New_York';

@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { parseFilterAST } from '@objectstack/spec/data';
+import { lowerFilterCondition, parseFilterAST } from '@objectstack/spec/data';
 import { translateFilter } from './mongodb-filter.js';
 
 describe('MongoDB Filter Translator', () => {
@@ -43,74 +43,114 @@ describe('MongoDB Filter Translator', () => {
     });
   });
 
-  describe('calendar-day upper bounds (#4042; the SQL twin is #3777)', () => {
-    it('a bare-day $lte compiles half-open — through the whole day', () => {
+  /**
+   * [#20822 · ADR-0053 D-D1 items 5 and 9, as amended] The whole-day upper bound
+   * (#4042; the SQL twin is #3777) is applied once, by the shared lowering at
+   * the seams that feed this driver, and this translator keeps no copy of it:
+   * it compiles the comparison it is handed. One block per side of the seam.
+   */
+  describe('calendar-day upper bounds — a direct call, compiled as written (item 5)', () => {
+    it('a bare-day $lte is `<=` its midnight', () => {
       expect(translateFilter({ created_at: { $lte: '2026-07-28' } })).toEqual({
+        created_at: { $lte: '2026-07-28' },
+      });
+    });
+
+    it('a bare-day $between is inclusive at both ends', () => {
+      expect(translateFilter({ created_at: { $between: ['2026-04-29', '2026-07-31'] } })).toEqual({
+        created_at: { $gte: '2026-04-29', $lte: '2026-07-31' },
+      });
+    });
+
+    it('the authored array `<=` is lowered by parseFilterAST only, not widened (#5158)', () => {
+      expect(translateFilter(parseFilterAST([['created_at', '<=', '2026-07-28']]))).toEqual({
+        created_at: { $lte: '2026-07-28' },
+      });
+    });
+
+    it('the last supported day is an ordinary bound, $lte and a $between max alike', () => {
+      expect(translateFilter({ created_at: { $lte: '9999-12-31' } })).toEqual({
+        created_at: { $lte: '9999-12-31' },
+      });
+      expect(translateFilter({ created_at: { $between: ['2026-04-29', '9999-12-31'] } })).toEqual({
+        created_at: { $gte: '2026-04-29', $lte: '9999-12-31' },
+      });
+    });
+  });
+
+  describe('calendar-day upper bounds — a seam-fed filter, through the shared lowering (the control)', () => {
+    /** What a TYPED seam hands this driver: `created_at` is the declared `datetime`. */
+    const seamed = <T,>(where: T): T =>
+      lowerFilterCondition(where, { isDatetimeColumn: (column) => column === 'created_at' });
+
+    it('a bare-day $lte arrives half-open — through the whole day', () => {
+      expect(translateFilter(seamed({ created_at: { $lte: '2026-07-28' } }))).toEqual({
         created_at: { $lt: '2026-07-29' },
       });
     });
 
     it('a full-ISO $lte keeps instant semantics — only the bare day is widened', () => {
-      expect(translateFilter({ created_at: { $lte: '2026-07-28T12:00:00.000Z' } })).toEqual({
+      expect(translateFilter(seamed({ created_at: { $lte: '2026-07-28T12:00:00.000Z' } }))).toEqual({
         created_at: { $lte: '2026-07-28T12:00:00.000Z' },
       });
     });
 
     it('bare-day $gte / $gt / $lt keep their midnight anchoring', () => {
-      expect(translateFilter({ created_at: { $gte: '2026-07-28' } })).toEqual({
+      expect(translateFilter(seamed({ created_at: { $gte: '2026-07-28' } }))).toEqual({
         created_at: { $gte: '2026-07-28' },
       });
-      expect(translateFilter({ created_at: { $lt: '2026-07-28' } })).toEqual({
+      expect(translateFilter(seamed({ created_at: { $lt: '2026-07-28' } }))).toEqual({
         created_at: { $lt: '2026-07-28' },
       });
     });
 
-    it('$between with a bare-day max decomposes half-open, rolling the month', () => {
-      expect(translateFilter({ created_at: { $between: ['2026-04-29', '2026-07-31'] } })).toEqual({
+    it('$between with a bare-day max arrives split and half-open, rolling the month', () => {
+      expect(translateFilter(seamed({ created_at: { $between: ['2026-04-29', '2026-07-31'] } }))).toEqual({
         created_at: { $gte: '2026-04-29', $lt: '2026-08-01' },
       });
     });
 
     it('the authored array `<=` takes the same rule, once lowered (#5158)', () => {
-      // `translateFilter` no longer compiles the array spelling; the authored
-      // shape reaches it through `parseFilterAST`, which is what both doors do.
-      expect(translateFilter(parseFilterAST([['created_at', '<=', '2026-07-28']]))).toEqual({
+      expect(translateFilter(seamed(parseFilterAST([['created_at', '<=', '2026-07-28']])))).toEqual({
         created_at: { $lt: '2026-07-29' },
       });
       expect(
-        translateFilter(parseFilterAST([['created_at', '<=', '2026-07-28T12:00:00.000Z']])),
+        translateFilter(seamed(parseFilterAST([['created_at', '<=', '2026-07-28T12:00:00.000Z']]))),
       ).toEqual({
         created_at: { $lte: '2026-07-28T12:00:00.000Z' },
       });
     });
 
     // [#20600] 9999-12-31, the last supported day, has no next day: every value
-    // is inside its whole-day bound, so no upper bound is compiled. The helper
-    // answered the five-digit '10000-01-01', a bound below every stored value.
+    // is inside its whole-day bound, so the lowering keeps only `$null: false`.
     it('a bare-day $lte on the last supported day asks only for a value', () => {
-      expect(translateFilter({ created_at: { $lte: '9999-12-31' } })).toEqual({
+      expect(translateFilter(seamed({ created_at: { $lte: '9999-12-31' } }))).toEqual({
         created_at: { $ne: null },
       });
       // The control: the day before is an ordinary half-open bound.
-      expect(translateFilter({ created_at: { $lte: '9999-12-30' } })).toEqual({
+      expect(translateFilter(seamed({ created_at: { $lte: '9999-12-30' } }))).toEqual({
         created_at: { $lt: '9999-12-31' },
       });
     });
 
     it('a $between whose max is the last supported day keeps its min alone', () => {
-      expect(translateFilter({ created_at: { $between: ['2026-04-29', '9999-12-31'] } })).toEqual({
+      expect(translateFilter(seamed({ created_at: { $between: ['2026-04-29', '9999-12-31'] } }))).toEqual({
         created_at: { $gte: '2026-04-29' },
       });
-      expect(translateFilter({ created_at: { $between: ['2026-04-29', '9999-12-30'] } })).toEqual({
+      expect(translateFilter(seamed({ created_at: { $between: ['2026-04-29', '9999-12-30'] } }))).toEqual({
         created_at: { $gte: '2026-04-29', $lt: '9999-12-31' },
       });
     });
 
-    it("the lowered $ne beside an author's own $ne keeps both (#13524)", () => {
-      expect(translateFilter({ created_at: { $lte: '9999-12-31', $ne: '9999-12-31T10:00:00.000Z' } })).toEqual({
+    it("the lowered value requirement beside an author's own $ne keeps both (#13524)", () => {
+      // The `$ne` a value also takes the lowering's NULL escape (#5298), so the
+      // two constraints arrive as conjuncts and both survive the translation.
+      expect(
+        translateFilter(seamed({ created_at: { $lte: '9999-12-31', $ne: '9999-12-31T10:00:00.000Z' } })),
+      ).toEqual({
         $and: [
-          { created_at: { $ne: '9999-12-31T10:00:00.000Z' } },
           { created_at: { $ne: null } },
+          { $and: [{ $or: [{ created_at: { $eq: null } }, { created_at: { $ne: '9999-12-31T10:00:00.000Z' } }] }] },
         ],
       });
     });

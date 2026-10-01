@@ -7,7 +7,7 @@
 // "ratchets completeness over a CURATED table of HTTP/transport entry points"
 // and that "a new ungated route there is UNCLASSIFIED ... and breaks CI". That
 // promise is true only for the entry points a probe can actually mint a key
-// for. This module measures, for EVERY one of the 13 files the `PROBES` table
+// for. This module measures, for EVERY one of the 14 files the `PROBES` table
 // names, how far that reach extends — and records the result so it cannot rot.
 //
 // ⭐ Since 2026-08-31 two of those files are the ROUTE LEDGERS, and they are
@@ -283,7 +283,11 @@ export interface ProbeTableReading {
   keys: number;
 }
 
-export const PROBE_TABLE: ProbeTableReading = { entries: 18, files: 13, keys: 15 };
+// [#21061] 18 / 13 / 15 -> 19 / 14 / 17: the `/analytics` domain gate joined the
+// table as a GATE_PIN on `packages/runtime/src/domains/analytics.ts`, and the
+// `anonymous-deny-analytics` row covers its key plus the `/analytics`
+// dispatcher-domain key that left the shrink-only ledger baseline.
+export const PROBE_TABLE: ProbeTableReading = { entries: 19, files: 14, keys: 17 };
 
 /**
  * The probe count `authz-conformance.matrix.ts`'s header states.
@@ -301,8 +305,11 @@ export const PROBE_TABLE: ProbeTableReading = { entries: 18, files: 13, keys: 15
  * next probe added without moving the prose is RED instead of a fact recorded
  * in a third file. ⛔ Do not re-point this at a hand-written number — it is
  * read out of the matrix header's own text.
+ *
+ * [#21061] 18 -> 19, moved in the same change as the header sentence and the
+ * probe it counts, which is exactly what the inverted pin asks for.
  */
-export const MATRIX_HEADER_PROBE_CLAIM = 18;
+export const MATRIX_HEADER_PROBE_CLAIM = 19;
 
 export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
   // ── the two LEDGER files: the population source since 2026-08-31 ───────
@@ -543,6 +550,22 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     blindSpot: 0,
     populationRule: '`export async function handle*Request` entry points',
     controls: { 'shouldDenyAnonymous(': 1, handlePackagesRequest: 2 },
+    note: 'Same shape as domains/actions.ts.',
+  },
+  {
+    // [#21061] The analytics domain joined the anonymous-deny floor; the gate is
+    // the handler's first statement, so this row has the actions.ts shape. Its
+    // handler name occurs 3 times: the declaration, the DomainRoute call site
+    // and the file docblock's link to it.
+    file: 'packages/runtime/src/domains/analytics.ts',
+    kinds: ['GATE_PIN'],
+    probes: 1,
+    keys: 1,
+    population: 1,
+    reachable: 1,
+    blindSpot: 0,
+    populationRule: '`export async function handle*Request` entry points',
+    controls: { 'shouldDenyAnonymous(': 1, handleAnalyticsRequest: 3 },
     note: 'Same shape as domains/actions.ts.',
   },
   {
@@ -868,11 +891,12 @@ export function deriveProbeFileCensus(): {
     });
   }
 
-  // ── the four runtime domain files (GATE_PIN) ────────────────────────────
+  // ── the five runtime domain files (GATE_PIN) ────────────────────────────
   const domains: Array<[string, string, string]> = [
     ['packages/runtime/src/domains/actions.ts', 'shouldDenyAnonymous(', 'handleActionsRequest'],
     ['packages/runtime/src/domains/automation.ts', 'shouldDenyAnonymous(', 'handleAutomationRequest'],
     ['packages/runtime/src/domains/packages.ts', 'shouldDenyAnonymous(', 'handlePackagesRequest'],
+    ['packages/runtime/src/domains/analytics.ts', 'shouldDenyAnonymous(', 'handleAnalyticsRequest'],
   ];
   for (const [rel, gate, handler] of domains) {
     const src = read(rel);

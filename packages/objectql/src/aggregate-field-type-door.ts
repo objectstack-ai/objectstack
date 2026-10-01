@@ -36,6 +36,16 @@
  * | `avg` over a `datetime` field | 200, `null` | 200, `2026` | **500 `DATABASE_ERROR`** |
  * | `max` over a `number`, `min` over a `datetime`, `avg` over a `percent` (the controls) | one answer | the same | the same |
  *
+ * [#20914] measured the `sum` row on `origin/main` `2821e9f15`, the same way:
+ *
+ * | aggregation | InMemoryDriver | SqlDriver, SQLite | SqlDriver, PostgreSQL 16 |
+ * |:--|:--|:--|:--|
+ * | `sum` over a `json`, `text`, single-value `select` or `tags` field | 200, `0` | 200, `0` | **500 `DATABASE_ERROR`** (`function sum(json)` — or `sum(text)`, `sum(character varying)` — `does not exist`) |
+ * | `sum` over a `datetime` field | 200, `0` | 200, `4052` (the years added) | **500 `DATABASE_ERROR`** |
+ * | `sum` over a `formula` field | 200, `0` | 400 `INVALID_FIELD` (no column) | 400 `INVALID_FIELD` (no column) |
+ * | `sum` over a `percent` field (refused by the table: a rate does not add) | 200, the rates added | the same | the same |
+ * | `sum` over a `number`, `currency` or `boolean` (the controls) | one answer | the same | the same |
+ *
  * ## Whose verdict it is
  *
  * The TYPE half is the spec table's: `AGGREGATE_FIELD_TYPE_COMPATIBILITY`
@@ -46,25 +56,28 @@
  * nothing. The refusal names the row's accepted set, read off the table.
  *
  * The DECLARATION half is `isMultiValueField`: a multi-capable type flagged
- * `multiple: true` (`select`, `lookup`, `user`, `file`, `image`) is stored in
- * the JSON column the multi-option types (`MULTI_OPTION_TYPES`) are stored in
- * and holds the same value — a list — but a per-TYPE table cannot see the
- * flag. So the declaration takes the verdict the row gives that class: a row
- * that refuses any multi-option type refuses a multi-value declaration too
- * (`count_distinct`, `sum`, `avg`, `min`, `max`), and a row that accepts the
- * whole class accepts it (`count`, which compares no value). A field is
- * refused if either half refuses it.
+ * `multiple: true` (`MULTI_CAPABLE_TYPES`: `select`, `radio`, `lookup`,
+ * `user`, `file`, `image`) is stored in the JSON column the multi-option types
+ * (`MULTI_OPTION_TYPES`) are stored in and holds the same value — a list — but
+ * a per-TYPE table cannot see the flag. So the declaration takes the verdict
+ * the row gives that class: a row that refuses any multi-option type refuses a
+ * multi-value declaration too (`count_distinct`, `sum`, `avg`, `min`, `max`),
+ * and a row that accepts the whole class accepts it (`count`, which compares
+ * no value). A field is refused if either half refuses it.
  *
- * ## The row the census held back: `sum`
+ * ## Every row is judged — `sum` included
  *
  * [#20914] The triage direction sent the door to the whole table "census
  * first": an authored pair the table refuses, in `examples/**` or a published
- * stack, stops that row and goes back to triage. The census found one, in the
- * published hotcrm stack: a grouped list view whose column summary sums a
- * `formula` field (`sum` × `formula`, refused by the table — a formula is
- * virtual in SQL storage). So `sum` is in {@link ROWS_HELD_FOR_TRIAGE} and is
- * not judged here; releasing it is deleting that entry and flipping its pins.
- * Every other row is judged.
+ * stack, stops that row and goes back to triage. The census found one `sum`
+ * pair, in the published hotcrm stack: a grouped list view whose column
+ * summary sums a `formula` field (`sum` × `formula`, refused by the table — a
+ * formula is virtual in SQL storage). The row was held for one landing, then
+ * released by triage's answer: that summary is a client-side list footer that
+ * never reaches `engine.aggregate`, and both SQL drivers already refused the
+ * pair, while `sum` over a `json`, `text` or `select` field answered a
+ * plausible `0` or a 500. ⛔ No row is held and no pair is exempted: the door
+ * asks the table's row whole for all six functions.
  *
  * ## Where it stands, and what it judges
  *
@@ -79,12 +92,11 @@
  * **Not judged** (no verdict, the aggregation passes on as it came): an
  * aggregation that names no field (a fieldless `count`, or `'*'`), a function
  * outside the table's vocabulary (that is the query schema's refusal, not a
- * field-type one), a held row, an undeclared name (a relationship path
- * included), a registry-less host (no field map, no verdict), and a declared
- * type outside `FieldType` (a driver-internal alias such as `string` or
- * `integer` on an introspected object): the table is fail-closed on
- * vocabulary, and "cannot answer, do not block" is this consumer's tier, as
- * the table's own TSDoc says.
+ * field-type one), an undeclared name (a relationship path included), a
+ * registry-less host (no field map, no verdict), and a declared type outside
+ * `FieldType` (a driver-internal alias such as `string` or `integer` on an
+ * introspected object): the table is fail-closed on vocabulary, and "cannot
+ * answer, do not block" is this consumer's tier, as the table's own TSDoc says.
  *
  * `INVALID_FIELD`, the code the `groupBy` door beside it answers: the verdict
  * is about the NAMED field's type at a position.
@@ -106,13 +118,6 @@ import {
 
 /** The declared `FieldType` vocabulary — the only types the table can answer for. */
 const DECLARED_FIELD_TYPES: ReadonlySet<string> = new Set(FieldType.options);
-
-/**
- * Rows of the table this door does not judge yet, each held by the census
- * that preceded it — see the module header. ⛔ A row is held, never trimmed:
- * the door asks the table's row whole or not at all.
- */
-const ROWS_HELD_FOR_TRIAGE: ReadonlySet<string> = new Set(['sum']);
 
 /** Does the table's `fn` row accept the multi-value class — every multi-option type? */
 function rowAcceptsMultiValue(fn: string): boolean {
@@ -152,7 +157,6 @@ function refusedAggregations(
     const fn = (agg as { function?: unknown }).function;
     if (typeof fn !== 'string') continue;
     if (!Object.prototype.hasOwnProperty.call(AGGREGATE_FIELD_TYPE_COMPATIBILITY, fn)) continue;
-    if (ROWS_HELD_FOR_TRIAGE.has(fn)) continue;
     const field = (agg as { field?: unknown }).field;
     if (typeof field !== 'string' || field === '*') continue;
     if (!Object.prototype.hasOwnProperty.call(fields, field)) continue;

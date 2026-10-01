@@ -228,8 +228,8 @@ const SYNC_CONFIG_RETIRED =
   + 'Delete the key; the `DataSyncConfig` shape leaves with it. A sync is defined on its TARGET: '
   + 'a `mapping` (`targetObject`, `fieldMapping`, `mode`, `upsertKey`) whose `connectorSource` '
   + 'names the `rest` or `openapi` connector it pulls from, the read action and an optional '
-  + 'timestamp `watermark`, with a `job` for the cadence. That binding is declared but its pull is '
-  + 'not executed yet, and authoring it warns until it is. '
+  + 'timestamp `watermark`, with a `job` for the cadence. Its pull runs when a `job` drives it; '
+  + 'nothing schedules one yet, and authoring the binding warns until a job can. '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
 /**

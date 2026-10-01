@@ -842,7 +842,10 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
             return out;
         }
 
-        const SOURCE = readFileSync(resolve(HERE, 'error-response.ts'), 'utf8');
+        // [#20919] The classification half lives in `@objectstack/types` now;
+        // read it ahead of the emission half, the order the one file had.
+        const SOURCE = readFileSync(resolve(HERE, '../../types/src/data-error-classification.ts'), 'utf8')
+            + readFileSync(resolve(HERE, 'error-response.ts'), 'utf8');
 
         it('every arm in the SHARED classification has a §1 parity case', () => {
             const declared = codeLiterals(

@@ -34,7 +34,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { DuplicateRecordError } from '@objectstack/objectql';
 import { uniqueViolationColumn } from '@objectstack/types';
-import { runImport, type ImportProtocolLike } from './import-runner';
+import { runImport, type ImportProtocolLike } from '@objectstack/core';
 
 /**
  * [#16952] The doubles below are annotated FROM the exported declaration

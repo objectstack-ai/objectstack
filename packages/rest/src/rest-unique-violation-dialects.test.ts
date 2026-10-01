@@ -41,7 +41,7 @@ import { isUniqueViolationError, looksLikeInternalErrorLeak } from '@objectstack
 import { mapDataError } from './rest-server.js';
 // [#7821] The bulk path, imported only so the parity assertion can compare the
 // two paths' answers in one place. This file does not otherwise test it.
-import { sanitizeRowError } from './import-runner.js';
+import { sanitizeRowError } from '@objectstack/core';
 
 /**
  * The user data value MySQL embeds in its conflict message. Kept as a named

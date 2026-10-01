@@ -221,8 +221,16 @@ export const PackageSchema = lazySchema(() => z.object({
    * - `private`     — only the owner org can see and install it
    * - `org`         — all environments within the owner org
    * - `marketplace` — publicly discoverable in the ObjectStack Marketplace
+   *
+   * Defaults to `org`, the create-time default ruled for ADR-0006 v4 open
+   * question 2: a package published from one environment is installable in
+   * the owner organization's other environments. It is also what the cloud
+   * control plane gives a new package whose create request omits the key —
+   * `CreatePackageRequestSchema.visibility` stays optional, and neither
+   * `os package publish` nor `os plugin publish` sends it unless
+   * `--visibility` is passed — so the declared default and the runtime agree.
    */
-  visibility: PackageVisibilitySchema.default('private'),
+  visibility: PackageVisibilitySchema.default('org'),
 
   /** Primary category for marketplace filtering. */
   category: PackageCategorySchema.optional(),

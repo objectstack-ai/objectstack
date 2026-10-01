@@ -574,5 +574,25 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + 'carries a written `false` and is now hidden: recompile it, or delete the key. To hide a cube '
         + 'from the analytics API, write `public: false`.',
     },
+    {
+      key: 'marketplace/Package:visibility',
+      from: '"private"',
+      to: '"org"',
+      reason:
+        'A RULED declaration change: ADR-0006 v4 open question 2 (the visibility a package gets '
+        + 'when its creator names none) is ruled `org` (maintainer ruling 2026-09-30, letter A) — a '
+        + 'package published from one environment is installable in the owner organization\'s other '
+        + 'environments. The declared `private` was never the default a create path applied: the cloud control '
+        + 'plane gives a new package `org` when the create request omits `visibility`, '
+        + '`os package publish` used to send `org` itself, and `os plugin publish` sent its own '
+        + '`private` explicitly on every publish (it now omits the key unless `--visibility` is '
+        + 'passed, so a NEW plugin package gets the control plane\'s `org`). '
+        + '`CreatePackageRequestSchema.visibility` stays optional with NO default, so a create '
+        + 'request that omits the key still reaches the control plane without it. What moves for '
+        + 'a consumer who relied on `private`: a package ROW parsed through `PackageSchema` (or its '
+        + 'published JSON Schema) with no `visibility` now reads `org` where it read `private`. A '
+        + 'row or request that writes a value keeps it. To keep `private`, write '
+        + '`visibility: \'private\'` (on the CLI, `--visibility private`).',
+    },
   ],
 };

@@ -17,6 +17,15 @@
  * | `avg` over a `datetime` field | 200, `null` | 200, `2026` | 500 `DATABASE_ERROR` |
  * | `max` over a `number`, `min` over a `datetime`, `avg` over a `percent`, `max` over a `boolean` (the controls) | one answer | the same | the same |
  *
+ * …and the `sum` row, which one landing held back for triage's census answer
+ * and the next released, measured on `origin/main` `2821e9f15`:
+ *
+ * | query | InMemoryDriver | SQLite | PostgreSQL 16 |
+ * |:--|:--|:--|:--|
+ * | `sum` over a `json`, `text`, `select` or `tags` field | 200, `0` | 200, `0` | 500 `DATABASE_ERROR` (`function sum(json) does not exist`, `sum(text)`, `sum(character varying)`) |
+ * | `sum` over a `formula` field | 200, `0` | 400 `INVALID_FIELD`, the driver's words (no column) | the same |
+ * | `sum` over a `number`, `currency` or `boolean` (the controls) | one answer | the same | the same |
+ *
  * The refusals sit in the engine, in front of every driver, so one verdict
  * holds on each cell. InMemoryDriver's row is `@objectstack/objectql`'s
  * `engine-aggregate-field-type-door.test.ts` by construction (the door answers
@@ -52,22 +61,25 @@ const LEDGER = {
   fields: {
     title: { name: 'title', type: 'text' as const },
     amount: { name: 'amount', type: 'number' as const },
+    price: { name: 'price', type: 'currency' as const },
     pct: { name: 'pct', type: 'percent' as const },
     due: { name: 'due', type: 'datetime' as const },
     flag: { name: 'flag', type: 'boolean' as const },
+    status: { name: 'status', type: 'select' as const, options: OPTIONS },
     meta: { name: 'meta', type: 'json' as const },
     labels: { name: 'labels', type: 'tags' as const },
     picks: { name: 'picks', type: 'select' as const, multiple: true, options: OPTIONS },
     owners: { name: 'owners', type: 'lookup' as const, multiple: true, reference: TARGET },
+    expected: { name: 'expected', type: 'formula' as const, expression: 'record.amount * 2' },
   },
 };
 
 const TARGET_OBJECT = { name: TARGET, label: 'Target 20914', fields: { name: { name: 'name', type: 'text' as const } } };
 
 const ROWS = [
-  { id: 'd1', title: 'x', amount: 1, pct: 10, due: '2026-01-01T00:00:00.000Z', flag: true, meta: { a: 1 }, labels: ['p', 'q'], picks: ['a'], owners: ['t1'] },
-  { id: 'd2', title: 'x', amount: 2, pct: 20, due: '2026-02-01T00:00:00.000Z', flag: false, meta: { b: 1 }, labels: ['p'], picks: ['a', 'b'], owners: ['t1', 't2'] },
-  { id: 'd3', title: 'y', amount: 3, pct: 30, due: '2026-03-01T00:00:00.000Z', flag: true, meta: { a: 2 }, labels: ['q'], picks: ['b'], owners: ['t2'] },
+  { id: 'd1', title: 'x', amount: 1, price: 10, pct: 10, due: '2026-01-01T00:00:00.000Z', flag: true, status: 'a', meta: { a: 1 }, labels: ['p', 'q'], picks: ['a'], owners: ['t1'] },
+  { id: 'd2', title: 'x', amount: 2, price: 20, pct: 20, due: '2026-02-01T00:00:00.000Z', flag: false, status: 'b', meta: { b: 1 }, labels: ['p'], picks: ['a', 'b'], owners: ['t1', 't2'] },
+  { id: 'd3', title: 'y', amount: 3, price: 30, pct: 30, due: '2026-03-01T00:00:00.000Z', flag: true, status: 'a', meta: { a: 2 }, labels: ['q'], picks: ['b'], owners: ['t2'] },
 ];
 
 const agg = (fn: string, field: string, alias = 'v'): EngineAggregateOptions['aggregations'] =>
@@ -76,6 +88,10 @@ const agg = (fn: string, field: string, alias = 'v'): EngineAggregateOptions['ag
 /** The route the refusal names for min / max — asserted on the REST body, so it must land inside the door's 500-character bound. */
 const MIN_MAX_ROUTE = 'accepts a field of type number, currency, percent, rating, slider, progress, summary, '
   + 'date, datetime, time, boolean or toggle: aggregate a field of one of those types, or count the rows with count.';
+
+/** The route the refusal names for sum, read off the table's `sum` row — inside the same 500-character bound. */
+const SUM_ROUTE = 'sum accepts a field of type number, currency, rating, slider, progress, summary, boolean or toggle: '
+  + 'aggregate a field of one of those types, or count the rows with count.';
 
 interface Cell {
   id: 'sqlite' | 'pg' | 'mysql';
@@ -206,6 +222,33 @@ for (const cell of CELLS) {
         expect(reads.n - before, 'no read of the object').toBe(0);
       });
 
+      it('sum over a json, text, select, tags and formula field answers 400 INVALID_FIELD in the engine\'s words, naming the types sum accepts — no read', async () => {
+        // The row one landing held for the census, released: these pairs
+        // reached the driver then (0 on SQLite, a 500 on PostgreSQL; a formula
+        // the driver's own "no column" 400).
+        const before = reads.n;
+        const cases: ReadonlyArray<readonly [string, string]> = [
+          ['meta', 'json field — a structured-JSON value'],
+          ['title', 'text field'],
+          ['status', 'select field'],
+          ['labels', 'tags field — a multi-value field'],
+          ['expected', 'formula field'],
+        ];
+        for (const [field, declared] of cases) {
+          const label = `sum(${field})`;
+          const res = await query({ aggregations: agg('sum', field) });
+          expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(400);
+          expect(res.body.code, label).toBe('INVALID_FIELD');
+          expect(res.body.error, label).toContain(
+            `aggregations[0].field sums '${field}', a declared ${declared}, which the engine does not sum. The query was NOT run.`,
+          );
+          expect(res.body.error, label).toContain(SUM_ROUTE);
+          const err = await engine.aggregate(OBJECT, { aggregations: agg('sum', field) }).then(() => null, (e: any) => e);
+          expect({ code: err?.code, status: err?.status }, `engine.aggregate, ${label}`).toEqual({ code: 'INVALID_FIELD', status: 400 });
+        }
+        expect(reads.n - before, 'no read of the object — every refusal precedes the driver').toBe(0);
+      });
+
       it('CONTROL a pair the table accepts is served unchanged, from the driver', async () => {
         const before = reads.n;
         const answers: Record<string, unknown> = {};
@@ -213,6 +256,8 @@ for (const cell of CELLS) {
           ['max', 'amount', 'max amount'],
           ['avg', 'pct', 'avg pct'],
           ['sum', 'amount', 'sum amount'],
+          ['sum', 'price', 'sum price'],
+          ['sum', 'flag', 'sum flag'],
           ['max', 'flag', 'max flag'],
           ['min', 'due', 'min due'],
         ];
@@ -225,8 +270,10 @@ for (const cell of CELLS) {
           'max amount': Number(answers['max amount']),
           'avg pct': Number(answers['avg pct']),
           'sum amount': Number(answers['sum amount']),
+          'sum price': Number(answers['sum price']),
+          'sum flag': Number(answers['sum flag']),
           'max flag': Number(answers['max flag']),
-        }).toEqual({ 'max amount': 3, 'avg pct': 20, 'sum amount': 6, 'max flag': 1 });
+        }).toEqual({ 'max amount': 3, 'avg pct': 20, 'sum amount': 6, 'sum price': 60, 'sum flag': 2, 'max flag': 1 });
         expect(new Date(answers['min due'] as string).toISOString()).toBe('2026-01-01T00:00:00.000Z');
         expect(reads.n - before, 'the driver was asked, once per query').toBe(shapes.length);
       });

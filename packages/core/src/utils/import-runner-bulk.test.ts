@@ -21,7 +21,7 @@ import { runImport, type ImportProtocolLike } from './import-runner';
  */
 type FindArgs = Parameters<ImportProtocolLike['findData']>[0];
 type CreateArgs = Parameters<ImportProtocolLike['createData']>[0];
-import type { ExportFieldMeta } from './export-format.js';
+import type { ExportFieldMeta } from './import-field-meta.js';
 
 /**
  * The CANONICAL object `where` out of the slot's declared input union.

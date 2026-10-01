@@ -59,6 +59,7 @@ export type { WidgetBindingFinding, WidgetBindingSeverity } from './validate-wid
 export {
   validateDatasetMeasureAggregates,
   MEASURE_AGGREGATE_FIELD_TYPE_REFUSED,
+  DIMENSION_JSON_STORED_FIELD_REFUSED,
 } from './validate-dataset-measure-aggregates.js';
 export type { DatasetMeasureAggregateFinding } from './validate-dataset-measure-aggregates.js';
 
