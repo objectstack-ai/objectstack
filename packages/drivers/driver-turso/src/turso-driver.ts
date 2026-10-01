@@ -2695,10 +2695,39 @@ export class TursoDriver extends SqlDriver {
       // which columns a merge may write. A remote object never renames a
       // column (`remoteTableFor` refuses a renaming column map first), so the
       // list's physical names are the names the transport writes.
+      //
+      // [#21185] The same list now names the tenant column, so a call with no
+      // tenant context never re-parents the row it merges into. And a
+      // tenant-scoped call is fenced to its organization on this face as on
+      // the local one, in three steps, because this face had none of them:
+      //  - the caller's organization is stamped on the row on entry
+      //    (`injectTenantOnInsert`, the local face's own first step) — without
+      //    it the insert leg wrote a row with no organization, and the
+      //    "written" organization the fence compares against was empty;
+      //  - the transport puts the predicate inside the merge statement, so a
+      //    conflict on another organization's row (or a row with none) leaves
+      //    it untouched;
+      //  - the transport reads the landed row back under the written
+      //    organization exactly and answers `null` when the predicate left the
+      //    row alone, which is refused here with the local face's own
+      //    `UNIQUE_VIOLATION` sentence. The check sits outside the autonumber
+      //    re-seed wrapper: the refusal is not a counter collision, and nothing
+      //    was written to re-seed for.
+      const row: Record<string, any> = { ...data };
+      this.injectTenantOnInsert(object, row, options);
+      const fence = this.upsertTenantGuard(object, row, options);
       const insertOnly = [...this.insertOnlyUpsertColumns(object)];
-      const written = await this.writeRemoteRowWithAutoNumbers(object, { ...data }, options, (filled) =>
-        this.remoteTransport!.upsert(object, this.toRemoteWriteForms(object, filled), conflictKeys, table, insertOnly),
+      const written = await this.writeRemoteRowWithAutoNumbers(object, row, options, (filled) =>
+        this.remoteTransport!.upsert(
+          object,
+          this.toRemoteWriteForms(object, filled),
+          conflictKeys,
+          table,
+          insertOnly,
+          fence ? { column: fence.column, value: fence.value } : undefined,
+        ),
       );
+      if (written === null) throw this.upsertConflictRefusal(object, conflictKeys);
       return this.formatRemoteRow(object, written);
     }
     return super.upsert(object, data, conflictKeys, options);

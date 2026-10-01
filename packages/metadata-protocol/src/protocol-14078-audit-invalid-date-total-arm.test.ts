@@ -16,7 +16,7 @@
  *
  * ## Reachability is measured, not argued
  *
- * PR #14409 (landed `3ecb7dc1a`): mysql2 3.23.1 returns a module constant
+ * Commit `3ecb7dc1a`: mysql2 3.23.1 returns a module constant
  * literally named `INVALID_DATE` for a zero `DATETIME`; postgres-date 1.0.7
  * builds `new Date(NaN)` for every year in 275760..294276, a range Postgres
  * itself stores. The maintainer ruled option B on 2026-09-02, on all five arms

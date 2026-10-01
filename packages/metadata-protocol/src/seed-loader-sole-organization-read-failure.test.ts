@@ -14,7 +14,7 @@
  * organization" and "the read could not run" are different facts.
  *
  * The sibling probe on the objectql side, `ObjectQL.probeInstallOrganizations`,
- * had the SAME shape and was repaired by PR #9817 to bind the parameter and ask
+ * had the SAME shape and was repaired by commit 855591fe7 to bind the parameter and ask
  * the declared predicate. This site was missed by that pass; the repair here is
  * that repair, copied.
  *

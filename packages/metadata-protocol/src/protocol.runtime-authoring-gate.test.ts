@@ -560,7 +560,7 @@ describe('#6710 — gate activation is keyed on the declared authoring channel',
     // [#8310] That build-time reason is the carve-out's ONLY footing. It does
     // not also rest on the runtime door lacking the rule, and must not be
     // re-founded on one: `validateSecurityPosture` declares both authoring
-    // surfaces (PR #8390) and PR #8600 put `object` in its `runtimeTypes`, so
+    // surfaces (PR #8390) and commit 018d22cc3 put `object` in its `runtimeTypes`, so
     // it answers at the runtime publish door as well as on every CLI command.
     // What skips a `package-author` write is the CHANNEL —
     // `assertRuntimeAuthoringRules` returns early on it at every call site,

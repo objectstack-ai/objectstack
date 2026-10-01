@@ -440,14 +440,14 @@ describe('seed pointer-pair resolution (#11339 — referenceVia)', () => {
  * and therefore has no case here; the verdict and its reasons are recorded at
  * the declaration site (`sys-automation-run.object.ts`, `trigger_record_id`).
  *
- * ## Ordering: what heals, what still requires the target first (#11674)
+ * ## Ordering: what heals, what still requires the target first (commit 9a884c6e4)
  *
  * `sys_activity` heals an out-of-order pointer in pass 2 (the
  * order-independence case above). Whether these four inherit that was
  * measured rather than assumed, and the answer SPLIT — by dataset keyedness
  * first, then by the `required` flag on the id half:
  *
- *  - MEASURED, healed by #11674: all four are engine-owned rows with no
+ *  - MEASURED, healed by commit 9a884c6e4: all four are engine-owned rows with no
  *    natural key, so an honest seed dataset for them declares no
  *    `externalId`. Pass 2 used to back-fill by looking the row up BY its
  *    externalId, so a keyless deferral resolved the target and then had
@@ -464,7 +464,7 @@ describe('seed pointer-pair resolution (#11339 — referenceVia)', () => {
  *    DELETING the column from the row. The real engine enforces `required`
  *    on seed inserts (SEED_OPTIONS skips only state_machine), so the
  *    deferred insert is rejected before pass 2 can help — an independent,
- *    equally LOUD road that #11674's write-back does NOT clear. For those
+ *    equally LOUD road that commit 9a884c6e4's write-back does NOT clear. For those
  *    three, order the target dataset first; `sys_audit_log` (optional id
  *    half) is genuinely order-independent now.
  */
@@ -562,12 +562,12 @@ describe('pointer-pair adoption per object (#11386)', () => {
      * authoring for an engine-owned ledger — no natural key) had no such
      * handle, so the deferral resolved the target and then dropped the link
      * LOUDLY ("Deferred reference DROPPED … empty externalId"). That
-     * order-dependence is the defect #11674 names: the declared deferral
+     * order-dependence is the defect commit 9a884c6e4 heals: the declared deferral
      * property ("a pointer pair contributes no static ordering edge, pass 2
      * heals it") did not hold for exactly the datasets the four adopted
      * objects ship.
      *
-     * #11674's fix makes pass 2 write back through the internal id captured
+     * Commit 9a884c6e4's fix makes pass 2 write back through the internal id captured
      * at insert time, so the property now holds without requiring a key.
      * This case pins the healed behaviour; the keyed sibling below pins that
      * the pre-existing keyed path still heals identically (it was the
@@ -868,7 +868,7 @@ describe('pointer-pair adoption per object (#11386)', () => {
 });
 
 /**
- * The load-time EARLY SIGNAL for a deferral on a `required` column — #11674's
+ * The load-time EARLY SIGNAL for a deferral on a `required` column — commit 1cba33f16, the
  * B half, ruled by triage on 2026-08-24 as "warn (loud) by default", scoped to
  * the required subset, and ⛔ NOT allowed to change the accept set.
  *

@@ -140,6 +140,26 @@ export const EXPRESSION_METRIC_TYPES = new Set(['number', 'string', 'boolean']);
 const IDENTIFIER_PATH = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/;
 
 /**
+ * [#21129] The column a measure's `sql` aggregates, located on the object that
+ * declares it — `undefined` for `'*'` and for an expression. A bare identifier
+ * is a column of `parentTable`; a relationship path is its last segment, on
+ * the object the path's last hop reaches ({@link columnObjectOf}, the one hop
+ * resolver: the object this statement joins for that path). The aggregand's
+ * operand policy and the presenter both read the column here, so the column
+ * whose class shapes the statement and the column whose type presents its
+ * answer are one column.
+ */
+function measureColumnOf(
+  cube: Cube,
+  parentTable: string,
+  sql: string,
+  referenceOf: HopReference | undefined,
+): { readonly object: string; readonly field: string } | undefined {
+  if (sql === '*' || !IDENTIFIER_PATH.test(sql)) return undefined;
+  return { object: columnObjectOf(cube, parentTable, sql, referenceOf), field: sql.slice(sql.lastIndexOf('.') + 1) };
+}
+
+/**
  * [#20986] The joins ONE statement registers, keyed by alias: each join's SQL
  * and the object it reads — the object {@link resolvePathHops} named for that
  * hop, which `generateSql` then scopes the alias as. One value for both, so
@@ -710,16 +730,22 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // number whatever the column held; `min` / `max` answer a value OF the
     // column, so they are presented only when that column is declared numeric
     // (`driver-sql`'s `readPresentationKind` rule), asked through
-    // `declaredFieldType` — a host that cannot answer, or a relationship-path
-    // column, leaves the value as the client gave it. Expression metric types
+    // `declaredFieldType` on the object that declares the column
+    // ({@link measureColumnOf}) — [#21129] for a relationship path, the object
+    // its last hop reaches, as the statement joined it. A host that cannot
+    // answer leaves the value as the client gave it. Expression metric types
     // (`number` / `string` / `boolean`) are the author's SQL and stay as they
     // are. Rows are presented in place, as the driver presents its own.
     const declaredType = (ctx as DatasetScopedStrategyContext).declaredFieldType;
+    const referenceOf = relationshipReferenceOf(ctx);
     const numberMeasures = (query.measures ?? []).filter((member) => {
       const measure = this.lookupMember(cube, member, 'measure');
       if (!measure?.type || !Object.prototype.hasOwnProperty.call(AGGREGATE_ANSWER_KIND, measure.type)) return false;
       if (AGGREGATE_ANSWER_KIND[measure.type as AggregationFunction] === 'number') return true;
-      const sourceType = typeof declaredType === 'function' ? declaredType.call(ctx, objectName, measure.sql) : undefined;
+      const target = measureColumnOf(cube, objectName, measure.sql, referenceOf);
+      const sourceType = target && typeof declaredType === 'function'
+        ? declaredType.call(ctx, target.object, target.field)
+        : undefined;
       return sourceType !== undefined && NUMERIC_VALUE_TYPES.has(sourceType);
     });
     if (numberMeasures.length > 0 && Array.isArray(rows)) {
@@ -1225,21 +1251,18 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // answered `500` for a boolean `sum` the engine answers. The column's
     // class is the one predicate's, over the declaration the host relays for
     // the object the column lives on — the base object, or the object a
-    // relationship path's last hop reads ({@link columnObjectOf}, the one hop
-    // resolver). An expression, a column the host cannot describe, or a host
+    // relationship path's last hop reads ({@link measureColumnOf}, through the
+    // one hop resolver). An expression, a column the host cannot describe, or a host
     // that names no dialect gets no class or no policy, and is aggregated as
     // stored. The expression metric types are not aggregates and are never
     // wrapped.
+    const target = measureColumnOf(cube, parentTable, measure.sql, joins.referenceOf);
     const col = column === '*' || !Object.prototype.hasOwnProperty.call(AGGREGATE_ANSWER_KIND, measure.type)
       ? column
       : aggregandOperandSql(
           measure.type as AggregationFunction,
-          IDENTIFIER_PATH.test(measure.sql)
-            ? aggregandColumnClass(
-                declaredValueShapeResolver(ctx, columnObjectOf(cube, parentTable, measure.sql, joins.referenceOf))?.(
-                  measure.sql.slice(measure.sql.lastIndexOf('.') + 1),
-                ),
-              )
+          target
+            ? aggregandColumnClass(declaredValueShapeResolver(ctx, target.object)?.(target.field))
             : undefined,
           sqlDialectFor(ctx, parentTable),
           column,

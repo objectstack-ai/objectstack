@@ -7,7 +7,7 @@
  * ## The defect this closes
  *
  * `allowOrgOverride` and `allowRuntimeCreate` are orthogonal tiers. #6283 /
- * PR #6478 closed the OVERLAY tier for `flow`; the runtime-create tier stayed
+ * commit 474f131cf closed the OVERLAY tier for `flow`; the runtime-create tier stayed
  * open by design and never consulted the ORG dimension at all —
  * `SysMetadataRepository.put` stamps `organization_id: this.organizationId`
  * whatever the type is. So a Studio-authored item of an
@@ -317,7 +317,7 @@ describe('#6190 — org-scoped writes of non-org-overridable types are refused',
 
     it('R4 — flow: the original #6190 specimen, brand-new and org-scoped, is refused', async () => {
         // No artifact is shadowed here, so this is the `allowRuntimeCreate`
-        // tier — the tier PR #6478 deliberately left open and the tier the
+        // tier — the tier commit 474f131cf deliberately left open and the tier the
         // tenant scenario in the issue actually uses (authoring a NEW flow in
         // Studio, not overlaying a packaged one).
         const { protocol, rows } = makeProtocol([], 'env_prod');

@@ -184,7 +184,7 @@ runRepositoryContractTests('SysMetadataRepository', makeRepo, {
   // type — is not, on purpose (packaged objects are locked); `'dashboard'` is.
   primaryType: 'view',
   secondaryType: 'dashboard',
-  // #10842 — the `declaredDivergences: { resumableWatch: '#10842' }` line that
+  // commit f334d662e — the `declaredDivergences: { resumableWatch: … }` line that
   // stood here is GONE, deleted by the PR that made invariant 6 true for this
   // implementation: `watch(filter, since)` now replays from
   // `sys_metadata_history` before going live. The pin clause the declaration
@@ -252,7 +252,7 @@ describe('SysMetadataRepository — what the contract suite does and does not re
 });
 
 /**
- * #10842 — invariant 6's TWO halves, pinned where they are implementation
+ * Commit f334d662e — invariant 6's TWO halves, pinned where they are implementation
  * facts rather than table entries.
  *
  * The shared suite asserts the floor every `MetadataRepository` owes and
@@ -451,7 +451,7 @@ describe('SysMetadataRepository — invariant 6, both halves (#10842)', () => {
 });
 
 /**
- * #11021 — what `close()` owes a pending iterator.
+ * Commit 7d81c889f — what `close()` owes a pending iterator.
  *
  * `close()` used to model shutdown as a metadata EVENT: it broadcast a
  * synthetic `{ seq: -1, ref: { org: '', type: 'view', name: '_close' } }`

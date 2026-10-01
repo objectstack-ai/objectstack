@@ -42,7 +42,7 @@
  *     registry entry, IN the static spelling contract, still advertised and
  *     still mintable. This is the discriminating control: without it the change
  *     cannot show its narrowing is narrow;
- *  3. **withdrawn** (`policy`, `data`, `package`, `kind` — and, since #10485,
+ *  3. **withdrawn** (`policy`, `data`, `package`, `kind` — and, since commit 35ad101bc,
  *     `theme`, whose carrier retired out of the spelling contract while legacy
  *     stored rows can still hold the key live) — live `SchemaRegistry` keys,
  *     in NEITHER half of the static contract, advertised `false` and refused.
@@ -161,11 +161,11 @@ const SAMPLE: Array<{
         // UNREGISTERED_KIND_SCHEMAS, and the "behaves as advertised" case
         // drives this body through a real write, so a malformed one would
         // 422 and misread the ADVERTISEMENT door this suite measures.
-        // (`theme` held this slot until #10485 retired the themes surface.)
+        // (`theme` held this slot until commit 35ad101bc retired the themes surface.)
         item: { name: 'probe_webhook', label: 'Probe', object: 'task', triggers: ['create'], url: 'https://example.com/hook' },
     },
     {
-        // [#10485] `theme` moved from class 2 to class 3: the carrier retired
+        // [commit 35ad101bc] `theme` moved from class 2 to class 3: the carrier retired
         // out of the spelling contract, while a legacy environment's stored
         // rows can still hold the key in the live set — so it must be
         // advertised `false` and refused at the mint door, like the four.
@@ -250,7 +250,7 @@ describe('#8421 — the read door and the mint door agree, across all three clas
         // no hand-written spec-valid body here, so they are pinned on the door
         // that this change actually moved — the advertisement. Breaking any of
         // them is the one outcome that would make this change worse than the
-        // defect it closes. (`theme` left the set at #10485.)
+        // defect it closes. (`theme` left the set at commit 35ad101bc.)
         const { protocol } = makeProtocol();
         const listing = await protocol.getMetaTypes();
         for (const kind of [

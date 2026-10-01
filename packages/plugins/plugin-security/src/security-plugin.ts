@@ -37,6 +37,7 @@ import {
   d10NarrowingStatement,
 } from './explain-engine.js';
 import { declaredComparisonColumns } from './declared-comparison-columns.js';
+import { storedFormCheckJudge } from './rls-check-stored-form.js';
 import type { ExplainDecision, ExplainOperation } from '@objectstack/spec/security';
 import type { II18nService, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
 
@@ -3290,9 +3291,20 @@ export class SecurityPlugin implements Plugin {
           // the two raw values and the write admitted and stored. No map (a
           // schema that cannot be loaded) judges values only, as before.
           const checkFieldOptions = await this.writeCheckFieldOptions(opCtx.object);
+          // [#21109, ruling A] Every image is judged as the row it will be
+          // STORED as: on each declared `date` / `datetime` / `time` column,
+          // the image's value and the check's comparands go through
+          // `@objectstack/core`'s `temporalStorageForm`, the rule the drivers
+          // write and compare that column by, so the write and the read the
+          // same policy scopes give one answer for one row. This is the one
+          // step for every image this block judges, here and in the engine's
+          // seams (`rls-check-stored-form.ts` says what it does and does not
+          // carry). A refusal is still attributed to `checkParts`, the
+          // compiled policies as they are.
+          const judgeStoredForm = storedFormCheckJudge(checkParts, checkFieldOptions);
           const satisfiesCheck = (image: Record<string, unknown>): boolean => {
             try {
-              return checkParts.every((f) => matchesFilterCondition(image as any, f as any, checkFieldOptions));
+              return judgeStoredForm(image);
             } catch (e) {
               const refusal = crossFieldClassRefusalCarriedBy(e);
               if (refusal && checkFieldOptions?.fields) {

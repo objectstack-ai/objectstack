@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #6483 — the nine ADR-0005 whitelist divergences, rolled back. The WRITE
+ * Commit ee58392e1 — the nine ADR-0005 whitelist divergences, rolled back. The WRITE
  * PATH now says what the ADR's amendment table has said since 2026-05-22.
  *
  * `DEFAULT_METADATA_TYPE_REGISTRY` carried `allowOrgOverride: true` on nine
@@ -24,7 +24,7 @@
  *     (`getMetadataTypeSchema`), so (b) — the written rationale — is the
  *     discriminating clause, and none of the three carries one.
  *
- * The 2026-08-08 maintainer ruling on #6483 settled all nine: `permission` /
+ * The 2026-08-08 maintainer ruling recorded in commit ee58392e1 settled all nine: `permission` /
  * `tool` / `skill` roll back unconditionally; the other six roll back unless
  * live org-scoped overlay rows AND a complete admission pair exist. Measured
  * in-repo: zero committed `sys_metadata` overlay rows for any of the nine

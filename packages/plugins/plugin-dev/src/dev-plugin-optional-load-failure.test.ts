@@ -280,7 +280,7 @@ describe('DevPlugin — an optional service that is installed and fails to const
     const line = allLines(ctx).find((l) => l.includes('REST API NOT enabled'));
     expect(line, 'the no-auth refusal is reported on its own terms').toBeDefined();
     expect(line).toContain('no auth is mounted');
-    expect(line).toContain('#3963');
+    expect(line).toContain('always denied, with no setting that turns that off');
     expect(line).toContain('NOT a missing-package problem');
     // And the false claim it used to emit instead is gone.
     expect(allLines(ctx).some((l) => l.includes('@objectstack/rest not installed'))).toBe(false);
