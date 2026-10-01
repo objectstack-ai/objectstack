@@ -23,16 +23,16 @@
 //     `@objectstack/service-automation`, none of which the BUILD config's
 //     program has ever contained, so `pnpm check:type-source-resolution` goes
 //     from exit 0 to exit 1 -- "NEW dist-resolved type import(s) since this
-//     entry was measured" -- against a registry that was SHRINK-ONLY and whose
-//     own message ruled that widening the entry was not the fix. That gate read
+//     entry was measured" -- against a registry that is SHRINK-ONLY and whose
+//     own message rules that widening the entry is not the fix. That gate reads
 //     each package's `tsconfig.json` and only that one, so the excluded region
-//     put back HERE left its population unchanged.
+//     put back HERE leaves its population unchanged.
 //
 // The remediation it asked for -- `paths` rules pointing those four
 // dependencies at their source -- was a separate card by that gate's own ruling
 // ("Remediation is per-package and lands as its own card, because the switch is
 // not free"), and this file did not pre-empt it. That gate was retired on
-// 2026-09-18 (#18373), so nothing asks for that remediation now.
+// 2026-09-18 (#18373), so no gate asks for that remediation now.
 //
 // What differs from the build config, and what deliberately does NOT:
 //   - `exclude` drops `**/*.test.ts` and nothing else. That single subtraction

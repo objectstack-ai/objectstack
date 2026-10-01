@@ -31,8 +31,8 @@
  * `./email-plugin.js` extension and fails identically to `formula`'s
  * extensionless `./registry`. Adding extensions to the redirected packages
  * cannot fix this, and neither could removing the `paths` blocks — those were
- * mandated by `pnpm check:type-source-resolution` (retired since, on
- * 2026-09-18 — #18373), which was green throughout. So was
+ * mandated by `pnpm check:type-source-resolution` (retired on 2026-09-18 —
+ * #18373), which was green throughout. So was
  * `pnpm check:test-source-alias`. The two gates covered the **types** axis and
  * the **vitest** axis; the axis that broke — a CLI child's **runtime** module
  * resolution — was covered by neither, which is why the defect lived on `main`
