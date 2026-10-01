@@ -56,6 +56,7 @@ export * from './utils/datetime.js';
 // runtime dependencies, and a copy per face is how one `sum` came to answer
 // two doubles.
 export * from './utils/compensated-sum.js';
+export * from './utils/json-membership-sql.js';
 
 // Export the shared batched-write helper (framework#2678)
 export * from './utils/bulk-write.js';
