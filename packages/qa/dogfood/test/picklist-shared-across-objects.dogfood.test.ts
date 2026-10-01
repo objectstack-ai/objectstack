@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // GOLDEN REGRESSION — one shared picklist, two objects, two packages, booted for
-// real and driven through the HTTP doors a client uses (ADR-0136 D2.4).
+// real and driven through the HTTP doors a client uses (the ADR-0054 runtime proof).
 //
 // The picklist kind lets several select fields name ONE option list
 // (`Field.select({ picklist: 'industry' })`) instead of copying `options` into
