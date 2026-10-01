@@ -27,6 +27,16 @@
  * (`audit-log-field-values.dogfood.test.ts`); here the double stands in for it
  * so every fail-closed branch is reachable.
  *
+ * ## Rows no non-system door serves
+ *
+ * [#21175] The ledger's parent-record read gate (`audit-log-read-visibility.ts`)
+ * composes on the same chain: a row about a record that no longer exists — the
+ * `delete` row, and the deleted record's other rows — or one naming a record
+ * the gate cannot judge is not served to any caller that is not system
+ * context. What the redaction does with such a row is therefore pinned on the
+ * seam's own function ({@link redactAuditLogRows}) over the row at rest, and
+ * the read path pins that it is not served at all.
+ *
  * ⚠️ Disclosure discipline: no test title states a value.
  */
 
@@ -37,6 +47,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import type { EngineQueryOptions } from '@objectstack/spec/data';
 
 import { AuditPlugin } from './audit-plugin.js';
+import { redactAuditLogRows } from './audit-log-field-redaction.js';
 
 const LEDGER = 'sys_audit_log';
 const ITEM = 'alr_item';
@@ -116,6 +127,15 @@ describe('[#21155] sys_audit_log before/after snapshots are served through the s
     engine.find(LEDGER, { orderBy: [{ field: 'created_at', order: 'asc' }], context, ...extra }) as Promise<Row[]>;
   const byId = (rows: Row[], key: keyof typeof rowIds) => rows.find((r) => r.id === rowIds[key]);
   const mirrorRows = (rows: Row[]) => rows.filter((r) => [rowIds.created, rowIds.updated, rowIds.deleted].includes(r.id));
+  /** The rows of the live record the read path serves a non-system reader. */
+  const LIVE_MIRROR_ROWS = 2;
+  /** One row as stored, through the redaction seam's own function, for `context`. */
+  const redactedAtRest = async (key: keyof typeof rowIds, context: Record<string, unknown>): Promise<Row> => {
+    const row = (await engine.findOne(LEDGER, { where: { id: rowIds[key] }, context: SYS })) as Row;
+    expect(row?.id, `the ${key} row is at rest`).toBe(rowIds[key]);
+    await redactAuditLogRows([row], security, context);
+    return row;
+  };
 
   beforeAll(async () => {
     kernel = new ObjectKernel({ logger: { level: 'silent' } });
@@ -198,8 +218,8 @@ describe('[#21155] sys_audit_log before/after snapshots are served through the s
 
   it('masked: no ledger row served to the reader carries the stored value of a field it is served masked', async () => {
     const rows = mirrorRows(await read(MASKED_READER));
-    expect(rows).toHaveLength(3);
-    const blob = JSON.stringify(rows);
+    expect(rows).toHaveLength(LIVE_MIRROR_ROWS);
+    const blob = JSON.stringify([...rows, await redactedAtRest('deleted', MASKED_READER)]);
     for (const v of MASKED_VALUES) expect(blob).not.toContain(v);
   });
 
@@ -214,7 +234,8 @@ describe('[#21155] sys_audit_log before/after snapshots are served through the s
       expect(updated).not.toHaveProperty('f_masked');
       expect(updated).toHaveProperty('f_open');
     }
-    const deleted = snap(byId(rows, 'deleted'), 'old_value');
+    expect(byId(rows, 'deleted')).toBeUndefined();
+    const deleted = snap(await redactedAtRest('deleted', MASKED_READER), 'old_value');
     expect(deleted).not.toHaveProperty('f_masked');
     expect(deleted).toHaveProperty('f_open', V.openDel);
   });
@@ -223,13 +244,13 @@ describe('[#21155] sys_audit_log before/after snapshots are served through the s
 
   it('not served: no ledger row served to the reader carries a value of a field it may not read', async () => {
     const rows = mirrorRows(await read(UNSERVED_READER));
-    expect(rows).toHaveLength(3);
-    const blob = JSON.stringify(rows);
+    expect(rows).toHaveLength(LIVE_MIRROR_ROWS);
+    const blob = JSON.stringify([...rows, await redactedAtRest('deleted', UNSERVED_READER)]);
     for (const v of UNSERVED_VALUES) expect(blob).not.toContain(v);
   });
 
   it('not served: the field masked for another reader is not withheld from this one', async () => {
-    const blob = JSON.stringify(mirrorRows(await read(UNSERVED_READER)));
+    const blob = JSON.stringify([...mirrorRows(await read(UNSERVED_READER)), await redactedAtRest('deleted', UNSERVED_READER)]);
     for (const v of [...MASKED_VALUES, ...OPEN_VALUES]) expect(blob).toContain(v);
   });
 
@@ -238,11 +259,13 @@ describe('[#21155] sys_audit_log before/after snapshots are served through the s
   it('control: a reader served every field reads every snapshot byte-identical to the row at rest', async () => {
     const atRest = await read(SYS);
     const served = await read(CONTROL);
-    for (const key of ['created', 'updated', 'deleted'] as const) {
+    for (const key of ['created', 'updated'] as const) {
       for (const col of ['old_value', 'new_value'] as const) {
         expect(byId(served, key)?.[col]).toBe(byId(atRest, key)?.[col]);
       }
     }
+    const deleted = await redactedAtRest('deleted', CONTROL);
+    expect(deleted.old_value).toBe(byId(atRest, 'deleted')?.old_value);
   });
 
   // ── the doors the ledger is read through ───────────────────────────────
@@ -284,21 +307,21 @@ describe('[#21155] sys_audit_log before/after snapshots are served through the s
   });
 
   it('fail closed: a record-write row naming no parent object loses its snapshots', async () => {
-    const row = byId(await read(CONTROL), 'orphan');
-    expect(row).toBeTruthy();
+    expect(byId(await read(CONTROL), 'orphan')).toBeUndefined();
+    const row = await redactedAtRest('orphan', CONTROL);
     expect(row).not.toHaveProperty('old_value');
   });
 
   it('fail closed: a reader the service cannot answer masking for keeps no snapshot field value', async () => {
     const rows = await read(NO_QUERYABLE_READER);
-    const blob = JSON.stringify(mirrorRows(rows));
+    const blob = JSON.stringify([...mirrorRows(rows), await redactedAtRest('deleted', NO_QUERYABLE_READER)]);
     for (const v of [...MASKED_VALUES, ...UNSERVED_VALUES, ...OPEN_VALUES]) expect(blob).not.toContain(v);
     expect(snap(byId(rows, 'updated'), 'new_value')).toEqual({});
   });
 
   it('fail closed: an answer the contract does not define strips every snapshot of the read', async () => {
     const rows = await read(MALFORMED_READER);
-    expect(mirrorRows(rows)).toHaveLength(3);
+    expect(mirrorRows(rows)).toHaveLength(LIVE_MIRROR_ROWS);
     for (const row of rows) {
       expect(row).not.toHaveProperty('old_value');
       expect(row).not.toHaveProperty('new_value');
@@ -306,7 +329,8 @@ describe('[#21155] sys_audit_log before/after snapshots are served through the s
   });
 
   it('no answer: a row about an object the security service cannot resolve is served as written', async () => {
-    const row = byId(await read(UNSERVED_READER), 'foreign');
+    expect(byId(await read(UNSERVED_READER), 'foreign')).toBeUndefined();
+    const row = await redactedAtRest('foreign', UNSERVED_READER);
     expect(JSON.stringify(row)).toContain(V.foreign);
   });
 
