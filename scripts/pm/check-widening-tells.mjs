@@ -1071,23 +1071,23 @@
  *
  * The price, measured over the history provably present in this tree (shallow,
  * ONE graft boundary `2e8bd8322b` excluded, through {@link wideningTells} with
- * {@link headBlobSource} live and a known blob probed first): of the 1,978
- * non-merge commits touching `packages/spec/src`, 1,932 carry a non-test `.ts`
- * diff — 5,861 file diffs. The
- * merge-base version of this file and this one raise **4,914 rows against 4,914,
- * 0 differing commits** (T1 2,390 · T2 2,040 · T4 484) at `dfe5a0863f`. On PR
- * #20961's diff the rows go 3 → 2: the false T1 declines, both T3 stand. The
- * shape's population is 0 key lines on `packages/spec/src/**` at `dfe5a0863f`
- * and 1 at `d9d0d38cfc` — a reading this change makes for the next one, not a
- * repair of history.
+ * {@link headBlobSource} live and a known blob probed first), up to `a5bce40888`:
+ * of the 1,979 non-merge commits touching `packages/spec/src`, 1,933 carry a
+ * non-test `.ts` diff — 5,865 file diffs. The merge-base version of this file
+ * raises 4,915 rows and this one **4,914 — ONE differing commit, ONE row**:
+ * `315888d660` (PR #20961 as it landed), whose T1 at `component.zod.ts:932`
+ * declines. No other row moves and none begins firing (T1 2,390 · T2 2,040 ·
+ * T4 484 stand). On the PR's own diff `--declaration no` still exits 4, on the
+ * two true T3 rows alone. The shape's population on `packages/spec/src/**` is
+ * that one key line (`a5bce40888`).
  *
  * ⚠️ The quiet direction this buys, stated rather than left to be found: a body
  * that MUTATES the instance it hands back (`schema._zod.def = …`) reads as
  * transparent, and nothing a text reader sees says otherwise. Measured over the
- * same surface's non-test `.ts`: 6 of 6,367 top-of-line definitions read
- * transparent at `dfe5a0863f` (`defineBook`, `defineDataset`, `asItem`,
- * `asInput`, `asApp`, `withRefusalConversions`) and 8 at `d9d0d38cfc` (the two
- * slot markers added), none of them mutating what it returns. #17955's own
+ * same surface's non-test `.ts` at `a5bce40888`: 8 of 6,388 top-of-line
+ * definitions read transparent (`componentSlot`, `retiredComponentSlot`,
+ * `defineBook`, `defineDataset`, `asItem`, `asInput`, `asApp`,
+ * `withRefusalConversions`), none of them mutating what it returns. #17955's own
  * residual — a live arm chained on the CLOSING line of a multi-line tombstone —
  * reaches inside a wrapper unchanged (`)).or(z.string()),` declares no key),
  * with the same population of 0 and the same overturn condition.
