@@ -54,12 +54,13 @@ import { asAcceptedSqlDialect, type AcceptedSqlDialect } from './text-match-sql.
  * `IObjectQLEngine`, so the `Partial<>` around it is not decoration — it is
  * what keeps this seam usable against an engine that is not ObjectQL.
  * `judgeFilter` (#20157) is optional on the contract itself, by ruling, and
- * the auto-bridge probes it the same way.
+ * the auto-bridge probes it the same way. So is `hasObjectMiddleware`
+ * (#21080), whose absence the bridge below reads as "cannot say".
  */
 type DataEngineLike =
   Pick<IDataEngine, 'aggregate'>
   & Partial<Pick<IDataEngine, 'execute' | 'resolveEffectiveDatasource' | 'getDriverForObject'>>
-  & Partial<Pick<IObjectQLEngine, 'getObject' | 'judgeFilter'>>;
+  & Partial<Pick<IObjectQLEngine, 'getObject' | 'judgeFilter' | 'hasObjectMiddleware'>>;
 
 /**
  * The slice of the `IDataDriver` CONTRACT the analytics layer consumes —
@@ -1207,6 +1208,43 @@ export class AnalyticsServicePlugin implements Plugin {
       }
     };
 
+    /**
+     * [#21080] The data engine's answer to "is a middleware registered for
+     * this object?" (`IObjectQLEngine.hasObjectMiddleware`), resolved per call
+     * like every bridge above, so plugin order does not matter.
+     *
+     * Asked by `NativeSQLStrategy`, which runs no engine operation and so no
+     * engine middleware: it declines an object this answers `true` for, and the
+     * engine serves it. It FAILS CLOSED: no engine, or an engine without the
+     * member, answers `undefined`, which declines too. The cost of that tier is
+     * the native path for every object on such an engine — its queries are
+     * served by the ObjectQL strategy, and a query that strategy cannot serve
+     * is refused. Said once, at `warn`: the answers stay correct, only the
+     * fast path is gone.
+     */
+    let reportedEngineWithoutMiddlewareAnswer = false;
+    const hasObjectMiddleware = (objectName: string): boolean | undefined => {
+      let svc: DataEngineLike | undefined;
+      try {
+        svc = ctx.getService<DataEngineLike>('data');
+      } catch {
+        return undefined;
+      }
+      if (!svc) return undefined;
+      if (typeof svc.hasObjectMiddleware === 'function') return svc.hasObjectMiddleware(objectName);
+      if (!reportedEngineWithoutMiddlewareAnswer) {
+        reportedEngineWithoutMiddlewareAnswer = true;
+        ctx.logger.warn(
+          `[Analytics] The "data" engine has no hasObjectMiddleware (IObjectQLEngine.hasObjectMiddleware), so ` +
+            `NativeSQLStrategy cannot tell which objects carry a middleware registered for them (first asked: ` +
+            `"${objectName}"). It declines every query, and the ObjectQL strategy serves them through the engine, ` +
+            `where those middlewares run; a query that strategy cannot serve is refused. Register ObjectQLPlugin's ` +
+            `engine as "data" to keep the native path for objects without one. Reported once.`,
+        );
+      }
+      return undefined;
+    };
+
     const config: AnalyticsServiceConfig = {
       cubes: this.options.cubes,
       logger: ctx.logger,
@@ -1297,6 +1335,10 @@ export class AnalyticsServicePlugin implements Plugin {
       // [#19995, ruling C] The executing engine's own `where` admission — see
       // `judgeFilter` beside the `executeAggregate` auto-bridge above.
       judgeFilter,
+      // [#21080] The data engine's per-object middleware answer — see
+      // `hasObjectMiddleware` above. Wired whoever executes raw SQL: the
+      // middlewares live in the engine either way.
+      hasObjectMiddleware,
       // ADR-0062 D6 — a federated object carries an `external` block (ADR-0015).
       // Reported so NativeSQLStrategy declines it (its hand-compiled FROM would
       // hit the wrong physical table) and the driver-correct ObjectQL path runs.

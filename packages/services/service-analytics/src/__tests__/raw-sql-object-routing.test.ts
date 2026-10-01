@@ -101,6 +101,9 @@ function fakeEngine(opts: {
           [alias]: r[opts.shape.alias],
         }));
       },
+      // [#21080] The engine this double models answers which objects carry a
+      // middleware registered for them; none of this file's objects does.
+      hasObjectMiddleware: () => false,
       getObject: (name: string) => {
         const fields = opts.schema[name];
         if (!fields) return undefined;
