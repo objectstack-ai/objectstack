@@ -66,7 +66,7 @@
       "title": "Create → read → update → delete a record through the console UI",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -94,7 +94,7 @@
         "open the record's History tab (screenshot first, then read entries)",
         "clone the record: POST /api/v1/data/showcase_account/<id>/clone (optionally with {overrides:{name:'os-qa-<runid>-clone'}}); capture the 201 result (new id ≠ source, sourceId, record); re-read the clone via GET /api/v1/data/showcase_account/<new id>",
         "RLS probe on clone: as a persona WITHOUT read on the source row (a permission-zoo persona, or a non-owner under owner-RLS), POST the same clone route and capture the refusal — expect 404 RECORD_NOT_FOUND, never a silent duplicate (record blocked(fixture) if no non-reading persona is bound on this boot)",
-        "delete via the row/detail action; confirm the dialog; re-read via the filtered GET",
+        "delete via the row/detail action; confirm the dialog; re-read via the filtered GET. ⚠️ If clause 7's recipe gave the member an own-row invoice pointing at THIS account, the delete answers 409 DELETE_RESTRICTED: the invoice's account lookup is required, and the engine turns a required set_null into restrict (packages/objectql/src/engine.ts). Point that invoice at a seeded account instead (the recipe's step 5 says so)",
         "reload the list view and confirm final state"
       ],
       "acceptance": [
@@ -135,7 +135,7 @@
           "evidence": "re-read JSON + search response"
         },
         {
-          "clause": "clone (POST /data/:object/:id/clone, gated by enable.clone default-on) returns 201 with a NEW id and the source's field VALUES copied, but engine-owned columns (id, audit, autonumber, formula, summary) and readonly columns (e.g. approval_status) RE-DERIVED not carried, and the clone is owned by the CLONER — not the source's owner",
+          "clause": "clone (POST /data/:object/:id/clone, gated by enable.clone default-on) returns 201 with a NEW id and the source's field VALUES copied, but engine-owned columns (id, audit, autonumber, formula, summary) and readonly columns RE-DERIVED not carried, and the clone is owned by the CLONER — not the source's owner. ⚠️ The readonly half is UNOBSERVABLE on the stock seed: showcase_account declares no readonly column, no showcase object has an approval_status, and the showcase's one readonly field (showcase_contact.lead_score) is null on every seeded row, so carried and re-derived read identically. Record that half blocked(fixture), or first give a contact a lead_score system-side (an objectql write in {isSystem: true} context sets a readonly field, as access-security.write-path-guards negative[1] does) and clone that contact",
           "oracle": "api",
           "verify": "the 201 result carries {id (new ≠ sourceId), sourceId, record}; field-by-field diff shows business values copied and system/readonly columns re-derived (#3043 CLONE_STRIP_FIELDS + the engine's create-side static-readonly strip, #14147); owner_id resolves to the signed-in cloner (the clone is a create in the caller's context — packages/metadata-protocol/src/protocol.ts cloneData)",
           "evidence": "clone response + source-vs-clone field diff + owner_id read"
@@ -203,6 +203,12 @@
           "date": "2026-08-24",
           "change": "clause 7's cross-area recipe pointer became a real reference. The persona it needs — qa-contributor-bound-member — is owned by areas/search.json, and until now no spelling existed that the validator accepted, so the pointer lived in knownGaps prose and clause 7's verify text: readable by a runner, invisible to check:platform-checklist, and free to rot if the recipe were ever renamed or moved. The maintainer ruled option A on 2026-08-22 (#10593 gap 2, area-qualified references), so this item now carries fixtures.provisioning.use = `search:qa-contributor-bound-member` and the gate resolves it. What a RUN does is unchanged in every particular: the same recipe, replayed from the same file, unblocking the same single clause on the same object and row — clause 7 was already instructed to drive showcase_invoice with this persona, and no step, clause, oracle, persona or acceptance text changed. The revision is bumped because the item's fixtures did, and because a run record pinning revision 6 was scored against an item whose recipe reference the tooling could not check",
           "ref": "#10593"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-01",
+          "change": "checklist-accuracy findings of QA run #21056: acceptance[6]'s readonly-column half is unobservable on the stock seed (no readonly column on showcase_account, no approval_status anywhere, lead_score null on every seeded contact) — recorded with the system-side way to make it observable; steps[8] warns that an own-row invoice pointing at the run's account turns the delete into 409 DELETE_RESTRICTED",
+          "ref": "#21060"
         }
       ]
     },

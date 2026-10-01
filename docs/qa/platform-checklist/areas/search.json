@@ -45,7 +45,7 @@
         {
           "step": 5,
           "call": "give the member a row of their OWN: as the member, POST /api/v1/data/showcase_invoice (contributors hold allowCreate)",
-          "expect": "2xx, and that row IS visible to them on a re-read — turning the subset from empty into a proper non-empty one. This is what makes the restriction provably SUBTRACTIVE rather than a blackout; without it, zero-hits and no-access are indistinguishable.",
+          "expect": "2xx, and that row IS visible to them on a re-read — turning the subset from empty into a proper non-empty one. This is what makes the restriction provably SUBTRACTIVE rather than a blackout; without it, zero-hits and no-access are indistinguishable. Point the invoice's required `account` at a SEEDED account, never at one a consuming item later deletes: a required lookup turns set_null into restrict, so that delete answers 409 DELETE_RESTRICTED (records-forms.crud-roundtrip met it in QA run #21056).",
           "source": "ContributorPermissionSet.objects.showcase_invoice.allowCreate === true (permission-sets.ts); the seeded owner emails hold no credential, so borrowing a seeded owner is not an option — this is why the own-row is CREATED"
         }
       ],
