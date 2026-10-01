@@ -19,8 +19,9 @@
  *   4. Every door that carries a dataset refuses it: `DatasetSchema`, the
  *      `dataset` write-door binding, and `defineStack()` (with its
  *      STACK_SCHEMA_INVALID / 422 envelope).
- *   5. ADR-0087: the family's D3 entry is registered under step 18; no key
- *      left the shape, so no `RETIRED_KEYS_BY_MAJOR` row.
+ *   5. ADR-0087: the family's D3 entry is registered under step 18 and linked
+ *      to the one D2 repair (a `count` measure's empty `field`); no key left
+ *      the shape, so no `RETIRED_KEYS_BY_MAJOR` row.
  *
  * On the assertion set: a schema refusal raises a `ZodError` whose issues carry
  * `code` and `path` but no ADR-0112 `status` — that envelope belongs to the
@@ -223,11 +224,15 @@ describe('dataset field — every door that carries a dataset refuses a non-colu
 });
 
 describe('dataset field — ADR-0087 registration', () => {
-  it('carries the family D3 entry under step 18, with no retired-key row', () => {
+  it('carries the family D3 entry under step 18, linked to its one D2 repair, with no retired-key row', () => {
     const d3 = MIGRATIONS_BY_MAJOR[18]!.semantic.find((s) => s.id === D3_ID);
     expect(d3, 'the family D3 entry').toBeDefined();
     expect(d3!.reason.length).toBeGreaterThan(0);
     expect(d3!.acceptanceCriteria.length).toBeGreaterThan(0);
+    // The D2 half — a `count` measure's empty `field` — is pinned on a stored
+    // row in `conversions/dataset-count-measure-empty-field-removed.test.ts`.
+    expect(d3!.conversionIds).toEqual(['dataset-count-measure-empty-field-removed']);
+    expect(MIGRATIONS_BY_MAJOR[18]!.conversionIds).toContain('dataset-count-measure-empty-field-removed');
     // No key left the shape, so no `${defKey}:${name}` entry is owed.
     expect(RETIRED_KEYS_BY_MAJOR[18]!.filter((k) => /Dataset(Dimension|Measure):field$/.test(k))).toEqual([]);
   });

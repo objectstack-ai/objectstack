@@ -24,9 +24,11 @@ is `'*'` on a dimension.
 Why: the dataset layer was declared to take no raw SQL (ADR-0021 "zero raw SQL /
 zero raw expressions") and `field` was documented as a field or a relationship
 path, but it was a bare string and parsed anything. The analytics dataset door
-already refused a non-column `field` on every query (`PERMISSION_DENIED` / 403,
+already refused an expression `field` on every query (`PERMISSION_DENIED` / 403,
 inline or saved), so such a dataset could be saved and never answered — declared,
-never enforced (ADR-0049). The accept set is the one the cube members a dataset
+never enforced (ADR-0049). That door never judged an empty `field`: it skips one,
+which is how a `count` measure with `field: ''` kept counting rows on SQLite's
+native-SQL path (the D2 repair below). The accept set is the one the cube members a dataset
 compiles to already hold: the dataset compiler copies `field` into the member's
 `sql` verbatim, and both now read one shared declaration. `'*'` is refused on a
 dimension because grouping by every column is no axis — both analytics strategies
@@ -66,7 +68,11 @@ keep the bucket as a field of the object and name that field.
 
 **The one-line fix:** parse each dataset; every refusal at `…field` is one member
 to change — name the column, omit `field` on a plain count (never `field: ''`),
-or move the computation to a measure `filter` or a `derived` measure.
+or move the computation to a measure `filter` or a `derived` measure. The one
+mechanical case is done for you: `os migrate meta --from 17` lists, and every
+stored-row rehydration replays, the D2 conversion
+`dataset-count-measure-empty-field-removed`, which drops a `count` measure's empty
+`field` (it still counts rows). Nothing else has a mechanical rewrite.
 
 **What an author who still writes it sees.** `DatasetSchema`, `defineStack({
 datasets })` (`STACK_SCHEMA_INVALID` / 422), the `dataset` write door and
@@ -82,11 +88,16 @@ with the prescription. `tsc` does not: the key's type is still `string`.
   cube layer's `CUBE_MEMBER_SQL` is that same `RegExp`. A dimension's pattern is
   the same column path without the `'*'` arm. A column reference parses
   byte-identically to before.
-- **ADR-0087.** The D3 entry `dataset-member-field-expression-refused`, with its
-  step-18 rationale fragment. No D2 conversion — an expression has no mechanical
-  rewrite into a column — and no `RETIRED_KEYS_BY_MAJOR` row: no key left the
-  shape, so the authorable-surface, api-surface and JSON-schema manifest ratchets
-  are unchanged.
+- **ADR-0087.** D2 carries the one lossless repair: the conversion
+  `dataset-count-measure-empty-field-removed` (`retiredFromLoadPath`, so an author
+  is refused at parse while stored rows and `os migrate meta` replay it) drops a
+  `count` measure's `field: ''`, which compiles to `COUNT(*)` without it. The D3
+  entry `dataset-member-field-expression-refused`, linked to that conversion and
+  with its step-18 rationale fragment, carries the rest — a non-count measure or a
+  dimension with `''` and every expression have no mechanical rewrite into a
+  column. No `RETIRED_KEYS_BY_MAJOR` row: no key left the shape, so the
+  authorable-surface, api-surface and JSON-schema manifest ratchets are
+  unchanged.
 - **Liveness.** The `dataset` ledger rows `dimensions.field` and
   `measures.field` stay `live`, re-verified, with the narrowing recorded.
 - **Docs.** The `ui/dataset` reference page is regenerated.
@@ -102,10 +113,13 @@ with the prescription. `tsc` does not: the key's type is still `string`.
   re-pinned: the service door's test builds them unparsed, and the REST route's
   test now expects the route's `400`.
 - Studio's dataset inspector (objectui) seeds a new dimension or measure row with
-  `field: ''`; a measure left that way as a plain count is now refused at save
-  with the prescription to omit the key. It parsed before; its query answered
-  `500` on the ObjectQL path (SQLite's native-SQL path happened to accept the
-  `COUNT()` it compiled to).
+  `field: ''`. A plain count saved that way parsed before; its query answered
+  `500` on the ObjectQL path, while SQLite's native-SQL path accepted the
+  `COUNT()` it compiled to. A row already stored that way is repaired on load by
+  the D2 conversion above. A NEW save of that shape is refused at the save door
+  with the prescription to omit the key, because the write path parses with the
+  current schema and replays no conversion; the producer-side change is
+  objectui's.
 - Out-of-repo authored datasets: NOT MEASURED.
 
-<!-- adr-0087: registered dataset-member-field-expression-refused -->
+<!-- adr-0087: registered dataset-member-field-expression-refused, dataset-count-measure-empty-field-removed -->

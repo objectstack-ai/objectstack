@@ -90,11 +90,13 @@ const DATASET_NO_SQL =
  *
  * The module header said so from the start ("no raw SQL"), and the field's own
  * description named a field or a relationship path, but the slot was a bare
- * `z.string()` and parsed anything. The runtime has refused a non-column
+ * `z.string()` and parsed anything. The runtime has refused an expression
  * `field` at the analytics dataset door since #21190 (`PERMISSION_DENIED` /
  * 403, inline or saved), so an expression could be saved and never answered —
  * declared, never enforced. That door stays, as defence in depth for a dataset
- * that reaches the service without meeting this parse.
+ * that reaches the service without meeting this parse. It never judged an
+ * empty `field` (it skips one); a stored `count` measure with `field: ''` is
+ * repaired on load by the D2 conversion `dataset-count-measure-empty-field-removed`.
  *
  * A measure admits the row wildcard `'*'` (a count's `COUNT(*)`); a dimension
  * does not — the restriction, and its measurement, are stated on
