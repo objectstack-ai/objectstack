@@ -43,9 +43,10 @@
  * one constant text, so it is held WHOLE under that bound, the remedy and the
  * "withheld" sentence included, by a pin that runs it through that function
  * (`json-column-operator-refusal.test.ts`). The diagnostic names the field four
- * times, so its length grows with the name; its order (what was refused, why,
- * then the remedy) leaves the any-of example last, the first thing a very long
- * name pushes past the bound when an author-marked refusal discloses it.
+ * times, so its length grows with the name. It is whole on the wire for a field
+ * name of up to 35 characters when an author-marked refusal discloses it. Its
+ * order (what was refused, why, then the remedy) leaves the any-of example
+ * last, so a longer name pushes that out first.
  *
  * ## The other half of the JSON column's contract
  *

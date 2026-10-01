@@ -10,13 +10,14 @@
  *
  * The door cuts a 4xx message of 500 characters or more to 499 plus an
  * ellipsis, keeping the head. The withheld message this driver throws on a
- * multi-value or JSON field was 748 characters, so on SQLite and PostgreSQL
- * alike the wire ended `Refused rather than compiled because the answe…`. No
- * caller read the end of the reason, or the sentence saying the field and the
- * operator were withheld and where the diagnostic went. The author-disclosed
- * text (the diagnostic, which the `'author'` provenance arm puts on the wire)
- * was 643 characters or more and was cut too, its any-of example first once
- * the field name passed about 20 characters.
+ * multi-value or JSON field was 748 characters. Measured with that text back in
+ * place, on SQLite and a live PostgreSQL 16.14 alike, the envelope ended
+ * `Refused rather than compiled because the answ…`: no caller read the end of
+ * the reason, or the sentence saying the field and the operator were withheld
+ * and where the diagnostic went. The author-disclosed text (the diagnostic,
+ * which the `'author'` provenance arm puts on the wire) was 643 characters for
+ * a field named `owners`. It was cut for every field name, and from a
+ * 10-character name on, the cut took the any-of example as well.
  *
  * ## What this file pins, per dialect cell
  *

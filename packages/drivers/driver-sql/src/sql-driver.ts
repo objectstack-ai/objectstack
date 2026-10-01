@@ -3329,9 +3329,11 @@ function unrenderableTextComparandError(
  * administrator's. The prescription survives redaction with PLACEHOLDER names —
  * the SHAPE is the repair, and the shape names nothing.
  *
- * [#21007] The TEXT is `@objectstack/core`'s, byte for byte what this builder
- * spelled before the move; the CONSTRUCTOR stays here, because the #8220
- * provenance seam it goes through is this driver's.
+ * [#21007] The TEXT is `@objectstack/core`'s; the CONSTRUCTOR stays here,
+ * because the #8220 provenance seam it goes through is this driver's.
+ * [#21067] That text no longer names this driver's storage form, since the
+ * engine and `driver-memory` print it too; the measured SQL consequences above
+ * live in the builder's docblock.
  */
 function jsonColumnOperatorError(field: string, op: string, bare: boolean, subtree?: unknown): Error {
   const { message, diagnostic } = jsonColumnOperatorRefusalText(field, op, bare);
