@@ -73,7 +73,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { Cube, DriverOptions, FilterCondition } from '@objectstack/spec/data';
-import { asciiCaseInsensitiveContains } from '@objectstack/spec/data';
+import { asciiCaseInsensitiveContains, lowerFilterCondition } from '@objectstack/spec/data';
 import type { AnalyticsQuery } from '@objectstack/spec/contracts';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
@@ -273,8 +273,13 @@ for (const [engineName, makeDriver] of ENGINES) {
     });
 
     it('driver-sql (the ObjectQL execute face) answers the JavaScript rows — the reference', async () => {
+      // [#20822] As the engine drives it: the `where` through the shared
+      // lowering first (its rule 3 totalises a `$not` operand), since the
+      // driver keeps no copy of that rewrite. No column here is a `datetime`.
       const wrong = await cellsDiffering(async (where) =>
-        ((await driver.find(TABLE, { where }, BYPASS)) as Array<{ label: string }>).map((r) => r.label).sort(),
+        ((await driver.find(TABLE, { where: lowerFilterCondition(where, { isDatetimeColumn: () => false }) }, BYPASS)) as Array<{ label: string }>)
+          .map((r) => r.label)
+          .sort(),
       );
       expect(wrong, `driver-sql: ${wrong.length} of ${GRID.length} cells differ`).toEqual([]);
     });

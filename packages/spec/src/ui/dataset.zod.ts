@@ -214,7 +214,16 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * and this docblock and the `describe` beneath it both said so.
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
-   * `db11afd49`; re-derived at that pin 2026-09-29 — `date-display.ts` is
+   * `e420df310`; re-derived at that pin 2026-09-30 — `dataset-format.ts` is
+   * byte-identical to `db11afd49`, so `formatMeasureDate` `:229-263`, its call
+   * at `:369` and its datetime arm `:259`-`:261` did not move and were re-READ
+   * in place, and `date-display.ts` changed (+68/-1, objectui `858eafb4f`,
+   * objectui#11141: a header comment naming the new `toDisplayEndDate` /
+   * `toInclusiveEndDay` exports, and those two functions added after
+   * `toDisplayDate`, above every anchor here), so `formatDate` `378-413` ->
+   * `445-480` and the ±7-day fallback `332` -> `399` MOVED byte-identical,
+   * re-READ with the same reading below. At `db11afd49` (2026-09-29)
+   * `date-display.ts` was
    * byte-identical to `dd3f7e1be` and `dataset-format.ts` changed only in three
    * comment lines (`:529`, `:589`, `:660`, objectui `63ab76112`), all below every
    * anchor here, so `formatDate` `378-413`, the ±7-day fallback `332`,
@@ -251,9 +260,9 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * non-numeric value through `formatMeasureDate` (`:229-263`, was `:229-264`
    * and before that `:185-198`) at `:369`,
    * whose date-only arm threads `format` into the STYLE parameter of
-   * `formatDate` (`utils/date-display.ts:378-413`, was `:355-390`, `:271-306`,
+   * `formatDate` (`utils/date-display.ts:445-480`, was `:378-413`, `:355-390`, `:271-306`,
    * `:198-233` and before that `:131-164`, whose `relative` branch falls back to the absolute form
-   * beyond ±7 days at `:332`, was `:309`, `:225`, `:152` and `:117` — the fallback strips the style through
+   * beyond ±7 days at `:399`, was `:332`, `:309`, `:225`, `:152` and `:117` — the fallback strips the style through
    * `absoluteFallbackOptions`), while its datetime arm answers `relative` with
    * `formatRelativeDate` (`:259`), `short` with
    * `formatDateTime(v, { locale, style: 'compact' })` (`:260`) and everything

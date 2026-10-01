@@ -88,10 +88,10 @@ describe('composeStacks', () => {
 
   it('should concatenate apps from multiple stacks', () => {
     const crm = makeStack({
-      apps: [{ name: 'sales', label: 'Sales', objects: ['account'] }],
+      apps: [{ name: 'sales', label: 'Sales' }],
     });
     const todo = makeStack({
-      apps: [{ name: 'tasks', label: 'Tasks', objects: ['task'] }],
+      apps: [{ name: 'tasks', label: 'Tasks' }],
     });
 
     const result = composeStacks([crm, todo]);

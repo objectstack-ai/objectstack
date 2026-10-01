@@ -129,9 +129,11 @@ export interface RlsFieldGuard {
    * columns only, the scope `SqlDriver` holds — so a `date`, `time` or
    * non-temporal column reaches `using`'s drivers and `check`'s evaluator
    * byte-identical to before. Absent (no guard, or a caller that did not read
-   * the types) reads NO column as `datetime`: the rule is left to each face's
-   * own copy, as it was, never applied type-blind to a column no driver
-   * widens. The NULL-polarity guards do not depend on it.
+   * the types) means the seam cannot read the declared type, so the rule
+   * applies TYPE-BLIND (item 7's second half — the engine's `where` seam reads
+   * an object with no field map the same way): the drivers keep no copy of the
+   * rule to fall back on, and on `Field.date` text `< next-day` orders exactly
+   * as `<= day`. The NULL-polarity guards do not depend on it.
    */
   datetime?: ReadonlySet<string>;
 }
@@ -297,8 +299,9 @@ type RlsComparandVerdict =
  * copy-on-write and returns the same reference otherwise), then LOWERED by the
  * shared `lowerFilterCondition` (ADR-0053 D-D1, amended — #5930): this is the
  * RLS compile seam the amendment names, so the `$between` split, the whole-day
- * upper bound on the guard's `datetime` columns and the NULL-polarity guards
- * are applied here once, for `using` and `check` alike. A thrown value
+ * upper bound on the guard's `datetime` columns (on every column, type-blind,
+ * when the guard carries no type set — {@link rlsLowering}) and the
+ * NULL-polarity guards are applied here once, for `using` and `check` alike. A thrown value
  * without the ADR-0112 envelope (a string `code` and a numeric `status`) is not
  * a verdict about the filter, so it is re-thrown rather than dressed up as one.
  */
@@ -335,13 +338,24 @@ function judgeCompiledComparands(
 }
 
 /**
- * [ADR-0053 D-D1 item 7 — #5930] The RLS seam's declared-type reader: a column
- * is `datetime` when the caller's guard says so ({@link RlsFieldGuard.datetime}),
- * and no column is when it carries no type set.
+ * [ADR-0053 D-D1 item 7 — #5930, #20822] The RLS seam's declared-type reader: a
+ * column is `datetime` when the caller's guard says so
+ * ({@link RlsFieldGuard.datetime}).
+ *
+ * With no type set to read — no guard (the security plugin could not resolve
+ * the object's declaration), or a guard built without types — this seam
+ * cannot read the declared type, so it hands the lowering NO reader and the
+ * whole-day rule applies type-blind: item 7's reading for a seam that cannot
+ * read the type, and the engine seam's for an object with no field map. This
+ * branch used to read "no column is `datetime`", which left a bare-day upper
+ * bound to the drivers' own copies of the rule; those copies are deleted
+ * (#20822), and a `using` filter is composed into the query after the
+ * engine's seam has run, so nothing downstream would lower it.
  */
 function rlsLowering(fieldGuard: RlsFieldGuard | undefined): FilterLoweringOptions {
   const datetime = fieldGuard?.datetime;
-  return { isDatetimeColumn: (column) => datetime?.has(column) === true };
+  if (datetime === undefined) return {};
+  return { isDatetimeColumn: (column) => datetime.has(column) };
 }
 
 /**

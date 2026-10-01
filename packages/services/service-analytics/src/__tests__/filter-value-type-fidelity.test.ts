@@ -605,9 +605,14 @@ function makeEngine(captured: Array<Record<string, unknown> | undefined>) {
   ): Promise<Array<Record<string, unknown>>> => {
     captured.push(options.filter);
     const filtered = ENGINE_ROWS.filter((row) =>
-      Object.entries(options.filter ?? {}).every(
-        ([field, cond]) => (row as Record<string, unknown>)[field] === cond,
-      ),
+      Object.entries(options.filter ?? {}).every(([field, cond]) => {
+        const stored = (row as Record<string, unknown>)[field];
+        // [#20918] The null predicate, in the engine's own `{ $null: flag }`
+        // spelling: it asks about presence, never compares a value.
+        const flag = (cond as { $null?: unknown } | null)?.$null;
+        if (typeof flag === 'boolean') return (stored === null) === flag;
+        return stored === cond;
+      }),
     );
     return [{ order_count: filtered.length }];
   };
@@ -652,9 +657,10 @@ describe('[#5526] analytics engine path — the comparand reaches engine.aggrega
 
   it('a real null comparand is still the null predicate, not a value', async () => {
     const { captured, result } = await run(null);
-    // `convertFilter` maps `notSet` to a bare `null` — the spelling every driver
-    // reads as IS NULL (#5332 / #5525), reached without entering `values`.
-    expect(captured[0]).toEqual({ code: null });
+    // `convertFilter` maps `notSet` to `{ $null: true }` — the engine's own IS
+    // NULL predicate (#5332 / #5525; the bare `null` before #20918), reached
+    // without entering `values`.
+    expect(captured[0]).toEqual({ code: { $null: true } });
     expect(result.rows).toEqual([{ order_count: 1 }]);
   });
 });

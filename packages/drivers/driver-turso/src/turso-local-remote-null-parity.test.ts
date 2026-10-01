@@ -50,10 +50,21 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { FILTER_LOGIC_ROWS } from '@objectstack/spec/data';
+import { FILTER_LOGIC_ROWS, lowerFilterCondition } from '@objectstack/spec/data';
 import { TursoDriver } from './turso-driver.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
 import type { DriverQuery } from '@objectstack/spec/contracts';
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5 and 9, as amended] What a seam hands this
+ * driver: the filter through the shared lowering, whose rule 3 makes each
+ * `$not` leaf total in the direction its operator answers for a row with no
+ * value (#5146, #5298). Neither face of `TursoDriver` carries its own copy of
+ * that rewrite any more, so the answers below are the ones every seamed read
+ * gets, unchanged. No column here is a declared `datetime`, so the whole-day rule has nothing
+ * to rewrite.
+ */
+const seamed = <T,>(where: T): T => lowerFilterCondition(where, { isDatetimeColumn: () => false });
 
 /**
  * The SHARED conformance fixture, not a private one. `d` is valued on rows 1-2
@@ -286,8 +297,8 @@ describe('[#5903] TursoDriver LOCAL and REMOTE answer the NULL family identicall
 
   for (const c of PARITY_CASES) {
     it(c.name, async () => {
-      const localIds = ids(await local.find('conformance', { where: c.filter } as DriverQuery));
-      const remoteIds = ids(await remote.find('conformance', { where: c.filter } as DriverQuery));
+      const localIds = ids(await local.find('conformance', { where: seamed(c.filter) } as DriverQuery));
+      const remoteIds = ids(await remote.find('conformance', { where: seamed(c.filter) } as DriverQuery));
       // Agreement first — this is the assertion #5903 is about.
       expect(remoteIds, `local/remote divergence. ${c.why}`).toEqual(localIds);
       // …and agreement on the RIGHT answer, so a shared regression cannot pass
@@ -301,10 +312,10 @@ describe('[#5903] TursoDriver LOCAL and REMOTE answer the NULL family identicall
     // wearing a total instead of a row set — and remote builds its COUNT
     // statement separately from its SELECT.
     for (const c of PARITY_CASES) {
-      expect(await local.count('conformance', { where: c.filter } as DriverQuery), `local ${c.name}`).toBe(
+      expect(await local.count('conformance', { where: seamed(c.filter) } as DriverQuery), `local ${c.name}`).toBe(
         c.expected.length,
       );
-      expect(await remote.count('conformance', { where: c.filter } as DriverQuery), `remote ${c.name}`).toBe(
+      expect(await remote.count('conformance', { where: seamed(c.filter) } as DriverQuery), `remote ${c.name}`).toBe(
         c.expected.length,
       );
     }

@@ -2119,10 +2119,14 @@ export const ValidateDataRequestSchema = lazySchema(() => z.object({
  *
  * One entry per submitted row, in submission order.
  *
- * A row's `droppedFields` is DECLARED AHEAD of its producer: the engine's
- * `validate` already runs the write's strips and reports them through the
- * write's own listener, but `validateData` does not yet forward that listener
- * or attribute its events to rows, so no server sets the key until it does.
+ * A row's `droppedFields` is set by the engine's `validate`, which runs the
+ * write's computed-field strip (every context) and its strips of static
+ * `readonly` and runtime-owned fields (`isSystem`-gated), records what each
+ * takes from each row, and reports it on a row the verdict accepts;
+ * `validateData` relays it. An `update`-mode preview does not run the
+ * `readonlyWhen` or primary-key strips, which judge a prior record and an
+ * update dispatch the preview does not have, so it can report fewer drops than
+ * the update it predicts.
  * The element IS {@link DroppedFieldsEventSchema} — the same shape and `reason`
  * vocabulary the write reports, ⛔ never a second enum — so a preview and the
  * write it predicts answer in one vocabulary, exactly as `errors` / `warnings`

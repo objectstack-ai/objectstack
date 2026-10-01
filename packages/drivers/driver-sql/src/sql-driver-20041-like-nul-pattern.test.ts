@@ -36,9 +36,20 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { Knex } from 'knex';
-import { markFilterSubtreeProvenance, type DriverOptions, type FilterCondition } from '@objectstack/spec/data';
+import { lowerFilterCondition, markFilterSubtreeProvenance, type DriverOptions, type FilterCondition } from '@objectstack/spec/data';
 import { matchesFilterCondition } from '@objectstack/formula';
 import { SqlDriver, type SqlDriverConfig } from './index.js';
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5 and 9, as amended] What a seam hands this
+ * driver: the filter through the shared lowering, whose rule 3 makes each
+ * `$not` leaf total in the direction its operator answers for a row with no
+ * value (#5146, #5298). The driver no longer carries its own copy of that
+ * rewrite, so the answers below are the ones every seamed read gets,
+ * unchanged. The tables here declare no `datetime` column, so the whole-day rule has
+ * nothing to rewrite.
+ */
+const seamed = (where: FilterCondition): FilterCondition => lowerFilterCondition(where, { isDatetimeColumn: () => false }) as FilterCondition;
 
 interface WireBearingError extends Error {
   code?: string;
@@ -120,7 +131,7 @@ describe('[#20041] SqlDriver (better-sqlite3): a $like / $ilike pattern holding 
   };
 
   const labels = async (where: FilterCondition): Promise<string[]> =>
-    ((await driver.find(TABLE, { where }, BYPASS)) as Array<{ label: string }>).map((r) => r.label).sort();
+    ((await driver.find(TABLE, { where: seamed(where) }, BYPASS)) as Array<{ label: string }>).map((r) => r.label).sort();
 
   const formulaLabels = (where: FilterCondition): string[] =>
     Object.entries(ROWS)
