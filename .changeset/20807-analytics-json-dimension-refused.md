@@ -16,4 +16,4 @@ Clause-②: no (narrowing)
 
 **Who is affected.** A dashboard, report or caller that grouped an analytics query by a structured-JSON field on SQLite and read one group per serialized document as real groups. On PostgreSQL the same query was already a 500.
 
-**Unchanged.** A dimension on any other type; a `timeDimensions` entry with no `granularity`, which bounds a range and groups nothing; measures (this door judges only the members that group); a member naming a column the object does not have, which keeps its existing `INVALID_FIELD` answer first; and a host that wires no `sourceFieldMeta`, where the column's type cannot be read.
+**Unchanged.** A dimension on any other type; a `timeDimensions` entry with no `granularity`, which bounds a range and groups nothing; measures (this door judges only the members that group); a dotted dimension path the cube declares no join for, whose object is not a declaration; a member naming a column the object does not have, which keeps its existing `INVALID_FIELD` answer first; and a host that wires no `sourceFieldMeta`, where the column's type cannot be read.
