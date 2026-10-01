@@ -204,7 +204,7 @@ for (const cell of CELLS) {
             expect(agg.json.error).toContain('{ "$or": [{ "FIELD": { "$contains": "a" } }');
             expect(agg.json.error).not.toContain(`"${field}"`);
             // The field and the operator are in the server log, not the response.
-            const logged = warn.mock.calls.map((call) => String(call[0])).join('\n');
+            const logged = warn.mock.calls.map((call: unknown[]) => String(call[0])).join('\n');
             expect(logged).toContain('INVALID_FILTER — refusal detail withheld from the response');
             expect(logged).toMatch(new RegExp(`(Operator "\\$[a-z]+" on field "${field}"|The bare equality spelling \\{ "${field}": value \\}) WAS NOT APPLIED`));
           }, 60_000);
