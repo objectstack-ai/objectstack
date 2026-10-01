@@ -146,6 +146,7 @@ Reproduce any row with a driver-less clone and git's own server-side merge:
 git clone -q --bare --shared . /tmp/driverless.git   # a fresh clone has no merge.os-regen.driver
 git --git-dir=/tmp/driverless.git fetch -q . BRANCH_A:refs/b BRANCH_B:refs/h
 git --git-dir=/tmp/driverless.git merge-tree --write-tree --messages refs/b refs/h
+rm -rf /tmp/driverless.git
 ```
 
 Exit 1 with no tree id is a missing object, never a conflict; a real conflict prints the tree id first.
