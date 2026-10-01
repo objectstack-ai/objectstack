@@ -29,8 +29,9 @@
  * `matchesFilterCondition` judges a `check` clause. On each column the object
  * DECLARES `date`, `datetime` or `time` (the spec's `CALENDAR_DATE_TYPES`,
  * `INSTANT_TYPES`, `CLOCK_TIME_TYPES`), it puts two things into
- * `@objectstack/core`'s `temporalStorageForm`, the rule every driver applies
- * when it writes such a column and when it compares one:
+ * `@objectstack/core`'s `temporalStorageForm`, the rule the SQL drivers and
+ * the memory driver call when they write such a column and when they compare
+ * one:
  *
  * - the post-image's value, so the check sees the value that will be stored;
  * - every comparand of the value comparisons on that column (`$eq`, `$ne`, the
@@ -61,6 +62,14 @@
  * `normalizeMultiValueFields`, which no entry of `@objectstack/objectql`
  * exports, and this package depends on the engine only for its tests. A copy
  * of it would be a second rule.
+ *
+ * `driver-mongodb` stores these columns through its own copy of the rule
+ * (`mongodb-temporal.ts`), not through `temporalStorageForm`. Measured shape by
+ * shape, the two agree on every value the write door admits, a `datetime`
+ * being the same instant in the driver's BSON `Date`, except one: a `Date` in a
+ * UTC year from 0001 to 0999 written to a `date` column, whose year that copy
+ * leaves unpadded (`999-06-15`). This step judges the four-digit form the
+ * rule declares.
  */
 
 import { temporalStorageForm, type TemporalComparandKind } from '@objectstack/core';

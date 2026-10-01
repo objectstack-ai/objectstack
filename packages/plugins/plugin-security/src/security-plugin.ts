@@ -3294,8 +3294,8 @@ export class SecurityPlugin implements Plugin {
           // [#21109, ruling A] Every image is judged as the row it will be
           // STORED as: on each declared `date` / `datetime` / `time` column,
           // the image's value and the check's comparands go through
-          // `@objectstack/core`'s `temporalStorageForm`, the rule every driver
-          // writes and compares that column by, so the write and the read the
+          // `@objectstack/core`'s `temporalStorageForm`, the rule the drivers
+          // write and compare that column by, so the write and the read the
           // same policy scopes give one answer for one row. This is the one
           // step for every image this block judges, here and in the engine's
           // seams (`rls-check-stored-form.ts` says what it does and does not
