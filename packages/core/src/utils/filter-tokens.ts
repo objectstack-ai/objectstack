@@ -37,6 +37,19 @@
  * is the engine's question, not this module's: it refuses a resolved token
  * outside its field's years.
  *
+ * # A date macro past the instants a `Date` holds refuses here
+ *
+ * [#21068] An offset can land past every instant a JavaScript `Date` can hold
+ * (ECMA-262's time values, ±8.64e15 ms around 1970): `{300000_years_ago}`,
+ * `{99999999999999999999_minutes_ago}`. Such a macro names no day and no time,
+ * so there is no year left for the engine to judge. It used to resolve to the
+ * text `Invalid Date` (a day-or-coarser macro), which compares as text and
+ * answered every row of a `$lt`, or to throw an uncoded `RangeError` from
+ * `toISOString` (a sub-day one), which the REST door answered `500`. It is
+ * refused instead, `INVALID_FILTER` / 400 naming the placeholder — see
+ * {@link DateMacroPastDateRangeError}. The test is the `Date`'s own validity,
+ * asked once, of the instant the macro computed: ⛔ never a copy of the range.
+ *
  * # Period `_end` resolves to a calendar DAY — its WIDTH is ADR-0053 D-D
  *
  * `{current_year_end}` resolves to `2026-12-31`, per the spec's own
@@ -97,8 +110,13 @@ import {
   parseDateMacroParam,
   type DateMacroUnit,
 } from '@objectstack/spec/data';
+import type { StandardErrorCode } from '@objectstack/spec/api';
 import { calendarPartsInTzOrUtc, wallClockToUtcMs } from './datetime.js';
-import { isOutsideTemporalYearRange, temporalStorageForm } from './temporal-storage-form.js';
+import {
+  isOutsideTemporalYearRange,
+  SUPPORTED_TEMPORAL_YEARS,
+  temporalStorageForm,
+} from './temporal-storage-form.js';
 
 /**
  * The slice of an execution context the resolver reads. Structural on purpose —
@@ -187,6 +205,46 @@ export class UnresolvedFilterTokenError extends Error {
   }
 }
 
+/** A year as a refusal spells it: four digits, `0001`. */
+const fourDigitYear = (year: number): string => String(year).padStart(4, '0');
+
+/**
+ * [#21068] Raised when a date macro's offset lands past every instant a
+ * JavaScript `Date` can hold, so the macro names no day and no time — see the
+ * module doc. `token` names the placeholder.
+ *
+ * `INVALID_FILTER` / 400, the code a date macro's family already answers: the
+ * engine refuses one that resolved outside its column's years with it, and the
+ * temporal-comparand door a literal of the same value. This one lands past
+ * every column's years, and the author's fix is the same (a smaller offset).
+ * ⛔ Not `FILTER_TOKEN_UNRESOLVED`: its declared meaning is a context the
+ * request does not carry ({@link UnresolvedFilterTokenError}: "the spelling is
+ * correct, the context is not"), and here the context is complete. ⛔ Not
+ * `FILTER_TOKEN_UNKNOWN` either: the token is in the vocabulary.
+ *
+ * Not exported: a caller reads `code` and `status`, as for every door's
+ * refusal, and the module's public surface stays as it was.
+ */
+class DateMacroPastDateRangeError extends Error {
+  readonly token: string;
+  readonly status = 400;
+  readonly code = 'INVALID_FILTER' satisfies StandardErrorCode;
+
+  constructor(token: string) {
+    const { date, datetime } = SUPPORTED_TEMPORAL_YEARS;
+    super(
+      `Relative-date placeholder "{${token}}" names no instant: its offset lands past every instant ` +
+      'a JavaScript Date can hold, so it resolves to no day and no time, and it is refused rather ' +
+      `than compared. A date value names a year from ${fourDigitYear(date.first)} to ` +
+      `${fourDigitYear(date.last)}, and a datetime value a year from ${fourDigitYear(datetime.first)} ` +
+      `to ${fourDigitYear(datetime.last)}: use a relative-date placeholder whose offset lands inside ` +
+      'those years.',
+    );
+    this.name = 'DateMacroPastDateRangeError';
+    this.token = token;
+  }
+}
+
 /**
  * Calendar arithmetic is done on a UTC "proxy" date built from the reference
  * timezone's calendar parts. Working in UTC keeps the math free of DST jumps
@@ -220,7 +278,8 @@ function proxyDay(now: Date, timezone?: string): Date {
  * `toISOString` spells for its instant: every reader reads it as that UTC day,
  * on every host. The range is core's one range, asked of the day itself, never
  * re-derived here. A step past the instants a `Date` holds is not one of these:
- * it has no day at all, and keeps the rule's spelling of an invalid `Date`.
+ * it has no day at all, and [#21068] never reaches here — {@link resolveFilterToken}
+ * refuses it first.
  */
 function asYmd(d: Date): string {
   if (!isOutsideTemporalYearRange(d, 'date')) return String(temporalStorageForm(d, 'date'));
@@ -306,12 +365,12 @@ function addUnits(unit: DateMacroUnit, d: Date, n: number): Date {
 
 /**
  * `current|last|next` × `week|month|quarter|year` × `start|end`, plus the bare
- * `week_start`-style aliases (which mean `current_`). Returns `undefined` when
- * the token is not a period token.
+ * `week_start`-style aliases (which mean `current_`). Returns the period's
+ * bounding day, or `undefined` when the token is not a period token.
  */
 const PERIOD_RE = /^(?:(current|last|next)_)?(week|month|quarter|year)_(start|end)$/;
 
-function resolvePeriodToken(token: string, today: Date): string | undefined {
+function resolvePeriodToken(token: string, today: Date): Date | undefined {
   const m = PERIOD_RE.exec(token);
   if (!m) return undefined;
   const rel = (m[1] ?? 'current') as 'current' | 'last' | 'next';
@@ -324,19 +383,59 @@ function resolvePeriodToken(token: string, today: Date): string | undefined {
   // is involved at all — so the answer never depends on the clamp policy, and
   // the arithmetic reads the same for every `kind`.
   const periodStart = startOfPeriod(kind, addPeriods(kind, startOfPeriod(kind, today), offset));
-  if (bound === 'start') return asYmd(periodStart);
+  if (bound === 'start') return periodStart;
   // `_end` = the last calendar DAY of the period: the day before the next
   // period begins. See the module doc on half-open ranges.
   const next = addPeriods(kind, periodStart, 1);
   next.setUTCDate(next.getUTCDate() - 1);
-  return asYmd(next);
+  return next;
+}
+
+/**
+ * [#21068] The instant a date macro computes, and how it is spelled: an
+ * instant (`{now}`, `{N_hours_*}`, `{N_minutes_*}`) or a calendar day (every
+ * other macro). `undefined` when `token` is not a date macro. Computing it
+ * apart from spelling it lets {@link resolveFilterToken} ask the one question
+ * every macro owes before either spelling — does the instant exist? — in one
+ * place.
+ */
+function dateMacroInstant(
+  token: string,
+  now: Date,
+  timezone: string | undefined,
+): { at: Date; spelled: 'instant' | 'day' } | undefined {
+  const today = proxyDay(now, timezone);
+
+  switch (token) {
+    case 'now': return { at: now, spelled: 'instant' };
+    case 'today': return { at: today, spelled: 'day' };
+    case 'yesterday': return { at: addUnits('day', today, -1), spelled: 'day' };
+    case 'tomorrow': return { at: addUnits('day', today, 1), spelled: 'day' };
+  }
+
+  const period = resolvePeriodToken(token, today);
+  if (period !== undefined) return { at: period, spelled: 'day' };
+
+  const param = parseDateMacroParam(token);
+  if (!param) return undefined;
+  const sign = param.direction === 'ago' ? -1 : 1;
+  // Sub-day units are instants — they must keep their time-of-day, so they
+  // shift `now` and render as a full ISO timestamp. Day-and-coarser units are
+  // calendar quantities and render as `YYYY-MM-DD` off the reference day.
+  if (param.unit === 'minute' || param.unit === 'hour') {
+    return { at: addUnits(param.unit, now, sign * param.n), spelled: 'instant' };
+  }
+  return { at: addUnits(param.unit, today, sign * param.n), spelled: 'day' };
 }
 
 /**
  * Resolve one token NAME (the bit inside the braces) to its concrete value.
  * Throws {@link UnresolvedFilterTokenError} for a vocabulary token the request
- * carries no value for. Returns `undefined` only when the token is outside the
- * vocabulary — callers turn that into {@link UnknownFilterTokenError}.
+ * carries no value for, and [#21068] `INVALID_FILTER` / 400 for a date macro
+ * whose offset lands past every instant a `Date` holds
+ * ({@link DateMacroPastDateRangeError}). Returns `undefined` only when the
+ * token is outside the vocabulary — callers turn that into
+ * {@link UnknownFilterTokenError}.
  */
 export function resolveFilterToken(
   token: string,
@@ -385,31 +484,14 @@ export function resolveFilterToken(
   }
 
   // ── Date macros ───────────────────────────────────────────────────────
-  const today = proxyDay(now, ctx.timezone);
-
-  switch (token) {
-    case 'now': return now.toISOString();
-    case 'today': return asYmd(today);
-    case 'yesterday': return asYmd(addUnits('day', today, -1));
-    case 'tomorrow': return asYmd(addUnits('day', today, 1));
-  }
-
-  const period = resolvePeriodToken(token, today);
-  if (period !== undefined) return period;
-
-  const param = parseDateMacroParam(token);
-  if (param) {
-    const sign = param.direction === 'ago' ? -1 : 1;
-    // Sub-day units are instants — they must keep their time-of-day, so they
-    // shift `now` and render as a full ISO timestamp. Day-and-coarser units are
-    // calendar quantities and render as `YYYY-MM-DD` off the reference day.
-    if (param.unit === 'minute' || param.unit === 'hour') {
-      return addUnits(param.unit, now, sign * param.n).toISOString();
-    }
-    return asYmd(addUnits(param.unit, today, sign * param.n));
-  }
-
-  return undefined;
+  const macro = dateMacroInstant(token, now, ctx.timezone);
+  if (macro === undefined) return undefined;
+  // [#21068] An offset past every instant a `Date` holds computes an invalid
+  // `Date`: `asYmd` would spell it as the text `Invalid Date` and
+  // `toISOString` would throw an uncoded `RangeError`. Refused here, once,
+  // before either spelling.
+  if (Number.isNaN(macro.at.getTime())) throw new DateMacroPastDateRangeError(token);
+  return macro.spelled === 'instant' ? macro.at.toISOString() : asYmd(macro.at);
 }
 
 /**

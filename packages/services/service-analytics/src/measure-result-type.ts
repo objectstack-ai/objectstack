@@ -37,6 +37,14 @@ import { isAggregateCompatibleWithFieldType } from '@objectstack/spec/data';
  * ⛔ There is therefore no second account of which pairs are supported in this
  * package. A row changed in the spec changes this rule in the same commit.
  *
+ * [#21044] The cube door reads this rule too. `POST /analytics/query` asks the
+ * same table ahead of both strategies (`cube-measure-field-type-door.ts`, a
+ * refused pair answers `INVALID_FIELD` / 400 before anything is read), and
+ * describes a served measure column by this function at the seam every
+ * strategy's result leaves through (`withMeasureResultTypes` in
+ * `analytics-service.ts`), with the cube measure's aggregate and the declared
+ * type of the base-object column it reads. Two doors, one rule, one table.
+ *
  * ## The aggregate axis, enumerated rather than sampled
  *
  * `AggregationFunction` (`spec/data/query.zod.ts`) is a CLOSED vocabulary, so

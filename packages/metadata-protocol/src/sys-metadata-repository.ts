@@ -909,6 +909,20 @@ export class SysMetadataRepository implements MetadataRepository {
        * answering `success: true`. Which row won was driver-order dependent.
        */
       packageId?: string | null;
+      /**
+       * [#20312] The body the ACTIVE row stores, derived from the draft body
+       * this promotion read — applied to the row actually promoted, inside the
+       * same call, so the derivation and the write read one row rather than
+       * two. The protocol passes the derivations its save door applies to an
+       * active body (ADR-0080 §5: an html page's `requires` re-stamped from its
+       * source), so a publish stores what an active save of the same body
+       * would. Return the argument unchanged when there is nothing to derive.
+       *
+       * Omitted → the draft body is promoted byte for byte, as before. The
+       * draft row is still drained by its OWN hash: the derivation changes
+       * what lands in `active`, never which draft is consumed.
+       */
+      deriveActiveBody?: (draftBody: unknown) => unknown;
     },
   ): Promise<{
     version: string;
@@ -954,7 +968,8 @@ export class SysMetadataRepository implements MetadataRepository {
     // optimistic-lock `parentVersion` matches the exact row `put` upserts.
     // (Package-less drafts → packageId null → identical to the prior behaviour.)
     const currentActive = await this.get(ref, { state: 'active', packageId: draftPackageId });
-    const result = await this.put(ref, draft.body, {
+    const activeBody = opts.deriveActiveBody ? opts.deriveActiveBody(draft.body) : draft.body;
+    const result = await this.put(ref, activeBody, {
       parentVersion: currentActive?.hash ?? null,
       actor: opts.actor,
       source: opts.source ?? 'sys-metadata-repo.publish',
