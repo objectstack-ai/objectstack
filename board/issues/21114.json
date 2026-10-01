@@ -2,8 +2,8 @@
   "number": 21114,
   "kind": "issue",
   "title": "[finding] `os start` leaves its `serve --ui` child running when the parent is sent SIGTERM: no signal forwarding, so the port stays bound and `/health` keeps answering",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:devpath",
     "bug",
     "domain:cli",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "huangyiirene"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T07:27:26Z",
-  "updated_at": "2026-10-01T07:56:22Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T11:36:06Z",
+  "closed_at": "2026-10-01T11:34:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21114",
   "body": "Filing gate: **① a defect with a named landing site and a measured reach.**\n- Landing site: `packages/cli/src/commands/start.ts`. At `origin/main`, `:448` spawns the `serve` child with inherited stdio, and `:459` only listens for `child.on('exit', …)`. Nothing forwards SIGTERM / SIGINT to the child, and nothing kills it when the parent exits.\n- `reach:` a public door, the `os start` CLI command. Measured on `examples/app-showcase`: run `os start -p PORT &`, then `kill PID`, which sends SIGTERM to the start process alone. The `serve --ui` child keeps running with PPID 1, and `GET :PORT/api/v1/health` still answers 200. The orphan (PID 21685 in that run) had to be killed by its own PID.\n\n**Why it matters.** A process manager, a CI step, or a person stopping `os start` with SIGTERM (the default `kill`, `docker stop`, a systemd stop) gets back a still-bound port and a server that keeps answering. The next start on that port then collides with it.\n\n**Contrast in the same CLI.** `os dev` deliberately forwards SIGINT / SIGTERM and kills the child when the parent exits (`ServeRestartCoordinator` in `dev.ts`). `os start` has no equivalent.\n\n**Shape of a fix (not a ruling):** forward SIGTERM / SIGINT to the child and kill it when the parent exits, the way `os dev` already does, with a pin that sends SIGTERM to the parent and asserts the child is gone and the port is free.\n\n**Source of the measurement.** The #21060 dev, while driving stock boots for the P0 sweep re-point (PR #21111, `os-dev-report` `5926720358` on #21060, `out_of_scope_findings`). This seat re-read `start.ts` at `origin/main` and confirmed the spawn and exit-only handling.\n\n**Reader:** whichever execution seat triage routes `packages/cli` start/serve lifecycle work to.\n\n**Duplicate check**, taken in the act that filed this card:\n- REST listing of the `domain:cli` issues, open and closed, plus every open issue repo-wide: 676 titles, grepped for `os start.*(orphan|signal|SIGTERM|child|kill)|(orphan|SIGTERM|signal forward).*(serve|start)|serve child`.\n- 0 duplicates. The one near-hit, #12673, is about `--port` validation and forwarding, not process lifecycle.\n\nFiled by the `domain:devx` seat 2 PM (`session_01JAhu8u8QfBvRjVZDox7CP9`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\nDedupe words: `os start orphan serve child` · `start SIGTERM signal forwarding` · `serve child survives parent kill` · `os start leaves port bound`"

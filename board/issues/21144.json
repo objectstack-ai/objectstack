@@ -1,0 +1,37 @@
+{
+  "number": 21144,
+  "kind": "pull_request",
+  "title": "fix(security): close out the stored-metadata-body family — project or refuse every further read/copy/evaluate exit",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T09:40:18Z",
+  "updated_at": "2026-10-01T14:16:58Z",
+  "closed_at": "2026-10-01T14:16:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-01T14:16:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21144",
+  "body": "Fixes #21120\n\nClause-②: no (narrowing)\n\n> **Security boundary — human floor. This PR stays in DRAFT.** It narrows a\n> credential-disclosure surface; landing is the maintainer's. No AI seat flips\n> it ready, queues it or arms auto-merge.\n\n## What this does\n\nStored metadata bodies (`sys_metadata` / `sys_metadata_history`'s `metadata`\ncolumn — stored datasource credential material included) are declared\nwrite-only and are already redacted on the `/meta` and datasource doors and, as\nof #21086, on the generic data door's reads. This PR closes out the remaining\nsurfaces that can **serve, copy or evaluate** such a body, so each either goes\nthrough the one shared redaction seam or refuses — and adds an enumeration pin\nso a future surface fails the pin instead of joining the family silently.\n\n- **One seam, no second dialect.** The family-wide primitives — the object set,\n  the body predicate, the column names and the per-type body redactor — now live\n  once in `@objectstack/spec/kernel`, beside the redactor registry they build\n  on. The data door's wrappers (projection, `dropType`, the groupBy and the new\n  filter/sort refusals) consume that one definition, as do the audit, analytics\n  and realtime exits — none of which depends on `@objectstack/metadata-protocol`.\n\n- **Audit / activity copy** (`@objectstack/plugin-audit`). The audit writer\n  copies a stored-metadata row into `sys_audit_log.new_value` / `old_value` and\n  `sys_activity.metadata` at write time — a second, admin-readable, at-rest\n  store. The copy now projects the body through the shared redactor, so the\n  credential is withheld there too, and a one-off migration\n  (`os migrate audit-metadata-bodies`, dry-run by default, `--apply`, idempotent)\n  rewrites the copies already at rest. Fail-closed: a body the redactor cannot\n  judge is dropped from the recorded copy.\n\n- **Analytics** (`@objectstack/service-analytics`). A query naming the stored\n  body column of these objects as a dimension, measure, filter or sort is\n  refused (`400 INVALID_FIELD`) at the service door, ahead of every strategy —\n  the posture analytics already takes for a member it will not evaluate.\n\n- **Realtime** (`@objectstack/objectql`). A `data.record.*` event projects its\n  `after` / `changes` body through the same redactor, so a subscriber to these\n  objects' events receives no stored credential. (Predicate/bulk events carry\n  only a count, so they were already safe.)\n\n- **Data door filter / sort** (`@objectstack/metadata-protocol`, maintainer\n  ruling A). A filter or sort on the body column is refused (`400 INVALID_FIELD`),\n  the same family and shape as the merged groupBy refusal. This lands on #21086's\n  seam, now on `main` (merged in; no stacked branch).\n\nWhat stays answerable on both tables: every scalar column — `type`, `name`,\n`scope`, `state`, timestamps — is still grouped, filtered, sorted, counted and\nserved. Only the body column is affected, and only on these two objects.\n\n## Enumeration pin\n\n`packages/metadata-protocol/src/stored-metadata-body-family.pin.test.ts` pins\nthe family: the object set is the boundary, every declared `apiMethods` verb on\nthe two objects is a covered read verb (a new verb or a write verb fails the\npin), and each family surface is enumerated with its disposition and owning\nper-package pin.\n\n## Tests\n\n- spec: the shared seam (register/lookup, fail-closed, by-reference) — `metadata-type-redaction.test.ts`.\n- metadata-protocol: the family enumeration pin; the merged #21086 data-door suite still green on the reconciled seam.\n- plugin-audit: the writer redaction (create / update rotation / clean body) in `audit-writers.test.ts`; the migration planners and driven runner (dry-run, apply, idempotent) in `stored-metadata-body-migration.test.ts`.\n- service-analytics: the member refusal — `stored-metadata-body-refusal.test.ts`.\n- objectql: the realtime event redaction — `engine-realtime-stored-metadata-body.test.ts`.\n\nChanged lines well under the 5,000 human-merge threshold.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01MRdbfpy4sQT8bUjmMhxsN7\n"
+}

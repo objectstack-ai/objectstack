@@ -1,0 +1,35 @@
+{
+  "number": 21151,
+  "kind": "pull_request",
+  "title": "chore(turbo): opt out of the agent-guidance block in the root turbo.json",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T10:07:06Z",
+  "updated_at": "2026-10-01T11:10:20Z",
+  "closed_at": "2026-10-01T11:10:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-01T11:10:18Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21151",
+  "body": "Fixes #21146\nClause-②: no\n\nAdds `\"agentGuidance\": false` to the root `turbo.json`, and nothing else (1 file, +1 line).\n\n## Why\n\nturbo 2.11 (landed with the 2.11.5 bump) defaults the root option `agentGuidance` to `true`: when it detects an AI agent it maintains a managed block, the BEGIN/END `turborepo-agent-rules` pair, in the repository-root `AGENTS.md` before repository-scoped commands, and the block tells the agent to keep it committed. `AGENTS.md` is a governed surface, so every agent worktree that obeys turns its PR into a human-approval PR. The opt-out is the root-only key turbo's own bundled `docs/reference/configuration.mdx` names. No other file is in the surface; `AGENTS.md` was never staged (see Evidence).\n\n## Evidence\n\nAll commands run in this worktree at base e952cff57 with `AI_AGENT` set in the environment, `turbo` 2.11.5 (`node_modules/.bin/turbo --version`). `AGENTS.md` sha1 before every leg: `99e45344e3582f8b5e9c9e9987fc3c8375c1999d`.\n\n- Positive control, main's `turbo.json` with no opt-out: `turbo ls` exit 0, then `git diff --exit-code -- AGENTS.md` exit 1, `1 file changed, 11 insertions(+)`. The 11 lines are the managed block appended after the last line of `AGENTS.md`. Restoring with `git restore --source=HEAD --staged --worktree AGENTS.md` and running `turbo ls` again re-added the same block (exit 1 again), so the write is repeatable and not a one-off.\n- Treatment, same tree with the one line added: `turbo ls` exit 0, `git diff --exit-code -- AGENTS.md` exit 0, `git status --short` lists only `turbo.json`, `AGENTS.md` sha1 unchanged. `turbo run build --dry=json --filter=@objectstack/types` exit 0, `git diff --exit-code -- AGENTS.md` exit 0 again.\n- Commit hygiene: `git diff --cached --name-only` before the commit lists `turbo.json` only (zero lines match `AGENTS.md`); `git show HEAD --name-only` lists `turbo.json` only.\n\n## Readers of `turbo.json`\n\nNone pins the top-level key set, so nothing is loosened. Readers measured at HEAD 3e3b4c915 (tree identical to HEAD, `git diff HEAD --quiet` exit 0), each exit code taken before any pipe:\n\n- Derived by `dispatch-gates.mjs --commands` (9 commands, derivation identical before and after the commit): `check-closing-keyword-parity.mjs` (plus `--self-test`), `check-comment-mask-corpus.mjs`, `check:driver-memory-census`, `check:gitlink-declared`, `check:nul-bytes`, `check:refd-timer-probe`, `check:turbo-task-graph`, `check:watch-hint-literal`: all exit 0. `--ran` reconciliation: 9 derived, 9 run, 0 NOT-MEASURED, 0 UNRUN, every family carrying an exit code.\n- Readers found by grepping the tree for `turbo.json` read points, run beyond the derivation: `check-ci-filter-parity.mjs` (and `--self-test`), `partition-test-shards.mjs --self-test`, `check:cross-package-test-inputs`, `check:examples-live-imports`, `check:type-check-coverage`: all exit 0. They read `tasks`, `globalDependencies` and per-task `inputs`; none iterates the top-level keys.\n- NOT MEASURED: live `pnpm check:dev-prereqs` (exit 1, \"The workspace is not built\": 67 of 67 packages have no `dist/`, a prerequisite and not a verdict; this diff touches no package, so no build was owed). Its `--self-test` is exit 0, and its only read of `turbo.json` is `globalDependencies` through `scripts/build-input-hash.mjs`, which this change does not move.\n- Not run, CI-owned: repo-wide `pnpm lint` and the rest of the `check:*` farm. `scripts/ci/select-gate-families.sh` classifies `turbo.json` as root config, so CI runs every gate family on this PR by design.\n\n## Changeset\n\nNone owed: the root `turbo.json` publishes nothing (root config, private root package). `.github/workflows/pr-automation.yml`'s `Check Changeset` job counts changesets this PR adds and has no path exemption, only the `skip-changeset` label, so the PR carries that label.\n\n## Acceptance notes\n\n- Per turbo's docs the opt-out stops future writes and does not remove a block already present. A worktree that already carries it restores with `git restore --source=HEAD --staged --worktree AGENTS.md`; never commit the block.\n- `turbo.json` is not on the governed-surface register, so this PR is not a Tier H or Tier S landing.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018gA1pE6eJtwHhqx72G8U9X)_\n"
+}

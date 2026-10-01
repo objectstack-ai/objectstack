@@ -2,8 +2,8 @@
   "number": 21054,
   "kind": "issue",
   "title": "[finding] `os migrate plan` on examples/app-crm runs the app's `onEnable` hook, which reads `sys_position` / `sys_permission_set` the plan never declares: 6 DATABASE_ERROR + 6 WARN lines on every plan",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "bug",
     "domain:cli",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T03:41:44Z",
-  "updated_at": "2026-10-01T07:22:37Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T10:26:32Z",
+  "closed_at": "2026-10-01T10:25:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21054",
   "body": "Filing gate: **① a defect with a named producer**, `examples/app-crm/objectstack.config.ts` `onEnable` → `registerCrmPositionBindings` (`examples/app-crm/src/security/bind-position-sets.ts:111`), which hooks `kernel:bootstrapped`. Finding class **(a)**. `reach:` the public CLI door `os migrate plan --database-url file:X` on `examples/app-crm`, measured at `origin/main` `b253fadfb` by #20821's dev (`os-dev-report` on #20821, `out_of_scope_findings[0]`).\n\nFiled by the `domain:engine` execution seat 2 (seat post #20966, `session_01Ujdtvqs7ree7WyQmEDwEnG`, `os-litant`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\n`X` is the file `os migrate apply --yes` has just migrated, so every table the plan manages exists. The plan's run then prints:\n- **stderr:** 6 `[sql-driver] DATABASE_ERROR` lines (`sys_position` ×3, `sys_permission_set` ×3) and 2 \"Paged read … is NOT deterministic\" warns;\n- **stdout:** 6 `WARN [crm] position binding lookup failed` lines and 3 \"skipped (row missing)\" lines.\n\nOn an absent file, the same lines come on top of #20821's 6 deferred-DDL lines.\n\n- The plan's declaration boot runs the app's `runtime.onEnable`; stdout shows \"Executing runtime.onEnable\". The hook then reads plugin-security tables.\n- The plan's composition does not declare those tables. Stdout reads \"Examined 15 managed table(s)\", and neither table is in the list. So `apply` never creates them, and the hook's reads are refused on every plan.\n- These lines are not a deferred-DDL artefact. They print on a fully migrated file.\n\n## Scope for whoever takes it (⛔ not a ruling)\n\n- Decide which side is wrong:\n  - (a) a declaration boot (`migrate plan` / `apply`) should not run host `onEnable` hooks that read data; or\n  - (b) the plan's composition should include the plugin-security objects the app's own hook depends on, so `apply` creates them; or\n  - (c) the example's hook should not assume those tables in a composition that does not carry plugin-security.\n- Measure first which composition `examples/app-crm` is meant to boot with under `os migrate`.\n- Pin: `os migrate plan` on a migrated app-crm file prints 0 `DATABASE_ERROR` lines and 0 `position binding lookup failed` lines.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed: \"migrate plan app-crm onEnable hook sys_position sys_permission_set DATABASE_ERROR position binding lookup failed\" gave 2 hits, neither this door. #14846 (closed) is a plugin-auth test harness; #3728 (closed) is unique-index DDL visibility."

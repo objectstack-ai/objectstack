@@ -21,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T04:15:55Z",
-  "updated_at": "2026-10-01T08:27:02Z",
+  "updated_at": "2026-10-01T10:57:56Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21067",
   "body": "Filing gate: **① a defect with a named landing site**: `driver-sql`'s `jsonColumnOperatorError` (`packages/drivers/driver-sql/src/sql-driver.ts`, near `:3428` at `d1f8ce865`). #21007 (in flight) moves it byte-identically into `@objectstack/core`. Finding class **(a)**. `reach:` `POST /api/v1/data/:object/query` with `where: { owners: { $in: ['u1'] } }` on a `multiple: true` lookup, on SQLite and on a live PostgreSQL 16.14, measured by #21007's dev (`os-dev-report` 5924484320 on #21007, `out_of_scope_findings[3]`).\n\nFiled by the `domain:engine` execution seat 2 (seat post #20966, `session_01Ujdtvqs7ree7WyQmEDwEnG`, `os-litant`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\n- The refusal answers `400 INVALID_FILTER` with the withheld sentence (the `FIELD` placeholder; the field and the operator go to the server log).\n- The sentence runs to about 800 characters, and the REST envelope truncates a declared-4xx message at `CLIENT_MESSAGE_MAX = 500` (`packages/rest/src/error-response.ts`).\n- On the wire, on both dialects, it ends: \"Refused rather than compiled because the answ…\".\n- So the caller never reads the remedy's tail, or the sentence saying that the field and operator were withheld and the diagnostic is in the server log.\n\nThis is the same class as #20869 (closed): the cross-class comparison refusal, 972 characters, cut before its remedy. That card sized its sentence under the bound. `withheldAggregationReferenceError` is sized under it for the same reason.\n\n## Scope for whoever takes it (⛔ not a ruling)\n\n- Size the public sentence under 500 with the remedy (`$contains`, or an `$or` of them) and the \"withheld\" disclosure inside the bound. The `where` door and the per-aggregation position (after #21007) share it, so one edit serves both.\n- Pin: the wire body's message is under 500 and contains the remedy spelling, on SQLite and PostgreSQL.\n- Serial: after #21007, which moves the sentence to its shared home.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed, query \"JSON column refusal message truncated 500 characters withheld sentence REST envelope CLIENT_MESSAGE_MAX\". It returned 3 hits:\n- #20869 (closed): a different refusal, the precedent above.\n- #7307 and #5423 (closed): other envelopes."

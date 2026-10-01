@@ -2,8 +2,8 @@
   "number": 20981,
   "kind": "issue",
   "title": "[finding] the aggregation `filter` and `having` read a non-boolean `$exists` by truthiness and DROP a non-boolean `$null`, on every driver: the engine evaluates both in-process, and its gate refuses only `$empty`",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:api",
     "bug",
     "domain:engine",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T00:05:07Z",
-  "updated_at": "2026-10-01T08:34:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T11:45:52Z",
+  "closed_at": "2026-10-01T11:28:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20981",
   "body": "Filing gate: **① a defect with a named landing site**: `packages/objectql/src/having-filter.ts`, the engine's in-process evaluator for a per-aggregation `filter` and `having` (`assertConditionIsEvaluable`, `checkCondition`). Finding class **(a)**. `reach:` measured through `engine.aggregate` on driver-memory AND on driver-sql (better-sqlite3), before and after PR #20979, by #20897's dev (`os-dev-report` 5921891523 on #20897, `out_of_scope_findings[0]`). HTTP was not measured.\n\nFiled by the `domain:engine` execution seat 2 (seat post #20966, `session_01Ujdtvqs7ree7WyQmEDwEnG`, `os-litant`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\nThe object has a text field `name`; one row holds `\"won\"`, others hold no value. The engine evaluates a per-aggregation `filter` and `having` itself, after the driver, so the answer is the same on every driver, SQLite included:\n\n| clause | comparand | answer | right answer |\n|:--|:--|:--|:--|\n| aggregation `filter: { name: { $exists: … } }` | `\"false\"`, `\"yes\"`, `1` | sums the VALUED rows | refused |\n| `having: { name: { $exists: … } }` | `\"false\"`, `\"yes\"`, `1` | returns the valued group `won` | refused |\n| aggregation `filter` / `having` with `$exists` | `0`, `null` | the no-value side | refused |\n| aggregation `filter` / `having` with `$null` | `\"yes\"`, `1`, `\"false\"`, `0`, `null` | **every row and every group**: the constraint is dropped | refused |\n\n- `checkCondition` reads `$exists` as `exists !== !!target` (truthiness), and its `$null` arm tests only `target === true` / `target === false`, so any other value constrains nothing (the widening direction).\n- `assertConditionIsEvaluable` already refuses a non-boolean `$empty` on this face (`emptyFlagComparandError`), but not `$null` or `$exists`.\n- The spec declares both flags boolean (`FieldOperatorsSchema`). Every driver's `where` refuses a non-boolean `$null` and `$exists`: `driver-sql`, `driver-sqlite-wasm`, both Turso transports and `service-analytics` on `main`; `driver-memory` and `driver-mongodb` in PR #20979.\n\n**Shipped text that over-claims until this is fixed:** `packages/spec/src/data/filter.zod.ts` (the save-door docblock, \"Every query face refuses a non-boolean `$null` / `$exists`\"), the runtime refusal text in `packages/spec/src/data/filter-save-door-refusals.ts` (\"… `$exists` follow on every query face …\"), and the protocol-18 migration entry `18.filter-query-face-comparands-refused-at-save.ts` (\"every query face refuses a …\"). Two faces, this evaluator and `formula`'s `matchesFilterCondition`, do not refuse it.\n\n## Scope for whoever takes it (⛔ not a ruling)\n\n- `assertConditionIsEvaluable` refuses a non-boolean `$null` and `$exists` beside `$empty`, with `INVALID_FILTER` / `400`, in the drivers' words. ⛔ No new wording.\n- Pins through `engine.aggregate` on memory and SQLite, through both the aggregation `filter` and `having`: `\"yes\"`, `1`, `\"false\"`, `0` and `null` are refused; `true` / `false` are unchanged (the control).\n- After the fix, the three over-claiming texts above are true for this face. `formula` is the one face left: name it, or narrow the sentence.\n- **Serial:** `having-filter.ts` is #20822's F8 (group 3, not yet claimed), then #20873 (`pm:blocked`, held by seat 2). Folding into #20873's dispatch (same file, same function, same seat) is triage's call; the defect shapes differ.\n\n**Reader:** the `domain:engine` seat that dispatches `having-filter.ts` after #20822's F8. Seat 2 holds #20873 in that file.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed, in the act that filed this card:\n- 「having aggregation filter non-boolean $exists $null comparand truthiness constraint dropped assertConditionIsEvaluable」: 2 hits. #20897 (open) is the drivers' `where`. #20116 (closed) is the save-time door.\n- 「having-filter checkCondition $exists truthiness non-boolean flag per-aggregation filter」: 9 hits. #20873 (open) is `$contains` on a stored array. #20116, #20510, #20176, #20122, #20148, #13709 and #7390 (closed) are other doors or other comparand shapes. None covers this evaluator's flag reading.\n\nDedupe words: `having non-boolean $exists truthiness` · `aggregation filter $null non-boolean constraint dropped` · `assertConditionIsEvaluable flags $null $exists`"

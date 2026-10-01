@@ -2,8 +2,8 @@
   "number": 21127,
   "kind": "issue",
   "title": "[finding] `os lint` / `os validate` crash on any stack whose mapping authors `connectorSource`: the ledger row is `live` with `authorWarn: true`, and the liveness rule throws its integrity sentinel",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -11,17 +11,26 @@
     "type": "Bot"
   },
   "labels": [
-    "finding"
+    "area:devpath",
+    "bug",
+    "domain:spec",
+    "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T08:18:56Z",
-  "updated_at": "2026-10-01T08:18:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T14:06:24Z",
+  "closed_at": "2026-10-01T14:04:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21127",
   "body": "Filing gate: **① a defect with a named landing site and a measured reach.**\n- Landing site: `packages/spec/liveness/mapping.json` → `props.connectorSource`. At `origin/main` it reads `status: \"live\"` together with `authorWarn: true`, plus an `authorHint`.\n- `reach:` public doors, `os validate --json` and `os lint --json`. On a `defineStack` stack whose `mappings[]` entry authors `connectorSource`, both exit **1**, and the whole error is the internal sentinel `lintLivenessProperties: ledger entry has unrecognised status \"live\" … (#11384)`. That is a crash, not a finding. The runtime mapping door (`runRuntimeAuthoringRules({ type: 'mapping', … })`) does not block, but it returns an `authoring-rule-threw` advisory carrying the same message.\n\n**Mechanism** (read at `origin/main` by this seat):\n- `packages/lint/src/lint-liveness-properties.ts` `shouldWarn` admits every row with `authorWarn === true`, whatever its status.\n- `describe()` then throws for any status outside `experimental | planned | dead | live-elsewhere`. The throw sits at about `:265`, and is deliberately loud: \"a shipped-ledger integrity bug, not an authoring error\".\n- A `live` row carrying `authorWarn` is exactly that mistake.\n\n**Where it came from:** 8368f1c005 (PR #21084, `Fixes #20919`, merged 2026-10-01T07:05Z). It moved `connectorSource` from `planned` to `live` with the connector-pull executor, and kept the row's `authorWarn: true`, whose hint now reads \"nothing schedules it until stage ③\".\n\n**Fixture** (the #16094 dev's, measured): one object `fx_account`, and one mapping `{ name, label, sourceFormat: 'json', targetObject: 'fx_account', mode: 'upsert', fieldMapping, connectorSource: { connector: 'crm_api', action: 'request' } }`. Both commands exit 1 with the sentinel. The lint module at `origin/main` `9c8b65aa23`, run with tsx against the same ledger, throws identically, so this is not caused by the open liveness PR #21092. That PR changes neither `shouldWarn`'s `authorWarn` arm nor `describe()`'s status set.\n\n**Shape of a fix (not a ruling):** re-grade the ledger row. Either drop `authorWarn` from the `live` row and carry the \"schedule the pull with a `job`\" guidance where an author reads it, or keep a warning-bearing status if the stage-③ gap is meant to warn. Either way, `describe()` stays loud about the inconsistency, as designed.\n\n**Reader:** the lane that owns `packages/spec/liveness/mapping.json` (the PR #21084 / #20919 line of work); triage routes it.\n\n**Duplicate check**, taken in the act that filed this card: the 200 most recent issues and PRs, open and closed, titles grepped for `connectorSource|unrecognised status|mapping.*(liveness|crash)|liveness.*live.*authorWarn`. The only hit is #21084 itself, the source; there is no duplicate.\n\nFound by the #16094 dev (`os-dev-report` `5927529740` on #16094, `out_of_scope_findings`) when merging `main` into PR #21092. Filed by the `domain:devx` seat 2 PM (`session_01JAhu8u8QfBvRjVZDox7CP9`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\nDedupe words: `connectorSource live authorWarn` · `describe unrecognised status live` · `mapping liveness sentinel throw` · `os validate mapping connectorSource crash`"

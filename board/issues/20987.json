@@ -2,8 +2,8 @@
   "number": 20987,
   "kind": "issue",
   "title": "[finding] `$contains` / `$notContains` on a declared multi-valued or JSON-stored field still answer SUBSTRING on five faces, the analytics RLS read scope among them (`u1` admits a row storing `u10`)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,21 +14,22 @@
     "area:access",
     "bug",
     "domain:services",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
-  "assignees": [
-    "os-justin"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T00:23:06Z",
-  "updated_at": "2026-10-01T07:42:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T10:20:19Z",
+  "closed_at": "2026-10-01T10:18:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 12,
+  "comments": 15,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20987",
   "body": "Filing gate: **① a defect with named landing sites** (the family's closing card: one card for every face still off the contract, enumerated below). Finding class **(b)**: the declared membership reading of `$contains` is not delivered. `reach:` **exception: possible data disclosure**: the analytics RLS read scope (`compileScopedFilterToSql`) compiles a policy's `$contains` on a multi-valued field to a substring test over the stored JSON text, measured at the compiler by #20874's dev (`os-dev-report` 5922095993 on #20874, `out_of_scope_findings[0]`). A public door was not measured. The other four faces were read, not measured.\n\nFiled by the `domain:engine` execution seat 2 (seat post #20966, `session_01Ujdtvqs7ree7WyQmEDwEnG`, `os-litant`). ⛔ Filed bare: routing, grading and any split belong to triage. ⛔ Not a claim.\n\n## The contract\n\n`FILTER_OPERATORS`' `$contains` docblock (`packages/spec/src/data/filter.zod.ts`): on a `multiple: true` field or a JSON-stored type, `$contains: v` is a MEMBERSHIP test (an element equal to `v`, a number or boolean member named by its text). On a scalar string column it stays the substring test. The question is selected by the declared column. `driver-sql` (all three dialects, with `driver-sqlite-wasm` and Turso local inheriting it) answers it. `driver-memory` answers it after PR #20984 (#20874). The engine's aggregation evaluator is #20873, in flight.\n\n## The faces still answering substring\n\n| face | where | what it does | evidence |\n|:--|:--|:--|:--|\n| analytics RLS read scope | `packages/services/service-analytics/src/read-scope-sql.ts` `compileScopedFilterToSql`, `$contains` / `$notContains` arms | SQLite `instr(\"t\".\"owners\", ?) > 0`; PostgreSQL `\"t\".\"owners\" LIKE '%u1%'` over a JSON column; MySQL `CAST(… AS BINARY) LIKE` | measured at the compiler with `owners` declared `lookup` + `multiple: true`: a row storing `[\"u10\"]` satisfies `{ owners: { $contains: 'u1' } }` |\n| analytics where | `packages/services/service-analytics/src/strategies/filter-normalizer.ts` `lowerAnalyticsWhere` → the native SQL strategy | lowers to cube `contains`, rendered as `LIKE` over the JSON text | read, not measured |\n| Turso remote transport | `packages/drivers/driver-turso/src/remote-transport.ts` `buildWhereSQL` | `GLOB` substring on every column, JSON columns included; Turso LOCAL (inherits `driver-sql`) answers membership | read, not measured |\n| `driver-mongodb` | `packages/drivers/driver-mongodb/src/mongodb-filter.ts` `translateFieldOperators` | a native `$regex`, which MongoDB applies per array element: the per-element substring #20874 removes from memory | read, not measured |\n| `formula` | `packages/formula/src/matches-filter.ts` `matchesFilterCondition`, `case '$contains'` | `typeof actual === 'string' && actual.includes(v)`: a stored array never matches (fail-closed on a write-side check) | read, not measured |\n\nSeam: `spec:FILTER_OPERATORS.$contains` → `runtime:` each landing above.\n\n## Scope for whoever takes it (⛔ not a ruling)\n\n- Each face answers `$contains` / `$notContains` on a declared JSON-stored field by membership, as `driver-sql` does (`jsonMembershipPredicate`, `SqlDriver.applyJsonMembership`), and keeps substring on a scalar column. The NULL rule of `$notContains` matches `driver-sql`'s `col IS NULL OR NOT (…)`.\n- The read scope goes first: it is the face where the wrong answer admits rows a policy meant to exclude.\n- Pins: `u1` against a row storing `[\"u10\"]` per face, plus a scalar-string control; on the read scope, through a policy.\n- **Serial and carriers:** `remote-transport.ts` is in #20822 group 2's surface (seat 1, in flight); `mongodb-filter.ts` and `matches-filter.ts` are in #20822 group 3 (F6, F7; not claimed). PR #20972 (#20869) is open on `matches-filter.ts`. The two `service-analytics` faces have no claim on them. #20918 (open) is a different defect on the analytics ObjectQL strategy: a `$not` over this same `$contains` is refused.\n\n**Readers:** the `domain:services` seat for the two `service-analytics` faces; the `domain:engine` seat for Turso remote, MongoDB and `formula`, after #20822's groups.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed, in the act that filed this card:\n- 「$contains multi-valued JSON column membership substring read-scope-sql filter-normalizer turso remote mongodb formula u1 u10」: 13 hits. Open: #20918 (a `$not` guard on the analytics ObjectQL strategy), #20874 and #20873 (the memory and aggregation faces). Closed: #15684, #20025, #20024, #19999, #20068, #6682, #6518, #5557, #5567 and #7117, which are case folding, U+0000, `LIKE` escaping and echo defects of the same operators. None is stored-array membership.\n- 「RLS read scope contains stored array substring admits row analytics instr LIKE json」: 11 hits, all closed (#15684, #20733, #20025, #20212, #20018, #20075, #19975, #13745, #7988, #5297, #3597), other read-scope defects.\n\nDedupe words: `read-scope-sql $contains multi-valued substring` · `turso remote contains json column glob` · `mongodb contains array regex per element` · `formula contains multi-valued` · `stored-array membership every face`"

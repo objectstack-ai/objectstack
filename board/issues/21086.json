@@ -2,8 +2,8 @@
   "number": 21086,
   "kind": "issue",
   "title": "[security] Stored datasource credentials are served unredacted to an admin through a read path outside the two datasource read doors — detail withheld pending maintainer",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:access",
     "bug",
     "domain:services",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
@@ -24,9 +23,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T05:34:32Z",
-  "updated_at": "2026-10-01T07:45:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T08:49:08Z",
+  "closed_at": "2026-10-01T08:48:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,
