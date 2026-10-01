@@ -442,19 +442,25 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
     });
 
     it('a guarded relation traversal guards the DOTTED member, not its alias', async () => {
-      // `{account: {region: 'NA'}}` flattens to the member `account.region` (the
-      // normalizer's own dotted-key flattening), so the guard has to flatten the
-      // same way: guarding `account` would test the relation, not the column the
-      // leaf reads. Asserted on the generated SQL only — `region` is not a column
-      // of this fixture, which is the point: both halves resolve to ONE member.
-      const { sql } = await sqlFor({ $not: { account: { region: 'NA' } } });
-      // [ADR-0053 D-D1, amended — #5930 step 3] The door spells the nested
-      // relation dotted before the shared lowering reads it, so the lowering's
-      // guard lands on the dotted member too (outer), and this face's own copy
-      // adds its own (inner) — never a guard on `account` itself.
+      // The cube member `account.region` — a traversal through the cube's
+      // join — so the guard lands on the member the leaf reads: guarding
+      // `account` would test the relation, not the column. Asserted on the
+      // generated SQL only — `region` is not a column of this fixture, which is
+      // the point: both halves resolve to ONE member.
+      const { sql } = await sqlFor({ $not: { 'account.region': 'NA' } });
+      // [ADR-0053 D-D1, amended — #5930 step 3] The shared lowering's guard
+      // lands on the dotted member (outer), and this face's own copy adds its
+      // own (inner) — never a guard on `account` itself.
       expect(sql).toContain('NOT (("account"."region" IS NOT NULL AND ("account"."region" IS NOT NULL AND "account"."region" = $1)))');
       expect(sql).not.toContain('"deal"."account" IS NOT NULL');
       expect(sql).not.toMatch(/(^|[^."])account IS NOT NULL/);
+      // [#20887] REPLACED spelling. This case wrote the NESTED form
+      // (`{ account: { region: 'NA' } }`), which this compiler used to flatten
+      // to the same member. The nested form is now the engine's — the related
+      // object read as the caller, capped — and `NativeSQLStrategy.canHandle`
+      // declines a query carrying it; reaching this compiler anyway is a
+      // routing fault, refused bare.
+      await expect(sqlFor({ $not: { account: { region: 'NA' } } })).rejects.toThrowError(/reached the SQL compiler/);
     });
   });
 
@@ -738,8 +744,10 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       await expect(ids({ stage: {} })).rejects.toThrowError(/zero operators/);
       await expect(ids({ $or: [{ stage: {} }, { owner: 'u1' }] })).rejects.toThrowError(/zero operators/);
       await expect(ids({ $not: { stage: {} } })).rejects.toThrowError(/zero operators/);
-      // A nested relation is NOT this shape and still flattens.
-      const { sql } = await sqlFor({ account: { region: 'NA' } });
+      // A relation traversal is NOT this shape: the dotted cube member still
+      // compiles. [#20887] (The nested spelling of it is the engine's now, and
+      // never reaches this compiler — see the guarded-traversal case above.)
+      const { sql } = await sqlFor({ 'account.region': 'NA' });
       expect(sql).toContain('"account"."region" = $1');
     });
 

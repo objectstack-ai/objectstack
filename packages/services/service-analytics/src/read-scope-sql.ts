@@ -1312,8 +1312,27 @@ function compileField(field: string, value: unknown, qAlias: string, params: unk
 
   const ops = value as Record<string, unknown>;
   const keys = Object.keys(ops);
-  // A value object must be ALL operators; a non-$ key means a nested relation,
-  // which a flat read scope cannot join — fail closed.
+  // [#20887] The nested-relation form — a value object whose keys are ALL
+  // fields (`{ owner: { region: 'NA' } }`) — keeps its fail-closed refusal
+  // HERE, in words that name the route that serves it. The form is answered by
+  // READING the related object as the caller (#20802's ruling: its row scope
+  // and field permissions, and a cap), and this compile cannot: it is a
+  // synchronous string builder that holds the caller's context for
+  // placeholders and no data engine, so there is nothing here to read the
+  // related object with, and a second copy of the permission rule is not an
+  // answer. The engine is where the form is served.
+  if (keys.length > 0 && keys.every((k) => !k.startsWith('$'))) {
+    throw readScopeCompileError(
+      `[read-scope-sql] "${field}" carries a nested-relation condition ({ "${field}": { … } }), ` +
+      `which a read scope compiled to SQL cannot serve (fail-closed): the condition is answered by ` +
+      `reading the related object, and this compile reads no other object. The engine serves the ` +
+      `form in a query's where — it reads the related object as the caller, with that object's row ` +
+      `scope and field permissions, and refuses a match past its cap. In a read scope compiled to SQL, ` +
+      `name the related ids on a single-valued relation: { "${field}": { "$in": [ID, …] } }.`,
+    );
+  }
+  // A value object must be ALL operators; a non-$ key beside a $ key (or no
+  // key at all) is no shape this compiler reads — fail closed.
   if (keys.length === 0 || keys.some((k) => !k.startsWith('$'))) {
     throw readScopeCompileError(`[read-scope-sql] "${field}" has a nested/relation value which is not supported in a read scope (fail-closed).`);
   }

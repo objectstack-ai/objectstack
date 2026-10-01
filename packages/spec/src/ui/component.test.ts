@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import {
   PageHeaderProps,
   PageTabsProps,
@@ -22,6 +23,7 @@ import {
   ElementTextInputPropsSchema,
   ObjectMetricPropsSchema,
   ObjectKanbanPropsSchema,
+  pageComponentSlotPositions,
 } from './component.zod';
 import { PageComponentSchema, PageSchema, PageComponentType, ElementDataSourceSchema, RETIRED_PAGE_COMPONENT_TYPES } from './page.zod';
 import {
@@ -513,6 +515,52 @@ describe('PageCardProps', () => {
 
   it('does not materialize the retired `actions` on a clean parse', () => {
     expect(PageCardProps.parse({ title: 'Shortcuts', children: [] })).not.toHaveProperty('actions');
+  });
+});
+
+describe('pageComponentSlotPositions — the one slot list, derived from the rows (#20940)', () => {
+  // Every page walk reads this list: the ADR-0087 conversion walker (every
+  // entry), the exported `walkAddressedPageComponents` and lint's
+  // `walkPageComponents` (authorable entries). Before it each kept its own,
+  // and they disagreed about `page:card.footer`.
+  it('names exactly the positions the rows declare, in the walks\' visit order', () => {
+    expect(pageComponentSlotPositions()).toEqual([
+      { key: 'children', retired: false },
+      { key: 'body', retired: true },
+      { key: 'footer', retired: false },
+      { key: 'items', panelKey: 'children', retired: false },
+    ]);
+  });
+
+  it('is derived from the rows that declare each position, never from a list of its own', () => {
+    const cardShape = PageCardProps.shape as Record<string, unknown>;
+    const tabsItem = (PageTabsProps.shape.items as any).def.element.shape as Record<string, unknown>;
+    const accordionItem = (PageAccordionProps.shape.items as any).def.element.shape as Record<string, unknown>;
+    for (const key of ['children', 'body', 'footer']) expect(cardShape).toHaveProperty(key);
+    expect(PageContainerProps.shape).toHaveProperty('children');
+    expect(tabsItem).toHaveProperty('children');
+    expect(accordionItem).toHaveProperty('children');
+    // CONTROL: a row's plain `z.array(z.unknown())` that is NOT a slot — the
+    // same schema shape, unmarked — is not in the list.
+    const keys = pageComponentSlotPositions().map((p) => p.key);
+    for (const notASlot of ['columns', 'staticData', 'rowActions', 'fields', 'sections']) {
+      expect(keys).not.toContain(notASlot);
+    }
+  });
+
+  it('marks a slot without changing it: the parse and the JSON Schema are the unmarked schema\'s', () => {
+    const footer = PageCardProps.shape.footer;
+    const unmarked = z.array(z.unknown()).optional().describe('Card footer components (slot)');
+    expect(z.toJSONSchema(footer)).toEqual(z.toJSONSchema(unmarked));
+    expect(footer.parse(['bare-id', { type: 'element:button' }])).toEqual(['bare-id', { type: 'element:button' }]);
+    expect(() => PageCardProps.parse({ body: [] })).toThrow(/`body`.*removed.*`children`/s);
+  });
+
+  it('is derived once and handed back frozen', () => {
+    const first = pageComponentSlotPositions();
+    expect(pageComponentSlotPositions()).toBe(first);
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(first.every((position) => Object.isFrozen(position))).toBe(true);
   });
 });
 
