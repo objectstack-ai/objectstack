@@ -5369,7 +5369,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
   },
   {
     id: 'dataset-member-field-expression-refused',
-    order: 57,
+    order: 58,
     text:
       'It also holds an ADR-0021 dataset\'s `field` — `dimensions[].field` and `measures[].field` — to '
       + 'the accept set the cube members it compiles to already hold, from one shared declaration: a '
