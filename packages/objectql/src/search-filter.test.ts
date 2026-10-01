@@ -206,9 +206,11 @@ describe('expandSearchToFilter', () => {
     });
 
     it('a label term: one $contains per matched option value, never $in', () => {
+      // The auto-default set: the scalar `status` beside it keeps its fallback.
       expect(expandSearchToFilter('important', { fields: taskFields })).toEqual({ $or: [
         { subject: { $icontains: 'important' } },
         { tags: { $contains: 'important' } },
+        { status: { $icontains: 'important' } },
       ] });
       // Two labels match → two membership clauses in the same $or (any-of).
       expect(expandSearchToFilter('QUICK', { fields: taskFields, searchableFields: ['tags'] })).toEqual({ $or: [
