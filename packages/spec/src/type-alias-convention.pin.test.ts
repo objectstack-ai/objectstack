@@ -275,7 +275,7 @@ import type * as M187 from './shared/duration.zod.js';
 import type * as M188 from './ai/build-progress.zod.js';
 
 // ---------------------------------------------------------------------------
-// 778 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 779 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -449,6 +449,7 @@ export type Iso_api_contract__UpdateRequestSchema = Assert<Eq< z.input< typeof M
 // api/discovery.zod.ts
 // [#16325] `EnvironmentTypeSchema` moved here from cloud/environment.zod.ts (was Iso262).
 export type Iso_api_discovery__ApiRoutesSchema = Assert<Eq< z.input< typeof M17.ApiRoutesSchema >, z.infer< typeof M17.ApiRoutesSchema > >>;
+export type Iso_api_discovery__AuthFamiliesSchema = Assert<Eq< z.input< typeof M17.AuthFamiliesSchema >, z.infer< typeof M17.AuthFamiliesSchema > >>;
 export type Iso_api_discovery__CapabilityDescriptorSchema = Assert<Eq< z.input< typeof M17.CapabilityDescriptorSchema >, z.infer< typeof M17.CapabilityDescriptorSchema > >>;
 export type Iso_api_discovery__DiscoveryEnvironmentSchema = Assert<Eq< z.input< typeof M17.DiscoveryEnvironmentSchema >, z.infer< typeof M17.DiscoveryEnvironmentSchema > >>;
 export type Iso_api_discovery__DiscoverySchema = Assert<Eq< z.input< typeof M17.DiscoverySchema >, z.infer< typeof M17.DiscoverySchema > >>;
@@ -1670,7 +1671,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 778 isomorphic pins', () => {
+  it('still declares all 779 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2397,7 +2398,14 @@ describe('ADR-0122 type-alias convention', () => {
     // module's surviving pins. -2 removed. Authored off 779 (as 779 -> 777)
     // and re-derived on the merge of #20694's `EmptyStateSchema` pin above, so
     // this entry's arrow starts from 780.
-    expect(pins).toHaveLength(778);
+    //
+    // 778 -> 779 is #21046: discovery reports which optional `/auth` route
+    // families are mounted, and the new exported `AuthFamiliesSchema` needs its
+    // `AuthFamilies` author alias. A closed object of booleans with no default
+    // or transform in its tree, so it is pinned here
+    // (Iso_api_discovery__AuthFamiliesSchema) rather than given an
+    // `AuthFamiliesParsed` synonym. +1 added.
+    expect(pins).toHaveLength(779);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either
