@@ -37,7 +37,7 @@ import type { EngineAggregateOptions, EngineQueryOptions } from '@objectstack/sp
 
 import { AuditPlugin } from './audit-plugin.js';
 import { redactActivityRows } from './activity-field-redaction.js';
-import { ACTIVITY_VALUE_BEARING_COLUMNS, namedActivityColumns, pinnedParentObject } from './activity-predicate-guard.js';
+import { ACTIVITY_QUERY_GUARD, AUDIT_LOG_QUERY_GUARD, namedValueBearingColumns, pinnedParentObject } from './parent-field-query-guard.js';
 
 const ACTIVITY = 'sys_activity';
 const ITEM = 'apg_item';
@@ -351,7 +351,9 @@ describe('[#21154] a query over the activity text by a reader withheld a parent 
 
 // ── the guard's own definitions ───────────────────────────────────────────
 
-describe('[#21154] the activity query guard: its column list, its pin rule and its clause walk', () => {
+describe('[#21154] the parent-field query guard: its column lists, its pin rule and its clause walk', () => {
+  const named = (ast: Record<string, unknown>) => namedValueBearingColumns(ast, ACTIVITY_QUERY_GUARD.columns);
+
   it('names exactly the columns the field redaction strips when it fails closed', async () => {
     const row: Record<string, unknown> = {
       id: 'a1', object_name: '', record_id: 'r1', type: 'note', url: 'u', actor_name: 'n',
@@ -360,37 +362,40 @@ describe('[#21154] the activity query guard: its column list, its pin rule and i
     const before = Object.keys(row);
     await redactActivityRows([row], { getReadableFields: async () => [], getQueryableFields: async () => [] }, {});
     const stripped = before.filter((key) => !(key in row));
-    expect(stripped.sort()).toEqual([...ACTIVITY_VALUE_BEARING_COLUMNS].sort());
+    expect(stripped.sort()).toEqual([...ACTIVITY_QUERY_GUARD.columns].sort());
   });
 
   it('reads a pin only from an equality at the root or inside a root conjunction', () => {
-    expect(pinnedParentObject({ object_name: 'acct' })).toBe('acct');
-    expect(pinnedParentObject({ object_name: { $eq: 'acct' } })).toBe('acct');
-    expect(pinnedParentObject({ $and: [{ type: 'x' }, { $and: [{ object_name: 'acct' }] }] })).toBe('acct');
-    expect(pinnedParentObject({ object_name: 'acct', $and: [{ object_name: 'acct' }] })).toBe('acct');
-    expect(pinnedParentObject({ object_name: 'acct', type: { $in: ['a', 'b'] } })).toBe('acct');
-    expect(pinnedParentObject({ object_name: 'acct', $and: [{ object_name: 'lead' }] })).toBeNull();
-    expect(pinnedParentObject({ $or: [{ object_name: 'acct' }] })).toBeNull();
-    expect(pinnedParentObject({ $not: { object_name: 'acct' } })).toBeNull();
-    expect(pinnedParentObject({ object_name: { $in: ['acct'] } })).toBeNull();
-    expect(pinnedParentObject({ object_name: { $eq: 'acct', $ne: 'lead' } })).toBeNull();
-    expect(pinnedParentObject({ object_name: ACTIVITY })).toBeNull();
-    expect(pinnedParentObject({ object_name: 'Not A Name' })).toBeNull();
-    expect(pinnedParentObject(undefined)).toBeNull();
+    expect(pinnedParentObject({ object_name: 'acct' }, ACTIVITY)).toBe('acct');
+    expect(pinnedParentObject({ object_name: { $eq: 'acct' } }, ACTIVITY)).toBe('acct');
+    expect(pinnedParentObject({ $and: [{ type: 'x' }, { $and: [{ object_name: 'acct' }] }] }, ACTIVITY)).toBe('acct');
+    expect(pinnedParentObject({ object_name: 'acct', $and: [{ object_name: 'acct' }] }, ACTIVITY)).toBe('acct');
+    expect(pinnedParentObject({ object_name: 'acct', type: { $in: ['a', 'b'] } }, ACTIVITY)).toBe('acct');
+    expect(pinnedParentObject({ object_name: 'acct', $and: [{ object_name: 'lead' }] }, ACTIVITY)).toBeNull();
+    expect(pinnedParentObject({ $or: [{ object_name: 'acct' }] }, ACTIVITY)).toBeNull();
+    expect(pinnedParentObject({ $not: { object_name: 'acct' } }, ACTIVITY)).toBeNull();
+    expect(pinnedParentObject({ object_name: { $in: ['acct'] } }, ACTIVITY)).toBeNull();
+    expect(pinnedParentObject({ object_name: { $eq: 'acct', $ne: 'lead' } }, ACTIVITY)).toBeNull();
+    expect(pinnedParentObject({ object_name: ACTIVITY }, ACTIVITY)).toBeNull();
+    expect(pinnedParentObject({ object_name: 'Not A Name' }, ACTIVITY)).toBeNull();
+    expect(pinnedParentObject(undefined, ACTIVITY)).toBeNull();
+    // On the ledger, the ledger itself is not a parent; the activity stream's rule applies otherwise.
+    expect(pinnedParentObject({ object_name: 'acct' }, AUDIT_LOG_QUERY_GUARD.object)).toBe('acct');
+    expect(pinnedParentObject({ object_name: AUDIT_LOG_QUERY_GUARD.object }, AUDIT_LOG_QUERY_GUARD.object)).toBeNull();
   });
 
   it('collects a column from every row-shaping clause, a cross-field comparand included, and not from the projection', () => {
-    expect(namedActivityColumns({ fields: ['summary', 'record_label', 'metadata'] })).toEqual({ aggregate: [], predicate: [] });
-    expect(namedActivityColumns({ where: { type: { $eq: { $field: 'summary' } } } }).predicate).toEqual(['summary']);
-    expect(namedActivityColumns({ where: { $or: [{ type: 'x' }, { $not: { record_label: 'y' } }] } }).predicate).toEqual(['record_label']);
-    expect(namedActivityColumns({ having: { metadata: 'x' } }).predicate).toEqual(['metadata']);
-    expect(namedActivityColumns({ orderBy: [{ field: 'record_label', order: 'asc' }] }).predicate).toEqual(['record_label']);
-    expect(namedActivityColumns({ groupBy: ['summary'] }).aggregate).toEqual(['summary']);
-    expect(namedActivityColumns({ groupBy: [{ field: 'metadata' }] }).aggregate).toEqual(['metadata']);
-    expect(namedActivityColumns({ aggregations: [{ function: 'max', field: 'metadata.x' }] }).aggregate).toEqual(['metadata']);
-    expect(namedActivityColumns({ aggregations: [{ function: 'count', field: '*', filter: { summary: 'x' } }] }))
+    expect(named({ fields: ['summary', 'record_label', 'metadata'] })).toEqual({ aggregate: [], predicate: [] });
+    expect(named({ where: { type: { $eq: { $field: 'summary' } } } }).predicate).toEqual(['summary']);
+    expect(named({ where: { $or: [{ type: 'x' }, { $not: { record_label: 'y' } }] } }).predicate).toEqual(['record_label']);
+    expect(named({ having: { metadata: 'x' } }).predicate).toEqual(['metadata']);
+    expect(named({ orderBy: [{ field: 'record_label', order: 'asc' }] }).predicate).toEqual(['record_label']);
+    expect(named({ groupBy: ['summary'] }).aggregate).toEqual(['summary']);
+    expect(named({ groupBy: [{ field: 'metadata' }] }).aggregate).toEqual(['metadata']);
+    expect(named({ aggregations: [{ function: 'max', field: 'metadata.x' }] }).aggregate).toEqual(['metadata']);
+    expect(named({ aggregations: [{ function: 'count', field: '*', filter: { summary: 'x' } }] }))
       .toEqual({ aggregate: [], predicate: ['summary'] });
-    expect(namedActivityColumns({ where: { type: 'x', object_name: 'acct' }, orderBy: [{ field: 'timestamp' }] }))
+    expect(named({ where: { type: 'x', object_name: 'acct' }, orderBy: [{ field: 'timestamp' }] }))
       .toEqual({ aggregate: [], predicate: [] });
   });
 });

@@ -18,10 +18,11 @@
  * service door's free-text arm closed the same class for its own filter
  * (`freeTextMayMatchSnapshot`, #11040); this is the generic door's half.
  *
- * ## The rule — the activity stream's, applied to the snapshot
+ * ## The rule — the audit plugin's, applied to the snapshot
  *
  * The same rule `plugin-audit` applies to the activity stream's value-bearing
- * columns (`activity-predicate-guard.ts`, triage ruling on #21154, option A):
+ * columns and the compliance ledger's snapshots (`parent-field-query-guard.ts`,
+ * triage ruling on #21154, option A):
  *
  *  - no security service wired → unchanged: the redaction serves every
  *    snapshot whole, so a predicate over it discloses nothing the rows do not;

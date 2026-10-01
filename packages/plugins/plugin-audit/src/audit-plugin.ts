@@ -19,7 +19,7 @@ import { createAuthEventAuditSink } from './auth-event-audit.js';
 import { installCommentAccessHooks, installCommentReadVisibility } from './comment-access-hooks.js';
 import { installActivityReadVisibility } from './activity-read-visibility.js';
 import { installActivityFieldRedaction, type ActivityFieldVisibilitySource } from './activity-field-redaction.js';
-import { installActivityPredicateGuard } from './activity-predicate-guard.js';
+import { installParentFieldQueryGuards } from './parent-field-query-guard.js';
 
 /**
  * [#8992] Read/view audit configuration — the per-object opt-in, closed.
@@ -289,11 +289,12 @@ export class AuditPlugin implements Plugin {
       // installed, and that is said rather than left silent.
       if (typeof (engine as any).registerMiddleware === 'function') {
         // [#21154] A query that filters, sorts, searches, groups or aggregates
-        // by a value-bearing column is judged before the read gate below runs
-        // its pre-scan — the redaction narrows only what is served, so such a
-        // predicate would select on a value the reader is not served. The
-        // security service is resolved on every read, as for the redaction.
-        installActivityPredicateGuard(
+        // by a value-bearing column of the activity stream or the ledger is
+        // judged before the read gate below runs its pre-scan — a read-time
+        // redaction narrows only what is served, so such a predicate would
+        // select on a value the reader is not served. The security service is
+        // resolved on every read, as for the redaction.
+        installParentFieldQueryGuards(
           engine as any,
           () => {
             try {
