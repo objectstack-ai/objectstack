@@ -4028,7 +4028,11 @@ export type ObjectMetricPropsParsed = z.infer<typeof ObjectMetricPropsSchema>;
  * DESIGNER's spelling with
  * zero read points (#7973 class) — aliased to the `groupBy` the board reads.
  * `limit` (#16503) was measured later, at the pin this repo builds against
- * (`.objectui-sha` = `e420df310`; re-measured there 2026-09-30 —
+ * (`.objectui-sha` = `31971ff1e`; re-measured there 2026-10-01 —
+ * `ObjectKanban.tsx` changed on this hop only in the comment above its
+ * `navigation` read (+12/-14, objectui#8652: the key is now declared on
+ * `ObjectKanbanSchema`), far below the anchor, which did not move and was
+ * re-read in place. At `e420df310` (2026-09-30)
  * `ObjectKanban.tsx` changed on this hop, +40/-13: objectui#9853 renamed the
  * default `DEFAULT_KANBAN_LIMIT` to `DEFAULT_KANBAN_FETCH_BATCH_SIZE`, still
  * 100, on the anchor line itself, and objectui#11234 mounts an internal
@@ -4805,7 +4809,13 @@ const OBJECT_MAP_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * `object-map` (objectui `plugin-map/src/ObjectMap.tsx` plus the registry shell
  * `plugin-map/src/index.tsx`, read at the pin this repo builds against —
- * `.objectui-sha` = `e420df310`, re-measured there 2026-09-30: all three files
+ * `.objectui-sha` = `31971ff1e`, re-measured there 2026-10-01: `ObjectMap.tsx`
+ * and `core/src/utils/record-source.ts` are byte-identical to `e420df310`, so
+ * every anchor in them holds unmoved and was re-read in place; `index.tsx`
+ * changed (+7/-3, objectui#10859 batch 5: the comment above the registration
+ * and the `objectName` input's description now count the node's
+ * `dataSource` binding), the `map` input MOVING `:97` -> `:101`
+ * byte-identical. At `e420df310` (2026-09-30) all three files
  * changed across the hop from `db11afd49`, so every anchor was re-mapped
  * through the diff and re-READ. `ObjectMap.tsx` (+16/-17, objectui#8348)
  * changed only in the record-source docblock above `getDataConfig`, one line
@@ -4874,7 +4884,7 @@ const OBJECT_MAP_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * `sort` (`:952` and `:1031`, through the shared `convertSortToQueryParams` sink
  * to `$orderby`), `map` (`:405` — `getMapConfig` branch 1, the author face and
  * the registration's declared `{ name: 'map', type: 'object' }` input,
- * `plugin-map/src/index.tsx:97`; the second copy this record cited at `:78`
+ * `plugin-map/src/index.tsx:101`; the second copy this record cited at `:78`
  * belonged to the bare `map` registration, retired on objectui#10393, so
  * `object-map` is now the one registration declaring it), `mapStyle`
  * (`:400`, `schema.mapStyle || schema.map?.style`), `navigation` (`:1182`) and
@@ -4937,7 +4947,11 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    * Base query filter — the `ViewFilterRule` ARRAY form, the one filter
    * orthography every `filter` door in this map shares (ui#6206-B reaching the
    * `object-*` family: #15449, decision batch #55, option A). Measured at the
-   * pin this repo builds against (`.objectui-sha` = `e420df310`, re-READ there
+   * pin this repo builds against (`.objectui-sha` = `31971ff1e`, re-READ there
+   * 2026-10-01: `ObjectMap.tsx` is byte-identical to `e420df310`, so all three
+   * anchors held unmoved, and `plugin-map/src/index.tsx` changed above its
+   * inputs (objectui#10859 batch 5), the `filter` input MOVING `:100` ->
+   * `:104` byte-identical. At `e420df310`, re-READ there
    * 2026-09-30: `ObjectMap.tsx` changed only in the record-source docblock
    * above both anchors, one line shorter (objectui#8348), so each MOVED up one
    * line with its text byte-identical, `:858` -> `:857`, `:952` -> `:951` and
@@ -4971,7 +4985,11 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    * Marker order — the `SortItem` ARRAY form, the one sort orthography every
    * DECLARED `sort` door on this platform carries (objectui#8221, decision batch
    * #77, option B). Measured at the pin this repo builds against
-   * (`.objectui-sha` = `e420df310`, re-READ there 2026-09-30 — `ObjectMap.tsx`
+   * (`.objectui-sha` = `31971ff1e`, re-READ there 2026-10-01 — `ObjectMap.tsx`
+   * is byte-identical to `e420df310`, so both anchors held unmoved, and
+   * `plugin-map/src/index.tsx` changed above its inputs (objectui#10859 batch
+   * 5), the `sort` input MOVING `:101` -> `:105` byte-identical. At
+   * `e420df310`, re-READ there 2026-09-30 — `ObjectMap.tsx`
    * changed only in the record-source docblock above both anchors, one line
    * shorter (objectui#8348), so both MOVED up one line with their text
    * byte-identical, `:953` -> `:952` and `:1032` -> `:1031`; and
@@ -4994,7 +5012,7 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    * declare against, so the legacy string clause is refused here for the same
    * ruling. Through `db11afd49` `plugin-map/src/index.tsx` declared no `sort`
    * input at all; since objectui#8220 it declares one in this array form
-   * (`:101`), so the registry and this door agree.
+   * (`:105`), so the registry and this door agree.
    */
   sort: z.array(SortItemSchema).optional()
     .describe('Marker order for the fetched records — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array`'),
@@ -5066,7 +5084,13 @@ const OBJECT_GANTT_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * `object-gantt` (objectui `plugin-gantt/src/ObjectGantt.tsx` plus the registry
  * shell `plugin-gantt/src/index.tsx`, read at the pin this repo builds against
- * — `.objectui-sha` = `e420df310`, re-measured there 2026-09-30: all three
+ * — `.objectui-sha` = `31971ff1e`, re-measured there 2026-10-01:
+ * `ObjectGantt.tsx` and `record-source.ts` are byte-identical to `e420df310`,
+ * so every anchor in them holds unmoved and was re-read in place;
+ * `plugin-gantt/src/index.tsx` changed (+3/-2, objectui#11117: the
+ * `objectName` input's description and the comment above the registration
+ * now count a `dataSource.object` binding), the `gantt` input MOVING `:145`
+ * -> `:146` byte-identical. At `e420df310` (2026-09-30) all three
  * files changed across the hop from `db11afd49`, and every anchor was
  * re-mapped through the diff and re-READ; NONE changed content. `ObjectGantt.tsx`
  * +85/-26 (objectui#11141's inclusive date-only end, objectui#8348's
@@ -5112,7 +5136,7 @@ const OBJECT_GANTT_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * `$filter`; at `f8a9d0fb0` it was sent verbatim), `sort` (`:1064`, through
  * `convertSortToQueryParams` to `$orderby`), `gantt` (`:610-612` —
  * `getGanttConfig` branch 1, the author face and the registration's declared
- * `{ name: 'gantt', type: 'object' }` input (`plugin-gantt/src/index.tsx:145`),
+ * `{ name: 'gantt', type: 'object' }` input (`plugin-gantt/src/index.tsx:146`),
  * validated there against this
  * repo's own {@link GanttConfigSchema}), `navigation` (`:1923`), `label`
  * (`:2505`, resolved through `resolveInlineI18nLabel` for the export file
@@ -5219,10 +5243,15 @@ export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
 /**
  * The flat `TreeConfig` spellings `getTreeConfig` reads ahead of the `tree`
  * block (`ObjectTree.tsx:281-294`) and that `ObjectView` / `ListView` EMIT when
- * they flatten `options.tree` (`ListView.tsx:3722-3741`, `case 'tree'`: the
+ * they flatten `options.tree` (`ListView.tsx:3756-3775`, `case 'tree'`: the
  * product carries these keys, the EFFECTIVE `filter` objectui#10250 added, and
  * NO `tree` key). Both halves re-READ at the
- * pin this repo builds against (`.objectui-sha` = `e420df310`) on 2026-09-30 —
+ * pin this repo builds against (`.objectui-sha` = `31971ff1e`) on 2026-10-01 —
+ * `ObjectTree.tsx` is byte-identical to `e420df310`, so `281-294` and
+ * `233-254` did not move; `ListView.tsx` changed above its `case 'tree'` arm
+ * (+35/-1, objectui#10689's re-read on a harvested query input), which MOVED
+ * byte-identical `3722-3741` -> `3756-3775`, so the flat key set each reads or
+ * emits did not move. At `e420df310`, 2026-09-30 —
  * `ObjectTree.tsx` changed (+29/-26, objectui#8348's record-source arm and the
  * host-data read below it), none of it inside `281-294` or `233-254`, which did
  * not move; `ListView.tsx` changed above its `case 'tree'` arm (objectui#11021
@@ -5247,7 +5276,7 @@ export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
  *
  * `titleField` is in the set although no `tree` block key is spelled that way:
  * `ListView`'s flatten resolves `treeCfg.titleField` into `labelField` before
- * emitting (`ListView.tsx:3736`, `labelField: treeCfg.labelField ||
+ * emitting (`ListView.tsx:3770`, `labelField: treeCfg.labelField ||
  * treeCfg.titleField || 'name'`), so the author's intent is always the block's
  * `labelField`, and the prescription below says so.
  *
@@ -5402,7 +5431,13 @@ export const ObjectTreePropsSchema = lazySchema(() => strictObject({
    * holds for them because each registers through `ElementDataSourceGate`,
    * which lowers the spec binding onto `objectName` before the renderer sees
    * the node. `plugin-tree/src/index.tsx` does NOT: at the pin this repo
-   * builds against (`.objectui-sha` = `e420df310`, re-COUNTED there 2026-09-30 by
+   * builds against (`.objectui-sha` = `31971ff1e`, re-COUNTED there 2026-10-01 by
+   * the same method — 0 for the tree, whose shell is byte-identical, and 3 each
+   * for `plugin-grid` (byte-identical), `plugin-gantt` and `plugin-calendar`
+   * (both changed on the hop: objectui#11117 in each, and objectui#8652's
+   * `navigation` input in the calendar's), but 4 for `plugin-map`: objectui#10859 batch 5 added a
+   * comment that names the gate, while its wiring is the same three lines;
+   * re-COUNTED at `e420df310` 2026-09-30 by
    * the same method — 3 each again and 0 for the tree; `plugin-map` and
    * `plugin-gantt`'s `src/index.tsx` changed on the hop (objectui#8220's
    * `filter` / `sort` inputs) and still read 3, the tree's is byte-identical;
@@ -5411,8 +5446,9 @@ export const ObjectTreePropsSchema = lazySchema(() => strictObject({
    * `plugin-grid/src/index.tsx` changed on the hop and still reads 3; re-COUNTED
    * at `dd3f7e1be`
    * 2026-09-28) its registry shell has ZERO hits for that wiring, against 3
-   * each in `plugin-map`, `plugin-gantt`, `plugin-grid` and `plugin-calendar`
-   * — four controls, so the zero discriminates. ⚠️ Re-counted at every end
+   * each in `plugin-gantt`, `plugin-grid` and `plugin-calendar` and 4 in
+   * `plugin-map` (three of them the wiring, one the comment above it) — four
+   * controls, so the zero discriminates. ⚠️ Re-counted at every end
    * with ONE method (occurrences of that identifier in each `src/index.tsx`):
    * `f8a9d0fb0`, `62597c588`, `87af769e9` and `53ded82bf` all read 3 each and 0 for the tree as well —
    * `plugin-grid/src/index.tsx` changed on the hop onto `62597c588` and still reads 3, and
