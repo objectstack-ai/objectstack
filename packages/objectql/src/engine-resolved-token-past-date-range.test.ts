@@ -117,7 +117,9 @@ describe('[#21068] a date macro past the instants a Date holds is refused, on ev
     for (const token of PAST_THE_DATE_RANGE) {
       for (const field of ['opened_at', 'placed_on', 'note'] as const) {
         for (const op of ['$lt', '$gt'] as const) {
-          for (const [position, call] of positions(field, op, token)) {
+          // `max` of a text column is refused by the aggregate field-type door,
+          // which runs before resolution: the text column's `having` is that door's.
+          for (const [position, call] of positions(field, op, token).filter(([p]) => field !== 'note' || p !== 'having')) {
             const err = await refusalOf(call());
             const at = `${position} ${field} ${op} ${token}`;
             expect(err, at).not.toBeNull();
