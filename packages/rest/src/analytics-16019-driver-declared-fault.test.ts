@@ -251,10 +251,12 @@ describe('[#16019] a driver fault on the raw-SQL path reaches the caller by decl
     expect(execute).not.toHaveBeenCalled();
     expect(warned.filter((m) => m.includes('[sql-driver] DATABASE_ERROR'))).toHaveLength(0);
     // ⛔ The refusal names the path, never the caller's `field` expression text
-    // or a compiled statement.
+    // or a compiled statement. The statement check reads the keywords as the
+    // strategies emit them (upper case): the prescription itself tells the
+    // author, in prose, to "Group by the column itself".
     const body = JSON.stringify(res.body);
     expect(body).not.toMatch(/translate/i);
-    expect(body).not.toMatch(/SELECT|GROUP BY/i);
+    expect(body).not.toMatch(/\bSELECT\b|\bGROUP BY\b/);
   });
 
   it('POSITIVE CONTROL: a legitimate dataset on declared fields → 200 with rows', async () => {
