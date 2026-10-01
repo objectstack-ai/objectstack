@@ -3,9 +3,9 @@
 '@objectstack/lint': patch
 ---
 
-feat(cli)!: the `picklist` kind through the authoring commands — `objectstack validate` and `objectstack build` refuse a field whose `picklist` names no picklist, `objectstack generate picklist` scaffolds one, and lint R8 counts `picklist` as an options source (#20825)
+feat(cli)!: `objectstack validate` and `objectstack build` refuse a field whose `picklist` names no picklist the stack declares, and lint R8 counts `picklist` as an options source (#20825)
 
-Clause-②: yes (narrowing — `objectstack validate` / `objectstack build` newly refuse a field `picklist` that names no picklist the stack declares; `objectstack generate` newly accepts the `picklist` type, and `objectstack init` wires its `src/picklists` directory)
+Clause-②: no (narrowing — `objectstack validate` / `objectstack build` newly refuse a field `picklist` that names no picklist the stack declares; the R8 change removes a false-positive warning and widens no accept set of its own)
 
 <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable changes spelling or type: `packages/spec` is untouched, and `Field.picklist` stays the snake_case name it was. What changes is that two authoring commands now refuse one authored shape, a field whose `picklist` names no picklist in the stack. `objectstack migrate meta` could not rewrite that shape even in principle, because which list the author meant is not in the metadata. Nothing here judges a stored row. -->
 
@@ -30,12 +30,6 @@ carry, the list may live there, and these commands cannot read it. That referenc
 an `info` notice (`picklist-reference-unverified`) in `warnings` and on the console,
 naming the field, the list and the dependencies — never a failure, not even under
 `--strict`.
-
-**`objectstack generate picklist <name>`** writes `src/picklists/<name>.picklist.ts`,
-the file pattern the metadata registry declares for the kind, as a `definePicklist`
-module. `objectstack init` now wires a `src/picklists` directory and a `picklists`
-key in the config it writes, the way it wires every directory `objectstack generate`
-writes into.
 
 **Lint R8 (`field/select-missing-options`)** no longer reports a select, multiselect
 or radio field that names a `picklist`: the picklist is its options source. The
