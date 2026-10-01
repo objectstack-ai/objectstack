@@ -5975,6 +5975,25 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'carries, and on the assembled-manifest `viewItems` channel.',
   },
   {
+    id: 'ui-object-master-detail-form-details-closed',
+    order: 56,
+    text:
+      'It also closes the third carrier of the inline grid column: an '
+      + '`object-master-detail-form` page block\'s `details` was `z.array(z.unknown())`, so a key '
+      + 'its renderer does not read and `scale` on a currency column, which the other two carriers '
+      + 'refuse under the maintainer\'s rulings of 2026-09-23 (option B) and 2026-09-24 (option 乙), '
+      + 'went through `objectstack validate` green (#20928). '
+      + 'Each detail entry is now a strict shape of the twelve keys the renderer reads, and its '
+      + '`columns` references `InlineGridColumnSchema`. Page-component `properties` is read by the '
+      + 'component-props gate, which reports a failing entry or column as an advisory finding, '
+      + 'and is not parsed on the metadata save or load path, so a stored page still saves and '
+      + 'loads and no conversion is registered; the authored census found nothing to respell. '
+      + '`defineStack`\'s identity-only check reaches the block wherever a page carries it, with '
+      + 'the reach `inline-grid-column-identity-only-currency-scale-refused` records for the '
+      + 'other two carriers. Its D3 record is the semantic entry '
+      + '`ui-object-master-detail-form-details-closed`.',
+  },
+  {
     id: 'ui-report-joined-chart-retired',
     order: 38,
     text:
@@ -12909,13 +12928,13 @@ const step18: MigrationStep = {
         + 'the audience that does not parse. Measured on 884e8347d: the only in-repo readers are '
         + 'packages/core/src/health-monitor.ts and packages/core/src/hot-reload.ts, both moved in '
         + 'this same change; and the pinned objectui checkout — the pin this repo builds '
-        + 'against, `.objectui-sha` = `e420df310f5ba9526fd19d5fe65c2a52d6ac6d8c` — names '
+        + 'against, `.objectui-sha` = `31971ff1e28f89cfc45f0c19bc5b05e443f28b79` — names '
         + 'neither def and neither key: all thirteen exports of plugin-lifecycle-advanced.zod.ts and '
-        + 'the string debounceDelay each occur 0 times across its 9800 tracked files (0 across the 9546 at db11afd49, the 9283 at dd3f7e1be, the '
+        + 'the string debounceDelay each occur 0 times across its 9912 tracked files (0 across the 9800 at e420df310, the 9546 at db11afd49, the 9283 at dd3f7e1be, the '
         + '8512 at f8a9d0fb0 and the 8303 at 62597c588 too), against lit '
         + 'controls objectstack 12966 and @objectstack/spec 4997 on the same corpus at 87af769e9, '
         + 'which re-count to 13125 and 5043 respectively at 62597c588, to 13347 and 5123 at '
-        + 'f8a9d0fb0, to 13745 and 5466 at dd3f7e1be, to 14704 and 5545 at db11afd49 and to 15352 and 6024 at this pin (git grep -o -F, the method that reproduces '
+        + 'f8a9d0fb0, to 13745 and 5466 at dd3f7e1be, to 14704 and 5545 at db11afd49, to 15352 and 6024 at e420df310 and to 15691 and 6206 at this pin (git grep -o -F, the method that reproduces '
         + 'every earlier count).',
       acceptanceCriteria:
         'Every producer and reader of a PluginHealthCheck spells intervalMs and timeoutMs, and every '
@@ -13120,10 +13139,10 @@ const step18: MigrationStep = {
         + 'spells timeout 0 times; outside the zod file and its test the only live occurrences are the '
         + 'generated rows in content/docs/references/kernel/plugin-security-advanced.mdx, which this '
         + 'rename regenerates. The pinned objectui checkout — this is the pin we build against, '
-        + '`.objectui-sha` = `e420df310f5ba9526fd19d5fe65c2a52d6ac6d8c`, re-read from this tree — '
+        + '`.objectui-sha` = `31971ff1e28f89cfc45f0c19bc5b05e443f28b79`, re-read from this tree — '
         + 'spells resourceLimits.timeout 0 times across '
-        + '9800 tracked files, against lit controls timeout 1293, RuntimeConfig 273 and resourceLimits '
-        + '2 on the same corpus (0 across 9546, and 1197 / 273 / 2, at db11afd49; 0 across 9283, and 1172 / 263 / 2, at dd3f7e1be; 0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
+        + '9912 tracked files, against lit controls timeout 1303, RuntimeConfig 273 and resourceLimits '
+        + '2 on the same corpus (0 across 9800, and 1293 / 273 / 2, at e420df310; 0 across 9546, and 1197 / 273 / 2, at db11afd49; 0 across 9283, and 1172 / 263 / 2, at dd3f7e1be; 0 across 8512, and 1096 / 245 / 2, at f8a9d0fb0; 0 across 8303, and '
         + '1086 / 240 / 2, at 62597c588); both resourceLimits hits are prose in packages/app-shell recording '
         + 'that objectui\'s own AppShellRuntimeConfig shares not one key with the spec\'s '
         + 'RuntimeConfig, so nothing there authors this key and no pin bump is owed. ADR-0087.',
@@ -13359,10 +13378,10 @@ const step18: MigrationStep = {
         + 'no in-repo runtime reads any of the four — outside `packages/spec/src/system/logging.zod.ts` '
         + 'and its test the only occurrences are the generated rows in '
         + '`content/docs/references/system/logging.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `e420df310f5ba9526fd19d5fe65c2a52d6ac6d8c` — spells '
+        + 'objectui checkout — `.objectui-sha` = `31971ff1e28f89cfc45f0c19bc5b05e443f28b79` — spells '
         + '`flushInterval` 0 times, `initialDelay` 0, `HttpDestinationConfig` 0 and `LoggingConfig` 0 '
-        + 'across its 9800 tracked files, against lit controls `useState` 2464 and `timeout` 1293 on '
-        + 'the same corpus (all four 0 across 9546, against 2449 and 1197, at db11afd49, 0 across 9283, against 2435 and 1172, at dd3f7e1be, 0 across 8512, '
+        + 'across its 9912 tracked files, against lit controls `useState` 2469 and `timeout` 1303 on '
+        + 'the same corpus (all four 0 across 9800, against 2464 and 1293, at e420df310, 0 across 9546, against 2449 and 1197, at db11afd49, 0 across 9283, against 2435 and 1172, at dd3f7e1be, 0 across 8512, '
         + 'against 2391 and 1096, at f8a9d0fb0, and 0 across '
         + '8303, against 2389 and 1086, at 62597c588).',
       acceptanceCriteria:
@@ -17018,10 +17037,11 @@ const step18: MigrationStep = {
         + 'against a lit control of 1195 defineStack occurrences on that same corpus at fc28c1d38 '
         + '(1195 again at 9b62f54671); and the objectui '
         + 'checkout this repo builds against — this is the pin, '
-        + '`.objectui-sha` = `e420df310f5ba9526fd19d5fe65c2a52d6ac6d8c`, re-read from this tree — '
-        + 'spells all six metrics def names and both distinctive keys 0 times across 9800 tracked '
-        + 'files at that sha, against lit controls window 3873, timeout 1293, period 233, '
-        + 'interval 196 and metrics 352 on that same corpus and sha (0 across 9546, against 3772 / '
+        + '`.objectui-sha` = `31971ff1e28f89cfc45f0c19bc5b05e443f28b79`, re-read from this tree — '
+        + 'spells all six metrics def names and both distinctive keys 0 times across 9912 tracked '
+        + 'files at that sha, against lit controls window 3916, timeout 1303, period 234, '
+        + 'interval 196 and metrics 354 on that same corpus and sha (0 across 9800, against 3873 / '
+        + '1293 / 233 / 196 / 352, at e420df310, 0 across 9546, against 3772 / '
         + '1197 / 228 / 196 / 341, at db11afd49, 0 across 9283, against 3681 / 1172 / 183 / 176 / 340, at dd3f7e1be, 0 across 8512, against 3581 / '
         + '1096 / 171 / 179 / 326, at f8a9d0fb0, and 0 across 8303, against 3526 / 1086 / 170 / 179 / '
         + '324, at 62597c588), so no pin bump is owed. '
@@ -17235,12 +17255,13 @@ const step18: MigrationStep = {
         + 'dark control of 0; inside packages/spec the '
         + 'only occurrences are tracing.zod.ts, its test, and the generated rows in '
         + 'content/docs/references/system/tracing.mdx, which this rename regenerates. And the '
-        + 'pinned objectui checkout — `.objectui-sha` = `e420df310f5ba9526fd19d5fe65c2a52d6ac6d8c` — names none of it: all 37 exports of '
-        + 'tracing.zod.ts and each of the four key names occur 0 times across the 9800 files '
+        + 'pinned objectui checkout — `.objectui-sha` = `31971ff1e28f89cfc45f0c19bc5b05e443f28b79` — names none of it: all 37 exports of '
+        + 'tracing.zod.ts and each of the four key names occur 0 times across the 9912 files '
         + 'tracked at that sha (the 486 Span and 53 SpanSchema hits are objectui\'s own HTML '
         + 'text-span component, TextSpanSchema, an unrelated name, plus colSpan and prose), against '
-        + 'two lit controls on that same corpus and sha: 15352 hits for the bare token objectstack, '
-        + 'and 6024 for the package specifier @objectstack/spec (at db11afd49: 0 across 9546, Span 486, '
+        + 'two lit controls on that same corpus and sha: 15691 hits for the bare token objectstack, '
+        + 'and 6206 for the package specifier @objectstack/spec (at e420df310: 0 across 9800, Span 486, '
+        + '15352 and 6024; at db11afd49: 0 across 9546, Span 486, '
         + '14704 and 5545; at dd3f7e1be: 0 across 9283, Span 485, 13745 and 5466; at f8a9d0fb0: 0 across 8512, '
         + 'Span 488, 13347 and 5123; at 62597c588: 0 across 8303, Span 486, 13125 and 5043).',
       acceptanceCriteria:
@@ -17348,9 +17369,9 @@ const step18: MigrationStep = {
         + 'bd25e897dc: no in-repo runtime reads the key — outside `packages/spec/src/system/tenant.zod.ts` '
         + 'and its test the only occurrences are the four generated rows in '
         + '`content/docs/references/system/tenant.mdx`, which this rename regenerates; and the pinned '
-        + 'objectui checkout — `.objectui-sha` = `e420df310f5ba9526fd19d5fe65c2a52d6ac6d8c` — spells it 0 '
-        + 'times across 9800 tracked files, against lit controls `TTL` 181 and `tenant` 1235 on the '
-        + 'same corpus (0 across 9546, against 181 and 1200, at db11afd49; 0 across 9283, against 181 and 1185, at dd3f7e1be; 0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
+        + 'objectui checkout — `.objectui-sha` = `31971ff1e28f89cfc45f0c19bc5b05e443f28b79` — spells it 0 '
+        + 'times across 9912 tracked files, against lit controls `TTL` 181 and `tenant` 1237 on the '
+        + 'same corpus (0 across 9800, against 181 and 1235, at e420df310; 0 across 9546, against 181 and 1200, at db11afd49; 0 across 9283, against 181 and 1185, at dd3f7e1be; 0 across 8512, against 156 and 1034, at f8a9d0fb0; 0 across 8303, against 156 '
         + 'and 987, at 62597c588).',
       acceptanceCriteria:
         'Every schema-level tenant isolation source spells `performance.schemaCacheTtlSeconds`; '
@@ -18463,6 +18484,68 @@ const step18: MigrationStep = {
         + '`pageSize` shorthand are reported the same way at their own paths. The author deletes '
         + 'the key or writes the page size they meant, and `os validate` then reports no '
         + '`component-props-invalid` finding for that node.',
+    },
+    // #20928 — the third carrier of the inline grid column. An
+    // `object-master-detail-form` page block's `details` was `z.array(z.unknown())`
+    // while the other two carriers — a relationship field's `inlineColumns` and a
+    // form view's `subforms[].columns` (#20901) — were the strict
+    // `InlineGridColumnSchema`; the entry is now a strict shape of the twelve keys
+    // objectui's `MasterDetailForm` reads, and its `columns` REFERENCES that schema.
+    // D3 only: page-component `properties` is not parsed on the metadata save or
+    // load path, so a stored page is never refused and there is no load-path
+    // refusal for a conversion to pre-empt; the authored census found no `field`
+    // spelling to respell. `defineStack`'s identity-only check reaches this carrier
+    // too, the reach `inline-grid-column-identity-only-currency-scale-refused`
+    // records for the other two.
+    {
+      id: 'ui-object-master-detail-form-details-closed',
+      surface: 'page `object-master-detail-form` components — `properties.details[]` (each detail '
+        + 'entry, which used to accept any value) and `properties.details[].columns[]` (its inline '
+        + 'grid columns), including `scale` on a column that declares no `type` and whose `name` is a '
+        + '`currency` field of the entry\'s `childObject`',
+      replacement: 'each entry is `{ childObject, relationshipField?, columns?, formFields?, '
+        + 'inlineMode?, amountField?, sortField?, totalField?, title?, minRows?, maxRows?, addLabel? }` '
+        + '— the keys the renderer reads — with `inlineMode` one of `grid` / `form`. Each column is the '
+        + 'strict, name-keyed inline grid column a relationship field\'s `inlineColumns` takes — '
+        + '`{ name, label?, type?, … }`, where `{ name }` alone hydrates the rest from the child '
+        + 'object\'s field. Write `childObject` on every entry; write `name` where a column said '
+        + '`field` (or `fieldName`, `key`) or was a bare field-name string; delete `scale` from a '
+        + 'column that renders as a currency column, whether it declares `type: \'currency\'` or takes '
+        + 'it from a `currency` child field — nothing replaces it, the currency\'s ISO 4217 minor unit '
+        + 'decides; delete any key neither shape declares.',
+      reason: 'The block draws one inline grid per detail entry, hydrating an authored column list '
+        + 'with the same rule and into the same grid as the other two carriers of the inline grid '
+        + 'column, but nothing judged its entries: a key the renderer does not read was ignored in '
+        + 'silence, and a column carrying a key the grid does not read, or `scale` on a currency '
+        + 'column — refused on the other carriers under the maintainer\'s rulings of 2026-09-23 '
+        + '(option B, `scale` retired from the currency type) and 2026-09-24 (option 乙 — a currency\'s '
+        + 'ISO 4217 minor unit decides its display) — went through `objectstack validate` green. The '
+        + 'entry is now a strict shape and its `columns` references the column schema, so every rule '
+        + 'that schema holds applies here too, with its own prescription. The entry half is read where '
+        + 'every page component\'s props are: the component-props gate reports a failing entry or '
+        + 'column as an advisory `component-props-unknown-key` / `component-props-invalid` finding on '
+        + '`objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still '
+        + 'saves and loads, because a page component\'s `properties` is not parsed on the metadata save '
+        + 'or load path. The identity-only half is `defineStack`\'s cross-reference check, which already '
+        + 'judged the other two carriers: it now reaches the block wherever a page carries it and '
+        + 'refuses an identity-only column over a `currency` child field that carries `scale`, with the '
+        + 'column schema\'s own message; reach: the child object must be declared in the same stack, '
+        + 'and a column the column schema refuses on its own is left to the component-props gate. No '
+        + 'conversion is registered: nothing on the load path refuses the shape, and the authored '
+        + 'census found nothing to respell. Population measured at the change, on origin/main '
+        + 'ebdb6f2aca: one authored block in the examples (the showcase project workspace, one entry '
+        + '`{ title, childObject, addLabel }`, no columns), one documentation example whose three '
+        + 'columns were bare field-name strings (rewritten as `{ name }` columns in the same change), '
+        + 'and zero `field`-keyed detail columns, against one authored `inlineColumns` block as the '
+        + 'control. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `object-master-detail-form` node validates: `objectstack validate` '
+        + 'reports no `component-props-unknown-key` / `component-props-invalid` finding on a '
+        + '`properties.details` path and no cross-reference finding on a `details[].columns[].scale` '
+        + 'path. Every detail entry carries `childObject` and only keys the entry shape declares; every '
+        + 'column is an object carrying `name`, no column carries `field`, `fieldName` or `key`, and no '
+        + 'column that renders as a currency column carries `scale`. The block\'s showcase entry '
+        + '`{ title, childObject, addLabel }` parses unchanged, and the master-detail grid renders a '
+        + 'value — not a blank cell — in each authored column for a row that has one.',
     },
     {
       id: 'ui-react-list-view-binding-aliases-retired',

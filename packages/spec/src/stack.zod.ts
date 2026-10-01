@@ -1936,18 +1936,11 @@ const isComponentNode = (value: unknown): value is Record<string, unknown> =>
   isRecord(value) && typeof value.type === 'string';
 
 /**
- * Every inline action a page's component tree carries, each with a locatable
- * path — the traversal `validateCrossReferences` needs and `config.actions`
- * cannot supply (#6889).
- *
- * An action authored **inline** on a page element (`element:button` →
- * `properties.action`, an {@link InlineActionSchema}) never enters
- * `config.actions`, so before this walk NO cross-reference check visited one: a
- * dangling `type: 'modal'` target built clean and failed only when a user
- * clicked, while the identical target on a *registered* action was a build
- * error. Inline is also the shape AI authoring emits most readily — a button
- * with its behaviour written right there — so it is the surface that most needs
- * authoring-time rejection.
+ * Visit every component a page carries, with its locatable path, parent before
+ * children — the one traversal of a page's component tree the cross-reference
+ * checks share (inline actions, #6889; master-detail detail columns, #20928).
+ * `visit` receives the node and its `properties` record; a node without one is
+ * not visited, since every check here reads under `properties`.
  *
  * Two traversal facts make this a walk rather than a loop:
  *
@@ -1959,45 +1952,17 @@ const isComponentNode = (value: unknown): value is Record<string, unknown> =>
  *   a button nested inside a container survives parse as raw data. We recurse
  *   into any array under `properties` whose entries are component-shaped, which
  *   reaches every container spelling without this walk enumerating them.
- *
- * Candidates are normalized by parsing with `InlineActionSchema` rather than
- * read key-by-key: that schema's preprocess is what canonicalizes the legacy
- * `to` spelling onto `target`, and page-component `properties` are a loose
- * record, so a raw node has NOT been through it. Reading `action.target ??
- * action.to` here would be a second, hand-mirrored copy of the producer's
- * normalization — the consumer-side leniency Prime Directive #12 rejects.
- *
- * When that parse fails the node is still checked, from its raw `type`/`target`
- * strings. A node that is not a valid inline action is broken on some *other*
- * axis (a key page-component `properties` does not validate today), and the
- * fallback neither invents a target nor accepts one — it only keeps a dangling
- * reference from hiding behind an unrelated defect. The legacy `to` spelling is
- * deliberately NOT read there: canonicalization stays the schema's job.
  */
-function collectInlinePageActions(page: unknown): InlineActionSite[] {
-  if (!isRecord(page)) return [];
-  const pageName = typeof page.name === 'string' ? page.name : '(unnamed)';
-  const sites: InlineActionSite[] = [];
-
+function forEachPageComponent(
+  page: Record<string, unknown>,
+  visit: (node: Record<string, unknown>, props: Record<string, unknown>, path: string) => void,
+): void {
   const visitComponent = (node: unknown, path: string): void => {
     if (!isComponentNode(node)) return;
     const props = isRecord(node.properties) ? node.properties : undefined;
     if (!props) return;
 
-    if (isRecord(props.action)) {
-      const parsed = InlineActionSchema.safeParse(props.action);
-      const action = parsed.success
-        ? (parsed.data as InlineActionSite['action'])
-        : {
-          type: typeof props.action.type === 'string' ? props.action.type : undefined,
-          name: typeof props.action.name === 'string' ? props.action.name : undefined,
-          target: typeof props.action.target === 'string' ? props.action.target : undefined,
-        };
-      // An inline action's `name` is optional (the button supplies its own
-      // label), so the path is the only identity an anonymous one has.
-      const subject = action.name ? `Inline action '${action.name}'` : 'Inline action';
-      sites.push({ action, where: `${subject} on page '${pageName}' (${path})` });
-    }
+    visit(node, props, path);
 
     for (const [key, value] of Object.entries(props)) {
       if (!Array.isArray(value)) continue;
@@ -2025,6 +1990,58 @@ function collectInlinePageActions(page: unknown): InlineActionSite[] {
       }
     }
   }
+}
+
+/**
+ * Every inline action a page's component tree carries, each with a locatable
+ * path — the traversal `validateCrossReferences` needs and `config.actions`
+ * cannot supply (#6889).
+ *
+ * An action authored **inline** on a page element (`element:button` →
+ * `properties.action`, an {@link InlineActionSchema}) never enters
+ * `config.actions`, so before this walk NO cross-reference check visited one: a
+ * dangling `type: 'modal'` target built clean and failed only when a user
+ * clicked, while the identical target on a *registered* action was a build
+ * error. Inline is also the shape AI authoring emits most readily — a button
+ * with its behaviour written right there — so it is the surface that most needs
+ * authoring-time rejection.
+ *
+ * The traversal is {@link forEachPageComponent}'s: every root, every nesting.
+ *
+ * Candidates are normalized by parsing with `InlineActionSchema` rather than
+ * read key-by-key: that schema's preprocess is what canonicalizes the legacy
+ * `to` spelling onto `target`, and page-component `properties` are a loose
+ * record, so a raw node has NOT been through it. Reading `action.target ??
+ * action.to` here would be a second, hand-mirrored copy of the producer's
+ * normalization — the consumer-side leniency Prime Directive #12 rejects.
+ *
+ * When that parse fails the node is still checked, from its raw `type`/`target`
+ * strings. A node that is not a valid inline action is broken on some *other*
+ * axis (a key page-component `properties` does not validate today), and the
+ * fallback neither invents a target nor accepts one — it only keeps a dangling
+ * reference from hiding behind an unrelated defect. The legacy `to` spelling is
+ * deliberately NOT read there: canonicalization stays the schema's job.
+ */
+function collectInlinePageActions(page: unknown): InlineActionSite[] {
+  if (!isRecord(page)) return [];
+  const pageName = typeof page.name === 'string' ? page.name : '(unnamed)';
+  const sites: InlineActionSite[] = [];
+
+  forEachPageComponent(page, (_node, props, path) => {
+    if (!isRecord(props.action)) return;
+    const parsed = InlineActionSchema.safeParse(props.action);
+    const action = parsed.success
+      ? (parsed.data as InlineActionSite['action'])
+      : {
+        type: typeof props.action.type === 'string' ? props.action.type : undefined,
+        name: typeof props.action.name === 'string' ? props.action.name : undefined,
+        target: typeof props.action.target === 'string' ? props.action.target : undefined,
+      };
+    // An inline action's `name` is optional (the button supplies its own
+    // label), so the path is the only identity an anonymous one has.
+    const subject = action.name ? `Inline action '${action.name}'` : 'Inline action';
+    sites.push({ action, where: `${subject} on page '${pageName}' (${path})` });
+  });
 
   return sites;
 }
@@ -2700,17 +2717,25 @@ const hasOwnKey = (record: object, key: string): boolean => Object.prototype.has
  *
  * ⛔ No second rule. The verdict is the column schema's own: the column is
  * re-parsed as `{ ...column, type: <resolved> }` and every issue that parse
- * raises is reported, with the schema's own message. The column already passed
- * the stack's parse without the type, so an issue here is one the resolved
- * type brings.
+ * raises is reported, with the schema's own message. A column is judged only
+ * once it is a valid column WITHOUT the type, so an issue here is one the
+ * resolved type brings. On the two carriers the stack's parse reaches, it
+ * already passed that parse; on the page carrier, whose `properties` the
+ * stack's parse never reaches, the column is parsed alone first and a column
+ * that fails is left to the component-props gate (`@objectstack/lint`'s
+ * `validateComponentProps`), which reports its own defects against
+ * `ComponentPropsMap`.
  *
- * Both carriers of the column are walked:
+ * All three carriers of the column are walked:
  *
  * - a relationship field's `inlineColumns` — the field sits on the CHILD
  *   object, so a column names a field of the object that owns the field;
  * - a form view's `subforms[].columns` (the container's `form` and each
  *   `formViews` entry) — a column names a field of the subform's
- *   `childObject`.
+ *   `childObject`;
+ * - [#20928] an `object-master-detail-form` page block's `details[].columns`,
+ *   wherever the block sits on a page ({@link forEachPageComponent}) — a column
+ *   names a field of the detail entry's `childObject`.
  *
  * Resolution is against the stack's own `objects`: a `childObject` this stack
  * does not declare, or a column naming no field of it, is not judged here — an
@@ -2736,6 +2761,8 @@ function collectHydratedInlineColumnErrors(config: ObjectStackDefinition): strin
         ? HYDRATED_INLINE_COLUMN_TYPE[fieldType]
         : undefined;
       if (!resolved) return;
+      // Valid without the type, or not judged here — see the docblock.
+      if (!InlineGridColumnSchema.safeParse(column).success) return;
       const verdict = InlineGridColumnSchema.safeParse({ ...column, type: resolved });
       if (verdict.success) return;
       for (const issue of verdict.error.issues) {
@@ -2770,6 +2797,24 @@ function collectHydratedInlineColumnErrors(config: ObjectStackDefinition): strin
         judge(subform.columns, subform.childObject, `${where}.subforms[${j}].columns`);
       });
     }
+  }
+
+  // [#20928] The page carrier: `properties` is an open record the stack's parse
+  // never reaches, so `details` is read raw, entry by entry.
+  for (const page of config.pages ?? []) {
+    if (!isRecord(page)) continue;
+    const pageName = typeof page.name === 'string' ? page.name : '(unnamed)';
+    forEachPageComponent(page, (node, props, path) => {
+      if (node.type !== 'object-master-detail-form' || !Array.isArray(props.details)) return;
+      props.details.forEach((detail: unknown, j: number) => {
+        if (!isRecord(detail) || typeof detail.childObject !== 'string') return;
+        judge(
+          detail.columns,
+          detail.childObject,
+          `Page '${pageName}' (${path}) object-master-detail-form details[${j}].columns`,
+        );
+      });
+    });
   }
   return errors;
 }
@@ -2851,7 +2896,8 @@ function validateCrossReferences(
   }
 
   // Validate identity-only inline grid columns against the child field's type
-  // (#20901) — both carriers, the column schema's own verdict.
+  // (#20901) — every carrier (#20928 added the page block's), the column
+  // schema's own verdict.
   errors.push(...collectHydratedInlineColumnErrors(config));
 
   // Validate seed data → object references. ARTIFACT-SCOPED (#18202).

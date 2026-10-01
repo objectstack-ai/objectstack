@@ -297,6 +297,7 @@
     "ObjectMapPropsParsed (type)",
     "ObjectMapPropsSchema (const)",
     "ObjectMasterDetailFormProps (type)",
+    "ObjectMasterDetailFormPropsParsed (type)",
     "ObjectMasterDetailFormPropsSchema (const)",
     "ObjectMetricProps (type)",
     "ObjectMetricPropsParsed (type)",

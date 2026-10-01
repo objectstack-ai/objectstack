@@ -324,22 +324,29 @@ export type ImportRequestParsed = z.infer<typeof ImportRequestSchema>;
  * Two optional report keys ride on an `ok` row, and neither changes its
  * `ok` / `action`:
  *
- * - `warnings` was SERVED before it was declared: the REST import runner's
- *   dry-run branch (`packages/rest/src/import-runner.ts`) copies the admitted
- *   findings of the engine's validate verdict onto the row, and both the
+ * - `warnings` was SERVED before it was declared: the import runner's
+ *   dry-run branch (`packages/core/src/utils/import-runner.ts`) copies the
+ *   admitted findings of the engine's validate verdict onto the row, and both the
  *   synchronous route and the async job's results carry it (the synchronous
  *   route is pinned at the wire by
  *   `packages/rest/src/import-dryrun-parity.test.ts`; no test reads it off the
  *   async job's results). Undeclared, it was
  *   invisible to every reader typed by this schema, and
  *   `ImportRowResultSchema.parse` stripped it.
- * - `droppedFields` is DECLARED AHEAD of its producer, per row rather than
- *   import-wide so the report keeps which row dropped what. The engine has to
- *   report drops per row out of `validateData` and `insertMany`, and the REST
- *   import route has to copy them onto the row; until both do, no server sets
- *   the key, which is why its describe says an absent key does not prove
- *   nothing was dropped. The element IS {@link DroppedFieldsEventSchema}, so
- *   the `reason` vocabulary is the engine's — ⛔ never a second enum here.
+ * - `droppedFields` is per row rather than import-wide, so the report keeps
+ *   which row dropped what. The engine reports its strips per row (the
+ *   verdict `validateData` answers each row with, the outcome `insertManyData`
+ *   answers it with, and the single-row create/update response), and the
+ *   import runner (`packages/core/src/utils/import-runner.ts`) copies that
+ *   report onto the row verbatim, on the dry run and on the commit. Two
+ *   places it cannot, which is why the describe says an absent key does not
+ *   prove nothing was dropped: a create batched through `createManyData`,
+ *   whose report is a batch-level union that names no row; and the
+ *   `readonlyWhen` / primary-key strips of a row the import UPDATES, which an
+ *   `update`-mode preview does not run (see `ValidateDataResponseSchema`),
+ *   so that row's dry run can name fewer fields than its commit. The element
+ *   IS {@link DroppedFieldsEventSchema}, so the `reason` vocabulary is the
+ *   engine's — ⛔ never a second enum here.
  */
 export const ImportRowResultSchema = lazySchema(() => z.object({
   row: z.number().int().describe('1-based row number in the source data'),
@@ -358,10 +365,12 @@ export const ImportRowResultSchema = lazySchema(() => z.object({
   ),
   droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
     'Write-observability: caller-supplied fields the engine LEGALLY strips from THIS row, one event per '
-    + 'reason, in the engine\'s own `droppedFields` shape and reason vocabulary. A dry-run row reports the '
-    + 'strips the write would make; a committed row reports the strips it made. The row still succeeds: '
-    + '`ok` and `action` are unchanged. Present only when at least one field was dropped. A server that '
-    + 'does not produce this report omits the key too, so an absent key alone does not prove nothing was '
+    + 'reason, in the engine\'s own `droppedFields` shape and reason vocabulary. A committed row reports the '
+    + 'strips its write made. A dry-run row reports the strips its preview runs, which for a row the import '
+    + 'would update excludes `readonlyWhen` and primary-key strips, so that row can name fewer fields than '
+    + 'its commit. The row still succeeds: '
+    + '`ok` and `action` are unchanged. Present only when at least one field was dropped. A server or write '
+    + 'path that does not produce this report omits the key too, so an absent key alone does not prove nothing was '
     + 'dropped. In an async job\'s `results`, an ok row\'s drops reach the reader only if the row falls '
     + 'inside that capped, failures-first sample.',
   ),
