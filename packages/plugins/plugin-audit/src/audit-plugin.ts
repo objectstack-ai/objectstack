@@ -20,6 +20,7 @@ import { installCommentAccessHooks, installCommentReadVisibility } from './comme
 import { installActivityReadVisibility } from './activity-read-visibility.js';
 import { installActivityFieldRedaction } from './activity-field-redaction.js';
 import { installAuditLogFieldRedaction } from './audit-log-field-redaction.js';
+import { installAuditLogReadVisibility } from './audit-log-read-visibility.js';
 import type { FieldVisibilitySource } from './served-fields.js';
 
 /**
@@ -315,11 +316,16 @@ export class AuditPlugin implements Plugin {
         // every field is granted it by a set that unmasks those fields.
         installAuditLogFieldRedaction(engine as any, getSecurity, ctx.logger);
         ctx.logger.info('AuditPlugin: sys_audit_log field redaction installed');
+        // [#21175] …and the ledger's rows take the activity stream's parent-record
+        // gate: a row about a record is served only to a caller who can read it.
+        installAuditLogReadVisibility(engine as any, ctx.logger);
+        ctx.logger.info('AuditPlugin: sys_audit_log parent-record read visibility installed');
       } else {
         ctx.logger.warn(
           'AuditPlugin: engine has no middleware seam — sys_activity READ visibility and field redaction, and ' +
-            'sys_audit_log field redaction, NOT installed (activity about records the caller cannot read would be ' +
-            'listable, and an activity row or a ledger snapshot would serve every parent field value it carries)',
+            'sys_audit_log READ visibility and field redaction, NOT installed (activity and ledger rows about ' +
+            'records the caller cannot read would be listable, and an activity row or a ledger snapshot would ' +
+            'serve every parent field value it carries)',
         );
       }
     });

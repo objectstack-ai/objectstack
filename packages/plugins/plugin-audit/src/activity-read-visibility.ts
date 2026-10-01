@@ -18,8 +18,10 @@
  * read per parent object, so the parent's own OWD/sharing, RLS and object-level
  * CRUD decide. ⛔ Nothing here derives readability a second way.
  *
- * Mechanism, as for comments: a data middleware (not a find-hook) on `find`,
- * `findOne`, `count` and `aggregate`, so a list's `total` and a grouped count
+ * Mechanism, as for comments, and shared with the compliance ledger's gate
+ * (`audit-log-read-visibility.ts`) through `parent-record-read-gate.ts`: a data
+ * middleware (not a find-hook) on `find`, `findOne`, `count` and `aggregate`,
+ * so a list's `total` and a grouped count
  * are narrowed exactly like its rows. For each read it pre-scans the parent
  * pairs the query would touch under SYSTEM context, asks which of those parents
  * the caller can read (one read per parent object, never one per row), and ANDs
@@ -38,39 +40,37 @@
  *  - a row naming `sys_activity` itself is excluded: probing it would re-enter
  *    this gate.
  * A platform object is a parent like any other: its rows are kept exactly when
- * the caller can read that platform record.
+ * the caller can read that platform record. The stream declares no row class
+ * outside the gate: its one platform producer is the CRUD mirror, and every
+ * row it writes is about a record.
  *
  * System-context reads (the audit writer, engine self-reads) and context-less
  * programmatic calls on bare kernels are not narrowed, as for comments: every
  * real transport carries a context.
  */
 
+import type { CommentAccessEngine, CommentAccessLogger, CommentReadMiddlewareCtx } from './comment-access-hooks.js';
 import {
-  resolveReadableParentIds,
-  type CommentAccessEngine,
-  type CommentAccessLogger,
-  type CommentReadMiddlewareCtx,
-} from './comment-access-hooks.js';
+  PARENT_GATE_READ_OPS,
+  andIntoWhere,
+  computeParentRecordFilter,
+  parseParentObject,
+  parseParentRecord,
+  type ParentRecord,
+  type ParentRecordGate,
+} from './parent-record-read-gate.js';
 
 const ACTIVITY_OBJECT = 'sys_activity';
-const SYSTEM_CTX = { isSystem: true } as const;
-const READ_OPS = new Set(['find', 'findOne', 'count', 'aggregate']);
 
-/** Bound on the per-read candidate pre-scan — the comment gate's bound. Beyond
- * it the filter fails CLOSED (the un-scanned rows are excluded, never leaked). */
-const READ_SCAN_LIMIT = 2_000;
-
-/** No real row matches — the fail-closed sentinel (the comment gate's shape). */
-const READ_DENY_ALL = { id: '__activity_parent_denied__' } as const;
-
-/** Object machine-name shape (`ObjectSchema.name` in packages/spec). */
-const OBJECT_NAME_RE = /^[a-z_][a-z0-9_]*$/;
+/** The activity stream's gate: every row naming no parent is excluded. */
+const ACTIVITY_GATE: ParentRecordGate = {
+  object: ACTIVITY_OBJECT,
+  seam: 'activity read visibility',
+  denyAll: { id: '__activity_parent_denied__' },
+};
 
 /** The record an activity row is about. */
-export interface ActivityParent {
-  object: string;
-  recordId: string;
-}
+export type ActivityParent = ParentRecord;
 
 /** The engine slice a `sys_activity` read middleware needs (this gate and the
  * field redaction in `activity-field-redaction.ts`). */
@@ -89,10 +89,7 @@ export interface ActivityMiddlewareEngine {
  * gate can authorize. One definition for both read seams over the stream.
  */
 export function parseActivityParentObject(row: Record<string, unknown> | null | undefined): string | null {
-  const object = row?.object_name;
-  if (typeof object !== 'string' || !OBJECT_NAME_RE.test(object)) return null;
-  if (object === ACTIVITY_OBJECT) return null;
-  return object;
+  return parseParentObject(row, ACTIVITY_OBJECT);
 }
 
 /**
@@ -100,12 +97,7 @@ export function parseActivityParentObject(row: Record<string, unknown> | null | 
  * this gate can authorize — which every caller here treats as DENY.
  */
 export function parseActivityParent(row: Record<string, unknown> | null | undefined): ActivityParent | null {
-  const object = parseActivityParentObject(row);
-  const recordId = row?.record_id;
-  if (object === null) return null;
-  if (typeof recordId !== 'string' && typeof recordId !== 'number') return null;
-  if (String(recordId) === '') return null;
-  return { object, recordId: String(recordId) };
+  return parseParentRecord(row, ACTIVITY_OBJECT);
 }
 
 /**
@@ -119,98 +111,26 @@ export function installActivityReadVisibility(
   logger: CommentAccessLogger,
 ): void {
   if (typeof engine.registerMiddleware !== 'function') return;
-  const andIn = (ctx: CommentReadMiddlewareCtx, filter: unknown) => {
-    if (!ctx.ast) return;
-    ctx.ast.where = ctx.ast.where ? { $and: [ctx.ast.where, filter] } : filter;
-  };
 
   engine.registerMiddleware(
     async (ctx, next) => {
       // Only reads carry an `ast` to constrain; the object is append-only and
       // `apiMethods: ['get', 'list']`. System / context-less reads are internal.
-      if (!READ_OPS.has(ctx.operation) || !ctx.ast || !ctx.context || ctx.context.isSystem) {
+      if (!PARENT_GATE_READ_OPS.has(ctx.operation) || !ctx.ast || !ctx.context || ctx.context.isSystem) {
         return next();
       }
       try {
-        const filter = await computeActivityVisibilityFilter(engine, ctx, logger);
-        if (filter) andIn(ctx, filter);
+        const filter = await computeParentRecordFilter(engine, ctx, logger, ACTIVITY_GATE);
+        if (filter) andIntoWhere(ctx, filter);
       } catch (err) {
         // A filter-compute failure must never fall open into a leak.
         logger.warn(
           `[audit] activity read visibility: filter failed, denying all (${(err as Error)?.message ?? err})`,
         );
-        andIn(ctx, READ_DENY_ALL);
+        andIntoWhere(ctx, ACTIVITY_GATE.denyAll);
       }
       return next();
     },
     { object: ACTIVITY_OBJECT },
   );
-}
-
-/**
- * Resolve the parent-visibility WHERE predicate for one `sys_activity` read.
- * Returns `null` when the query matches no rows (nothing to narrow), one
- * `$in` branch per parent object holding the readable ids, or the deny-all
- * sentinel.
- */
-async function computeActivityVisibilityFilter(
-  engine: CommentAccessEngine,
-  ctx: CommentReadMiddlewareCtx,
-  logger: CommentAccessLogger,
-): Promise<unknown | null> {
-  // 1. The parent pairs the query would touch, read under SYSTEM context (the
-  //    caller may not see the rows yet; that is what is being decided). The
-  //    caller's own order rides along, so on a table larger than the scan
-  //    bound the window scanned is the window the caller pages through — the
-  //    newest rows of a feed sorted by `timestamp`, not an arbitrary 2,000.
-  const orderBy = (ctx.ast as { orderBy?: unknown } | undefined)?.orderBy;
-  const candidates = await engine.find(ACTIVITY_OBJECT, {
-    where: (ctx.ast?.where as Record<string, unknown>) ?? {},
-    fields: ['object_name', 'record_id'],
-    ...(Array.isArray(orderBy) && orderBy.length > 0 ? { orderBy } : {}),
-    limit: READ_SCAN_LIMIT,
-    context: { ...SYSTEM_CTX },
-  });
-  if (!candidates.length) return null;
-  if (candidates.length >= READ_SCAN_LIMIT) {
-    // Not silent (fail-closed truncation): rows beyond the scan window are
-    // excluded, so a very broad read may omit rows the caller could see. A
-    // record timeline scopes by `object_name` + `record_id` and never hits it.
-    logger.warn(
-      `[audit] activity read visibility: candidate pre-scan hit the ${READ_SCAN_LIMIT}-row cap; ` +
-        'the visibility filter for this broad read is fail-closed and may omit visible rows — ' +
-        'scope the query by object_name and record_id',
-    );
-  }
-
-  /** parent object → (record id as compared → the value as STORED). The stored
-   * value is what the emitted filter carries, so it can only match rows the
-   * pre-scan actually saw spelled that way. */
-  const byObject = new Map<string, Map<string, unknown>>();
-  for (const row of candidates) {
-    const parent = parseActivityParent(row);
-    if (!parent) continue;
-    let ids = byObject.get(parent.object);
-    if (!ids) byObject.set(parent.object, (ids = new Map()));
-    if (!ids.has(parent.recordId)) ids.set(parent.recordId, row.record_id);
-  }
-  if (byObject.size === 0) return READ_DENY_ALL;
-
-  // 2. The SAME readability answer the comment gate asks — one caller-scoped
-  //    read per parent object.
-  const idSets = new Map<string, Set<string>>();
-  for (const [object, ids] of byObject) idSets.set(object, new Set(ids.keys()));
-  const readable = await resolveReadableParentIds(engine, ctx.context, idSets);
-
-  // 3. One branch per parent object that kept at least one readable record.
-  const branches: Array<Record<string, unknown>> = [];
-  for (const [object, ids] of byObject) {
-    const visible = readable.get(object);
-    if (!visible) continue;
-    const kept: unknown[] = [];
-    for (const [recordId, stored] of ids) if (visible.has(recordId)) kept.push(stored);
-    if (kept.length) branches.push({ object_name: object, record_id: { $in: kept } });
-  }
-  if (branches.length === 0) return READ_DENY_ALL;
-  return branches.length === 1 ? branches[0] : { $or: branches };
 }
