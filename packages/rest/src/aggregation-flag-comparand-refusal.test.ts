@@ -50,6 +50,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import type { EngineAggregateOptions, EngineQueryOptions } from '@objectstack/spec/data';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver, withheldFilterDiagnosticOf } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
@@ -139,7 +140,8 @@ describe('[#20981] a non-boolean $exists / $null in a per-aggregation filter or 
   /** The `where` twin's refusal, thrown by `driver-sql`, and the diagnostic it keeps server-side. */
   async function whereTwinDiagnostic(op: string, comparand: unknown): Promise<string> {
     try {
-      await engine.find(OBJECT, { where: { name: { [op]: comparand } } } as any);
+      // Deliberately off-contract: the flag is not a boolean.
+      await engine.find(OBJECT, { where: { name: { [op]: comparand } } } as unknown as EngineQueryOptions);
     } catch (err) {
       expect((err as { code?: string }).code).toBe('INVALID_FILTER');
       const diagnostic = withheldFilterDiagnosticOf(err);
@@ -152,7 +154,8 @@ describe('[#20981] a non-boolean $exists / $null in a per-aggregation filter or 
   /** The engine's full message, thrown before any row is read. */
   async function engineRefusal(body: Record<string, unknown>): Promise<Error & { code?: string; status?: number }> {
     try {
-      await engine.aggregate(OBJECT, body as any);
+      // Deliberately off-contract: the flag is not a boolean.
+      await engine.aggregate(OBJECT, body as unknown as EngineAggregateOptions);
     } catch (err) {
       return err as Error & { code?: string; status?: number };
     }
