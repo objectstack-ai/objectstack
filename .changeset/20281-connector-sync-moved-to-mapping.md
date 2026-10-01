@@ -25,15 +25,16 @@ declared-connector item carried neither key, and the def a provider registers is
 own. The `latest_wins` and `soft_delete` defaults read as configured policy and did
 nothing; the platform has no soft delete.
 
-**Added (declared, not yet executed):** `mapping.connectorSource` — the pull
+**Added:** `mapping.connectorSource` — the pull
 binding on the target side, beside the mapping's existing `targetObject`,
 `fieldMapping`, `mode` and `upsertKey`: `connector` (a `rest` or `openapi`
 connector instance), `action` (the action that reads the records), optional
 `input`, optional `recordsPath`, and an optional `watermark` (`field` on the
 record, `param` on the request) for a timestamp-incremental pull. Version 1 is a
 one-way pull. It carries no cadence (a `job` sets that), no credential (the
-connector instance holds it) and no delete or conflict policy. Nothing executes it
-in this release, and `os validate` / `os build` warn when it is authored.
+connector instance holds it) and no delete or conflict policy. The connector sync
+executor, `@objectstack/service-automation`'s `pullConnectorSource` (#20919), reads
+it; nothing schedules a pull until the `job` stage lands.
 
 ### FROM → TO
 
