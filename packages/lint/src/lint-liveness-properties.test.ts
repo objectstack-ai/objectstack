@@ -1775,7 +1775,12 @@ describe('the hint a verdict-triggered row shows an author (#16094)', () => {
   });
 
   it('CONTROL, REAL LEDGER: every row that warned before the ruling keeps its hint byte for byte', () => {
-    const before = shippedRows().filter((r) => r.entry.authorWarn === true || r.entry.status === 'experimental');
+    // A `live` row that opts in is outside this population: `describe()` throws
+    // on it before and after the ruling (the COVERAGE pin above holds that it
+    // stays loud), so it has no hint to keep.
+    const before = shippedRows().filter(
+      (r) => (r.entry.authorWarn === true || r.entry.status === 'experimental') && r.entry.status !== 'live',
+    );
     // Anti-vacuity: an opted-in row and an experimental row both fall back to
     // their note today, so the control would see a change in either.
     expect(before.some((r) => r.entry.authorWarn === true && r.entry.authorHint === undefined && typeof r.entry.note === 'string')).toBe(true);
