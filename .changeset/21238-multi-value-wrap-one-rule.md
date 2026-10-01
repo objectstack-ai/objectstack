@@ -6,7 +6,7 @@
 
 fix(plugin-security): a row-level `check` judges a lone scalar written to a declared multi-valued field as the one-member list it is stored as, so the write and the read the same policy scopes give one answer for one row (#21238)
 
-Clause-②: no
+Clause-②: yes (widening)
 
 The write door stores a lone scalar sent to a multi-valued field (`tags`, `multiselect`, `checkboxes`, or a `select` / `lookup` / `user` / `file` / `image` flagged `multiple: true`) as a one-member list: `tags: 'x'` is stored as `["x"]`. The row-level write `check` judged the value as sent on the insert and on a by-id update, because both images are formed before the write door runs. Measured through `ObjectQL.insert` with `SecurityPlugin` on two SQLite driver families, as a member resolving a permission set, with the same predicate as `using` and `check`:
 
@@ -20,4 +20,4 @@ Now the image's value on every field the object declares multi-valued goes throu
 
 Unchanged: a field the object does not declare multi-valued is judged as written; a list, `null`, a blank string and an object are judged as written, as the write door leaves them; the check's comparands are left as written, since `contains` takes one member; and refusals keep their code and status (`PERMISSION_DENIED` / 403).
 
-**`@objectstack/core`** (one new root export, so `minor`): `multiValueStorageForm(value)`, the rule itself. It wraps a string, a number or a boolean into a one-member list and returns every other value as the same value. `@objectstack/objectql`'s `normalizeMultiValueFields` now calls it, with no change in what the write door stores (`patch`). `@objectstack/plugin-security` is `minor` because the set of writes its check admits widens (the first and third rows above).
+**`@objectstack/core`** (one new root export, so `minor`; this export is the widening the `Clause-②: yes (widening)` line declares): `multiValueStorageForm(value)`, the rule itself. It wraps a string, a number or a boolean into a one-member list and returns every other value as the same value. `@objectstack/objectql`'s `normalizeMultiValueFields` now calls it, with no change in what the write door stores (`patch`). `@objectstack/plugin-security` is `minor` because the set of writes its check admits widens (the first and third rows above); that is a security-floor behaviour change, not the declared widening.
