@@ -507,19 +507,23 @@ const CROSS_FIELD_CLASS_REFUSAL = Symbol.for('objectstack.formula.crossFieldClas
  * — driver-sql withholds the same comparison's columns on the read for the
  * same reason (#7929). The columns, the operator and both declarations travel
  * on the error for the server log ({@link crossFieldClassRefusalCarriedBy}).
+ *
+ * The remedy leads, and the whole message stays under the REST door's client
+ * message bound (`CLIENT_MESSAGE_MAX` in `@objectstack/rest`: a 4xx message of
+ * 500 characters or more is cut to 499 plus an ellipsis). The bound cuts the
+ * TAIL, so a remedy written last never reached the wire. The order is: the
+ * remedy; what is refused (two columns with no shared class, and the classes);
+ * why it is refused; why the columns are withheld. The text is fixed, so its
+ * length is too — a sentence added here must be paid for by a shorter one.
  */
 function crossFieldClassError(refusal: CrossFieldClassRefusal): Error {
   const err = new Error(
-    'A field-to-field comparison ({ "$field": … }) in this filter compares two columns that share no ' +
-      'comparison class. Two columns are compared only within one class — a number with a number, text ' +
-      'with text, a boolean with a boolean, a date with a date, a datetime with a datetime, a time of day ' +
-      'with a time of day — and a file field, a formula field, or a column that holds a list or an object ' +
-      'has no class at all, so the platform defines no answer for this comparison. It is refused rather ' +
-      'than evaluated: across classes SQL and this evaluator answer differently, and the read path refuses ' +
-      'the same comparison, so an answer here would give one access policy two meanings. The columns and ' +
-      'the operator are withheld from this message because the filter may be an access policy the caller ' +
-      'did not write; the server log names them. In a row-level policy, compare a field only with a field ' +
-      'of the same class, or fix the declaration of the one that is declared with the wrong type.',
+    'In a row-level policy, compare a field only with a field of the same class, or fix the declaration ' +
+      'of the one that is declared with the wrong type. This filter compares two columns that share no ' +
+      'class (number, text, boolean, date, datetime, time; file, formula, list and object fields have ' +
+      'none). SQL and this evaluator answer it differently, so it is refused, as on the read path. The ' +
+      'columns and operator are withheld, as the caller may not have written the policy; the server log ' +
+      'names them.',
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.INVALID_FILTER;
   err.status = 400;

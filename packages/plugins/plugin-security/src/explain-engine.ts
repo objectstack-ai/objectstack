@@ -923,6 +923,14 @@ function refusedPolicyNamesOf(
  * same caller for the same object publishes the same predicate: `readFilter`
  * without a `recordId`, the `rls` layer's `rowFilter` with one. So naming the
  * policy and its two columns here discloses nothing that report does not.
+ *
+ * The remedy leads, BEFORE the subject. The REST door bounds a 4xx message
+ * (`CLIENT_MESSAGE_MAX` in `@objectstack/rest`: 500 characters or more is cut
+ * to 499 plus an ellipsis), and the subject and the diagnostic have no length
+ * bound: object, field and policy names declare no maximum, and the subject
+ * lists every refused policy. So no subject-first order can keep a trailing
+ * remedy on the wire for every policy; at index 0 it survives any length. The
+ * reason comes last and is the part a long subject may cut.
  */
 function crossFieldRefusalForExplain(
   cause: unknown,
@@ -939,10 +947,10 @@ function crossFieldRefusalForExplain(
     : `The row-level security ${policies.length === 1 ? 'policy' : 'policies'} ` +
       `${policies.map((p) => `'${p}'`).join(', ')} on '${object}'`;
   const err = new Error(
-    `${subject} cannot be evaluated: ${refusal.diagnostic}. Enforcement refuses every request this filter ` +
-      'scopes instead of judging a record (the find answers INVALID_FILTER / 400), so explain answers with the ' +
-      'same refusal and reports no verdict. Compare a field only with a field of the same class, or fix ' +
-      'the declaration of the one that is declared with the wrong type.',
+    'Compare a field only with a field of the same class, or fix the declaration of the one that is ' +
+      `declared with the wrong type. ${subject} cannot be evaluated: ${refusal.diagnostic}. Enforcement ` +
+      'refuses every request this filter scopes (the find answers INVALID_FILTER / 400), so explain answers ' +
+      'with the same refusal and reports no verdict.',
   );
   const { code, status } = cause as { code?: string; status?: number };
   return Object.assign(err, { code, status, cause });
