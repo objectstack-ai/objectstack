@@ -1577,13 +1577,13 @@
   
   **BREAKING** — `quickAdd` is retired from the `object-kanban` component props. Executes the
   objectui#8285 director-seat ruling (decision batch #91, 2026-09-08, standing maintainer
-  delegation), ruled **option B**: the key leaves the board and stays only on the `kanban-ui`
-  block, where a React host can supply the runtime function the control needs.
+  delegation), ruled **option B**: the key leaves the board. Delete the key; `object-kanban`
+  offers no quick-add control.
   
   | | before | after |
   |:--|:--|:--|
   | `object-kanban` | `quickAdd: true` parsed clean and did nothing | refused by the tombstone, with the prescription |
-  | `kanban-ui` (objectui block) | the control works when the host passes `onQuickAdd` | **unchanged** |
+  | `kanban-ui` (objectui block) | the control works when the host passes `onQuickAdd` | **retired** in objectui (objectui#8257), not by this change: no block a document can name offers the control |
   
   **What was actually wrong.** Measured at the `.objectui-sha` pin this repo builds against
   (`53ded82bf`): the board FORWARDS the key — `ObjectKanban.tsx:931` spreads the authored bag
@@ -1613,9 +1613,10 @@
   { type: 'object-kanban', properties: { objectName: 'crm_task', groupBy: 'status' } }
   ```
   
-  The control itself is not withdrawn from the platform. It stays on the `kanban-ui` block,
-  which a React host renders directly and can hand the `onQuickAdd` slot to — that is what the
-  ruling preserved deliberately.
+  No block a document can name offers the control either. The ruling kept it on objectui's
+  `kanban-ui` block, which a React host rendered directly and could hand the `onQuickAdd` slot
+  to; objectui has since retired that block (objectui#8257), so no metadata node reaches the
+  control.
   
   Existing sources: `os migrate meta --from 17` lists the mechanical edits; apply them by hand.
   
@@ -1625,8 +1626,8 @@
     a value reaching the parse raises the prescription rather than a bare unknown-key verdict
   - the D2 conversion `object-kanban-quick-add-removed` (`RETIRED_KEYS_BY_MAJOR[18]` entry
     `ui/ObjectKanbanProps:quickAdd`, wired into the protocol-18 chain step) — a **pure lossless
-    delete**, since the key never had an effect to preserve, scoped by component `type` so the
-    live `kanban-ui` spelling stays out of its reach
+    delete**, since the key never had an effect to preserve, scoped by component `type`, never
+    by key name, so a node of any other type that authors the same key is left alone
   - the `authorable-surface/ui.json` row becomes `ui/ObjectKanbanProps:quickAdd [RETIRED]`, and
     the generated reference page prints the prescription in place of the old describe
   - the schema docblock's read-point list is corrected in the same stroke: it named `quickAdd`
@@ -1640,6 +1641,8 @@
     `apps/` (control: `object-grid` 3, `object-metric` 8 in the same corpora, same instrument)
   - `api-surface/` is unchanged, correctly: it ratchets export existence, and no export leaves —
     `ObjectKanbanProps` still exists, one key narrower
+  
+  *Erratum, 2026-10-01 — this entry said the key "stays only on the `kanban-ui` block, where a React host can supply the runtime function the control needs", tabled that block's control as **unchanged**, said "The control itself is not withdrawn from the platform. It stays on the `kanban-ui` block", and called the block "the live `kanban-ui` spelling". objectui registers no `kanban-ui` block: objectui#8865 retired the registration (objectui#8257) on 2026-09-10, before this change landed on 2026-09-12, and neither the `.objectui-sha` pin this release was versioned at (`dd3f7e1be`) nor the pin at this correction (`31971ff1e`) registers one. The sentences were true of the pin they were measured at (`53ded82bf`). Delete the key; `object-kanban` offers no quick-add control. Four passages above are corrected in place; the retirement, its tombstone, its D2 conversion and everything else this entry published are unchanged. (Corrected after publication, #21143.)*
 - 2f1a6f6: A flow screen field can now express a numeric bound, help text and a lookup target — spelled with the object field's own key names
   
   <!-- adr-0087: registered screen-field-lookup-reference-required -->

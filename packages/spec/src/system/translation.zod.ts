@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 export const LocaleSchema = lazySchema(() => z.string().describe('BCP-47 Language Tag (e.g. en-US, zh-CN)'));
 export type Locale = z.input<typeof LocaleSchema>;
 
@@ -128,6 +129,13 @@ const actionTranslationSchema = (surface: string) => strictObject({
   description: z.string().optional().describe('Translated action description — the explanatory line under the title in the action\'s param dialog'),
   confirmText: z.string().optional().describe('Translated confirmation prompt'),
   successMessage: z.string().optional().describe('Translated success toast/message'),
+  // `ActionSchema.outcomeMessages` (#21095) — one translated message per
+  // declared outcome, keyed by the same snake_case outcome name, so a bundle
+  // key that could never match a handler's `outcome` is refused here rather
+  // than shipped as a translation nothing selects. Overlaid by
+  // `translateAction` key by key, only for outcomes the action declares.
+  outcomeMessages: z.record(SnakeCaseIdentifierSchema, z.string()).optional()
+    .describe('Translated success copy per handler outcome, keyed by the snake_case outcome name the action\'s `outcomeMessages` declares'),
   params: z.record(z.string(), strictObject({
     surface: 'this action parameter translation',
     history: TRANSLATION_HISTORY,
@@ -335,6 +343,7 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
    *   objects.<object>._actions.<action_name>.description
    *   objects.<object>._actions.<action_name>.confirmText
    *   objects.<object>._actions.<action_name>.successMessage
+   *   objects.<object>._actions.<action_name>.outcomeMessages.<outcome>
    *   objects.<object>._actions.<action_name>.params.<param_name>.label
    *   objects.<object>._actions.<action_name>.params.<param_name>.helpText
    *   objects.<object>._actions.<action_name>.params.<param_name>.placeholder
@@ -797,6 +806,7 @@ const appTranslationDataShape = () => ({
    *   globalActions.<action_name>.description
    *   globalActions.<action_name>.confirmText
    *   globalActions.<action_name>.successMessage
+   *   globalActions.<action_name>.outcomeMessages.<outcome>
    *   globalActions.<action_name>.params.<param_name>.label
    *   globalActions.<action_name>.params.<param_name>.helpText
    *   globalActions.<action_name>.params.<param_name>.placeholder

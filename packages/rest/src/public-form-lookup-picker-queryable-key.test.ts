@@ -17,11 +17,14 @@
  * What is pinned, by caller class (the picker's own context — the route builds
  * it, the session is not read):
  *
- * - masked classes — the deployment registers no `guest_portal` set (the
- *   context resolves no set), or registers one that does not hold the
- *   capability the rule names: rows are sorted, and searched, on the next
- *   queryable display field; the masked field is still served, masked; and no
- *   request the engine receives names the masked field;
+ * - masked class — the deployment registers a `guest_portal` set that does not
+ *   hold the capability the rule names: rows are sorted, and searched, on the
+ *   next queryable display field; the masked field is still served, masked;
+ *   and no request the engine receives names the masked field;
+ * - [#21079] the deployment registers no `guest_portal` set, so the context
+ *   resolves no set: the ADR-0056 D2 deny baseline refuses every picker at
+ *   object admission (`403 PERMISSION_DENIED`), while the key it composes is
+ *   unchanged and still never names the masked field;
  * - a picker with no queryable display field answers the engine's own refusal
  *   for those fields, and the engine is never asked;
  * - controls — a picker with no masked display field, and a caller the rule is
@@ -286,8 +289,83 @@ describe('[#21062] the fixture is authorable', () => {
     });
 });
 
+/**
+ * [#21079] The deployment registers no guest set, so the picker's context
+ * resolves NO permission set — and an empty set list is the ADR-0056 D2 deny
+ * baseline: the engine refuses that caller at object admission, before any
+ * field guard, whatever the query names. The field answers are unchanged (the
+ * masked field is readable and not queryable, and the key the picker composes
+ * is still the next queryable display field), but nothing is served: every
+ * picker on this deployment answers `403 PERMISSION_DENIED`. The picker itself
+ * is retired on its own card; until then this is what it answers here.
+ */
+describe('[#21062] a picker whose first display field is masked for its caller — the deployment registers no guest set (the context resolves none): [#21079] refused at object admission', () => {
+    let h: Harness;
+    beforeAll(async () => { h = await boot([MEMBER_SET]); }, 60_000);
+    afterAll(async () => { try { await h?.engine.destroy(); } catch { /* noop */ } });
+
+    /** The deny baseline's answer at the door: refused at object admission, nothing served. */
+    function expectRefusedAtAdmission(res: { status: number; body: any }): void {
+        expect({ status: res.status, code: res.body?.code }, JSON.stringify(res.body)).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+        expect(res.body?.data, 'no row is served').toBeUndefined();
+        for (const stored of Object.values(STORED_BY_ID)) expect(JSON.stringify(res.body)).not.toContain(stored);
+    }
+
+    it('the premise: the security service answers the masked field readable and not queryable', async () => {
+        const context = { permissions: ['guest_portal'], anonymous: true };
+        expect(await h.security.getReadableFields(CONTACT, context)).toContain(MASKED);
+        expect(await h.security.getQueryableFields(CONTACT, context)).not.toContain(MASKED);
+        expect(await engineRefusal(h.engine, [MASKED])).toMatchObject({ status: 403, code: 'PERMISSION_DENIED' });
+    });
+
+    it('[#21079] the picker whose first display field is masked is refused at object admission', async () => {
+        expectRefusedAtAdmission(await h.lookup('c_first'));
+    });
+
+    it('[#21079] its search is refused at object admission too', async () => {
+        expectRefusedAtAdmission(await h.lookup('c_first', 'Brav'));
+    });
+
+    it('never uses the masked field as a key', async () => {
+        const before = h.finds().length;
+        await h.lookup('c_first');
+        await h.lookup('c_first', 'Brav');
+        const asked = h.finds().slice(before);
+        expect(asked).toHaveLength(2);
+        for (const query of asked) {
+            expect(queriedFields(query)).not.toContain(MASKED);
+            expect(query.orderBy).toEqual([{ field: 'name', order: 'asc' }]);
+        }
+    });
+
+    it('[#21079] a picker with no queryable display field answers 403 PERMISSION_DENIED, as the engine does, and the engine is never asked', async () => {
+        const reference = await engineRefusal(h.engine, PICKERS.c_only.displayFields);
+        expect(reference).toMatchObject({ status: 403, code: 'PERMISSION_DENIED' });
+        // The engine's refusal for this caller is object admission, not the
+        // field guard: a query keyed on a field it MAY query on is refused the
+        // same. (Under the field guard alone that query was served.)
+        expect(await engineRefusal(h.engine, PICKERS.c_control.displayFields.slice(0, 1)))
+            .toMatchObject({ status: 403, code: 'PERMISSION_DENIED' });
+        const before = h.finds().length;
+        for (const q of [undefined, 'A']) {
+            const res = await h.lookup('c_only', q);
+            expectRefusedAtAdmission(res);
+            expect({ status: res.status, code: res.body?.code }).toEqual({ status: reference!.status, code: reference!.code });
+        }
+        expect(h.finds().length - before, 'the engine was asked').toBe(0);
+    });
+
+    it('[#21079] control: a picker with no masked display field still keys on its first display field, and is refused at object admission too', async () => {
+        const before = h.finds().length;
+        expectRefusedAtAdmission(await h.lookup('c_control'));
+        expectRefusedAtAdmission(await h.lookup('c_control', 'Charl'));
+        const asked = h.finds().slice(before);
+        expect(asked).toHaveLength(2);
+        for (const query of asked) expect(query.orderBy).toEqual([{ field: 'name', order: 'asc' }]);
+    });
+});
+
 for (const [label, sets] of [
-    ['the deployment registers no guest set (the context resolves none)', [MEMBER_SET]],
     ['the guest set does not hold the capability the rule names', [MEMBER_SET, GUEST_SET]],
 ] as const) {
     describe(`[#21062] a picker whose first display field is masked for its caller — ${label}`, () => {

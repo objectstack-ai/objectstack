@@ -671,10 +671,19 @@ describe('the arms the CRUD grant alone does not cover', () => {
     await expect(plugin.canWriteObject('invoice', 'insert', ORGLESS_CTX, PLAIN_PAYLOAD)).resolves.toBe(false);
   });
 
-  it('ADMITS the org-bound twin who resolves no permission set — arm 4 still admits', async () => {
-    const { plugin } = await boot([], undefined, { orgScoping: true, noBaseline: true });
+  it('[#21079] DENIES the org-bound twin who resolves no permission set — arm 4 is the deny baseline, wall or no wall', async () => {
+    const { plugin, middleware } = await boot([], undefined, { orgScoping: true, noBaseline: true });
     await expect((plugin as any).resolvePermissionSetsForContext(WRITER_CTX)).resolves.toEqual([]);
-    await expect(plugin.canWriteObject('invoice', 'insert', WRITER_CTX, PLAIN_PAYLOAD)).resolves.toBe(true);
+    await expect(plugin.canWriteObject('invoice', 'insert', WRITER_CTX, PLAIN_PAYLOAD)).resolves.toBe(false);
+    // …which is the middleware's own answer: refused at its CRUD gate, ahead of the wall.
+    const refusal = await middleware(
+      { object: 'invoice', operation: 'insert', context: { ...WRITER_CTX }, options: {}, ast: { where: {} }, data: PLAIN_PAYLOAD },
+      async () => {},
+    ).then(
+      () => null,
+      (e: { code?: unknown; status?: unknown; statusCode?: unknown }) => ({ code: e.code, status: e.status ?? e.statusCode }),
+    );
+    expect(refusal).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
   });
 
   it('ADMITS the same caller with an active organization — so the arm is not a blanket deny', async () => {
