@@ -6,7 +6,7 @@
  *
  * ## The defect
  *
- * `@oclif/core@4.13.3`'s `lib/config/ts-path.js` skips its TypeScript path
+ * `@oclif/core@5.1.2`'s `lib/config/ts-path.js` skips its TypeScript path
  * lookup only when `isProd()`, which `lib/util/util.js` defines as a negated
  * `['development', 'test'].includes(process.env.NODE_ENV ?? '')`. So an ambient
  * `NODE_ENV=development` — exported by a developer, or inherited by any child

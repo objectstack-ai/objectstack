@@ -5,7 +5,7 @@
 // having been built. Not published (`files` does not name `bin/`, and only the
 // `bin` target itself is packed automatically).
 //
-// The body is `execute({ development: true })` from @oclif/core 4.13.3 inlined,
+// The body is `execute({ development: true })` from @oclif/core 5.1.2 inlined,
 // for the reason `bin/run.js` states: `execute` hands the error straight to
 // `handle()`, which prints a usage dump, and #10111 needs one unmistakable line
 // to land on stderr before it. `NODE_ENV` and `settings.debug` are what
