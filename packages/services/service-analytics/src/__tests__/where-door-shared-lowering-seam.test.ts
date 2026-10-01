@@ -113,14 +113,27 @@ describe('[ADR-0053 D-D1 amended — #5930 step 3] F10: the where → tree face 
     });
   });
 
-  it('a nested relation under $not is guarded on the dotted member its leaf reads, never on the relation key', () => {
-    // The nested spelling is this door's sugar (the engine refuses it); the
-    // door spells it dotted before the lowering reads it, so the lowering's
-    // guard lands on `account.region` — not on whatever `account` resolves to.
+  it('a nested relation under $not travels as written and unguarded: the engine guards what it lowers it to', () => {
+    // [#20887] REPLACED. This case pinned the door spelling the nested form
+    // dotted (`account.region`) before the lowering read it, so the guard landed
+    // on the joined member — the reading of a door that compiled the form into a
+    // JOIN. The form is the ENGINE's now (#20802's ruling: served in `where` by
+    // reading the related object as the caller, capped), carried as written and
+    // held out of the shared lowering: the engine lowers it to `account IN
+    // (ids)` and puts the NULL guard on that `$in` itself.
+    expect(tree({ $not: { account: { region: 'NA' } } })).toEqual({
+      kind: 'not',
+      child: { kind: 'relation', member: 'account', condition: { region: 'NA' } },
+    });
+    // A second level is carried as written too: the engine refuses it (one level).
+    expect(tree({ $not: { account: { owner: { name: 'x' } } } })).toEqual({
+      kind: 'not',
+      child: { kind: 'relation', member: 'account', condition: { owner: { name: 'x' } } },
+    });
+    // Beside a guarded leaf, only the leaf is guarded.
     const members = (where: FilterCondition) =>
       [...new Set(collectFilterLeaves(tree(where) as never).map((l) => l.member))].sort();
-    expect(members({ $not: { account: { region: 'NA' } } })).toEqual(['account.region']);
-    expect(members({ $not: { account: { owner: { name: 'x' } } } })).toEqual(['account.owner.name']);
+    expect(members({ $not: { $and: [{ account: { region: 'NA' } }, { stage: 'won' }] } })).toEqual(['account', 'stage']);
   });
 
   it('an instant is never widened', () => {

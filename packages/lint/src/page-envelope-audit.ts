@@ -56,7 +56,7 @@
  * | door | parses | reaches | blind to |
  * |:--|:--|:--|:--|
  * | 1 `PageSchema` | the whole page | every schema-typed position (component `visibleWhen`, and any expression key nested in a typed sub-schema) | anything inside `properties` |
- * | 2 `PageComponentSchema` | each walked component | components nested INSIDE `properties` (`page:tabs` → `items[].children[]`, `page:card` → `body`/`footer`) | the `properties` bag itself |
+ * | 2 `PageComponentSchema` | each walked component | components nested INSIDE `properties` (`page:tabs` → `items[].children[]`, `page:card` → `footer`) | the `properties` bag itself |
  * | 3 `ComponentPropsMap[type]` | each component's `properties` | expression keys the per-type props schema declares (`record:alert.properties.visible`) | types absent from the map |
  *
  * Door 2 exists because `PageComponentSchema.properties` is

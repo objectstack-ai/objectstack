@@ -26,8 +26,9 @@
  * the repo root it answers that package's dist target. Ten in-tree
  * directories carry such a rule, written so `tsc --noEmit` grades against a
  * producer's SOURCE rather than its last build
- * (`check:type-source-resolution` requires them), and #11094 named the
- * runtime half "a latent runtime redirect for any tsx-honouring tool".
+ * (`check:type-source-resolution` required them until it was retired on
+ * 2026-09-18, #18373), and #11094 named the runtime half "a latent runtime
+ * redirect for any tsx-honouring tool".
  *
  * ⛔ CORRECTED. The card read the failure as the source subpath's export set
  * DIFFERING from `dist`. It does not. The spec package's `data` source index

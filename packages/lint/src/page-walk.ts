@@ -13,17 +13,33 @@
  *   - `slots.<slot>` is `PageComponent | PageComponent[]` — a single component
  *     is legal and must be normalized.
  *   - `PageComponentSchema` is `.strict()`, so a component carries no `children`
- *     key of its own. Sub-trees live INSIDE the untyped `properties` bag:
- *     `page:tabs` → `properties.items[].children`, `page:accordion` →
- *     `properties.items[].children`, `page:card` → `properties.body` /
- *     `properties.footer`. All are `z.array(z.unknown())`, so the recursion is
- *     untyped and has to be done by hand.
+ *     key of its own. Sub-trees live INSIDE the untyped `properties` bag, at
+ *     the positions `@objectstack/spec`'s `pageComponentSlotPositions()`
+ *     derives from the component rows — the ONE list this walk, the exported
+ *     `walkAddressedPageComponents` and the ADR-0087 conversion walker all read
+ *     (#20940; this file kept its own before, and the three disagreed about
+ *     `page:card.footer`). Today: every container's `properties.children`,
+ *     `page:card` → `properties.footer`, `page:tabs` / `page:accordion` →
+ *     `properties.items[].children`. All are `z.array(z.unknown())`, so the
+ *     recursion is untyped and has to be done by hand.
+ *   - A RETIRED slot spelling is not walked: `page:card.body` was tombstoned by
+ *     #5775 (maintainer ruling 2026-08-06, direction A — one composition key,
+ *     `children`), and the ruling keeps the renderers' `body` read as a
+ *     back-compat fallback for STORED documents, not as an authorable spelling.
+ *     An author who writes it is told by the tombstone itself
+ *     (`validate-component-props`, `page:card`) and by the container rows'
+ *     guidance (`page:section` / `page:footer` / `page:sidebar`); judging the
+ *     sub-tree under a refused key as if it were authored is what the ruling
+ *     rules out. The conversion walker still descends it — stored documents
+ *     are its population, not this walk's.
  *   - `kind: 'html' | 'react' | 'jsx'` pages are authored as `source`, which is
  *     authoritative; their `regions` hold at most a DERIVED cache that the
  *     source wins over. Linting that cache reports findings about metadata the
  *     author never wrote, so those pages are skipped here and covered by
  *     `validate-jsx-pages` / `validate-react-page-props` instead.
  */
+
+import { pageComponentSlotPositions } from '@objectstack/spec/ui';
 
 export type AnyRec = Record<string, unknown>;
 
@@ -100,6 +116,10 @@ export function walkPageComponents(page: AnyRec, pagePath: string): WalkedCompon
 
   const pageObject = strName(page.object);
 
+  // Where sub-trees hang: the authorable entries of spec's one derived list
+  // (see the module header — a retired spelling is not walked).
+  const slotPositions = pageComponentSlotPositions().filter((position) => !position.retired);
+
   // The current descent path — ancestors only, removed again on the way out.
   const ancestors = new Set<AnyRec>();
 
@@ -122,31 +142,30 @@ export function walkPageComponents(page: AnyRec, pagePath: string): WalkedCompon
 
     ancestors.add(node);
     try {
-      // `page:tabs` / `page:accordion` — items[].children[]
-      if (Array.isArray(props.items)) {
-        for (let i = 0; i < props.items.length; i++) {
-          const item = props.items[i];
-          if (!isRec(item) || !Array.isArray(item.children)) continue;
-          for (let c = 0; c < item.children.length; c++) {
-            visit(item.children[c], `${path}.properties.items[${i}].children[${c}]`, objectName);
+      // Every authorable slot position, matched by SHAPE on any component
+      // type: `properties` is an open bag, and layout containers (`type:
+      // 'flex'` grids in the showcase command-center wrap every chart this way)
+      // compose `children` without a props row of their own. Omitting a
+      // position hides whole sub-trees from every rule built on this walk.
+      for (const { key, panelKey } of slotPositions) {
+        const list = props[key];
+        if (!Array.isArray(list)) continue;
+        if (panelKey === undefined) {
+          for (let i = 0; i < list.length; i++) {
+            visit(list[i], `${path}.properties.${key}[${i}]`, objectName);
           }
+          continue;
         }
-      }
-      // Generic layout nesting — `properties.children[]`. Not in any props
-      // schema, but it is how real pages compose layout containers (`type:
-      // 'flex'` grids in the showcase command-center wrap every chart this way).
-      // Omitting it hides whole sub-trees from every rule built on this walk.
-      if (Array.isArray(props.children)) {
-        for (let i = 0; i < props.children.length; i++) {
-          visit(props.children[i], `${path}.properties.children[${i}]`, objectName);
-        }
-      }
-      // `page:card` — body[] / footer[]
-      for (const key of ['body', 'footer'] as const) {
-        const slotList = props[key];
-        if (!Array.isArray(slotList)) continue;
-        for (let i = 0; i < slotList.length; i++) {
-          visit(slotList[i], `${path}.properties.${key}[${i}]`, objectName);
+        // A panel list — `page:tabs` / `page:accordion` `items[].children[]`.
+        // The panel object is not a component; only its child list is walked.
+        for (let i = 0; i < list.length; i++) {
+          const panel = list[i];
+          if (!isRec(panel)) continue;
+          const children = panel[panelKey];
+          if (!Array.isArray(children)) continue;
+          for (let c = 0; c < children.length; c++) {
+            visit(children[c], `${path}.properties.${key}[${i}].${panelKey}[${c}]`, objectName);
+          }
         }
       }
     } finally {

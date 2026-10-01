@@ -38,14 +38,17 @@ const PREFIX = '/api/v1';
  * `InMemoryRealtimeAdapter`, and the reason is structural rather than
  * stylistic. Reaching for the real class made `@objectstack/runtime`
  * type-resolve `@objectstack/service-realtime` through its `dist/*.d.ts`, and
- * three of this repo's own ratchets refuse that from three directions:
- * `check:type-source-resolution` reds on the dist-resolved type import; its
- * registry is SHRINK-ONLY and its re-baseline limb is open only to a change
- * that ONBOARDED the program (this package's `typecheck` script already named
- * `tsconfig.test.json`, so it did not); and the mandated `paths` remedy pulls
- * that package's file graph into a program whose `rootDir` is `./src`, which
- * `tsconfig.test.json` states it will not widen — 13 `TS6059` billed to a
- * ledger `service-realtime` cannot see, the same shape PR #12570 measured.
+ * when this was written three of this repo's own ratchets refused that from
+ * three directions: `check:type-source-resolution` redded on the dist-resolved
+ * type import; its registry was SHRINK-ONLY and its re-baseline limb was open
+ * only to a change that ONBOARDED the program (this package's `typecheck`
+ * script already named `tsconfig.test.json`, so it did not); and the mandated
+ * `paths` remedy pulls that package's file graph into a program whose
+ * `rootDir` is `./src`, which `tsconfig.test.json` states it will not widen —
+ * 13 `TS6059` billed to a ledger `service-realtime` cannot see, the same shape
+ * PR #12570 measured. That gate, its registry and its `paths` mandate were
+ * retired on 2026-09-18 (#18373), so none of the three refuses the import any
+ * more; this paragraph records why the stand-in was chosen.
  *
  * ⚠️ What this file therefore STOPPED proving, stated because a pin that still
  * passes while proving less is a real cost: the first case below no longer

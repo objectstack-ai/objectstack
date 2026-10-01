@@ -205,12 +205,57 @@ const enc = (s) => encodeURIComponent(s);
  * A GraphQL mutation on a pull request, keyed by the op. The executor resolves
  * the pull's node id with `GET /repos/{repo}/pulls/{n}` and sends
  * `POST /graphql` with `{ query, variables: { id } }`.
+ *
+ * The two auto-merge rows also select `isInMergeQueue` and
+ * `isMergeQueueEnabled` (`PullRequest`, both `Boolean!`): on a branch behind a
+ * merge queue, arming a pull whose checks are already green enqueues it at
+ * once and the answer carries NO `autoMergeRequest` — the relay's own landings
+ * on this repository read `auto-merge off` while GitHub recorded
+ * `added_to_merge_queue` in the same second — so the queue half is what lets
+ * `PR_LANDED_STATE` judge that answer as landed. They are the fields
+ * `gh pr merge` reads to take its merge-queue path, which it does under a
+ * workflow token holding only `contents` and `pull-requests`. `mergeMethod`
+ * is never judged: GitHub ignores it on a merge-queue branch (the input's
+ * documentation) and the answer there names `MERGE` for a `SQUASH` request.
  */
 const PR_MUTATIONS = Object.freeze({
   pr_ready: 'mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { number isDraft } } }',
   pr_draft: 'mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { pullRequest { number isDraft } } }',
-  automerge_enable: `mutation($id: ID!) { enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: ${MERGE_METHOD} }) { pullRequest { number autoMergeRequest { enabledAt mergeMethod } } } }`,
-  automerge_disable: 'mutation($id: ID!) { disablePullRequestAutoMerge(input: { pullRequestId: $id }) { pullRequest { number autoMergeRequest { enabledAt } } } }',
+  automerge_enable: `mutation($id: ID!) { enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: ${MERGE_METHOD} }) { pullRequest { number autoMergeRequest { enabledAt mergeMethod } isInMergeQueue isMergeQueueEnabled } } }`,
+  automerge_disable: 'mutation($id: ID!) { disablePullRequestAutoMerge(input: { pullRequestId: $id }) { pullRequest { number autoMergeRequest { enabledAt } isInMergeQueue isMergeQueueEnabled } } }',
+});
+
+const isObject = (v) => v !== null && typeof v === 'object';
+
+/**
+ * What LANDED means for each pull-request mutation: the state the answer's
+ * `pullRequest` must show. A 200 carrying `data` and no `errors` says only
+ * that GitHub accepted the request — `enablePullRequestAutoMerge` has answered
+ * exactly that with `autoMergeRequest: null` on a pull it never armed nor
+ * queued — so the executor judges every one of these rows against its entry
+ * here and reports a FAILED action, naming what the answer showed, when the
+ * state is not there. Each entry:
+ *
+ *   `wants`   the requested state, in the words the failure prints;
+ *   `fields`  the `pullRequest` fields `holds` reads — each one must be in the
+ *             row's selection set (`execute.mjs --self-test` pins it), since
+ *             a field the query never asked for is absent, not false;
+ *   `holds`   the predicate over the answer's `pullRequest`.
+ *
+ * `automerge_disable` asks for auto-merge off and nothing more: disabling does
+ * not dequeue a queued pull, and its row prints `in the merge queue` when the
+ * answer says so — failing there would stop a stroke's later `pr_draft`, the
+ * second half of the disarm AGENTS.md prescribes.
+ */
+export const PR_LANDED_STATE = Object.freeze({
+  pr_ready: Object.freeze({ wants: 'ready for review (isDraft false)', fields: Object.freeze(['isDraft']), holds: (pr) => pr.isDraft === false }),
+  pr_draft: Object.freeze({ wants: 'a draft (isDraft true)', fields: Object.freeze(['isDraft']), holds: (pr) => pr.isDraft === true }),
+  automerge_enable: Object.freeze({
+    wants: 'auto-merge armed (an autoMergeRequest) or the pull in the merge queue (isInMergeQueue true)',
+    fields: Object.freeze(['autoMergeRequest', 'isInMergeQueue']),
+    holds: (pr) => isObject(pr.autoMergeRequest) || pr.isInMergeQueue === true,
+  }),
+  automerge_disable: Object.freeze({ wants: 'auto-merge off (autoMergeRequest null)', fields: Object.freeze(['autoMergeRequest']), holds: (pr) => pr.autoMergeRequest === null }),
 });
 
 /**
@@ -248,7 +293,10 @@ export function transferRemedy(source, target) {
  *   `requests`    the request descriptors the executor issues, in order:
  *                 `{ verb, path, body?, idempotent404?, graphql? }` — a
  *                 `graphql` descriptor names the mutation and the pull (or
- *                 the issue and target) whose node ids it needs.
+ *                 the issue and target) whose node ids it needs; a pull's
+ *                 descriptor also carries `landed`, its `PR_LANDED_STATE`
+ *                 entry, which is how the executor tells a landing from a
+ *                 bare 200.
  */
 export const OPS = Object.freeze({
   comment: Object.freeze({
@@ -334,13 +382,13 @@ export const OPS = Object.freeze({
     permission: 'pull-requests',
     required: Object.freeze(['pull']),
     optional: Object.freeze([]),
-    requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'markPullRequestReadyForReview', query: PR_MUTATIONS.pr_ready, pull: a.pull } }],
+    requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'markPullRequestReadyForReview', query: PR_MUTATIONS.pr_ready, pull: a.pull, landed: PR_LANDED_STATE.pr_ready } }],
   }),
   pr_draft: Object.freeze({
     permission: 'pull-requests',
     required: Object.freeze(['pull']),
     optional: Object.freeze([]),
-    requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'convertPullRequestToDraft', query: PR_MUTATIONS.pr_draft, pull: a.pull } }],
+    requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'convertPullRequestToDraft', query: PR_MUTATIONS.pr_draft, pull: a.pull, landed: PR_LANDED_STATE.pr_draft } }],
   }),
   // The two auto-merge mutations spend `contents` — GitHub requires `contents: write`
   // on the token for enable/disablePullRequestAutoMerge, over and above `pull-requests`.
@@ -348,13 +396,13 @@ export const OPS = Object.freeze({
     permission: 'contents',
     required: Object.freeze(['pull']),
     optional: Object.freeze([]),
-    requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'enablePullRequestAutoMerge', query: PR_MUTATIONS.automerge_enable, pull: a.pull } }],
+    requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'enablePullRequestAutoMerge', query: PR_MUTATIONS.automerge_enable, pull: a.pull, landed: PR_LANDED_STATE.automerge_enable } }],
   }),
   automerge_disable: Object.freeze({
     permission: 'contents',
     required: Object.freeze(['pull']),
     optional: Object.freeze([]),
-    requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'disablePullRequestAutoMerge', query: PR_MUTATIONS.automerge_disable, pull: a.pull } }],
+    requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'disablePullRequestAutoMerge', query: PR_MUTATIONS.automerge_disable, pull: a.pull, landed: PR_LANDED_STATE.automerge_disable } }],
   }),
   // The one row whose token reaches a second repository — see the header.
   // `issue`, never `pull`: a pull request does not transfer.

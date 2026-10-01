@@ -12,8 +12,9 @@
     // through each dependency's `exports` map — `dist/index.d.ts`, A BUILD
     // ARTIFACT — so the verdict would be about the last `pnpm build` rather
     // than about the producer's source in the checkout.
-    // `check:type-source-resolution` refuses exactly that, and its header
-    // states why the dangerous case is a typecheck that PASSES.
+    // `check:type-source-resolution` refused exactly that — the dangerous case
+    // being a typecheck that PASSES against a stale `dist` — until it was
+    // retired on 2026-09-18 (#18373); no gate checks this rule now.
     //
     // ONE rule per package, not two: both publish a single entry point (their
     // `exports` maps carry only `"."` besides, for metadata-core, a `./testing`
@@ -43,8 +44,8 @@
     // That suite's claim is "the SDK keeps the session the SERVER just handed
     // it", so its verdict has to be about the server's SOURCE; through
     // `exports` it would be about the last `pnpm build` of two other packages,
-    // which `check:type-source-resolution` reports as a NEW dist-resolved type
-    // import.
+    // which the since-retired `check:type-source-resolution` reported as a NEW
+    // dist-resolved type import.
     //
     // `@objectstack/platform-objects` is the one entry here spelled as a
     // SUBPATH: that package publishes eleven of them and this suite imports one
