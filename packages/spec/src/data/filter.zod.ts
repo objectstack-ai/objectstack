@@ -428,11 +428,12 @@ const ORDERING_COMPARAND_DESCRIPTION =
  *    that in the COMPARAND position (`'14:30'` → `'14:30:00'`, the #3979
  *    contract pair). A `$gte: '09:00'` on a `time` column is a supported
  *    comparison an ISO refinement would refuse.
- * 3. **date-only and full-timestamp are already reconciled by the driver**, so
+ * 3. **date-only and full-timestamp are already reconciled downstream**, so
  *    narrowing buys no safety there. A bare `YYYY-MM-DD` anchors to midnight
- *    UTC for a lower bound and is rewritten to the half-open
- *    `< next-day-midnight` for an upper bound (`calendarDayUpperBoundRewrite`,
- *    the #3777 convention).
+ *    UTC for a lower bound, and an upper bound is rewritten to the half-open
+ *    `< next-day-midnight` by the shared `lowerFilterCondition` at the seams
+ *    (ADR-0053 D-D1, as amended; the #3777 convention) before each driver
+ *    puts it in its storage form.
  *
  * ## What widening ADMITS, stated plainly
  *
@@ -728,12 +729,13 @@ const RANGE_ENDPOINT_DESCRIPTION =
  *   `{ at: { $between: ['08:00:00', '18:00:00'] } }` on a `Field.time` column.
  *   A declaration contradicted by the conformance table one directory over is
  *   not under-describing reality; it is disagreeing with it.
- * - **The driver already normalises both ends per column type.**
+ * - **Both ends are already normalised per column type downstream.**
  *   `SqlDriver.coerceFilterValue` recurses through arrays member-wise
- *   (`value.map(v => this.coerceFilterValue(table, field, v))`), and
- *   `calendarDayBetweenRewrite` coerces the min and rewrites a bare-calendar-day
- *   max into the half-open `< next-day(max)` bound — knex's `whereBetween` being
- *   inclusive on both ends, it inherits the same rule `$lte` has (#3777).
+ *   (`value.map(v => this.coerceFilterValue(table, field, v))`), and the shared
+ *   `lowerFilterCondition` (ADR-0053 D-D1, as amended) splits a `$between` at
+ *   the seams into `$gte` its min and `$lte` its max, so a bare-calendar-day max
+ *   becomes the half-open `< next-day(max)` bound by the same rule `$lte` has
+ *   (#3777) — a range being inclusive on both ends.
  *
  * A closed interval is the natural spelling of a **date window**, which makes
  * this the slot an author — an AI author in particular — is most likely to
@@ -747,9 +749,9 @@ const RANGE_ENDPOINT_DESCRIPTION =
  * range applies to), an ISO refinement would reject the `HH:MM[:SS[.fff]]` form
  * `field-value.zod.ts`'s `CLOCK_TIME_TYPES` declares and the conformance case
  * above exercises, and date-only vs full-timestamp is already reconciled
- * downstream by `calendarDayBetweenRewrite`. Endpoint-vs-column correctness is
- * a field-TYPED judgement that already has an owner; re-guessing it here would
- * refuse working ranges.
+ * downstream, by the shared `lowerFilterCondition` at the seams.
+ * Endpoint-vs-column correctness is a field-TYPED judgement that already has an
+ * owner; re-guessing it here would refuse working ranges.
  *
  * ## What widening ADMITS, stated plainly
  *
@@ -1022,6 +1024,24 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  *   analytics face's SQL echo renders SQLite's `json_each` construct for the
  *   same question. A field with no recorded declaration keeps the substring
  *   reading, as a table `driver-sql` was never told about does.
+ * - **`driver-mongodb` — ANSWERS the membership contract, on every face.**
+ *   `translateFilter` (query, count, write and the aggregation `$match` alike)
+ *   forks on the field's DECLARED value shape, read from the schema
+ *   `syncSchema` recorded (`STRUCTURED_JSON_TYPES`, or `isMultiValueField`): an
+ *   array-only `$elemMatch` over the members `@objectstack/core`'s
+ *   `jsonMembershipCandidates` names there, the substring `$regex` on a scalar
+ *   column. `['u10']` no longer answers `'u1'`; the stored number `1` answers
+ *   `'1'`. Measured on the emitted documents, read server-free and cross-checked
+ *   against mingo; a real `mongod` was not measured. A field with no recorded
+ *   declaration keeps the substring reading.
+ * - **`@objectstack/formula`'s `matchesFilterCondition` — ANSWERS the
+ *   membership contract.** This face judges one record (the RLS write check,
+ *   the explain engine), so it reads the column's DECLARATION when its caller
+ *   supplies one (`options.fields`) and the stored value's shape otherwise: an
+ *   array asks membership, anything else substring — the by-value reading this
+ *   face already gives `$empty`. Measured through `plugin-security` on SQLite: a
+ *   `contains` policy over a multi-valued field admits a write of the row its
+ *   read shows (`['x']`) and refuses `['xy']`, which its read hides.
  *
  * Only `$contains` / `$notContains` are ruled here. The other text operators
  * over a stored array are not: measured on the same fixture, `$startsWith`

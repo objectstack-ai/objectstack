@@ -50,6 +50,14 @@ import { FILTER_OPERATORS } from '@objectstack/spec/data';
 // [#20444] The `$empty` operator's ONE expansion — the field's declared row of
 // the ruled 「is empty」 table, asked of the spec per translation.
 import { expandEmptyOperator, type ValueShapeFieldDef } from '@objectstack/spec/data';
+// The JSON-stored population — the declared fields on which `$contains` asks
+// MEMBERSHIP — from the spec's value-shape classes, the same two `driver-sql`'s
+// JSON-column registry and `driver-memory`'s population are built from.
+import { STRUCTURED_JSON_TYPES, isMultiValueField } from '@objectstack/spec/data';
+// The members a `$contains` comparand names on a JSON-stored field: the one
+// candidate rule every SQL dialect binds (`@objectstack/core`), read here as
+// JSON values instead of as JSON text. See {@link containsMembers}.
+import { jsonMembershipCandidates } from '@objectstack/core';
 import {
   coerceTemporalValue,
   type TemporalFieldKind,
@@ -620,6 +628,69 @@ function undeclaredEmptyOperatorFieldError(field: string, path: string): Error {
 export type ValueShapeResolver = (field: string) => ValueShapeFieldDef | undefined;
 
 /**
+ * Is a field with this DECLARED value shape JSON-stored — the population on
+ * which `$contains` / `$notContains` ask MEMBERSHIP rather than SUBSTRING?
+ *
+ * The contract is `FILTER_OPERATORS`' `$contains` docblock
+ * (`@objectstack/spec`): on a `multiple: true` field or a JSON-stored type,
+ * `$contains: v` asks whether `v` is a member of the stored array; on a scalar
+ * string column it stays the substring test. The question is selected by the
+ * DECLARATION, never by the row, so this reads the shape `MongoDBDriver.syncSchema`
+ * recorded: `STRUCTURED_JSON_TYPES`, or a multi-valued field
+ * (`isMultiValueField`, which covers `MULTI_OPTION_TYPES`) — the two halves
+ * `driver-sql`'s JSON-column registry and `driver-memory`'s population are built
+ * from.
+ *
+ * **No declaration ⇒ `false`.** A field whose declaration this translator was
+ * not handed — an object never synced, a field its schema does not name, a
+ * standalone {@link translateFilter} call with no {@link ValueShapeResolver} —
+ * keeps the substring reading, exactly as `SqlDriver.isJsonColumn` answers for
+ * a table it was never told about.
+ */
+function isJsonStoredShape(shape: ValueShapeFieldDef | undefined): boolean {
+  if (!shape) return false;
+  return STRUCTURED_JSON_TYPES.has(shape.type) || isMultiValueField(shape);
+}
+
+/**
+ * The stored MEMBERS a `$contains` comparand names on a JSON-stored field.
+ *
+ * The comparand is a STRING by contract, so a member stored as a JSON number or
+ * boolean is named by its TEXT: `'1'` names the string `'1'` OR the number `1`,
+ * `'true'` the string OR `true`, `'null'` the string OR `null`, and `'1.50'`
+ * the number `1.5`. That is `@objectstack/core`'s `jsonMembershipCandidates`,
+ * the one rule every SQL dialect binds, which answers each candidate as JSON
+ * TEXT; parsing it gives the value MongoDB compares a stored element against.
+ * One rule, read in two encodings, so this driver and the SQL family cannot
+ * disagree about WHICH members a comparand names.
+ */
+function containsMembers(value: unknown): unknown[] {
+  return jsonMembershipCandidates(value).map((candidate) => JSON.parse(candidate) as unknown);
+}
+
+/**
+ * The un-negated MEMBERSHIP test `$contains` lowers to on a JSON-stored field:
+ * some element of the stored array IS one of the members the comparand names.
+ *
+ * `$elemMatch` is array-only by construction, so a stored scalar, an object or
+ * `null` has no member — the answer `driver-sql` gives on every dialect (its
+ * constructs are array-only too). The `$not: { $type: 'array' }` clause keeps a
+ * NESTED array out: `$in` reaches through an element that is itself an array,
+ * so `[['u1']]` would otherwise answer `'u1'`, where SQLite compares the
+ * element's JSON text `["u1"]` and does not. `driver-memory` emits the same
+ * document for the same question (`InMemoryDriver.filterContainsTest`), and
+ * mingo is that package's MongoDB-compatible evaluator.
+ *
+ * Before this test existed, `$contains` wrote `$regex` here on every field, and
+ * MongoDB applies a `$regex` to each element of an array value: `'u1'` matched
+ * a stored `['u10']` and `'red'` a stored `['redwood']`, substrings across the
+ * member boundary the contract rules out.
+ */
+function containsMembershipTest(value: unknown): Record<string, unknown> {
+  return { $elemMatch: { $in: containsMembers(value), $not: { $type: 'array' } } };
+}
+
+/**
  * [#20444] Translate `{ field: { $empty: true | false } }` by the field's
  * DECLARED row of the ruled 「is empty」 table — ruling B on #20311 (record
  * 5861435168), spelled as this operator by ruling A on #20399 (record
@@ -847,7 +918,9 @@ export function translateFilter(
   temporalKind?: TemporalFieldKindResolver,
   // [#20444] The declared value shape of each field, for `$empty`'s declared
   // row. Omitted, `$empty` is refused — the pure shape translation has no
-  // declaration to read a row from.
+  // declaration to read a row from. It also selects the question `$contains` /
+  // `$notContains` ask: membership on a declared JSON-stored field; omitted,
+  // every field keeps the substring reading.
   valueShape?: ValueShapeResolver,
 ): Filter<any> {
   if (!where) return {};
@@ -957,7 +1030,9 @@ function translateCondition(
             objValue = rest;
           }
           if (hasOps) {
-            const translated = translateFieldOperators(objValue, temporalKind?.(key), key, `${path}.${key}`);
+            const translated = translateFieldOperators(
+              objValue, temporalKind?.(key), key, `${path}.${key}`, valueShape?.(key),
+            );
             // [#13524] Lowered writes whose MongoDB key was already taken by a
             // sibling operator on the same field. Merging one would drop a
             // constraint silently, so each becomes its own `$and` branch — see
@@ -1062,6 +1137,11 @@ interface LoweredWrite {
  * written by `$notContains` and by nothing else, so it is covered here by
  * construction rather than curatively.
  *
+ * On a declared JSON-stored field `$contains` writes `$elemMatch` instead of
+ * `$regex` (its membership test), a key no other operator writes, so it
+ * contests nothing; `$startsWith` / `$endsWith` / `$icontains` still meet on
+ * `$regex` there, by the rule below.
+ *
  * ## The rule, and why it is this one
  *
  * Free key → merge inline (the overwhelmingly common case). Taken key → the
@@ -1147,6 +1227,9 @@ function translateFieldOperators(
   // refused, the way `driver-sql` and `driver-memory` do.
   field = '<field>',
   path = 'filter',
+  // The field's DECLARED value shape, when the caller holds it: it selects the
+  // question `$contains` / `$notContains` ask ({@link isJsonStoredShape}).
+  shape?: ValueShapeFieldDef,
 ): Record<string, unknown> {
   const store = (v: unknown) => coerceTemporalValue(v, kind);
   /**
@@ -1229,16 +1312,25 @@ function translateFieldOperators(
       // dropping the flag changes which CASES match, never which characters are
       // metacharacters. The deliberate case-insensitive spelling is
       // `$icontains` below — one operator, one answer, per #5374.
+      //
+      // On a declared JSON-stored field the question is MEMBERSHIP instead
+      // (`FILTER_OPERATORS`' `$contains` docblock): {@link containsMembershipTest}.
+      // A `$regex` there matched per element, so `'u1'` answered a stored
+      // `['u10']`.
       case '$contains':
-        put('$regex', escapeRegex(String(value)));
+        if (isJsonStoredShape(shape)) put('$elemMatch', containsMembershipTest(value).$elemMatch);
+        else put('$regex', escapeRegex(String(value)));
         break;
 
       case '$notContains':
         // The negated twin needs the same treatment in this ONE place: the
         // pattern under `$not` is the same predicate, so a flag left here would
         // have excluded rows the positive form includes — the negation widening
-        // rather than mirroring.
-        put('$not', { $regex: escapeRegex(String(value)) });
+        // rather than mirroring. On a declared JSON-stored field it is the
+        // exact complement of the membership test: `$not` over `$elemMatch`
+        // also admits a row whose field is null, missing or not an array, the
+        // rows with no member (`driver-sql`'s `col IS NULL OR NOT (…)`).
+        put('$not', isJsonStoredShape(shape) ? containsMembershipTest(value) : { $regex: escapeRegex(String(value)) });
         break;
 
       // [#13524] These four all write `$regex`, so before the assembly below

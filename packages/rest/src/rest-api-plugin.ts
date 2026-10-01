@@ -527,7 +527,7 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
                 if ((config.api as any)?.requireAuth !== undefined
                     || (config.api as any)?.api?.requireAuth !== undefined) {
                     ctx.logger.warn(
-                        '[security] `api.requireAuth` was removed (#3963) and is IGNORED — anonymous access to '
+                        '[security] `api.requireAuth` was removed and is IGNORED — anonymous access to '
                         + 'object data is always denied. Publish public surfaces by declaration instead: a public '
                         + 'form view, a share link, or `book.audience: \'public\'`.',
                     );
