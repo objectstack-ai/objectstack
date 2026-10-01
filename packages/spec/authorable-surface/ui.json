@@ -39,6 +39,7 @@
     "ui/Action:opensInNewTab",
     "ui/Action:operation",
     "ui/Action:order",
+    "ui/Action:outcomeMessages",
     "ui/Action:params",
     "ui/Action:patch",
     "ui/Action:recordIdField",
