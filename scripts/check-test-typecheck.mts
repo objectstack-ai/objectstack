@@ -56,7 +56,7 @@
 //                                population of a file could rotate underneath
 //                                a constant number and the gate printed OK.
 //                                Measured by ablation in packages/rest, not
-//                                argued (#13470); entries are per-signature.
+//                                argued (commit 57827b617); entries are per-signature.
 //   • an unledgered file errors→ red — this is the everyday case, and it is
 //                                why the pin files carry NO entry: any error in
 //                                them, including the TS2578 that a deleted (or
@@ -135,7 +135,8 @@ const LEDGER_COMMENT =
   'every ledger by every regeneration — so it outlives its own repair and cannot be corrected in the ' +
   'file where it is read. Measure instead, before repairing anything: `tsc --noEmit --pretty false -p ' +
   'tsconfig.test.json` in the package prints the real classes with their TS codes. ' +
-  'Each entry maps a file to its per-SIGNATURE error counts, never to a bare total (#13470): a ' +
+  'Each entry maps a file to its per-SIGNATURE error counts, never to a bare total, because a total can ' +
+  'hold while the errors underneath it are replaced wholesale: a ' +
   'signature is the TS code plus the diagnostic message with structural type blobs collapsed, and it ' +
   'carries NO line or column — so the pin survives edits that move code around, and only stops ' +
   'matching when the error itself becomes a different error. ' +
@@ -281,7 +282,7 @@ export function isSignatureCounts(value: unknown): value is SignatureCounts {
 /** `path(line,col): error TSxxxx: message` — continuation lines never match. */
 const DIAGNOSTIC = /^(\S[^(]*)\((\d+),(\d+)\): error (TS\d+): (.*)$/;
 
-// ── What a signature keeps, and what it deliberately throws away (#13470) ───
+// ── What a signature keeps, and what it deliberately throws away (commit 57827b617) ──
 //
 // WHY THIS IS NOT A COUNT. The ledger used to record one integer per file, and
 // an integer measures a QUANTITY, never an identity. `packages/rest` proved the
@@ -588,10 +589,10 @@ const SELF_TEST_VERDICT = 'check-test-typecheck self-test reached its verdict';
 // must not red. A battery BELOW its floor means cases stopped running; the
 // remedy is to find what stopped registering.
 const SELF_TEST_BATTERIES: Readonly<Record<string, number>> = Object.freeze({
-  'the cardinality-preserving control (#13470)': 1,
-  'What a signature must and must not notice (#13470)': 4,
+  'the cardinality-preserving control': 1,
+  'What a signature must and must not notice': 4,
   'The ratchet-remedy authority convention (#8435)': 7,
-  'The same authority rule, applied to the per-SIGNATURE offer (#13470)': 3,
+  'The same authority rule, applied to the per-SIGNATURE offer': 3,
   'The ledger\'s own prose (#12624)': 11,
   'Path-independence: a signature must not move with the CHECKOUT (#17739)': 7,
 });
@@ -619,7 +620,7 @@ function selfTest(): string {
     const b = openBattery ?? UNATTRIBUTED_BATTERY;
     seen.set(b, (seen.get(b) ?? 0) + 1);
   };
-  // The two REAL signatures from the ablation that produced #13470: `packages/
+  // The two REAL signatures from the ablation that produced commit 57827b617: `packages/
   // rest`'s two call sites passed a bad request AND a bad response, tsc showed
   // only the request error, and PR #13466's repair uncovered the response one.
   // Same file, same count, entirely different errors.
@@ -687,12 +688,12 @@ function selfTest(): string {
       expect: [/a\.test\.ts: ledger entry is a bare error COUNT \(3\), not a per-signature map/],
     },
     {
-      // ⭐ THE CASE THIS GATE WAS REOPENED FOR (#13470). The old per-file count
+      // ⭐ THE CASE THIS GATE WAS REOPENED FOR (commit 57827b617). The old per-file count
       // is IDENTICAL across this substitution — 2 before, 2 after — and printed
       // OK. Both halves of the set difference must be named: which debt was
       // paid, and which one it uncovered.
       label:
-        '⭐ #13470 — a WHOLESALE substitution of error identity at CONSTANT cardinality is red, and '
+        '⭐ a WHOLESALE substitution of error identity at CONSTANT cardinality is red, and '
         + 'names both the signature that ARRIVED and the one that VANISHED',
       actual: [['rest.test.ts', [[RES, 2]]]],
       ledger: { 'rest.test.ts': { [REQ]: 2 } },
@@ -742,9 +743,9 @@ function selfTest(): string {
   // populations really are the same size, so the number the ledger used to hold
   // is UNCHANGED across the swap. Without this the case would only be proving
   // "a changed count is red", which the per-file count already did.
-  battery('the cardinality-preserving control (#13470)');
+  battery('the cardinality-preserving control');
   expect(
-    '⭐ #13470 — the substitution fixture is cardinality-preserving (else the case above proves nothing '
+    '⭐ the substitution fixture is cardinality-preserving (else the case above proves nothing '
       + 'the old per-file count could not already see)',
     totalErrors(new Map([[RES, 2]])) === totalErrors({ [REQ]: 2 }),
   );
@@ -771,14 +772,14 @@ function selfTest(): string {
     );
   }
 
-  // ── What a signature must and must not notice (#13470) ────────────────────
+  // ── What a signature must and must not notice (commit 57827b617) ─────────────
   //
   // These are the two properties that decide whether pinning identity is worth
   // its cost. (i) POSITION-BLIND: the same errors after unrelated edits above
   // them must produce an IDENTICAL ledger, or every commit churns a generated
   // file and the gate gets weakened. (ii) IDENTITY-SHARP: a different named
   // type must produce a different key, or the pin is decoration.
-  battery('What a signature must and must not notice (#13470)');
+  battery('What a signature must and must not notice');
   {
     const atLine = (line: number, type: string): string =>
       `src/rest.test.ts(${line},7): error TS2345: Argument of type '{ json: Mock<Procedure>; `
@@ -792,22 +793,22 @@ function selfTest(): string {
       JSON.stringify([...m].map(([f, sigs]) => [f, [...sigs]]));
 
     expect(
-      `#13470 (i) POSITION-BLIND — the same errors at different line/column produce the SAME ledger, so `
+      `(i) POSITION-BLIND — the same errors at different line/column produce the SAME ledger, so `
         + `unrelated edits above them do not churn a generated file: ${keysOf(before)} vs ${keysOf(moved)}`,
       keysOf(before) === keysOf(moved),
     );
     expect(
-      '#13470 (ii) IDENTITY-SHARP — swapping only the NAMED parameter type produces a DIFFERENT '
+      '(ii) IDENTITY-SHARP — swapping only the NAMED parameter type produces a DIFFERENT '
         + 'signature, which is the whole discrimination the per-file count lacked',
       keysOf(before) !== keysOf(swapped),
     );
     expect(
-      '#13470 (ii-control) — and the swap is cardinality-preserving, so nothing but identity separates '
+      '(ii-control) — and the swap is cardinality-preserving, so nothing but identity separates '
         + 'the two readings',
       totalErrors(before.get('src/rest.test.ts')!) === totalErrors(swapped.get('src/rest.test.ts')!),
     );
     expect(
-      '#13470 — a signature drops the churn-prone structural blob but keeps the named type (a full '
+      'a signature drops the churn-prone structural blob but keeps the named type (a full '
         + 'message string would re-pin every anonymous shape tsc prints, including its own '
         + '"... 37 more ..." elisions)',
       [...before.get('src/rest.test.ts')!.keys()][0] ===
@@ -1016,31 +1017,31 @@ function selfTest(): string {
     );
   }
 
-  // ── The same authority rule, applied to the per-SIGNATURE offer (#13470) ──
+  // ── The same authority rule, applied to the per-SIGNATURE offer (commit 57827b617) ──
   //
   // ARRIVED is the unledgered-file verdict's sibling one level down: recording
   // a NEW signature against a file that is already ledgered expands an EXACT
   // shrink-only ratchet exactly as adding a whole file does, and it is the more
   // tempting of the two — the file total need not have moved, so it reads like
   // bookkeeping. VANISHED is its opposite and must stay unmarked.
-  battery('The same authority rule, applied to the per-SIGNATURE offer (#13470)');
+  battery('The same authority rule, applied to the per-SIGNATURE offer');
   const arrived = evaluate(observed([['a.test.ts', [[RES, 2]]]]), { 'a.test.ts': { [REQ]: 2 } });
   const arrivedMsg = arrived.find((m) => m.includes('ARRIVED')) ?? '';
   const vanishedMsg = arrived.find((m) => m.includes('VANISHED')) ?? '';
 
   expect(
-    '#13470 — the ratchet-offer DETECTOR reaches the ARRIVED verdict (else the marker assertion below '
+    'the ratchet-offer DETECTOR reaches the ARRIVED verdict (else the marker assertion below '
       + 'it passes vacuously forever)',
     RATCHET_EXPANSION_OFFER.test(arrivedMsg),
   );
   expect(
-    `#13470 — the ARRIVED verdict marks its ledger offer ${RATCHET_AUTHORITY_MARKER}: recording a NEW `
+    `the ARRIVED verdict marks its ledger offer ${RATCHET_AUTHORITY_MARKER}: recording a NEW `
       + 'signature EXPANDS the same shrink-only ratchet that adding a whole file does, and it is the '
       + 'more tempting path because the file total need not have moved',
     ratchetRemedyCarriesAuthority(arrivedMsg),
   );
   expect(
-    '#13470 — the detector does NOT reach the VANISHED verdict (an error that is gone is the ratchet '
+    'the detector does NOT reach the VANISHED verdict (an error that is gone is the ratchet '
       + "tightening and squarely the author's job to re-record)",
     vanishedMsg !== '' && !RATCHET_EXPANSION_OFFER.test(vanishedMsg) && ratchetRemedyCarriesAuthority(vanishedMsg),
   );
@@ -1105,7 +1106,7 @@ function selfTest(): string {
     JSON.stringify(built.entries) === JSON.stringify({ 'a.test.ts': { [REQ]: 1 }, 'b.test.ts': { [RES]: 2 } }),
   );
   expect(
-    '#13470 — and it writes SIGNATURE keys sorted too, so a regeneration that measured the same errors '
+    'and it writes SIGNATURE keys sorted too, so a regeneration that measured the same errors '
       + `produces a byte-identical file: got ${JSON.stringify(buildLedger(observed([['a.test.ts', [[RES, 1], [REQ, 1]]]])).entries)}`,
     JSON.stringify(buildLedger(observed([['a.test.ts', [[RES, 1], [REQ, 1]]]])).entries) ===
       JSON.stringify(buildLedger(observed([['a.test.ts', [[REQ, 1], [RES, 1]]]])).entries),
@@ -1199,7 +1200,7 @@ function selfTest(): string {
     process.exit(1);
   }
   console.log(
-    `✓ check:test-typecheck --self-test — ${cases.length} semantic case(s), the parser, the #13470 `
+    `✓ check:test-typecheck --self-test — ${cases.length} semantic case(s), the parser, the `
       + 'identity pins (a wholesale substitution at constant cardinality is red and names both the '
       + 'signature that ARRIVED and the one that VANISHED; signatures are position-blind but '
       + 'identity-sharp; the ARRIVED offer is marked maintainer-only and VANISHED is not), the #8435 '
