@@ -189,12 +189,13 @@ describe('translateObject — embedded listViews: description and bulk-action co
         columns: ['provider_id'],
         bulkActionDefs: [
           {
-            name: 'unlink',
-            label: 'Unlink',
-            operation: 'delete',
-            confirmText: 'Unlink the selected accounts?',
-            confirmLabel: 'Unlink them',
-            params: [{ name: 'reason', type: 'text', label: 'Reason', help: 'Kept in the audit log', placeholder: 'Optional' }],
+            name: 'mark_reviewed',
+            label: 'Mark reviewed',
+            operation: 'update',
+            patch: { reviewed: true },
+            confirmText: 'Mark the selected accounts reviewed?',
+            confirmLabel: 'Mark them',
+            params: [{ name: 'note', type: 'text', label: 'Note', help: 'Kept in the audit log', placeholder: 'Optional' }],
           },
         ],
       }),
@@ -210,11 +211,11 @@ describe('translateObject — embedded listViews: description and bulk-action co
               label: '我的链接',
               description: '与你关联的账户',
               bulkActions: {
-                unlink: {
-                  label: '解除关联',
-                  confirmText: '确定解除所选账户的关联吗？',
-                  confirmLabel: '确认解除',
-                  params: { reason: { label: '原因', help: '记录在审计日志中', placeholder: '选填' } },
+                mark_reviewed: {
+                  label: '标记已复核',
+                  confirmText: '确定将所选账户标记为已复核吗？',
+                  confirmLabel: '确认标记',
+                  params: { note: { label: '备注', help: '记录在审计日志中', placeholder: '选填' } },
                 },
               },
             },
@@ -234,21 +235,21 @@ describe('translateObject — embedded listViews: description and bulk-action co
     // view document nests them in.
     const out = translate(clone(WITH_COPY), WITH_COPY);
     expect(out.listViews.mine.description).toBe('与你关联的账户');
-    expect(def(out)).toMatchObject({ label: '解除关联', confirmText: '确定解除所选账户的关联吗？', confirmLabel: '确认解除' });
-    expect(def(out).params[0]).toMatchObject({ label: '原因', help: '记录在审计日志中', placeholder: '选填' });
+    expect(def(out)).toMatchObject({ label: '标记已复核', confirmText: '确定将所选账户标记为已复核吗？', confirmLabel: '确认标记' });
+    expect(def(out).params[0]).toMatchObject({ label: '备注', help: '记录在审计日志中', placeholder: '选填' });
     // Nothing else on the def moved.
-    expect(def(out).operation).toBe('delete');
+    expect(def(out)).toMatchObject({ operation: 'update', patch: { reviewed: true } });
   });
 
   it('an edited def string beats the catalog; the untouched ones on it stay translated', () => {
     const doc = clone(WITH_COPY);
-    def(doc).label = 'Disconnect';
+    def(doc).label = 'Close out';
     def(doc).params[0].help = 'Shown to admins';
     const out = translate(doc, WITH_COPY);
-    expect(def(out).label).toBe('Disconnect');
-    expect(def(out).confirmText).toBe('确定解除所选账户的关联吗？');
+    expect(def(out).label).toBe('Close out');
+    expect(def(out).confirmText).toBe('确定将所选账户标记为已复核吗？');
     expect(def(out).params[0].help).toBe('Shown to admins');
-    expect(def(out).params[0].label).toBe('原因');
+    expect(def(out).params[0].label).toBe('备注');
   });
 
   it('an edited description beats the catalog; the label beside it stays translated', () => {
