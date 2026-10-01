@@ -275,7 +275,7 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   // domain-wide floor there covers them all — the `/packages` shape above. Its
   // REST sibling, the analytics dataset door, already opened with `enforceAuth`;
   // this domain was the one data-serving dispatcher domain without the floor.
-  { id: 'anonymous-deny-analytics', summary: 'anonymous-deny on the analytics dispatcher surface (#21061)', state: 'enforced',
+  { id: 'anonymous-deny-analytics', summary: 'anonymous-deny on the analytics dispatcher surface', state: 'enforced',
     enforcement: 'runtime/domains/analytics.ts handleAnalyticsRequest — shouldDenyAnonymous DOMAIN-WIDE as the handler\'s FIRST statement, ahead of the service-availability probe (so a 401-vs-404 difference cannot fingerprint whether the analytics capability is installed) and ahead of the AnalyticsQuery body validation (so an anonymous malformed body is a 401, never a 400 describing the contract); every face answers the dispatcher-wrapper 401 UNAUTHENTICATED, and object admission and the read scope for a signed-in caller stay with the security layer behind the service',
     proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
     // The DISPATCHER domain only, at ledger granularity, beside the gate pin —
