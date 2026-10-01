@@ -154,6 +154,9 @@ const NON_BOOLEANS: ReadonlyArray<readonly [string, unknown, string]> = [
   ['"false" (truthy)', 'false', 'string ("false")'],
   ['0', 0, 'number (0)'],
   ['null', null, 'null (null)'],
+  // Not one of the card's five, but reaching the same gate: no earlier door
+  // refuses a list here, so it met the old `!!target` read like any other value.
+  ['[true] (a list)', [true], 'array ([true])'],
 ];
 
 describe('[#20981] a non-boolean $exists / $null — refused before any driver read, on both positions', () => {

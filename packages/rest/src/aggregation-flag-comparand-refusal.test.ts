@@ -1,15 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#20981] A per-aggregation `filter` and a `having` REFUSE a non-boolean
- * `$exists` / `$null` the way their `where` twin does — 400 `INVALID_FILTER` —
- * through the door a caller uses: `POST /api/v1/data/:object/query` →
- * `RestServer` → `ObjectStackProtocolImplementation.findData` →
- * `ObjectQL.aggregate` → a real `SqlDriver` on SQLite.
+ * [#20981] A per-aggregation `filter` and a `having` evaluated by
+ * `ObjectQL.aggregate` over a real `SqlDriver` on SQLite REFUSE a non-boolean
+ * `$exists` / `$null` the way their `where` twin does — `INVALID_FILTER` / 400,
+ * in `driver-sql`'s words — and `true` / `false` select what the twin selects.
  *
  * Measured before this change (`origin/main` `7a606a9a3`) through
  * `engine.aggregate` on driver-sql (better-sqlite3) and driver-memory, over the
- * three rows below: every `where` twin was 400, while the per-aggregation
+ * three rows below: every `where` twin was refused, while the per-aggregation
  * `filter` summed the VALUED row for `$exists` `"yes"` / `1` / `"false"`, the
  * no-value rows for `0` / `null`, and EVERY row for any non-boolean `$null`;
  * `having` kept the matching groups the same way (both groups under `$null`).
@@ -17,6 +16,19 @@
  * it. The engine-level cell — both `having` paths, every position, the
  * published row evaluators — is `@objectstack/objectql`'s
  * `engine-aggregate-flag-comparand-refusal.test.ts`.
+ *
+ * ## Why the refusal cases call the engine, not the route
+ *
+ * `POST /api/v1/data/:object/query` never reached the defect: the route parses
+ * the request against the spec's query schema first, and that parse already
+ * refuses a non-boolean flag in `where`, in `aggregations[i].filter` and in
+ * `having` (400 `VALIDATION_FAILED`, measured on the same base, before and
+ * after this change). The engine's refusal is the floor for every caller that
+ * reaches `engine.aggregate` without that parse — server-side code, and the
+ * analytics bridge that lowers a measure's `filter` into an aggregation filter.
+ * So the refusal cases run on `engine.aggregate`; the route is asked only to
+ * show where its own parse stands and to carry the `true` / `false` control end
+ * to end.
  *
  * ## The words
  *
@@ -26,12 +38,11 @@
  * imported because the engine cannot depend on a driver. This file is where the
  * copy is held to its source: each case reads the `where` twin's withheld
  * diagnostic off the thrown error (`withheldFilterDiagnosticOf`) and requires
- * the engine's message to equal it under exactly those two edits. The wire
- * texts differ only in disclosure: `driver-sql` withholds the field and the
- * value of a `where` predicate no boundary marked as the author's, while the
- * per-aggregation `filter` and `having` are always the caller's own clauses.
- *
- * ## The dialect axis
+ * the engine's message to equal it under exactly those two edits. `driver-sql`
+ * withholds that diagnostic from a `where` response because a `where` can carry
+ * a merged read scope; a per-aggregation `filter` and a `having` never do, so
+ * the engine's message names the field and the value, as its `$empty` and
+ * `$icontains` refusals do.
  *
  * SQLite only, deliberately: the refusal precedes every driver read, so no
  * dialect can answer it differently, and the `where` twin's wording is
@@ -94,7 +105,7 @@ const grouped = (having: unknown) => ({ groupBy: ['name'], aggregations: [{ func
 const whereSum = (where: unknown) => ({ where, aggregations: [{ function: 'count', alias: 'n' }, { function: 'sum', field: 'amount', alias: 's' }] });
 const whereGrouped = (where: unknown) => ({ where, groupBy: ['name'], aggregations: [{ function: 'count', alias: 'n' }] });
 
-describe('[#20981] POST /data/:object/query — a non-boolean $exists / $null is refused in a per-aggregation filter and in having, as in where — sqlite', () => {
+describe('[#20981] a non-boolean $exists / $null in a per-aggregation filter or a having is refused as its where twin is — SqlDriver on sqlite', () => {
   let engine: ObjectQL;
   let post: (body: Record<string, unknown>) => Promise<{ status: number; json: any }>;
 
@@ -150,10 +161,7 @@ describe('[#20981] POST /data/:object/query — a non-boolean $exists / $null is
 
   for (const op of OPS) {
     for (const [label, comparand] of NON_BOOLEANS) {
-      it(`${op}: ${label} — 400 INVALID_FILTER in the filter and in having, in the where twin's words`, async () => {
-        const twin = await post(whereSum({ name: { [op]: comparand } }));
-        expect(twin.status, 'where twin').toBe(400);
-        expect(twin.json.code).toBe('INVALID_FILTER');
+      it(`${op}: ${label} — engine.aggregate refuses it in the filter and in having, in the where twin's words`, async () => {
         const diagnostic = await whereTwinDiagnostic(op, comparand);
         const twinAt = diagnostic.match(/ at (\S+)\. @objectstack/)?.[1];
         expect(twinAt, diagnostic).toBe(`filter.name.${op}`);
@@ -170,19 +178,24 @@ describe('[#20981] POST /data/:object/query — a non-boolean $exists / $null is
           expect(err.message).toBe(
             diagnostic.trim().replace(` at ${twinAt}. `, ` at ${at}. `).replaceAll('this driver', 'driver-sql'),
           );
-
-          // …and over the wire: the same status, code and leading sentence.
-          const res = await post(body);
-          expect(res.status, JSON.stringify(res.json)).toBe(400);
-          expect(res.json.code).toBe('INVALID_FILTER');
-          expect(res.json.error).toContain(
-            `Operator "${op}" on field "name" requires a boolean comparand (true or false). Received `,
-          );
-          expect(res.json.error).toContain(` at ${at}. `);
+          expect(err.message).toContain(`Operator "${op}" on field "name" requires a boolean comparand (true or false).`);
         }
       }, 60_000);
     }
   }
+
+  it('the route refuses all three positions in its own schema parse first — 400 VALIDATION_FAILED, unchanged here', async () => {
+    for (const [body, field] of [
+      [whereSum({ name: { $exists: 'yes' } }), 'query.where.name.$exists'],
+      [perAggregation({ name: { $exists: 'yes' } }), 'query.aggregations.1.filter.name.$exists'],
+      [grouped({ name: { $null: 1 } }), 'query.having.name.$null'],
+    ] as const) {
+      const res = await post(body);
+      expect(res.status, JSON.stringify(res.json)).toBe(400);
+      expect(res.json.code).toBe('VALIDATION_FAILED');
+      expect(res.json.fields.map((f: { field: string }) => f.field)).toEqual([field]);
+    }
+  }, 60_000);
 
   // The control: a boolean flag answers, and the filter and having select the
   // rows and groups their where twin does.
