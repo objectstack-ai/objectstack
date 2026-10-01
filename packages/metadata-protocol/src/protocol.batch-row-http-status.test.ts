@@ -543,7 +543,7 @@ describe('[#14723] section 7 — a `DuplicateRecordError` row reports `UNIQUE_VI
     });
 
     it('[GUARD] a producer that merely SPEAKS `DUPLICATE_RECORD` is not the engine\'s envelope and keeps its own code', async () => {
-        // The same discrimination the whole-request arm makes (#14389 §5):
+        // The same discrimination the whole-request arm makes (commit 10220a7bf):
         // the gate is the registered code AND the class name. A hook throwing
         // the registered member from its own body is a different producer
         // speaking a member of the vocabulary; the verbatim rule still applies.

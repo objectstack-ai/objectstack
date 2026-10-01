@@ -7,7 +7,7 @@
  *
  * ── The defect, and why the singular verb is the sharper half ─────────────
  *
- * Commit 96326040f (PR #14767) moved {@link organizationIdForMetaRead} INSIDE the PLURAL
+ * Commit 96326040f moved {@link organizationIdForMetaRead} INSIDE the PLURAL
  * verb, `getMetaItems`, and deliberately did not carry to this one. There, the
  * two `queryByOrg` reads are UNIONed, so an ungated organization can only ADD
  * rows — the resurrection that card is about. Here the two `findOverlay` reads

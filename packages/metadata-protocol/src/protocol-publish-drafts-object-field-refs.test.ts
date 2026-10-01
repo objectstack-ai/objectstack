@@ -244,7 +244,7 @@ describe('publishPackageDrafts refuses a dangling object field-name list (#15254
         expect(causal.code).toBe('INVALID_METADATA');
 
         // …with a rule id and the offending path, which is what has to reach
-        // the author's screen. The path is name-keyed on the wire (#10064) —
+        // the author's screen. The path is name-keyed on the wire (commit def0d3e63) —
         // `objects.<name>.<key>[i]`, never the gate's private snapshot index.
         const wire = JSON.stringify(causal);
         expect(wire).toContain('object-field-ref-unknown');

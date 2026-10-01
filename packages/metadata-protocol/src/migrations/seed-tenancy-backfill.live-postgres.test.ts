@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #17621 — the seed-tenancy backfill's statements, RUN on a live PostgreSQL.
+ * Commit 7e74af3df — the seed-tenancy backfill's statements, RUN on a live PostgreSQL.
  *
  * ## The gap this closes
  *
@@ -52,7 +52,7 @@
  * uses) and reports a named SKIP without one — never a silent pass. A runner
  * that knows it provisioned the server sets `OS_EXPECT_LIVE_DIALECT_MATRIX=1`,
  * which turns the missing URL into a failure, so a dropped `env:` line cannot
- * quietly return this seam to the no-coverage state #17621 records.
+ * quietly return this seam to the no-coverage state commit 7e74af3df records.
  *
  * ## Isolation — a per-file SCHEMA, and why the resolver is the MySQL-named one
  *
@@ -253,7 +253,7 @@ describe.skipIf(!PG_URL)('#17621 seed-tenancy backfill on a LIVE PostgreSQL', ()
     const statements: Array<[string, string, unknown[]]> = [
       ['presence probe (fallback arm)', buildSequencesPresenceSql(c), []],
       // The statement the boot path actually runs now. It is in this list for
-      // the reason every other one is here, and #17621 exists because it was
+      // the reason every other one is here, and commit 7e74af3df exists because it was
       // the ONE arm this list could not previously contain.
       ['presence probe (catalog arm)', buildTablePresenceSql(SEQUENCES_TABLE, c) as string, []],
       ['split probe', buildSplitProbeSql(c), [GLOBAL_TENANT, GLOBAL_TENANT]],

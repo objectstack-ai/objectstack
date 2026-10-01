@@ -176,7 +176,7 @@ function makeHarness(rows: StoredRow[], options: HarnessOptions = {}) {
                     return (r as unknown as Record<string, unknown>)[k] === v;
                 }),
             );
-            // `check:objectql-double-limit` (#10978) — hold the caller's bound,
+            // `check:objectql-double-limit` (commit 4c9780c7a) — hold the caller's bound,
             // applied AFTER the filter and BY PRESENCE. A double that hands
             // back every row it matched cannot tell a dropped bound from no
             // bound at all.

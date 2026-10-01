@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #10420 — `SysMetadataRepository` under the SHARED repository contract suite.
+ * Commit 05bc692e0 — `SysMetadataRepository` under the SHARED repository contract suite.
  *
  * ## Why this file exists
  *

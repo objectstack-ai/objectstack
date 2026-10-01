@@ -16,7 +16,7 @@
  * is no body for the item-level redactor to take. This is the same "different
  * plane, same stored bytes" split that made #7990 its own card.
  *
- * ## The ruled shape (maintainer ruling, issue comment 5299845282 — Option B)
+ * ## The ruled shape (maintainer ruling, recorded in commit 75e66fc8e's message — Option B)
  *
  *   > Ruled: Option B — diff raw, then redact emitted values at redactor-named
  *   > paths, keeping the path and the "changed" signal.
