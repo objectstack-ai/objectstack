@@ -36,6 +36,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 
 import { AuditPlugin } from './audit-plugin.js';
 import { resolveServedFields } from './activity-field-redaction.js';
@@ -114,8 +115,13 @@ describe('[#21081] sys_activity value-bearing columns are served through the sec
     },
   };
 
-  const read = (context: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
-    engine.find(ACTIVITY, { where: { object_name: ITEM, record_id: ids.item }, orderBy: [{ field: 'timestamp', order: 'asc' }], context, ...extra } as any) as Promise<Row[]>;
+  const read = (context: EngineQueryOptions['context'], extra: EngineQueryOptions = {}) =>
+    engine.find(ACTIVITY, {
+      where: { object_name: ITEM, record_id: ids.item },
+      orderBy: [{ field: 'timestamp', order: 'asc' }],
+      context,
+      ...extra,
+    }) as Promise<Row[]>;
 
   /** The mirror rows about the item, classified ONCE from the at-rest read
    * (a reader's own copy may have had the very keys the classification reads
@@ -245,7 +251,7 @@ describe('[#21081] sys_activity value-bearing columns are served through the sec
   });
 
   it('not served: the record label and the created summary composed from an unserved title are dropped', async () => {
-    const rows = await engine.find(ACTIVITY, { where: { object_name: LABELLED }, context: UNSERVED_READER } as any) as Row[];
+    const rows = await engine.find(ACTIVITY, { where: { object_name: LABELLED }, context: UNSERVED_READER }) as Row[];
     expect(rows).toHaveLength(1);
     expect(JSON.stringify(rows)).not.toContain(V.title);
     expect(rows[0]).not.toHaveProperty('record_label');
@@ -266,7 +272,7 @@ describe('[#21081] sys_activity value-bearing columns are served through the sec
     for (const v of [V.masked1, V.masked2, V.unserved1, V.unserved2, V.open3]) expect(blob).toContain(v);
     expect(rows.allTracked).toHaveProperty('summary');
     expect(rows.milestone).toHaveProperty('summary');
-    const labelled = await engine.find(ACTIVITY, { where: { object_name: LABELLED }, context: CONTROL } as any) as Row[];
+    const labelled = await engine.find(ACTIVITY, { where: { object_name: LABELLED }, context: CONTROL }) as Row[];
     expect(labelled[0]).toHaveProperty('record_label', V.title);
   });
 
@@ -294,7 +300,7 @@ describe('[#21081] sys_activity value-bearing columns are served through the sec
 
   it('findOne: the by-id read is redacted like the list', async () => {
     const tracked = byChange(await read(SYS)).allTracked!;
-    const row = await engine.findOne(ACTIVITY, { where: { id: tracked.id }, context: MASKED_READER } as any) as Row;
+    const row = await engine.findOne(ACTIVITY, { where: { id: tracked.id }, context: MASKED_READER }) as Row;
     expect(row?.id).toBe(tracked.id);
     expect(JSON.stringify(row)).not.toContain(V.masked2);
     expect(row).not.toHaveProperty('summary');
