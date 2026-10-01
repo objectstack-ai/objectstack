@@ -4,7 +4,7 @@
 
 ## 复核归属与资格(按面)
 
-- 欠不欠按面判 ⛔ 不按车道:diff 碰下列任一面即欠达档复核,交付后当轮完成。
+- 欠不欠按面判 ⛔ 不按车道:diff 或认领申报碰下列任一面即欠达档复核,交付后当轮完成。
 - 复核面 = 契约三面:`Clause-②: yes` 申报、已发布 schema(`packages/spec/src/**` 非测试)、governed
   规则文本(统一定义见 SKILL.md);`.changeset`/CHANGELOG、`content/docs/**`、`apps/docs/**` 散文面
   ⛔ 不在其列:派发席按本席档在 ACCEPT 逐句对照 diff 核,ACCEPT 点名所核句。
