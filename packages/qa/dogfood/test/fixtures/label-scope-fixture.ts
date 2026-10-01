@@ -52,7 +52,7 @@ export const labelScopeStack = defineStack({
     version: '0.0.0',
     type: 'app',
     name: 'Label Scope Fixture',
-    description: 'Deal → vendor lookup exercising the #3602 label read-scope leak.',
+    description: 'Deal → vendor lookup exercising the dimension-label read scope: a vendor the reader cannot read is shown by raw id, never by name.',
   },
   objects: [Vendor, Deal],
 });

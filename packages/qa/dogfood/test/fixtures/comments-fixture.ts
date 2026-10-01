@@ -136,7 +136,7 @@ export const commentsFixtureStack = defineStack({
     type: 'app',
     name: 'Comments Permission Matrix Fixture',
     description:
-      'Four-object app exercising the #4630 comment permission matrix: thread visibility, author/parent-editor writes, the enable.feeds gate.',
+      'Four-object app exercising the record-level comment permission matrix: thread visibility, author/parent-editor writes, the enable.feeds gate.',
   },
   objects: [CmtOpen, CmtPrivate, CmtReadonly, CmtNoFeeds],
 });
