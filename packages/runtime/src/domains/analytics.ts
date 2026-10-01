@@ -9,9 +9,15 @@
  * dispatcher-owned so the URL contract is stable regardless of what occupies
  * the slot; an empty slot answers the `handled: false` 404 below — as does a
  * slot occupied by a self-declared stub (#4000, see {@link isServiceServeable},
- * the shared predicate every service domain reads since #4058).
+ * the shared predicate every service domain reads since #4058). Both of those
+ * answers are for an authenticated caller: an anonymous one is refused before
+ * the slot is consulted (#21061, see the first statement of
+ * {@link handleAnalyticsRequest}).
  */
 
+import {
+    shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
+} from '@objectstack/core';
 import { CoreServiceName } from '@objectstack/spec/system';
 import { AnalyticsQueryRequestSchema } from '@objectstack/spec/api';
 import { isAnalyticsDateRangeRefusalIssue } from '@objectstack/spec/data';
@@ -104,6 +110,38 @@ export async function handleAnalyticsRequest(
     context: HttpProtocolContext,
     query?: any,
 ): Promise<HttpDispatcherResult> {
+    // [#21061] ANONYMOUS BASELINE (ADR-0056 D2) — the FIRST statement, ahead
+    // of the service-availability probe and the body validation below, in the
+    // hoisted form `domains/security.ts` and `domains/ai.ts` use. This domain
+    // serves aggregates over objects, so it stands on the same anonymous-deny
+    // floor as `/data`, `/meta`, `/actions`, `/automation` and `/packages`;
+    // its REST sibling, the analytics dataset door in `@objectstack/rest`,
+    // already opens with `enforceAuth`.
+    //
+    // Why here and nowhere else: every analytics face (cube read, SQL, meta)
+    // converges on this ONE handler body, whichever transport delivered it,
+    // so a single domain-wide gate covers them all and a face added later
+    // cannot arrive ungated. ⛔ No second gate at the dispatcher mount, and ⛔
+    // no "no permission set resolved" admission rule copied into
+    // `service-analytics` — that question belongs to the security layer, at
+    // every door at once, not to one door.
+    //
+    // Why ahead of the probe: an anonymous caller must not learn from a 404
+    // versus a 401 whether this deployment carries the analytics capability,
+    // and must not reach the body validator either — a malformed body from an
+    // anonymous caller is still a 401, never a 400 describing the contract.
+    //
+    // The dispatcher hands an unauthenticated request to this handler as the
+    // guest envelope (`assembleExecutionContextOrGuest`), which carries no
+    // `userId`; an unresolved context carries none either. Both are denied.
+    const ec = context?.executionContext;
+    if (shouldDenyAnonymous({ userId: ec?.userId, isSystem: ec?.isSystem, method })) {
+        return {
+            handled: true,
+            response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
+        };
+    }
+
     const analyticsService = await deps.getService(context, CoreServiceName.enum.analytics);
     // Empty slot — or a slot filled by a self-declared stub (#4000), which is
     // the same amount of analytics capability. 404 handled by caller.
@@ -116,7 +154,8 @@ export async function handleAnalyticsRequest(
     if (subPath === 'query' && m === 'POST') {
         // [#3878] Entry validation AFTER the service check on purpose: an
         // uninstalled analytics capability answers 404 (the honest "install
-        // service-analytics" signal, #3891) regardless of body shape.
+        // service-analytics" signal, #3891) regardless of body shape. Both sit
+        // behind the anonymous floor at the top of this handler (#21061).
         assertAnalyticsQueryBody(body);
         // [#2852] Pass the request's execution context so the analytics
         // service scopes each object by its per-object read filter (tenant +
