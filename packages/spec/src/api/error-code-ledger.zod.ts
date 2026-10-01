@@ -190,7 +190,6 @@ import { retiredStandardErrorCodeMessage } from './retired-error-codes';
 export const ERROR_CODE_LEDGER = {
   '@objectstack/rest': [
     'ALREADY_REVERTED',
-    'AMBIGUOUS_MATCH',            // import row matched more than one record
     'ANALYTICS_QUERY_FAILED',
     'APPROVAL_ACTIONS_FAILED',
     // [commit 30b1c636a] The eight rows below are the TEMPLATE-GENERATED members of the
@@ -217,8 +216,6 @@ export const ERROR_CODE_LEDGER = {
     'BATCH_NOT_ATOMIC',
     'BATCH_TOO_LARGE',
     'BATCH_UNRESOLVED_REF',
-    'BLANK_MATCH_KEY',
-    'CONCURRENT_UPDATE',
     // [#8111] `respondSharingError`'s 409 arm — `revoke` on a rule-materialised
     // share (`source != 'manual'`), thrown by plugin-sharing's `sharing-service`
     // and documented at `content/docs/kernel/runtime-services/sharing-service.mdx`.
@@ -235,7 +232,6 @@ export const ERROR_CODE_LEDGER = {
     'DUPLICATE_REQUEST',
     'EMAIL_SEND_FAILED',
     'ERR_BULK_RESULT_MISMATCH',
-    'ERR_DATASOURCE_UNAVAILABLE',
     'EXPLAIN_FAILED',
     'EXPORT_NOT_PERMITTED',
     'EXTERNAL_DATASOURCE_ERROR',     // introspection/connection-test refusal from the external-datasource service
@@ -263,7 +259,6 @@ export const ERROR_CODE_LEDGER = {
     'MAPPING_TARGET_MISMATCH',
     'NOT_FOUND',
     'NOT_UNDOABLE',
-    'NO_MATCH',                   // import upsert found no record for the match key
     'OBJECT_API_DISABLED',
     'OBJECT_API_METHOD_NOT_ALLOWED',
     'OPENAPI_UNAVAILABLE',        // no OpenAPI spec bundled with this runtime
@@ -294,7 +289,6 @@ export const ERROR_CODE_LEDGER = {
     'SUGGESTION_CONFIRM_FAILED',
     'SUGGESTION_DISMISS_FAILED',
     'SUGGESTION_LIST_FAILED',
-    'SUMMARY_RECOMPUTE_FAILED',
     // [commit 30b1c636a] `POST /approvals/requests/:id/remind` inside the reminder
     // cool-down window — `handleApprovalError` (`rest-server.ts`) maps
     // plugin-approvals' `THROTTLED: …` throw (`approval-service.ts`,
@@ -306,7 +300,6 @@ export const ERROR_CODE_LEDGER = {
     // API quota.
     'THROTTLED',
     'UNAUTHORIZED',
-    'UNIQUE_VIOLATION',
     'UNSUPPORTED_TRANSFORM',
     'VALIDATION_FAILED',          // record-level validation; carries `fields[]` (#3977)
   ],
@@ -908,6 +901,31 @@ export const ERROR_CODE_LEDGER = {
     // `status`. Raised while the kernel is still registering plugins, before
     // bootstrap and therefore before any HTTP boundary exists.
     'PLUGIN_CONTRACT_VIOLATION',
+    // [#20919] The bulk-import runner (`utils/import-runner.ts`) and the
+    // mapping pipeline (`utils/import-mapping.ts`) moved here from
+    // `@objectstack/rest`, and their row and refusal codes moved with them
+    // (the rows left `@objectstack/rest`'s key, except `UNSUPPORTED_TRANSFORM`,
+    // which rest's `resolveNamedMapping` still stamps too). Wire path: the
+    // import door (`POST /data/:object/import`, the async import-job worker)
+    // reports each row's `code` in its results, and the connector sync
+    // executor in `@objectstack/service-automation` returns the same report.
+    'AMBIGUOUS_MATCH',            // import row matched more than one record
+    'BLANK_MATCH_KEY',
+    'NO_MATCH',                   // import upsert found no record for the match key
+    'SUMMARY_RECOMPUTE_FAILED',
+    'UNSUPPORTED_TRANSFORM',
+  ],
+  '@objectstack/types': [
+    // [#20919] The REST door's error CLASSIFICATION half
+    // (`data-error-classification.ts`: `mapDataError` through
+    // `classifyDataError`) moved here from `@objectstack/rest`, and the codes
+    // its table stamps moved with it. Wire path: every `@objectstack/rest`
+    // route catch answers through `handleRouteError` / `sendThrownError`,
+    // which resolve the thrown error through this table, and the bulk-import
+    // runner adopts its verdict for each failed row.
+    'CONCURRENT_UPDATE',
+    'ERR_DATASOURCE_UNAVAILABLE',
+    'UNIQUE_VIOLATION',
   ],
   '@objectstack/hono': [
     'AUTH_CONFIG_ERROR',             // auth service threw while the adapter mounted it
