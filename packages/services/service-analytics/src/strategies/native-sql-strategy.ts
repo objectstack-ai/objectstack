@@ -1402,7 +1402,10 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     const measure = this.lookupMember(cube, member, 'measure');
     if (measure) return this.qualifyAndRegisterJoin(measure.sql, parentTable, joins, cube);
     const fieldName = member.includes('.') ? member.split('.')[1] : member;
-    return fieldName;
+    // [#21249] A member the cube does not declare is a base-table column too
+    // (`where: { id }`), so it takes the same qualification as a declared one:
+    // returned bare it sat beside a joined target's own `id`, ambiguous.
+    return this.qualifyAndRegisterJoin(fieldName, parentTable, joins, cube);
   }
 
   /**
