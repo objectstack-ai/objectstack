@@ -405,6 +405,54 @@ const retiredComponentProps = (type: string) => {
 };
 
 /**
+ * Component-composition SLOTS — declared here, on the rows, and nowhere else
+ * (#20940).
+ *
+ * A slot is a props key whose value is an ordered list of child page
+ * components the renderer draws: a container's `children`, a card's `footer`,
+ * a tab or accordion panel's `items[].children`. `properties` is an open bag
+ * nothing parses by `type` on the load path, so every pass that has to reach a
+ * nested component — the ADR-0087 conversion walker, the exported
+ * `walkAddressedPageComponents` (`translatePage`, the CLI extractor, objectui's
+ * validator) and `@objectstack/lint`'s `walkPageComponents` — has to be TOLD
+ * where the sub-trees hang. Each used to carry its own list, and the three
+ * disagreed: lint walked a card's `footer`, the exported walk did not, so a
+ * node there was judged by `os lint` and skipped by every consumer of the
+ * exported walk.
+ *
+ * So the row declares the fact and {@link pageComponentSlotPositions} derives
+ * the one list from `ComponentPropsMap`: a key is a slot exactly when its row
+ * wraps its schema in {@link componentSlot}. The marker adds nothing to the
+ * schema — the instance it returns is the one it was handed, so the parse, the
+ * JSON Schema and the authorable surface are byte-identical to the unmarked
+ * key; it only records the instance in a module-private registry.
+ *
+ * {@link retiredComponentSlot} marks a TOMBSTONED spelling of a slot:
+ * `page:card.body`, retired by #5775 (maintainer ruling 2026-08-06, direction
+ * A — one composition key, `children`). It is not an authorable spelling, and
+ * the authoring walks do not descend it; the renderers still read it as a
+ * back-compat fallback for STORED documents, which is exactly the population
+ * the conversion walker normalizes, so that walker keeps descending it.
+ */
+const COMPONENT_SLOT_DECLARATIONS = new WeakMap<object, { readonly retired: boolean }>();
+
+/**
+ * Declare the key whose schema this is as a component-composition slot. Wrap
+ * the OUTERMOST schema the shape holds (after `.optional()` / `.describe()`),
+ * so the registered instance is the one `shape[key]` returns.
+ */
+function componentSlot<T extends z.ZodType>(schema: T): T {
+  COMPONENT_SLOT_DECLARATIONS.set(schema, { retired: false });
+  return schema;
+}
+
+/** {@link componentSlot} for a tombstoned spelling of a slot — see the block above. */
+function retiredComponentSlot<T extends z.ZodType>(schema: T): T {
+  COMPONENT_SLOT_DECLARATIONS.set(schema, { retired: true });
+  return schema;
+}
+
+/**
  * The composition slot every thin container renders: `page:section`,
  * `page:footer`, `page:sidebar`.
  *
@@ -445,7 +493,7 @@ export const PageContainerProps = strictObject(
     },
   },
   {
-    children: z.array(z.unknown()).optional().describe('Child components rendered inside this container, in order'),
+    children: componentSlot(z.array(z.unknown()).optional().describe('Child components rendered inside this container, in order')),
   },
 );
 export type PageContainerProps = z.input<typeof PageContainerProps>;
@@ -821,7 +869,7 @@ export const PageTabsProps = strictObject({
      * so an explicit value is only needed when the count is not that sum.
      */
     count: z.number().int().min(0).optional().describe('Badge count shown next to the tab label (default: derived from `record:related_list` descendants)'),
-    children: z.array(z.unknown()).describe('Child components')
+    children: componentSlot(z.array(z.unknown()).describe('Child components'))
   })),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
@@ -871,21 +919,29 @@ export const PageCardProps = strictObject({
    * than declaring both — one composition key, not two de-facto contracts
    * (Prime Directive #12). `footer` is a genuinely distinct slot and stays.
    */
-  children: z.array(z.unknown()).optional().describe('Card content components, in order (the card body slot)'),
+  children: componentSlot(z.array(z.unknown()).optional().describe('Card content components, in order (the card body slot)')),
   /**
    * REMOVED (#5775). `body` was the declared spelling of the slot every other
    * container calls `children`; the two are the same slot, and the renderer
    * already reads both. The live mechanism is `children`.
+   *
+   * Marked a RETIRED slot spelling (#20940): the authoring walks do not
+   * descend it, the ADR-0087 conversion walker does — see
+   * {@link retiredComponentSlot}.
    */
-  body: retiredKey(
+  body: retiredComponentSlot(retiredKey(
     '`page:card` property `body` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — '
     + 'it was a second spelling of the composition slot every other container calls `children`, '
     + 'and the renderer reads both. Rename the key to `children`; the value (an array of child '
     + 'components) is unchanged. '
     + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
-  ),
-  /** Slot for footer content */
-  footer: z.array(z.unknown()).optional().describe('Card footer components (slot)'),
+  )),
+  /**
+   * Slot for footer content — a declared, rendered slot distinct from
+   * `children` (objectui's `PageCardRenderer` draws it under the body), so
+   * every page walk descends it (#20940).
+   */
+  footer: componentSlot(z.array(z.unknown()).optional().describe('Card footer components (slot)')),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
@@ -2033,7 +2089,7 @@ export const PageAccordionProps = strictObject({
       'Lucide icon name rendered in the panel trigger, left of the label. Read on this component — the renderer draws it via `LazyIcon`; contrast the item `value` beside it, which the renderer overwrites with `panel-<index>`.',
     ),
     collapsed: z.boolean().default(false),
-    children: z.array(z.unknown()).describe('Child components'),
+    children: componentSlot(z.array(z.unknown()).describe('Child components')),
   })),
   allowMultiple: z.boolean().default(false).describe('Allow multiple panels to be expanded simultaneously'),
   /**
@@ -5691,3 +5747,164 @@ export const ComponentPropsMap = {
  */
 export type ComponentProps<T extends keyof typeof ComponentPropsMap> = z.infer<typeof ComponentPropsMap[T]>;
 export type ComponentPropsInput<T extends keyof typeof ComponentPropsMap> = z.input<typeof ComponentPropsMap[T]>;
+
+/**
+ * One position where a page component nests child page components inside its
+ * `properties` bag — an entry of {@link pageComponentSlotPositions} (#20940).
+ */
+export interface PageComponentSlotPosition {
+  /**
+   * The `properties` key the position hangs off: the child-component list
+   * itself (`children`, `footer`), or — on a PANEL position — the list of
+   * panels (`items`).
+   */
+  readonly key: string;
+  /**
+   * Set on a panel position only: each object entry of `properties[key]` holds
+   * its child components under this key (`page:tabs` / `page:accordion` →
+   * `items[].children`). The panel object itself is not a component, and an
+   * entry that is not an object carrying this array is not a panel.
+   */
+  readonly panelKey?: string;
+  /**
+   * `true` for a TOMBSTONED spelling of a slot (`page:card.body`, #5775). The
+   * renderers still read it for stored documents, so the ADR-0087 conversion
+   * walker descends it; it is not an authorable spelling, so the authoring
+   * walks (`walkAddressedPageComponents`, lint's `walkPageComponents`) skip it.
+   */
+  readonly retired: boolean;
+}
+
+/**
+ * THE list of page-component slot positions — derived from the
+ * `ComponentPropsMap` rows that declare a slot, and the one list every page
+ * walk reads (#20940): the ADR-0087 conversion walker
+ * (`conversions/walk.ts`, every entry), the exported
+ * `walkAddressedPageComponents` (`system/i18n-resolver.ts`, non-retired
+ * entries) and `@objectstack/lint`'s `walkPageComponents` (non-retired
+ * entries). A walk that needs to know where sub-trees hang reads this; ⛔ it
+ * never keeps a list of its own, which is how the three came to disagree about
+ * `page:card.footer`.
+ *
+ * A key is a slot exactly when its row wraps the key's schema in
+ * `componentSlot` / `retiredComponentSlot` (module-private, top of this file);
+ * a key of a panel list's element object (`items: z.array(z.object({ children
+ * }))`) so marked yields a panel position. The walks match a position by SHAPE
+ * on every component, not by the type whose row declared it: `properties` is an
+ * open bag and custom types compose the same vocabulary.
+ *
+ * Order is the walks' visit order: direct slots in the order the rows first
+ * declare them, then panel positions — so `children` is still walked before
+ * `items[].children`, the order `walkAddressedPageComponents` has arbitrated
+ * nested-id collisions in since #16772.
+ *
+ * Derived on FIRST CALL and memoized, never at import: reading every row's
+ * shape constructs the `lazySchema` rows, which import must not pay for
+ * (measured once on the dev box: ~18 ms and under 1 MB of heap, once per
+ * process). Two rows declaring one position with contradicting retirement, or
+ * one key declared both as a slot and as a panel list, throw — a walk has no
+ * way to honour both.
+ */
+export function pageComponentSlotPositions(): readonly PageComponentSlotPosition[] {
+  // Memoized on the function object rather than a module-level `let`: the
+  // same hoisting reasoning as `closedObjectConstructor` (strict-object.ts) —
+  // a caller reaching this during module evaluation meets a function, never a
+  // binding in its temporal dead zone.
+  const self = pageComponentSlotPositions as unknown as { derived?: readonly PageComponentSlotPosition[] };
+  return (self.derived ??= deriveComponentSlotPositions());
+}
+
+/** The slice of a zod schema's `_zod.def` the derivation below reads. */
+interface SlotDerivationDef {
+  type?: string;
+  innerType?: unknown;
+  element?: unknown;
+}
+
+const slotDerivationDef = (schema: unknown): SlotDerivationDef | undefined =>
+  (schema as { _zod?: { def?: SlotDerivationDef } } | undefined)?._zod?.def;
+
+/**
+ * The slot declaration on `schema`, looking through the wrapper types
+ * (`optional`, `default`, `nullable`, …) that carry an `innerType`, so a
+ * marker applied under a later `.optional()` is still found.
+ */
+function componentSlotDeclarationOf(schema: unknown): { readonly retired: boolean } | undefined {
+  let current: unknown = schema;
+  while (current !== null && (typeof current === 'object' || typeof current === 'function')) {
+    const declared = COMPONENT_SLOT_DECLARATIONS.get(current);
+    if (declared) return declared;
+    current = slotDerivationDef(current)?.innerType;
+  }
+  return undefined;
+}
+
+/** The element schema of an array schema (through its wrappers), or `undefined`. */
+function componentSlotArrayElementOf(schema: unknown): unknown {
+  let current: unknown = schema;
+  while (current !== null && (typeof current === 'object' || typeof current === 'function')) {
+    const def = slotDerivationDef(current);
+    if (def?.type === 'array') return def.element;
+    current = def?.innerType;
+  }
+  return undefined;
+}
+
+/** An object schema's shape — read through a `lazySchema` proxy too — or `undefined`. */
+function componentSlotShapeOf(schema: unknown): Record<string, unknown> | undefined {
+  if (schema === null || (typeof schema !== 'object' && typeof schema !== 'function')) return undefined;
+  const shape = (schema as { shape?: unknown }).shape;
+  return shape !== null && typeof shape === 'object' ? (shape as Record<string, unknown>) : undefined;
+}
+
+function deriveComponentSlotPositions(): readonly PageComponentSlotPosition[] {
+  const direct = new Map<string, PageComponentSlotPosition>();
+  const panels = new Map<string, PageComponentSlotPosition>();
+  const declaredBy = new Map<string, string>();
+
+  const record = (into: Map<string, PageComponentSlotPosition>, id: string, position: PageComponentSlotPosition, type: string) => {
+    const seen = into.get(id);
+    if (seen === undefined) {
+      into.set(id, Object.freeze(position));
+      declaredBy.set(id, type);
+      return;
+    }
+    if (seen.retired !== position.retired) {
+      throw new Error(
+        `pageComponentSlotPositions: \`${type}\` declares the slot position \`${id}\` `
+        + `${position.retired ? 'retired' : 'authorable'} while \`${declaredBy.get(id)}\` declares it `
+        + `${seen.retired ? 'retired' : 'authorable'} — the walks match positions by shape on every component, `
+        + 'so one position cannot be both (component.zod.ts).',
+      );
+    }
+  };
+
+  for (const [type, row] of Object.entries(ComponentPropsMap)) {
+    const shape = componentSlotShapeOf(row);
+    if (!shape) continue;
+    for (const [key, schema] of Object.entries(shape)) {
+      const declared = componentSlotDeclarationOf(schema);
+      if (declared) {
+        record(direct, key, { key, retired: declared.retired }, type);
+        continue;
+      }
+      const panelShape = componentSlotShapeOf(componentSlotArrayElementOf(schema));
+      if (!panelShape) continue;
+      for (const [panelKey, panelSchema] of Object.entries(panelShape)) {
+        const inPanel = componentSlotDeclarationOf(panelSchema);
+        if (inPanel) record(panels, `${key}[].${panelKey}`, { key, panelKey, retired: inPanel.retired }, type);
+      }
+    }
+  }
+
+  for (const panel of panels.values()) {
+    if (direct.has(panel.key)) {
+      throw new Error(
+        `pageComponentSlotPositions: \`${panel.key}\` is declared both as a slot (by \`${declaredBy.get(panel.key)}\`) `
+        + `and as a panel list (\`${panel.key}[].${panel.panelKey}\`) — a walk cannot read one key both ways (component.zod.ts).`,
+      );
+    }
+  }
+
+  return Object.freeze([...direct.values(), ...panels.values()]);
+}

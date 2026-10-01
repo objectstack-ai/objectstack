@@ -94,7 +94,7 @@ function refusalFor(filter: unknown, alias = 'crm_opportunity'): Refusal | undef
  * Every refusing site in `read-scope-sql.ts`, in source order — except row ⑯,
  * appended when it was added (its row says where it runs).
  *
- * SIXTEEN rows over FOURTEEN throw sites: TWO sites are each reached by two
+ * SEVENTEEN rows over FIFTEEN throw sites: TWO sites are each reached by two
  * triggers, and every trigger is listed on purpose.
  *
  *   - `quoteIdent`, with two `kind` values. That alias-vs-field split was option
@@ -188,10 +188,13 @@ const REFUSALS: Array<{
     sensitive: 'region_code',
   },
   {
-    name: '⑩ nested / relation value',
-    site: 'compileField: nested/relation value',
+    // [#20887] The nested-relation form keeps its refusal here, in words that
+    // name the route that serves it (the engine); the value object that is not
+    // that form keeps the old words, row ⑰.
+    name: '⑩ nested-relation condition',
+    site: 'compileField: nested-relation condition',
     filter: { owner: { manager_id: 'u1' } },
-    message: /"owner" has a nested\/relation value which is not supported in a read scope \(fail-closed\)/,
+    message: /"owner" carries a nested-relation condition \(\{ "owner": \{ … \} \}\), which a read scope compiled to SQL cannot serve \(fail-closed\)/,
     sensitive: 'owner',
   },
   {
@@ -245,6 +248,16 @@ const REFUSALS: Array<{
     filter: { region_code: { $eq: ['emea', 'apac'] } },
     message: /array value for "region_code"\.\$eq — an equality compares one value, so a list is refused rather than bound; use \{ \$in: \[\.\.\.\] \} \(fail-closed\)/,
     sensitive: 'region_code',
+  },
+  {
+    // [#20887] Split out of row ⑩'s site when that site's nested-relation
+    // form got words of its own: a value object with NO key, or with a non-$
+    // key beside a $ key, is no shape this compiler reads.
+    name: '⑰ an empty or mixed value object',
+    site: 'compileField: nested/relation value',
+    filter: { owner: { $eq: 'u1', manager_id: 'u1' } },
+    message: /"owner" has a nested\/relation value which is not supported in a read scope \(fail-closed\)/,
+    sensitive: 'owner',
   },
 ];
 
@@ -336,15 +349,16 @@ describe('[#5367] every read-scope refusal carries the ADR-0112 envelope (READ_S
     // #5352's lesson, stated as a guard: seven of `filter-normalizer.ts`'s nine
     // sites carrying an envelope was indistinguishable from none of them at the
     // HTTP boundary, because the commonest input hit one of the two bare ones.
-    // Sixteen inputs over the module's FOURTEEN throw sites (see the table's
+    // Seventeen inputs over the module's FIFTEEN throw sites (see the table's
     // note on the two sites with two triggers each), and every one of them
     // enveloped. [#6125] added the eleventh site, [#6387] the twelfth,
-    // [#13571] the thirteenth (the empty-`$nin` refusal) and [#19975] the
-    // fourteenth (a list under `$eq`); these two numbers are the ratchet that
-    // makes a future unenveloped `throw` fail HERE instead of at an HTTP
-    // boundary.
-    expect(REFUSALS).toHaveLength(16);
-    expect(new Set(REFUSALS.map((c) => c.site)).size).toBe(14);
+    // [#13571] the thirteenth (the empty-`$nin` refusal), [#19975] the
+    // fourteenth (a list under `$eq`) and [#20887] the fifteenth (the
+    // nested-relation form, split from row ⑰'s site); these two numbers are
+    // the ratchet that makes a future unenveloped `throw` fail HERE instead of
+    // at an HTTP boundary.
+    expect(REFUSALS).toHaveLength(17);
+    expect(new Set(REFUSALS.map((c) => c.site)).size).toBe(15);
     for (const c of REFUSALS) {
       expect(refusalFor(c.filter, c.alias)?.code, `${c.site} is still bare`).toBe('READ_SCOPE_COMPILE_FAILED');
     }

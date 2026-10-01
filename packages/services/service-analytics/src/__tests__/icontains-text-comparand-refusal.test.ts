@@ -147,10 +147,14 @@ describe('[#20068] the `where` door refuses the two rows, both spellings, in the
     }
   });
 
-  it('in every position: under $not, in an $or beside a TRUE arm, and on a nested relation', () => {
+  it('in every position: under $not, in an $or beside a TRUE arm, and on a relation traversal', () => {
     expectWhereRefusal(refusalOf(() => tree({ $not: { name: { $icontains: '' } } })), 'name', '');
     expectWhereRefusal(refusalOf(() => tree({ $or: [{}, { name: { $icontains: '' } }] })), 'name', '');
-    expectWhereRefusal(refusalOf(() => tree({ acct: { name: { $icontains: '' } } })), 'acct.name', '');
+    // [#20887] The traversal as the dotted cube member. Its NESTED spelling
+    // (`{ acct: { name: { $icontains: '' } } }`) is no longer this door's leaf:
+    // it is carried as written to the engine, which reads the related object
+    // with it and refuses the comparand there, in the same published words.
+    expectWhereRefusal(refusalOf(() => tree({ 'acct.name': { $icontains: '' } })), 'acct.name', '');
   });
 
   it('existing refusals keep their sentence: an array and an object are not re-diagnosed', () => {

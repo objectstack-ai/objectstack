@@ -787,7 +787,7 @@ jobs:
       contents: write
     outputs:
       # "the docker job must build" — set only when npm ALREADY has this
-      # version and its runtime image is missing.
+      # version's WHOLE fixed group and its runtime image is missing.
       published: ${{ steps.audit.outputs.image-missing }}
       cli-version: ${{ steps.audit.outputs.version }}
       # The commit `publish` checks out: the newest first-parent commit at which
@@ -938,9 +938,11 @@ jobs:
           echo "publish-pending=false" >> "$GITHUB_OUTPUT"
           echo "npm: @objectstack/cli@${version} is present."
 
-          # From here on, every repair is over an ALREADY-PUBLISHED version, so
-          # none of it can mint anything. This is the #4900 case — published,
-          # then died before the Releases / D4 asset / image existed.
+          # Every repair below is over an ALREADY-PUBLISHED version, so none of
+          # it can mint anything. This is the #4900 case — published, then died
+          # before the Releases / D4 asset / image existed. "Published" means
+          # the WHOLE fixed group, and that is read further down, before any
+          # backfill is requested: `cli` on npm only says a publish STARTED.
 
           # ── GitHub Releases + the ADR-0087 D4 asset ───────────────────────
           # Two anchors, not all 69: @objectstack/cli is the fixed group's
@@ -954,17 +956,12 @@ jobs:
             gh release view "@objectstack/spec@${version}" --json assets \
               --jq '.assets[].name' 2>/dev/null | grep -qx 'spec-changes.json' || releases_ok=false
           fi
-          if [ "$releases_ok" = true ]; then
-            echo "GitHub Releases + ADR-0087 D4 asset are present for ${version}."
-          else
-            echo "::warning::@objectstack/cli@${version} is on npm but its GitHub Releases or the ADR-0087 D4 asset are incomplete (#4900) — backfilling."
-            echo "releases-missing=true" >> "$GITHUB_OUTPUT"
-          fi
 
           # ── runtime image ─────────────────────────────────────────────────
           # A failed probe counts as MISSING on purpose: a redundant rebuild
           # costs a few minutes, a wrongly-skipped one leaves a published npm
           # version with no image and nothing to say so.
+          image_ok=false
           if token=$(curl -fsS "https://ghcr.io/token?scope=repository:${GITHUB_REPOSITORY}:pull&service=ghcr.io" 2>/dev/null) \
             && token=$(node -p 'JSON.parse(process.argv[1]).token' "$token" 2>/dev/null) \
             && curl -fsS -o /dev/null -H "Authorization: Bearer $token" \
@@ -972,11 +969,83 @@ jobs:
                  -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
                  "https://ghcr.io/v2/${GITHUB_REPOSITORY}/manifests/$version" 2>/dev/null
           then
-            echo "ghcr: image for $version is present — release is complete."
+            image_ok=true
+          fi
+
+          if [ "$releases_ok" = true ] && [ "$image_ok" = true ]; then
+            echo "GitHub Releases + ADR-0087 D4 asset are present for ${version}."
+            echo "ghcr: image for $version is present — nothing to backfill."
             exit 0
           fi
-          echo "::warning::No ghcr image for $version (or the registry could not be probed) — requesting the Docker job."
-          echo "image-missing=true" >> "$GITHUB_OUTPUT"
+
+          # ── the WHOLE fixed group, before any backfill (#20627) ──────────
+          # `cli` on npm is not "the publish is complete": `changeset publish`
+          # commits the 69 packages over minutes and cli is not the last. npm's
+          # own `time` on 17.5.0: cli 07:58:57Z, console 08:05:24Z, spec — the
+          # last — 08:09:33Z. A landing audited at 08:05:53Z read cli, took this
+          # backfill, and its image build went red installing a group npm did
+          # not have yet. So no backfill is requested until every package is on
+          # npm, read by the ONE definition of "published" the publish job's
+          # own post-publish check uses — scripts/release-verify-npm.mjs, asked
+          # once (`--probe`) instead of waited on for 15 minutes. Its set is the
+          # VERSION COMMIT's workspace, the tree the publish job checked out and
+          # verified; this push's tree may carry a package no release of
+          # ${version} contains, which would read as absent forever.
+          #
+          # Asked only when something IS missing, so the common path (nothing
+          # to repair) pays no 69 registry reads. The cli reading above stays
+          # the PUBLISH predicate on purpose: which push queues a publish is
+          # ADR-0125 D1's question, and a publish that stopped partway already
+          # has its repair — the `force` dispatch (D4) — not a push.
+          vc_tree="${RUNNER_TEMP}/release-version-commit"
+          git worktree add --quiet --detach "$vc_tree" "$version_commit"
+          if ! group=$(RELEASE_VERSION="$version" node scripts/release-verify-npm.mjs --probe --root "$vc_tree"); then
+            echo "::error::could not read whether the whole fixed group of ${version} is on npm (reason above). Refusing to request a backfill nobody measured."
+            exit 1
+          fi
+          jq -c . <<<"$group"
+          group_state=$(jq -r '.state' <<<"$group")
+          group_checked=$(jq -r '.checked' <<<"$group")
+          group_short=$(jq -r '.missing | length' <<<"$group")
+          group_names=$(jq -r '[.missing[] | "\(.name)@\(.version)"] | (.[:5] | join(", ")) + (if length > 5 then ", and \(length - 5) more" else "" end)' <<<"$group")
+          case "$group_state" in
+            published)
+              echo "npm: all ${group_checked} package(s) of the ${version} fixed group are present."
+              ;;
+            unpublished)
+              echo "::notice::@objectstack/cli@${version} is on npm, but ${group_short} of ${group_checked} package(s) of its fixed group are not yet (${group_names}). A publish of ${version} is still shipping, or one stopped partway. Nothing is backfilled from a partly published group: the publish job creates the Releases, the ADR-0087 D4 asset and the runtime image itself, and a landing after the group is complete backfills whatever it did not. A publish that stopped partway is red in its own run, naming what is missing; dispatch this workflow with 'force' to finish it (ADR-0125 D4)."
+              {
+                echo "## Release ${version} is not fully on npm yet"
+                echo
+                echo "main (\`${SHA}\`) carries **@objectstack/cli@${version}**, which is on npm, but"
+                echo "${group_short} of ${group_checked} packages of its fixed group are not: ${group_names}."
+                echo "No GitHub Release, ADR-0087 D4 asset or runtime image is backfilled from a"
+                echo "partly published group."
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+              ;;
+            unknown)
+              echo "::warning::@objectstack/cli@${version} is on npm, but npm could not be read for ${group_short} of ${group_checked} package(s) of its fixed group (${group_names}), so whether the whole group is published is unknown. Nothing is backfilled off a guess; the next landing reads again."
+              exit 0
+              ;;
+            *)
+              echo "::error::the group probe answered '${group_state}'; this step has no branch for it. Refusing to guess."
+              exit 1
+              ;;
+          esac
+
+          if [ "$releases_ok" = true ]; then
+            echo "GitHub Releases + ADR-0087 D4 asset are present for ${version}."
+          else
+            echo "::warning::${version} is on npm but its GitHub Releases or the ADR-0087 D4 asset are incomplete (#4900) — backfilling."
+            echo "releases-missing=true" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$image_ok" = true ]; then
+            echo "ghcr: image for $version is present."
+          else
+            echo "::warning::No ghcr image for $version (or the registry could not be probed) — requesting the Docker job."
+            echo "image-missing=true" >> "$GITHUB_OUTPUT"
+          fi
 
       # Everything below is skipped on the overwhelmingly common path (nothing to
       # repair), which is why the install is here rather than at the top of the job.

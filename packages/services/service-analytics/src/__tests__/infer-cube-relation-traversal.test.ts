@@ -498,16 +498,27 @@ describe('[#5739] the source-field gates keep every rejection they already made'
     expect(sqls).toEqual([]);
   });
 
-  it('leaves a NESTED relation object reading exactly as it did', async () => {
+  it('leaves a NESTED relation object minting exactly as it did — and hands it to the engine as written', async () => {
     // `{owner: {region: 'NA'}}`'s top-level key is the bare `owner`, so the mint
-    // is unchanged by the ruling — and the LEAF `owner.region` reaches the
-    // strategies through `lookupMember`'s synthetic tier, as it always has.
-    const { sqls, dimensions } = await run(
+    // is unchanged by the ruling.
+    //
+    // [#20887] REPLACED second half. It used to assert that the LEAF
+    // `owner.region` reached the native strategy through `lookupMember`'s
+    // synthetic tier (a JOIN). The nested form is the ENGINE's now — the related
+    // object read as the caller, capped (#20802's ruling) — so the engine path
+    // receives it as written, and a host with no engine path is refused loudly,
+    // with no statement run.
+    const engine = await run({ cube: 'crm_account', measures: ['count'], where: { owner: { region: 'NA' } } });
+    expect(engine.dimensions).toEqual(['owner']);
+    expect(engine.calls).toHaveLength(1);
+    expect(JSON.stringify(engine.calls[0].filter)).toContain('{"owner":{"region":"NA"}}');
+    expect(JSON.stringify(engine.calls[0].filter)).not.toContain('owner.region');
+
+    const nativeOnly = await run(
       { cube: 'crm_account', measures: ['count'], where: { owner: { region: 'NA' } } },
       { native: true },
     );
-
-    expect(dimensions).toEqual(['owner']);
-    expect(sqls[0]).toContain('WHERE "owner"."region" = ');
+    expect(nativeOnly.error?.message).toMatch(/nested-relation condition on "owner"/);
+    expect(nativeOnly.sqls).toEqual([]);
   });
 });

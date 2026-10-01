@@ -15,6 +15,7 @@
 
 import { FLOW_REGION_SLOTS_BY_TYPE } from '../automation/region-slots.js';
 import { deepEqualAuthored } from '../shared/deep-equal.js';
+import { pageComponentSlotPositions } from '../ui/component.zod.js';
 
 type Dict = Record<string, unknown>;
 
@@ -227,21 +228,28 @@ export function mapPages(stack: Dict, mapper: (page: Dict, path: string) => Dict
  */
 const MAX_COMPONENT_DEPTH = 32;
 
-/**
- * The container keys a page component nests its sub-tree under, listed exactly
- * as `walkPageComponents` (`packages/lint/src/page-walk.ts`) lists them:
- * `page:card` → `body` / `footer`, every layout container → `children`.
- * `page:tabs` / `page:accordion` hang theirs off `items[].children`, handled
- * separately below because of the extra index.
+/*
+ * WHERE a page component nests its sub-tree is not this file's to list: it
+ * reads `pageComponentSlotPositions()` (`ui/component.zod.ts`), the one list
+ * derived from the component rows that declare slots and shared with the
+ * exported `walkAddressedPageComponents` and lint's `walkPageComponents`
+ * (#20940 — this file kept a private `['children', 'body', 'footer']` before,
+ * and the three walks disagreed about `page:card.footer`).
  *
- * Recognised by SHAPE — an array — and deliberately NOT keyed by component
+ * This walker reads EVERY entry, the retired ones included: `page:card.body`
+ * is a tombstoned spelling the authoring walks skip, but the renderers still
+ * read it for stored documents, and normalizing stored documents is what this
+ * walker is for — a conversion that runs before `page-card-body-to-children`
+ * in the chain meets the sub-tree still under `body`.
+ *
+ * Recognised by SHAPE — an array (a panel list: an array whose object entries
+ * carry the panel key's array) — and deliberately NOT keyed by component
  * `type`, which is the same rule lint applies: `properties` is an open bag that
  * nothing validates per-type on the load path, and layout containers compose
  * `children` without ever declaring it in a props schema. A `body: 'Confirm the
  * work'` string on a `record:alert` is not an array and so is never mistaken
  * for a slot; a non-dict element inside one is passed through untouched.
  */
-const COMPONENT_CHILD_KEYS = ['children', 'body', 'footer'] as const;
 
 /**
  * Map a list of page components, immutably. Returns the SAME array reference
@@ -290,30 +298,37 @@ function mapComponentTree(
 
   let nextProps = properties;
 
-  // `page:tabs` / `page:accordion` — `items[].children[]`.
-  const items = nextProps.items;
-  if (Array.isArray(items)) {
-    let itemsChanged = false;
-    const nextItems = items.map((item, i) => {
-      if (!isDict(item) || !Array.isArray(item.children)) return item;
+  // Every slot position, retired spellings included — see the note above
+  // `mapComponentList`. Each reads `nextProps`, so two positions sharing one
+  // panel list compose instead of overwriting each other.
+  for (const { key, panelKey } of pageComponentSlotPositions()) {
+    const list = nextProps[key];
+    if (!Array.isArray(list)) continue;
+
+    if (panelKey === undefined) {
+      const next = mapComponentList(list, `${path}.properties.${key}`, mapper, depth + 1);
+      if (next !== list) nextProps = { ...nextProps, [key]: next };
+      continue;
+    }
+
+    // A panel list — `page:tabs` / `page:accordion` `items[].children[]`. The
+    // panel object is not a component; only its child list is descended.
+    let panelsChanged = false;
+    const nextPanels = list.map((panel, i) => {
+      if (!isDict(panel)) return panel;
+      const children = panel[panelKey];
+      if (!Array.isArray(children)) return panel;
       const nextChildren = mapComponentList(
-        item.children,
-        `${path}.properties.items[${i}].children`,
+        children,
+        `${path}.properties.${key}[${i}].${panelKey}`,
         mapper,
         depth + 1,
       );
-      if (nextChildren === item.children) return item;
-      itemsChanged = true;
-      return { ...item, children: nextChildren };
+      if (nextChildren === children) return panel;
+      panelsChanged = true;
+      return { ...panel, [panelKey]: nextChildren };
     });
-    if (itemsChanged) nextProps = { ...nextProps, items: nextItems };
-  }
-
-  for (const key of COMPONENT_CHILD_KEYS) {
-    const list = nextProps[key];
-    if (!Array.isArray(list)) continue;
-    const next = mapComponentList(list, `${path}.properties.${key}`, mapper, depth + 1);
-    if (next !== list) nextProps = { ...nextProps, [key]: next };
+    if (panelsChanged) nextProps = { ...nextProps, [key]: nextPanels };
   }
 
   return nextProps === properties ? mapped : { ...mapped, properties: nextProps };
@@ -365,7 +380,8 @@ function mapComponentTree(
  * where you put it", the position-dependence the flow-node region recursion
  * (#4347) was built to abolish.
  *
- * Two differences from the lint walk remain, both deliberate:
+ * Three differences from the lint walk remain, all deliberate, and each makes
+ * this walker reach MORE, never less:
  *
  *   1. **Source-authored pages** (`kind: 'html' | 'react' | 'jsx'`) are visited
  *      here and skipped there. For lint that skip prevents findings about a
@@ -376,6 +392,11 @@ function mapComponentTree(
  *   2. **The {@link MAX_COMPONENT_DEPTH} ceiling** has no counterpart in lint,
  *      which walks parsed JSON only. This walker also runs on hand-built
  *      `defineStack` objects, where a self-referencing `children` is reachable.
+ *   3. **Retired slot spellings** (`page:card.body`) are descended here and
+ *      not there (#20940). Both walks read the one `pageComponentSlotPositions()`
+ *      list; lint takes its authorable entries, this walker takes every entry,
+ *      because a stored document still carries the retired spelling and the
+ *      renderers still draw it.
  */
 export function mapPageComponents(
   stack: Dict,

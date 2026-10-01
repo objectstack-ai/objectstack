@@ -329,8 +329,9 @@
  * cause (a dropped `$`) into a predicate on a non-existent member `amount.gte`,
  * turning a diagnosable mistake into a harder one.
  *
- * ⛔ What does not move: a wrapper that is ALL non-`$` keys keeps flattening to
- * the dotted member (`{d: {nested: 'x'}}` → `d.nested`); a wrapper that is ALL
+ * ⛔ What does not move: a wrapper that is ALL non-`$` keys is a nested-relation
+ * condition (since #20887 carried as written for the engine to answer, where it
+ * used to flatten to the dotted member `d.nested`); a wrapper that is ALL
  * `$`-operators compiles exactly as before; `$null` / `$exists` flag semantics
  * (#5526 / #5332 / #5347) and {@link comparand} are untouched. The sibling door
  * `read-scope-sql.ts` already fails closed on this exact shape
@@ -652,7 +653,19 @@ export type NormalizedFilterNode =
   | { kind: 'const'; value: boolean }
   | { kind: 'and'; children: NormalizedFilterNode[] }
   | { kind: 'or'; children: NormalizedFilterNode[] }
-  | { kind: 'not'; child: NormalizedFilterNode };
+  | { kind: 'not'; child: NormalizedFilterNode }
+  /**
+   * [#20887] A NESTED-RELATION condition — `{ owner: { region: 'NA' } }`, a
+   * plain object with no `$` key beneath a field — carried AS WRITTEN for the
+   * engine to answer. The engine serves it in `where` by reading the related
+   * object as the caller, capped (#20802's ruling), and refuses it at an
+   * aggregation's own `filter`; this package holds no second copy of either
+   * rule. So the one compiler of this node is the engine hand-off
+   * (`ObjectQLStrategy`): `NativeSQLStrategy.canHandle` declines every query
+   * that would give it one ({@link findNestedRelationCondition}), and the
+   * native compiler and the display-SQL renderer refuse it.
+   */
+  | { kind: 'relation'; member: string; condition: Record<string, unknown> };
 
 /**
  * The SQL boolean constants the compilers of this tree emit for a `const` node.
@@ -897,11 +910,12 @@ function undefinedComparandError(field: string, path: string): Error {
  * The positions are enumerated rather than swept, because "comparand" is a
  * POSITION and not a type:
  *
- *   - the DIRECT comparand — `{d: undefined}`, the implicit `=`. Reached for a
- *     nested relation too, because {@link fieldLeaves} recurses into one with the
- *     DOTTED member name, so `{profile: {verified: undefined}}` is refused as
- *     `"profile.verified"` — the member the leaf would have carried, not the
- *     relation. (`read-scope-sql`'s twin has no such case: it refuses nested
+ *   - the DIRECT comparand — `{d: undefined}`, the implicit `=`. [#20887] Not
+ *     inside a nested relation any more: {@link fieldLeaves} no longer recurses
+ *     into one, it carries it as written for the engine, and an `undefined`
+ *     inside it (`{profile: {verified: undefined}}`) is refused before that by
+ *     the shared comparand-TYPE face, which {@link mapWhereFieldEntries}
+ *     descends into the relation for. (`read-scope-sql`'s twin refuses nested
  *     relations outright.)
  *   - [#19888] ⛔ NOT a member of a bare array — `{d: [1, undefined]}`. That
  *     position used to be swept here, because the bare array was read as an
@@ -1006,8 +1020,8 @@ function assertDefinedComparands(field: string, spec: unknown): void {
  *     `{amount: {gte: 10, $lte: 20}}` — repaired by the prefixed spelling
  *     (`"gte" → "$gte"`);
  *   - a NESTED-RELATION member that strayed into an operator wrapper —
- *     repaired by giving it a wrapper of its own (`{ "d": { "nested": … } }`
- *     compiles to the member `d.nested`), ANDed with the operator constraint
+ *     repaired by giving it a wrapper of its own (`{ "d": { "nested": … } }`,
+ *     a condition on the related record), ANDed with the operator constraint
  *     explicitly, since one JSON object cannot spell the same field key twice.
  *
  * Option B — flattening the sibling as a nested path beside the operators —
@@ -1027,7 +1041,7 @@ function mixedFieldWrapperError(field: string, opKeys: string[], nonOpKeys: stri
     `guess. If an operator missing its "$" was meant — the usual authoring slip — spell it with the ` +
     `prefix: ${rewrites}, as in { "${field}": { "$${example}": ... } }. If a nested-relation member ` +
     `was meant, give it a wrapper of its OWN with no $ siblings — { "${field}": { "${example}": ... } } ` +
-    `compiles to the member "${field}.${example}" — and AND it with the operator constraint ` +
+    `is a condition on the related record's own "${example}" — and AND it with the operator constraint ` +
     `explicitly: { "$and": [{ "${field}": { "$op": ... } }, { "${field}": { "${example}": ... } }] }. ` +
     `This shape used to compile by silently DROPPING every non-$ sibling, and a dropped conjunct ` +
     `does not narrow the query, it WIDENS it: the chart included rows the author excluded, with ` +
@@ -1090,6 +1104,11 @@ function assertUnmixedFieldWrapper(field: string, wrapper: Record<string, unknow
  * `{ $gte, $lte }` depends on.
  */
 function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
+  // [#20887] A nested-relation condition the shared lowering was kept away from
+  // ({@link shieldNestedRelations}): the relation node, carrying it as written.
+  const shielded = isFilterObject(raw) ? NESTED_RELATION_SENTINELS.get(raw) : undefined;
+  if (shielded) return [{ kind: 'relation', member: key, condition: shielded }];
+
   // [#6386] `undefined` in a comparand position, refused before any leaf exists.
   // First statement of the only leaf producer, so no consumer of the tree can be
   // handed one — see {@link assertDefinedComparands} for the position list and
@@ -1293,11 +1312,15 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
       }
       return out;
     }
-    // Nested relation (e.g. {profile: {verified: true}}). Flatten with
-    // dot-prefixed keys so cube field path resolution still works.
-    for (const [nestedKey, nestedVal] of Object.entries(wrapper)) {
-      out.push(...fieldLeaves(`${key}.${nestedKey}`, nestedVal));
-    }
+    // [#20887] A nested-relation condition (`{ profile: { verified: true } }`)
+    // is the ENGINE's form: served in `where` by reading the related object as
+    // the caller, capped (#20802's ruling). It is carried as written for the
+    // engine to answer. ⛔ It is no longer flattened to the dotted member
+    // `profile.verified`: that resolved through a cube join, which applied the
+    // related object's row scope but neither its field permissions nor the cap,
+    // missed a multi-valued relation, and — on a cube with no declared join —
+    // named a table that does not exist.
+    out.push({ kind: 'relation', member: key, condition: wrapper });
     return out;
   }
 
@@ -1604,10 +1627,11 @@ function nullGuardForFieldSpec(spec: unknown): NullGuard {
  * Guard one `field: spec` entry, writing either the untouched entry into `out`
  * or its guarded form into `guarded`.
  *
- * A nested relation spec (`{account: {region: 'NA'}}`) is flattened with the
- * dotted key {@link fieldLeaves} would have produced, so the guard lands on the
- * SAME member as the leaf it protects — guarding `account` when the leaf reads
- * `account.region` would test a column that does not exist.
+ * [#20887] A nested-relation condition (`{account: {region: 'NA'}}`) is written
+ * through untouched: it reaches the engine as written, and the engine guards
+ * what it lowers it to — the `$in` / `$contains` over the related ids — with
+ * the same NULL-safe rule, after reading the related object. A guard here would
+ * test the relation column before the engine knows which ids match.
  */
 function guardFieldEntry(
   key: string,
@@ -1615,14 +1639,8 @@ function guardFieldEntry(
   out: Record<string, unknown>,
   guarded: unknown[],
 ): void {
-  if (
-    isFilterObject(spec) &&
-    Object.keys(spec).length > 0 &&
-    !Object.keys(spec).some((k) => k.startsWith('$'))
-  ) {
-    for (const [nested, value] of Object.entries(spec)) {
-      guardFieldEntry(`${key}.${nested}`, value, out, guarded);
-    }
+  if (isNestedRelationCondition(spec)) {
+    out[key] = spec;
     return;
   }
 
@@ -1752,6 +1770,63 @@ function isNestedRelationSpec(spec: unknown): spec is Record<string, unknown> {
 }
 
 /**
+ * [#20887] A nested-relation CONDITION: a {@link isNestedRelationSpec} that
+ * names at least one field. The empty object `{}` is not one — it keeps
+ * #5240's zero-operator refusal in {@link fieldLeaves}, the answer the engine
+ * gives it too (a condition naming no field of the related object).
+ */
+function isNestedRelationCondition(spec: unknown): spec is Record<string, unknown> {
+  return isNestedRelationSpec(spec) && Object.keys(spec).length > 0;
+}
+
+/**
+ * [#20887] The first nested-relation condition in a `FilterCondition` —
+ * `{ owner: { region: 'NA' } }` beneath a field, at any depth of `$and` /
+ * `$or` / `$not` — with the field and the key path it sits at, or `null`.
+ *
+ * The form is the ENGINE's: it serves it in `where` by reading the related
+ * object AS THE CALLER, with the related object's row scope and field
+ * permissions, and refuses a match past its cap (#20802's ruling, lowered at
+ * the #5930 seam). A compiler in this package that emits SQL itself cannot
+ * enforce that — it would need the caller's field permissions and a read of the
+ * related object, which is a second copy of the rule. So this is the ROUTING
+ * detector: `NativeSQLStrategy.canHandle` declines a query in which any
+ * producer it would compile carries the form, and the query goes to the
+ * engine path — the mechanism and the reasoning of the #7598 cross-field
+ * decline (maintainer ruling 2026-08-12, Q1 = B), for the same reason: the
+ * rule lives in one place.
+ *
+ * Reads the traversal the shared comparand faces read (`$and` / `$or` arrays,
+ * `$not`, field entries); any other `$` key is not a field. Never throws — a
+ * malformed shape is the normalizer's to refuse, in its own words.
+ */
+export function findNestedRelationCondition(
+  node: unknown,
+  path = 'where',
+): { field: string; path: string } | null {
+  if (!isFilterObject(node)) return null;
+  for (const [key, spec] of Object.entries(node)) {
+    const here = `${path}.${key}`;
+    if (key === '$and' || key === '$or') {
+      if (!Array.isArray(spec)) continue;
+      for (const [index, child] of spec.entries()) {
+        const hit = findNestedRelationCondition(child, `${here}[${index}]`);
+        if (hit) return hit;
+      }
+      continue;
+    }
+    if (key === '$not') {
+      const hit = findNestedRelationCondition(spec, here);
+      if (hit) return hit;
+      continue;
+    }
+    if (key.startsWith('$')) continue;
+    if (isNestedRelationCondition(spec)) return { field: key, path: here };
+  }
+  return null;
+}
+
+/**
  * [#20010, copy-on-write since #20035] Visit every FIELD ENTRY of an
  * object-form `where` — `{ key: spec }` with the `path` of the node that holds
  * it — the way the shared comparand faces walk a condition, plus one step the
@@ -1765,9 +1840,10 @@ function isNestedRelationSpec(spec: unknown): spec is Record<string, unknown> {
  * The extra step: a NESTED-RELATION object (`{ acct: { region: … } }`, see
  * {@link isNestedRelationSpec}) is descended, where the faces leave one alone
  * because a driver reads it as a deep-equality comparand or another object's
- * condition. This compiler reads it as neither: {@link fieldLeaves} flattens it
- * to the dotted member `acct.region`, so its entries are comparisons in their
- * own right. The entry is visited as `{ region: … }` at path `where.acct`,
+ * condition. Its entries ARE comparisons in their own right — on the related
+ * object's fields, which the engine judges with these same faces when it reads
+ * that object for the condition (#20887: the condition reaches the engine as
+ * written) — so this door judges them first, in its own envelope. The entry is visited as `{ region: … }` at path `where.acct`,
  * which is how the #19888 gate has named that position since it landed, and
  * which the type face renders `where.acct.region` — the path the dotted
  * spelling `{ 'acct.region': … }` gets.
@@ -1872,9 +1948,9 @@ function forEachWhereFieldEntry(
  *
  * One step past the face: a NESTED-RELATION object (`{ acct: { region: [...] } }`,
  * no `$` key) is descended. The face leaves one alone, because to a driver it
- * is a deep-equality comparand or another object's condition. Here it is
- * neither: {@link fieldLeaves} flattens it to the dotted member `acct.region`,
- * whose implicit-equality slot is the one the list sits in.
+ * is a deep-equality comparand or another object's condition. Here it is the
+ * latter, a condition on the related object's own `region`, whose
+ * implicit-equality slot is the one the list sits in.
  *
  * It runs before every gate {@link buildNode} reaches, so a list is diagnosed
  * as the list and not by one of its members (`{ f: [1, undefined] }`), the
@@ -1949,8 +2025,8 @@ function assertNoListInEqualitySlot(node: unknown, path = 'where'): void {
  * one-entry node with the same path seed, `where`: the face then reports
  * exactly the path and field it reports on the whole condition, so the object
  * spelling gets the `FilterArray` spelling's refusal byte for byte. A nested
- * relation's entries are handed over too, since this compiler flattens them to
- * the dotted member.
+ * relation's entries are handed over too: they are comparisons on the related
+ * object's fields.
  *
  * Refusals this door already gave in its own words now give the face's, the
  * same words the `FilterArray` spelling gets: a `$between` that is not a
@@ -1991,8 +2067,8 @@ function assertWhereComparandShapes(node: unknown, path = 'where'): void {
  * reports exactly the path it reports on the whole condition and the object
  * spelling gets the `FilterArray` spelling's refusal byte for byte. A nested
  * relation's entries are handed over too ({@link mapWhereFieldEntries}): the
- * face leaves such an object alone as filter STRUCTURE, and this compiler
- * flattens it to dotted members whose comparands are literals like any other.
+ * face leaves such an object alone as filter STRUCTURE, and its comparands are
+ * literals on the related object's fields like any other.
  */
 function normalizeWhereComparandTypes<T>(node: T, path = 'where'): T {
   return mapWhereFieldEntries(node, path, (key, spec, at) =>
@@ -2388,88 +2464,67 @@ export function normalizeAnalyticsFilterTree(
 ): NormalizedFilterNode | null {
   const condition = lowerAnalyticsWhere(query);
   if (!condition) return null;
-  return buildNode(lowerFilterCondition(spellNestedRelationsDotted(condition), lowering));
+  return buildNode(lowerFilterCondition(shieldNestedRelations(condition), lowering));
 }
 
 /**
- * [ADR-0053 D-D1, amended — #5930 step 3] Spell every nested-relation field
- * spec (`{ account: { region: 'NA' } }`) as the DOTTED members it names
- * (`{ 'account.region': 'NA' }`), before the shared lowering reads the
- * condition.
+ * [#20887] The nested-relation conditions a `where` carries, held OUT of the
+ * shared lowering: each stands in the lowered condition as a sentinel spec
+ * registered here, and {@link fieldLeaves} turns the sentinel back into the
+ * `relation` node carrying the author's condition, as written.
  *
- * The nested spelling is this door's own sugar: the schema accepts it, the
- * engine refuses it on every driver, and {@link fieldLeaves} is what gives it a
- * meaning here — it compiles each nested key as the dotted member. The shared
- * lowering has no such reading: it takes `account` for a column and, inside a
- * `$not`, guards it — `account IS NOT NULL`, a predicate on whatever the member
- * `account` resolves to, which is not the member the leaf reads (the reason
- * {@link guardFieldEntry} flattens before it guards). Spelled dotted first,
- * the lowering guards `account.region`, the member the leaf binds.
+ * Why the lowering must not read the condition itself: it is not a door, and it
+ * reads every field key as a column of THIS object. Under a `$not` it would
+ * guard the relation column (`{ owners: { $null: false } }`) before anything
+ * knows which related ids match — a guard the engine adds itself, over the
+ * `$in` / `$contains` it lowers the condition to, and one this package's engine
+ * hand-off spells `$ne: null`, which the SQL driver refuses over a multi-valued
+ * relation's JSON column (measured: `{ $not: { owners: { region: 'NA' } } }`
+ * answered `INVALID_FILTER` where the engine answers its rows). And the
+ * condition's own comparands belong to the related object, whose declared
+ * types the engine reads when it lowers them.
  *
- * It rewrites only the spelling: every dotted member is the one
- * {@link fieldLeaves} would have produced, in the same order, and a member that
- * already has an entry keeps both, the second as an `$and` conjunct. An EMPTY
- * spec is left as it is, for {@link fieldLeaves}' zero-operator refusal —
- * flattening `{}` would make the constraint vanish. Copy-on-write: a condition
- * with no nested relation comes back as the same object.
+ * The sentinel is `{ $exists: true }`, a fresh object per condition: TOTAL for
+ * a row with no value, so the lowering neither guards nor rewrites it and hands
+ * it on by reference, and it names no column as required (only an exact
+ * `{ $null: false }` does). Copy-on-write, like the lowering: a condition with
+ * no nested relation comes back as the same object.
  */
-function spellNestedRelationsDotted(node: Record<string, unknown>): Record<string, unknown> {
-  const isNonEmptyRelation = (spec: unknown): spec is Record<string, unknown> =>
-    isNestedRelationSpec(spec) && Object.keys(spec).length > 0;
-  const dottedPairs = (prefix: string, spec: Record<string, unknown>): Array<[string, unknown]> =>
-    Object.entries(spec).flatMap(([key, value]): Array<[string, unknown]> => {
-      const dotted = `${prefix}.${key}`;
-      return isNonEmptyRelation(value) ? dottedPairs(dotted, value) : [[dotted, value]];
-    });
+const NESTED_RELATION_SENTINELS = new WeakMap<object, Record<string, unknown>>();
 
-  let changed = false;
-  const entries: Array<[string, unknown]> = [];
-  const conjuncts: Record<string, unknown>[] = [];
-  const seen = new Set<string>();
-  const put = (key: string, value: unknown): void => {
-    if (seen.has(key)) conjuncts.push({ [key]: value });
-    else {
-      seen.add(key);
-      entries.push([key, value]);
-    }
+function shieldNestedRelations(node: Record<string, unknown>): Record<string, unknown> {
+  let out: Record<string, unknown> | undefined;
+  const replace = (key: string, value: unknown): void => {
+    out ??= { ...node };
+    out[key] = value;
   };
   for (const [key, spec] of Object.entries(node)) {
-    if ((key === '$and' || key === '$or') && Array.isArray(spec)) {
+    if (key === '$and' || key === '$or') {
+      if (!Array.isArray(spec)) continue;
       let copy: unknown[] | undefined;
       spec.forEach((child, index) => {
         if (!isFilterObject(child)) return;
-        const spelled = spellNestedRelationsDotted(child);
-        if (spelled !== child) {
+        const shielded = shieldNestedRelations(child);
+        if (shielded !== child) {
           copy ??= [...spec];
-          copy[index] = spelled;
+          copy[index] = shielded;
         }
       });
-      if (copy) changed = true;
-      put(key, copy ?? spec);
+      if (copy) replace(key, copy);
       continue;
     }
-    if (key === '$not' && isFilterObject(spec)) {
-      const spelled = spellNestedRelationsDotted(spec);
-      if (spelled !== spec) changed = true;
-      put(key, spelled);
+    if (key === '$not') {
+      if (!isFilterObject(spec)) continue;
+      const shielded = shieldNestedRelations(spec);
+      if (shielded !== spec) replace(key, shielded);
       continue;
     }
-    if (!key.startsWith('$') && isNonEmptyRelation(spec)) {
-      changed = true;
-      for (const [dotted, value] of dottedPairs(key, spec)) put(dotted, value);
-      continue;
-    }
-    put(key, spec);
+    if (key.startsWith('$') || !isNestedRelationCondition(spec)) continue;
+    const sentinel = { $exists: true };
+    NESTED_RELATION_SENTINELS.set(sentinel, spec);
+    replace(key, sentinel);
   }
-  if (!changed) return node;
-  const out: Record<string, unknown> = Object.fromEntries(entries);
-  if (conjuncts.length > 0) {
-    // A malformed `$and` is {@link buildNode}'s to refuse, in its own words;
-    // folding a conjunct into it would replace the shape it refuses.
-    if ('$and' in out && !Array.isArray(out.$and)) return node;
-    out.$and = [...((out.$and as unknown[] | undefined) ?? []), ...conjuncts];
-  }
-  return out;
+  return out ?? node;
 }
 
 /**
@@ -2532,6 +2587,10 @@ export function collectFilterLeaves(
 ): NormalizedAnalyticsFilter[] {
   if (!node) return [];
   if (node.kind === 'leaf') return [{ member: node.member, operator: node.operator, values: node.values }];
+  // [#20887] A nested-relation condition constrains the relation FIELD of the
+  // queried object — the member it names here. The related object's fields in
+  // it are the engine's to judge, as the caller, when it reads that object.
+  if (node.kind === 'relation') return [{ member: node.member, operator: 'relation', values: [] }];
   // A boolean constant names no member — it constrains rows, not columns — so
   // it contributes nothing to the cross-object envelope check.
   if (node.kind === 'const') return [];

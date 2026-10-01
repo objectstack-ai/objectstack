@@ -5,6 +5,7 @@ import type { Cube } from '@objectstack/spec/data';
 import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext } from './types.js';
 import {
   declaredDatetimeLowering,
+  findNestedRelationCondition,
   lowerAnalyticsWhere,
   normalizeAnalyticsFilterTree,
   toSqlBindValue,
@@ -252,6 +253,25 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // filter the engine door answers 400 for — two envelopes for one mistake,
     // which is the drift this card exists to remove.
     if (this.carriesUninterpretableTemporalComparand(query, ctx)) return false;
+    // ── [#20887] DECLINE the nested-relation form ─────────────────────────
+    //
+    // `{ relation: { field: value } }` is served by the ENGINE (#20802's
+    // ruling, lowered at the #5930 seam): the related object is read AS THE
+    // CALLER — its row scope AND its field permissions — and a match past the
+    // engine's cap is refused, never truncated. This strategy compiles SQL
+    // itself and can do neither without a second copy of that rule (it holds no
+    // field permissions and reads no related object), which is what it used to
+    // do instead: flatten the form to a dotted member and LEFT JOIN the related
+    // table, filtering by a field the caller may not read and bounded by
+    // nothing. So it declines, and the query routes to the ObjectQL strategy,
+    // which hands the form to the engine as written. The mechanism of the
+    // #7598 decline above, for the same reason — one rule, in one place. Every
+    // filter a caller or a dataset writes is read (see
+    // {@link nestedRelationConditionIn}); a READ SCOPE is not, deliberately —
+    // it is a policy this strategy compiles to SQL, and that compile keeps its
+    // fail-closed refusal of the form (`read-scope-sql.ts`). The DOTTED member
+    // (`account.region`) is a cube member, not this form, and stays here.
+    if (this.nestedRelationConditionIn(query, ctx)) return false;
     const caps = ctx.queryCapabilities(query.cube);
     return caps.nativeSql && typeof ctx.executeRawSql === 'function';
   }
@@ -349,6 +369,50 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       if (scope === undefined || scope === null) continue;
       const inScope = findCrossFieldComparand(scope);
       if (inScope) return { source: `the read scope of "${objectName}"`, ...inScope };
+    }
+    return null;
+  }
+
+  /**
+   * [#20887] The first nested-relation condition in a filter this strategy
+   * would compile for `query` — or `null`. See the decline at {@link canHandle}.
+   *
+   * Every filter the caller or the dataset writes, as {@link generateSql}
+   * compiles them: the caller's `where` (lowered, so the `FilterArray` spelling
+   * is read as the object it lowers to), the compiled dataset's own `filter`,
+   * and the `filter` of each REQUESTED measure (one it does not ask for is never
+   * compiled).
+   *
+   * ⛔ NOT the read scope. A read scope is a policy, compiled to SQL here by
+   * `compileScopedFilterToSql` — a synchronous string builder that holds the
+   * caller's context for placeholders and no data engine, so it cannot read the
+   * related object as the caller. It keeps its fail-closed refusal of the form
+   * (`READ_SCOPE_COMPILE_FAILED` / 500, the policy withheld), in words that name
+   * the route; routing the query away would trade that declared refusal for
+   * whatever the next strategy answers, on a host that has none a generic fault.
+   */
+  private nestedRelationConditionIn(
+    query: AnalyticsQuery,
+    ctx: StrategyContext,
+  ): { source: string; field: string; path: string } | null {
+    let where: unknown = null;
+    try {
+      where = lowerAnalyticsWhere(query);
+    } catch {
+      // A `where` this compiler cannot even lower is refused downstream, with
+      // its own message. Nothing to route.
+    }
+    const inWhere = findNestedRelationCondition(where);
+    if (inWhere) return { source: 'the query\'s `where`', ...inWhere };
+
+    const datasetScope = query.cube
+      ? (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube)
+      : undefined;
+    const inScope = findNestedRelationCondition(datasetScope?.filter, 'filter');
+    if (inScope) return { source: 'the dataset\'s own `filter`', ...inScope };
+    for (const measure of query.measures ?? []) {
+      const inMeasure = findNestedRelationCondition(datasetScope?.measureFilters?.[measure], 'filter');
+      if (inMeasure) return { source: `the \`filter\` of measure "${measure}"`, ...inMeasure };
     }
     return null;
   }
@@ -1088,6 +1152,25 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
 
     if (node.kind === 'const') {
       return node.value ? SQL_CONST_TRUE : SQL_CONST_FALSE;
+    }
+
+    if (node.kind === 'relation') {
+      // [#20887] Unreachable by construction: {@link canHandle} declines every
+      // query that carries a nested-relation condition, reading the same
+      // producers this compiler reads. Kept because the failure mode if the two
+      // ever disagree is the one #20887 closed — a JOIN that filters by a field
+      // the caller may not read, with no cap — and a routing regression must
+      // be a loud fault, never that. Deliberately BARE, an undeclared 500: the
+      // caller's filter is legal and is served on the engine path, so arriving
+      // here is our own drift, not the caller's 400 (the tier and the reasoning
+      // of {@link assertNoCrossFieldComparison}).
+      throw new Error(
+        `[native-sql-strategy] the nested-relation condition on "${node.member}" reached the SQL ` +
+        `compiler. It is served by the engine, which reads the related object as the caller — ` +
+        `\`canHandle\` declines such a query so it routes to the ObjectQL/engine path; reaching ` +
+        `this throw means the decline and this compiler stopped agreeing, which is our bug and ` +
+        `must never degrade to a joined statement.`,
+      );
     }
 
     if (node.kind === 'leaf') {
