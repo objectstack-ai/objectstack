@@ -67,7 +67,6 @@
     "ui/ExpressionBindableTextKey",
     "ui/FormButtonConfig",
     "ui/FormField",
-    "ui/FormFieldPublicPicker",
     "ui/FormSection",
     "ui/FormSelectOption",
     "ui/FormView",
