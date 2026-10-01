@@ -2,6 +2,7 @@
 
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
 import type { Cube } from '@objectstack/spec/data';
+import { NUMERIC_VALUE_TYPES, type AggregationFunction } from '@objectstack/spec/data';
 import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext } from './types.js';
 import {
   declaredDatetimeLowering,
@@ -21,6 +22,9 @@ import { datasetInvalidError, invalidMemberError } from '../dataset-refusal.js';
 import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
 import { nextUtcCalendarDay, resolveAnalyticsDateRangeString, isUnboundedAbove } from '@objectstack/core';
+// [#20889] What each aggregate function ANSWERS, and the `'number'` presenter —
+// the rule `driver-sql`'s own `aggregate()` applies, defined once in core.
+import { AGGREGATE_ANSWER_KIND, presentAsNumber } from '@objectstack/core';
 import { explicitDateRangeWindow } from '../date-range-array-arm.js';
 
 /**
@@ -466,6 +470,43 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     const objectName = this.extractObjectName(cube);
 
     const rows = await ctx.executeRawSql!(objectName, sql, params);
+
+    // [#20889] A measure column `fields[]` declares `number` answers a number,
+    // on every dialect. The SQL client hands an aggregate back as the wire type
+    // of its expression: node-postgres parses `bigint` (`count`, `sum` over an
+    // integer column) and `numeric` (`sum` / `avg` over the exact-decimal
+    // column, `avg` over an integer one, `min` / `max` over a decimal one) to
+    // STRINGS, mysql2 does the same for `DECIMAL`, and better-sqlite3 answers
+    // numbers. `driver-sql`'s own `aggregate()` presents those answers
+    // (#20335); this statement reaches the client through the host's raw-SQL
+    // bridge instead, so it is presented here, with the same table and the same
+    // presenter (`@objectstack/core`) — never a second coercion.
+    //
+    // Keyed on each measure's DECLARED aggregate function, never on whether a
+    // value looks numeric: `count` / `count_distinct` / `sum` / `avg` answer a
+    // number whatever the column held; `min` / `max` answer a value OF the
+    // column, so they are presented only when that column is declared numeric
+    // (`driver-sql`'s `readPresentationKind` rule), asked through
+    // `declaredFieldType` — a host that cannot answer, or a relationship-path
+    // column, leaves the value as the client gave it. Expression metric types
+    // (`number` / `string` / `boolean`) are the author's SQL and stay as they
+    // are. Rows are presented in place, as the driver presents its own.
+    const declaredType = (ctx as DatasetScopedStrategyContext).declaredFieldType;
+    const numberMeasures = (query.measures ?? []).filter((member) => {
+      const measure = this.lookupMember(cube, member, 'measure');
+      if (!measure?.type || !Object.prototype.hasOwnProperty.call(AGGREGATE_ANSWER_KIND, measure.type)) return false;
+      if (AGGREGATE_ANSWER_KIND[measure.type as AggregationFunction] === 'number') return true;
+      const sourceType = typeof declaredType === 'function' ? declaredType.call(ctx, objectName, measure.sql) : undefined;
+      return sourceType !== undefined && NUMERIC_VALUE_TYPES.has(sourceType);
+    });
+    if (numberMeasures.length > 0 && Array.isArray(rows)) {
+      for (const row of rows) {
+        if (!row || typeof row !== 'object') continue;
+        for (const member of numberMeasures) {
+          if (row[member] !== undefined) row[member] = presentAsNumber(row[member]);
+        }
+      }
+    }
 
     // Build field metadata
     const fields = this.buildFieldMeta(query, cube);

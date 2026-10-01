@@ -34,7 +34,6 @@
       "TS7006: Parameter 'w' implicitly has an 'any' type.": 2
     },
     "src/compose-stacks.test.ts": {
-      "TS2322: Type '…' is not assignable to type 'undefined'.": 2,
       "TS2322: Type '…' is not assignable to type '…'.": 2,
       "TS2353: Object literal may only specify known properties, and 'object' does not exist in type '…'.": 2,
       "TS2353: Object literal may only specify known properties, and 'route' does not exist in type '…'.": 2

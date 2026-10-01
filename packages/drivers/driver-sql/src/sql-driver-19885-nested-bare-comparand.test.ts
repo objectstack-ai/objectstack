@@ -85,9 +85,23 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { Knex } from 'knex';
-import type { FilterCondition } from '@objectstack/spec/data';
+import { lowerFilterCondition, type FilterCondition } from '@objectstack/spec/data';
 import { SqlDriver, withheldFilterDiagnosticOf } from './sql-driver.js';
 import { DIALECT_CELLS, declareDialectCell, dialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5 and 9, as amended] What a seam hands this
+ * driver: the filter through the shared lowering, whose rule 3 makes each
+ * `$not` leaf total in the direction its operator answers for a row with no
+ * value (#5146, #5298). The driver no longer carries its own copy of that
+ * rewrite, so the answers below are the ones every seamed read gets,
+ * unchanged. The tables here declare no `datetime` column, so the whole-day rule has
+ * nothing to rewrite. A binary comparand never passes a seam (the platform
+ * doors refuse it), so the binary block reads rule 3 applied as a seam would;
+ * a direct caller's three-valued `NOT` is pinned in
+ * `sql-driver-20822-comparison-as-written.test.ts` §B.
+ */
+const seamed = (where: FilterCondition): FilterCondition => lowerFilterCondition(where, { isDatetimeColumn: () => false }) as FilterCondition;
 
 /** Issue-prefixed: the live cells share one server with every other suite here. */
 const OBJECT = 'os19885_nested_comparand';
@@ -158,7 +172,9 @@ const PRE_FIX_SQLITE_SQL: ReadonlyArray<readonly [FilterCondition, string, unkno
   [{ $or: [{ tags: 'a' }] }, `select \`id\` from \`${OBJECT}\` where ((\`tags\` = ?))`, ['a']],
   [{ $and: [{ tags: 'a' }] }, `select \`id\` from \`${OBJECT}\` where ((\`tags\` = ?))`, ['a']],
   [
-    { $not: { tags: 'a' } },
+    // [#20822] The `$not` operand a seam hands the driver (the lowering's rule 3
+    // guard); the driver compiles it as handed, to the SQL it compiled before.
+    seamed({ $not: { tags: 'a' } }),
     `select \`id\` from \`${OBJECT}\` where not (((\`tags\` is not null) and (\`tags\` = ?)))`,
     ['a'],
   ],
@@ -207,7 +223,7 @@ function declareNestedBareComparandSuite(cell: DialectCell): void {
     const find = (where: FilterCondition) => driver.find(OBJECT, { fields: ['id'], where });
 
     const ids = async (where: FilterCondition): Promise<string[]> =>
-      ((await find(where)) as Array<{ id: unknown }>).map((r) => String(r.id)).sort();
+      ((await find(seamed(where))) as Array<{ id: unknown }>).map((r) => String(r.id)).sort();
 
     const refusalOf = async (where: FilterCondition): Promise<WireBearingError> => {
       let rows: unknown[];
@@ -317,7 +333,7 @@ describe('[#19885] SqlDriver — a binary comparand nested under a combinator (s
   });
 
   const ids = async (where: FilterCondition): Promise<string[]> =>
-    ((await driver.find(BINARY_OBJECT, { fields: ['id'], where })) as Array<{ id: unknown }>)
+    ((await driver.find(BINARY_OBJECT, { fields: ['id'], where: seamed(where) })) as Array<{ id: unknown }>)
       .map((r) => String(r.id))
       .sort();
 

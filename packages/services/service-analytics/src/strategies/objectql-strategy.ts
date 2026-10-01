@@ -1917,8 +1917,22 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * it was strict about, which is why the guard sits at the door and not here.
    */
   private convertFilter(operator: string, values?: unknown[]): unknown {
-    if (operator === 'set') return { $ne: null };
-    if (operator === 'notSet') return null;
+    // [#20918] The null predicates reach the engine in the engine's OWN
+    // spelling, `{ $null: false }` / `{ $null: true }`: the shared lowering
+    // (`lowerFilterCondition`, run at the engine's `where` seam) emits exactly
+    // these for the NULL-safe guards of a `$not` operand (#5146) and of the
+    // negative-polarity operators (#5298), and `driver-sql` applies them on
+    // every column. These two leaves carry the same guards out of this
+    // package's `where` door, so their spelling decides whether such a filter
+    // is served at all. They used to be `{ $ne: null }` and the bare `null`,
+    // which `driver-sql` refuses over a multi-valued lookup's JSON column (a
+    // scalar comparison and the bare equality spelling, #7398): so
+    // `{ $not: { owners: { $contains: 'u1' } } }` answered `400 INVALID_FILTER`
+    // here while the engine and the native strategy answered its rows. In the
+    // lowering's own spelling the engine also recognises the guard as one it
+    // already carries, instead of adding a second beside it.
+    if (operator === 'set') return { $null: false };
+    if (operator === 'notSet') return { $null: true };
     // [#20445] `$empty` goes to the engine as the canonical operator the
     // author wrote — never as a local expansion into `$null` / `$eq: ''`
     // fragments, which could not spell the multi-value row at all (an empty

@@ -32,6 +32,18 @@ import { createClient, type Client, type InStatement } from '@libsql/client';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import { TursoDriver } from './turso-driver.js';
 import { asLibsqlClient, makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
+import { lowerFilterCondition } from '@objectstack/spec/data';
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5 and 9, as amended] What a seam hands this
+ * driver: the filter through the shared lowering, whose rule 3 makes each
+ * `$not` leaf total in the direction its operator answers for a row with no
+ * value (#5146, #5298). Neither face of `TursoDriver` carries its own copy of
+ * that rewrite any more, so the answers below are the ones every seamed read
+ * gets, unchanged. No column here is a declared `datetime`, so the whole-day rule has nothing
+ * to rewrite.
+ */
+const seamed = <T,>(where: T): T => lowerFilterCondition(where, { isDatetimeColumn: () => false });
 
 const NUL = String.fromCharCode(0x00);
 const OBJECT = { name: 'stored_nul_text_match', fields: { label: { type: 'string' }, v: { type: 'text' } } };
@@ -149,7 +161,7 @@ describe('[#20024] TursoDriver LOCAL and REMOTE — a comparand without U+0000 r
   let libsqlCalls: Array<{ sql: string; args: unknown[] }>;
 
   const labels = async (driver: TursoDriver, where: DriverQuery['where']): Promise<string[]> =>
-    ((await driver.find(OBJECT.name, { where }, { bypassTenantAudit: true })) as Array<{ label: string }>)
+    ((await driver.find(OBJECT.name, { where: seamed(where) }, { bypassTenantAudit: true })) as Array<{ label: string }>)
       .map((r) => r.label)
       .sort();
 

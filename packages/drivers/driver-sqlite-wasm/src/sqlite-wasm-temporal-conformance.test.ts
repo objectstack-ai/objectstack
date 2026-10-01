@@ -21,6 +21,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
+  lowerFilterCondition,
   TEMPORAL_CASES,
   TEMPORAL_NOW,
   TEMPORAL_ROWS,
@@ -32,6 +33,23 @@ import { SqliteWasmDriver } from './index.js';
 
 const resolveTokens = <T,>(filter: T): T =>
   resolveFilterTokens(filter, { now: new Date(TEMPORAL_NOW) });
+
+/** The declared field maps this file syncs — what a typed seam reads. */
+const CONFORMANCE_FIELDS = { at: { type: 'datetime' }, on: { type: 'date' }, why: { type: 'string' } };
+const TIME_CONFORMANCE_FIELDS = { at: { type: 'time' }, why: { type: 'string' } };
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5, 7 and 9, as amended] What a TYPED seam hands
+ * this driver: the case's filter through the shared lowering, reading the
+ * declared field map (`datetime` columns only). The `SqlDriver` this driver
+ * inherits keeps no whole-day copy any more, so the whole-day cells are
+ * answered by the lowered filter, as on every seam-fed path; the expected rows
+ * are the shared table's, unchanged. Tokens resolve first, then lower (item 3).
+ */
+const lowered = <T,>(fields: Record<string, { type: string }>, filter: T): T =>
+  lowerFilterCondition(filter, {
+    isDatetimeColumn: (column) => Object.prototype.hasOwnProperty.call(fields, column) && fields[column]!.type === 'datetime',
+  });
 
 /**
  * The wasm twin of driver-sql's `LegacyStorageDriver` testkit (deliberately
@@ -64,7 +82,7 @@ describe('driver-sqlite-wasm — temporal conformance', () => {
     await driver.initObjects([
       {
         name: 'conformance',
-        fields: { at: { type: 'datetime' }, on: { type: 'date' }, why: { type: 'string' } },
+        fields: CONFORMANCE_FIELDS,
       },
     ]);
     for (const r of TEMPORAL_ROWS) {
@@ -88,14 +106,14 @@ describe('driver-sqlite-wasm — temporal conformance', () => {
 
   for (const c of TEMPORAL_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('conformance', { where: c.filter });
+      const rows = await driver.find('conformance', { where: lowered(CONFORMANCE_FIELDS, c.filter) });
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });
 
     if (c.tokenFilter) {
       it(`${c.name} — via relative tokens`, async () => {
-        const rows = await driver.find('conformance', { where: resolveTokens(c.tokenFilter) });
+        const rows = await driver.find('conformance', { where: lowered(CONFORMANCE_FIELDS, resolveTokens(c.tokenFilter)) });
         const got = (rows as any[]).map((r) => r.id).sort();
         expect(got, c.note).toEqual([...c.expected].sort());
       });
@@ -109,7 +127,7 @@ describe('driver-sqlite-wasm — Field.time conformance', () => {
   beforeAll(async () => {
     driver = new SqliteWasmDriver({ filename: ':memory:' });
     await driver.initObjects([
-      { name: 'time_conformance', fields: { at: { type: 'time' }, why: { type: 'string' } } },
+      { name: 'time_conformance', fields: TIME_CONFORMANCE_FIELDS },
     ]);
     for (const r of TEMPORAL_TIME_ROWS) {
       await driver.create(
@@ -132,7 +150,7 @@ describe('driver-sqlite-wasm — Field.time conformance', () => {
 
   for (const c of TEMPORAL_TIME_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('time_conformance', { where: c.filter });
+      const rows = await driver.find('time_conformance', { where: lowered(TIME_CONFORMANCE_FIELDS, c.filter) });
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });
@@ -147,7 +165,7 @@ describe('driver-sqlite-wasm — temporal conformance on un-backfilled legacy st
     await driver.initObjects([
       {
         name: 'conformance',
-        fields: { at: { type: 'datetime' }, on: { type: 'date' }, why: { type: 'string' } },
+        fields: CONFORMANCE_FIELDS,
       },
     ]);
     // The two pre-#3912 storage forms, split by the writer-form tag (the
@@ -174,7 +192,7 @@ describe('driver-sqlite-wasm — temporal conformance on un-backfilled legacy st
   // already swept above — a divergence here is a repair-path bug by construction.
   for (const c of TEMPORAL_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('conformance', { where: c.filter });
+      const rows = await driver.find('conformance', { where: lowered(CONFORMANCE_FIELDS, c.filter) });
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });
@@ -187,7 +205,7 @@ describe('driver-sqlite-wasm — Field.time conformance on un-backfilled legacy 
   beforeAll(async () => {
     driver = new LegacyStorageWasmDriver({ filename: ':memory:' });
     await driver.initObjects([
-      { name: 'time_conformance', fields: { at: { type: 'time' }, why: { type: 'string' } } },
+      { name: 'time_conformance', fields: TIME_CONFORMANCE_FIELDS },
     ]);
     // The pre-#3994 forms (#4191): `native` → INTEGER epoch ms of the wall
     // clock on the epoch day (a_midnight = the measured hazard, INTEGER 0),
@@ -209,7 +227,7 @@ describe('driver-sqlite-wasm — Field.time conformance on un-backfilled legacy 
 
   for (const c of TEMPORAL_TIME_CASES) {
     it(c.name, async () => {
-      const rows = await driver.find('time_conformance', { where: c.filter });
+      const rows = await driver.find('time_conformance', { where: lowered(TIME_CONFORMANCE_FIELDS, c.filter) });
       const got = (rows as any[]).map((r) => r.id).sort();
       expect(got, c.note).toEqual([...c.expected].sort());
     });

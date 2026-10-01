@@ -8,9 +8,11 @@
  * below). A `DatasetMeasure` pairs an `aggregate` with a `field`; this
  * table is the contract both consumer legs execute — the compile-time refusal
  * in the dataset compiler (#16099) and the authoring-time lint rule — so the
- * two cannot drift into two accounts of one pair. The `count_distinct` row has
- * a third reader, the engine's `aggregate` door, which refuses a query-time
- * pair the row refuses (the JSON-stored rows below).
+ * two cannot drift into two accounts of one pair. The table has a third
+ * reader, the engine's `aggregate` door, which refuses a query-time pair the
+ * table refuses — the `count_distinct` row since #20808 (the JSON-stored rows
+ * below), the other rows since #20914; objectql's `aggregate-field-type-door.ts`
+ * names the rows it judges.
  *
  * ## Why this exists
  *
@@ -136,7 +138,8 @@
  *
  * It refuses nothing itself. The refusals are the consumer legs — the dataset
  * compile leg and the authoring lint leg on every row, and the engine's
- * `aggregate` door on the `count_distinct` row (#20808); a
+ * `aggregate` door at query time (#20808, #20914 — the door names the rows it
+ * judges); a
  * consumer that cannot resolve a field's type (a relationship PATH it has no
  * metadata for) must NOT call the predicate with a guess — "cannot answer, do
  * not block" is the consumer's tier, not this table's.
@@ -223,7 +226,7 @@ export const AGGREGATE_FIELD_TYPE_COMPATIBILITY: Readonly<Record<AggregationFunc
  * May `aggregate` be applied to a field of `fieldType`? The single predicate
  * both consumer legs call, so one pair cannot be accepted at authoring and
  * refused at compile time — and the one the engine's `aggregate` door asks for
- * a `count_distinct` pair (#20808).
+ * a query-time pair (#20808, #20914).
  *
  * Fail-closed on vocabulary AND on shape: a value outside `AggregationFunction`
  * or outside `FieldType` answers `false`, and so does anything that is not a
