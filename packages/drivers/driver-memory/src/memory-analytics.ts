@@ -59,6 +59,8 @@ import {
   unsupportedFilterError,
   unsupportedTimeGranularityError,
   type FilterFaceCapabilities,
+  // [#21066] The JSON-stored refusal's log line, written by this face's logger.
+  withheldFilterLogLine,
 } from './filter-refusal.js';
 
 /**
@@ -1143,7 +1145,7 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     // into the cube-style `{member, operator, values}` list this pipeline
     // consumes, and anything this face cannot lower is refused there rather than
     // dropped (#5345).
-    const normalizedFilters = this.normalizeFilters(query);
+    const normalizedFilters = this.normalizeFilters(query, cube);
     if (normalizedFilters.length > 0) {
       const matchStage = this.mongoConjunction(cube, normalizedFilters);
       if (Object.keys(matchStage).length > 0) {
@@ -1587,7 +1589,7 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     // construction for the same reason. There is deliberately no
     // `values.length > 0` guard any more: an empty list IS a predicate, and
     // skipping the clause described the whole table (see the `in` row).
-    const whereClauses = this.sqlConjunction(cube, this.normalizeFilters(query));
+    const whereClauses = this.sqlConjunction(cube, this.normalizeFilters(query, cube));
 
     let sql = `SELECT ${selectClauses.join(', ')} FROM ${tableName}`;
     if (whereClauses.length > 0) {
@@ -1812,7 +1814,7 @@ export class MemoryAnalyticsService implements IAnalyticsService {
    * lowering is refused `INVALID_FILTER` / 400. It used to skip all three steps
    * and the flatten, and so answered every row.
    */
-  private normalizeFilters(query: unknown): NormalizedCubeEntry[] {
+  private normalizeFilters(query: unknown, cube: Cube): NormalizedCubeEntry[] {
     if (!query || typeof query !== 'object') return [];
 
     const out: NormalizedCubeEntry[] = [];
@@ -1822,7 +1824,18 @@ export class MemoryAnalyticsService implements IAnalyticsService {
       assertListComparandShapes(where);
       const admitted = normalizeFilterComparandTypes(where);
       const lowered = lowerFilterCondition(admitted);
-      assertFilterConditionShape(lowered, 'where', ANALYTICS_FILTER_CAPABILITIES);
+      // [#21066] A `where` key here is a cube MEMBER; the declaration it is
+      // judged by is the field it resolves to on the cube's table — the same
+      // (table, field path) pair `$contains` asks the driver about
+      // (`filterContainsTest`), so this face refuses the equality and ordering
+      // family on exactly the fields where `$contains` asks membership, as
+      // `find()` does. The withheld half goes to this face's own log.
+      const table = this.extractTableName(cube.sql);
+      const declared = this.driver.filterFieldDeclarations(table);
+      assertFilterConditionShape(lowered, 'where', ANALYTICS_FILTER_CAPABILITIES, {
+        isJsonStoredField: (member) => declared.isJsonStoredField(this.resolveFieldPath(cube, member)),
+        reportWithheld: (diagnostic) => this.logger.warn(withheldFilterLogLine(diagnostic)),
+      });
       this.flattenFilterCondition(lowered as Record<string, unknown>, out, 'where');
     }
 
