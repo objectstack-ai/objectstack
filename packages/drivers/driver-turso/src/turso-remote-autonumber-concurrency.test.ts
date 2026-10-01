@@ -47,14 +47,27 @@
  *   changes is printed with the failure, and reported in the PR.
  * - The writers are different processes, and neither is this one.
  *
- * # Reverse verification — direction predicted BEFORE it was run
+ * # Reverse verification — predicted BEFORE it was run, then measured
  *
- * With the warm path split into two statements (read `last_value`, then write
- * `last_value + 1`), two processes releasing on the barrier read the same
- * value and write the same successor, so the distinct count drops below N.
- * The window between the two statements is a native call wide, so the drop is
- * probable rather than certain on a single run; the measured outcome, and the
- * number of runs it took, are recorded in the PR.
+ * Predicted: with the warm path split into two statements (read `last_value`,
+ * then write `last_value + 1`), two processes releasing on the barrier read
+ * the same value and write the same successor, so the distinct count drops
+ * below N.
+ *
+ * Measured — a different red than predicted, kept rather than tidied: the
+ * duplicate reservations never reached the distinct-count pin, because the
+ * fixture's unique index (`uniq_crm_case_organization_id_case_number`, the
+ * tenant-scoped unique every autonumber this repo declares `unique` carries)
+ * refused the second row carrying the same number, and the #5495 re-seed —
+ * forward-only, to the observed MAX — could not outrun a writer that kept
+ * reading the same stale value, so after its retry budget the write FAILED.
+ * The red is on the "no write failed" pin, with `SQLITE_CONSTRAINT: UNIQUE
+ * constraint failed: index 'uniq_crm_case_organization_id_case_number'` in
+ * the writer's error list: 2 of 3 runs with no gap between the two
+ * statements, 3 of 3 with a 1 ms gap (the order of one HTTP round trip). So
+ * what this pin distinguishes is a counter that can hand out one number
+ * twice, and on a declared-unique column that surfaces as refused writes
+ * before it surfaces as duplicate rows.
  */
 
 import { describe, it, expect, afterAll } from 'vitest';
