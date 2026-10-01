@@ -82,7 +82,10 @@ async function makeEngine(rows: readonly Record<string, unknown>[]) {
 }
 
 const perAggregation = (filter: unknown) => ({
-  aggregations: [{ function: 'count', alias: 'n' }, { function: 'count', alias: 'm', filter: filter as never }],
+  aggregations: [
+    { function: 'count' as const, alias: 'n' },
+    { function: 'count' as const, alias: 'm', filter: filter as never },
+  ],
 });
 
 /** Each field's member and a non-member, so every comparand is one a real author could write. */
@@ -144,7 +147,7 @@ function expectWhereRefusal(
   expect(err.message).toContain('{ "FIELD": { "$contains": "a" } }');
   expect(err.message).toContain('{ "$or": [{ "FIELD": { "$contains": "a" } }, { "FIELD": { "$contains": "b" } }] }');
   expect(err.message).not.toContain(`"${field}"`);
-  const logged = warn.mock.calls.map((call) => String(call[0])).join('\n');
+  const logged = warn.mock.calls.map((call: unknown[]) => String(call[0])).join('\n');
   expect(logged).toContain('INVALID_FILTER — refusal detail withheld from the response');
   expect(logged).toContain(bare
     ? `The bare equality spelling { "${field}": value } WAS NOT APPLIED`
@@ -189,7 +192,7 @@ describe('[#21007] engine.aggregate — a per-aggregation filter refuses a scala
         { function: 'count', alias: 'm', filter: { owners: { $nin: ['u1'] } } as never },
       ],
     }));
-    expect(warn.mock.calls.map((call) => String(call[0])).join('\n')).toContain('At aggregations[2].filter.owners.$nin:');
+    expect(warn.mock.calls.map((call: unknown[]) => String(call[0])).join('\n')).toContain('At aggregations[2].filter.owners.$nin:');
   });
 });
 
@@ -211,7 +214,7 @@ describe('[#21007] what still answers — the membership spelling, the null pred
     it(`${name}: m = ${m}`, async () => {
       const { engine, warn } = await makeEngine(ROWS);
       expect(await engine.aggregate(OBJECT, perAggregation(filter))).toEqual([{ n: 6, m }]);
-      expect(warn.mock.calls.map((call) => String(call[0])).join('\n')).not.toContain('INVALID_FILTER');
+      expect(warn.mock.calls.map((call: unknown[]) => String(call[0])).join('\n')).not.toContain('INVALID_FILTER');
     });
   }
 });
