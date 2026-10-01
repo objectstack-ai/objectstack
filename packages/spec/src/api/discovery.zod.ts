@@ -248,6 +248,83 @@ export function readChannelRoute(svc: unknown): string | undefined {
   return typeof route === 'string' && route.length > 0 ? route : undefined;
 }
 
+// ============================================================================
+// Which optional `/auth` route FAMILIES are mounted (#21046)
+// ============================================================================
+
+/**
+ * Which optional better-auth route families this deployment mounts under
+ * `routes.auth`.
+ *
+ * ## Why discovery answers this
+ *
+ * A family a deployment does not enable is not mounted at all: its routes
+ * answer a plain `404`, byte-identical to a path that never existed. The
+ * #15920 ruling (maintainer, 2026-09-07) keeps that `404` — it discloses
+ * correctly — and names discovery as the place an SDK caller asks "does this
+ * deployment mount the admin family" before building those URLs. Discovery
+ * could not answer it: it carried `routes.auth` alone, identical with the admin
+ * plugin off and on, while `GET {routes.auth}/config` carried the answer as
+ * `features.admin`.
+ *
+ * ## One source, no second derivation
+ *
+ * Each flag is the auth service's own public-config answer — the
+ * `getPublicConfig()` object `GET {routes.auth}/config` serves — read through
+ * {@link readAuthFamilies}. Neither producer re-derives "is the admin plugin
+ * on" from configuration or environment, so on one boot discovery and
+ * `/auth/config` give one answer.
+ *
+ * ## Closed
+ *
+ * A closed object, like `capabilities`: a family joins by a contract change
+ * here, and both producers then answer it through {@link readAuthFamilies}.
+ * `admin` is the family the ruling names. Before adding another, check that
+ * the `/config` route serves `getPublicConfig()`'s flag for it UNREFINED — it
+ * does not for `sso`, which the route narrows to "usable" (≥1 provider
+ * configured) after `getPublicConfig()` returns, so the raw flag would answer a
+ * different question than `/auth/config` does.
+ */
+export const AuthFamiliesSchema = lazySchema(() => z.object({
+  admin: z.boolean().describe(
+    'Whether the better-auth admin family ({routes.auth}/admin/*: list-users, set-role, update-user, ban-user, …) '
+    + 'is mounted. Same value as features.admin on GET {routes.auth}/config, read from the same source; '
+    + 'false means those routes answer a plain 404 on this deployment.'
+  ),
+}).describe('Which optional better-auth route families are mounted under routes.auth'));
+
+export type AuthFamilies = z.input<typeof AuthFamiliesSchema>;
+
+/**
+ * The producer half of {@link AuthFamiliesSchema}: the families the registered
+ * `auth` service says it mounts, or `undefined` when it cannot say.
+ *
+ * Reads `getPublicConfig().features` — the very object `GET {routes.auth}/config`
+ * returns — so the discovery answer and the `/auth/config` answer are one
+ * computation. Both discovery producers call this; neither reads the auth
+ * plugin's configuration or an environment variable itself.
+ *
+ * `undefined` (the producer then emits no `authFamilies`) when there is no
+ * service, when it publishes no `getPublicConfig()`, when that call throws, or
+ * when its `features.admin` is not a boolean. A throw is not swallowed into a
+ * `false`: `GET {routes.auth}/config` answers `500 AUTH_CONFIG_ERROR` in that
+ * state, which is where the failure is loud, while discovery — the document a
+ * client connects through — stays answerable and makes no claim it cannot read.
+ */
+export function readAuthFamilies(authSvc: unknown): AuthFamilies | undefined {
+  if (!authSvc || typeof authSvc !== 'object') return undefined;
+  const getter = (authSvc as { getPublicConfig?: unknown }).getPublicConfig;
+  if (typeof getter !== 'function') return undefined;
+  let config: unknown;
+  try {
+    config = (getter as () => unknown).call(authSvc);
+  } catch {
+    return undefined;
+  }
+  const admin = (config as { features?: { admin?: unknown } } | null | undefined)?.features?.admin;
+  return typeof admin === 'boolean' ? { admin } : undefined;
+}
+
 /**
  * API Routes Schema
  * The "Map" for the frontend to know where to send requests.
@@ -949,6 +1026,25 @@ export const DiscoverySchema = lazySchema(() => z.object({
     environmentId: z.string().optional()
       .describe('The resolved environment id — present only on a scoped mount'),
   }).optional().describe('Environment-scoping posture, added by the REST discovery endpoint'),
+
+  /**
+   * Which optional `/auth` route families are mounted (#21046) — see
+   * {@link AuthFamiliesSchema}. Consult it before building a URL into a
+   * family: a family reported `false` answers a plain `404` on this
+   * deployment, indistinguishable on the wire from a mistyped path.
+   *
+   * Optional, on the `scoping` / `routes.mcp` reasoning: a producer that cannot
+   * read the answer emits nothing rather than inventing one. That is the case
+   * when no `auth` service is registered (then `routes.auth` is absent as well
+   * — there is no auth surface to have families) and when the registered one
+   * publishes no public config ({@link readAuthFamilies}). Both discovery
+   * producers emit it whenever the auth service answers, and the REST endpoint
+   * passes the `getDiscovery()` value through unchanged.
+   */
+  authFamilies: AuthFamiliesSchema.optional().describe(
+    'Which optional better-auth route families are mounted under routes.auth — the same source as '
+    + 'GET {routes.auth}/config features; absent when no auth service answers'
+  ),
 
   /**
    * Custom metadata key-value pairs for extensibility
