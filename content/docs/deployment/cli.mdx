@@ -635,12 +635,12 @@ The `<pkg>` directory is found from the packages the artifact registers, at
 **any depth** under `src/`: `src/<pkg>/docs/` and `src/packages/<pkg>/docs/`
 are one case, not two. The search descends through every directory whose name
 names none of the declared packages (never into `node_modules`) and **stops**
-at the first directory that names one. That directory is the package's root
-and everything under it is the package's own source, so only its own `docs/`
-is read — a deeper `src/<pkg>/components/docs/` is neither read nor reported.
-A stack that declares no `packages[]` has nothing to search for: its docs are
-read from `src/docs/` alone, and a `src/<dir>/docs/` one level down is
-reported, not read.
+at the first directory that names any of them. That directory is a package
+root and everything under it is that package's own source, so only its own
+`docs/` is read — a deeper `src/<pkg>/components/docs/` is neither read nor
+reported. A stack that declares no `packages[]` has nothing to search for: its
+docs are read from `src/docs/` alone, and a `src/<dir>/docs/` one level down
+is reported, not read.
 `<pkg>` is matched against two spellings of the package: its
 `id`, and the last dot-separated segment of that `id`. The display `name` is
 ⛔ not a directory key — it is free to be re-worded, and a docs binding a
