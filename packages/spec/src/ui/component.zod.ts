@@ -4778,29 +4778,37 @@ const MASTER_DETAIL_DETAIL_HISTORY =
  * drag-reorder). `title` and `addLabel` are plain strings because the
  * renderer draws them as a React child and a button label without resolving a
  * locale map.
+ *
+ * A factory called inside {@link ObjectMasterDetailFormPropsSchema}'s own lazy
+ * body, the way a form view's `subforms[]` entry is built inline in its
+ * parent's: a standalone `lazySchema` here would be a function-typed proxy that
+ * nothing exports, which the schema-graph walks (`alias-integrity.test.ts`)
+ * never descend into, so its alias table would go unjudged.
  */
-const MasterDetailDetailSchema = lazySchema(() => strictObject({
-  surface: 'this `object-master-detail-form` detail entry',
-  history: MASTER_DETAIL_DETAIL_HISTORY,
-  aliases: {
-    object: 'childObject', childObjectName: 'childObject', child: 'childObject',
-    foreignKey: 'relationshipField', relationField: 'relationshipField', parentField: 'relationshipField',
-    fields: 'columns', label: 'title', sumField: 'amountField', rollupField: 'totalField',
-  },
-}, {
-  childObject: z.string().describe('Child object whose records are entered inline'),
-  relationshipField: z.string().optional().describe('FK on the child pointing back to the parent (auto-detected from the child\'s master_detail/lookup field when omitted)'),
-  columns: z.array(InlineGridColumnSchema).optional().describe("Editable grid columns (derived from the child object when omitted). Each entry is the strict, name-keyed inline grid column a relationship field's `inlineColumns` takes ({ name, label?, type?, … } — objectui GridColumn); identity-only entries ({ name }) hydrate everything else from the child object's fields. Unknown keys and the retired `field` spelling are refused at parse."),
-  formFields: z.array(z.string()).optional().describe("Child field names for the per-row expand form (derived from the child object's editable fields when omitted)"),
-  inlineMode: z.enum(['grid', 'form']).optional().describe("Inline-edit form factor: 'grid' = editable cells; 'form' = read-only list + per-row full form. Resolved from the relationship field's `inlineEdit` when omitted"),
-  amountField: z.string().optional().describe('Numeric child column summed for the running total'),
-  sortField: z.string().optional().describe('Child field holding the line sort position, stamped on drag-reorder (derived from a `position` / `sort_order` / … field when omitted)'),
-  totalField: z.string().optional().describe('Parent field to receive the rolled-up sum'),
-  title: z.string().optional().describe('Section title'),
-  minRows: z.number().optional().describe('Minimum number of rows'),
-  maxRows: z.number().optional().describe('Maximum number of rows'),
-  addLabel: z.string().optional().describe('Add-row button label'),
-}));
+function masterDetailDetailEntry() {
+  return strictObject({
+    surface: 'this `object-master-detail-form` detail entry',
+    history: MASTER_DETAIL_DETAIL_HISTORY,
+    aliases: {
+      object: 'childObject', childObjectName: 'childObject', child: 'childObject',
+      foreignKey: 'relationshipField', relationField: 'relationshipField', parentField: 'relationshipField',
+      fields: 'columns', label: 'title', sumField: 'amountField', rollupField: 'totalField',
+    },
+  }, {
+    childObject: z.string().describe('Child object whose records are entered inline'),
+    relationshipField: z.string().optional().describe('FK on the child pointing back to the parent (auto-detected from the child\'s master_detail/lookup field when omitted)'),
+    columns: z.array(InlineGridColumnSchema).optional().describe("Editable grid columns (derived from the child object when omitted). Each entry is the strict, name-keyed inline grid column a relationship field's `inlineColumns` takes ({ name, label?, type?, … } — objectui GridColumn); identity-only entries ({ name }) hydrate everything else from the child object's fields. Unknown keys and the retired `field` spelling are refused at parse."),
+    formFields: z.array(z.string()).optional().describe("Child field names for the per-row expand form (derived from the child object's editable fields when omitted)"),
+    inlineMode: z.enum(['grid', 'form']).optional().describe("Inline-edit form factor: 'grid' = editable cells; 'form' = read-only list + per-row full form. Resolved from the relationship field's `inlineEdit` when omitted"),
+    amountField: z.string().optional().describe('Numeric child column summed for the running total'),
+    sortField: z.string().optional().describe('Child field holding the line sort position, stamped on drag-reorder (derived from a `position` / `sort_order` / … field when omitted)'),
+    totalField: z.string().optional().describe('Parent field to receive the rolled-up sum'),
+    title: z.string().optional().describe('Section title'),
+    minRows: z.number().optional().describe('Minimum number of rows'),
+    maxRows: z.number().optional().describe('Maximum number of rows'),
+    addLabel: z.string().optional().describe('Add-row button label'),
+  });
+}
 
 /**
  * `object-master-detail-form` (objectui `plugin-form/src/MasterDetailForm.tsx`
@@ -4808,7 +4816,7 @@ const MasterDetailDetailSchema = lazySchema(() => strictObject({
  * child collections come from `details` — the FK and editable-grid columns
  * are auto-derived from the child object's metadata (`deriveMasterDetail.ts`),
  * so `details[].columns` is an override, not a requirement. Each entry is the
- * strict {@link MasterDetailDetailSchema} since #20928.
+ * strict {@link masterDetailDetailEntry} since #20928.
  *
  * `formType` speaks the MEASURED vocabulary — `simple` / `tabbed` — since
  * #11873 (the spec half of objectui#5939, which tightened the objectui
@@ -4841,7 +4849,7 @@ export const ObjectMasterDetailFormPropsSchema = lazySchema(() => strictObject({
   }).optional().describe("Parent form presentation — the two variants the renderer honours for the parent half"),
   sections: z.array(z.unknown()).optional().describe('Parent form sections'),
   fields: z.array(z.unknown()).optional().describe('Parent fields shown'),
-  details: z.array(MasterDetailDetailSchema).optional()
+  details: z.array(masterDetailDetailEntry()).optional()
     .describe('Detail collections — each a strict entry ({ childObject, title?, addLabel?, columns?, relationshipField?, … }) whose `columns` are the inline grid columns a relationship field\'s `inlineColumns` takes; the FK and columns auto-derive from child metadata when omitted'),
   title: I18nLabelSchema.optional().describe('Form title'),
   submitText: I18nLabelSchema.optional().describe('Submit button label'),
