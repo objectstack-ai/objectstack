@@ -28,7 +28,7 @@
  * overlay regime keeps its overlay.
  */
 import { describe, expect, it } from 'vitest';
-import { isCodeArtifactBody } from '@objectstack/metadata-core';
+import { assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const PACKAGE_ID = 'com.example.pkg';
@@ -155,6 +155,8 @@ function harness(rows: StoredRow[]) {
             return opts?.limit === undefined ? matched : matched.slice(0, opts.limit);
         },
         async findOne(table: string, opts?: { where?: Record<string, unknown> }) {
+            // `check:engine-double-contract` — refuses what the real engine refuses.
+            assertEngineFindOnePredicate(table, opts);
             if (table !== 'sys_metadata') return null;
             return matching(opts?.where ?? {})[0] ?? null;
         },
