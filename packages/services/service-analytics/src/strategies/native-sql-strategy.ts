@@ -20,6 +20,7 @@ import { declaredValueShapeResolver, whereEmptyLeafSql } from '../empty-operator
 import { datasetInvalidError, invalidMemberError } from '../dataset-refusal.js';
 import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
+import { whereContainsMembershipSql } from '../contains-membership-sql.js';
 import { nextUtcCalendarDay, resolveAnalyticsDateRangeString, isUnboundedAbove } from '@objectstack/core';
 import { explicitDateRangeWindow } from '../date-range-array-arm.js';
 
@@ -1301,6 +1302,24 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       const polarity = textOperatorPolarity(operator);
       if (polarity && nonTextColumnResolver(ctx, target.object)?.(target.field)) {
         return polarity === 'negative' ? SQL_CONST_TRUE : SQL_CONST_FALSE;
+      }
+      // [#20987] On a column the host DECLARES multi-valued or JSON-stored,
+      // `contains` / `notContains` are MEMBERSHIP, not a substring of the
+      // stored JSON text: the read scope's question, from the same
+      // `@objectstack/core` construct `driver-sql` emits. Refused
+      // `INVALID_FILTER` / 400 on the `'unknown'` dialect, before anything
+      // binds. `null` keeps the text match below. See
+      // `contains-membership-sql.ts`.
+      if (operator === 'contains' || operator === 'notContains') {
+        const membership = whereContainsMembershipSql({
+          ctx,
+          target,
+          column: rawCol,
+          value: values[0],
+          negate: operator === 'notContains',
+          bind: (v) => { params.push(v); return `$${params.length}`; },
+        });
+        if (membership !== null) return membership;
       }
       // [#15684] The case-EXACT family picks its construct per DIALECT, because
       // a plain `LIKE` folds ASCII case on SQLite and follows the collation on
