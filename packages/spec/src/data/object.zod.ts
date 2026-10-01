@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { FieldSchema } from './field.zod';
+import { FieldSchema, type FieldType } from './field.zod';
 import { ValidationRuleSchema } from './validation.zod';
 import { ActionSchema, type ActionParam } from '../ui/action.zod';
 import { ObjectListViewSchema } from '../ui/view.zod';
@@ -1580,6 +1580,79 @@ function refuseForeignTreeReference(ownName: unknown, fields: unknown, ctx: z.Re
   }
 }
 
+/**
+ * The field types an object's `imageField` may name: the two whose stored
+ * value IS a picture. One list, read by the refusal below and spelled into its
+ * prescription, so the accepted set and the text that names it cannot drift.
+ */
+const IMAGE_FIELD_TYPES: readonly FieldType[] = ['image', 'avatar'];
+
+/**
+ * [#21182 — ruling A on objectstack-ai/hotcrm#1199] `imageField`, when
+ * present, must name a field THIS object declares whose type is `image` or
+ * `avatar`.
+ *
+ * Judged here for the reason {@link refuseForeignTreeReference} is: only the
+ * object holds the field map the pointer resolves against, and every authoring
+ * door parses through this schema — `defineStack({ objects })` binds it
+ * element-wise (`ObjectSchema.create()` runs the same parse), `os validate`
+ * parses the stack through `ObjectStackDefinitionSchema`, and the metadata
+ * save door resolves the `object` type to this schema
+ * (`getMetadataTypeSchema('object')`). So a bad pointer is refused loudly at
+ * authoring and at publish alike, and no reader of the key ever needs a
+ * tolerance for one (Prime Directive #12).
+ *
+ * Two refusals, each one located issue at `['imageField']`:
+ *
+ *  - the name is not a key of `fields` — a pointer into nothing;
+ *  - the name resolves, and the field is any type but `image` / `avatar` — a
+ *    `text` URL column or a `file` attachment is not a declared picture, and a
+ *    renderer that guessed it was would be the consumer-side tolerance this
+ *    rule exists to make unnecessary.
+ *
+ * Judged against the AUTHORED field map only. No registry-injected system
+ * column is an `image` or `avatar` field, so widening the existence half to
+ * the injected set (the #5378 move the semantic-role lints make) could only
+ * turn "not declared" into "wrong type" for the same refused value. Not judged
+ * on `ObjectExtensionSchema`: an extension cannot declare `imageField` (its
+ * strict shape refuses the key), so the pointer is only ever the owning
+ * object's own. Pinned in `object-image-field.test.ts`.
+ */
+function refuseNonPictureImageField(
+  ownName: unknown,
+  imageField: unknown,
+  fields: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  if (typeof imageField !== 'string') return;
+  const objectName = typeof ownName === 'string' ? ownName : '<unnamed>';
+  const accepted = IMAGE_FIELD_TYPES.map((t) => `\`${t}\``).join(' or ');
+  const prescription =
+    `\`imageField\` must name a field of this object whose type is ${accepted} — point it at one `
+    + '(declare one with `Field.image()` or `Field.avatar()` if the object has none), or remove `imageField`.';
+  const declared = fields !== null && typeof fields === 'object'
+    && Object.prototype.hasOwnProperty.call(fields, imageField);
+  if (!declared) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['imageField'],
+      message:
+        `\`imageField\` names \`${imageField}\`, but object \`${objectName}\` declares no field `
+        + `\`${imageField}\`. ${prescription}`,
+    });
+    return;
+  }
+  const type = ((fields as Record<string, unknown>)[imageField] as { type?: unknown } | null)?.type;
+  if (typeof type === 'string' && (IMAGE_FIELD_TYPES as readonly string[]).includes(type)) return;
+  ctx.addIssue({
+    code: 'custom',
+    path: ['imageField'],
+    message:
+      `\`imageField\` names \`${imageField}\`, a \`${String(type)}\` field on object \`${objectName}\`, `
+      + `which is not a picture. ${prescription}`,
+  });
+}
+
 // ⚠️ ORDER IS LOAD-BEARING (#5593). This map used to live ~700 lines BELOW
 // `ObjectSchemaBase`, and the error map that reads it was built lazily
 // (`objectUnknownKeyErrorImpl ??= …`) purely to step around the temporal dead
@@ -2165,6 +2238,28 @@ const ObjectSchemaBase = strictObject(
   displayNameField: z.string().optional().describe('[DEPRECATED → nameField] Field to use as the record display name (e.g., "name", "title"). Accepted as an alias for nameField.'),
   titleFormat: TemplateExpressionInputSchema.optional().describe('[DEPRECATED → nameField (ADR-0079)] Render-only title template; the server cannot return or query it, and an explicit nameField now takes precedence. Migrate a single-field title to nameField, a composite to a formula field designated as nameField. Placeholders may be written {{field}} or {field} — the title renderers treat the two as equivalent, normalizing {{field}} to {field} before substituting; neither spelling is judged at parse time.'),
   /**
+   * [#21182 — ruling A on objectstack-ai/hotcrm#1199] The record's PICTURE:
+   * names the field whose value the record page header — the record chrome
+   * every record detail page shares — draws beside the title. A sibling of
+   * `nameField`: `nameField` says which field is the record's name, this says
+   * which is its picture. One object-level declaration that every detail page
+   * reads, deliberately NOT a `page:header` prop (that header's own identity
+   * is drawn by the record chrome, which is why its `icon` was retired).
+   *
+   * - Must name a field of this object whose type is `image` or `avatar`;
+   *   anything else — an undeclared name, a `text` URL column, a `file` — is
+   *   refused at parse by `refuseNonPictureImageField`, so at every authoring
+   *   and publish door.
+   * - A record whose field is empty shows no picture. The reader draws nothing
+   *   in its place — no initials, no placeholder avatar.
+   *
+   * The reader is objectui's record chrome, and it does not read the key yet:
+   * the liveness ledger holds this row `planned` until it does, so an authored
+   * value is accepted, stored and served, and takes effect when the renderer
+   * lands with no re-authoring.
+   */
+  imageField: z.string().optional().describe('The record\'s picture: names the field the record page header (record chrome) is to draw beside the title — one object-level declaration every record detail page reads, not a per-page header prop. Must name a field of this object whose type is `image` or `avatar`; any other name is refused. A record whose field is empty shows no picture (no initials or placeholder). Pending renderer: the record chrome does not draw it yet.'),
+  /**
    * [ADR-0085] Semantic role: the object's most important fields, in priority
    * order (the first entry wins wherever only one field fits, e.g. child-record
    * previews). Cross-surface by definition — drives default list/grid columns,
@@ -2432,6 +2527,10 @@ const ObjectSchemaBase = strictObject(
   // keeps this a `ZodObject` (zod 4 attaches checks in place), so `.shape` and
   // `create()`'s unknown-key walk are untouched; see the helper's docblock.
   refuseForeignTreeReference(object.name, object.fields, ctx);
+  // [#21182] `imageField` names a declared `image` / `avatar` field of THIS
+  // object — the same door, for the same reason: only the object holds the
+  // field map the pointer resolves against.
+  refuseNonPictureImageField(object.name, object.imageField, object.fields, ctx);
 });
 
 /**
