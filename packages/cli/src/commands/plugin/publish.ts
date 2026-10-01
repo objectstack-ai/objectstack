@@ -12,7 +12,8 @@
  *      per-file `integrity` digests (ADR-0025 §3.2) — refuse on any
  *      mismatch / missing / extra file; an absent map skips the check
  *      (the field is optional).
- *   3. POST /cloud/packages          — ensure the sys_package row exists.
+ *   3. POST /cloud/packages          — ensure the sys_package row exists
+ *      (`visibility` only when `--visibility` is passed; see the flag).
  *   4. POST /cloud/packages/:id/versions with `artifact_kind: 'plugin'`,
  *      the base64 artifact, the declared manifest, the signature, and the
  *      whole-artifact sha256 checksum. The cloud verifies the signature,
@@ -61,7 +62,19 @@ export default class PluginPublish extends Command {
     sig: Flags.string({ description: 'Path to the detached signature (default: <artifact>.sig)' }),
     'manifest-id': Flags.string({ description: 'Override package id (default: from the manifest)' }),
     'display-name': Flags.string({ description: 'Marketplace display name (default: manifest.name)' }),
-    visibility: Flags.string({ description: 'Who can see/install', options: ['private', 'org', 'marketplace'], default: 'private' }),
+    // ⛔ No `default:` here — the same rule as `os package publish`'s flag. The
+    // package upsert is also the RE-publish path, and the control plane patches
+    // an existing package's visibility whenever the body carries one; it cannot
+    // tell a CLI default from a choice. A default here rewrote every package on
+    // every publish: a `marketplace` plugin re-published without repeating the
+    // flag silently became `private`. Omitted flag ⇒ omitted key.
+    visibility: Flags.string({
+      description:
+        "Who can see / install this plugin's package. " +
+        "Omit it to leave an existing package's visibility unchanged; a new package then gets " +
+        "the control plane's default ('org' on ObjectStack Cloud).",
+      options: ['private', 'org', 'marketplace'],
+    }),
     org: Flags.string({ description: 'owner_org_id (service mode)', env: 'OS_ORG_ID' }),
     note: Flags.string({ char: 'n', description: 'Release notes (markdown ok)' }),
     'pre-release': Flags.boolean({ description: 'Mark as a pre-release', default: false }),
@@ -166,13 +179,23 @@ export default class PluginPublish extends Command {
 
     // 5. Register the package row. ──────────────────────────────────────
     printStep(`Registering package '${id}'...`);
-    const pkgBody: Record<string, any> = { manifest_id: id, display_name: displayName, visibility: flags.visibility };
+    const pkgBody: Record<string, any> = { manifest_id: id, display_name: displayName };
+    // Absent flag ⇒ absent key, so the control plane keeps an existing
+    // package's visibility and applies its own default to a new one.
+    // `CreatePackageRequestSchema.visibility` is optional; see the flag.
+    if (flags.visibility) pkgBody.visibility = flags.visibility;
     if (flags.org) pkgBody.owner_org_id = flags.org;
     if (typeof manifest.description === 'string') pkgBody.description = manifest.description;
     const pkgRes = await this.postJson(`${baseUrl}/api/v1/cloud/packages`, pkgBody, token, flags.timeout);
     if (!pkgRes.ok) { printError(`Register package failed (${pkgRes.status}): ${pkgRes.error}`); this.exit(1); return; }
     const pkg = pkgRes.body?.data ?? pkgRes.body;
     printSuccess(`${pkg?.created ? 'Created' : 'Updated'} sys_package ${pkg?.id} (${id})`);
+    // The visibility the package now has: the control plane's answer, else
+    // the value this publish explicitly asked for (the upsert stores it).
+    // With the flag omitted only the control plane knows — there is no
+    // local default to fall back on, and the summary says so.
+    const visibility: string | undefined =
+      typeof pkg?.visibility === 'string' ? pkg.visibility : flags.visibility;
 
     // 6. Publish the plugin version. ────────────────────────────────────
     printStep(`Publishing version ${version}...`);
@@ -206,8 +229,9 @@ export default class PluginPublish extends Command {
     printSuccess('Plugin version published');
     printKV('  Version', String(ver?.version ?? version));
     printKV('  Listing status', String(ver?.listing_status ?? (flags.submit ? 'pending_review' : 'draft')));
+    printKV('  Visibility', visibility ?? 'not reported by the control plane');
     printKV('  Artifact sha256', checksum);
-    if (!flags.submit && !flags['auto-approve'] && flags.visibility === 'marketplace') {
+    if (!flags.submit && !flags['auto-approve'] && visibility === 'marketplace') {
       printStep('Re-run with --submit to send this version for marketplace review.');
     }
   }
