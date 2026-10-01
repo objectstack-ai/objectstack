@@ -19,7 +19,9 @@ filters. A member of an authored cube is judged by the field it resolves to,
 not by its name in the cube. A field the caller may not read answers
 `403 PERMISSION_DENIED`, in the words the engine uses for the same field. The
 native-SQL strategy, the one a SQL driver serves first, answered such queries;
-the ObjectQL strategy and the data API already refused them.
+the ObjectQL strategy already refused them on `POST /api/v1/analytics/query`
+and `POST /api/v1/analytics/dataset/query`, as the data API did, but printed
+the statement on `POST /api/v1/analytics/sql`.
 
 **What is not affected.** A query that reads only fields the caller may read
 answers as before. A system context, and a caller with no permission sets, are

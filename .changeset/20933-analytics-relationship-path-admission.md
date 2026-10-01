@@ -40,7 +40,9 @@ deployment with no security service applies no object-level check, as on the
 data API.
 
 **Refusals that change form.** On the ObjectQL strategy a related object the
-caller may not read was already refused; it now answers the analytics door's
+caller may not read was already refused on `POST /api/v1/analytics/query` and
+`POST /api/v1/analytics/dataset/query`, though `POST /api/v1/analytics/sql`
+printed the statement; on those two doors it now answers the analytics door's
 refusal rather than the engine's, the same one a declared join gets. A filter,
 a time window or a two-hop path through such an object moves from
 `400 INVALID_FIELD` to that `403`. A relationship path whose relationship name
