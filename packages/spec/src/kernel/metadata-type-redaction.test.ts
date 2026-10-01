@@ -19,8 +19,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
   getMetadataTypeRedactor,
+  isStoredMetadataBodyObject,
   listMetadataTypeRedactorTypes,
+  redactStoredMetadataBody,
+  redactStoredMetadataRow,
+  redactStoredMetadataRows,
   registerMetadataTypeRedactor,
+  STORED_METADATA_BODY_OBJECTS,
   type MetadataRedactionResult,
   type MetadataTypeRedactor,
 } from './metadata-type-redaction';
@@ -164,5 +169,96 @@ describe('absence is distinguishable from "nothing to redact" (#8154 consumer co
     const result = getMetadataTypeRedactor('datasource')!(clean);
     expect(result.redactedKeys).toEqual([]);
     expect(result.item).toEqual(clean);
+  });
+});
+
+describe('stored metadata ROWS — the family-wide seam (#21120)', () => {
+  // A datasource body as it is stored in sys_metadata.metadata: serialized JSON
+  // carrying credential material the datasource redactor withholds.
+  const storedDatasourceBody = () =>
+    JSON.stringify({
+      name: 'ds',
+      driver: 'turso',
+      config: { url: 'libsql://db.turso.io', encryptionKey: 'aes-stored-key' },
+    });
+
+  it('isStoredMetadataBodyObject names exactly the two body tables', () => {
+    expect(isStoredMetadataBodyObject('sys_metadata')).toBe(true);
+    expect(isStoredMetadataBodyObject('sys_metadata_history')).toBe(true);
+    expect(isStoredMetadataBodyObject('sys_audit_log')).toBe(false);
+    expect(isStoredMetadataBodyObject('showcase_task')).toBe(false);
+    expect([...STORED_METADATA_BODY_OBJECTS].sort()).toEqual(['sys_metadata', 'sys_metadata_history']);
+  });
+
+  it('redactStoredMetadataRow withholds credential material from a datasource body row (string column)', () => {
+    const row = { id: '1', name: 'ds', type: 'datasource', metadata: storedDatasourceBody() };
+    const served = redactStoredMetadataRow('sys_metadata', row);
+    expect(JSON.stringify(served)).not.toContain('aes-stored-key');
+    // Non-body columns are untouched.
+    expect(served.id).toBe('1');
+    expect(served.type).toBe('datasource');
+    // The served body still parses and keeps its non-credential material.
+    const body = JSON.parse(served.metadata as string) as { config: Record<string, unknown> };
+    expect(body.config.url).toBe('libsql://db.turso.io');
+    expect(body.config.encryptionKey).toBeUndefined();
+    // Pure: the stored row's bytes are unchanged (connect path still reads them).
+    expect(row.metadata).toBe(storedDatasourceBody());
+  });
+
+  it('redactStoredMetadataRow serves a credential-free body as its stored bytes (by reference)', () => {
+    const row = {
+      id: '2',
+      type: 'datasource',
+      metadata: JSON.stringify({ name: 'ds2', driver: 'postgres', config: { host: 'h', database: 'd' } }),
+    };
+    expect(redactStoredMetadataRow('sys_metadata', row)).toBe(row);
+  });
+
+  it('a body of a type with NO redactor is served as stored (absence is a fact about the type)', () => {
+    const row = { id: '3', type: 'view', metadata: JSON.stringify({ name: 'v', columns: ['a'] }) };
+    expect(redactStoredMetadataRow('sys_metadata', row)).toBe(row);
+  });
+
+  it('FAIL-CLOSED: a redacted type whose body does not parse has the body column OMITTED', () => {
+    const row = { id: '4', type: 'datasource', metadata: '{not valid json' };
+    const served = redactStoredMetadataRow('sys_metadata', row) as Record<string, unknown>;
+    expect('metadata' in served).toBe(false);
+    expect(served.id).toBe('4');
+    expect(served.type).toBe('datasource');
+  });
+
+  it('a row of an object OUTSIDE the set passes through untouched (safe to call unconditionally)', () => {
+    const row = { id: '5', type: 'datasource', metadata: storedDatasourceBody() };
+    expect(redactStoredMetadataRow('sys_webhook', row)).toBe(row);
+    expect(redactStoredMetadataRow('showcase_task', row)).toBe(row);
+  });
+
+  it('a row with no body column, a null body, and a non-object row all pass through', () => {
+    const noBody = { id: '6', type: 'datasource' };
+    expect(redactStoredMetadataRow('sys_metadata', noBody)).toBe(noBody);
+    const nullBody = { id: '7', type: 'datasource', metadata: null };
+    expect(redactStoredMetadataRow('sys_metadata', nullBody)).toBe(nullBody);
+    expect(redactStoredMetadataRow('sys_metadata', 'not-a-row' as unknown as Record<string, unknown>)).toBe(
+      'not-a-row',
+    );
+  });
+
+  it('redactStoredMetadataRows maps the row redactor and leaves a non-array input alone', () => {
+    const rows = [
+      { id: '8', type: 'datasource', metadata: storedDatasourceBody() },
+      { id: '9', type: 'view', metadata: JSON.stringify({ name: 'v' }) },
+    ];
+    const served = redactStoredMetadataRows('sys_metadata', rows);
+    expect(JSON.stringify(served)).not.toContain('aes-stored-key');
+    expect(served[1]).toBe(rows[1]); // untouched (no redactor for 'view')
+    expect(redactStoredMetadataRows('showcase_task', rows)).toBe(rows);
+  });
+
+  it('redactStoredMetadataBody fails closed on a redacted type that does not parse', () => {
+    expect(redactStoredMetadataBody('datasource', '{broken')).toEqual({ ok: false });
+    // A null / absent body is nothing to redact.
+    expect(redactStoredMetadataBody('datasource', null)).toEqual({ ok: true, body: null });
+    // A type with no redactor keeps its body even when unparseable.
+    expect(redactStoredMetadataBody('view', '{broken')).toEqual({ ok: true, body: '{broken' });
   });
 });

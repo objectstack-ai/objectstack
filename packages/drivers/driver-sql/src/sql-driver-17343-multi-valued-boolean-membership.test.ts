@@ -270,13 +270,29 @@ describe('[#17343] the per-dialect construct, compiled — the registerExternalO
       const d = typed(config);
       for (const field of ['picks', 'refs']) {
         for (const op of POSITIVE_OPERATORS) {
+          // [#21009] Only `$contains` — the membership spelling — compiles on a
+          // JSON column now; the rest of the family is REFUSED there (`400`),
+          // ahead of both this card's declared-type gate and the emitter. Either
+          // way the gate this file is about does not fire: a refusal is not the
+          // `1 = 0` constant, and the SHAPE per operator is owned by #17590's
+          // and #21009's own files.
+          if (op !== '$contains') {
+            let refusal: (Error & { code?: string; status?: number }) | undefined;
+            try {
+              d.compileWhere({ [field]: { [op]: 'x' } } as FilterCondition);
+            } catch (e) {
+              refusal = e as Error & { code?: string; status?: number };
+            }
+            expect(refusal?.code, `${op} over ${field}`).toBe('INVALID_FILTER');
+            expect(refusal?.status, `${op} over ${field}`).toBe(400);
+            continue;
+          }
           const sql = d.compileWhere({ [field]: { [op]: 'x' } } as FilterCondition);
           expect(sql, `${op} over ${field}`).not.toMatch(/1 = 0|1 = 1/);
-          // [#17590] `$contains` compiles the MEMBERSHIP construct now and the
-          // rest of the family still compiles a pattern match. What this card
-          // is about is neither shape — it is that the declared-type gate does
-          // not fire — so this row asks for "a real predicate over the column",
-          // and the SHAPE per operator is owned by #17590's own file.
+          // [#17590] `$contains` compiles the MEMBERSHIP construct. What this
+          // card is about is not the shape — it is that the declared-type gate
+          // does not fire — so this row asks for "a real predicate over the
+          // column".
           expect(sql, `${op} over ${field}`).toMatch(REAL_PREDICATE[label]!);
         }
       }

@@ -306,18 +306,31 @@ describe('[#17590] the per-dialect membership construct, compiled', () => {
     });
 
     /**
-     * The other text operators are NOT membership spellings and this card does
-     * not rule on them — they keep the text emitter's lowering (on SQLite, since
-     * #20024, `instr(` for `$icontains` and `substr(CAST(` for `$endsWith`).
-     * Pinned so a later widening is a deliberate edit here rather than a silent
-     * side effect.
+     * The other text operators are NOT membership spellings and this card did
+     * not rule on them — it pinned them unmoved "so a later widening is a
+     * deliberate edit here rather than a silent side effect". [#21009] is that
+     * edit: on a JSON column they matched the serialization (SQLite) or failed at
+     * query time (PostgreSQL), so they are now REFUSED there, in the equality
+     * family's `400`, before either emitter is reached — and no membership
+     * reading is invented for them. On the scalar string column they keep the
+     * text emitter's lowering (on SQLite, since #20024, `instr(` for
+     * `$icontains` and `substr(CAST(` for `$endsWith`).
      */
-    it(`${label}: the rest of the text family is UNMOVED on a JSON column`, () => {
+    it(`${label}: [#21009] the rest of the text family is REFUSED on a JSON column, and unmoved on a scalar one`, () => {
       const d = new CompilerProbeDriver(config).declare();
       for (const op of ['$startsWith', '$endsWith', '$icontains', '$like', '$ilike']) {
-        const sql = d.compileWhere({ tags_: { [op]: 'red' } } as FilterCondition);
-        expect(sql, `${op} on ${label}`).toMatch(/LIKE|GLOB|instr\(|substr\(CAST\(/);
-        expect(sql, `${op} on ${label}`).not.toMatch(CONSTRUCT[label]!);
+        let refusal: (Error & { code?: string; status?: number }) | undefined;
+        try {
+          d.compileWhere({ tags_: { [op]: 'red' } } as FilterCondition);
+        } catch (e) {
+          refusal = e as Error & { code?: string; status?: number };
+        }
+        expect(refusal?.code, `${op} on ${label}`).toBe('INVALID_FILTER');
+        expect(refusal?.status, `${op} on ${label}`).toBe(400);
+        expect(refusal?.message, `${op} on ${label}`).toContain('WAS NOT APPLIED');
+        const sql = d.compileWhere({ label: { [op]: 'red' } } as FilterCondition);
+        expect(sql, `${op} on the scalar label, ${label}`).toMatch(/LIKE|GLOB|instr\(|substr\(CAST\(/);
+        expect(sql, `${op} on the scalar label, ${label}`).not.toMatch(CONSTRUCT[label]!);
       }
     });
   }

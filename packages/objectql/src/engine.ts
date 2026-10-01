@@ -84,6 +84,14 @@ import {
   SystemFieldName,
 } from '@objectstack/spec/system';
 import { ExecutionContext, ExecutionContextSchema } from '@objectstack/spec/kernel';
+// [#21120] The family-wide stored-metadata-body seam. A `data.record.*` event
+// carries the written row in `after` (and the input patch in `changes`), so a
+// subscriber to `sys_metadata` / `sys_metadata_history` events would receive
+// the stored metadata body — a datasource body's credential material included —
+// outside every redacting read exit. The event body is projected through the
+// one shared redactor so the realtime exit withholds it exactly as `/meta` and
+// the data door do. ⛔ No second redaction dialect.
+import { isStoredMetadataBodyObject, redactStoredMetadataBody, STORED_METADATA_BODY_COLUMN, STORED_METADATA_TYPE_COLUMN } from '@objectstack/spec/kernel';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 // Imported from spec directly rather than through `@objectstack/core`'s
 // re-export block: that block is labelled backward-compatibility, and this
@@ -3242,6 +3250,43 @@ function eventRecordBody(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+/**
+ * [#21120] Project the stored metadata body carried on a `data.record.*` event
+ * through the one shared redactor, when the event's object is a
+ * stored-metadata-body table. The event is a credential READ EXIT: a subscriber
+ * receives `after` (the written row) and `changes` (the input patch), so a
+ * `sys_metadata` datasource row's stored credential would otherwise reach it
+ * outside every redacting door.
+ *
+ * `fullRow` is the whole written record (`input.after`), read for the `type`
+ * column that selects the redactor — a `changes` patch need not carry it. A
+ * body the redactor cannot judge is DROPPED from the event (fail-closed): the
+ * key is omitted rather than published raw. A non-record body, and every object
+ * outside the set, pass through unchanged. Pure: the event body is a fresh
+ * object, never the stored row.
+ */
+function redactEventMetadataBody(
+  object: string,
+  body: Record<string, unknown> | undefined,
+  fullRow: unknown,
+): Record<string, unknown> | undefined {
+  if (body === undefined || !isStoredMetadataBodyObject(object)) return body;
+  if (!(STORED_METADATA_BODY_COLUMN in body)) return body;
+  const type =
+    typeof body[STORED_METADATA_TYPE_COLUMN] === 'string'
+      ? body[STORED_METADATA_TYPE_COLUMN]
+      : (fullRow && typeof fullRow === 'object' && !Array.isArray(fullRow)
+          ? (fullRow as Record<string, unknown>)[STORED_METADATA_TYPE_COLUMN]
+          : undefined);
+  const outcome = redactStoredMetadataBody(type, body[STORED_METADATA_BODY_COLUMN]);
+  if (outcome.ok) {
+    if (outcome.body === body[STORED_METADATA_BODY_COLUMN]) return body;
+    return { ...body, [STORED_METADATA_BODY_COLUMN]: outcome.body };
+  }
+  const { [STORED_METADATA_BODY_COLUMN]: _withheld, ...rest } = body;
+  return rest;
 }
 
 /** `DataEvent.userId` — the acting user, when the execution context names one. */
@@ -7412,8 +7457,8 @@ export class ObjectQL implements IObjectQLEngine {
 
     try {
       const timestamp = new Date().toISOString();
-      const changes = eventRecordBody(input.changes);
-      const after = eventRecordBody(input.after);
+      const changes = redactEventMetadataBody(object, eventRecordBody(input.changes), input.after);
+      const after = redactEventMetadataBody(object, eventRecordBody(input.after), input.after);
       const userId = eventUserId(input.context);
       // [#14970] The RECORD's organization, off the row itself — ⛔ never
       // `input.context.tenantId`, which is the CALLER's. See
