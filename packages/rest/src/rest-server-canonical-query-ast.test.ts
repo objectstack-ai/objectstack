@@ -112,7 +112,12 @@ interface CensusEntry {
 }
 
 const CENSUS: CensusEntry[] = [
-    { file: 'rest-server.ts', source: REST_SERVER, minQuerySlots: 5, noDoor: false },
+    // [#21180] 5 -> 4: the anonymous lookup picker's `pickerRequest` literal
+    // left with its route. Re-derived with `querySlots` itself: 5 slots on the
+    // tree before the deletion, 4 after (`req.query`, the import-job read and
+    // the two remaining server-built literals). The floor equals the measured
+    // count, so a slot that stops matching reds here as before.
+    { file: 'rest-server.ts', source: REST_SERVER, minQuerySlots: 4, noDoor: false },
     { file: 'import-runner.ts', source: IMPORT_RUNNER, minQuerySlots: 3, noDoor: true },
 ];
 
