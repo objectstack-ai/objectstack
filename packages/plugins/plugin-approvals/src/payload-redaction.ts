@@ -28,6 +28,28 @@
  * data-plane FLS, and the CSV/XLSX export path already derives its columns
  * from it.
  *
+ * ## A field the caller is served MASKED is dropped (#20964)
+ *
+ * The read projection counts a field whose `maskingRule` applies to the caller
+ * as READABLE: the data plane serves that column, with its value replaced. So
+ * narrowing by the read projection alone kept the key, and the snapshot handed
+ * over the value as captured at submission, unmasked. The security contract's
+ * query-side answer, `getQueryableFields` (#20935), is a subset of the read
+ * projection that differs from it by exactly the fields this caller is served
+ * masked. This seam reads it beside the read projection and serves only the
+ * fields in BOTH — so a masked-for-this-caller field is dropped, together with
+ * its derived label.
+ *
+ * Dropped, not masked, for two reasons. The contract publishes WHICH fields
+ * are masked for a caller, not the masked value: reproducing the mask here
+ * would be a second derivation of the masking rule beside the security
+ * plugin's own, which is exactly what this seam must not hold. And dropping is
+ * the fail-closed side of the data plane's answer: it discloses strictly less
+ * than the masked value would (no kept characters, no length), and it is the
+ * shape this seam already serves for a field the caller may not read at all.
+ * Who the rule applies to is never decided here — that is the contract's
+ * answer, asked as the caller.
+ *
  * ## What this deliberately does NOT do
  *
  * - **It does not gate on OBJECT-level access.** An approver routinely has no
@@ -71,6 +93,15 @@ export interface FieldVisibilitySource {
    * dangling on-behalf-of delegator).
    */
   getReadableFields(object: string, context?: unknown): Promise<string[] | undefined>;
+  /**
+   * [#20964] The security contract's `getQueryableFields` (#20935): the subset
+   * of {@link getReadableFields} this context may also query on, which the
+   * contract defines as differing from the read projection by exactly the
+   * fields this caller is served MASKED. Optional, as on the contract — and, as
+   * the contract obliges, a source that cannot give this answer is NOT read as
+   * "nothing is masked": {@link resolveReadableSnapshotFields} fails closed.
+   */
+  getQueryableFields?(object: string, context?: unknown): Promise<string[] | undefined>;
 }
 
 /** Outcome of one redaction pass, for logging and for tests to assert on. */
@@ -118,8 +149,9 @@ export function redactSnapshot(payload: unknown, readable: string[] | undefined)
 }
 
 /**
- * Resolve the caller-readable field set for `object`, or `undefined` when this
- * seam must not narrow.
+ * Resolve the snapshot fields this caller may be SERVED for `object` — readable
+ * and not masked for this caller — or `undefined` when this seam must not
+ * narrow.
  *
  * `undefined` is returned — and the snapshot therefore served whole — in three
  * cases, each a deliberate fail-OPEN that preserves today's behaviour rather
@@ -127,7 +159,7 @@ export function redactSnapshot(payload: unknown, readable: string[] | undefined)
  *
  *  1. no security service is wired (a bare engine boot, most unit fixtures);
  *  2. no object name is known for the request;
- *  3. `getReadableFields` THREW.
+ *  3. `getReadableFields` THREW, or answered `undefined` (schema unresolvable).
  *
  * Case 3 is the one worth naming out loud: the platform's stated posture for
  * consumers that turn this into an access decision is to fail closed, and this
@@ -136,6 +168,20 @@ export function redactSnapshot(payload: unknown, readable: string[] | undefined)
  * that would blank the snapshot on every approval drawer in the deployment for
  * the duration of a metadata hiccup. The trade is logged loudly so a persistent
  * outage is observable instead of silently non-narrowing.
+ *
+ * [#20964] Once the read projection is a list, the masked-for-this-caller
+ * fields come off it: the answer is the read projection intersected with
+ * `getQueryableFields`. That answer is NOT optional in the other direction.
+ * The contract obliges a consumer that cannot get it — the method is absent,
+ * or it answered `undefined` — not to read its absence as "nothing is masked",
+ * because the read projection alone reports every masked field as readable.
+ * This seam has no field declarations to fall back on and must not decide for
+ * whom a rule is lifted, so it fails closed for the object: `[]`, no snapshot
+ * field served. A THROW from it is treated the same way — unlike a throw from
+ * the read projection, falling open here would serve exactly the values the
+ * mask hides. With the security plugin wired, the member is always present and
+ * answers a list whenever the read projection does, so this branch is reached
+ * only by a source that predates the member; it is logged for that reason.
  */
 export async function resolveReadableSnapshotFields(
   security: FieldVisibilitySource | undefined,
@@ -146,12 +192,33 @@ export async function resolveReadableSnapshotFields(
   if (!security || typeof security.getReadableFields !== 'function') return undefined;
   const object = String(objectName ?? '').trim();
   if (!object) return undefined;
+  let readable: string[] | undefined;
   try {
-    return await security.getReadableFields(object, context);
+    readable = await security.getReadableFields(object, context);
   } catch (err: any) {
     logger?.warn?.('[approvals] payload redaction could not resolve readable fields — serving the snapshot unredacted', {
       object, error: err?.message ?? String(err),
     });
     return undefined;
   }
+  if (readable === undefined) return undefined;
+
+  let unmasked: string[] | undefined;
+  let reason = 'the field-visibility source has no masked-for-this-caller answer (getQueryableFields)';
+  if (typeof security.getQueryableFields === 'function') {
+    try {
+      unmasked = await security.getQueryableFields(object, context);
+      if (unmasked === undefined) reason = 'getQueryableFields answered undefined';
+    } catch (err: any) {
+      reason = `getQueryableFields threw: ${err?.message ?? String(err)}`;
+    }
+  }
+  if (unmasked === undefined) {
+    logger?.warn?.('[approvals] payload redaction cannot tell which readable fields are masked for this caller — serving no snapshot field (fail closed)', {
+      object, reason,
+    });
+    return [];
+  }
+  const keep = new Set(unmasked.map((f) => String(f)));
+  return readable.filter((f) => keep.has(String(f)));
 }

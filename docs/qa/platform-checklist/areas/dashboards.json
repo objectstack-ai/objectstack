@@ -636,7 +636,7 @@
         "packages/qa/dogfood/test/date-bucket-parity-conformance.test.ts (#3773)",
         "packages/qa/dogfood/test/empty-group-bucket-parity.test.ts (#3839)",
         "examples/app-showcase/src/ui/dashboards/ops-dashboard.dashboard.ts#dateRange (dateRange + global filter levers)",
-        "examples/app-showcase/src/data/seed/index.ts#signed_on (prospects carry no signed_on — the deliberate NULL population)"
+        "examples/app-showcase/src/data/seed/index.ts#accounts (prospects carry no signed_on — the deliberate NULL population; re-pointed #18101: signed_on is a key written INLINE in each seed row, which the shared resolver does not read as a declaration, and accounts is the seed constant that declares those rows)"
       ],
       "history": [
         {
@@ -749,7 +749,7 @@
       "source": [
         "examples/app-showcase/src/ui/dashboards/revenue-pulse.dashboard.ts (framework#2501 / objectui#2578 acceptance fixture)",
         "examples/app-showcase/src/ui/dashboards/ops-dashboard.dashboard.ts",
-        "examples/app-showcase/src/data/seed/index.ts#sales_region (sales_region + signed_on seeding, prospects unset by design)",
+        "examples/app-showcase/src/data/seed/index.ts#accounts (sales_region + signed_on seeding, prospects unset by design — re-pointed #18101: both keys are written INLINE in each seed row, which the shared resolver does not read as a declaration, and accounts is the seed constant that declares those rows)",
         "examples/app-showcase/src/coverage.ts (dashboard kind notes: revenue-pulse demonstrates dashboard-level filters)",
         "objectui packages/app-shell/src/views/metadata-admin/inspectors/DashboardWidgetInspector.tsx (Filter Bindings section — Apply toggle writes false for opt-out, field-override combo, data-testid widget-filter-binding-<name>, patches draft.widgets[i].filterBindings; objectui#2586)",
         "objectui packages/plugin-dashboard/src/DashboardFilterBar.tsx (isDirty→Reset affordance RotateCcw, data-testid dashboard-filter-bar; SelectFilter {value,label} options + server GROUP BY via queryDataset, #2578 item 5)",

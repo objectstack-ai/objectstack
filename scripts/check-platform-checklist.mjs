@@ -1920,8 +1920,8 @@ const CORPUS = defineCorpus({
 // import-only persona whose constant had MOVED to another file (the path was
 // re-pointed, not the symbol), a `.json` cross-area citation re-pointed at the
 // `items` block it means, and the `detector-artifact` row above. ⚠️ That file
-// still carries its 2 `accept-set` rows and that is CORRECT, not half-done:
-// they are #18101's, and reaching them means widening the shared core.
+// still carried its 2 `accept-set` rows after this slice, and that was
+// CORRECT, not half-done: they were #18101's, drained by the ruling below.
 // Third slice landed (#18104): `areas/cli.json`, `areas/platform-core.json`
 // and `areas/records-forms.json` — 15 rows, the three largest remaining
 // `bad-citation` blocks taken together. Two classes recur from the slices
@@ -1931,9 +1931,23 @@ const CORPUS = defineCorpus({
 // pins the ADR-0112 SCREAMING_SNAKE one, a manifest VALUE re-pointed at the
 // `scripts.dev` key pair that carries it, and a member read off a manifest or
 // a capability re-pointed at the function whose body does the reading.
-// ⚠️ `areas/records-forms.json` still carries its 2 `accept-set` rows, for
-// the same reason `areas/identity-auth.json` does: that file mixes both
+// ⚠️ `areas/records-forms.json` still carried its 2 `accept-set` rows, for
+// the same reason `areas/identity-auth.json` did: that file mixes both
 // verdicts, so a slice judges it ROW BY ROW BY VERDICT, never by file.
+//
+// ⭐ THE ACCEPT-SET DRAIN (#18101). The 8 `accept-set` rows left the same one
+// way, under the ruling recorded on that card (comment 5748968793, letter C).
+// ⛔ The shared core was NOT widened — neither toward a key written anywhere
+// on a line nor toward the head segment of a dotted string, because a
+// widening there lands on every corpus at once — and ⛔ no citation dropped
+// to a bare one, which would delete a checkable pointer to satisfy a check.
+// Each anchor was re-pointed at the nearest ENCLOSING declaration the
+// resolver does read: the seed, datasource or action constant that declares
+// the inline literal; the `plugins` key of a config whose default export has
+// no name; the `PUBLIC_AUTH_FEATURES` entry that holds the dotted action
+// names. A member segment rides on the constant only where the cited
+// sentence names that member itself. The ceiling came down by the same 8 in
+// the same edit.
 //
 // `verdict` is the classification #16898's acceptance asks for, and there are
 // exactly two:
@@ -1943,30 +1957,25 @@ const CORPUS = defineCorpus({
 //                 what the file carries, or drop to a bare citation. ⚠️ Dropping
 //                 costs the file an anchor and most floors have no headroom, so
 //                 re-pointing is the route and the sizing is its own card.
-//   accept-set    (8 rows) the anchor names something real that the SHARED
-//                 resolver's accept set does not reach — an object-literal key
-//                 written INLINE rather than at the start of a line (6), and a
-//                 DATA identifier that is the head segment of a dotted string
-//                 token, `sys_user` in `'sys_user.actions.invite_user'` (2).
-//                 ⛔ THAT IS A DIFFERENT CARD, against
-//                 `scripts/symbol-anchors.mjs`, and ⛔ nothing here may widen
-//                 the core to reach them: it is shared with four other corpora
-//                 and widening it would export this defect to all of them.
+//   accept-set    (0 rows — DRAINED, #18101) the anchor names something real
+//                 that the SHARED resolver's accept set does not reach — an
+//                 object-literal key written INLINE rather than at the start
+//                 of a line, or a DATA identifier that is the head segment of
+//                 a dotted string token, `sys_user` in
+//                 `'sys_user.actions.invite_user'`. The verdict is kept because
+//                 the shape is not gone: ruled C, its repair is the
+//                 `bad-citation` one — re-point at the enclosing declaration
+//                 the resolver reads, as the drain above did — and ⛔ never a
+//                 widening of the core to reach the literal: it is shared with
+//                 four other corpora and widening it would export this defect
+//                 to all of them.
 const SHARED_RESOLVER_RESIDUAL = Object.freeze([
   { doc: 'areas/ai.json', anchor: 'packages/mcp/src/plugin.ts#OS_MCP_SERVER_ENABLED', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/ai.json', anchor: 'packages/runtime/src/domains/ai.ts#capabilityUnavailable', shape: 'import-only', verdict: 'bad-citation' },
   { doc: 'areas/approvals.json', anchor: 'examples/app-showcase/src/security/seed-approval-demo.ts#AUDITOR_DEMO_USER', shape: 'import-only', verdict: 'bad-citation' },
   { doc: 'areas/attachments-storage.json', anchor: 'packages/spec/liveness/field.json#live', shape: 'json-value-not-key', verdict: 'bad-citation' },
-  { doc: 'areas/dashboards.json', anchor: 'examples/app-showcase/src/data/seed/index.ts#sales_region', shape: 'inline-key', verdict: 'accept-set' },
-  { doc: 'areas/dashboards.json', anchor: 'examples/app-showcase/src/data/seed/index.ts#signed_on', shape: 'inline-key', verdict: 'accept-set' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/spec/src/kernel/public-auth-features.ts#sys_invitation', shape: 'dotted-string-head', verdict: 'accept-set' },
-  { doc: 'areas/identity-auth.json', anchor: 'packages/spec/src/kernel/public-auth-features.ts#sys_user', shape: 'dotted-string-head', verdict: 'accept-set' },
-  { doc: 'areas/integration-system.json', anchor: 'examples/app-showcase/objectstack.config.ts#declarativeStdio', shape: 'inline-key', verdict: 'accept-set' },
-  { doc: 'areas/integration-system.json', anchor: 'examples/app-showcase/src/system/datasources/showcase-external.datasource.ts#onMismatch', shape: 'inline-key', verdict: 'accept-set' },
   { doc: 'areas/integration-system.json', anchor: 'packages/services/service-messaging/src/messaging-service.ts#PreferenceResolver', shape: 'import-only', verdict: 'bad-citation' },
   { doc: 'areas/integration-system.json', anchor: 'packages/spec/liveness/email_template.json#requireVars', shape: 'json-value-not-key', verdict: 'bad-citation' },
-  { doc: 'areas/records-forms.json', anchor: 'examples/app-showcase/src/data/objects/business-unit.object.ts#allowCreate', shape: 'inline-key', verdict: 'accept-set' },
-  { doc: 'areas/records-forms.json', anchor: 'examples/app-showcase/src/ui/actions/index.ts#maxSize', shape: 'inline-key', verdict: 'accept-set' },
   { doc: 'areas/studio-authoring.json', anchor: 'packages/objectql/src/overlay-precedence.test.ts#not_overridable', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/studio-authoring.json', anchor: 'packages/rest/src/meta-write-actor-identity.test.ts#Actor', shape: 'string-substring', verdict: 'bad-citation' },
   { doc: 'areas/studio-authoring.json', anchor: 'packages/rest/src/rest-route-ledger.ts#getHistory', shape: 'string-substring', verdict: 'bad-citation' },
@@ -1977,7 +1986,7 @@ const SHARED_RESOLVER_RESIDUAL = Object.freeze([
 // fail), so this is the belt on the braces: a silent append — the one edit that
 // would turn a closed ledger back into a permissive rule, one row at a time —
 // refuses here rather than validating.
-const SHARED_RESOLVER_RESIDUAL_CEILING = 18;
+const SHARED_RESOLVER_RESIDUAL_CEILING = 10;
 
 const residualKey = (doc, anchor) => `${doc}::${anchor}`;
 const SHARED_RESOLVER_RESIDUAL_INDEX = new Map(
