@@ -2,6 +2,7 @@
 '@objectstack/objectql': patch
 '@objectstack/driver-mongodb': patch
 '@objectstack/formula': patch
+'@objectstack/spec': patch
 ---
 
 fix(objectql,driver-mongodb,formula): the `having` and per-aggregation evaluator compiles the whole-day comparison it is handed, and `$contains` asks membership on a JSON-stored field in `MongoDBDriver` and in `matchesFilterCondition` (ADR-0053 D-D1 items 5 and 9; the `FILTER_OPERATORS` `$contains` contract, #20822)
@@ -13,4 +14,5 @@ Clause-②: no
 - **`@objectstack/formula`: `matchesFilterCondition` asks membership of a JSON-stored column.** When the caller supplies `options.fields` and it names the column, the declaration decides: membership on a JSON-stored column, substring on any other. Otherwise the stored value decides: an array asks membership, anything else substring. A stored array used to fail `$contains` and pass `$notContains` whatever it held.
   - **The RLS write check, which evaluates a policy with this function, moves with it.** Under a `check` such as `record.tags.contains('x')` on a multi-valued field, a write whose post-image holds `['x']` (a row the same policy's read shows) is now admitted; it was refused `PERMISSION_DENIED` / 403. `['xy']` stays refused, and the read hides it.
   - A scalar written to a declared multi-valued field is judged as written, before the write door wraps it in a list. So `tags: 'xy'`, which the check used to admit while the read hides the stored `['xy']`, is now refused 403. And `tags: 'x'` is now refused 403 too, although the read shows the stored `['x']`. Send the list, `tags: ['x']`.
+- **`@objectstack/spec`: docblock only, in the shipped `src/data/filter.zod.ts`.** The three pointers to the deleted `SqlDriver.calendarDayUpperBoundRewrite` / `calendarDayBetweenRewrite` now name the shared `lowerFilterCondition` at the seams, and the `FILTER_OPERATORS` `$contains` implementation-status list gains `driver-mongodb` and `formula`. No schema, type or export changes.
 - No exported name changes.
