@@ -70,6 +70,7 @@
 
 import { describe, it, expect, afterAll, afterEach, assert } from 'vitest';
 import { createClient } from '@libsql/client';
+import type { DriverOptions } from '@objectstack/spec/data';
 import { TursoDriver } from './index.js';
 import { RemoteTransport } from './remote-transport.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
@@ -371,7 +372,7 @@ describe('[#6203] one semantics: the shared SqlDriver rules, called on both face
 
   it('numbers issued by the local face and by the remote face on the same database do not collide', async () => {
     const { local, remote } = await makeSharedPair([NUMBERED_OBJECT]);
-    const opts = { bypassTenantAudit: true } as any;
+    const opts: DriverOptions = { bypassTenantAudit: true };
     const a = await local.create('crm_case', { organization_id: 'orgA', title: 'local 1' }, opts);
     const b = await remote.create('crm_case', { organization_id: 'orgA', title: 'remote 1' });
     const c = await local.create('crm_case', { organization_id: 'orgA', title: 'local 2' }, opts);
@@ -388,7 +389,7 @@ describe('[#6203] one semantics: the shared SqlDriver rules, called on both face
 
   it('the tenant bucket is the same rule: a different organization is a different counter on both faces', async () => {
     const { local, remote } = await makeSharedPair([NUMBERED_OBJECT]);
-    const opts = { bypassTenantAudit: true } as any;
+    const opts: DriverOptions = { bypassTenantAudit: true };
     expect((await local.create('crm_case', { organization_id: 'orgA', title: 'a' }, opts)).case_number).toBe('CASE-00001');
     expect((await remote.create('crm_case', { organization_id: 'orgB', title: 'b' })).case_number).toBe('CASE-00001');
     expect((await local.create('crm_case', { organization_id: 'orgB', title: 'b2' }, opts)).case_number).toBe('CASE-00002');
@@ -421,7 +422,7 @@ describe('[#6203] one semantics: the shared SqlDriver rules, called on both face
         (e) => (e as Error).message,
       );
     const onRemote = await message(() => remote.create('po', { po_no: '' }));
-    const onLocal = await message(() => local.create('po', { po_no: '' }, { bypassTenantAudit: true } as any));
+    const onLocal = await message(() => local.create('po', { po_no: '' }, { bypassTenantAudit: true }));
     expect(onRemote).toContain('Cannot generate autonumber "po.po_no" (format "{dept}-{000}"): referenced field(s) [dept] are empty on the record.');
     expect(onRemote).toBe(onLocal);
 
@@ -538,7 +539,7 @@ describe('[#6203] the other faces are untouched', () => {
     const row = await local.create(
       'crm_case',
       { organization_id: 'orgA', title: 'l' },
-      { bypassTenantAudit: true } as any,
+      { bypassTenantAudit: true },
     );
     expect(row.case_number).toBe('CASE-00001');
   });
@@ -551,7 +552,7 @@ describe('[#6203] the other faces are untouched', () => {
         { organization_id: 'orgA', title: 'b1' },
         { organization_id: 'orgA', title: 'b2' },
       ],
-      { bypassTenantAudit: true } as any,
+      { bypassTenantAudit: true },
     );
     expect((rows as any[]).map((r) => r.case_number)).toEqual(['CASE-00001', 'CASE-00002']);
 
@@ -559,7 +560,7 @@ describe('[#6203] the other faces are untouched', () => {
       'crm_case',
       { organization_id: 'orgA', title: 'u' },
       undefined,
-      { bypassTenantAudit: true } as any,
+      { bypassTenantAudit: true },
     );
     expect(upserted.case_number).toBe('CASE-00003');
   });
@@ -569,7 +570,7 @@ describe('[#6203] the other faces are untouched', () => {
     const row = await replica.create(
       'crm_case',
       { organization_id: 'orgA', title: 'r' },
-      { bypassTenantAudit: true } as any,
+      { bypassTenantAudit: true },
     );
     expect(row.case_number).toBe('CASE-00001');
   });

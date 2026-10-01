@@ -77,6 +77,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@libsql/client';
+import type { DriverQuery } from '@objectstack/spec/contracts';
 import { TursoDriver } from './index.js';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
@@ -242,7 +243,8 @@ describe('[#21113] two writers in two processes draw distinct numbers from one d
     process.stdout.write(`[turso-remote-autonumber-concurrency] pids ${pids.join('/')} · ${total} writes · ${new Set(all).size} distinct · ${switches} writer change(s)\n`);
 
     // And the database agrees: one row per number, one counter row at N.
-    const rows = await parent.find('crm_case', { orderBy: [{ field: 'case_number', order: 'asc' }] } as any);
+    const byNumber: DriverQuery = { orderBy: [{ field: 'case_number', order: 'asc' }] };
+    const rows = await parent.find('crm_case', byNumber);
     expect(rows.map((row) => row.case_number)).toEqual(expected);
     const counter = await parentClient.execute('select "last_value" from "_objectstack_sequences"');
     expect(counter.rows).toHaveLength(1);
