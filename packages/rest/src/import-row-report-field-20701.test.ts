@@ -24,11 +24,12 @@
  * door puts the bare names in `fields`). The second is `mapDataError`'s
  * driver-string branch calling a DECLARED field unknown.
  *
- * ⚠️ Not pinned here: the drop signal on the formula / readonly rows. The dry
- * run's source, the protocol's `validateData`, returns no `droppedFields` at
- * all, so the import cannot read one without a change outside this package
- * (the card's report names it). The formula and readonly cells below pin only
- * that both halves SUCCEED, which is the half of the card's pin that holds.
+ * The formula / readonly rows also carry the drop signal now: the engine
+ * reports its strips per row (`validateData` on the dry run, `insertManyData`
+ * on the commit) and the import runner copies the report onto the row. The
+ * cells below pin both halves succeeding AND reporting the strip with its
+ * reason; `import-row-dropped-fields-20701.test.ts` pins the rest of that
+ * family (the create door's equality, upsert updates, the async job).
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -164,16 +165,17 @@ describe('[#20701] a writable column imports — the control', () => {
   });
 });
 
-describe('[#20701] a formula or readonly column: the dry run and the commit both succeed', () => {
+describe('[#20701] a formula or readonly column: the dry run and the commit both succeed and both report the strip', () => {
   it.each([
-    ['formula', { id: 'f1', title: 't', n: 2, doubled: 5 }],
-    ['readonly', { id: 'f1', title: 't', n: 2, ro: 'forged' }],
-  ] as const)('%s column', async (_label, row) => {
+    ['formula', { id: 'f1', title: 't', n: 2, doubled: 5 }, { object: OBJECT, fields: ['doubled'], reason: 'computed' }],
+    ['readonly', { id: 'f1', title: 't', n: 2, ro: 'forged' }, { object: OBJECT, fields: ['ro'], reason: 'readonly' }],
+  ] as const)('%s column', async (_label, row, dropped) => {
     const b = await boot();
     for (const dryRun of [true, false]) {
       const r = await b.importRows([row], { dryRun });
       expect(r.body, `dryRun=${dryRun}`).toMatchObject({ ok: 1, errors: 0, created: 1 });
       expect(r.body.results[0], `dryRun=${dryRun}`).toMatchObject({ row: 1, ok: true, action: 'created' });
+      expect(r.body.results[0].droppedFields, `dryRun=${dryRun}`).toEqual([dropped]);
     }
     // The supplied value was not stored: the formula answers from `n`, and the readonly column stays empty.
     const stored = await b.engine.findOne(OBJECT, { where: { id: 'f1' } });

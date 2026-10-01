@@ -765,7 +765,10 @@ properties:
 
 A parent record edited alongside its child collections is the declared
 `object-master-detail-form` block. `details` entries derive the foreign key and
-columns from the child object's metadata when you omit them.
+columns from the child object's metadata when you omit them. An authored
+`columns` list takes the same name-keyed column a relationship field's
+`inlineColumns` takes: `{ name }` alone fills the label and cell type from the
+child field.
 
 {/* os:check-yaml PageComponentSchema */}
 ```yaml
@@ -779,7 +782,10 @@ properties:
     - title: Line Items
       childObject: invoice_line
       relationshipField: invoice_id
-      columns: [product, quantity, unit_price]
+      columns:
+        - name: product
+        - name: quantity
+        - name: unit_price
 ```
 
 For the *master/detail browsing* pattern — pick a record on the left, show it on

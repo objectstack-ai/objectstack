@@ -835,3 +835,92 @@ describe('[#20951] validateFieldConsumers — a child collection credits its chi
     });
   });
 });
+
+/**
+ * [#20928] The third carrier of an inline grid: an `object-master-detail-form`
+ * page block's `details` entries. Each entry names its child in `childObject`
+ * and its grid in `columns`, exactly as a `subforms` entry does, so it is read
+ * as a child collection: a column `name` and `amountField` /
+ * `relationshipField` against the child, `totalField` against the parent the
+ * block's `objectName` binds, and an entry with no `columns` credits the grid
+ * the child derives.
+ *
+ * `inv` is the parent and `line` the child; each declares a field the other's
+ * key names, so a key read against the wrong object shows up as the wrong one
+ * of the pair going quiet. `memo` is named nowhere: the control.
+ */
+describe('[#20928] validateFieldConsumers — an `object-master-detail-form` detail entry is a child collection', () => {
+  const data = { provider: 'object', object: 'inv' };
+
+  const stack = (details: unknown[], slots?: AnyRec): AnyRec => ({
+    objects: [
+      { name: 'inv', fields: { name: { type: 'text' }, qty: { type: 'number' }, total: { type: 'number' } } },
+      {
+        name: 'line',
+        fields: {
+          name: { type: 'text' },
+          invoice: { type: 'master_detail', reference: 'inv' },
+          qty: { type: 'number' },
+          total: { type: 'number' },
+          line_total: { type: 'number' },
+          memo: { type: 'text' },
+        },
+      },
+    ],
+    views: [{ list: { type: 'grid', data, columns: [{ field: 'name' }] } }],
+    pages: [{
+      name: 'inv_entry',
+      regions: [{
+        name: 'main',
+        components: [{ type: 'object-master-detail-form', properties: { objectName: 'inv', details } }],
+      }],
+      ...(slots ? { kind: 'slotted', slots } : {}),
+    }],
+  });
+
+  /** `object.field` → verdict, for every field the rule reports. */
+  const verdicts = (s: AnyRec): Record<string, string> =>
+    Object.fromEntries(validateFieldConsumers(s).map((f) => [`${f.object}.${f.field}`, f.verdict]));
+
+  /** Every non-name field of both objects, reported: what a block with no detail entry leaves. */
+  const NOTHING_READ = {
+    'inv.qty': 'inert',
+    'inv.total': 'inert',
+    'line.qty': 'inert',
+    'line.total': 'inert',
+    'line.line_total': 'inert',
+    'line.memo': 'inert',
+  };
+
+  it('baseline: a block with no detail entry reads no field of either object', () => {
+    expect(verdicts(stack([]))).toEqual(NOTHING_READ);
+  });
+
+  it("an authored column credits the CHILD's field, not the parent's same-named one", () => {
+    const { 'line.qty': _credited, ...rest } = NOTHING_READ;
+    expect(verdicts(stack([{ childObject: 'line', columns: [{ name: 'qty' }] }]))).toEqual(rest);
+  });
+
+  it("`amountField` credits the CHILD's field and `totalField` the PARENT's — each same-named counterpart stays reported", () => {
+    const entry = { childObject: 'line', columns: [{ name: 'qty' }], amountField: 'line_total', totalField: 'total' };
+    expect(verdicts(stack([entry]))).toEqual({
+      'inv.qty': 'inert',
+      'line.total': 'inert',
+      'line.memo': 'inert',
+    });
+  });
+
+  it('an entry with no `columns` credits the columns its child derives', () => {
+    // `deriveInlineGridColumns` draws every editable child field but the
+    // relationship back to the parent, so only the parent's two stay reported.
+    expect(verdicts(stack([{ childObject: 'line' }]))).toEqual({ 'inv.qty': 'inert', 'inv.total': 'inert' });
+  });
+
+  it("control: the page slot map's own `details` key holds components, and one read as an entry is read exactly as anywhere else", () => {
+    const component = { type: 'record:details', properties: { objectName: 'line', fields: ['memo'] } };
+    const elsewhere = verdicts(stack([], { header: [component] }));
+    // Non-vacuity: the component does read a field, so a slot that skipped it would show.
+    expect(elsewhere['line.memo']).toBeUndefined();
+    expect(verdicts(stack([], { details: [component] }))).toEqual(elsewhere);
+  });
+});

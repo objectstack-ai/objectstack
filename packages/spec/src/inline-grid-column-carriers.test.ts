@@ -2,7 +2,9 @@
 
 /**
  * #20901 — an inline grid column is judged on BOTH of its carriers, and by the
- * type it renders as.
+ * type it renders as. #20928 brought the THIRD carrier, an
+ * `object-master-detail-form` page block's `details[].columns`, to the same
+ * contract (its own section at the bottom of this file).
  *
  * The objectui master-detail grid reads one column shape from two carriers: a
  * relationship field's `inlineColumns` and a form view's `subforms[].columns`.
@@ -45,6 +47,7 @@ import { applyConversionsToStoredItem } from './conversions/stored';
 import { InlineGridColumnSchema } from './data/field.zod';
 import { applyMetaMigrations } from './migrations/chain';
 import { FormViewSchema, ViewMetadataSchema } from './ui/view.zod';
+import { ComponentPropsMap } from './ui/component.zod';
 import { defineStack } from './stack.zod';
 
 type Issue = { code: string; path: PropertyKey[]; message: string };
@@ -392,5 +395,203 @@ describe('#20901 — the `field` → `name` respelling is a chain step on the fo
     const view = applyConversionsToStoredItem('view', storedRows(columns).container) as Record<string, any>;
     expect(columnsOf(view)).toEqual(object.fields.invoice.inlineColumns);
     expect(columnsOf(view)).toEqual([...RESPELLED, { field: 'amount', name: 'total' }, 'not-a-column']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #20928 — the third carrier: an `object-master-detail-form` block's `details`.
+// ---------------------------------------------------------------------------
+
+/**
+ * The page block `object-master-detail-form` draws one inline grid per
+ * `details` entry, hydrating an authored `columns` list with the same objectui
+ * `hydrateColumns` the other two carriers feed. `details` was
+ * `z.array(z.unknown())`, so the card's probe — `{ zzz_not_a_key: 1 }` and a
+ * typed `currency` column with `scale` — went through `os validate` green.
+ *
+ * Two halves, two doors, the same split as the form-view carrier:
+ *
+ *   - the PROPS SCHEMA (`ComponentPropsMap['object-master-detail-form']`) is
+ *     the entry contract: a strict entry whose `columns` IS
+ *     `InlineGridColumnSchema`. Page-component `properties` is an open record
+ *     the stack's parse never reaches, so this half is read by the
+ *     component-props gate (`@objectstack/lint`), not by `defineStack`;
+ *   - `defineStack`'s cross-reference check reaches the block on a page and
+ *     judges an identity-only column by its child field's type. Because the
+ *     column was never parsed on this carrier, it judges only a column that is
+ *     valid without the type, and leaves the column's own defects to the
+ *     props half — so a finding here is always one the resolved type brings.
+ */
+const MASTER_DETAIL_PROPS = ComponentPropsMap['object-master-detail-form'];
+
+/** Every key objectui's `MasterDetailForm` reads off a detail entry (the `.objectui-sha` pin `31971ff1e28f`). */
+const FULL_DETAIL_ENTRY = {
+  childObject: 'crm_invoice_line',
+  relationshipField: 'invoice',
+  columns: [{ name: 'quantity' }],
+  formFields: ['quantity', 'amount'],
+  inlineMode: 'grid',
+  amountField: 'amount',
+  sortField: 'position',
+  totalField: 'total',
+  title: 'Lines',
+  minRows: 1,
+  maxRows: 20,
+  addLabel: 'Add line',
+} as const;
+
+const parseDetails = (details: unknown[]): Result =>
+  MASTER_DETAIL_PROPS.safeParse({ objectName: 'crm_invoice', details }) as Result;
+
+const parseDetailColumns = (columns: unknown[]): Result =>
+  parseDetails([{ childObject: 'crm_invoice_line', columns }]);
+
+const masterDetailBlock = (columns: unknown[], child = 'crm_invoice_line') => ({
+  type: 'object-master-detail-form',
+  properties: { objectName: 'crm_invoice', details: [{ title: 'Lines', childObject: child, columns }] },
+});
+
+type PagePosition = 'region' | 'nested' | 'slot';
+
+/** A stack whose one page carries the block in the given position. */
+const stackWithMasterDetailColumns = (columns: unknown[], position: PagePosition = 'region', child?: string) => {
+  const block = masterDetailBlock(columns, child);
+  const page = {
+    name: 'crm_invoice_entry',
+    label: 'Invoice Entry',
+    type: 'home' as const,
+    regions: [{
+      name: 'main',
+      components: position === 'region' ? [block]
+        : position === 'nested' ? [{ type: 'page:card', properties: { children: [block] } }]
+          : [],
+    }],
+    ...(position === 'slot' ? { kind: 'slotted', slots: { details: [block] } } : {}),
+  };
+  return { manifest, objects: [PARENT, childObject()], pages: [page] };
+};
+
+describe('#20928 — the master-detail block\'s detail entry is strict, and its columns are the column contract', () => {
+  it('its column element IS InlineGridColumnSchema — one contract, not a copy', () => {
+    type Unwrapped = { unwrap(): { element: { shape: Record<string, { unwrap(): { element: unknown } }> } } };
+    const details = (MASTER_DETAIL_PROPS.shape as unknown as Record<string, Unwrapped>).details;
+    const columnElement = details.unwrap().element.shape.columns.unwrap().element;
+    expect(columnElement).toBe(InlineGridColumnSchema);
+  });
+
+  it('refuses the card\'s typed currency column carrying `scale`, at the column\'s `scale`, with the ruled first sentence', () => {
+    const result = parseDetailColumns([{ name: 'quantity' }, TYPED_CURRENCY_WITH_SCALE]);
+    expect(result.success).toBe(false);
+    expect(result.error!.issues).toHaveLength(1);
+    const [issue] = result.error!.issues;
+    expect(issue.code).toBe('custom');
+    expect(issue.path).toEqual(['details', 0, 'columns', 1, 'scale']);
+    expect(issue.message.startsWith(COLUMN_FIRST_SENTENCE)).toBe(true);
+  });
+
+  it('refuses the card\'s bogus-key column: the key is named, and the missing `name` is required', () => {
+    const result = parseDetailColumns([BOGUS_KEY_ONLY]);
+    expect(result.success).toBe(false);
+    const issues = result.error!.issues;
+    const unknown = issues.find((i) => i.code === 'unrecognized_keys');
+    expect(unknown?.path).toEqual(['details', 0, 'columns', 0]);
+    expect(unknown?.message).toContain('`zzz_not_a_key`');
+    expect(issues.some((i) => i.code === 'invalid_type' && i.path.join('.') === 'details.0.columns.0.name')).toBe(true);
+  });
+
+  it('refuses the retired `field` spelling with the prescription naming `name`', () => {
+    const result = parseDetailColumns([{ field: 'quantity' }]);
+    expect(result.success).toBe(false);
+    const unknown = result.error!.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(unknown?.path).toEqual(['details', 0, 'columns', 0]);
+    expect(unknown?.message).toContain('`field` → `name`');
+  });
+
+  it('refuses an entry key the renderer does not read, naming it, and a near-miss with its rename', () => {
+    const bogus = parseDetails([{ childObject: 'crm_invoice_line', zzz_not_a_key: 1 }]);
+    expect(bogus.success).toBe(false);
+    const unknown = bogus.error!.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(unknown?.path).toEqual(['details', 0]);
+    expect(unknown?.message).toContain('`zzz_not_a_key`');
+
+    const alias = parseDetails([{ childObject: 'crm_invoice_line', foreignKey: 'invoice' }]);
+    expect(alias.success).toBe(false);
+    expect(alias.error!.issues.find((i) => i.code === 'unrecognized_keys')?.message).toContain('`foreignKey` → `relationshipField`');
+  });
+
+  it('requires `childObject` — an entry without it is the renderer\'s declined branch, refused here instead', () => {
+    const result = parseDetails([{ title: 'Lines' }]);
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.some((i) => i.code === 'invalid_type' && i.path.join('.') === 'details.0.childObject')).toBe(true);
+  });
+
+  it('refuses an `inlineMode` outside the two form factors the renderer draws', () => {
+    const result = parseDetails([{ childObject: 'crm_invoice_line', inlineMode: 'drawer' }]);
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0].path).toEqual(['details', 0, 'inlineMode']);
+  });
+
+  it('passes the card\'s identity-only column carrying `scale`: the schema cannot see the child field — the cross-reference check judges it (below)', () => {
+    expect(parseDetailColumns([IDENTITY_ONLY_WITH_SCALE]).success).toBe(true);
+  });
+
+  it('CONTROLS — the named producer\'s entry, and an entry carrying every key the renderer reads, parse and keep their keys', () => {
+    const showcase = { title: 'Tasks', childObject: 'showcase_task', addLabel: 'Add task' };
+    for (const entry of [showcase, FULL_DETAIL_ENTRY]) {
+      const result = parseDetails([entry]);
+      expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+      expect((result.data as { details: unknown[] }).details).toEqual([entry]);
+    }
+    expect(Object.keys(FULL_DETAIL_ENTRY)).toHaveLength(12);
+  });
+});
+
+describe('#20928 — defineStack judges an identity-only detail column by the type it renders as', () => {
+  it('refuses the card\'s identity-only column over a currency child field, on a page region', () => {
+    expectHydratedCurrencyRefusal(
+      stackWithMasterDetailColumns([{ name: 'quantity' }, IDENTITY_ONLY_WITH_SCALE]),
+      "Page 'crm_invoice_entry' (regions.0.components.0) object-master-detail-form details[0].columns[1].scale",
+    );
+  });
+
+  it('refuses it inside a container and under a slot too — wherever the page carries the block', () => {
+    expectHydratedCurrencyRefusal(
+      stackWithMasterDetailColumns([IDENTITY_ONLY_WITH_SCALE], 'nested'),
+      "Page 'crm_invoice_entry' (regions.0.components.0.properties.children.0) object-master-detail-form details[0].columns[0].scale",
+    );
+    expectHydratedCurrencyRefusal(
+      stackWithMasterDetailColumns([IDENTITY_ONLY_WITH_SCALE], 'slot'),
+      "Page 'crm_invoice_entry' (slots.details.0) object-master-detail-form details[0].columns[0].scale",
+    );
+  });
+
+  it('leaves a column that is invalid on its own to the props half: no finding the resolved type does not bring', () => {
+    // Identity-only, over the currency field, carrying `scale` — AND a key the
+    // column schema refuses whatever its type. The props schema reports the
+    // bogus key and nothing else; the stack does not re-report it as a
+    // currency-column finding.
+    const column = { ...IDENTITY_ONLY_WITH_SCALE, zzz_not_a_key: 1 };
+    expect(parseDetailColumns([column]).success).toBe(false);
+    expect(() => build(stackWithMasterDetailColumns([column]))).not.toThrow();
+  });
+
+  it('CONTROLS — valid columns build, and so do the card\'s other two columns, which only the props half reads', () => {
+    const columns = [
+      { name: 'quantity', scale: 1 },
+      { name: 'amount' },
+      { name: 'amount', prefix: 'US$' },
+      { name: 'amount', type: 'number', scale: 2 },
+      { name: 'not_a_child_field', scale: 2 },
+    ];
+    expect(() => build(stackWithMasterDetailColumns(columns))).not.toThrow();
+    expect(() => build(stackWithMasterDetailColumns([TYPED_CURRENCY_WITH_SCALE, BOGUS_KEY_ONLY]))).not.toThrow();
+  });
+
+  it('CONTROL — a child object this stack does not declare is not judged', () => {
+    expect(() => build(stackWithMasterDetailColumns([IDENTITY_ONLY_WITH_SCALE], 'region', 'ext_line'))).not.toThrow();
+  });
+
+  it('following the remedy builds: the refused column with `scale` deleted and nothing added', () => {
+    expect(() => build(stackWithMasterDetailColumns([{ name: 'amount' }]))).not.toThrow();
   });
 });

@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { coerceRow, type RefResolver, type RefMatch } from './import-coerce.js';
 import type { ExportFieldMeta } from './import-field-meta.js';
 import type { ValidationMessageTranslator } from '@objectstack/spec/system';
+import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import type { CreateDataRequest, FindDataRequest, UpdateDataRequest, ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from './bulk-write.js';
 import { isUniqueViolationError, uniqueViolationColumn, isEngineDuplicateRecordEnvelope, mapDataError } from '@objectstack/types';
@@ -37,6 +38,35 @@ import { isUniqueViolationError, uniqueViolationColumn, isEngineDuplicateRecordE
  * `evaluateValidationRules` `insert()` runs, under this deployment's own
  * ADR-0104 posture, and persists nothing. Agreement is by construction rather
  * than by a copy kept in step by hand.
+ *
+ * ## The row carries the write's drop report, on both halves (#20701)
+ *
+ * A caller-supplied value the engine LEGALLY strips (a `formula` column, a
+ * static `readonly` one, a runtime-owned one) does not fail the row: the write
+ * completes without it and the engine reports the strip as `droppedFields`
+ * (`DroppedFieldsEventSchema`, "stripping is legitimate semantics, not an
+ * error"). The create door relays that report; the import row used to answer
+ * a bare `ok` / `created` on both halves, so a file whose formula column was
+ * silently ignored read exactly like a file that wrote it. Each row now
+ * carries the engine's own per-row report, copied verbatim by
+ * {@link rowDrops} from whichever single-row channel the row's write answered
+ * on:
+ *
+ *  - the dry run: `validateData`'s verdict for the row (`results[0]`);
+ *  - a create through `insertManyData`: the row's own outcome;
+ *  - a create through `createData` (the inline path, and `bulkWrite`'s
+ *    per-row degradation) and an update through `updateData`: the response,
+ *    which is one row's.
+ *
+ * ⛔ The import holds no list of non-writable types and never inspects a
+ * `reason`: the engine's report is the only source, so a reason the engine
+ * adds later reaches the row with no change here. A create batched through
+ * `createManyData` answers only the batch-level union, which names no row
+ * (its own docblock forbids resolving it to rows), so those rows carry no
+ * key — an absent key does not prove nothing was dropped, as the spec's
+ * describe says. An update-mode preview runs no `readonlyWhen` or
+ * primary-key strip (the `ValidateDataResponseSchema` limit), so a matched
+ * row's dry run can name fewer fields than its commit.
  */
 
 export type ImportAction = 'created' | 'updated' | 'skipped' | 'failed';
@@ -57,6 +87,15 @@ export interface ImportRowResult {
    * fine HERE"; a real write has no equivalent channel to report them on.
    */
   warnings?: ValidateDataIssue[];
+  /**
+   * Caller-supplied fields the engine legally stripped from THIS row (a
+   * committed row) or would strip (a dry-run row), one event per reason, in
+   * the engine's own shape and reason vocabulary. Only on an `ok` row, and
+   * only when at least one field was dropped; `ok` and `action` are unchanged.
+   * See "The row carries the write's drop report" above for each channel it
+   * is read from, and where it cannot be.
+   */
+  droppedFields?: DroppedFieldsEvent[];
 }
 
 /** Running tallies handed to {@link RunImportOptions.onProgress}. */
@@ -146,8 +185,11 @@ export interface ImportProtocolLike {
    * row that fails validation is a per-row verdict, so a bad row never forces
    * the whole-batch degradation that re-runs beforeInsert hooks on the good
    * rows.
+   *
+   * An `ok` outcome carries `droppedFields`, what the engine stripped from
+   * THAT row, when anything was; the runner copies it onto the row (#20701).
    */
-  insertManyData?(args: ImportProtocolRequest<{ object: string; records: any[] }>): Promise<{ outcomes: Array<{ ok: boolean; record?: any; error?: unknown }> }>;
+  insertManyData?(args: ImportProtocolRequest<{ object: string; records: any[] }>): Promise<{ outcomes: Array<{ ok: boolean; record?: any; error?: unknown; droppedFields?: DroppedFieldsEvent[] }> }>;
   /**
    * Validate-only (commit 18189983d — #4633 ruling D). The write path's verdict on a
    * candidate row, with nothing persisted. The dry run routes through THIS
@@ -448,6 +490,27 @@ function adoptDoorVerdict(rowNo: number, door: Record<string, unknown>): ImportR
   };
 }
 
+/**
+ * The row's `droppedFields`, copied from the engine's report for that one row
+ * (#20701): a spread that adds the key when the report names at least one
+ * event, and nothing otherwise. The events are taken verbatim — no reason is
+ * read, mapped or filtered here, so the row speaks the engine's vocabulary,
+ * whatever arms it has.
+ */
+function rowDrops(events: readonly DroppedFieldsEvent[] | undefined): { droppedFields?: DroppedFieldsEvent[] } {
+  return Array.isArray(events) && events.length > 0 ? { droppedFields: [...events] } : {};
+}
+
+/**
+ * The `droppedFields` a single-record write answered with. `createData` and
+ * `updateData` are typed `any` on {@link ImportProtocolLike}; the key read is
+ * the one `CreateDataResponseSchema` / `UpdateDataResponseSchema` declare, and
+ * the response is one row's, so the report is that row's.
+ */
+function responseDrops(res: unknown): readonly DroppedFieldsEvent[] | undefined {
+  return (res as { droppedFields?: DroppedFieldsEvent[] } | null | undefined)?.droppedFields;
+}
+
 /** Upper bound on rows in one createManyData batch (framework#2678 suggests 100-500). */
 const MAX_CREATE_BATCH_SIZE = 200;
 
@@ -719,6 +782,12 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
     for (const b of batch) {
       if (b.data.id == null || b.data.id === '') b.data.id = randomUUID();
     }
+    // [#20701] Each row's drop report, recorded by the write call that wrote
+    // it and keyed by the row object itself (`bulkWrite` hands the closures
+    // the same objects it was given), because `bulkWrite`'s per-row result
+    // carries only the record. A row a retry found already committed has no
+    // entry: the response that would have carried its report was lost.
+    const dropsByRow = new Map<Record<string, any>, readonly DroppedFieldsEvent[] | undefined>();
     // Recheck helper shared by both write paths: on attempt > 1 split the
     // chunk into rows that already landed (by id) and rows still to create.
     const splitByExisting = async (chunk: Array<Record<string, any>>) => {
@@ -749,7 +818,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
               ({ existingByIdx, toCreate } = await splitByExisting(chunk));
             }
             try {
-              let freshOutcomes: Array<{ ok: boolean; record?: any; error?: unknown }>;
+              let freshOutcomes: Array<{ ok: boolean; record?: any; error?: unknown; droppedFields?: DroppedFieldsEvent[] }>;
               if (toCreate.length === 0) {
                 freshOutcomes = [];
               } else {
@@ -763,7 +832,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
                   // outcome array carried on the error (framework#3147).
                   const recovered = recoverSummaryStale(e);
                   if (!recovered) throw e;
-                  freshOutcomes = recovered as Array<{ ok: boolean; record?: any; error?: unknown }>;
+                  freshOutcomes = recovered as Array<{ ok: boolean; record?: any; error?: unknown; droppedFields?: DroppedFieldsEvent[] }>;
                 }
               }
               if (!Array.isArray(freshOutcomes) || freshOutcomes.length !== toCreate.length) {
@@ -772,6 +841,8 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
                   { code: 'ERR_BULK_RESULT_MISMATCH' },
                 );
               }
+              // [#20701] Outcome `k` is `toCreate[k]`'s, so its report is that row's.
+              toCreate.forEach((row, k) => { dropsByRow.set(row, freshOutcomes[k].ok ? freshOutcomes[k].droppedFields : undefined); });
               lastBatchUncertain = false;
               let k = 0;
               return chunk.map((_row, i) => existingByIdx.has(i)
@@ -834,10 +905,12 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
             if (hit) return hit; // already committed by a prior attempt
           }
           try {
-            return await p.createData({
+            const res = await p.createData({
               object: objectName, data: row, context: writeCtx,
               ...(environmentId ? { environmentId } : {}),
             });
+            dropsByRow.set(row, responseDrops(res)); // [#20701] one row's response, so the row's report
+            return res;
           } catch (e) {
             const recovered = recoverSummaryStale(e);
             if (recovered) return recovered[0]; // record written; summary stale
@@ -847,13 +920,14 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
       },
     );
     for (const res of writeResults) {
-      const { index, rowNo } = batch[res.index];
+      const { index, rowNo, data } = batch[res.index];
       if (res.ok) {
         const id = extractRecordId(res.record);
         okCount++; created++;
         if (collectUndo && id != null) undoLog.created.push(id);
         results[index] = { row: rowNo, ok: true, action: 'created', id,
-          ...(flushSummaryStale ? { code: 'SUMMARY_RECOMPUTE_FAILED' } : {}) };
+          ...(flushSummaryStale ? { code: 'SUMMARY_RECOMPUTE_FAILED' } : {}),
+          ...rowDrops(dropsByRow.get(data)) };
       } else {
         errCount++;
         results[index] = toFailedResult(rowNo, res.error, objectName);
@@ -930,15 +1004,19 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
                 // because the write would store it, and the complaint rides
                 // along so "accepted for now" is visible rather than silent.
                 const admitted = verdict?.warnings?.length ? { warnings: verdict.warnings } : {};
-                if (willUpdate) { updated++; results[i] = { row: rowNo, ok: true, action: 'updated', id: String((existing as any).id ?? '') || undefined, ...admitted }; }
-                else { created++; results[i] = { row: rowNo, ok: true, action: 'created', ...admitted }; }
+                // [#20701] What the write would strip from this row, from the same verdict.
+                const drops = rowDrops(verdict?.droppedFields);
+                if (willUpdate) { updated++; results[i] = { row: rowNo, ok: true, action: 'updated', id: String((existing as any).id ?? '') || undefined, ...admitted, ...drops }; }
+                else { created++; results[i] = { row: rowNo, ok: true, action: 'created', ...admitted, ...drops }; }
               }
             } else if (willUpdate) {
               const target = existing as Record<string, any>;
               let res2: unknown;
               let updateSummaryStale = false;
+              let updateDrops: readonly DroppedFieldsEvent[] | undefined;
               try {
                 res2 = await withTransientRetry(() => p.updateData({ object: objectName, id: target.id, data, context: writeCtx, ...(environmentId ? { environmentId } : {}) }));
+                updateDrops = responseDrops(res2); // [#20701] read off the response, never off a recovered record
               } catch (e) {
                 // Record updated but summary recompute failed (framework#3147):
                 // the update landed, so recover rather than fail the row.
@@ -952,7 +1030,8 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
                 undoLog.updated.push({ id: String(target.id), before: captureBefore(target, data) });
               }
               results[i] = { row: rowNo, ok: true, action: 'updated', id,
-                ...(updateSummaryStale ? { code: 'SUMMARY_RECOMPUTE_FAILED' } : {}) };
+                ...(updateSummaryStale ? { code: 'SUMMARY_RECOMPUTE_FAILED' } : {}),
+                ...rowDrops(updateDrops) };
             } else if (canBulkCreate) {
               // Buffer — the actual write happens in a batched flush below.
               pendingCreates.push({ index: i, rowNo, data });
@@ -966,7 +1045,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
               const id = extractRecordId(res2);
               okCount++; created++;
               if (collectUndo && id != null) undoLog.created.push(id);
-              results[i] = { row: rowNo, ok: true, action: 'created', id };
+              results[i] = { row: rowNo, ok: true, action: 'created', id, ...rowDrops(responseDrops(res2)) };
             }
           }
         }
