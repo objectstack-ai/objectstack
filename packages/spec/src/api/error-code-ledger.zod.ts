@@ -1059,11 +1059,25 @@ export const ERROR_CODE_LEDGER = {
     'AUTOMATION_UNSCOPED_RUN_DATA_ACCESS',
     'EXECUTION_ERROR',
     'INVALID_SIGNAL',             // resume signal writes engine-internal variables
+    // [#21106] The connector sync executor (`connector-pull.ts`,
+    // `pullConnectorSource`) stamps this row and `UNSUPPORTED_TRANSFORM` below
+    // onto `ConnectorPullError.code` through its local `refuse(code, status,
+    // reason, message)` helper: 404 when no mapping artifact has the requested
+    // name, 400 for a `javascript` transform a pull does not execute. The class
+    // ships in this package's `dist`. No HTTP door on this tree (nothing invokes
+    // the pull yet; the thrown value is the boundary). Both codes are already
+    // registered under `@objectstack/rest` (and `UNSUPPORTED_TRANSFORM` under
+    // `@objectstack/core`), so these rows are provenance, not identity.
+    // `check:error-code-provenance` cannot see a `refuse(...)` call site (a
+    // declared blind spot), so `check-error-code-provenance.test.ts` pins both
+    // rows by hand.
+    'MAPPING_NOT_FOUND',
     'NODE_FAILURE',
     'NO_EXECUTOR',
     'RESUME_IN_PROGRESS',         // duplicate resume refused while the first is running
     'RUN_NOT_FOUND',              // no suspension for this run id — unresumable for good
     'STORE_UNAVAILABLE',          // durable suspended-run store unreadable — existence unknown
+    'UNSUPPORTED_TRANSFORM',      // [#21106] see `MAPPING_NOT_FOUND` above
   ],
   '@objectstack/service-analytics': [
     'CUBE_NOT_FOUND',

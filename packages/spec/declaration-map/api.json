@@ -70,6 +70,8 @@
     "AuditMetaItemResponseSchema": "api/AuditMetaItemResponse",
     "AuthEndpoint": "api/AuthEndpoint",
     "AuthEndpointSchema": "api/AuthEndpoint",
+    "AuthFamilies": "api/AuthFamilies",
+    "AuthFamiliesSchema": "api/AuthFamilies",
     "AuthFeaturesConfig": "api/AuthFeaturesConfig",
     "AuthFeaturesConfigSchema": "api/AuthFeaturesConfig",
     "AuthProvider": "api/AuthProvider",
