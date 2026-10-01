@@ -21,10 +21,14 @@ export interface KnowledgeServicePluginOptions {
    */
   sources?: KnowledgeSource[];
   /**
-   * Subscribe to ObjectQL `record.*` events from `IRealtimeService`
-   * for `object` sources. Defaults to `true`. Set to `false` to
-   * disable inline event sync (e.g. when an external indexer drives
-   * upserts).
+   * Subscribe to ObjectQL `data.record.created` / `data.record.updated` /
+   * `data.record.deleted` events from `IRealtimeService` for `object`
+   * sources. Defaults to `true`. Set to `false` to disable inline event
+   * sync (e.g. when an external indexer drives upserts).
+   *
+   * The aggregate `data.records.updated` / `data.records.deleted` events a
+   * predicate write (`multi: true`) publishes carry a count, not records:
+   * they cannot be synced and only log a warning that the index may be stale.
    * @default true
    */
   enableEventSync?: boolean;
@@ -159,12 +163,18 @@ export class KnowledgeServicePlugin implements Plugin {
 
         // [#4626] `data.record.*` payloads ARE the spec's `DataEvent`
         // (`@objectstack/spec/api`): the record body lives in `after`, the id
-        // in the required top-level `recordId`. Reading the payload itself as
-        // a record (what the shared branch below did) indexed the ENVELOPE —
-        // `{ recordId, after }` — as if it were the row, so object sources
-        // were syncing documents with none of the record's fields, and a
-        // delete never resolved an id at all. Kept separate from the legacy
-        // `record.*` shape rather than merged behind fallbacks.
+        // in the required top-level `recordId`. The payload itself is the
+        // ENVELOPE, never the row — reading it as a record indexes
+        // `{ recordId, after }` as if it were the row (a document with none of
+        // the record's fields), and a delete never resolves an id at all.
+        //
+        // These three are the only per-record names the ObjectQL engine
+        // publishes. There is deliberately no `record.created|updated|deleted`
+        // branch: no producer emits those names (the spec's `RealtimeEventType`
+        // dropped them for the same reason), so a branch for them is dead code
+        // plus a `payload.record ?? payload` fallback for a shape nobody sends.
+        // An event type this handler does not name — those, and `metadata.*`
+        // too — falls through without a sync.
         if (type === 'data.record.created' || type === 'data.record.updated') {
           const record = payload.after as Record<string, unknown> | undefined;
           if (record && typeof record === 'object') {
@@ -213,21 +223,6 @@ export class KnowledgeServicePlugin implements Plugin {
             { object, type, matched },
           );
           return;
-        }
-
-        if (type === 'record.created' || type === 'record.updated') {
-          const record =
-            (payload.record as Record<string, unknown> | undefined) ?? payload;
-          if (record && typeof record === 'object') {
-            await service.handleRecordUpsert(object, record as Record<string, unknown>);
-          }
-          return;
-        }
-        if (type === 'record.deleted') {
-          const recordObj = payload.record as Record<string, unknown> | undefined;
-          const id =
-            (payload.id as string | undefined) ?? (recordObj?.id as string | undefined);
-          if (id) await service.handleRecordDelete(object, id);
         }
       });
       ctx.logger.info?.('KnowledgeServicePlugin: event sync subscription active.');

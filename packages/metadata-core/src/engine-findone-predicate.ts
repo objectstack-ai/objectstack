@@ -263,7 +263,7 @@ export const ENGINE_FINDONE_PREDICATE_CASES: readonly EngineFindOnePredicateCase
   { what: 'an operator predicate', query: { where: { id: { $in: ['a', 'b'] } } }, expect: 'selective' },
   // The alias the engine folds on every entry point (#4346). Before the fold,
   // `findOne({ filter })` matched the first row of the WHOLE table.
-  { what: "the 'filter' alias alone — folded into 'where' before the guard (#4346)", query: { filter: { status: 'open' } }, expect: 'selective' },
+  { what: "the 'filter' alias alone — folded into 'where' before the guard", query: { filter: { status: 'open' } }, expect: 'selective' },
   { what: "an explicit null 'where' beside a real 'filter' — null is a withdrawal, not a value", query: { where: null, filter: { status: 'open' } }, expect: 'selective' },
   // A FilterArray that is a well-formed AST lowers to a condition.
   { what: 'a non-empty FilterArray — lowered to a condition before the guard', query: { where: ['status', '=', 'open'] }, expect: 'selective' },
@@ -274,12 +274,12 @@ export const ENGINE_FINDONE_PREDICATE_CASES: readonly EngineFindOnePredicateCase
   //    a running server throws on — which is the whole of #11957.
   { what: 'no query at all', query: undefined, expect: 'reject' },
   { what: 'an empty query bag', query: {}, expect: 'reject' },
-  { what: "an empty 'where' object — the match-every-row shape (#3896's reading)", query: { where: {} }, expect: 'reject' },
+  { what: "an empty 'where' object — read as match-every-row, so NOT a predicate", query: { where: {} }, expect: 'reject' },
   { what: "an explicitly null 'where'", query: { where: null }, expect: 'reject' },
   // THE #11767 SHAPE. An empty FilterArray is truthy, so every hand-written
   // `if (!query?.where)` copy accepts it; the engine's lowering deletes the key
   // and the guard refuses. This one row is what the card was filed for.
-  { what: "an empty FilterArray 'where: []' — truthy, and NOT a predicate (#11767)", query: { where: [] }, expect: 'reject' },
+  { what: "an empty FilterArray 'where: []' — truthy, and NOT a predicate", query: { where: [] }, expect: 'reject' },
   { what: "a null 'filter' alias — a withdrawal, so nothing folds", query: { filter: null }, expect: 'reject' },
   { what: 'an empty orderBy array', query: { orderBy: [] }, expect: 'reject' },
   { what: 'a projection and a limit but nothing selective', query: { fields: ['id', 'name'], limit: 1 }, expect: 'reject' },

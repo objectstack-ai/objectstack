@@ -1,10 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, readFileSync, symlinkSync, rmSync } from 'node:fs';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, appendFileSync, readFileSync, symlinkSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+// Loaded at module top, so the first transform is paid during collection
+// rather than inside a clocked test body (`check:test-source-alias`).
+import { AppPlugin } from '@objectstack/runtime';
+import { loadConfig } from './config.js';
 import { bootSchemaStack } from './schema-migrate.js';
 
 /**
@@ -694,21 +698,38 @@ describe('a plan writes nothing even when the host writes from init() (#13332)',
 
       // The property (b) was chosen for: the hooks RAN — the log-only ones
       // included — on the path an operator reads before a production apply.
+      // The `extra` plugin is handed straight to the kernel (not host code
+      // composed for declarations), so every phase of it runs and meets the
+      // guard: the guard is phase-agnostic.
       for (const phase of PHASES) {
-        expect(log).toContain(`host|log-only|${phase}`);
         expect(log).toContain(`extra|log-only|${phase}`);
         // …and the writing hooks got all the way to their `create()` call,
         // which returned instead of throwing: the line after it was reached.
-        expect(log).toContain(`host|write|${phase}`);
         expect(log).toContain(`extra|write|${phase}`);
+      }
+      // The HOST config's plugin keeps `kernel:ready` — the phase the contract
+      // leaves registration in — and (#21054) never registers its
+      // post-declaration hooks at all.
+      expect(log).toContain('host|log-only|kernel:ready');
+      expect(log).toContain('host|write|kernel:ready');
+      for (const phase of ['kernel:bootstrapped', 'kernel:listening']) {
+        expect(log).not.toContain(`host|log-only|${phase}`);
+        expect(log).not.toContain(`host|write|${phase}`);
       }
 
       // The refusals are REPORTED, not swallowed — this is the line the plan
       // prints and `--json` carries. No raw execute() went through on this
       // boot, so the outcome claim HELD and is printed with the report.
+      // 4 = the host's `kernel:ready` write + the extra plugin's three.
       const notes = stack.composition.notes.join(' ');
-      expect(notes).toContain('Refused 6 write(s) during the declaration boot — a plan writes nothing');
+      expect(notes).toContain('Refused 4 write(s) during the declaration boot — a plan writes nothing');
       expect(notes).toContain('create() on sys_metadata');
+      // …and what was not run is said too.
+      expect(notes).toContain(
+        'did not register 4 host hook(s) on post-declaration phases '
+        + '(com.example.host-writes-from-init on kernel:bootstrapped x2, '
+        + 'com.example.host-writes-from-init on kernel:listening x2)',
+      );
     } finally {
       await stack.shutdown();
     }
@@ -770,10 +791,11 @@ describe('a plan writes nothing even when the host writes from init() (#13332)',
       // …and the run SAYS so. The refusal line drops the flat claim (the
       // colon directly after "boot" is the dropped phrase), the forwarded
       // call is named with its count, and no note in the run claims the
-      // plan wrote nothing. 4 refusals: the host config's plugin on three
-      // phases, plus this fixture's in-run control.
+      // plan wrote nothing. 2 refusals: the host config's plugin on
+      // `kernel:ready` (its post-declaration hooks are never registered,
+      // #21054), plus this fixture's in-run control.
       const notes = stack.composition.notes.join(' ');
-      expect(notes).toContain('Refused 4 write(s) during the declaration boot:');
+      expect(notes).toContain('Refused 2 write(s) during the declaration boot:');
       expect(notes).toContain('Raw execute() was called 1 time(s) during the declaration boot');
       expect(notes).not.toContain('a plan writes nothing');
 
@@ -784,5 +806,220 @@ describe('a plan writes nothing even when the host writes from init() (#13332)',
     } finally {
       await stack.shutdown();
     }
+  }, 60_000);
+});
+
+/**
+ * #21054 — a plan's declaration boot runs no app lifecycle hook.
+ *
+ * `examples/app-crm` measured it: its config's `onEnable` hooks
+ * `kernel:bootstrapped` and reads `sys_position` / `sys_permission_set`,
+ * tables the plan's composition never declares. Every plan — on a database
+ * `apply` had just migrated, and on one that does not exist — printed six
+ * `[sql-driver] DATABASE_ERROR` lines and six `position binding lookup failed`
+ * warnings. The write guard could not help: the hook only READS.
+ *
+ * The fixture is that shape, built here rather than read from
+ * `examples/app-crm` (a test reading another package's tree is an undeclared
+ * cross-package input): a stack with one object, a named `onEnable` export
+ * that hooks `kernel:bootstrapped` and reads the two undeclared tables, and a
+ * host plugin whose `init()` registers a reading `kernel:bootstrapped` hook
+ * beside a `kernel:ready` one.
+ *
+ * Pinned, in order: the POSITIVE CONTROL (the same code, composed the way a
+ * served boot composes it, prints the lines); `apply`'s confirmed work after
+ * the boot is unchanged (the DDL flush creates the app's table, the #13028
+ * coverage pass examines it); then the plan on the migrated file and on an
+ * absent one prints zero `DATABASE_ERROR` lines, runs neither hook, and still
+ * runs the host's `kernel:ready` hook.
+ */
+describe('a plan runs no app lifecycle hook (#21054)', () => {
+  let dir: string;
+  let migratedDb: string;
+  let hookLog: string;
+  const savedEnv: Record<string, string | undefined> = {};
+  let applyFlushed: Array<{ table: string; kind: string }> = [];
+  let applyExamined = -1;
+
+  const PROBE_TABLES = ['sys_position', 'sys_permission_set'];
+
+  /** Every driver `DATABASE_ERROR` warning the run printed, whatever channel it took. */
+  const captureDatabaseErrors = () => {
+    const lines: string[] = [];
+    const record = (...args: unknown[]) => {
+      const text = args.map((a) => (typeof a === 'string' ? a : '')).join(' ');
+      if (text.includes('DATABASE_ERROR')) lines.push(text);
+    };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(record);
+    const error = vi.spyOn(console, 'error').mockImplementation(record);
+    return {
+      lines,
+      restore: () => { warn.mockRestore(); error.mockRestore(); },
+    };
+  };
+
+  const bootPlan = (dbFile: string) => bootSchemaStack({
+    jsonOutput: false,
+    databaseUrl: `file:${dbFile}`,
+    deferSchemaDdl: true,
+    readOnlyProbe: true,
+    composeHostStack: true,
+    projectRoot: dir,
+  });
+
+  beforeAll(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'os-21054-'));
+    migratedDb = join(dir, 'migrated.db');
+    hookLog = join(dir, 'hooks.log');
+    writeFileSync(hookLog, '');
+
+    savedEnv.NODE_ENV = process.env.NODE_ENV;
+    savedEnv.OS_ARTIFACT_PATH = process.env.OS_ARTIFACT_PATH;
+    process.env.NODE_ENV = 'production';
+    process.env.OS_ARTIFACT_PATH = join(dir, 'dist', 'objectstack.json');
+
+    writeFileSync(
+      join(dir, 'objectstack.config.ts'),
+      [
+        "import { appendFileSync } from 'node:fs';",
+        '',
+        `const LOG = ${JSON.stringify(hookLog)};`,
+        "const SYS = { isSystem: true };",
+        '',
+        'export default {',
+        "  manifest: { id: 'com.example.os21054', name: 'No app hooks on a plan', version: '0.0.0', type: 'app' },",
+        "  objects: [{ name: 'os21054_account', fields: { name: { type: 'text' } } }],",
+        '  plugins: [{',
+        "    name: 'com.example.os21054-host',",
+        "    version: '1.0.0',",
+        '    init: async (ctx: any) => {',
+        "      ctx.hook('kernel:ready', async () => { appendFileSync(LOG, 'host|kernel:ready\\n'); });",
+        "      ctx.hook('kernel:bootstrapped', async () => {",
+        "        appendFileSync(LOG, 'host|kernel:bootstrapped\\n');",
+        "        try { await ctx.getService('objectql').find('sys_position', { where: { name: 'x' }, limit: 1, context: SYS }); } catch { /* answered */ }",
+        '      });',
+        '    },',
+        '  }],',
+        '};',
+        '',
+        '// The app-crm shape: a named `onEnable` beside the default-exported stack.',
+        'export const onEnable = async (ctx: any) => {',
+        "  appendFileSync(LOG, 'app|onEnable\\n');",
+        "  ctx.hook('kernel:bootstrapped', async () => {",
+        "    appendFileSync(LOG, 'app|kernel:bootstrapped\\n');",
+        `    for (const object of ${JSON.stringify(PROBE_TABLES)}) {`,
+        "      try { await ctx.ql.find(object, { where: { name: 'x' }, limit: 1, context: SYS }); } catch { /* answered */ }",
+        '    }',
+        '  });',
+        '};',
+        '',
+      ].join('\n'),
+    );
+
+    // `os migrate apply`, as the command runs it: boot deferred, then flush
+    // the confirmed DDL. Its results are the control asserted below.
+    const apply = await bootSchemaStack({
+      jsonOutput: false,
+      databaseUrl: `file:${migratedDb}`,
+      deferSchemaDdl: true,
+      composeHostStack: true,
+      projectRoot: dir,
+    });
+    try {
+      applyFlushed = (await apply.flushSchemaDdl()).map((p) => ({ table: p.table, kind: p.kind }));
+      applyExamined = apply.composition.coverage?.examinedObjects ?? -1;
+    } finally {
+      await apply.shutdown();
+    }
+    writeFileSync(hookLog, '');
+  }, 120_000);
+
+  afterAll(() => {
+    if (savedEnv.NODE_ENV === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = savedEnv.NODE_ENV;
+    if (savedEnv.OS_ARTIFACT_PATH === undefined) delete process.env.OS_ARTIFACT_PATH;
+    else process.env.OS_ARTIFACT_PATH = savedEnv.OS_ARTIFACT_PATH;
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  it('POSITIVE CONTROL: the same code, composed as a served boot composes it, runs both hooks and prints the lines', async () => {
+    const { config } = await loadConfig(join(dir, 'objectstack.config.ts'));
+
+    writeFileSync(hookLog, '');
+    const captured = captureDatabaseErrors();
+    const stack = await bootSchemaStack({
+      jsonOutput: false,
+      databaseUrl: `file:${migratedDb}`,
+      deferSchemaDdl: true,
+      readOnlyProbe: true,
+      // No declaration composition: the host plugin and the app as `serve`
+      // composes them, so this leg proves the fixture can print the lines.
+      composeHostStack: false,
+      extraPlugins: [...config.plugins, new AppPlugin(config, undefined, { skipSeedData: true })],
+      projectRoot: dir,
+    });
+    try {
+      const log = readFileSync(hookLog, 'utf8');
+      expect(log).toContain('app|onEnable');
+      expect(log).toContain('app|kernel:bootstrapped');
+      expect(log).toContain('host|kernel:bootstrapped');
+      for (const table of PROBE_TABLES) {
+        expect(captured.lines.some((l) => l.includes(`'${table}'`))).toBe(true);
+      }
+    } finally {
+      captured.restore();
+      await stack.shutdown();
+    }
+  }, 60_000);
+
+  it('CONTROL: apply\'s confirmed work after the boot is unchanged — the flush creates the app\'s table, the coverage pass examines it', () => {
+    expect(applyFlushed).toContainEqual({ table: 'os21054_account', kind: 'create_table' });
+    expect(applyExamined).toBeGreaterThan(0);
+  });
+
+  it('THE FIX, on the migrated file: zero DATABASE_ERROR lines, neither hook runs, kernel:ready still does', async () => {
+    writeFileSync(hookLog, '');
+    const captured = captureDatabaseErrors();
+    const stack = await bootPlan(migratedDb);
+    try {
+      expect(captured.lines).toEqual([]);
+
+      const log = readFileSync(hookLog, 'utf8');
+      expect(log).not.toContain('app|onEnable');
+      expect(log).not.toContain('app|kernel:bootstrapped');
+      expect(log).not.toContain('host|kernel:bootstrapped');
+      expect(log).toContain('host|kernel:ready');
+
+      // The plan itself: everything apply created is there, nothing pending.
+      expect(stack.pendingSchemaWork).toEqual([]);
+      expect(await stack.driver!.detectManagedDrift()).toHaveLength(0);
+
+      // And it says what it did not run.
+      expect(stack.composition.notes.join(' ')).toContain(
+        'did not execute runtime.onEnable of plugin.app.com.example.os21054, and did not register '
+        + '1 host hook(s) on post-declaration phases (com.example.os21054-host on kernel:bootstrapped)',
+      );
+    } finally {
+      captured.restore();
+      await stack.shutdown();
+    }
+  }, 60_000);
+
+  it('THE FIX, on an absent file: zero DATABASE_ERROR lines, neither hook runs, and no file is left behind', async () => {
+    const absent = join(dir, 'absent.db');
+    writeFileSync(hookLog, '');
+    const captured = captureDatabaseErrors();
+    const stack = await bootPlan(absent);
+    try {
+      expect(captured.lines).toEqual([]);
+      const log = readFileSync(hookLog, 'utf8');
+      expect(log).not.toContain('app|onEnable');
+      expect(log).not.toContain('host|kernel:bootstrapped');
+      expect(stack.pendingSchemaWork.map((p) => p.table)).toContain('os21054_account');
+    } finally {
+      captured.restore();
+      await stack.shutdown();
+    }
+    expect(existsSync(absent)).toBe(false);
   }, 60_000);
 });
