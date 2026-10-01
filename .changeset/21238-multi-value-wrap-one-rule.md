@@ -16,7 +16,7 @@ The write door stores a lone scalar sent to a multi-valued field (`tags`, `multi
 | `!record.tags.contains('x')` | `'x'` | admitted | `["x"]` | hidden |
 | `record.tags.contains('x')`, a by-id update | `'x'` | 403 | `["x"]` | shown |
 
-Now the image's value on every field the object declares multi-valued goes through the same rule the write door stores it by, before the check is judged. The first and third rows are admitted. The second is refused: a policy that forbids a member from tagging a row `x` can no longer be passed by sending `'x'` instead of `['x']`. A lone scalar now gets exactly the verdict its stored list gets, on the insert, a by-id update and a predicate update.
+Now the image's value on every field the object declares multi-valued goes through the same rule the write door stores it by, before the check is judged. The first and third rows are admitted. The second is refused: a policy that forbids a member from tagging a row `x` can no longer be passed by sending `'x'` instead of `['x']`. A lone scalar now gets exactly the verdict its stored list gets, on the insert, a by-id update and a predicate update. That includes a policy that compares such a field with a scalar comparison (`==`, `!=`, `in`, an ordering), which the read refuses with `INVALID_FILTER` / 400: there `'x'` used to get the opposite of the verdict `['x']` got, and now gets the same one.
 
 Unchanged: a field the object does not declare multi-valued is judged as written; a list, `null`, a blank string and an object are judged as written, as the write door leaves them; the check's comparands are left as written, since `contains` takes one member; and refusals keep their code and status (`PERMISSION_DENIED` / 403).
 
