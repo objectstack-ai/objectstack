@@ -10,7 +10,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { runImport, type ImportProtocolLike } from './import-runner';
-import type { ExportFieldMeta } from './export-format.js';
+import type { ExportFieldMeta } from './import-field-meta.js';
 
 /**
  * [#16952] The doubles below are annotated FROM the exported declaration

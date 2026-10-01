@@ -95,10 +95,9 @@ export const LEDGER_POPULATION_BASELINE: readonly string[] = [
 
   // ── dispatcher domains (`packages/runtime/src/route-ledger.ts`) ─────────
   // Absent because classified: `/meta`, `/actions`, `/automation`,
-  // `/packages`, `/mcp`. The other 16 domains are here.
+  // `/packages`, `/mcp`, `/analytics`. The other 15 domains are here.
   'dispatcher-domain:route-ledger.ts:/.well-known/objectstack',
   'dispatcher-domain:route-ledger.ts:/ai',
-  'dispatcher-domain:route-ledger.ts:/analytics',
   'dispatcher-domain:route-ledger.ts:/apps',
   'dispatcher-domain:route-ledger.ts:/auth',
   'dispatcher-domain:route-ledger.ts:/data',
@@ -125,6 +124,8 @@ export const LEDGER_POPULATION_BASELINE: readonly string[] = [
  *
  * 34 at 2026-08-31, the day the ledger population was adopted. 33 at
  * 2026-09-25 (#20102): `rest-family:rest-route-ledger.ts:reports` left with the
- * retired saved-report family — deleted, not classified.
+ * retired saved-report family — deleted, not classified. 32 at 2026-10-01
+ * (#21061): `dispatcher-domain:route-ledger.ts:/analytics` left classified, by
+ * the `anonymous-deny-analytics` row and its domain gate pin.
  */
-export const LEDGER_POPULATION_BASELINE_MAX = 33;
+export const LEDGER_POPULATION_BASELINE_MAX = 32;

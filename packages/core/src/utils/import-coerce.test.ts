@@ -15,7 +15,7 @@ import {
   splitMulti,
   coerceRow,
 } from './import-coerce';
-import type { ExportFieldMeta } from './export-format';
+import type { ExportFieldMeta } from './import-field-meta';
 
 describe('parseBooleanCell', () => {
   it('accepts common truthy spellings across languages', () => {

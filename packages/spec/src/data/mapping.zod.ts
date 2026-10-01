@@ -363,9 +363,12 @@ export const MappingSchema = lazySchema(() => strictObject({
    * - **no delete or conflict policy** — a pull writes through this mapping's
    *   `mode` / `upsertKey`, and nothing else is claimed.
    *
-   * ⚠️ DECLARED, NOT YET EXECUTED: the pull executor is the next stage. The
-   * liveness ledger records every key here `planned` with `authorWarn`, so
-   * authoring it warns until the executor reads it. `sourceFormat` keeps
+   * EXECUTED WHEN A JOB DRIVES IT: `@objectstack/service-automation`'s
+   * connector sync executor (`pullConnectorSource`) reads every key here and
+   * writes through the import runner. Nothing schedules a pull yet — the
+   * `job` that drives it is the next stage — so the liveness ledger keeps
+   * `authorWarn` on the container until it lands. A pull makes ONE action
+   * call and reads ONE response (see `watermark`). `sourceFormat` keeps
    * governing the manual import door; a pulled row is the connector's JSON
    * record.
    */
@@ -406,18 +409,22 @@ export const MappingSchema = lazySchema(() => strictObject({
       },
     }, {
       field: z.string().min(1).describe(
-        'Field of the pulled record holding its last-modified timestamp; the highest value '
-        + 'pulled is the next pull\'s starting point',
+        'Field of the pulled record holding its last-modified timestamp. The next pull\'s starting '
+        + 'point is read from the TARGET: the highest value stored in the field a `fieldMapping` entry '
+        + 'copies this field onto (transform `none`); a field no entry maps that way is refused at pull time',
       ),
       param: z.string().min(1).describe(
         'Query parameter of the read action that receives that starting point',
       ),
     }).optional().describe(
-      'Timestamp-incremental pull; omitted ⇒ every pull reads the full set',
+      'Timestamp-incremental pull; omitted ⇒ every pull reads the full set. Either way a pull makes ONE '
+      + 'action call and reads ONE response: the connector\'s paging is not followed, so a paged endpoint '
+      + 'yields its first page only — and an incremental pull over a newest-first paged endpoint moves its '
+      + 'starting point past the pages it never read',
     ),
   }).optional().describe(
     'Pull binding: the rest/openapi connector this mapping pulls rows from (one-way, full or '
-    + 'timestamp-incremental; a `job` sets the cadence). Declared; the pull is not executed yet',
+    + 'timestamp-incremental; a `job` sets the cadence). Pulled when a job drives it; nothing schedules it yet',
   ),
 
   // `extractQuery`, `errorPolicy` and `batchSize` were removed in 17.0.0

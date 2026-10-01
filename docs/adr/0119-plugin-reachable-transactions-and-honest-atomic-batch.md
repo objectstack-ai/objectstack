@@ -133,7 +133,7 @@ The declared default is aligned to the enforced one: `BatchOptionsSchema.atomic`
 
 **Implement `IDataEngine.batch?` rather than retire it.** No caller has ever wanted its shape; D1 and D4 deliver its stated purpose with semantics somebody actually specified.
 
-**Do nothing and bless the hand-rolled pattern (#4612's option 3).** Rejected on the issue's own evidence: four consumers converging independently on the same shape is a platform gap, and the copies differ in exactly the places that matter — `ImportUndoLog` (`packages/rest/src/import-runner.ts#ImportUndoLog`) journals per-row before-images; the publish path (`packages/metadata-protocol/src/protocol.ts#batchData`) captures a revert plan; `batchData` captured nothing at all and said it did.
+**Do nothing and bless the hand-rolled pattern (#4612's option 3).** Rejected on the issue's own evidence: four consumers converging independently on the same shape is a platform gap, and the copies differ in exactly the places that matter — `ImportUndoLog` (`packages/core/src/utils/import-runner.ts#ImportUndoLog`) journals per-row before-images; the publish path (`packages/metadata-protocol/src/protocol.ts#batchData`) captures a revert plan; `batchData` captured nothing at all and said it did.
 
 ## Consequences
 

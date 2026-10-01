@@ -45,7 +45,11 @@ vi.mock('@objectstack/runtime', () => ({
     },
     recordSeedOutcome: vi.fn(),
 }));
-vi.mock('@objectstack/spec/data', () => ({
+// Only the seed-request parse is stubbed; every other export stays the real one,
+// because `@objectstack/core` reads `@objectstack/spec/data` values at module load
+// (the bulk-import coercion moved there, #20919).
+vi.mock('@objectstack/spec/data', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('@objectstack/spec/data')>()),
     SeedLoaderRequestSchema: { parse: (x: any) => x },
 }));
 

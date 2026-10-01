@@ -27,6 +27,12 @@ import {
     type SuspendedRunStoreEngine,
 } from './suspended-run-store.js';
 import { ObjectStoreFlowDispatchStore } from './flow-dispatch-store.js';
+import {
+    pullConnectorSource,
+    type ConnectorPullOptions,
+    type ConnectorPullProtocol,
+    type ConnectorPullResult,
+} from './connector-pull.js';
 // [ADR-0126 §4 · #12359 ruling, 2026-08-26] ⛔ `SysMetadataActivation` is
 // deliberately NOT imported here any more. This plugin registered the
 // activation ledger's object while flows were its only consumer; registration
@@ -551,9 +557,11 @@ export class AutomationServicePlugin implements Plugin {
      * an unchanged instance (skip — don't re-open its MCP connection) from a
      * changed one (re-materialize). `close` is the optional teardown (e.g. an MCP
      * connection), invoked on removal, replacement, and `destroy()` so no socket /
-     * child process leaks.
+     * child process leaks. `provider` is the entry's provider key (#20919):
+     * the registered def carries none, and the connector sync executor reads
+     * only a `rest` / `openapi` instance, so the answer is recorded here.
      */
-    private materializedConnectors = new Map<string, { signature: string; close?: () => void | Promise<void> }>();
+    private materializedConnectors = new Map<string, { signature: string; provider: string; close?: () => void | Promise<void> }>();
     /**
      * Degraded declarative instances (#3017): provider-bound entries whose
      * upstream was unreachable at materialization. Keyed by connector name;
@@ -593,9 +601,39 @@ export class AutomationServicePlugin implements Plugin {
      * what their disagreement looks like in production.
      */
     private runObjectRegistered = false;
+    /** The context `init()` received — what {@link pullConnectorSource} resolves its services through. */
+    private ctx?: PluginContext;
 
     constructor(options: AutomationServicePluginOptions = {}) {
         this.options = options;
+    }
+
+    /**
+     * [#20919] Pull one `mapping`'s `connectorSource` and write the records
+     * through the import runner — the connector sync executor
+     * (`./connector-pull.ts`). Reads the mapping and writes the target through
+     * the `protocol` service, and resolves the connector against the instances
+     * this plugin materialized from `connectors[]`.
+     *
+     * ⛔ Nothing calls this on a schedule: a `job` drives a pull, and the
+     * caller supplies the execution context (`opts.context`) it runs under.
+     */
+    async pullConnectorSource(opts: ConnectorPullOptions): Promise<ConnectorPullResult> {
+        const ctx = this.ctx;
+        const engine = this.engine;
+        if (!ctx || !engine) {
+            throw new Error('[Automation] pullConnectorSource() called before init() — the automation plugin is not initialized');
+        }
+        const protocol = ctx.getService<ConnectorPullProtocol>('protocol');
+        return pullConnectorSource(
+            {
+                protocol,
+                registry: engine,
+                providerOf: (connector) => this.materializedConnectors.get(connector)?.provider,
+                logger: ctx.logger,
+            },
+            opts,
+        );
     }
 
     /**
@@ -637,6 +675,7 @@ export class AutomationServicePlugin implements Plugin {
     }
 
     async init(ctx: PluginContext): Promise<void> {
+        this.ctx = ctx;
         this.engine = new AutomationEngine(ctx.logger, undefined, {
             maxLogSize: this.options.maxLogSize,
             runSummaryLog: this.options.runSummaryLog,
@@ -1717,7 +1756,7 @@ export class AutomationServicePlugin implements Plugin {
             // conflict rule all agree with the metadata the author wrote.
             const def = { ...materialization.def, name };
             engine.registerConnector(def, materialization.handlers, 'declarative');
-            this.materializedConnectors.set(name, { signature, close: materialization.close });
+            this.materializedConnectors.set(name, { signature, provider, close: materialization.close });
             // Success clears any pending degraded retry — including replacing a
             // registered husk (registerConnector above overwrote it).
             const recovered = this.degradedInstances.delete(name);

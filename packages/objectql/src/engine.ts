@@ -2960,6 +2960,14 @@ export type HeldFileResolver = (
  * That row is gone with the divergence.
  */
 const METADATA_ARRAY_KEYS = [
+  // Data Protocol — shared option lists. FIRST, so a source's lists are in the
+  // registry before anything later in this loop reads them; objects do not
+  // depend on the order (they resolve a list lazily, on the next fold), so this
+  // is the declared loading order (`picklist` loads before `object`), not a
+  // precondition. Both are dispatched to their own registry verbs in
+  // `registerMetadataCollections`: the extensions merge into the list they
+  // name instead of registering as items of their own.
+  'picklists', 'picklistExtensions',
   // UI Protocol
   'actions', 'views', 'pages', 'dashboards', 'reports', 'datasets', 'themes',
   // Automation Protocol
@@ -6856,6 +6864,13 @@ export class ObjectQL implements IObjectQLEngine {
           const items = (source as any)?.[key];
           if (!Array.isArray(items) || items.length === 0) continue;
           this.logger.debug(`Registering ${key} from ${sourceLabel}`, { id: ownerId, count: items.length });
+          // A `picklistExtensions` entry is not an item: it has no name, only
+          // the list it adds to, and the registry merges it there — additive
+          // only, a repeated value refused loudly (`registerPicklistExtension`).
+          if (key === 'picklistExtensions') {
+              for (const extension of items) this._registry.registerPicklistExtension(extension, ownerId);
+              continue;
+          }
           for (const item of items) {
               const itemName = resolveMetadataItemName(key, item);
               if (!itemName) {
@@ -17013,8 +17028,8 @@ export class ObjectQL implements IObjectQLEngine {
       // the `count_distinct` row (memory counted equal documents apart, SQLite
       // compared serialized text, PostgreSQL answered 500); [#20914] took the
       // other rows — `max` over a `json` field answered a document in memory, a
-      // string on SQLite and a 500 on PostgreSQL. The `sum` row is held back by
-      // that card's census (see the door's header).
+      // string on SQLite and a 500 on PostgreSQL; `sum` over one answered `0`,
+      // `0` and a 500. Every row of the table is asked (see the door's header).
       assertAggregationFieldTypesAccepted(object, this._registry.getObject(object), query.aggregations);
       // [#10576] The per-aggregation `filter` (`AggregationNodeSchema.filter`,
       // the contract half of #10413) is a second filter position on this verb,

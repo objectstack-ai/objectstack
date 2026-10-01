@@ -2917,7 +2917,7 @@ export class ObjectStackClient {
    * plane this namespace calls speaks **snake_case**: the in-repo CLI
    * consumers read `p.display_name`, `p.organization_id`, `p.is_default`,
    * `res.database.database_url`, `res.membership.role`, and send
-   * `organization_id` / `display_name` / `clone_from_environment_id`.
+   * `organization_id` / `display_name`.
    *
    * So those contracts are not this wire's types. Binding to them would
    * typecheck, be false, and break the CLI at compile time while telling it
@@ -2990,6 +2990,11 @@ export class ObjectStackClient {
      * the `apps/server` templates route, and `sys_environment` has no such
      * column, so the field was accepted, transmitted, and dropped. Its
      * listing counterpart went the same way in #3702.
+     *
+     * No `clone_from_environment_id`, for the same reason: the control plane's
+     * create schema does not declare it and strips it unread, so a create that
+     * carried it answered success and made an EMPTY environment. Cloning an
+     * environment is not implemented.
      */
     create: async (req: {
       organization_id: string;
@@ -3003,7 +3008,6 @@ export class ObjectStackClient {
       is_default?: boolean;
       is_system?: boolean;
       storage_limit_mb?: number;
-      clone_from_environment_id?: string;
       metadata?: Record<string, unknown>;
     }) => {
       const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments`, {

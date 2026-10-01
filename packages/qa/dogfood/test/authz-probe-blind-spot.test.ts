@@ -43,18 +43,19 @@ describe('authz probe blind-spot census (#13260)', () => {
     expect(derived.table).toEqual(PROBE_TABLE);
   });
 
-  it('every classified key is accounted for — 15 `covers` keys, no more', () => {
-    // The matrix's `covers` keys number 15 today: the 9 probe-minted keys this
+  it('every classified key is accounted for — 17 `covers` keys, no more', () => {
+    // The matrix's `covers` keys number 17 today: the 9 probe-minted keys this
     // census was first measured against, plus the 6 ledger family/domain keys
-    // classified when the population moved (2026-08-31). If a probe starts
-    // minting a key no row covers, the ratchet itself goes red as UNCLASSIFIED
-    // — that is its job, and this pin does not duplicate it. What this asserts
-    // is only that the census's key count is current.
+    // classified when the population moved (2026-08-31), plus the `/analytics`
+    // domain's gate-pin key and its dispatcher-domain key (#21061). If a probe
+    // starts minting a key no row covers, the ratchet itself goes red as
+    // UNCLASSIFIED — that is its job, and this pin does not duplicate it. What
+    // this asserts is only that the census's key count is current.
     //
-    // ⚠️ This is NOT the size of the population. The ledgers mint 40 keys; 6
-    // are classified here and 34 are enumerated in the shrink-only baseline,
+    // ⚠️ This is NOT the size of the population. The ledgers mint 39 keys; 7
+    // are classified here and 32 are enumerated in the shrink-only baseline,
     // which `authz-conformance.test.ts` holds to its own four rules.
-    expect(PROBE_TABLE.keys).toBe(15);
+    expect(PROBE_TABLE.keys).toBe(17);
   });
 
   it.each(PROBE_FILE_CENSUS.map((r) => [r.file, r] as const))(

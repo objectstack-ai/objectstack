@@ -2,12 +2,11 @@
 
 import { randomUUID } from 'node:crypto';
 import { coerceRow, type RefResolver, type RefMatch } from './import-coerce.js';
-import type { ExportFieldMeta } from './export-format.js';
+import type { ExportFieldMeta } from './import-field-meta.js';
 import type { ValidationMessageTranslator } from '@objectstack/spec/system';
 import type { CreateDataRequest, FindDataRequest, UpdateDataRequest, ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
-import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from '@objectstack/core';
-import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
-import { isEngineDuplicateRecordEnvelope, mapDataError } from './error-response.js';
+import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from './bulk-write.js';
+import { isUniqueViolationError, uniqueViolationColumn, isEngineDuplicateRecordEnvelope, mapDataError } from '@objectstack/types';
 
 /**
  * import-runner — the shared row-processing core for bulk import.

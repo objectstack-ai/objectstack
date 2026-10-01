@@ -838,7 +838,7 @@
       "title": "Anonymous requests to every mounted API family answer 401 UNAUTHENTICATED — uniformly, before any resource resolution",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -854,6 +854,7 @@
       "steps": [
         "boot showcase on the platform-default auth posture; do NOT sign in for the probe half",
         "fire unauthenticated requests, one per mounted surface family: GET /api/v1/data/showcase_private_note (data), GET /api/v1/meta (metadata), POST /api/v1/actions/showcase_task/showcase_mark_done/anon-probe-id (dispatcher actions — deliberately a NONEXISTENT record id), GET /api/v1/automation/_status (dispatcher automation — the flow-inventory read; the GET /api/v1/automation flow list is retired, #19543), POST /api/v1/batch {\"operations\": []} (batch), GET /api/v1/security/explain (security-explain)",
+        "probe the analytics dispatcher family (#21061) at each of its three faces — cube read, SQL echo and meta, their routes being the `/analytics` rows of packages/runtime/src/route-ledger.ts — unauthenticated: the two body-carrying faces once with a well-formed AnalyticsQuery body naming a showcase object cube and once with a body the entry validator refuses, the meta face once; then drive the same calls as a signed-in member as the contrast",
         "capture status + full body per surface",
         "classify each 401 body into exactly ONE of the two declared envelope families (rest-flat vs dispatcher-wrapper, #5632) — no tolerant cross-family reads",
         "sign in as a member and repeat the data + meta reads to prove the gate keys on anonymity, not on the routes",
@@ -875,8 +876,14 @@
         {
           "clause": "every 401 body classifies into exactly one of the two declared envelope families — a third dialect (hybrid/re-nested body) is a FAIL even though the status is right (#5632)",
           "oracle": "api",
-          "verify": "mutually exclusive family predicates as in showcase-anonymous-deny-surfaces.dogfood.test.ts: rest-flat (top-level error string, no success flag) for /data /meta /batch /security, dispatcher-wrapper for /actions /automation",
+          "verify": "mutually exclusive family predicates as in showcase-anonymous-deny-surfaces.dogfood.test.ts: rest-flat (top-level error string, no success flag) for /data /meta /batch /security, dispatcher-wrapper for /actions /automation and the three analytics faces",
           "evidence": "classified bodies"
+        },
+        {
+          "clause": "the analytics family refuses before it reads anything: each analytics face answers an anonymous caller 401 UNAUTHENTICATED in the dispatcher-wrapper envelope — a malformed body included, never the validator's 400 — while a signed-in member is served 200 on the same face and meets the validator's 400 on the malformed body (#21061: the floor is the analytics handler's first statement)",
+          "oracle": "api",
+          "verify": "anonymous: cube read, SQL echo, meta → 401 with code UNAUTHENTICATED, and the malformed body on cube read and SQL echo → 401; signed-in member: the same three → 200, the malformed body → 400",
+          "evidence": "per-face traces, both callers"
         },
         {
           "clause": "an authenticated member is unaffected: the same data/meta reads answer 200 for a signed-in baseline member",
@@ -906,7 +913,8 @@
         "actions (/api/v1/actions — dispatcher-mounted)",
         "automation (/api/v1/automation — dispatcher-mounted)",
         "batch (/api/v1/batch)",
-        "security-explain (/api/v1/security/explain)"
+        "security-explain (/api/v1/security/explain)",
+        "analytics (/api/v1/analytics — dispatcher-mounted: cube read, SQL echo, meta)"
       ],
       "automated": {
         "kind": "dogfood",
@@ -921,7 +929,8 @@
         "#5519/#5569/#5570",
         "#5632",
         "authz-conformance.matrix.ts anonymous-deny rows (covers keys)",
-        "packages/core/src/security/anonymous-deny.ts"
+        "packages/core/src/security/anonymous-deny.ts",
+        "#21061"
       ],
       "history": [
         {
@@ -929,6 +938,12 @@
           "date": "2026-08-07",
           "change": "new — auth-boundary sweep over every mounted family, grounded in the #2567/#5519 conformance rows and their dogfood pin",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-01",
+          "change": "analytics variant — the three analytics dispatcher faces join the probe set with an anonymous leg (well-formed and malformed body), a signed-in member leg, and the dispatcher-wrapper family; the title's every-mounted-family claim covered a family the steps never drove",
+          "ref": "#21061"
         }
       ]
     },

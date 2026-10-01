@@ -116,11 +116,14 @@ async function runRollup(
   let settle!: (v: Rollup) => void;
   const done = new Promise<Rollup>((res) => { settle = res; });
   const React = { useEffect: (cb: () => unknown) => { cb(); } };
+  // The effect's dependency list names the two data-invalidation bus nonces the page
+  // reads through the injected `useDataInvalidation`; here they are plain numbers that
+  // never move, so the lifted call evaluates and the body runs exactly once.
   // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
-  const run = new Function('React', 'adapter', 'sel', 'reload', 'setRelated', effectSource) as (
-    React: unknown, adapter: unknown, sel: unknown, reload: unknown, setRelated: (v: Rollup) => void,
+  const run = new Function('React', 'adapter', 'sel', 'reload', 'projectChanged', 'invoiceChanged', 'setRelated', effectSource) as (
+    React: unknown, adapter: unknown, sel: unknown, reload: unknown, projectChanged: unknown, invoiceChanged: unknown, setRelated: (v: Rollup) => void,
   ) => void;
-  run(React, adapter, sel, 0, settle);
+  run(React, adapter, sel, 0, 0, 0, settle);
   return done;
 }
 

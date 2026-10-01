@@ -95,8 +95,9 @@ ten-stage pipeline, get no error, and get no execution.
 **What to use instead — layer by layer, and one honest gap:**
 
 - **Scheduled pull from an external system** — the target-side binding
-  `mapping.connectorSource` with a `job` for the cadence (declared, not yet executed;
-  see [Data sync is defined on the target](#data-sync-is-defined-on-the-target)).
+  `mapping.connectorSource` with a `job` for the cadence (pulled when a job drives it;
+  the job stage that schedules it has not landed — see
+  [Data sync is defined on the target](#data-sync-is-defined-on-the-target)).
 - **Per-field value conversion on import** — `mapping.fieldMapping[].transform`
   (`data/mapping.zod.ts`): a string enum (`none` / `constant` / `map` / `split` /
   `join` / `lookup`) with its settings in `params`, applied row by row by the REST
@@ -208,8 +209,28 @@ Complete, production-grade integration with external systems. Includes authentic
 > `connectorSource` adds where the rows come from — a `rest` / `openapi` connector
 > instance, the read action and an optional timestamp `watermark`. A `job` sets the
 > cadence; no schedule key returns to the connector. Version 1 is a one-way pull,
-> full or incremental. ⚠️ **Declared, not yet executed:** the pull executor ships in
-> a later stage, and authoring `connectorSource` warns until it does.
+> full or incremental.
+>
+> **How a pull runs.** `@objectstack/service-automation`'s connector sync executor
+> (`pullConnectorSource`) reads the mapping, resolves `connectorSource.connector` to a
+> declared (`connectors[]`) `rest` / `openapi` instance, makes **one** call to the read
+> action, takes the array at `recordsPath`, projects it through `fieldMapping` and writes
+> it with the import door's runner — same coercion, same `mode` / `upsertKey` matching,
+> same per-row verdicts. Every binding failure (a plugin-registered connector, an
+> `ok: false` answer, a non-array at `recordsPath`, an `update` / `upsert` with no
+> `upsertKey`, an unmapped `watermark.field`) is refused before anything is written.
+>
+> - **Watermark — read from the target.** Nothing stores it: the starting point sent as
+>   `query[watermark.param]` is the highest value already stored in the target field a
+>   `fieldMapping` entry copies `watermark.field` onto (transform `none`). Map that
+>   field, or the pull is refused.
+> - ⚠️ **One response per pull.** The connector's paging is not followed — no paging
+>   convention is declared. A paged endpoint yields its first page only, and an
+>   incremental pull over a newest-first paged endpoint moves its starting point past
+>   the pages it never read. Point `connectorSource` at an endpoint that answers the
+>   whole (incremental) set in one response.
+> - ⚠️ **Nothing schedules a pull yet.** A `job` drives it, and that stage has not
+>   landed, so authoring `connectorSource` still warns.
 > Already authored the retired keys? `os migrate meta --from 17` lists the mechanical edits.
 
 ### Use Cases
@@ -326,8 +347,12 @@ const sapConnector: Connector = {
 - **Monitoring**: Set up health checks and alerting for connector failures at the
   connector provider or upstream gateway — the connector shape declares no probe
   and no breaker
-- **Testing**: Test authentication and sync flows thoroughly
-- **Documentation**: Document field mappings and business logic
+- **Testing**: Exercise the connector's actions and its static `auth` against the real
+  upstream (or a fixture server) before a `mapping` pulls through it — a pull refuses an
+  `ok: false` answer rather than writing nothing silently
+- **Field mappings live on the target**: a sync's field map is the `mapping`'s
+  `fieldMapping`, not the connector's — document it there, beside the `upsertKey`
+  that matches a pulled record to a stored one
 
 ---
 
@@ -347,7 +372,7 @@ mostly answers "which surface", and — for the two questions that used to route
 | Do you need real-time webhooks? | **Outbound:** the stack's top-level `webhooks:` collection (`src/automation/webhook.zod.ts`) — **not** L3: a connector's nested `webhooks` was never delivered and is retired (ADR-0049) |
 | Do you need advanced authentication (OAuth2, SAML)? | **Yes** → L3 (Connector) |
 | Do you need retry policies and circuit breaking? | **Retry: yes, L3.** `retryConfig` is executed at the platform's one outbound call (ADR-0049 ruled `实现`) — backoff shape, attempt count, retryable statuses, network-error retry and a per-attempt `requestTimeoutMs`. **Circuit breaking: no level provides it** — `health.circuitBreaker` was retired (ADR-0049) because no breaker ever opened; implement it in the connector provider or an upstream gateway. Outbound **rate limiting** is not a reason to pick any level either: no level provides it (#4911); throttle at the provider or gateway |
-| Is it a simple pull from an external system into a local object? | The target-side binding: a `mapping` with `connectorSource` over a `rest` / `openapi` connector, cadence from a `job` — **declared, not yet executed** ([above](#data-sync-is-defined-on-the-target)) |
+| Is it a simple pull from an external system into a local object? | The target-side binding: a `mapping` with `connectorSource` over a `rest` / `openapi` connector, cadence from a `job` — **pulled when a job drives it; the job stage has not landed** ([above](#data-sync-is-defined-on-the-target)) |
 | Are you building a data warehouse pipeline? | The extraction half is that same pull binding; the warehouse-side transformation is the warehouse's own tooling. There is no ObjectStack pipeline protocol (#6414) |
 | Are you integrating with an enterprise system? | **Yes** → L3 (Connector) |
 | Do you need client-side offline sync? | Not this layering — and note `ui/offline.zod.ts` was itself retired at #4988 for having no carrier key |
@@ -368,8 +393,8 @@ instance with simple `auth` whose actions flows call.
 External API → L3 Connector → ObjectStack → (warehouse's own ELT)
 ```
 The second arrow used to read `ObjectStack → L2 ETL → Data Warehouse`, and that hop
-never executed. Land the data through a connector (the target-side pull binding once
-its executor ships), then transform it with a tool that actually runs — the
+never executed. Land the data through a connector (the target-side pull binding, once
+a job drives it), then transform it with a tool that actually runs — the
 warehouse's own ELT, a `flow`, or a scheduled job.
 
 ---
@@ -399,7 +424,7 @@ const pipeline: ETLPipeline = {
 ```
 
 **After** — split it by which half has a runtime. The extraction half is the
-target-side pull binding (declared; its executor ships in a later stage):
+target-side pull binding (pulled when a job drives it; the job stage has not landed):
 
 ```typescript
 import type { Connector } from '@objectstack/spec/integration';

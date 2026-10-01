@@ -267,7 +267,10 @@ describe('#14725 — the generic declared-status passthrough carries `object` on
         });
 
         it('positionally: the sniff literal lives in `classifyDataError`, never in the shared classification', () => {
-            const source = readFileSync(resolve(HERE, 'error-response.ts'), 'utf8');
+            // [#20919] The classification half lives in `@objectstack/types` now;
+            // read it ahead of the emission half, the order the one file had.
+            const source = readFileSync(resolve(HERE, '../../types/src/data-error-classification.ts'), 'utf8')
+                + readFileSync(resolve(HERE, 'error-response.ts'), 'utf8');
             const SNIFF = 'Record\\s+\\S+\\s+not found in\\s+\\S+';
             const shared = source.indexOf('function structuredCodeAnswer(');
             const classify = source.indexOf('function classifyDataError(');

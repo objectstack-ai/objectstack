@@ -1007,7 +1007,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // coerceError() — import-coerce.ts
     {
         code: 'invalid_boolean',
-        file: 'packages/rest/src/import-coerce.ts',
+        file: 'packages/core/src/utils/import-coerce.ts',
         shape: 'objlithelper',
         door: 'none',
         verdict: 'foreign-vocabulary',
@@ -1020,7 +1020,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     },
     {
         code: 'invalid_date',
-        file: 'packages/rest/src/import-coerce.ts',
+        file: 'packages/core/src/utils/import-coerce.ts',
         shape: 'objlithelper',
         door: 'none',
         verdict: 'foreign-vocabulary',
@@ -1033,7 +1033,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     },
     {
         code: 'invalid_time',
-        file: 'packages/rest/src/import-coerce.ts',
+        file: 'packages/core/src/utils/import-coerce.ts',
         shape: 'objlithelper',
         door: 'none',
         verdict: 'foreign-vocabulary',
@@ -1047,7 +1047,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     },
     {
         code: 'invalid_number',
-        file: 'packages/rest/src/import-coerce.ts',
+        file: 'packages/core/src/utils/import-coerce.ts',
         shape: 'objlithelper',
         door: 'none',
         verdict: 'foreign-vocabulary',
@@ -1060,7 +1060,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     },
     {
         code: 'invalid_option',
-        file: 'packages/rest/src/import-coerce.ts',
+        file: 'packages/core/src/utils/import-coerce.ts',
         shape: 'objlithelper',
         door: 'none',
         verdict: 'foreign-vocabulary',
@@ -1073,7 +1073,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     },
     {
         code: 'reference_ambiguous',
-        file: 'packages/rest/src/import-coerce.ts',
+        file: 'packages/core/src/utils/import-coerce.ts',
         shape: 'objlithelper',
         door: 'none',
         verdict: 'foreign-vocabulary',
@@ -1086,7 +1086,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     },
     {
         code: 'reference_not_found',
-        file: 'packages/rest/src/import-coerce.ts',
+        file: 'packages/core/src/utils/import-coerce.ts',
         shape: 'objlithelper',
         door: 'none',
         verdict: 'foreign-vocabulary',
