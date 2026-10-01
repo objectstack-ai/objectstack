@@ -336,7 +336,7 @@ export function scheduleLegacySsoSecretMigration(
     if (result.found === 0 && result.failures.length === 0) return;
     if (result.migrated > 0) {
       logger.info(
-        `Auth: migrated ${result.migrated} SSO provider client secret(s) into the encrypted channel (#8009)`,
+        `Auth: migrated ${result.migrated} SSO provider client secret(s) out of cleartext oidc_config into the encrypted channel`,
       );
     }
     if (result.failures.length > 0) {

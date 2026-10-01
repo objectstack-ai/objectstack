@@ -176,53 +176,6 @@
  "packages/plugins/plugin-audit/src/translations/zh-CN.objects.generated.ts": {
   "#11507": 1
  },
- "packages/plugins/plugin-auth/src/adopt-membership.ts": {
-  "#7725": 1
- },
- "packages/plugins/plugin-auth/src/audience-posture.ts": {
-  "#5205": 1
- },
- "packages/plugins/plugin-auth/src/auth-manager.ts": {
-  "#3585": 1
- },
- "packages/plugins/plugin-auth/src/auth-plugin.ts": {
-  "#2780": 1,
-  "#4790": 1
- },
- "packages/plugins/plugin-auth/src/auth-route-ledger.ts": {
-  "#2766": 1,
-  "#7735": 2,
-  "#8019": 1,
-  "#9653": 2,
-  "#9941": 1
- },
- "packages/plugins/plugin-auth/src/internal-field-readback.ts": {
-  "#8118": 1
- },
- "packages/plugins/plugin-auth/src/last-admin-guard.ts": {
-  "#10982": 1,
-  "#11663": 1,
-  "#6084": 1
- },
- "packages/plugins/plugin-auth/src/member-role-canonical.ts": {
-  "#8317": 4
- },
- "packages/plugins/plugin-auth/src/objectql-adapter.ts": {
-  "#5813": 1,
-  "#5814": 1
- },
- "packages/plugins/plugin-auth/src/otp-send-guard.ts": {
-  "#4808": 1
- },
- "packages/plugins/plugin-auth/src/sso-client-secret.ts": {
-  "#8009": 1
- },
- "packages/plugins/plugin-auth/src/two-factor-reenrollment-verified-reset.ts": {
-  "#10700": 3
- },
- "packages/plugins/plugin-auth/src/walled-owner-verification-path.ts": {
-  "#12751": 1
- },
  "packages/plugins/plugin-dev/src/dev-plugin.ts": {
   "#3963": 1,
   "#4818": 2
@@ -300,41 +253,6 @@
   "#5493": 1,
   "#5973": 1,
   "#6428": 1
- },
- "packages/plugins/plugin-webhooks/src/auto-enqueuer.ts": {
-  "#3196": 1,
-  "#7799": 2,
-  "#7986": 2,
-  "#8022": 4,
-  "#8069": 3
- },
- "packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.ts": {
-  "#7799": 1
- },
- "packages/plugins/plugin-webhooks/src/migrate-webhook-secrets.ts": {
-  "#7799": 2,
-  "#7986": 2
- },
- "packages/plugins/plugin-webhooks/src/redeliver-guard.ts": {
-  "#7799": 1,
-  "#8069": 2
- },
- "packages/plugins/plugin-webhooks/src/webhook-headers-gate.ts": {
-  "#7986": 1,
-  "#8558": 1,
-  "#8566": 1
- },
- "packages/plugins/plugin-webhooks/src/webhook-headers.ts": {
-  "#7986": 3,
-  "#8558": 2
- },
- "packages/plugins/plugin-webhooks/src/webhook-outbox-plugin.ts": {
-  "#7799": 1,
-  "#8069": 1
- },
- "packages/plugins/plugin-webhooks/src/webhook-secret.ts": {
-  "#7799": 2,
-  "#8542": 1
  },
  "packages/qa/dogfood/test/armed.ts": {
   "#8074": 2
@@ -606,37 +524,6 @@
  },
  "packages/services/service-knowledge/src/knowledge-service.ts": {
   "#2981": 1
- },
- "packages/services/service-messaging/src/http-outbox.ts": {
-  "#7799": 1,
-  "#8069": 3
- },
- "packages/services/service-messaging/src/objects/http-delivery.object.ts": {
-  "#8069": 2,
-  "#8118": 1
- },
- "packages/services/service-messaging/src/outbox.ts": {
-  "#11453": 2,
-  "#11859": 1
- },
- "packages/services/service-messaging/src/sql-http-outbox.ts": {
-  "#8118": 1
- },
- "packages/services/service-messaging/src/translations/en.objects.generated.ts": {
-  "#8069": 2,
-  "#8118": 1
- },
- "packages/services/service-messaging/src/translations/es-ES.objects.generated.ts": {
-  "#8069": 2,
-  "#8118": 1
- },
- "packages/services/service-messaging/src/translations/ja-JP.objects.generated.ts": {
-  "#8069": 2,
-  "#8118": 1
- },
- "packages/services/service-messaging/src/translations/zh-CN.objects.generated.ts": {
-  "#8069": 2,
-  "#8118": 1
  },
  "packages/services/service-queue/src/db-queue-adapter.ts": {
   "#5179": 1

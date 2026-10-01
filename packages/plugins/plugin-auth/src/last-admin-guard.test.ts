@@ -1902,10 +1902,10 @@ describe('[#6084] a zero-administrator reading is no longer automatically the bo
   it('…and the user delete and the grant revoke with it — all three halves stay on', async () => {
     const engine = await wipedEnvironment();
 
-    await expect(removeUser(engine, 'usr_platform')).rejects.toThrow(/#6084/);
+    await expect(removeUser(engine, 'usr_platform')).rejects.toThrow(/state a DELETED 'admin_full_access' permission-set row leaves behind/);
     await expect(
       engine.delete('sys_user_permission_set', { where: { id: 'ups_usr_platform' }, ...SYSTEM }),
-    ).rejects.toThrow(/#6084/);
+    ).rejects.toThrow(/state a DELETED 'admin_full_access' permission-set row leaves behind/);
     expect(await userExists(engine, 'usr_platform')).toBe(true);
     expect(await rowExists(engine, 'sys_user_permission_set', 'ups_usr_platform')).toBe(true);
   });

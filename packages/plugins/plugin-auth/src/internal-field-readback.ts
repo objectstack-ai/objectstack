@@ -333,7 +333,8 @@ async function recoverColumns(
         `${objectName} rows were read back without '${field}' (the engine's \`internal: true\` `
           + 'strip ran) but this engine offers no `resolveInternalField` accessor to recover it. '
           + `${FAIL_CLOSED_CONSEQUENCE[objectName] ?? 'better-auth would observe an incomplete row'}. `
-          + 'Wire the ObjectQL engine (which provides the accessor, #8118), or remove the '
+          + 'Wire the ObjectQL engine, which provides the accessor (an `internal` column is withheld from '
+          + 'every ordinary read and recovered only through it), or remove the '
           + `\`internal\` flag from ${objectName}.${field}.`,
       );
     }
