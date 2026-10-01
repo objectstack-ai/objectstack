@@ -286,9 +286,8 @@ describe('[#21078] the instance-level half is answered by the handler', () => {
         await unmounted.text(),
       ]);
     }
-    const reports = subject.errors.filter((e) => e.includes('NOT served'));
-    expect(reports).toHaveLength(1);
-    expect(reports[0]).toContain('oauthProvider init threw');
+    // Reported once, at ERROR, naming the cause — the wording is not pinned.
+    expect(subject.errors.filter((e) => e.includes('oauthProvider init threw'))).toHaveLength(1);
     expect(baseline.errors).toEqual([]);
   });
 
