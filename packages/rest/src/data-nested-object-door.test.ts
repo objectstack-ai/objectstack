@@ -23,10 +23,11 @@
  * The InMemoryDriver cells were measured on this branch and are not pinned
  * here: this package does not depend on the in-memory driver, and that
  * driver's test consumers are a ruled, closed census
- * (`check:driver-memory-census`). They answered every row above alike, except
- * the multi-valued arm where one stored id contains another as a substring
- * (`u1` / `u10`): the in-memory driver matches `$contains` per element by
- * substring — the gap `FILTER_OPERATORS`' `$contains` docblock records for it.
+ * (`check:driver-memory-census`). They answered every row above alike. The
+ * multi-valued arm where one stored id contains another as a substring
+ * (`u1` / `u10`) differed until #20874 made the in-memory driver answer
+ * `$contains` on a multi-valued field by membership; that driver pins the
+ * case over the driver input below (`memory-20874-contains-membership.test.ts`).
  * `@objectstack/objectql`'s `engine-nested-relation-lowering.test.ts` pins the
  * driver input the engine sends, which is the same on every driver.
  *

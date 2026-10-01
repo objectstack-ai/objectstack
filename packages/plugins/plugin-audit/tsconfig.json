@@ -15,9 +15,9 @@
     ],
     // [#10101] Resolve the shared platform-row resolver to SOURCE for
     // `tsc --noEmit`, so this package's typecheck is a verdict about the
-    // checkout rather than about `metadata-core/dist` build state
-    // (`pnpm check:type-source-resolution` — same fix `packages/rest`
-    // records for `@objectstack/metadata-protocol`).
+    // checkout rather than about `metadata-core/dist` build state (asked for
+    // by `check:type-source-resolution`, retired on 2026-09-18 — #18373 — and
+    // the same fix `packages/rest` records for `@objectstack/metadata-protocol`).
     "paths": {
       "@objectstack/metadata-core": ["../../metadata-core/src/index.ts"],
       // [#12642] Resolve the i18n provenance seam to SOURCE. This package's
@@ -25,14 +25,15 @@
       // `<locale>.source-hashes.generated.ts` companions through
       // `withSourceFallback`, whose home is `@objectstack/platform-objects/apps`
       // — a NEW type import here, so without this rule the typecheck would be a
-      // verdict about that package's `dist/` build state
-      // (`pnpm check:type-source-resolution`). Anchored on the SUBPATH: the
+      // verdict about that package's `dist/` build state (reported by the
+      // since-retired `check:type-source-resolution`). Anchored on the SUBPATH: the
       // bare key would match by prefix and resolve `/apps` through a file.
       "@objectstack/platform-objects/apps": ["../../platform-objects/src/apps/index.ts"],
       // [#16829] Resolve the real driver the record-view integration test boots
       // to SOURCE. Without it that file's `SqliteWasmDriver` type comes from
       // `driver-sqlite-wasm/dist`, making this package's typecheck a verdict
-      // about another package's build state (`pnpm check:type-source-resolution`).
+      // about another package's build state (reported by the since-retired
+      // `check:type-source-resolution`).
       // The `paths` precondition holds here: `rootDir` above is `../..` — the
       // `packages/` directory — and the redirected source sits under it at
       // `packages/drivers/driver-sqlite-wasm/src`, so no TS6059 is owed.
@@ -42,7 +43,8 @@
       // the missing-table cause its datasource remedy was written for, so
       // without this rule that predicate's type would come from
       // `types/dist`, making this package's typecheck a verdict about
-      // another package's build state (`pnpm check:type-source-resolution`).
+      // another package's build state (reported by the since-retired
+      // `check:type-source-resolution`).
       // Bare key, exactly as `plugin-security` spells the same entry: it is an
       // exact match, so it cannot swallow a subpath, and this package imports
       // none. The `paths` precondition holds — `rootDir` above is `../..`, the
