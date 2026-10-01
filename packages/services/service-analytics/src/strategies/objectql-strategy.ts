@@ -27,6 +27,8 @@ import {
 } from '../read-scope-sql.js';
 import { nonTextColumnResolver, textOperatorPolarity } from '../non-text-column.js';
 import { declaredValueShapeResolver, whereEmptyLeafSql } from '../empty-operator-sql.js';
+// [#20986] The one resolver of the object a relationship-path hop reads.
+import { columnObjectOf, relationshipReferenceOf, resolvePathHops, type HopReference } from '../hop-object.js';
 import { invalidMemberError } from '../dataset-refusal.js';
 import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
@@ -188,7 +190,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // hands the engine (item 7): a member is `datetime` when the column it binds
     // against is declared so. The engine seam lowers the same filter again with
     // the same scope, and the lowering is idempotent.
-    const lowering = declaredDatetimeLowering(ctx, (member) => this.resolveStorageTarget(cube, member, objectName));
+    const lowering = declaredDatetimeLowering(ctx, (member) => this.resolveStorageTarget(cube, member, objectName, relationshipReferenceOf(ctx)));
 
     // Build aggregations from measures.
     //
@@ -290,7 +292,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // differently for one query. `/analytics/query` reached `engine.aggregate`
     // with a predicate the engine cannot join and silently mis-bucketed it,
     // which is the exact outcome #3654's loud refusal exists to prevent.
-    const plan = this.planCrossObject(cube, query, this.filterMemberView(cube, query, ctx));
+    const plan = this.planCrossObject(cube, query, this.filterMemberView(cube, query, ctx), relationshipReferenceOf(ctx));
     if (plan) {
       return this.executeCrossObject(cube, query, aggregations, filter, plan, ctx);
     }
@@ -442,7 +444,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // rather than two copies: "the preview accepts/rejects the same set" is an
     // invariant between two call sites, and two copies of a view can drift
     // apart while each stays individually correct — which is how they drifted.
-    const plan = this.planCrossObject(cube, query, this.filterMemberView(cube, query, ctx));
+    const plan = this.planCrossObject(cube, query, this.filterMemberView(cube, query, ctx), relationshipReferenceOf(ctx));
     // Read once, reused below for both the per-measure conditional aggregate
     // (#10413 phase 2) and the dataset-scope WHERE conjunct (#10413 phase 1) —
     // the same channel `execute()` reads it from, so the echo cannot drift
@@ -453,7 +455,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // the lowered bound the engine receives — a bare-day `$lte` on a `datetime`
     // member reads `< next-day` here because that is what runs.
     const echoLowering = declaredDatetimeLowering(ctx, (member) =>
-      this.resolveStorageTarget(cube, member, this.extractObjectName(cube)),
+      this.resolveStorageTarget(cube, member, this.extractObjectName(cube), relationshipReferenceOf(ctx)),
     );
     const crossByDim = new Map((plan?.crossDims ?? []).map((cd) => [cd.outputName, cd]));
     const joinClauses: string[] = [];
@@ -717,12 +719,22 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     return { $and: [userFilter, scopeFilter] };
   }
 
-  /** Is `field` a resolved cross-object (relationship-traversal) reference? */
-  private isCrossObjectField(cube: Cube, field: string, baseObject: string): boolean {
+  /**
+   * Is `field` a resolved cross-object (relationship-traversal) reference?
+   *
+   * [#20986] Its first hop is resolved by the one resolver
+   * ({@link resolvePathHops}): the cube's join, else the relationship field's
+   * declared target, else the alias. A field whose DECLARED target is the base
+   * object itself — a self-reference, named differently from that object — is
+   * still a traversal: its value is another record's id, read through the
+   * FK-expand like any other. Only the cube's own qualifier (`<cube>.<field>`,
+   * which no field declares) and a join the cube declares onto its own object
+   * keep reading as base.
+   */
+  private isCrossObjectField(cube: Cube, field: string, baseObject: string, referenceOf: HopReference | undefined): boolean {
     if (!field.includes('.')) return false;
-    const alias = field.split('.')[0];
-    const joinedObject = cube.joins?.[alias]?.name ?? alias;
-    return joinedObject !== baseObject;
+    const [hop] = resolvePathHops(cube, baseObject, [field.split('.')[0]], referenceOf);
+    return hop.via === 'reference' || hop.object !== baseObject;
   }
 
   /**
@@ -896,6 +908,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     cube: Cube,
     query: AnalyticsQuery,
     filter: Record<string, FilterMemberOrigin>,
+    referenceOf: HopReference | undefined,
   ): CrossObjectPlan | null {
     const baseObject = this.extractObjectName(cube);
 
@@ -905,7 +918,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // true of the lowered predicate, but not what the author wrote.
     for (const td of query.timeDimensions ?? []) {
       const field = this.resolveFieldName(cube, td.dimension, 'dimension');
-      if (this.isCrossObjectField(cube, field, baseObject)) {
+      if (this.isCrossObjectField(cube, field, baseObject, referenceOf)) {
         throw invalidMemberError(
           `[Analytics] ObjectQLStrategy cannot bucket a cross-object time dimension ("${field}").`,
           { member: td.dimension, param: 'timeDimensions', cube: cube.name },
@@ -926,7 +939,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       ...Object.entries(filter)
         .filter(([, origin]) => origin.kind === 'where')
         .map(([f]) => ({ where: 'filter', member: f, field: f })),
-    ].filter((r) => this.isCrossObjectField(cube, r.field, baseObject));
+    ].filter((r) => this.isCrossObjectField(cube, r.field, baseObject, referenceOf));
     if (nonDim.length > 0) {
       throw invalidMemberError(
         `[Analytics] ObjectQLStrategy cannot evaluate a cross-object ${nonDim[0].where} ` +
@@ -963,7 +976,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // locator that IS actionable: the dataset whose definition holds the leaf.
     const scopeCross = Object.entries(filter)
       .filter(([field, origin]) =>
-        origin.kind === 'dataset-filter' && this.isCrossObjectField(cube, field, baseObject))
+        origin.kind === 'dataset-filter' && this.isCrossObjectField(cube, field, baseObject, referenceOf))
       .map(([field]) => field);
     if (scopeCross.length > 0) {
       throw invalidMemberError(
@@ -1019,7 +1032,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // `measure` field of its own would be a new wire shape for one diagnostic;
     // the message is where a locator with no request key belongs.
     const measureCross = Object.entries(filter).flatMap(([field, origin]) =>
-      origin.kind === 'measure-filter' && this.isCrossObjectField(cube, field, baseObject)
+      origin.kind === 'measure-filter' && this.isCrossObjectField(cube, field, baseObject, referenceOf)
         ? [{ field, measure: origin.measure }]
         : [],
     );
@@ -1041,7 +1054,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     const crossDims: CrossObjectPlanDim[] = [];
     for (const dim of query.dimensions ?? []) {
       const field = this.resolveFieldName(cube, dim, 'dimension');
-      if (!this.isCrossObjectField(cube, field, baseObject)) continue;
+      if (!this.isCrossObjectField(cube, field, baseObject, referenceOf)) continue;
       const [alias, ...rest] = field.split('.');
       const attr = rest.join('.');
       if (attr.includes('.')) {
@@ -1051,7 +1064,11 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
           { member: dim, param: 'dimensions', cube: cube.name },
         );
       }
-      crossDims.push({ outputName: dim, fkField: alias, attr, refObject: cube.joins?.[alias]?.name ?? alias });
+      // [#20986] The object the FK-expand reads the attribute from — and whose
+      // read scope it applies there — is the hop's object from the one
+      // resolver, the object the door admitted and scoped for this query.
+      const [hop] = resolvePathHops(cube, baseObject, [alias], referenceOf);
+      crossDims.push({ outputName: dim, fkField: alias, attr, refObject: hop.object });
     }
 
     if (crossDims.length === 0) return null;
@@ -1442,18 +1459,23 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * renders a description of the statement THAT compiler produces, and the
    * declared-type test both apply is keyed by object and field. A dotted
    * `sql` is a relationship path (ADR-0071): every segment but the last is a
-   * hop whose join alias is the dot-to-`__` spelling the dataset compiler keys
-   * `cube.joins` by, the last is the column.
+   * hop, the last is the column, and the column's object is the one the last
+   * hop reaches — [#20986] as {@link resolvePathHops} names it, the same object
+   * that compiler joins there.
    */
-  private resolveStorageTarget(cube: Cube, member: string, baseObject: string): { object: string; field: string } {
+  private resolveStorageTarget(
+    cube: Cube,
+    member: string,
+    baseObject: string,
+    referenceOf: HopReference | undefined,
+  ): { object: string; field: string } {
     const dim = this.lookupMember(cube, member, 'dimension');
     const measure = dim ? undefined : this.lookupMember(cube, member, 'measure');
     const rawSql = dim?.sql ?? measure?.sql ?? (member.includes('.') ? member.split('.').slice(1).join('.') : member);
     if (rawSql.includes('.')) {
       const segments = rawSql.split('.');
       const field = segments[segments.length - 1];
-      const relPath = segments.slice(0, -1).join('.');
-      const object = cube.joins?.[relPath.replace(/\./g, '__')]?.name ?? relPath;
+      const object = columnObjectOf(cube, baseObject, rawSql, referenceOf);
       return { object, field };
     }
     return { object: baseObject, field: rawSql.replace(/^\$/, '') };
@@ -1734,7 +1756,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         // way `NativeSQLStrategy.resolveStorageTarget` resolves it, so the echo
         // asks the declared-type hook the same question the executed statement
         // asked and prints the same constant for a non-text column.
-        this.resolveStorageTarget(cube, node.member, this.extractObjectName(cube)),
+        this.resolveStorageTarget(cube, node.member, this.extractObjectName(cube), relationshipReferenceOf(ctx)),
         ctx,
       );
     }

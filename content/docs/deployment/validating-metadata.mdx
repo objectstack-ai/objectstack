@@ -210,11 +210,25 @@ no such function and fails at query time. `min`/`max` over the same field are
 accepted over every type, because it reads no value, and `count_distinct` over
 every type but the JSON-stored ones (the structured-JSON types and
 `multiselect` / `checkboxes` / `tags`), whose values no two backends compare
-for equality alike. The analytics service refuses the same pair with
-`400 DATASET_INVALID` when a query is built; this is the identical verdict,
+for equality alike. The check reads the field's declaration as well as its
+type: a `select`, `radio`, `lookup`, `user`, `file` or `image` field declared
+`multiple: true` holds a list stored as JSON, so `count_distinct` over it is
+refused too, although the table accepts the type. The analytics service
+refuses the same pair with `400 DATASET_INVALID` when a query is built; this
+is the identical verdict,
 from the identical table, one door earlier. The rule stays silent wherever the
 field's type cannot be resolved (an object this stack does not define, a
 dangling field path, an untyped field) rather than guessing.
+
+The same check judges the dataset's **dimensions**, under its own id. A
+dimension is a group key, and the analytics service refuses a query grouped by
+a JSON-stored column with `400 INVALID_FIELD` before any SQL is built. So a
+dimension whose field is declared with a structured-JSON type, or as a
+multi-value field (`multiselect` / `checkboxes` / `tags`, or one of the types
+above declared `multiple: true`), is refused
+(`dimension-json-stored-field-refused`) at `datasets[N].dimensions[M].field`.
+Group by a field that stores one value instead. Like the measure check, it
+stays silent when the field's type cannot be resolved.
 
 ### 7. Navigation exposing objects nobody can read
 

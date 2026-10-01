@@ -4,7 +4,9 @@
  * [#16354 — the AUTHORING-TIME leg of the aggregate × field-type contract]
  * A dataset measure pairs an `aggregate` with a `field`. This rule refuses the
  * pairs `AGGREGATE_FIELD_TYPE_COMPATIBILITY` (`@objectstack/spec/data`, #16353)
- * does not accept, at the moment the author writes them.
+ * does not accept, at the moment the author writes them. [#20890] It also
+ * refuses a dataset DIMENSION over a JSON-stored field, which the analytics door
+ * refuses to group by — see "The dimension leg" below.
  *
  * All judgement lives in the SHARED predicate —
  * `isAggregateCompatibleWithFieldType`, the same call the compile leg makes —
@@ -91,11 +93,68 @@
  * registry's own definition, so `created_at` reads as the `datetime` it is and
  * `avg` over it is refused exactly as over an authored field — the pair reaches
  * the same backend either way.
+ *
+ * ## [#20890] The declaration half the per-type table cannot see
+ *
+ * The table is per TYPE, so it cannot see `multiple: true`: a `select` (or
+ * `radio`, `lookup`, `user`, `file`, `image`) flagged `multiple` is a list
+ * stored as JSON, the very storage the `count_distinct` row refuses `tags`
+ * for. The compile leg and the engine's `count_distinct` door both ask
+ * `isMultiValueField` (`@objectstack/spec/data`) beside the row, so this rule
+ * asks it too, in the same place: {@link acceptsDeclaration} is the row AND
+ * the declaration, and it decides the verdict and the accepted-aggregates hint
+ * alike, so the two cannot disagree. Only `count_distinct` can be moved by the
+ * flag — the `sum` / `avg` / `min` / `max` rows accept no multi-capable type,
+ * and `count` reads no value. ⛔ No second account of the pair table: the row
+ * is still the predicate's, the flag is still the spec's helper.
+ *
+ * ## [#20890] The dimension leg — `dimension-json-stored-field-refused`
+ *
+ * A dataset dimension is a GROUP KEY: it compiles to a cube dimension whose
+ * `sql` is the dimension's `field` (`dataset-compiler.ts`), and a query that
+ * selects it groups by that column. The analytics door
+ * (`service-analytics`' `structured-json-dimension-door.ts`) refuses a grouped
+ * member whose column is JSON-stored with `400 INVALID_FIELD`, before either
+ * strategy builds a statement, because a JSON value is no group key the SQL
+ * dialects share — one grouped each serialized value apart, another refused
+ * the statement. Its two predicates, in its order, are the ones this rule
+ * reads, called and never re-listed:
+ *
+ *   - `STRUCTURED_JSON_TYPES` — `json`, `composite`, `repeater`, `record`,
+ *     `location`, `address`, `vector`;
+ *   - `isMultiValueField` — an inherently multi option type (`multiselect`,
+ *     `checkboxes`, `tags`), or a multi-capable type flagged `multiple: true`.
+ *     The same type without the flag stores one value and is served.
+ *
+ * So a dimension over such a field is refused here, where the author is
+ * standing, instead of on the first dashboard that selects it. There is no
+ * selection of it the door serves as a group: a dataset's filters name FIELDS,
+ * not dimensions, and the one ungrouped use of a dimension — a time-dimension
+ * range with no `granularity` — bounds a date, which a JSON document is not.
+ * The column is resolved on the object graph exactly as a measure's is (dotted
+ * paths included, on the object the LEAF lives on) and stays silent under the
+ * same skips 1, 3 and 4 above, plus a dimension that writes no `field`.
+ *
+ * **Cube dimensions are NOT judged here, because lint reads no cube.** No
+ * authoring rule in this package walks `analyticsCubes`: its one mention is
+ * `validate-field-consumers.ts`'s list of roots a field-REMOVAL census reads,
+ * which judges nothing about a cube member. A cube dimension is a different
+ * position (a record keyed by member name, its column in `sql`) on a different
+ * metadata type, and the registry entry that carries this rule to the runtime
+ * door declares `runtimeTypes: ['dataset']` only — so a cube leg would be a new
+ * walk and a new door, not this rule extended.
+ *
+ * The function keeps its name: it is the registry's key (`authoring-rules.ts`),
+ * and the dimension leg rides on that one entry — gating, on all three
+ * commands, and at the runtime `dataset` write door.
  */
 
 import {
   AGGREGATE_FIELD_TYPE_COMPATIBILITY,
+  STRUCTURED_JSON_TYPES,
   isAggregateCompatibleWithFieldType,
+  isMultiValueField,
+  type ValueShapeFieldDef,
 } from '@objectstack/spec/data';
 
 import {
@@ -103,6 +162,7 @@ import {
   isUnjudgeable,
   recordsOf,
   resolveFieldPath,
+  type FieldPathVerdict,
   type ObjectGraph,
 } from './object-graph.js';
 
@@ -115,6 +175,15 @@ import {
  */
 export const MEASURE_AGGREGATE_FIELD_TYPE_REFUSED = 'measure-aggregate-field-type-refused';
 
+/**
+ * [#20890] Stable diagnostic id for a dataset dimension whose field is
+ * JSON-STORED — the spec's own name for the union the analytics door refuses
+ * to group by (`aggregate-field-type-compatibility.ts`: the structured-JSON
+ * class, the multi-option types, and a multi-capable type flagged
+ * `multiple: true`).
+ */
+export const DIMENSION_JSON_STORED_FIELD_REFUSED = 'dimension-json-stored-field-refused';
+
 export interface DatasetMeasureAggregateFinding {
   /**
    * Always `error`. The pair is decidable from the author's own declarations —
@@ -122,13 +191,14 @@ export interface DatasetMeasureAggregateFinding {
    * number whose value is a property of the SQL dialect. The compile leg
    * answers the same pair with `400 DATASET_INVALID`, so an advisory here
    * would only mean the author hears about it later, from someone else's
-   * dashboard.
+   * dashboard. A JSON-stored dimension is the same shape one door along: the
+   * analytics door answers every query grouping by it with `400 INVALID_FIELD`.
    */
   severity: 'error';
-  rule: typeof MEASURE_AGGREGATE_FIELD_TYPE_REFUSED;
+  rule: typeof MEASURE_AGGREGATE_FIELD_TYPE_REFUSED | typeof DIMENSION_JSON_STORED_FIELD_REFUSED;
   /** Human-readable location, e.g. `dataset "sales" › measure "avg_closed"`. */
   where: string;
-  /** Config path, e.g. `datasets[0].measures[2].aggregate`. */
+  /** Config path, e.g. `datasets[0].measures[2].aggregate` or `datasets[0].dimensions[1].field`. */
   path: string;
   message: string;
   hint: string;
@@ -159,20 +229,64 @@ const ACCEPTED_TYPES_BY_AGGREGATE: ReadonlyMap<string, readonly string[]> = new 
   ),
 );
 
-/** Every aggregate the table accepts for `fieldType` — always non-empty (`count` accepts any type). */
-function aggregatesAccepting(fieldType: string): string[] {
+/**
+ * May `aggregate` be applied to a field DECLARED as `shape`? The table's row
+ * for the type ({@link isAggregateCompatibleWithFieldType}) AND, for
+ * `count_distinct`, the declaration half the per-type row cannot see — a
+ * multi-capable type flagged `multiple: true` is a list stored as JSON
+ * ({@link isMultiValueField}). Asked the way the compile leg asks it, and the
+ * one place this file asks it: the verdict and the hint both read it.
+ */
+function acceptsDeclaration(aggregate: string, shape: ValueShapeFieldDef): boolean {
+  if (!isAggregateCompatibleWithFieldType(aggregate, shape.type)) return false;
+  return !(aggregate === 'count_distinct' && isMultiValueField(shape));
+}
+
+/** Every aggregate that accepts a field declared as `shape` — always non-empty (`count` accepts any type). */
+function aggregatesAccepting(shape: ValueShapeFieldDef): string[] {
   const accepting: string[] = [];
   for (const [fn] of ACCEPTED_TYPES_BY_AGGREGATE) {
-    if (isAggregateCompatibleWithFieldType(fn, fieldType)) accepting.push(fn);
+    if (acceptsDeclaration(fn, shape)) accepting.push(fn);
   }
   return accepting;
 }
 
+/** The declaration as the words say it: the type, and the flag when the field carries it. */
+function declaredAs(shape: ValueShapeFieldDef): string {
+  return shape.multiple === true ? `\`${shape.type}\` with \`multiple: true\`` : `\`${shape.type}\``;
+}
+
+/** The declaration the graph holds for a resolved leaf — its type and its `multiple` flag. */
+function shapeOf(verdict: Extract<FieldPathVerdict, { kind: 'ok' }>, fieldType: string): ValueShapeFieldDef {
+  return { type: fieldType, multiple: verdict.meta?.multiple === true };
+}
+
+/** Which object the words say declares the leaf: the dataset's own, or the joined one. */
+function declarerOf(verdict: Extract<FieldPathVerdict, { kind: 'ok' }>, baseObject: string): string {
+  return verdict.object === baseObject
+    ? `object "${baseObject}"`
+    : `object "${verdict.object}" (reached through this dataset's join chain)`;
+}
+
 /**
- * Refuse every dataset measure whose `aggregate` the field's declared
- * `FieldType` cannot carry. Returns findings (empty = clean). Pure
- * `(stack) => Finding[]` (ADR-0019): no I/O, and safe on both the
- * schema-parsed stack and the raw config the `os lint` path carries.
+ * [#20890] The class of a column a dimension GROUPS by, or `null` when it
+ * stores one scalar value — the analytics door's two predicates, in its
+ * order: {@link STRUCTURED_JSON_TYPES}, then {@link isMultiValueField} (the
+ * declaration, `multiple` included). ⛔ Never the type alone: a type-only
+ * reading would refuse `tags` and pass a `select` with `multiple: true`, which
+ * is the same JSON column.
+ */
+function groupKeyClassOf(shape: ValueShapeFieldDef): 'structured-json' | 'multi-value' | null {
+  if (STRUCTURED_JSON_TYPES.has(shape.type)) return 'structured-json';
+  return isMultiValueField(shape) ? 'multi-value' : null;
+}
+
+/**
+ * Refuse every dataset measure whose `aggregate` the field's declaration
+ * cannot carry, and every dataset dimension whose field is JSON-stored.
+ * Returns findings (empty = clean), each dataset's dimensions before its
+ * measures. Pure `(stack) => Finding[]` (ADR-0019): no I/O, and safe on both
+ * the schema-parsed stack and the raw config the `os lint` path carries.
  */
 export function validateDatasetMeasureAggregates(stack: unknown): DatasetMeasureAggregateFinding[] {
   const findings: DatasetMeasureAggregateFinding[] = [];
@@ -190,6 +304,60 @@ export function validateDatasetMeasureAggregates(stack: unknown): DatasetMeasure
     if (!graph.has(object) || !graph.get(object)) return;
 
     const dsName = strName(ds.name) ?? `#${di}`;
+
+    // ── [#20890] The dimension leg: a group key over a JSON-stored field ──
+    recordsOf(ds.dimensions).forEach((dimension, k) => {
+      // A dimension that writes no `field` has nothing to judge; a non-string
+      // there is the schema's refusal to give, not this rule's.
+      const field = strName(dimension.field);
+      if (!field) return;
+
+      // ── Skip 3: the path does not resolve — `dataset-field-unknown`'s finding ──
+      const verdict = resolveFieldPath(graph, object, field);
+      if (!verdict || isUnjudgeable(verdict) || verdict.kind !== 'ok') return;
+
+      // ── Skip 4: the leaf declares no type, so nothing can be asked about it ──
+      const fieldType = verdict.meta?.type;
+      if (!fieldType) return;
+
+      const shape = shapeOf(verdict, fieldType);
+      const cls = groupKeyClassOf(shape);
+      if (cls === null) return;
+
+      const dimensionName = strName(dimension.name) ?? `#${k}`;
+      const head =
+        `dimension "${dimensionName}" groups by field "${field}", which ` +
+        `${declarerOf(verdict, object)} declares as ${declaredAs(shape)} — `;
+      const door =
+        'The analytics door refuses every query that groups by this dimension with ' +
+        '`400 INVALID_FIELD` before any SQL is built, so a report or dashboard that selects it gets ' +
+        'that refusal instead of an answer.';
+      findings.push({
+        severity: 'error',
+        rule: DIMENSION_JSON_STORED_FIELD_REFUSED,
+        where: `dataset "${dsName}" › dimension "${dimensionName}"`,
+        path: `datasets[${di}].dimensions[${k}].field`,
+        message:
+          cls === 'structured-json'
+            ? head +
+              'a structured-JSON value, which analytics does not group by. A JSON document is no ' +
+              'group key the SQL dialects share: one groups each serialized document apart, ' +
+              `another refuses the statement. ${door}`
+            : head +
+              'a multi-value field, which analytics does not group by. A list of values is no ' +
+              'group key the SQL dialects share: one groups each serialized list apart, another ' +
+              `refuses the statement. ${door}`,
+        hint:
+          cls === 'structured-json'
+            ? 'Group by a field that stores one scalar value: store the part of the document you ' +
+              'group on in a field of its own and point this dimension at that field, or remove ' +
+              'the dimension.'
+            : `Filter by one member instead of grouping: a record query on "${verdict.object}" ` +
+              `with where { "${verdict.field}": { "$contains": VALUE } } counts or lists the records ` +
+              'that hold VALUE, one query per member. Point this dimension at a field that stores ' +
+              'one value, or remove it.',
+      });
+    });
 
     recordsOf(ds.measures).forEach((measure, k) => {
       // ── Skip 2: nothing written in one of the two positions ──
@@ -209,31 +377,38 @@ export function validateDatasetMeasureAggregates(stack: unknown): DatasetMeasure
       const fieldType = verdict.meta?.type;
       if (!fieldType) return;
 
-      if (isAggregateCompatibleWithFieldType(aggregate, fieldType)) return;
+      const shape = shapeOf(verdict, fieldType);
+      if (acceptsDeclaration(aggregate, shape)) return;
+      // [#20890] The row accepts the TYPE and the declaration is what refuses:
+      // a multi-capable field flagged `multiple: true` under `count_distinct`.
+      const flaggedList = isAggregateCompatibleWithFieldType(aggregate, fieldType);
 
       const measureName = strName(measure.name) ?? `#${k}`;
-      const onObject =
-        verdict.object === object
-          ? `object "${object}"`
-          : `object "${verdict.object}" (reached through this dataset's join chain)`;
       findings.push({
         severity: 'error',
         rule: MEASURE_AGGREGATE_FIELD_TYPE_REFUSED,
         where: `dataset "${dsName}" › measure "${measureName}"`,
         path: `datasets[${di}].measures[${k}].aggregate`,
-        message:
-          `measure "${measureName}" applies aggregate "${aggregate}" to field "${field}", which ` +
-          `${onObject} declares as \`${fieldType}\`. That pair is refused by the aggregate × ` +
-          `field-type compatibility table in @objectstack/spec, so the number a backend returns ` +
-          `for it is a property of the SQL dialect rather than of the data — one coerces the ` +
-          `stored form and answers something plausible, another has no such function and fails ` +
-          `at query time. "${aggregate}" accepts: ${accepted.join(', ')}.`,
+        message: flaggedList
+          ? `measure "${measureName}" applies aggregate "${aggregate}" to field "${field}", which ` +
+            `${declarerOf(verdict, object)} declares as ${declaredAs(shape)} — a list of values ` +
+            `stored as JSON. "${aggregate}" COMPARES the stored values for equality, and no two ` +
+            `backends compare a JSON-stored value alike: one counts every row apart, one compares ` +
+            `the serialized text, another has no equality for the type and fails at query time. ` +
+            `"${aggregate}" accepts: ${accepted.join(', ')}, none of them with \`multiple: true\`.`
+          : `measure "${measureName}" applies aggregate "${aggregate}" to field "${field}", which ` +
+            `${declarerOf(verdict, object)} declares as \`${fieldType}\`. That pair is refused by the aggregate × ` +
+            `field-type compatibility table in @objectstack/spec, so the number a backend returns ` +
+            `for it is a property of the SQL dialect rather than of the data — one coerces the ` +
+            `stored form and answers something plausible, another has no such function and fails ` +
+            `at query time. "${aggregate}" accepts: ${accepted.join(', ')}.`,
         hint:
           `Either point "${aggregate}" at a field of an accepted type, or aggregate ` +
-          `"${field}" with one its \`${fieldType}\` type accepts: ` +
-          `${aggregatesAccepting(fieldType).join(', ')}. ` +
+          `"${field}" with one its ${declaredAs(shape)} ${shape.multiple === true ? 'declaration' : 'type'} accepts: ` +
+          `${aggregatesAccepting(shape).join(', ')}. ` +
           `\`count\` accepts every type because it reads no value, and \`count_distinct\` every ` +
-          `type but the JSON-stored ones, whose values no two backends compare alike; a ` +
+          `type but the JSON-stored ones — a field declared \`multiple: true\` among them — whose ` +
+          `values no two backends compare alike; a ` +
           `quantity that must be added up or averaged has to be STORED as a ` +
           `numeric field (a computed column) and aggregated as one. The compile leg refuses ` +
           `this same pair with \`400 DATASET_INVALID\` before any SQL is emitted, so this is ` +

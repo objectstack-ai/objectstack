@@ -67,7 +67,7 @@ escalate to. Decide on **expressibility**; reuse/governance is Level B.
 |:--|:--|
 | one base object + **to-one** joins (`include`, ≤3 hops) | a join that **changes grain** / a **to-many** rollup onto the parent |
 | 0..N dimensions; date-bucket `day/week/month/quarter/year` | a **computed dimension** / CASE bucket / numeric bin |
-| measures `count/sum/avg/min/max/count_distinct` | list aggregation (collect-into-array / concatenate — retired in protocol 17, no spelling exists) or any custom-SQL metric |
+| measures `count/sum/avg/min/max/count_distinct` | list aggregation (collect-into-array / concatenate — retired in protocol 17, no spelling exists) |
 | **derived measures** — `ratio/sum/difference/product` of other measures | scalar math on raw fields (`amount*0.8`), aggregate-of-aggregate |
 | WHERE (`$and/$or/$not` on the base object) + measure-scoped filters | **HAVING** (filtering the aggregate result) |
 | `compareTo` (previous period/year) + `totals` (matrix subtotals) | **window** (rank, running total, lag/lead, %-of-total); **union**; reshaping params |
@@ -75,10 +75,10 @@ escalate to. Decide on **expressibility**; reuse/governance is Level B.
 > **The iron rule:** a dataset is a governed, *narrow* semantic layer — NOT a
 > general analytics escape hatch (no raw SQL, no hand-authored joins, no
 > window/having). If the need is in the right column, a dataset **cannot** express
-> it — escalate to a hand-authored **Cube** (raw SQL / explicit joins), a **stored
-> rollup or formula field** on the object (to-many rollups, computed columns), or
-> app code. Do not force it into a dataset: it fails to compile or renders an empty
-> series.
+> it — escalate to a **stored field** on the object (a `summary` rollup, or a field
+> holding the computed value or bucket) or app code, not to a **Cube**: a cube
+> member's `sql` is a column reference. Do not force it into a dataset: it fails to
+> compile or renders an empty series.
 
 Standardized answers to the recurring ambiguous cases:
 
