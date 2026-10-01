@@ -5,9 +5,9 @@
  *
  * A caller holding object-level `sys_activity` read gets back only the
  * activity rows whose parent record (`object_name`, `record_id`) it can read,
- * the same way `installCommentReadVisibility` narrows `sys_comment`. A caller
- * holding the read bypass on `sys_activity` (View All / Modify All, which is
- * what an admin holds) reads the stream exactly as before.
+ * the same way `installCommentReadVisibility` narrows `sys_comment`. An admin
+ * is the caller who can read every record, so it keeps every row about a
+ * record that exists.
  *
  * ## Why a real engine, a real driver and the real plugin
  *
@@ -21,19 +21,14 @@
  * `kernel:ready`, so a gate that stops being mounted fails here exactly like a
  * gate that was never written.
  *
- * ## The two stand-ins, and why each is the smallest honest one
+ * ## The one stand-in, and why it is the smallest honest one
  *
- *  - PARENT READABILITY. In a deployment the parent object's own sharing, RLS
- *    and object-level CRUD decide whether a caller can read a record; the gate
- *    only ever asks the engine, under the caller's context. Here one engine
- *    middleware on the owned parent object plays that part: a non-admin caller
- *    reads the rows it owns. The gate cannot tell it apart from plugin-security
- *    because it asks the same question the same way.
- *  - THE READ BYPASS. `ISecurityService.getEffectiveObjectPermissions` is the
- *    security service's own merged answer (the map `/auth/me/permissions`
- *    serves). The stand-in answers it per principal with the entry the real
- *    service answers for an admin (`viewAllRecords`) and for a member (read
- *    only).
+ * PARENT READABILITY. In a deployment the parent object's own sharing, RLS and
+ * object-level CRUD decide whether a caller can read a record; the gate only
+ * ever asks the engine, under the caller's context. Here one engine middleware
+ * on the owned parent object plays that part: a member reads the ledger rows
+ * it owns, the admin reads them all. The gate cannot tell it apart from
+ * plugin-security because it asks the same question the same way.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -87,21 +82,6 @@ describe('sys_activity read visibility — the plugin read path', () => {
   beforeAll(async () => {
     kernel = new ObjectKernel({ logger: { level: 'silent' } });
     await kernel.use(new ObjectQLPlugin());
-    // The read-bypass stand-in, registered as the slot the plugin resolves.
-    await kernel.use({
-      name: 'test.security-standin',
-      type: 'standard',
-      version: '0.0.0',
-      async init(ctx: any) {
-        ctx.registerService('security', {
-          async getEffectiveObjectPermissions(context?: { userId?: string }) {
-            return context?.userId === ADMIN.userId
-              ? { [ACTIVITY]: { allowRead: true, viewAllRecords: true } }
-              : { [ACTIVITY]: { allowRead: true } };
-          },
-        });
-      },
-    } as any);
     await kernel.use(new AuditPlugin());
     await kernel.bootstrap();
 
@@ -237,10 +217,13 @@ describe('sys_activity read visibility — the plugin read path', () => {
     expect(perObject.sort()).toEqual([`${OPEN}:find`, `${OWNED}:find`]);
   });
 
-  it('an admin (read bypass on sys_activity) reads every row, exactly as before', async () => {
+  it('an admin, who reads every record, keeps every row about a record that exists', async () => {
     const rows = await engine.find(ACTIVITY, { context: ADMIN } as any);
-    expect(pairs(rows)).toEqual(pairs(allRows));
-    expect(await engine.count(ACTIVITY, {}, { context: ADMIN } as any)).toBe(allRows.length);
+    const existing = allRows.filter(
+      (r) => (r.object_name === OWNED || r.object_name === OPEN) && r.record_id !== ids.gone,
+    );
+    expect(pairs(rows)).toEqual(pairs(existing));
+    expect(await engine.count(ACTIVITY, {}, { context: ADMIN } as any)).toBe(existing.length);
   });
 
   it('a system read is not narrowed', async () => {
