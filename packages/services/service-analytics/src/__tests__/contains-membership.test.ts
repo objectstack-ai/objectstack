@@ -374,3 +374,144 @@ describe('[#20987] the native where compiles the membership construct per dialec
     expect(sql).toMatch(/label"? LIKE \$\d+ ESCAPE \$\d+/);
   });
 });
+
+/**
+ * [#20987, the seat's decision 5927023075] On a datasource whose SQL dialect
+ * the host cannot name (`'unknown'`: a non-SQL driver such as memory or
+ * mongodb, whose raw-SQL bridge answers `RAW_SQL_UNSUPPORTED`), a query that
+ * would need a JSON function is DECLINED by `NativeSQLStrategy.canHandle`: a
+ * `$contains` / `$notContains` on a declared multi-valued or JSON-stored field,
+ * or a `$empty` on a multi-valued one, in the `where` or in a read scope. The
+ * ObjectQL strategy then answers through the engine. The compile-time
+ * refusals stay as the backstop, so a host with no ObjectQL bridge is still
+ * refused, and nothing reaches its raw-SQL bridge.
+ *
+ * The fixture is the one above. The raw-SQL bridge refuses every statement as
+ * a non-SQL driver does, and counts what reached it; the host answers no
+ * dialect.
+ */
+describe('[#20987] an unknown dialect: the native strategy declines a JSON-stored membership test, and the ObjectQL strategy answers', () => {
+  let driver: SqliteWasmDriver;
+  let engine: ObjectQL;
+  let bridged: AnalyticsService;
+  let unbridged: AnalyticsService;
+  let scopes: Record<string, unknown> = {};
+  let rawStatements = 0;
+
+  beforeAll(async () => {
+    driver = new SqliteWasmDriver({ filename: ':memory:' });
+    (driver as unknown as { logger: unknown }).logger = quiet;
+    await driver.initObjects([{ name: OBJECT, fields: FIELDS }] as never);
+    for (const row of ROWS) await driver.create(OBJECT, { ...row });
+
+    engine = new ObjectQL({ logger: quiet });
+    engine.registerDriver(driver as never, true);
+    await engine.init();
+    engine.registerObject({ name: OBJECT, label: 'Membership item', fields: FIELDS } as never);
+
+    const common = {
+      cubes: [CUBE],
+      logger: quiet,
+      getReadScope: (object: string) => (scopes[object] ?? undefined) as FilterCondition | undefined,
+      sourceFieldMeta: (object: string, field: string) => (object === OBJECT ? SHAPES[field] : undefined),
+      // What the plugin's bridge answers on a non-SQL driver: no raw SQL runs.
+      executeRawSql: async () => {
+        rawStatements += 1;
+        const err = new Error('this driver does not support SQL execution') as Error & { code: string };
+        err.code = 'RAW_SQL_UNSUPPORTED';
+        throw err;
+      },
+    };
+    bridged = new AnalyticsService({
+      ...common,
+      queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: true, inMemory: false }),
+      executeAggregate: async (objectName: string, options: Record<string, any>) =>
+        (await engine.aggregate(objectName, {
+          where: options.filter,
+          groupBy: options.groupBy,
+          aggregations: options.aggregations?.map((a: Record<string, unknown>) => ({
+            function: a.method,
+            field: a.field,
+            alias: a.alias,
+          })),
+          context: options.context,
+        } as never)) as Record<string, unknown>[],
+    } as never);
+    unbridged = new AnalyticsService({
+      ...common,
+      queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }),
+    } as never);
+  });
+
+  afterAll(async () => {
+    await driver?.disconnect?.();
+  });
+
+  afterEach(() => {
+    scopes = {};
+    rawStatements = 0;
+  });
+
+  const served = async (service: AnalyticsService, scope?: unknown, where?: unknown): Promise<string[]> => {
+    scopes = scope ? { [OBJECT]: scope } : {};
+    return ids((await service.query(query(where))).rows);
+  };
+
+  describe('the read scope (a policy)', () => {
+    for (const field of ENGINE_FIELDS) {
+      it(`${field}: $contains 'u1' is answered by the engine, membership, and no statement reaches the raw-SQL bridge`, async () => {
+        expect(await served(bridged, { [field]: { $contains: 'u1' } })).toEqual(MEMBER);
+        expect(rawStatements).toBe(0);
+      });
+
+      it(`${field}: $notContains 'u1' is answered by the engine, the complement`, async () => {
+        expect(await served(bridged, { [field]: { $notContains: 'u1' } })).toEqual(NOT_MEMBER);
+        expect(rawStatements).toBe(0);
+      });
+    }
+
+    it('$empty on a multi-valued field is answered by the engine', async () => {
+      expect(await served(bridged, { tags: { $empty: true } })).toEqual(['r4', 'r5']);
+      expect(rawStatements).toBe(0);
+    });
+
+    it('with no ObjectQL bridge the query is refused, fail-closed, and no statement reaches the raw-SQL bridge', async () => {
+      await refusalOf(() => served(unbridged, { tags: { $contains: 'u1' } }));
+      expect(rawStatements).toBe(0);
+    });
+
+    it('CONTROL: a scalar text policy is not declined; the native strategy is tried and falls back as before', async () => {
+      expect(await served(bridged, { label: { $contains: 'u1' } })).toEqual(SUBSTRING);
+      expect(rawStatements).toBe(1);
+    });
+  });
+
+  describe('the where', () => {
+    for (const field of ENGINE_FIELDS) {
+      it(`${field}: $contains 'u1' is answered by the engine, membership, and no statement reaches the raw-SQL bridge`, async () => {
+        expect(await served(bridged, undefined, { [field]: { $contains: 'u1' } })).toEqual(MEMBER);
+        expect(rawStatements).toBe(0);
+      });
+
+      it(`${field}: $notContains 'u1' is answered by the engine, the complement`, async () => {
+        expect(await served(bridged, undefined, { [field]: { $notContains: 'u1' } })).toEqual(NOT_MEMBER);
+        expect(rawStatements).toBe(0);
+      });
+    }
+
+    it('$empty on a multi-valued field is answered by the engine', async () => {
+      expect(await served(bridged, undefined, { tags: { $empty: true } })).toEqual(['r4', 'r5']);
+      expect(rawStatements).toBe(0);
+    });
+
+    it('with no ObjectQL bridge the query is refused, fail-closed, and no statement reaches the raw-SQL bridge', async () => {
+      await refusalOf(() => served(unbridged, undefined, { tags: { $contains: 'u1' } }));
+      expect(rawStatements).toBe(0);
+    });
+
+    it('CONTROL: a scalar text where is not declined; the native strategy is tried and falls back as before', async () => {
+      expect(await served(bridged, undefined, { label: { $contains: 'u1' } })).toEqual(SUBSTRING);
+      expect(rawStatements).toBe(1);
+    });
+  });
+});
