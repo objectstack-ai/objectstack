@@ -214,15 +214,35 @@ const WIDGET_HISTORY =
   + 'shipping inert metadata; a stale or mis-layered key is now a loud parse error.';
 
 /**
- * Widget `options` — the renderer-extras escape hatch, with the keys that
- * reach the ANALYTICS QUERY declared explicitly (framework#3588).
+ * Widget `options` — an open bag, with the keys that reach the ANALYTICS QUERY
+ * declared explicitly (framework#3588).
  *
- * The bag stays open (`passthrough`): presentation-only settings the renderer
- * understands — `icon`, `trend`, `columns`, `striped`, `density`, … — are
- * carried through untouched and are none of the spec's business. What the
- * declared keys below buy is a real contract for the four that are NOT
- * presentation-only: they change the SQL the dataset query compiles to, so a
- * typo (`sortDirection`, `granularity`) is now an author-time type error
+ * The bag stays open (`passthrough`), but an undeclared key in it is NOT a
+ * renderer setting. `dataset` is required, so every widget renders through
+ * objectui's dataset-bound path (`DatasetWidget`), and that path reads exactly
+ * the five keys declared below plus `description`, the metric sub-caption.
+ * Any other key parses and reaches no renderer. The #20960 census measured
+ * that at objectui `main` `5262f7dd` over every key this repo's examples wrote
+ * here (`format`, `currency`, `color`, `suffix`, `showLegend`, `horizontal`,
+ * `showDataLabels`): none is read on that path — only the legacy inline arm,
+ * which a widget carrying a `dataset` never reaches, spreads the bag into
+ * component props — so each was removed from its producer rather than
+ * declared. `description` is the opposite case, read but unwritten: no
+ * authored source writes it (only `translateDashboard` overlays it, from a
+ * `subCaption` bundle entry — `system/i18n-resolver.ts`), and objectui#11228
+ * ruled it out with the inline dialect, so it stays undeclared and dropping
+ * the read is objectui's follow-up. ⛔ A key is declared here only with both
+ * a writer and a read site on the dataset-bound path, and it then joins
+ * `CONSUMED_WIDGET_OPTION_KEYS` in `@objectstack/sdui-parser`
+ * (`check:widget-option-census`).
+ *
+ * Presentation has declared homes instead: a number's face is the dataset
+ * MEASURE's `format` + `currency`, a tile's accent is the widget's
+ * `colorVariant`, and a chart's look is the widget's `chartConfig`.
+ *
+ * What the declared keys below buy is a real contract for the four that are
+ * NOT presentation-only: they change the SQL the dataset query compiles to, so
+ * a typo (`sortDirection`, `granularity`) is now an author-time type error
  * instead of an option that reads as if it works and silently does nothing.
  *
  * The dashboard/report renderer lowers these into the `DatasetSelection` it
