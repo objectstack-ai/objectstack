@@ -18,7 +18,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { JSON_COLUMN_INCOMPATIBLE_OPERATORS, jsonColumnOperatorRefusalText } from '@objectstack/core';
-import { FILTER_OPERATORS } from '@objectstack/spec/data';
+import { FILTER_OPERATORS, type FilterCondition } from '@objectstack/spec/data';
 import { SqlDriver, withheldFilterDiagnosticOf } from './index.js';
 
 interface WireBearingError extends Error {
@@ -51,7 +51,7 @@ describe('[#21007] driver-sql — the JSON-column refusal is the shared set and 
 
   async function refusalOf(where: Record<string, unknown>): Promise<WireBearingError | null> {
     try {
-      await driver.find('team', { where } as any);
+      await driver.find('team', { where: where as FilterCondition });
       return null;
     } catch (e) {
       return e as WireBearingError;
