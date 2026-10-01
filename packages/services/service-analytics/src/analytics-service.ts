@@ -7,7 +7,7 @@ import type {
   CubeMeta,
   DatasetSelection,
 } from '@objectstack/spec/contracts';
-import { percentScaleOf, type AggregationFunction, type Cube, type FilterCondition } from '@objectstack/spec/data';
+import { percentScaleOf, AggregationFunction, type Cube, type FilterCondition } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { Dataset } from '@objectstack/spec/ui';
 // [#6761] The ONE shared `I18nLabel → string` resolver (#6765, maintainer
@@ -59,6 +59,11 @@ import {
 // Owned in its own module so the enumerated verdict per `AggregationFunction`
 // member has one home rather than being inlined at the enrichment site.
 import { measureResultType } from './measure-result-type.js';
+// [#21044] …and the table that rule asks first, asked at the cube door too:
+// a measure whose aggregate × field-type pair it refuses is refused in
+// `ensureCube`, ahead of both strategies, as the dataset door refuses it at
+// compile.
+import { assertCubeMeasureFieldTypesAccepted } from './cube-measure-field-type-door.js';
 import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext, DatasetScopedStrategyContext, DatasetScope, ReadScopeFilterJudge } from './strategies/types.js';
 import { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from './strategies/objectql-strategy.js';
@@ -597,6 +602,72 @@ function withDeclaredMeasureFormats(
     if (typeof format !== 'string' || format === '') return;
     fields ??= [...result.fields];
     fields[i] = { ...f, format };
+  });
+  return fields ? { ...result, fields } : result;
+}
+
+/**
+ * [#21044] The cube measure a `measures` entry resolves to — through
+ * {@link declaredMemberEntry}, the resolver {@link withDeclaredMeasureFormats}
+ * reads — and the base-object COLUMN it aggregates: its `sql` when that is a
+ * bare identifier, `null` otherwise (`'*'`, or a relationship path whose
+ * declaration lives on another object). `undefined` when the entry resolves to
+ * no declared measure.
+ */
+function declaredMeasureColumn(
+  cube: Cube,
+  member: string,
+): { type: unknown; column: string | null } | undefined {
+  const entry = declaredMemberEntry(cube, member, 'measure');
+  const measure = entry ? cube.measures[entry.key] : undefined;
+  if (!measure) return undefined;
+  const sql = typeof measure.sql === 'string' ? measure.sql.trim() : '';
+  return { type: measure.type, column: BARE_IDENTIFIER.test(sql) ? sql : null };
+}
+
+/** The `AggregationFunction` vocabulary — the aggregates `measureResultType` speaks about. */
+const AGGREGATION_FUNCTIONS: ReadonlySet<string> = new Set(AggregationFunction.options);
+
+/**
+ * [#21044] Describe each measure column's `type` by the dataset door's one
+ * rule, {@link measureResultType} — at the seam every strategy's result leaves
+ * the cube door through, beside {@link withDeclaredMeasureFormats}.
+ *
+ * Every producer of `fields[]` mints `{ type: 'number' }` for a measure
+ * (`buildFieldMeta`, both strategies). The dataset door corrects that in its
+ * ADR-0021 enrichment (`enrichResultColumns`); the cube door described a
+ * `min` / `max` over a temporal column as a number, in the same response that
+ * carried the instant. ⛔ No copy of the rule: this asks it with the cube
+ * measure's aggregate and the declared type of the base-object column it reads,
+ * and writes only what it answers. It answers `undefined` for every pair it has
+ * nothing to say about — the numeric and boolean classes, the count / sum / avg
+ * rows, an expression metric type — and for every pair the aggregate ×
+ * field-type table refuses, which the cube door has refused before any strategy
+ * ran ({@link assertCubeMeasureFieldTypesAccepted}). A relationship-path column
+ * is not described: the declaration this reads is the base object's.
+ *
+ * Copy-on-write, like the format pass: the strategy owns the object it
+ * returned.
+ */
+function withMeasureResultTypes(
+  result: AnalyticsResult,
+  query: AnalyticsQuery,
+  cube: Cube | undefined,
+  declaredTypeOf: ((object: string, field: string) => string | undefined) | undefined,
+): AnalyticsResult {
+  if (!declaredTypeOf || !cube || !result?.fields?.length || !query.measures?.length) return result;
+  const object = typeof cube.sql === 'string' ? cube.sql.trim() : '';
+  if (!object || !BARE_IDENTIFIER.test(object)) return result;
+  const requested = new Set(query.measures);
+  let fields: AnalyticsResult['fields'] | undefined;
+  result.fields.forEach((f, i) => {
+    if (!requested.has(f.name)) return;
+    const measure = declaredMeasureColumn(cube, f.name);
+    if (!measure?.column || typeof measure.type !== 'string' || !AGGREGATION_FUNCTIONS.has(measure.type)) return;
+    const type = measureResultType(measure.type as AggregationFunction, declaredTypeOf(object, measure.column));
+    if (type === undefined || f.type === type) return;
+    fields ??= [...result.fields];
+    fields[i] = { ...f, type };
   });
   return fields ? { ...result, fields } : result;
 }
@@ -1862,8 +1933,20 @@ export class AnalyticsService implements IAnalyticsService {
         // `analytics_cube.measures.format` is described at the same seam, for
         // the same reason: whichever strategy answered, the measure columns
         // leave with the format the cube declares.
+        //
+        // [#21044] …and with the `type` the dataset door's one rule gives a
+        // `min` / `max` over a temporal column (`time`), read off the cube
+        // measure and the column's declaration, never off the rows.
         const result = await strategy.execute(query, ctx);
-        return this.applySqlEchoPolicy(withDeclaredMeasureFormats(result, query, scope.getCube(query.cube!)));
+        const cube = scope.getCube(query.cube!);
+        return this.applySqlEchoPolicy(
+          withMeasureResultTypes(
+            withDeclaredMeasureFormats(result, query, cube),
+            query,
+            cube,
+            this.sourceFieldMeta && ((object, field) => this.sourceFieldMeta?.(object, field)?.type),
+          ),
+        );
       } catch (e) {
         if ((e as { code?: string })?.code === 'RAW_SQL_UNSUPPORTED') {
           this.logger.warn(
@@ -2705,6 +2788,9 @@ export class AnalyticsService implements IAnalyticsService {
       this.assertDimensionFields(query, cube, Object.keys(cube.dimensions));
       // [#20807] …and a grouped dimension's column must not be structured JSON.
       this.assertDimensionsGroupScalarColumns(query, cube);
+      // [#21044] …and a measure's aggregate must be one the aggregate ×
+      // field-type table accepts for its column's declared type.
+      this.assertMeasureFieldTypes(query, cube);
       // [#5669] …and the `where`'s, third and last of the three request keys that
       // carry a field name. Its members are read from the filter TREE, not from
       // `cube.dimensions` — which on this path was minted from this very query,
@@ -2777,6 +2863,9 @@ export class AnalyticsService implements IAnalyticsService {
       // the rejection suggests.
       this.assertDimensionFields(query, augmented, Object.keys(cube.dimensions));
       this.assertDimensionsGroupScalarColumns(query, augmented);
+      // [#21044] Judged on the AUGMENTED cube: a suffix-inferred measure and an
+      // authored one are one population for the aggregate × field-type table.
+      this.assertMeasureFieldTypes(query, augmented);
       // [#5669] The `where` gate resolves a filter member through dimensions AND
       // measures (that is what the strategies do for a filter member), so it is
       // handed the AUGMENTED cube — a caller filtering on a suffix-inferred
@@ -2792,8 +2881,45 @@ export class AnalyticsService implements IAnalyticsService {
       this.assertMeasureFields(query, cube, Object.keys(cube.measures));
       this.assertDimensionFields(query, cube, Object.keys(cube.dimensions));
       this.assertDimensionsGroupScalarColumns(query, cube);
+      this.assertMeasureFieldTypes(query, cube);
       this.assertWhereFields(query, cube, Object.keys(cube.dimensions));
     }
+  }
+
+  /**
+   * [#21044] Refuse a `measures` entry whose aggregate the aggregate ×
+   * field-type table (`AGGREGATE_FIELD_TYPE_COMPATIBILITY`) refuses for its
+   * column's declared type — `INVALID_FIELD` / 400, naming the member the
+   * caller wrote — before either strategy reads anything. The rule, the tiers,
+   * the measurements and the envelope are
+   * {@link assertCubeMeasureFieldTypesAccepted}'s
+   * (`cube-measure-field-type-door.ts`); this method supplies the two answers
+   * only the service has:
+   *
+   * - The measure and column a member resolves to are
+   *   {@link declaredMeasureColumn}'s — {@link declaredMemberEntry}, the
+   *   resolver {@link withDeclaredMeasureFormats} reads — and nothing else
+   *   resolves a member to a field here.
+   * - The column's declared type is {@link AnalyticsServiceConfig.sourceFieldMeta}'s,
+   *   the declaration the #20807 / #20912 door reads beside it.
+   *
+   * Runs after that door on every `ensureCube` path, so a `count_distinct`
+   * measure keeps its own verdict and a member naming a column the object does
+   * not have is answered as that first. Same stand-downs as that door: no
+   * `sourceFieldMeta`, or a cube whose `sql` is not a bare object name.
+   */
+  private assertMeasureFieldTypes(query: AnalyticsQuery, cube: Cube): void {
+    const fieldMeta = this.sourceFieldMeta;
+    if (!fieldMeta) return;
+    const object = typeof cube.sql === 'string' ? cube.sql.trim() : '';
+    if (!object || !BARE_IDENTIFIER.test(object)) return;
+    assertCubeMeasureFieldTypesAccepted(
+      query,
+      cube.name,
+      object,
+      (member) => declaredMeasureColumn(cube, member),
+      (o, field) => fieldMeta(o, field)?.type,
+    );
   }
 
   /**

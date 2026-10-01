@@ -37,8 +37,11 @@
  * core`), and `min` / `max` over a declared numeric column, through the same
  * `presentAsNumber` `driver-sql`'s own `aggregate()` applies (#20335). It is
  * keyed on the measure's declared function, never on whether a value looks
- * numeric: the text dimension and the `max` over a text column below hold
- * numeric-looking text and stay text.
+ * numeric: the text dimension below holds numeric-looking text and stays text.
+ * [#21044] The `max` over a text column this file used to serve as the
+ * second half of that control no longer reaches the presenter: the cube door
+ * refuses the pair by the aggregate × field-type table before any statement
+ * runs, and the case below now pins that refusal instead.
  *
  * The fixture's values are dyadic fractions and its groups hold 1, 2 or 4 rows,
  * so a JS double holds every sum and average EXACTLY and the expected values
@@ -143,7 +146,7 @@ type NumberMeasure = (typeof NUMBER_MEASURES)[number];
 const byGroup = (g: string) => ROWS.filter((r) => r.category === g);
 const sumOf = (rows: readonly Row[], f: 'stars' | 'amount' | 'frac') => rows.reduce((a, r) => a + r[f], 0);
 
-function expected(g: string): Record<NumberMeasure, number> & { max_code: string } {
+function expected(g: string): Record<NumberMeasure, number> {
   const rows = byGroup(g);
   return {
     row_count: rows.length,
@@ -157,8 +160,6 @@ function expected(g: string): Record<NumberMeasure, number> & { max_code: string
     max_price: Math.max(...rows.map((r) => r.price)),
     sum_frac: sumOf(rows, 'frac'),
     avg_frac: sumOf(rows, 'frac') / rows.length,
-    // Text order, not numeric: '9' sorts after '10'.
-    max_code: [...rows.map((r) => r.code)].sort().reverse()[0]!,
   };
 }
 
@@ -276,7 +277,7 @@ for (const cell of CELLS) {
       });
 
       it('the cube read: every measure declared number is a number, equal to the rows, and the native strategy answered it', async () => {
-        const res = await cubeRead('native', [...NUMBER_MEASURES, 'max_code'], ['category']);
+        const res = await cubeRead('native', NUMBER_MEASURES, ['category']);
         expect(res.rawSql, 'one raw statement: NativeSQLStrategy answered').toBe(1);
         expect(res.aggregate, 'no engine aggregate').toBe(0);
         for (const m of NUMBER_MEASURES) {
@@ -294,11 +295,18 @@ for (const cell of CELLS) {
         }
       });
 
-      it('keyed on the declared function, never on the value: max over a text column and a text dimension stay text', async () => {
-        const res = await cubeRead('native', ['max_code'], ['category']);
-        for (const [g, a] of byCategory(res.rows)) {
-          expect(a.max_code, `${g} max(code) is the column's text`).toBe(expected(g).max_code);
-        }
+      it('keyed on the declared function, never on the value: a text dimension stays text, and max over a text column is refused before it is read', async () => {
+        // [#21044] Flipped, not deleted: this half used to read the column's
+        // text back. The aggregate × field-type table refuses `max` over `text`,
+        // and the cube door now asks it ahead of the strategy.
+        const before = { ...reads };
+        const refused = await services.native!.query({ cube: CUBE.name, measures: ['max_code'], dimensions: ['category'] } as any).then(
+          () => undefined,
+          (e: Error & { code?: string; status?: number }) => e,
+        );
+        expect(refused?.code, refused?.message).toBe('INVALID_FIELD');
+        expect(refused?.status).toBe(400);
+        expect(reads.rawSql - before.rawSql, 'no statement ran').toBe(0);
 
         const byCode = await cubeRead('native', ['row_count'], ['code']);
         expect(byCode.rawSql).toBe(1);

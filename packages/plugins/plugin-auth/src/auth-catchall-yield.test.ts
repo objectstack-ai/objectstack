@@ -82,7 +82,14 @@ async function mountCatchAll(
     getKernel: vi.fn(),
   } as any;
 
-  const plugin = new AuthPlugin({ secret: 'test-secret-at-least-32-chars-long!!' });
+  // [#21078] Discovery off: the OIDC `.well-known` routes now mount
+  // synchronously from `registerAuthRoutes` and read the manager while they
+  // do, and this stand-in carries only the catch-all's two seams. The
+  // discovery mount has its own file (`oidc-discovery-sync-mount.test.ts`).
+  const plugin = new AuthPlugin({
+    secret: 'test-secret-at-least-32-chars-long!!',
+    plugins: { oidcProvider: false },
+  });
   await plugin.init(ctx);
 
   const ownership = buildBetterAuthRouteOwnership(api as any);
