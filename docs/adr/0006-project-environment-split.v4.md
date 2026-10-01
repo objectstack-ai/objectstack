@@ -240,6 +240,7 @@ when needed.
 2. **Visibility default for CLI-created packages.** `private` (owner org
    only) — consistent with `sys_package.visibility` default. Explicit
    `objectstack package publish --marketplace` flow to escalate.
+   **Resolved (2026-09-30, #20892): `org`.** A new package is visible to every environment of its owner organization by default, not `private`. Re-publishing without `--visibility` leaves an existing package's visibility unchanged, and listing on the public marketplace remains an explicit choice.
 3. **Multi-package envs in Studio.** The current "Environment detail" page
    assumes one artifact. Phase B+ updates it to list installations and
    show per-package versions.

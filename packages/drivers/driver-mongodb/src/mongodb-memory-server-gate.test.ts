@@ -97,7 +97,9 @@ describe('[#5517] the mongod opt-in gate', () => {
 
     expect(mongod).toBeUndefined();
     expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain('#5517');
+    expect(warnings[0]).toContain(
+      'retired from default test runs because concurrent downloads made green runs exit 1',
+    );
     expect(warnings[0]).toContain(MONGOD_TESTS_ENV);
     expect(warnings[0]).toContain('SKIP gate probe');
     // The property that makes the skip cost nothing: the module that would
@@ -202,7 +204,7 @@ describe('[#5517] the abandoned-download rejection guard', () => {
     listeners[0](renameEnoent());
     expect(reraised).toEqual([]);
     expect(warned).toHaveLength(1);
-    expect(warned[0]).toContain('#5517');
+    expect(warned[0]).toContain('download abandoned by a concurrent-download race');
 
     const real = new Error('a genuine unhandled rejection');
     listeners[0](real);

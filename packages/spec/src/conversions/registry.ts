@@ -8929,9 +8929,11 @@ const objectGridDefaultSortRemoved: MetadataConversion = {
  * `object-kanban`'s per-column quick-add switch leaves the contract (protocol
  * 18, #17260, ADR-0049 enforce-or-remove; the spec half of the objectui#8285
  * director-seat ruling, decision batch #91, 2026-09-08 — ruled option B,
- * `quickAdd` is retired from the board and stays only on the `kanban-ui`
- * block, where a React host can supply the runtime function the control
- * needs).
+ * `quickAdd` is retired from the board. The ruling kept the control on the
+ * `kanban-ui` block, where a React host can supply the runtime function it
+ * needs; objectui has since retired that block (objectui#8257), so
+ * `object-kanban` offers no quick-add control and no block a document can
+ * name offers one either).
  *
  * **A pure lossless delete.** The key never had an effect to preserve.
  * Measured at the `.objectui-sha` pin (`53ded82bf`): the board FORWARDS it —
@@ -8945,12 +8947,11 @@ const objectGridDefaultSortRemoved: MetadataConversion = {
  * `onCardClick` in the same file). So the gate was permanently false and
  * deleting the key preserves observed behaviour exactly.
  *
- * ⚠️ Scoped by component `type`, never by key name. `quickAdd` is LIVE on the
- * `kanban-ui` block — the same renderer chain, reached by a React host that
- * hands in `onQuickAdd` — and the ruling keeps it there deliberately. That
- * block is objectui-side and is not a component type this spec declares, so no
- * stack this walk reaches can carry it; the type scoping is what keeps the
- * strip from generalising into a name-keyed one if it ever is declared. The
+ * ⚠️ Scoped by component `type`, never by key name, so the strip cannot
+ * generalise into a name-keyed one: a node of any other type that authors the
+ * same key is left alone. The `kanban-ui` block the ruling kept the control on
+ * is retired (objectui#8257) and was never a component type this spec
+ * declares, so no stack this walk reaches is expected to carry it. The
  * fixture's non-carrier control is an `object-grid` authoring the same key
  * name.
  *
@@ -8973,7 +8974,7 @@ const objectKanbanQuickAddRemoved: MetadataConversion = {
   summary:
     "object-kanban component prop 'quickAdd' removed (#17260 — the affordance is gated on a "
     + "host-supplied 'onQuickAdd' function no producer puts on an object-kanban node, so the key "
-    + "was accepted and dropped; the quick-add control stays on the React-host 'kanban-ui' block)",
+    + "was accepted and dropped; delete the key — object-kanban offers no quick-add control)",
   apply(stack, emit) {
     return mapPageComponents(stack, (component, path) => {
       if (component.type !== 'object-kanban') return component;
@@ -9001,7 +9002,7 @@ const objectKanbanQuickAddRemoved: MetadataConversion = {
                 // ⚠️ The same key name on a component that is NOT an
                 // `object-kanban` — not this entry's key. Untouched: the strip
                 // is scoped by component type, never by key name, which is what
-                // keeps the LIVE `kanban-ui` spelling out of its reach.
+                // keeps this key out of every other component type's reach.
                 {
                   type: 'object-grid',
                   id: 'g1',

@@ -229,9 +229,10 @@ export class KnowledgeService implements IKnowledgeService {
   // ── Sync entrypoints (called by the host plugin's event bridge) ───
 
   /**
-   * Apply an ObjectQL `record.created` / `record.updated` event to
-   * every `object` source bound to the matching object. Failures are
-   * logged but never thrown — sync must not block writes.
+   * Apply an ObjectQL `data.record.created` / `data.record.updated` event
+   * (the record body is the event payload's `after`) to every `object`
+   * source bound to the matching object. Failures are logged but never
+   * thrown — sync must not block writes.
    */
   async handleRecordUpsert(object: string, record: Record<string, unknown>): Promise<void> {
     const targets = this.sourcesForObject(object);
@@ -249,7 +250,7 @@ export class KnowledgeService implements IKnowledgeService {
     }
   }
 
-  /** Apply an ObjectQL `record.deleted` event. */
+  /** Apply an ObjectQL `data.record.deleted` event (the id is the payload's `recordId`). */
   async handleRecordDelete(object: string, recordId: string): Promise<void> {
     const targets = this.sourcesForObject(object);
     for (const source of targets) {

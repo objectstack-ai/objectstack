@@ -5709,8 +5709,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'an author following the contract met a tool contradicting it with no way to tell which side '
       + 'was wrong. A retiredKey tombstone on `ObjectKanbanPropsSchema` with one D2 conversion that '
       + 'is a pure lossless DELETE (the key never had an effect to preserve) scoped by component '
-      + '`type`: `quickAdd` stays LIVE on the `kanban-ui` block, where a React host supplies the '
-      + 'runtime slot, and the ruling keeps it there deliberately.',
+      + '`type`. Delete the key; `object-kanban` offers no quick-add control.',
   },
   {
     id: 'object-tenancy-organization-field-retired',
@@ -14163,23 +14162,21 @@ const step18: MigrationStep = {
       id: 'object-kanban-quick-add-retired',
       surface: 'page.component.object-kanban.quickAdd — the per-column quick-add switch on the '
         + 'metadata-driven board',
-      replacement: '(removed from the metadata board.) The quick-add control exists on the `kanban-ui` '
-        + 'block, where a React host supplies the `onQuickAdd` function the control calls. On a '
-        + 'metadata board, records are created through the object\'s ordinary create action.',
+      replacement: '(removed from the metadata board.) Delete the key; `object-kanban` offers no '
+        + 'quick-add control. On a metadata board, records are created through the object\'s ordinary '
+        + 'create action.',
       reason: 'The D2 conversion `object-kanban-quick-add-removed` deletes `quickAdd` from every '
         + '`object-kanban` component, and the delete is lossless: the board forwarded the flag, but the '
         + 'control also needs a host-supplied `onQuickAdd` function that JSON cannot carry and no '
         + 'producer ever put on an object-kanban node, so the gate was permanently false and no board '
         + 'ever showed the control. The residue is the requirement behind the flag. An author who set '
         + '`quickAdd: true` wanted users to add a card inside a column; that never happened and still '
-        + 'does not. Whether the board can live without it, or needs a React host rendering the '
-        + '`kanban-ui` block with a real `onQuickAdd`, is a product decision about that board — not '
-        + 'something a key delete can make.',
+        + 'does not. Whether the board can live without it is a product decision about that board — '
+        + 'not something a key delete can make.',
       acceptanceCriteria: 'No `object-kanban` component carries `quickAdd`; the parse refuses it. Each '
         + 'board renders the same columns and cards as before the upgrade. For each board that had set '
-        + 'the flag, the author has either accepted creating records through the object\'s create '
-        + 'action, or moved that board to a host that renders the `kanban-ui` block with `onQuickAdd` '
-        + 'supplied — where clicking a column\'s add control creates a record in that column.',
+        + 'the flag, the author has accepted creating records through the object\'s create action: '
+        + '`object-kanban` offers no quick-add control.',
     },
     // #19054 (ADR-0049 enforce-or-remove; maintainer ruling 2026-09-18) — the D3
     // entry of the `object-tenancy-organization-field-removed` family (ruling B on
@@ -23170,8 +23167,10 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // #17260 — ADR-0049 enforce-or-remove, executing the objectui#8285
     // director-seat ruling (comment 5583979207, decision batch #91, 2026-09-08,
     // standing maintainer delegation): ruled option B — `quickAdd` is retired from
-    // the `object-kanban` board and stays only on the `kanban-ui` block, where a
-    // React host can supply the runtime function the control needs.
+    // the `object-kanban` board. The ruling kept the control on the `kanban-ui`
+    // block, where a React host can supply the runtime function it needs; objectui
+    // has since retired that block (objectui#8257), so `object-kanban` offers no
+    // quick-add control and no block a document can name offers one either.
     // The board FORWARDED the key but never honoured it: measured at the
     // `.objectui-sha` pin `53ded82bf`, `ObjectKanban.tsx:931` spreads the authored
     // bag into `KanbanRenderer` (`plugin-kanban/src/index.tsx:196` passes both
@@ -23187,7 +23186,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // wrong. Tombstoned with `retiredKey()` in `ObjectKanbanPropsSchema` (the
     // surface baseline line carries `[RETIRED]`); sources are stripped by the D2
     // conversion `object-kanban-quick-add-removed`, a pure lossless delete scoped
-    // by component `type` so the LIVE `kanban-ui` spelling is untouched.
+    // by component `type` so the same key on any other component type is untouched.
     //
     // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
     // removal ships on the 17.x line (launch-window convention: accept-set
