@@ -114,6 +114,10 @@ import {
   type NestedAuthorableKeyState,
 } from './lib/nested-authorable-keys';
 import { RETIRED_DEFS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../src/migrations/registry';
+// Where a registration is WRITTEN, as distinct from where it is read above: the
+// two tables are generated from one file per entry, and the generator's own
+// naming rule is what every remedy below prints (see `entryFileOf`).
+import { ENTRIES_DIR, KINDS, shardNameFor, type Kind } from './build-migration-registry';
 import {
   getMetadataTypeSchema,
   listMetadataTypeSchemaTypes,
@@ -759,6 +763,63 @@ try {
 
 const generatedKeys = new Set(generatedSchemas.keys());
 
+/** The protocol major this build is: the major any retirement it makes belongs to. */
+const CURRENT_MAJOR = Number.parseInt(SPEC_VERSION, 10);
+
+// ─── Where a registration is WRITTEN ──────────────────────────────────
+// RETIRED_KEYS_BY_MAJOR, RETIRED_DEFS_BY_MAJOR and every step's `semantic`
+// list are GENERATED into src/migrations/registry.ts from one file per entry
+// under src/migrations/entries/. So every remedy in this file that asks for a
+// registration — or for one to be undone — names the entry FILE and the
+// generator command, never the table: an entry typed between the generated
+// markers is reverted by the next `gen:migration-registry` run and failed by
+// `check:migration-registry` before that. The file name comes from the
+// generator's own `shardNameFor`, the one naming rule entries/README.md
+// documents, so a gate never prints a name the generator would refuse.
+
+const MIGRATION_ENTRIES_README = `packages/spec/${ENTRIES_DIR}/README.md`;
+const MIGRATION_REGISTRY_COMMAND = 'pnpm --filter @objectstack/spec gen:migration-registry';
+
+/** The repo-relative directory one kind of entry file lives in, with its trailing slash. */
+function entryDirOf(kind: Kind): string {
+  const { dir } = KINDS.find((k) => k.kind === kind)!;
+  return `packages/spec/${ENTRIES_DIR}/${dir}/`;
+}
+
+/** The repo-relative file that registers `id` under `major`, named as the generator names it. */
+function entryFileOf(kind: Kind, major: number, id: string): string {
+  return entryDirOf(kind) + shardNameFor(major, id);
+}
+
+/**
+ * The entry files to ADD for ids this build retires: each file under this
+ * build's major, and the one declaration it carries.
+ */
+function renderNewEntryFiles(kind: 'retired-key' | 'retired-def', ids: readonly string[]): string {
+  return ids
+    .map((id) => `        ${entryFileOf(kind, CURRENT_MAJOR, id)}\n          export const entry = '${id}';\n`)
+    .join('');
+}
+
+/**
+ * The entry files that register `key` in RETIRED_KEYS_BY_MAJOR — named from each
+ * entry's OWN id and major, so a key carried through a declared def rename
+ * (`carryAuthorableKey`) still names the file that is actually on disk, and a
+ * key registered under two majors names both.
+ */
+function retiredKeyEntryFiles(key: string): string[] {
+  return Object.entries(RETIRED_KEYS_BY_MAJOR).flatMap(([major, ids]) =>
+    ids.filter((id) => carryAuthorableKey(id) === key).map((id) => entryFileOf('retired-key', Number(major), id)),
+  );
+}
+
+/** The entry files that register `def` in RETIRED_DEFS_BY_MAJOR (no rename carry, as there). */
+function retiredDefEntryFiles(def: string): string[] {
+  return Object.entries(RETIRED_DEFS_BY_MAJOR).flatMap(([major, ids]) =>
+    ids.filter((id) => id === def).map((id) => entryFileOf('retired-def', Number(major), id)),
+  );
+}
+
 // ─── Declared def renames must describe THIS build ────────────────────
 // Both ratchets below consult RENAMED_DEFS, so an entry that no longer matches
 // reality (target never emitted, or source still emitted alongside it) would
@@ -786,10 +847,14 @@ if (missing.length > 0) {
     `   Zod change made it unrepresentable (e.g. an added .transform in "output" AND "input"\n` +
     `   io modes) or an export was renamed/removed. Fix the schema, or — if the removal is\n` +
     `   deliberate — delete the key(s) from packages/spec/${SCHEMA_MANIFEST_DIR_NAME}/<category>.json\n` +
-    `   in the same PR AND declare each one in RETIRED_DEFS_BY_MAJOR (src/migrations/registry.ts),\n` +
-    `   which the manifest deletion gate below requires (#4725). Deleting the line alone\n` +
-    `   used to be the whole procedure, and nothing checked it. Silently unpublishing a\n` +
-    `   schema deletes its reference docs on the next gen:docs run (see #2978).`,
+    `   in the same PR AND register each removal in RETIRED_DEFS_BY_MAJOR, which the manifest\n` +
+    `   deletion gate below requires (#4725). That table is generated: add one entry file per\n` +
+    `   def (named per ${MIGRATION_ENTRIES_README}; these names are the generator's own) —\n\n` +
+    renderNewEntryFiles('retired-def', missing) +
+    `\n   — then run \`${MIGRATION_REGISTRY_COMMAND}\`. ⛔ Never type an entry into the\n` +
+    `   generated table by hand. Deleting the line alone used to be the whole procedure, and\n` +
+    `   nothing checked it. Silently unpublishing a schema deletes its reference docs on the\n` +
+    `   next gen:docs run (see #2978).`,
   );
   process.exit(1);
 }
@@ -950,9 +1015,6 @@ function registeredRetiredKeys(): Map<string, number> {
   }
   return out;
 }
-
-/** The protocol major this build is: the major any retirement it makes belongs to. */
-const CURRENT_MAJOR = Number.parseInt(SPEC_VERSION, 10);
 
 const currentKeys = new Map<string, boolean>(); // key -> isRetired
 for (const [defKey, schema] of generatedSchemas) {
@@ -1124,12 +1186,17 @@ if (surfaceDoc) {
         `   (ADR-0087 D4) is a projection of the conversion + migration registries, and the\n` +
         `   generated upgrade guide and the \`spec_changes\` MCP tool are projections of that.\n` +
         `   Without an entry a consumer only learns of this by failing.\n\n` +
-        `   1. Declare each retirement by its EXACT key in RETIRED_KEYS_BY_MAJOR\n` +
-        `      (packages/spec/src/migrations/registry.ts) — copy these lines in:\n\n` +
-        unregistered.map((k) => `        '${k}',\n`).join('') +
-        `\n      under \`${CURRENT_MAJOR}: [ … ]\` (create the major's array if it is the first).\n` +
-        `      Nothing is inferred here: a leaf name matched against unrelated conversion\n` +
-        `      surfaces is what let tombstones register themselves by coincidence (#4659).\n\n` +
+        `   1. Register each retirement by its EXACT key in RETIRED_KEYS_BY_MAJOR. That table\n` +
+        `      is generated: add one entry file per key (named per\n` +
+        `      ${MIGRATION_ENTRIES_README}; these names are the generator's own) —\n\n` +
+        renderNewEntryFiles('retired-key', unregistered) +
+        `\n      — with a \`//\` comment above the \`export\` saying why the key was retired (it\n` +
+        `      lands above the entry in the table), then run\n` +
+        `      \`${MIGRATION_REGISTRY_COMMAND}\`. ⛔ Never type an entry into the\n` +
+        `      generated table by hand: the next run reverts it, and check:migration-registry\n` +
+        `      fails it first. Nothing is inferred here: a leaf name matched against unrelated\n` +
+        `      conversion surfaces is what let tombstones register themselves by coincidence\n` +
+        `      (#4659).\n\n` +
         `   2. Add a D2 conversion in src/conversions/registry.ts naming the surface (and a D3\n` +
         `      chain step referencing it) so \`os migrate meta\` rewrites their source.`,
       );
@@ -1174,15 +1241,19 @@ if (surfaceDoc) {
     console.error(
       `\n❌ ${liveButRegistered.length} RETIRED_KEYS_BY_MAJOR entr(ies) name a key that is still LIVE:`,
     );
-    for (const [k, major] of liveButRegistered) console.error(`     - ${k}  (registered at major ${major})`);
+    for (const [k, major] of liveButRegistered) {
+      console.error(`     - ${k}  (registered at major ${major})`);
+      for (const file of retiredKeyEntryFiles(k)) console.error(`         ${file}`);
+    }
     console.error(
       `\n   RETIRED_KEYS_BY_MAJOR records keys that ARE tombstoned — \`retiredKey()\`, which Zod\n` +
       `   emits as \`{ "not": {} }\`. These are still writable, so the entry registers a\n` +
       `   retirement nobody performed, and check (b) above would accept the real tombstone\n` +
       `   later without it ever being declared.\n\n` +
       `   Either tombstone the key in its schema (\`retiredKey('<key> was removed in … — use\n` +
-      `   <replacement>. …')\`), or delete the entry from\n` +
-      `   packages/spec/src/migrations/registry.ts.`,
+      `   <replacement>. …')\`), or delete the entry file named under it above and run\n` +
+      `   \`${MIGRATION_REGISTRY_COMMAND}\` — the table is generated from\n` +
+      `   those files, so ⛔ never delete its line by hand.`,
     );
     process.exit(1);
   }
@@ -1213,6 +1284,7 @@ if (surfaceDoc) {
     );
     for (const [k, major] of unresolvableNested) {
       console.error(`     - ${k}  (registered at major ${major})`);
+      for (const file of retiredKeyEntryFiles(k)) console.error(`         ${file}`);
     }
     console.error(
       `\n   The def IS emitted; the dotted path is not in it. Unlike a top-level key, a\n` +
@@ -1221,7 +1293,10 @@ if (surfaceDoc) {
       `   aged-out steady state: the row names a path this build has no property for.\n\n` +
       `   Fix the spelling against the emitted schema (json-schema/<category>/<Def>.json —\n` +
       `   an array member is spelled without its \`[]\`, as \`steps.estimatedMinutes\`), or\n` +
-      `   delete the entry from packages/spec/src/migrations/registry.ts.\n\n` +
+      `   delete the entry. Either is an edit to the entry file named under the row above —\n` +
+      `   a respelled id renames that file, and the generator names the name it expects —\n` +
+      `   then run \`${MIGRATION_REGISTRY_COMMAND}\`; the table is generated\n` +
+      `   from those files, so ⛔ never edit its line by hand.\n\n` +
       `   Two legitimate shapes this check cannot yet tell apart from a wrong row, both\n` +
       `   unreached on this tree — if yours is the first, teach this check the shape,\n` +
       `   ⛔ do not delete a row that is telling the truth:\n` +
@@ -2569,6 +2644,7 @@ function checkManifestRemovals(git: GitRun, baseRev: string | null): void {
     );
     for (const [def, major] of stillPublished) {
       console.error(`     - ${def}  (registered at major ${major})`);
+      for (const file of retiredDefEntryFiles(def)) console.error(`         ${file}`);
     }
     console.error(
       `\n   RETIRED_DEFS_BY_MAJOR records defs that HAVE left the published set — no\n` +
@@ -2576,7 +2652,9 @@ function checkManifestRemovals(git: GitRun, baseRev: string | null): void {
         `   so the entry registers a removal nobody performed, and the gate below would accept\n` +
         `   the real one later without it ever being declared.\n\n` +
         `   Either remove the export (and its ${MANIFEST_FILE_NAME} line) in this PR, or delete\n` +
-        `   the entry from packages/spec/src/migrations/registry.ts.`,
+        `   the entry file named under it above and run\n` +
+        `   \`${MIGRATION_REGISTRY_COMMAND}\` — the table is generated from\n` +
+        `   those files, so ⛔ never delete its line by hand.`,
     );
     process.exit(1);
   }
@@ -2633,10 +2711,13 @@ function checkManifestRemovals(git: GitRun, baseRev: string | null): void {
       `   waived every baseline line under the vanished def on the grounds that this file would\n` +
       `   adjudicate it. Removals are therefore compared against ${MANIFEST_FILE_NAME} at the\n` +
       `   merge base ${short} with origin/main, which this commit cannot rewrite.\n\n` +
-      `   1. Declare each removal by its EXACT def key in RETIRED_DEFS_BY_MAJOR\n` +
-      `      (packages/spec/src/migrations/registry.ts) — copy these lines in:\n\n` +
-      unregistered.map((def) => `        '${def}',\n`).join('') +
-      `\n      under \`${CURRENT_MAJOR}: [ … ]\` (create the major's array if it is the first).\n\n` +
+      `   1. Register each removal by its EXACT def key in RETIRED_DEFS_BY_MAJOR. That table\n` +
+      `      is generated: add one entry file per def (named per\n` +
+      `      ${MIGRATION_ENTRIES_README}; these names are the generator's own) —\n\n` +
+      renderNewEntryFiles('retired-def', unregistered) +
+      `\n      — then run \`${MIGRATION_REGISTRY_COMMAND}\`. ⛔ Never type an\n` +
+      `      entry into the generated table by hand: the next run reverts it, and\n` +
+      `      check:migration-registry fails it first.\n\n` +
       `   2. Add a D2 conversion in src/conversions/registry.ts naming the surface (and a D3\n` +
       `      chain step referencing it) plus a \`major\` changeset, so the removal reaches\n` +
       `      spec-changes.json, the upgrade guide and \`os migrate meta\` — the table is the\n` +
@@ -2822,10 +2903,13 @@ let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
             `   A line may only leave this file when:\n` +
             `     1. its key was tombstoned (\`retiredKey()\` → "[RETIRED]") AND that key is\n` +
             `        declared — EXACTLY, as '\${defKey}:\${name}' — in RETIRED_KEYS_BY_MAJOR\n` +
-            `        (src/migrations/registry.ts) under a major ≥ ${TOMBSTONE_AGE_MAJORS} behind this one\n` +
-            `        (≤ v${CURRENT_MAJOR - TOMBSTONE_AGE_MAJORS}). Tombstones that predate that table are deliberately\n` +
-            `        undeclared: nothing could date them honestly, so they are NOT deletable\n` +
-            `        until someone establishes the true major and writes it down (#5898). The\n` +
+            `        under a major ≥ ${TOMBSTONE_AGE_MAJORS} behind this one (≤ v${CURRENT_MAJOR - TOMBSTONE_AGE_MAJORS}). Tombstones that\n` +
+            `        predate that table are deliberately undeclared: nothing could date them\n` +
+            `        honestly, so they are NOT deletable until someone establishes the true\n` +
+            `        major and writes it down (#5898) — as one entry file under\n` +
+            `        ${entryDirOf('retired-key')}, named for that major per\n` +
+            `        ${MIGRATION_ENTRIES_README}, then \`${MIGRATION_REGISTRY_COMMAND}\`;\n` +
+            `        the table is generated, ⛔ never typed. The\n` +
             `        D2 conversion (src/conversions/registry.ts) naming the surface stays\n` +
             `        required — it is the prescription consumers follow — but it is no longer\n` +
             `        what dates the clock; or\n` +
@@ -2833,7 +2917,8 @@ let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
             `        that itself (it would have said so above); or\n` +
             `     3. its whole def stopped being emitted — adjudicated by the manifest deletion\n` +
             `        gate above (#4725), which demands the removal be declared in\n` +
-            `        RETIRED_DEFS_BY_MAJOR (src/migrations/registry.ts); or\n` +
+            `        RETIRED_DEFS_BY_MAJOR — an entry file under ${entryDirOf('retired-def')},\n` +
+            `        whose name that gate prints; or\n` +
             `     4. its baseline entry was NOT \`[RETIRED]\`, and writing the key on its def is\n` +
             `        REFUSED as an unrecognized key carrying the prescription its\n` +
             `        \`strictObject\` \`guidance\` table declares for it — an enumerated\n` +
@@ -3258,9 +3343,11 @@ if (!defaultsBaseline) {
         `   against sources you do not control — \`from\` against the baseline, \`to\` against what\n` +
         `   the build emits — so the declaration dies the moment it stops being true.\n\n` +
         `   If the default was NOT meant to move, restore it in the schema. And if the value\n` +
-        `   genuinely has to change for existing documents too, add a \`semantic\` entry to this\n` +
-        `   major's step in src/migrations/registry.ts so it reaches spec-changes.json, the\n` +
-        `   upgrade guide and \`os migrate meta\`.`,
+        `   genuinely has to change for existing documents too, add a \`semantic\` entry for major\n` +
+        `   ${CURRENT_MAJOR} — one entry file under ${entryDirOf('semantic')}, named per\n` +
+        `   ${MIGRATION_ENTRIES_README}, then \`${MIGRATION_REGISTRY_COMMAND}\`\n` +
+        `   (the step's list is generated, ⛔ never typed) — so it reaches spec-changes.json,\n` +
+        `   the upgrade guide and \`os migrate meta\`.`,
     );
     process.exit(1);
   }

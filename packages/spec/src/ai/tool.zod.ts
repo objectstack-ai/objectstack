@@ -28,10 +28,11 @@ import { strictObject } from '../shared/strict-object';
 // ==========================================
 
 /**
- * Retired `ToolSchema` keys — the rejection carries the upgrade prescription,
- * because the parse error is the one channel every consumer bumping
+ * Keys REMOVED from `ToolSchema`'s shape — the rejection carries the upgrade
+ * prescription, because the parse error is the one channel every consumer bumping
  * `@objectstack/spec` is guaranteed to hit (pattern of `object.zod.ts`'s
- * `UNKNOWN_KEY_GUIDANCE`, ADR-0049 enforce-or-remove).
+ * `UNKNOWN_KEY_GUIDANCE`, ADR-0049 enforce-or-remove). A key retired in place is
+ * a `retiredKey()` tombstone in the shape instead, never a row here.
  */
 const TOOL_RETIRED_KEY_GUIDANCE: Record<string, string> = {
   permissions:
