@@ -21,6 +21,19 @@
  * Every other outcome is a non-2xx error envelope, which this client's
  * `fetch` wrapper throws — it never reaches the declared return type.
  *
+ * ## `message` → `outcome`: the wire in transition (#21095)
+ *
+ * Ruling B on objectstack-ai/cloud#2315 — the server returns facts, the console
+ * composes the message in the user's locale — and ruling A's landing order
+ * (spec and this SDK first, the control plane LAST) mean a 200 from the
+ * route may carry the English `message`, the closed `outcome` fact, or both,
+ * depending on which control-plane release answers. The type therefore
+ * declares BOTH optional, and the outcome vocabulary split by arm:
+ * `archived | already_archived | purge_deferred` on the archive answer,
+ * `destroyed` on the teardown answer. Nothing in this repo reads `message`
+ * (measured: `git grep` over packages/, apps/ and examples/ at this change
+ * finds no reader outside this file, and objectui's tree has none either).
+ *
  * ## What each pin asserts
  *
  * - The URL for every combination of the two options. `force` and `purge` are
@@ -36,6 +49,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { ActionSchema } from '@objectstack/spec/ui';
 import { ObjectStackClient } from './index';
 
 type EnvironmentsNamespace = ObjectStackClient['environments'];
@@ -54,10 +68,27 @@ export function archiveAnswerDeclaresItsKeys(answer: DeleteAnswer): void {
     const purgeDeferred: boolean = answer.purgeDeferred;
     const retentionDays: number = answer.retentionDays;
     const warnings: string[] = answer.warnings;
-    const message: string = answer.message;
-    void [environmentId, archived, purgeDeferred, retentionDays, warnings, message];
+    const outcome: 'archived' | 'already_archived' | 'purge_deferred' | undefined = answer.outcome;
+    const message: string | undefined = answer.message;
+    void [environmentId, archived, purgeDeferred, retentionDays, warnings, outcome, message];
     // @ts-expect-error an archive tears nothing down; the archive answer carries no `purged`
     void answer.purged;
+}
+
+/**
+ * The transition, pinned in both directions (#21095): `message` is no longer
+ * guaranteed, `outcome` is not guaranteed yet, and the archive arm's outcome
+ * vocabulary excludes the teardown's.
+ */
+export function archiveAnswerGuaranteesNeitherMessageNorOutcome(answer: DeleteAnswer): void {
+    if (answer.deleted) return;
+    // @ts-expect-error `message` is optional — the control plane is retiring the sentence for `outcome`
+    const message: string = answer.message;
+    // @ts-expect-error `outcome` is optional — older control planes do not report it
+    const outcome: 'archived' | 'already_archived' | 'purge_deferred' = answer.outcome;
+    // @ts-expect-error `destroyed` is the teardown's outcome, never an archive's
+    const destroyed: NonNullable<typeof answer.outcome> = 'destroyed';
+    void [message, outcome, destroyed];
 }
 
 /** The teardown answer. `deleted: true` selects it, and it carries none of the archive-only keys. */
@@ -66,7 +97,11 @@ export function teardownAnswerDeclaresItsKeys(answer: DeleteAnswer): void {
     const environmentId: string = answer.environmentId;
     const purged: true = answer.purged;
     const warnings: string[] = answer.warnings;
-    void [environmentId, purged, warnings];
+    const outcome: 'destroyed' | undefined = answer.outcome;
+    void [environmentId, purged, warnings, outcome];
+    // @ts-expect-error a teardown is never reported as an archive outcome
+    const archivedOutcome: NonNullable<typeof answer.outcome> = 'archived';
+    void archivedOutcome;
     // @ts-expect-error the teardown answer carries no `archived`
     void answer.archived;
     // @ts-expect-error the teardown answer carries no `purgeDeferred`
@@ -84,6 +119,15 @@ export function previouslyDeclaredKeysStayReadable(answer: DeleteAnswer): void {
     const warnings: string[] = answer.warnings;
     void [deleted, environmentId, warnings];
 }
+
+/**
+ * The closed outcome vocabulary across both arms, tied to the declaration in
+ * BOTH directions: `satisfies` refuses a member the type lacks, and the
+ * `Exclude` below refuses a type member this list lacks.
+ */
+const DELETE_OUTCOMES = ['archived', 'already_archived', 'purge_deferred', 'destroyed'] as const satisfies ReadonlyArray<NonNullable<DeleteAnswer['outcome']>>;
+type UnlistedOutcome = Exclude<NonNullable<DeleteAnswer['outcome']>, (typeof DELETE_OUTCOMES)[number]>;
+export const everyOutcomeIsListed: [UnlistedOutcome] extends [never] ? true : false = true;
 
 /** `force` and `purge` are both declared options and may be passed together. */
 export function bothOptionsAreDeclared(): void {
@@ -119,6 +163,17 @@ const TORN_DOWN = {
     deleted: true,
     purged: true,
     warnings: ['attachment storage sweep failed: timeout'],
+};
+
+/** The archive answer of a control plane that reports the fact and has retired the sentence. */
+const ARCHIVED_AS_FACT = {
+    environmentId: 'env_1',
+    deleted: false,
+    archived: true,
+    outcome: 'already_archived',
+    purgeDeferred: false,
+    retentionDays: 30,
+    warnings: [],
 };
 
 describe('client.environments.delete — the two-step delete (cloud ADR-0014)', () => {
@@ -192,6 +247,42 @@ describe('client.environments.delete — the two-step delete (cloud ADR-0014)', 
         expect(answer.warnings).toEqual(['attachment storage sweep failed: timeout']);
     });
 
+    it('relays an archive answer that reports `outcome` and carries no `message` (the post-transition wire)', async () => {
+        const { client } = clientAnswering(200, { success: true, data: ARCHIVED_AS_FACT });
+
+        const answer = await client.environments.delete('env_1');
+
+        expect(Object.keys(answer).sort()).toEqual([
+            'archived', 'deleted', 'environmentId', 'outcome', 'purgeDeferred', 'retentionDays', 'warnings',
+        ]);
+        if (answer.deleted) throw new Error('expected the archive answer');
+        expect(answer.outcome).toBe('already_archived');
+        expect(answer.message).toBeUndefined();
+    });
+
+    it('relays a teardown answer that reports `outcome: destroyed`', async () => {
+        const { client } = clientAnswering(200, { success: true, data: { ...TORN_DOWN, outcome: 'destroyed' } });
+
+        const answer = await client.environments.delete('env_1', { purge: true });
+
+        if (!answer.deleted) throw new Error('expected the teardown answer');
+        expect(answer.outcome).toBe('destroyed');
+    });
+
+    it('every outcome the SDK can relay is authorable as an `outcomeMessages` key on an action', () => {
+        // The console composes the copy from the action's `outcomeMessages`
+        // (ruling A): an outcome the spec's key grammar refused could be
+        // reported and never given copy. Parsed through the real schema.
+        const r = ActionSchema.safeParse({
+            name: 'delete_environment',
+            label: 'Delete environment',
+            type: 'script',
+            target: 'deleteEnvironment',
+            outcomeMessages: Object.fromEntries(DELETE_OUTCOMES.map((o) => [o, `Outcome: ${o}`])),
+        });
+        expect(r.success, JSON.stringify((r as { error?: unknown }).error)).toBe(true);
+    });
+
     it('rejects a refusal instead of resolving it: a production environment deleted without `force`', async () => {
         const { client } = clientAnswering(409, {
             success: false,
@@ -210,6 +301,8 @@ describe('client.environments.delete — the two-step delete (cloud ADR-0014)', 
 
     it('anti-vacuity: the type pins above are real bindings in this module', () => {
         expect(typeof archiveAnswerDeclaresItsKeys).toBe('function');
+        expect(typeof archiveAnswerGuaranteesNeitherMessageNorOutcome).toBe('function');
+        expect(everyOutcomeIsListed).toBe(true);
         expect(typeof teardownAnswerDeclaresItsKeys).toBe('function');
         expect(typeof previouslyDeclaredKeysStayReadable).toBe('function');
         expect(typeof bothOptionsAreDeclared).toBe('function');
