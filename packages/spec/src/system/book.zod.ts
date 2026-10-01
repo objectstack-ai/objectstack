@@ -295,8 +295,16 @@ function entryFromDoc(doc: ResolverDoc): ResolvedEntry {
  *  - Otherwise membership is derived: a doc joins the first group (in group
  *    order) whose `include` matches it OR whose `key` equals the doc's explicit
  *    `group`. Within a group, docs sort by `doc.order` then label.
- *  - Any doc claimed by no group falls into a synthetic *Uncategorized* group
- *    appended last — nothing is ever dropped.
+ *  - Any doc OF THE BOOK'S PACKAGES claimed by no group falls into a
+ *    synthetic *Uncategorized* group appended last — no doc of the book is
+ *    ever dropped (ADR-0046 §6.4: "any doc left unplaced rolls up under a
+ *    synthetic *Uncategorized* group", the unplaced docs being the
+ *    package's). The book's packages are `bookPackage` plus every group's
+ *    `package`; a doc of any OTHER package is not this book's to catch — it
+ *    stays reachable through its own package's book. When the book declares
+ *    no package at all, every unclaimed doc is an orphan, as before.
+ *    Explicit placement is NOT scoped: a doc of another package whose
+ *    `group` names one of this book's groups still joins that group.
  */
 export function resolveBookTree(book: Book, docs: ResolverDoc[], bookPackage?: string): ResolvedBook {
   const groupsSorted = [...book.groups]
@@ -373,8 +381,20 @@ export function resolveBookTree(book: Book, docs: ResolverDoc[], bookPackage?: s
     resolvedGroups.push({ key: group.key, label: group.label, entries });
   }
 
-  // Orphans: docs claimed by no group.
-  const orphans = docs.filter((d) => !claimed.has(d.name)).sort(byOrderThenLabel);
+  // Orphans: docs of the book's own packages claimed by no group (ADR-0046
+  // §6.4). "Of the book's packages" is asked through `matchesInclude` with
+  // the catch-all rule `'*'` — the implicit package book's own rule
+  // (`deriveImplicitPackageBook`) — so the orphan pass and `include` share
+  // ONE reading of a doc's package: its stamped `packageId`, and a doc with
+  // none is in every scope. No package declared ⇒ no scope, every
+  // unclaimed doc is an orphan.
+  const ownPackages = [bookPackage, ...book.groups.map((g) => g.package)].filter(
+    (p): p is string => typeof p === 'string' && p.length > 0,
+  );
+  const orphans = docs
+    .filter((d) => !claimed.has(d.name))
+    .filter((d) => ownPackages.length === 0 || ownPackages.some((p) => matchesInclude(d, '*', p)))
+    .sort(byOrderThenLabel);
   if (orphans.length) {
     resolvedGroups.push({
       key: UNCATEGORIZED_KEY,

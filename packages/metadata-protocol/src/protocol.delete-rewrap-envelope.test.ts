@@ -80,6 +80,7 @@ import { ErrorCode } from '@objectstack/spec/api';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
+import { packagedBaseRegimeRow } from './packaged-base-regime.js';
 
 /**
  * The tier whose artifact-backed delete is refused BY THE REPOSITORY on a
@@ -309,7 +310,17 @@ describe('#7426 — the repository refusal reaches the caller with its code', ()
             // the token to the envelope, and the bracketed `[NOT_OVERRIDABLE]`
             // opener it had been trapped in was the duplicate left behind —
             // `error` is human language, `code` is the machine token.
-            expect(String(err.message), type).toContain('is not allowOrgOverride in the registry');
+            // [#20910, ADR-0126 §2] A type with a Regime C row (`flow`,
+            // `action`) is refused with its row's removal sentence, naming its
+            // sanctioned path; every other type keeps the type-door sentence.
+            if (packagedBaseRegimeRow(type)) {
+                expect(String(err.message), type).toContain(
+                    `Metadata item '${type}/${name}' is provided by a code package, and its packaged base is locked against removal.`,
+                );
+                expect(String(err.message), type).toContain('docs/adr/0126-packaged-metadata-customization-model.md');
+            } else {
+                expect(String(err.message), type).toContain('is not allowOrgOverride in the registry');
+            }
             expect(String(err.message), type).not.toContain('[NOT_OVERRIDABLE]');
             // A refusal that already deleted the row is a log line.
             expect(rows.size, type).toBe(1);

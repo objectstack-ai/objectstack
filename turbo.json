@@ -175,7 +175,8 @@
         "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
         "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
         "$TURBO_ROOT$/scripts/**",
-        "$TURBO_ROOT$/packages/rest/src/analytics-nested-relation-filter.test.ts"
+        "$TURBO_ROOT$/packages/rest/src/analytics-nested-relation-filter.test.ts",
+        "$TURBO_ROOT$/packages/drivers/driver-memory/src/memory-exists-non-boolean-refusal.test.ts"
       ]
     },
     "@objectstack/lint#test": {
@@ -417,7 +418,7 @@
     "@objectstack/dogfood#test": {
       "dependsOn": ["^build"],
       "outputs": [],
-      "env": ["OS_TEST_TIERS"],
+      "env": ["OS_TEST_TIERS", "OS_TEST_SHARD"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -464,6 +465,19 @@
         "!**/node_modules/**",
         "$TURBO_ROOT$/packages/spec/src/security/rls.zod.ts",
         "$TURBO_ROOT$/skills/objectstack-formula/**"
+      ]
+    },
+    "@objectstack/service-automation#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS", "OS_TEST_SHARD"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "!**/node_modules/**",
+        "$TURBO_ROOT$/packages/connectors/connector-rest/src/**"
       ]
     },
     "@objectstack/metadata-protocol#test": {
@@ -636,6 +650,8 @@
         "!**/node_modules/**",
         "$TURBO_ROOT$/content/docs/protocol/objectql/state-machine.mdx",
         "$TURBO_ROOT$/skills/objectstack-automation/SKILL.md",
+        "$TURBO_ROOT$/packages/types/src/data-error-classification.ts",
+        "$TURBO_ROOT$/packages/core/src/utils/import-runner.ts",
         "$TURBO_ROOT$/content/**",
         "$TURBO_ROOT$/docs/**",
         "$TURBO_ROOT$/skills/**"

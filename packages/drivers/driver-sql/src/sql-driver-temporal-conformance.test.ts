@@ -67,6 +67,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
+  lowerFilterCondition,
   TEMPORAL_CASES,
   TEMPORAL_NOW,
   TEMPORAL_ROWS,
@@ -113,9 +114,31 @@ const timeShape = (name: string) => ({
   fields: { at: { type: 'time' }, why: { type: 'string' } },
 });
 
+/** The declared field map of each table this file syncs — what a typed seam reads. */
+const DECLARED_FIELDS: Record<string, Record<string, { type: string }>> = Object.fromEntries(
+  [datetimeShape(DATETIME_TABLE), datetimeShape(DATETIME_LEGACY_TABLE), timeShape(TIME_TABLE), timeShape(TIME_LEGACY_TABLE)]
+    .map((shape) => [shape.name, shape.fields]),
+);
+
+/**
+ * [#20822 · ADR-0053 D-D1 items 5, 7 and 9, as amended] What a TYPED seam hands
+ * this driver: the case's filter through the shared lowering, reading the
+ * table's declared field map (`datetime` columns only). This driver keeps no
+ * whole-day copy of its own any more, so the whole-day cells are answered by
+ * the lowered filter, as on every seam-fed path; the expected rows are the
+ * shared table's, unchanged. Tokens resolve first, then lower (item 3).
+ */
+function seamed(table: string, where: unknown): unknown {
+  const fields = DECLARED_FIELDS[table];
+  if (!fields) throw new Error(`no declared field map for ${table}`);
+  return lowerFilterCondition(where, {
+    isDatetimeColumn: (column) => Object.prototype.hasOwnProperty.call(fields, column) && fields[column]!.type === 'datetime',
+  });
+}
+
 /** Row ids a filter reaches, sorted — the one thing every cell must agree on. */
 async function matchedIds(driver: SqlDriver, table: string, where: unknown): Promise<string[]> {
-  const rows = await driver.find(table, { where } as any);
+  const rows = await driver.find(table, { where: seamed(table, where) } as any);
   return (rows as any[]).map((r) => r.id).sort();
 }
 

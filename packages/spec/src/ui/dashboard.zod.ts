@@ -10,7 +10,7 @@ import { analyticsCarrierFilter } from './analytics-carrier-filter';
 import { DateGranularity } from '../data/query.zod';
 import { DATE_MACRO_WRAPPED_RE, isDateMacroToken } from '../data/date-macros.zod';
 import { DATE_RANGE_PRESETS } from '../data/date-range-presets';
-import { ChartTypeSchema, ChartConfigSchema } from './chart.zod';
+import { ChartTypeSchema, ChartConfigSchema, type ChartType } from './chart.zod';
 import { ActionType } from './action.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 // `AriaPropsSchema` is no longer imported here: `widgets[].aria` was retired
@@ -676,6 +676,166 @@ export function checkDashboardWidgetMetricMeasureArity(
 }
 
 /**
+ * The widget `type`s that DECLARE a rendering for several measures on a widget
+ * with NO dimension — the multi-measure set. One exported constant, and the only
+ * list of it anywhere: {@link checkDashboardWidgetDimensionlessMeasureArity}
+ * reads it, that check's refusal text reads it, the `values` doc string reads it,
+ * and objectui's `.shape` mirror is to import it rather than restate it.
+ *
+ * What each member renders when `dimensions` is empty or absent:
+ *
+ * | type | the several measures become |
+ * |---|---|
+ * | `table` | one row, one column per measure |
+ * | `pivot` | one row of measure columns |
+ * | `bar` / `column` / `horizontal-bar` | one bar per measure — the bar family's orientations |
+ * | `line` / `area` | one series per measure |
+ * | `combo` | one series per measure, mixed marks on shared axes |
+ *
+ * Every other member of `ChartTypeSchema` is outside the set, and a dimensionless
+ * widget of one of them carrying two or more measures is refused — by exactly
+ * one of two checks: the metric FAMILY (`SINGLE_MEASURE_WIDGET_TYPES` above) by
+ * {@link checkDashboardWidgetMetricMeasureArity}, which refuses a second measure
+ * at ANY dimensionality, and the remaining seven — `pie`, `donut`, `funnel`,
+ * `scatter`, `radar`, `treemap`, `sankey`, named here as a reading, never as a
+ * list any code consults — by the dimensionless check. Those seven, with nothing
+ * to split by, drew `values[0]` and dropped the rest.
+ *
+ * Widening is free and is the direction this constant moves: a type that gains a
+ * DECLARED multi-measure rendering (a radar of measures, a funnel of measure
+ * stages) joins here with no migration, because a narrowing that is later
+ * relaxed costs an author nothing. ⛔ Never add a member to make a document
+ * parse — only when a renderer draws every measure.
+ *
+ * `satisfies readonly ChartType[]`, so a member that is not a declared widget
+ * type is a compile error rather than a silent no-op entry.
+ */
+export const DASHBOARD_WIDGET_MULTI_MEASURE_TYPES = [
+  'table',
+  'pivot',
+  'bar',
+  'column',
+  'horizontal-bar',
+  'line',
+  'area',
+  'combo',
+] as const satisfies readonly ChartType[];
+
+/**
+ * objectui#8894 ruling D, applied to the chart families — a widget with NO
+ * dimension declares two or more measures only on a type that renders them.
+ *
+ * ## What was wrong
+ *
+ * `values` is `z.array(z.string()).min(1)`, and outside the metric family it has
+ * no upper bound at all. With a dimension, the several measures of a `pie` have a
+ * category axis to sit against; with NONE, `pie`, `donut`, `funnel`, `scatter`,
+ * `radar`, `treemap` and `sankey` have one mark to draw and drew `values[0]`: the
+ * rest were selected, queried, and dropped on the floor by the renderer. Every
+ * door accepted the document. That is the declared≠delivered shape ADR-0049
+ * exists to end, and it is the case ruling D judged — 「协议不正确的应该先修改协议」:
+ * the protocol is fixed where it admits measures a widget type cannot render,
+ * rather than a display semantics being invented for `values[1..]`.
+ *
+ * ## The rule, exactly
+ *
+ * Refused when ALL of these hold:
+ *
+ *  1. `dimensions` is absent or empty;
+ *  2. `values` carries two or more measures;
+ *  3. `type` is a declared `ChartTypeSchema` member outside
+ *     {@link DASHBOARD_WIDGET_MULTI_MEASURE_TYPES};
+ *  4. and `type` is NOT a metric-family member — those are refused by
+ *     {@link checkDashboardWidgetMetricMeasureArity} already, at any
+ *     dimensionality, and a second issue on the same `values` would change that
+ *     existing refusal from one issue to two. Conditions 3 + 4 together are "the
+ *     rest of the taxonomy", computed from `ChartTypeSchema` and the two sets, so
+ *     no third list exists to drift.
+ *
+ * One `custom` issue at `values`, naming the widget's `id`, the count and the
+ * type, and steering to the shapes that DO render several measures: `table` (a
+ * row of measures), a bar-family type (one bar per measure), or one widget per
+ * measure.
+ *
+ * Same spelling as the metric check and for the same measured reason: an
+ * object-level check on the strict object, attached by identifier, not a
+ * per-`type` union arm — a union collapses every other diagnostic on this door
+ * into one bare `Invalid input` (the metric check's docblock carries the table).
+ *
+ * ## What this check deliberately does NOT reach
+ *
+ *  1. **A widget WITH a dimension.** A `pie` with `dimensions: ['stage']` and two
+ *     measures parses exactly as before. Whether that shape renders both
+ *     measures is a separate question this rule does not answer.
+ *  2. **The EMPTY and the single `values`.** `values: []` keeps the field's own
+ *     `too_small`, and one measure is the legal document on every type.
+ *  3. **A widget that declares no `type`.** It resolves to `metric`, a family
+ *     member, so it is the metric check's to refuse, not this one's.
+ *  4. **A `type` outside `ChartTypeSchema`.** Through this schema's door zod
+ *     treats that `invalid_value` as aborting and the check never runs. For a
+ *     mirror that re-attaches this export onto a WIDER type enum (objectui adds
+ *     `list` / `custom` and its component widget types), condition 3 keeps the
+ *     export from judging types the spec does not declare: it refuses exactly what
+ *     the spec's door refuses, never more and never less.
+ *  5. **Whether the measures EXIST in the bound dataset.** A fact about the
+ *     dataset, unreachable from this schema.
+ *  6. **objectui's CLIENT-SIDE authoring door**, a `.shape` mirror that runs only
+ *     the checks it imports and chains: until it chains this export, its editor
+ *     keeps accepting a dimensionless two-measure `pie` and the author meets the
+ *     refusal at PUBLISH.
+ */
+export function checkDashboardWidgetDimensionlessMeasureArity(
+  widget: { id?: unknown; type?: unknown; dimensions?: unknown; values?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const values = widget.values;
+  // Not an array, empty, or one measure: the field's own `.min(1)` owns the
+  // first two verdicts and one measure is legal on every type. Non-coverage 2.
+  if (!Array.isArray(values) || values.length <= 1) return;
+
+  // A dimension gives the measures an axis to sit against — out of this rule.
+  // Anything but absent-or-empty returns: through this door a non-array
+  // `dimensions` is the field's own `invalid_type` and the check never runs.
+  const dimensions = widget.dimensions;
+  if (dimensions !== undefined && !(Array.isArray(dimensions) && dimensions.length === 0)) return;
+
+  // `?? WIDGET_TYPE_DEFAULT` is UNREACHABLE through this schema's own door —
+  // zod applies `type`'s default before object-level checks. It is here for the
+  // mirror whose `type` carries no default, so the export never judges a
+  // typeless widget differently from the door it is exported from: the default
+  // is a metric-family member, which returns just below.
+  const type = widget.type ?? WIDGET_TYPE_DEFAULT;
+  if (typeof type !== 'string') return;
+  if ((DASHBOARD_WIDGET_MULTI_MEASURE_TYPES as readonly string[]).includes(type)) return;
+  // The metric family is the sibling check's, at every dimensionality. Rule 4.
+  if ((SINGLE_MEASURE_WIDGET_TYPES as readonly string[]).includes(type)) return;
+  // A type the spec does not declare is not this export's to judge. Non-coverage 4.
+  if (!(ChartTypeSchema.options as readonly string[]).includes(type)) return;
+
+  const widgetName = typeof widget.id === 'string' && widget.id.length > 0
+    ? '`' + widget.id + '`'
+    : 'this widget';
+  const multiMeasureTypes = DASHBOARD_WIDGET_MULTI_MEASURE_TYPES.map((t) => '`' + t + '`').join(' / ');
+
+  ctx.addIssue({
+    code: 'custom',
+    path: ['values'],
+    message:
+      'Widget ' + widgetName + ' declares ' + values.length + ' measures with no `dimensions` on `type: '
+      + `'${type}'`
+      + "`, and that type declares no rendering for several measures without a dimension: with "
+      + 'nothing to split by it draws `values[0]`, and every measure after it is queried and then '
+      + 'dropped on the floor by the renderer. The types that DO render several measures on a '
+      + 'dimensionless widget are ' + multiMeasureTypes + '. '
+      + "Write `type: 'table'` for a row of measures, or a bar-family type (`bar` / `column` / "
+      + '`horizontal-bar`) for one bar per measure — or keep `type: '
+      + `'${type}'`
+      + '` and give each measure its own widget, with its own `id` (and `layout`, if you pin '
+      + 'positions).',
+  });
+}
+
+/**
  * The prescription each structural `chartConfig` key carries on a dashboard
  * widget. One builder rather than four literals, because all four refusals say
  * the same thing and differ only in the key and in where the intent belongs —
@@ -1005,9 +1165,19 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
    * every measure after `values[0]` on the floor, so the second one is now a
    * parse error rather than a queried-and-discarded column
    * ({@link checkDashboardWidgetMetricMeasureArity}).
+   *
+   * With NO `dimensions`, two or more only on a type in
+   * {@link DASHBOARD_WIDGET_MULTI_MEASURE_TYPES} — the types that render several
+   * measures with nothing to split by; every other chart type drew `values[0]`
+   * and dropped the rest ({@link checkDashboardWidgetDimensionlessMeasureArity}).
    */
   values: z.array(z.string()).min(1)
-    .describe('Measure names — Y (at least one; exactly one on the metric/kpi/gauge/solid-gauge/bullet family)')
+    .describe(
+      'Measure names — Y (at least one; exactly one on the metric/kpi/gauge/solid-gauge/bullet family; '
+      + 'with no dimensions, two or more only on '
+      + DASHBOARD_WIDGET_MULTI_MEASURE_TYPES.join('/')
+      + ')',
+    )
     .meta({ title: 'Values' }),
 
   /**
@@ -1162,7 +1332,12 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
   // objectui#8894 ruling D — the metric FAMILY takes exactly one measure. Same
   // idiom, same reason: `values`'s arity is decided by its sibling `type` one
   // level up, so the rule has to run where both keys are in scope.
-  .superRefine(checkDashboardWidgetMetricMeasureArity));
+  .superRefine(checkDashboardWidgetMetricMeasureArity)
+  // Ruling D's principle on the chart families — a dimensionless widget takes
+  // several measures only on a type in `DASHBOARD_WIDGET_MULTI_MEASURE_TYPES`.
+  // Three siblings decide it (`dimensions`, `values`, `type`), so it too runs
+  // at the object, attached by identifier.
+  .superRefine(checkDashboardWidgetDimensionlessMeasureArity));
 
 /**
  * Dashboard date-range presets — the named windows a dashboard date filter may

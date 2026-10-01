@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { prepareImportRequest, mergeLocalizedOptionSynonyms } from './import-prepare';
-import { matchOption } from './import-coerce';
+import { matchOption } from '@objectstack/core';
 import { buildFieldMetaMap } from './export-format';
 
 const SCHEMA = {

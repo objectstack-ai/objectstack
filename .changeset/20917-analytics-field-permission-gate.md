@@ -8,7 +8,7 @@ Clause-②: yes (narrowing)
 
 <!-- adr-0087: not-required (no-migration-prescription) No authorable key, export or stored shape is removed or renamed. The change refuses analytics queries that read a field the caller's field-level permissions hide, which the engine already refuses on the data API and on the ObjectQL strategy, so there is nothing for `objectstack migrate meta` to rewrite. The one public-surface addition is a new optional service hook. -->
 
-**BREAKING for analytics queries on a SQL deployment that read a field the caller may not read.**
+**BREAKING for analytics queries that read a field the caller may not read: on a SQL deployment, and on `POST /api/v1/analytics/sql` whichever strategy serves the cube.**
 
 **What changed.** `POST /api/v1/analytics/query`, `POST /api/v1/analytics/sql`
 and `POST /api/v1/analytics/dataset/query` now judge every field a query reads
@@ -19,7 +19,9 @@ filters. A member of an authored cube is judged by the field it resolves to,
 not by its name in the cube. A field the caller may not read answers
 `403 PERMISSION_DENIED`, in the words the engine uses for the same field. The
 native-SQL strategy, the one a SQL driver serves first, answered such queries;
-the ObjectQL strategy and the data API already refused them.
+the ObjectQL strategy already refused them on `POST /api/v1/analytics/query`
+and `POST /api/v1/analytics/dataset/query`, as the data API did, but printed
+the statement on `POST /api/v1/analytics/sql`.
 
 **What is not affected.** A query that reads only fields the caller may read
 answers as before. A system context, and a caller with no permission sets, are

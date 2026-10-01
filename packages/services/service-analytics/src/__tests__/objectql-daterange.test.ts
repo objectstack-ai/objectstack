@@ -60,7 +60,7 @@ type AggOpts = {
 function matches(row: Row, filter: Record<string, unknown>): boolean {
   return Object.entries(filter).every(([key, cond]) => {
     if (key === '$and') return (cond as Record<string, unknown>[]).every((sub) => matches(row, sub));
-    // [#5298] `fieldLeaves` emits a NULL-safe `$ne` as `$or: [{ field: null }, { field: { $ne } }]`,
+    // [#5298] `fieldLeaves` emits a NULL-safe `$ne` as `$or: [{ field: { $null: true } }, { field: { $ne } }]`,
     // so a real query genuinely hands this double an `$or` — it is not dormant here.
     if (key === '$or') return (cond as Record<string, unknown>[]).some((sub) => matches(row, sub));
     if (key.startsWith('$')) throw new Error(`test bridge: unhandled operator ${key}`);
@@ -73,6 +73,8 @@ function matches(row: Row, filter: Record<string, unknown>): boolean {
           case '$gt': return String(v) > String(operand);
           case '$lt': return String(v) < String(operand);
           case '$ne': return v !== operand;
+          // [#20918] The strategy's null predicate, in the engine's own spelling.
+          case '$null': return (v === null || v === undefined) === operand;
           default: throw new Error(`test bridge: unhandled operator ${op}`);
         }
       });
@@ -353,7 +355,7 @@ describe('ObjectQLStrategy — window ∧ where on one field (#3650)', () => {
     // same rows; both operands still survive.
     expect(seen[0].filter).toEqual({
       stage: 'won',
-      $and: [{ $or: [{ stage: null }, { $or: [{ stage: null }, { stage: { $ne: 'lost' } }] }] }],
+      $and: [{ $or: [{ stage: { $null: true } }, { $or: [{ stage: { $null: true } }, { stage: { $ne: 'lost' } }] }] }],
     });
   });
 });

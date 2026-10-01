@@ -636,7 +636,7 @@
         "packages/qa/dogfood/test/date-bucket-parity-conformance.test.ts (#3773)",
         "packages/qa/dogfood/test/empty-group-bucket-parity.test.ts (#3839)",
         "examples/app-showcase/src/ui/dashboards/ops-dashboard.dashboard.ts#dateRange (dateRange + global filter levers)",
-        "examples/app-showcase/src/data/seed/index.ts#signed_on (prospects carry no signed_on — the deliberate NULL population)"
+        "examples/app-showcase/src/data/seed/index.ts#accounts (prospects carry no signed_on — the deliberate NULL population; re-pointed #18101: signed_on is a key written INLINE in each seed row, which the shared resolver does not read as a declaration, and accounts is the seed constant that declares those rows)"
       ],
       "history": [
         {
@@ -749,7 +749,7 @@
       "source": [
         "examples/app-showcase/src/ui/dashboards/revenue-pulse.dashboard.ts (framework#2501 / objectui#2578 acceptance fixture)",
         "examples/app-showcase/src/ui/dashboards/ops-dashboard.dashboard.ts",
-        "examples/app-showcase/src/data/seed/index.ts#sales_region (sales_region + signed_on seeding, prospects unset by design)",
+        "examples/app-showcase/src/data/seed/index.ts#accounts (sales_region + signed_on seeding, prospects unset by design — re-pointed #18101: both keys are written INLINE in each seed row, which the shared resolver does not read as a declaration, and accounts is the seed constant that declares those rows)",
         "examples/app-showcase/src/coverage.ts (dashboard kind notes: revenue-pulse demonstrates dashboard-level filters)",
         "objectui packages/app-shell/src/views/metadata-admin/inspectors/DashboardWidgetInspector.tsx (Filter Bindings section — Apply toggle writes false for opt-out, field-override combo, data-testid widget-filter-binding-<name>, patches draft.widgets[i].filterBindings; objectui#2586)",
         "objectui packages/plugin-dashboard/src/DashboardFilterBar.tsx (isDirty→Reset affordance RotateCcw, data-testid dashboard-filter-bar; SelectFilter {value,label} options + server GROUP BY via queryDataset, #2578 item 5)",
@@ -964,7 +964,7 @@
       "title": "The showcase_delivery analytics cube serves /api/v1/analytics/*: meta discovers its measures/dimensions, a query answers a known aggregate that reconciles against a direct /data aggregate, and an unwired analytics slot degrades honestly to 404",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -973,7 +973,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the showcase_delivery cube (examples/app-showcase/src/data/analytics/showcase.cube.ts — verified present: base table showcase_task; measures count / total_estimate_hours / avg_estimate_hours / done_rate; dimensions status / priority / due_date / assignee), registered as `analyticsCubes` (examples/app-showcase/src/coverage.ts) and served by the `analytics` capability the CLI serve path auto-loads (packages/cli/src/commands/serve.ts CAPABILITY_PROVIDERS.analytics → @objectstack/service-analytics, configKey analyticsCubes)",
+          "the showcase_delivery cube (examples/app-showcase/src/data/analytics/showcase.cube.ts — verified present: base table showcase_task; measures count / total_estimate_hours / avg_estimate_hours; dimensions status / priority / due_date / assignee), registered as `analyticsCubes` (examples/app-showcase/src/coverage.ts) and served by the `analytics` capability the CLI serve path auto-loads (packages/cli/src/commands/serve.ts CAPABILITY_PROVIDERS.analytics → @objectstack/service-analytics, configKey analyticsCubes)",
           "seeded showcase_task rows spanning multiple statuses (the same multi-bucket seed dashboards.chart-first-paint relies on) so the reconciled aggregate has more than one bucket"
         ]
       },
@@ -988,9 +988,9 @@
       ],
       "acceptance": [
         {
-          "clause": "meta discovers the cube: GET /analytics/meta lists showcase_delivery with exactly its four measures (namespaced showcase_delivery.count / .total_estimate_hours / .avg_estimate_hours / .done_rate) and four dimensions (showcase_delivery.status / .priority / .due_date / .assignee)",
+          "clause": "meta discovers the cube: GET /analytics/meta lists showcase_delivery with exactly its measures (namespaced showcase_delivery.count / .total_estimate_hours / .avg_estimate_hours) and four dimensions (showcase_delivery.status / .priority / .due_date / .assignee)",
           "oracle": "api",
-          "verify": "the meta response's cubes[] entry for showcase_delivery names all four measures and four dimensions (getMeta keys them `${cube}.${key}`, and lists a cube only when its `public` is not `false`: a cube declaring `public: false` is omitted from meta and refused by query()/generateSql() with 404 CUBE_NOT_FOUND. showcase_delivery declares no `public`, so it is visible by the schema default `true`)",
+          "verify": "the meta response's cubes[] entry for showcase_delivery names each measure and dimension the clause lists (getMeta keys them `${cube}.${key}`, and lists a cube only when its `public` is not `false`: a cube declaring `public: false` is omitted from meta and refused by query()/generateSql() with 404 CUBE_NOT_FOUND. showcase_delivery declares no `public`, so it is visible by the schema default `true`)",
           "evidence": "the /analytics/meta?cube=showcase_delivery body"
         },
         {
@@ -1033,8 +1033,7 @@
       "variants": [
         "measure count (type: count)",
         "measure total_estimate_hours (type: sum)",
-        "measure avg_estimate_hours (type: avg)",
-        "measure done_rate (type: number, computed CASE expression)"
+        "measure avg_estimate_hours (type: avg)"
       ],
       "traps": [
         "dispatcher-vs-hono-route",
@@ -1061,6 +1060,12 @@
           "date": "2026-09-28",
           "change": "re-spelled the meta clause's verify text and two source lines, which stopped being true when the analytics service began reading `analytics_cube.public`: getMeta no longer returns every registry cube (it omits one declaring `public: false`, and query()/generateSql() refuse it with 404 CUBE_NOT_FOUND), and the showcase cube no longer declares `public: false` (it is visible by the default `true`). Text only: every clause, step and verdict is unchanged, because showcase_delivery stays visible and its meta entry still names the same four measures and four dimensions",
           "ref": "#20348"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-01",
+          "change": "dropped done_rate from the fixture line and the meta clause, re-spelled the verify text that counted it, and removed its variant: a cube member's `sql` is now a column reference (MetricSchema in packages/spec/src/data/analytics.zod.ts refuses a SQL expression at parse), so the showcase_delivery cube no longer declares the CASE-expression done_rate measure, and the done rate is declared on the showcase_task_metrics dataset (examples/app-showcase/src/ui/datasets/chart-gallery.dataset.ts) as a filtered count over a count. The steps, the reconciliation clauses and the four dimensions are unchanged",
+          "ref": "#20943"
         }
       ]
     },

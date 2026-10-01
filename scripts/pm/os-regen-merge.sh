@@ -243,11 +243,44 @@
 # for a contradiction that was really an instrument mismatch.
 #
 # The sound probe is one where the driver is genuinely ABSENT — a throwaway bare
-# clone sharing the object store, which is GitHub's actual condition:
+# clone, which is GitHub's actual condition — and that HOLDS both commits:
 #
-#   git clone --bare --shared . PROBE.git
-#   git --git-dir=PROBE.git merge-tree --write-tree --name-only <base> <head>
-#   rm -rf PROBE.git                       # exit 1 + the paths = really conflicted
+#   git clone -q --bare --shared . PROBE.git
+#   git --git-dir=PROBE.git fetch -q . <base>:refs/b <head>:refs/h
+#   git --git-dir=PROBE.git merge-tree --write-tree --name-only refs/b refs/h
+#   rm -rf PROBE.git          # exit 1 + a tree id + the paths = really conflicted
+#
+# ⛔ The fetch is not optional, and exit 1 alone is not a verdict. From a SHALLOW
+# checkout `--shared` writes no alternates: git drops to a transport clone
+# (`--local` says so: "source repository is shallow, ignoring --local") that
+# packs only what `refs/heads/**` reach, so `origin/main` or a fetched PR head is
+# simply not there. merge-tree then answers exit 1 — the exit code of a real
+# conflict — with an EMPTY stdout and `<sha> - not something we can merge` on
+# stderr: a missing object, over a head that may be clean. A real conflict
+# always prints the merged tree id first. The fetch runs in YOUR checkout (`.`
+# is the cwd, not PROBE.git), so `<base>`/`<head>` may be names or ids: they
+# resolve there, never in the probe, which carries no `origin/main`.
+#
+# Why this hid: from a LINKED worktree of the same shallow checkout, the same
+# clone DOES write alternates and comes out non-shallow — over a store that
+# still is, so a walk past the shallow boundary fails ("Failed to traverse
+# parents") — and the fetch-less recipe answered right. From the primary
+# checkout it was right only while some local branch happened to contain both
+# commits. MEASURED (git 2.43.0, shallow checkout, a base and two heads that no
+# ref reaches, over packages/spec/spec-changes.json; ground truth = `git
+# merge-file`: same line → exit 1, 288 lines apart → exit 0):
+#
+#   source             fetch-less recipe                 recipe above
+#   primary checkout   clean    exit 1, no tree   ✗      exit 0 + tree           ✓
+#                      conflict exit 1, no tree   ✗      exit 1 + tree + path    ✓
+#   linked worktree    clean    exit 0 + tree     ✓      exit 0 + tree           ✓
+#                      conflict exit 1 + tree+path ✓     exit 1 + tree + path    ✓
+#
+# The primary checkout's conflict row is ✗ too: its exit 1 is the missing base,
+# and matches the truth only by coincidence. A non-shallow source writes
+# alternates as documented, and the same three lines answer there too (measured
+# on a synthetic non-shallow repository). `--reference` is no way round it: it
+# refuses a shallow source outright.
 #
 # ⛔ NOT `git -c merge.os-regen.driver= merge-tree --write-tree <base> <head>`, and
 # ⛔ NOT `git -c merge.os-regen.driver=false merge-tree …` either. NEITHER spelling

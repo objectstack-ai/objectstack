@@ -8,7 +8,7 @@ Clause-②: no (narrowing)
 
 <!-- adr-0087: not-required (no-migration-prescription) No authorable key, export or stored shape is removed or renamed. The change refuses, or row-scopes, what the native-SQL strategy read from an object reached through an undeclared relationship path, the way a declared join to the same object already was; there is nothing for `objectstack migrate meta` to rewrite. -->
 
-**BREAKING for analytics queries on a SQL deployment that read a related object through a relationship path the cube does not declare.**
+**BREAKING for analytics queries that read a related object through a relationship path the cube does not declare: on a SQL deployment, and on `POST /api/v1/analytics/sql` whichever strategy serves the cube.**
 
 **What changed.** The analytics door admits and row-scopes one object set
 before either strategy runs. It held the cube's base object and the joins the
@@ -40,7 +40,9 @@ deployment with no security service applies no object-level check, as on the
 data API.
 
 **Refusals that change form.** On the ObjectQL strategy a related object the
-caller may not read was already refused; it now answers the analytics door's
+caller may not read was already refused on `POST /api/v1/analytics/query` and
+`POST /api/v1/analytics/dataset/query`, though `POST /api/v1/analytics/sql`
+printed the statement; on those two doors it now answers the analytics door's
 refusal rather than the engine's, the same one a declared join gets. A filter,
 a time window or a two-hop path through such an object moves from
 `400 INVALID_FIELD` to that `403`. A relationship path whose relationship name

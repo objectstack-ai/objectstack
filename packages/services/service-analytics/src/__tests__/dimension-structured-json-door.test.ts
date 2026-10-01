@@ -21,13 +21,13 @@
  *   (inferred) cube, and a bucketed time dimension;
  * - no statement and no aggregate reaches the host bridges on a refusal;
  * - GUARD: the judged types are exactly `@objectstack/spec/data`'s
- *   `STRUCTURED_JSON_TYPES`, over every `FieldType` — the predicate the
- *   engine's door reads, never a second list.
+ *   `STRUCTURED_JSON_TYPES` and `isMultiValueField`, over every `FieldType` —
+ *   the predicates the engine's door reads, never a second list.
  */
 
 import { describe, it, expect, vi } from 'vitest';
 import type { Cube } from '@objectstack/spec/data';
-import { FieldType, STRUCTURED_JSON_TYPES } from '@objectstack/spec/data';
+import { FieldType, STRUCTURED_JSON_TYPES, isMultiValueField } from '@objectstack/spec/data';
 import type { Dataset } from '@objectstack/spec/ui';
 import type { AnalyticsQuery } from '@objectstack/spec/contracts';
 import { AnalyticsService } from '../analytics-service.js';
@@ -246,7 +246,11 @@ describe('what the door does not judge', () => {
     expect(calls.raw).toHaveLength(1);
   });
 
-  it('GUARD the judged types are exactly the spec\'s STRUCTURED_JSON_TYPES, over every FieldType', async () => {
+  it('GUARD the judged types are exactly the spec\'s STRUCTURED_JSON_TYPES and isMultiValueField, over every FieldType', async () => {
+    // The multi-value class joined the door with the engine's: an inherently
+    // multi option type (`multiselect`, `checkboxes`, `tags`) is judged with or
+    // without the flag. The flagged half is pinned in
+    // `multi-value-json-stored-door.test.ts`.
     const { service } = makeService('native');
     for (const type of FieldType.options) {
       const query: AnalyticsQuery = { cube: OBJECT, measures: ['count'], dimensions: [`f_${type}`] };
@@ -255,7 +259,9 @@ describe('what the door does not judge', () => {
         (e: Refusal) => ({ code: e.code, status: e.status, member: e.member }),
       );
       expect(verdict, type).toEqual(
-        STRUCTURED_JSON_TYPES.has(type) ? { code: 'INVALID_FIELD', status: 400, member: `f_${type}` } : null,
+        STRUCTURED_JSON_TYPES.has(type) || isMultiValueField({ type })
+          ? { code: 'INVALID_FIELD', status: 400, member: `f_${type}` }
+          : null,
       );
     }
   });

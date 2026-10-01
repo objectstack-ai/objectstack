@@ -305,6 +305,11 @@ export * from './search-fields';
 // grouping semantics every renderer (form, detail, drawer, designer) applies.
 export * from './field-group-layout';
 
+// Default inline-grid columns — the single source of which child fields an
+// inline master-detail grid draws when its author listed none. Consumed by the
+// renderer and credited by lint's `field-no-consumers`, so the two agree.
+export * from './inline-grid-columns';
+
 // record-surface derivation (ADR-0085 §5) — the single source for how a record's
 // create/edit/detail opens by default (full page vs drawer/modal overlay).
 export * from './record-surface';

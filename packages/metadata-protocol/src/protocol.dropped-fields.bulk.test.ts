@@ -141,6 +141,11 @@ describe('insertManyData — BATCH-LEVEL droppedFields that names no row (#3455)
   // so the cases are REPLACED rather than amended. The engine double below
   // models the exemption, which the old one had no concept of; that is why the
   // old case stayed green through exactly the shape it was written for.
+  //
+  // [#20922] Row precision now comes from the ENGINE, on each `ok` outcome's
+  // own `droppedFields` (pinned against the real engine in objectql's
+  // `engine-per-row-dropped-fields.test.ts`). The double below attributes no
+  // row, so these cases pin what THIS seam adds: nothing derived from the union.
 
   /**
    * `hookStamps` names the rows whose `beforeInsert` hook re-assigns
@@ -249,6 +254,29 @@ describe('insertManyData — BATCH-LEVEL droppedFields that names no row (#3455)
       records: [{ title: 'A' }],
     });
     expect(res).not.toHaveProperty('droppedFields');
+  });
+
+  it('[#20922] an outcome the ENGINE attributed passes through as answered, beside the unchanged union', async () => {
+    // The per-row channel is the engine's (`InsertManyRowOutcome.droppedFields`,
+    // recorded at its strips). This seam relays it and derives nothing: the
+    // cases above, whose engine attributes no row, still get none.
+    const rowDrop = { object: 'approval_case', fields: ['approval_status'], reason: 'readonly' as const };
+    const insertMany = vi.fn(async (object: string, rows: any[], options?: any) => {
+      options?.onFieldsDropped?.({ object, fields: ['approval_status'], reason: 'readonly' });
+      return rows.map((r, i) => (i === 1
+        ? { ok: true, record: { id: 'rec-2', title: r.title, approval_status: 'draft' }, droppedFields: [rowDrop] }
+        : { ok: true, record: { id: 'rec-1', title: r.title, approval_status: 'draft' } }));
+    });
+    const p = makeProtocol(insertMany as any);
+
+    const res: any = await p.insertManyData({
+      object: 'approval_case',
+      records: [{ title: 'A' }, { title: 'B', approval_status: 'approved' }],
+    });
+
+    expect(res.outcomes[0]).not.toHaveProperty('droppedFields');
+    expect(res.outcomes[1].droppedFields).toEqual([rowDrop]);
+    expect(res.droppedFields).toEqual([rowDrop]);
   });
 });
 

@@ -53,8 +53,9 @@
  *   tells an adopter holding a confident wrong suggestion — the case the
  *   option is most needed for — that `aliases` is not their tool, which is
  *   this campaign's own finding-7 shape (see {@link acceptsNothing}).
- * - `guidance` — tombstones for retired keys (the rejection must carry the
- *   upgrade) and wrong-layer pointers.
+ * - `guidance` — prescriptions for keys the shape does not declare: wrong-layer
+ *   pointers, and the upgrade for a spelling removed from it (a key retired in
+ *   place is a `retiredKey()` tombstone in the shape, never a row here).
  *
  * Both are optional. A schema with neither still gets a named surface, the
  * offending key echoed back, and a distance-based suggestion — which is the
@@ -149,8 +150,10 @@ export interface StrictObjectOptions {
    */
   aliases?: Readonly<Record<string, string>>;
   /**
-   * Exact-key prescriptions appended as bullet lines: tombstones for retired
-   * keys, wrong-layer pointers. An entry here suppresses the rename suggestion.
+   * Exact-key prescriptions appended as bullet lines, for keys the shape does
+   * not declare: wrong-layer pointers, a removed spelling's upgrade (a retired
+   * key's tombstone is `retiredKey()` in the shape). An entry here suppresses
+   * the rename suggestion.
    */
   guidance?: Readonly<Record<string, string>>;
   /**

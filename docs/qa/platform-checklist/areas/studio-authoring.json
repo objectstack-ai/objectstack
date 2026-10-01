@@ -1363,6 +1363,92 @@
       "history": [
         { "revision": 1, "date": "2026-08-30", "change": "new item (2026-08-30 sweep, angle 4): the governance sweep GET /meta/diagnostics + its two Studio surfaces had no coverage — nothing asserted the stats/tile parity seam, the #8924 spelling refusal (whose regression the page paints as 'All clear'), the #8855 outage honesty, or the clean-store empty state. Grounded against source with two corrections to the register hypothesis: the scoping query param is ?package= (not ?packageId= — that is the protocol-layer argument name), and severity=warning cannot 'add warning-only entries' on stock because no producer emits warnings at head (reserved for a future lint layer) — authored as a mechanism clause with the lint-layer tripwire recorded. The invalid-stored-row positive is blocked(fixture) by construction (save doors validate; sys_metadata is not a data-plane object), with the stale-row snapshot named as the honest fixture candidate", "ref": "#sweep-2026-08-30" }
       ]
+    },
+    {
+      "id": "studio-authoring.doc-on-app-menu",
+      "title": "A doc on the app menu follows the reader's audience: an admin authors a doc and puts it (or its book) on an app menu; a member who may read it sees it and opens it in its book; a member outside its audience does not see the entry and gets a refusal — never \"not found\", never a blank page — on the direct route",
+      "since": "v17.5",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (authors the doc, the books and the app navigation)",
+        "member holding the gating permission set (the reader)",
+        "member not holding it (the outsider)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a book with audience { permissionSet: SET } claiming one doc, an org book claiming another, and a book claiming none — all in ONE package, so the flat /docs/DOC permalink has to pick the CLAIMING book rather than the package's first book by label",
+          "an app whose navigation carries one doc entry of each shape — { doc }, { book }, { book, doc } — over the gated and the open corpus",
+          "a session per persona, each signed in through the form in its own browser context; the member holding SET gets it through a sys_user_permission_set row (a stock set such as showcase_auditor serves as SET)",
+          "a console bundle carrying objectui PR 11258 (menu pruning, direct-route refusal, claiming-book permalink) and PR 11241 (the doc editor)"
+        ],
+        "knownGaps": [
+          "THE STOCK SHOWCASE CORPUS CARRIES NO { permissionSet } BOOK AND NO doc NAV ENTRY — verify first (GET /api/v1/meta/book, read each audience; GET /api/v1/meta/app?id=showcase_app, look for type:'doc'). The run authors the books, docs, permission set and nav entries at runtime and tears them down, as platform-core.docs-audience-gate allows; the audience is read off the stored row, so a runtime-authored book exercises the same resolver",
+          "FORK WINDOW: while .objectui-sha predates objectui PR 11241 / PR 11258, the vendored console carries the PRE-feature UI — at db11afd496 the console source holds no 'You do not have access to this documentation' heading and no renderer doc-target check (source read) — so a run against it fails for a reason that is not this item's. Drive a console built from an objectui revision carrying both (RUNNER.md's two honest options) and NAME that revision in the run record, beside the pin",
+          "FIXTURE RECIPE, measured on the first run: the showcase is invite_only, so members come from POST /api/v1/auth/admin/create-user (mustChangePassword false), not sign-up; the Studio doc editor refuses the read-only code package com.example.showcase with a loud 422 ('Pick or create a writable base (package) first'), so install a writable base first (POST /api/v1/packages with id, name, version, type 'app') and author every book, doc and the app into it with ?package=; the seeded admin holds no app-declared set, so once the gated book claims the doc the admin's own editor and /meta/app answer the audience refusal too — author the doc before the gated book, or read it back as the reader",
+          "REPO OWNERSHIP (ADR-0054): the server half — /meta/app pruning, /meta/doc and /meta/book refusals — is objectstack's; the menu markup, the direct-route refusal page and the claiming-book permalink are objectui's. A locator or copy fix goes to objectui"
+        ]
+      },
+      "steps": [
+        "boot the showcase isolated (dogfood §0) with the console named above; as admin, verify the stock corpus first (knownGaps), then create the doc in Studio (metadata admin, doc editor) and publish it; author the remaining fixture books/docs and the permission set, assign SET to the reader",
+        "as admin, add the three doc entries to the app navigation (Studio app designer, or PUT /api/v1/meta/app/APP) over the gated and the open corpus",
+        "GET /api/v1/meta/app?id=APP as each member in that member's own session (prove the identity with GET /api/v1/auth/get-session first); record which doc entries each receives",
+        "as each member, open the app and capture the rendered menu after a screenshot confirms it settled; diff the rendered doc entries against that member's /meta/app answer (UI mirror)",
+        "as the reader, open every doc entry: the page (lands in the book that claims it); the book (lands on its first readable page with the book sidebar showing only that member's pruned subset, compared with GET /api/v1/meta/book/BOOK/tree as that member); the page in its book",
+        "as the outsider, open each gated entry's href directly (/docs/DOC, /docs/BOOK, /docs/BOOK/DOC, and each under /apps/APP/docs) and record what renders beside the server's status for the same name (GET /api/v1/meta/doc/DOC, GET /api/v1/meta/book/BOOK/tree)",
+        "control: open /docs/NAME for a name nothing carries, as the outsider",
+        "tear down every runtime-authored fixture (nav entries, books, docs, the permission-set assignment) and confirm the corpus reads back as the step-1 baseline"
+      ],
+      "acceptance": [
+        {
+          "clause": "a member's /meta/app carries no doc entry whose target they cannot read (a doc outside their audience; a book outside it or with no readable claimed page); the reader receives them",
+          "oracle": "api",
+          "verify": "per-persona /meta/app navigation diff, each fetched in that member's own session",
+          "evidence": "the per-persona entry lists"
+        },
+        {
+          "clause": "UI mirror: the rendered menu's doc entries that name an installed doc or book equal that member's /meta/app doc entries — neither wider nor narrower (a dangling entry the server still serves may be hidden by the renderer)",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms the menu settled, rendered entries vs the API answer, per persona, run in that member's own session",
+          "evidence": "the menu screenshot described in text + the empty diff"
+        },
+        {
+          "clause": "a page entry opens the page in the book that CLAIMS it — in a package with several books, not the package's first book by label; a book entry opens its first readable page with the book sidebar showing only the member's pruned subset",
+          "oracle": "dom",
+          "verify": "the landed URL names the claiming book (/docs/BOOK/DOC); every book-sidebar entry appears in GET /api/v1/meta/book/BOOK/tree as that member — never wider — and a doc outside the member's audience is absent from the sidebar of a book they CAN open (the outsider on the open book). The portal resolves the synthetic Uncategorized group over the book's own package, so the sidebar may be narrower than the server tree's cross-package Uncategorized group; narrower is not a FAIL, wider is",
+          "evidence": "final URL + the sidebar entries per persona beside that member's tree"
+        },
+        {
+          "clause": "the outsider gets a refusal on every shape's direct route: the heading \"You do not have access to this documentation\" with the server's reason, in place — never \"Documentation not found\" / \"is not installed\", never \"Failed to load documentation\", never a blank page. A name nothing carries still reads \"Documentation not found\"",
+          "oracle": "screenshot",
+          "verify": "per-route screenshot after settle, beside the server status for the same name (403 / 401 for the gated names, 404 for the control)",
+          "evidence": "the per-route headings + the statuses"
+        }
+      ],
+      "negative": [
+        "a doc entry drawn for the outsider is an audience leak — cross-file to platform-core.docs-audience-gate and access-security",
+        "\"Documentation not found\" where the server answers 401 / 403 — the UI half of platform-core.docs-audience-gate's \"a 404 where a 401/403 is due\" negative",
+        "a blank region or a crash on any direct route — FAIL",
+        "a page entry that opens in a book that does not claim the page — the addendum's \"in its book's context\" fails",
+        "SCOPE: the book/doc audience semantics at API grain are platform-core.docs-audience-gate, and the portal's own rendering is platform-core.docs-portal-render — cite them, never duplicate them; this item owns the app-menu entry, its UI mirror and the direct-route refusal"
+      ],
+      "traps": ["auth-state-leak", "hydration-race", "wrong-persona", "stale-console-bundle", "cache-staleness"],
+      "source": [
+        "objectstack#19482 ruling and addendum 5754645447 (the doc nav entry; audience rule)",
+        "objectstack#19790 ruling 5793362670 (server prunes the entry; point 2: the renderer's pruning stays as defence in depth)",
+        "ADR-0046 §6.7",
+        "packages/spec/src/ui/app.zod.ts#DocNavItemSchema (the type:'doc' nav entry: book and/or doc, at least one)",
+        "packages/rest/src/meta-item-read-gate.ts#filterAppForUser (/meta/app pruning), (NavDocAudienceGate — fails CLOSED: an absent gate prunes every doc entry)",
+        "objectui PR 11258: packages/layout NavigationRenderer passesNavItemGuards (checkDocTarget), packages/app-shell hooks/useNavDocTargetCheck, apps/console pages DocsSlug / DocPage / BookPage (DocRefusal) / book-nav homeBook",
+        "objectui PR 11241 (the doc editor the admin authors with)",
+        "platform-core.docs-audience-gate, platform-core.docs-portal-render (the neighbours — cross-referenced, not merged)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-09-30", "change": "new — the 清单项待写 row of docs/NORTH-STAR.md beside platform-core.docs-audience-gate and platform-core.docs-portal-render; drafted with objectui#10188 and corrected by the at-tier review of objectui PR 11258 (the UI-mirror clause scoped to entries naming an installed doc or book; no signed-out persona — /docs sits behind ProtectedRoute)", "ref": "#20939" }
+      ]
     }
   ]
 }

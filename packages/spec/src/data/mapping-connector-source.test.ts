@@ -12,10 +12,12 @@
  * the rows come from. Version 1 is a one-way pull, full or
  * timestamp-incremental, from a `rest` / `openapi` connector instance.
  *
- * What is pinned here is the CONTRACT this stage lands — the shape, its closed
- * door and the keys it deliberately does not carry. The pull executor is the
- * next stage; until it reads the binding the ledger rows are `planned` with
- * `authorWarn` (`liveness/mapping.json`), which the last block pins.
+ * What is pinned here is the CONTRACT — the shape, its closed door and the
+ * keys it deliberately does not carry. The pull executor
+ * (`@objectstack/service-automation`'s `pullConnectorSource`, #20919) reads
+ * the binding, so the ledger rows are `live`; nothing schedules a pull until
+ * the `job` stage lands, so the container keeps `authorWarn`
+ * (`liveness/mapping.json`), which the last block pins.
  */
 
 import fs from 'node:fs';
@@ -173,30 +175,41 @@ describe('mapping.connectorSource — the closed door and what it does not carry
   });
 });
 
-describe('mapping.connectorSource — declared, not executed: the ledger says so', () => {
+describe('mapping.connectorSource — executed when a job drives it, scheduled by nothing yet: the ledger says so', () => {
   const LEDGER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../liveness/mapping.json');
 
-  it('every key of the binding is `planned`, and the container warns the author', () => {
-    const ledger = JSON.parse(fs.readFileSync(LEDGER, 'utf8')) as {
-      props: Record<string, { status: string; authorWarn?: boolean; children?: Record<string, { status: string; children?: Record<string, { status: string }> }> }>;
-    };
+  it('every key of the binding is `live`, citing the executor, and the container still warns the author', () => {
+    type Row = { status: string; evidence?: string; authorWarn?: boolean; authorHint?: string; children?: Record<string, Row> };
+    const ledger = JSON.parse(fs.readFileSync(LEDGER, 'utf8')) as { props: Record<string, Row> };
+    const EXECUTOR = 'packages/services/service-automation/src/connector-pull.ts#pullConnectorSource';
     const row = ledger.props.connectorSource;
     expect(row, 'connectorSource must have a ledger row').toBeDefined();
-    expect(row!.status).toBe('planned');
+    expect(row!.status).toBe('live');
+    expect(row!.evidence).toContain(EXECUTOR);
+    // Nothing schedules a pull until the `job` stage lands, so the warning stays.
     expect(row!.authorWarn).toBe(true);
+    expect(row!.authorHint).toContain('nothing schedules it');
     const children = row!.children!;
     expect(Object.keys(children).sort()).toEqual(['action', 'connector', 'input', 'recordsPath', 'watermark']);
-    for (const [key, child] of Object.entries(children)) expect(child.status, key).toBe('planned');
+    for (const [key, child] of Object.entries(children)) {
+      expect(child.status, key).toBe('live');
+      expect(child.evidence, key).toContain(EXECUTOR);
+    }
     expect(Object.keys(children.watermark!.children!).sort()).toEqual(['field', 'param']);
-    // CONTROL: the executed target half of the same type is live — the
-    // `planned` above is a statement about the binding, not about the type.
-    for (const key of ['targetObject', 'fieldMapping', 'mode', 'upsertKey']) {
-      expect(ledger.props[key]!.status, key).toBe('live');
+    for (const [key, child] of Object.entries(children.watermark!.children!)) {
+      expect(child.status, `watermark.${key}`).toBe('live');
+      expect(child.evidence, `watermark.${key}`).toContain(EXECUTOR);
     }
   });
 
-  it('the schema says it too, where an author reads it', () => {
-    const shape = (MappingSchema as unknown as { shape: Record<string, { description?: string }> }).shape;
-    expect(shape.connectorSource!.description).toContain('the pull is not executed yet');
+  it('the schema says it too, where an author reads it — including where the watermark is read from and the one-response limit', () => {
+    const shape = (MappingSchema as unknown as { shape: Record<string, { description?: string; unwrap?: () => unknown }> }).shape;
+    const source = shape.connectorSource!;
+    expect(source.description).toContain('Pulled when a job drives it; nothing schedules it yet');
+    const inner = (source.unwrap!() as { shape: Record<string, { description?: string; unwrap?: () => unknown }> }).shape;
+    const watermark = inner.watermark!;
+    expect(watermark.description).toContain('ONE action call and reads ONE response');
+    const wmShape = (watermark.unwrap!() as { shape: Record<string, { description?: string }> }).shape;
+    expect(wmShape.field!.description).toContain('read from the TARGET');
   });
 });
