@@ -1,23 +1,26 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#20995] A field whose masking rule applies is served MASKED to a caller who
-// resolves no permission set, on a real boot.
+// [#20995] A field whose masking rule applies used to be served MASKED to a
+// caller who resolves no permission set, on a real boot — and [#21079] that
+// caller, when it carries a principal, is now refused the object itself: the
+// ADR-0056 D2 deny baseline, so no row, masked or stored, leaves the door.
 //
-// `maskingRule` declares itself for "every non-system caller unless the
-// field's `requiredPermissions` are ALL held". A caller who resolves no
-// permission set holds nothing, so the rule applies to it. Two doors that
-// produce that caller on a real composition are driven here:
+// Two doors that produce that caller on a real composition are driven here:
 //
-//  - the public form's lookup picker, which serves the referenced object's
-//    declared display fields to a visitor with no session, on a deployment
-//    that registers no profile for public forms; and
+//  - the public form's lookup picker, which hands the engine a context naming
+//    the public-form profile, to a visitor with no session, on a deployment
+//    that registers no such profile; and
 //  - the record door, for a signed-in user on a deployment whose baseline is
 //    switched off (`fallbackPermissionSet: null`) and who holds no grant.
 //
 // What is asserted, by class: the scene is real (a system read carries the
-// stored value); the field is served masked, never stored; a field with no
-// rule beside it is served as stored (the door really served the row); and,
-// on the record door, a predicate on the masked field is refused.
+// stored value), and the door refuses at object admission (403,
+// `PERMISSION_DENIED`) — the record door for the read and for a query alike.
+// The masker's zero-set reading is still reached on a real boot through the
+// public form submit's echo, pinned by `public-form-read-back-masking`.
+//
+// The picker-door case is shared with the card retiring the picker (#21180),
+// which deletes that door; whichever of the two lands second adapts this file.
 //
 // `bootStack` with the real `SecurityPlugin`, `ObjectQL`, SQL driver, REST and
 // auth layers. `@objectstack/plugin-security` resolves to its BUILT output
@@ -108,26 +111,23 @@ async function seedContact(stack: Awaited<ReturnType<typeof bootStack>>): Promis
   return id;
 }
 
-function expectMasked(value: unknown): void {
-  expect(typeof value, 'the masked field is served, as a string').toBe('string');
-  expect(value).not.toBe(STORED);
-  expect(String(value)).toContain('*');
-  expect(String(value)).toHaveLength(STORED.length);
+/** [#21079] The door's answer to the deny baseline: refused at object admission, nothing served. */
+async function expectRefusedAtAdmission(res: Response, what: string): Promise<void> {
+  const text = await res.clone().text();
+  expect(res.status, `${what}: ${text}`).toBe(403);
+  const refusal = (await res.json()) as { code?: unknown; error?: { code?: unknown } };
+  expect(refusal.code ?? refusal.error?.code, what).toBe('PERMISSION_DENIED');
+  expect(text, `${what}: no stored value leaves the door`).not.toContain(STORED);
 }
 
-describe('[#20995] a masked field is served masked to a caller who resolves no permission set', () => {
+describe('[#20995] a caller who resolves no permission set, on a real boot: [#21079] refused at object admission', () => {
   it(
-    'on the public form lookup door, to a visitor with no session',
+    'on the public form lookup door, to a visitor with no session, on a deployment without the public-form profile',
     async () => {
       const stack = await bootStack(zsmaskStack as unknown as Stack);
       try {
         await seedContact(stack);
-        const res = await stack.api('/forms/zsmask-intake/lookup/contact');
-        expect(res.status).toBe(200);
-        const body = (await res.json()) as { data: Array<Record<string, unknown>> };
-        expect(body.data).toHaveLength(1);
-        expect(body.data[0].name, 'the door served the row').toBe(NAME);
-        expectMasked(body.data[0][KEY]);
+        await expectRefusedAtAdmission(await stack.api('/forms/zsmask-intake/lookup/contact'), 'the picker');
       } finally {
         await stack.stop();
       }
@@ -145,17 +145,18 @@ describe('[#20995] a masked field is served masked to a caller who resolves no p
         const id = await seedContact(stack);
         const token = await stack.signUp('zsmask-nobody@verify.test');
 
-        const res = await stack.apiAs(token, 'GET', `/data/${CONTACT}/${id}`);
-        expect(res.status).toBe(200);
-        const body = (await res.json()) as { record?: Record<string, unknown> };
-        const record = body.record ?? (body as Record<string, unknown>);
-        expect(record.name, 'the door served the row').toBe(NAME);
-        expectMasked(record[KEY]);
-
-        const probe = await stack.apiAs(token, 'POST', `/data/${CONTACT}/query`, { where: { [KEY]: STORED } });
-        expect(probe.status).toBe(403);
-        const refusal = (await probe.json()) as { code?: unknown; error?: { code?: unknown } };
-        expect(refusal.code ?? refusal.error?.code).toBe('PERMISSION_DENIED');
+        await expectRefusedAtAdmission(await stack.apiAs(token, 'GET', `/data/${CONTACT}/${id}`), 'the record read');
+        // A query refused for naming the masked field would be the field
+        // guard's answer; the one naming an unmasked field shows the object
+        // itself is what is refused.
+        await expectRefusedAtAdmission(
+          await stack.apiAs(token, 'POST', `/data/${CONTACT}/query`, { where: { [KEY]: STORED } }),
+          'a query naming the masked field',
+        );
+        await expectRefusedAtAdmission(
+          await stack.apiAs(token, 'POST', `/data/${CONTACT}/query`, { where: { name: NAME } }),
+          'a query naming an unmasked field',
+        );
       } finally {
         await stack.stop();
       }

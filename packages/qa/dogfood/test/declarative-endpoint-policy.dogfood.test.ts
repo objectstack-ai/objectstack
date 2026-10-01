@@ -16,8 +16,12 @@
 //   1. an OMITTED `authRequired` really denies anonymous — the upgrade guide
 //      tells every maintainer that "an omission is safe", and this is what
 //      makes that sentence testable rather than reassuring;
-//   2. an EXPLICIT `authRequired: false` really serves anonymous — otherwise
-//      D6's obligation would be protecting nothing;
+//   2. an EXPLICIT `authRequired: false` really lets anonymous through the
+//      authentication gate — otherwise D6's obligation would be protecting
+//      nothing. [#21079] What it reaches behind that gate is what the
+//      permission model grants anonymous callers, and this fixture grants them
+//      nothing: the ADR-0056 D2 deny baseline refuses the endpoint's object
+//      read at object admission (403, not the 401 an omitted key answers);
 //   3. the armed budget really meters, on the wire: the (N+1)-th anonymous
 //      request inside the window gets 429 **with a `Retry-After` header**. A
 //      429 that loses that header has told the client nothing it can act on,
@@ -83,17 +87,19 @@ describe('[#5112] authRequired — the default is the protection', () => {
   });
 });
 
-describe('[#5112] ADR-0121 D6 — anonymous is served, and metered', () => {
-  it('an EXPLICIT authRequired:false serves an anonymous caller', async () => {
+describe('[#5112] ADR-0121 D6 — anonymous passes authentication, and is metered', () => {
+  it('[#21079] an EXPLICIT authRequired:false lets an anonymous caller through authentication, and the deny baseline refuses its object read', async () => {
     const res = await stack.api(PUBLIC_FEED, { method: 'GET' });
-    expect(res.status, await res.clone().text()).toBe(200);
-    const body = (await res.json()) as { success?: boolean };
-    expect(body.success).toBe(true);
+    expect(res.status, await res.clone().text()).toBe(403);
+    const body = (await res.json()) as { success?: boolean; error?: { code?: unknown } };
+    expect(body.success).toBe(false);
+    expect(body.error?.code).toBe('PERMISSION_DENIED');
   });
 
-  it('carries the declared cacheTtlSeconds on the anonymous success', async () => {
+  it('[#21079] never puts the declared cacheTtlSeconds on the anonymous refusal — the directive is success-only', async () => {
     const res = await stack.api(PUBLIC_FEED, { method: 'GET' });
-    expect(res.headers.get('cache-control')).toMatch(/max-age=15/);
+    expect(res.status, await res.clone().text()).toBe(403);
+    expect(res.headers.get('cache-control') ?? '').not.toMatch(/max-age=15/);
   });
 
   it('answers 429 WITH Retry-After once the armed budget is exhausted', async () => {
