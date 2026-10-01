@@ -152,9 +152,9 @@ async function rejectionOf(p: Promise<unknown>): Promise<unknown> {
 
 describe('#21243 installPackage — a refused sys_packages write fails the install and registers nothing', () => {
   it.each([
-    ['returned driverFault', returnedDriverFault, 'INTERNAL_ERROR'],
-    ['thrown DATABASE_ERROR', thrownDatabaseError, 'DATABASE_ERROR'],
-  ] as const)('fresh id, %s → 500 %s, no row, no namespace', async (_label, publish, code) => {
+    ['returned driverFault', 'INTERNAL_ERROR', returnedDriverFault],
+    ['thrown DATABASE_ERROR', 'DATABASE_ERROR', thrownDatabaseError],
+  ] as const)('fresh id, %s → 500 %s, no row, no namespace', async (_label, code, publish) => {
     const { impl, registry } = makeImpl(publish);
 
     const err = await rejectionOf(impl.installPackage({ manifest: { id: 'com.example.leave', name: 'Leave' } }));
@@ -217,9 +217,9 @@ describe('#21243 installPackage — a refused sys_packages write fails the insta
 
 describe('#21243 updatePackage — a refused sys_packages write fails the edit and restores the manifest', () => {
   it.each([
-    ['returned driverFault', returnedDriverFault, 'INTERNAL_ERROR'],
-    ['thrown DATABASE_ERROR', thrownDatabaseError, 'DATABASE_ERROR'],
-  ] as const)('%s → 500 %s, the prior manifest back in place', async (_label, publish, code) => {
+    ['returned driverFault', 'INTERNAL_ERROR', returnedDriverFault],
+    ['thrown DATABASE_ERROR', 'DATABASE_ERROR', thrownDatabaseError],
+  ] as const)('%s → 500 %s, the prior manifest back in place', async (_label, code, publish) => {
     const { impl, registry } = makeImpl(publish);
     const row = registry.installPackage({ id: 'com.example.leave', name: 'Leave', version: '1.0.0' });
     const manifestObject = row.manifest;
