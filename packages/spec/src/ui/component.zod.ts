@@ -5467,8 +5467,8 @@ const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * This was also the one block of the three whose type was absent from the
  * tracked `sdui.manifest.json`, so `check:react-declaration-parity` reported
  * it as missing from the registry rather than comparing it. ⚠️ Re-read at
- * `e420df310`: the manifest regenerated at this pin carries an `object-tree`
- * entry, as the one at `db11afd49` already did. The derivation above is from
+ * `31971ff1e`: the manifest regenerated at this pin carries an `object-tree`
+ * entry, as the ones at `db11afd49` and `e420df310` already did. The derivation above is from
  * the renderer's sources at the pin either way, which is what #7751's method
  * asks for.
  *
