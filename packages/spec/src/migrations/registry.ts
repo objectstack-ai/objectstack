@@ -25516,6 +25516,14 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // exported value schema with no consumer reads as a capability). See
     // `18.ui__Theme.ts` for the retirement record and the ruling.
     'ui/ColorPalette',
+    // `ui/FormFieldPublicPicker` (`displayFields`, `maxResults`, `filter`,
+    // `object`) leaves with its only carrier, `FormFieldBaseSchema.publicPicker`,
+    // tombstoned in this same major under ADR-0087 D2 by the maintainer's ruling E
+    // on #21079: anonymous public forms no longer offer record search, so nothing
+    // replaces the shape — a fixed choice is a `select` field with static
+    // `options`, and a record choice belongs on a form behind sign-in. See
+    // `retired-keys/18.ui__FormField__publicPicker.ts` for the retirement record.
+    'ui/FormFieldPublicPicker',
     // #11027 — `ui/ResponsiveConfig` (the per-breakpoint LAYOUT block: grid
     // columns / visibility / display order on the Tailwind `xs…2xl` axis). Its
     // last authorable carrier, `page.components[].responsive`, is tombstoned in

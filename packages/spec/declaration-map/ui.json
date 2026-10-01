@@ -122,8 +122,6 @@
     "FormButtonConfigSchema": "ui/FormButtonConfig",
     "FormField": "ui/FormField",
     "FormFieldBaseSchema": "ui/FormField",
-    "FormFieldPublicPicker": "ui/FormFieldPublicPicker",
-    "FormFieldPublicPickerSchema": "ui/FormFieldPublicPicker",
     "FormFieldSchema": "ui/FormField",
     "FormSection": "ui/FormSection",
     "FormSectionSchema": "ui/FormSection",

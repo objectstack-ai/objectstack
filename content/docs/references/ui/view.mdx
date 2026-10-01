@@ -59,8 +59,8 @@ nothing. The one item-name grammar itself lives in
 ## TypeScript Usage
 
 ```typescript
-import { AddRecordConfigSchema, AppearanceConfigSchema, CalendarConfigSchema, ColumnPrefixSchema, ColumnSummarySchema, ColumnSummaryConfigSchema, EmptyStateSchema, FormButtonConfigSchema, FormFieldSchema, FormFieldPublicPickerSchema, FormSectionSchema, FormSelectOptionSchema, FormViewSchema, GalleryConfigSchema, GanttConfigSchema, GanttQuickFilterSchema, GroupingConfigSchema, GroupingFieldSchema, HttpMethodSubsetSchema, HttpRequestSchema, KanbanConfigSchema, ListChartConfigSchema, ListColumnSchema, ListMapConfigSchema, ListViewSchema, NavigationConfigSchema, NavigationModeSchema, ObjectListViewSchema, ObjectUserFiltersSchema, PaginationConfigSchema, RowColorConfigSchema, RowHeightSchema, SelectionConfigSchema, TimelineConfigSchema, TreeConfigSchema, UserActionsConfigSchema, UserFilterFieldSchema, UserFiltersSchema, ViewSchema, ViewDataSchema, ViewFilterRuleSchema, ViewItemSchema, ViewItemNameSchema, ViewItemWireSchema, ViewKindSchema, ViewScopeSchema, ViewSharingSchema, ViewTabSchema, VisualizationTypeSchema } from '@objectstack/spec/ui';
-import type { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnPrefix, ColumnSummary, ColumnSummaryConfig, EmptyState, FormButtonConfig, FormField, FormFieldPublicPicker, FormSection, FormSelectOption, FormView, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, HttpMethodSubset, HttpRequest, KanbanConfig, ListChartConfig, ListColumn, ListMapConfig, ListView, NavigationConfig, NavigationMode, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, View, ViewData, ViewFilterRule, ViewItem, ViewItemName, ViewItemWire, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
+import { AddRecordConfigSchema, AppearanceConfigSchema, CalendarConfigSchema, ColumnPrefixSchema, ColumnSummarySchema, ColumnSummaryConfigSchema, EmptyStateSchema, FormButtonConfigSchema, FormFieldSchema, FormSectionSchema, FormSelectOptionSchema, FormViewSchema, GalleryConfigSchema, GanttConfigSchema, GanttQuickFilterSchema, GroupingConfigSchema, GroupingFieldSchema, HttpMethodSubsetSchema, HttpRequestSchema, KanbanConfigSchema, ListChartConfigSchema, ListColumnSchema, ListMapConfigSchema, ListViewSchema, NavigationConfigSchema, NavigationModeSchema, ObjectListViewSchema, ObjectUserFiltersSchema, PaginationConfigSchema, RowColorConfigSchema, RowHeightSchema, SelectionConfigSchema, TimelineConfigSchema, TreeConfigSchema, UserActionsConfigSchema, UserFilterFieldSchema, UserFiltersSchema, ViewSchema, ViewDataSchema, ViewFilterRuleSchema, ViewItemSchema, ViewItemNameSchema, ViewItemWireSchema, ViewKindSchema, ViewScopeSchema, ViewSharingSchema, ViewTabSchema, VisualizationTypeSchema } from '@objectstack/spec/ui';
+import type { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnPrefix, ColumnSummary, ColumnSummaryConfig, EmptyState, FormButtonConfig, FormField, FormSection, FormSelectOption, FormView, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, HttpMethodSubset, HttpRequest, KanbanConfig, ListChartConfig, ListColumn, ListMapConfig, ListView, NavigationConfig, NavigationMode, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, View, ViewData, ViewFilterRule, ViewItem, ViewItemName, ViewItemWire, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
 
 // Validate data
 const result = AddRecordConfigSchema.parse(data);
@@ -197,7 +197,7 @@ Column footer summary configuration
 | **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| … +35 more>` | optional | Field type (auto-infers widget if omitted) |
 | **options** | `{ label: string; value: string; description?: string; color?: string; … }[]` | optional | Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition). On a metadata form (schema-bound, built by `defineForm`), an enum-typed row may list its members here, to give them human labels or to offer a deliberate subset. An option `value` is a lowercase system identifier, so a row whose members cannot be spelled as option values (a hyphen, a capital) omits `options`: the control derives the members from the served JSON Schema, and their meanings go in `helpText`. |
 | **reference** | `string` | optional | Target object name for lookup/master_detail fields |
-| **publicPicker** | `{ displayFields?: string[]; maxResults?: integer; filter?: object[]; object?: string }` | optional | Opt this field into the anonymous public-form lookup picker (GET /forms/:slug/lookup/:field). Without it the route answers 403 LOOKUP_NOT_PUBLIC and the field is stripped from the rendered public form. |
+| **publicPicker** | `never` | optional | [REMOVED] `view.form.sections[].fields[].publicPicker` was removed in @objectstack/spec 17.6.0 (ADR-0087 D2) — an anonymous public form no longer offers record search: lookup, `master_detail` and `user` fields are always left off the anonymous rendering, and the anonymous record-search route (`GET /forms/:slug/lookup/:field`) no longer exists. Delete the key (the whole `publicPicker` block). To let a visitor choose from a fixed list, use a `select` field with static `options`; to let them pick an existing record, put the form behind sign-in. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **maxLength** | `integer` | optional | Maximum character length (positive integer; for text/textarea/email/url/phone) |
 | **minLength** | `integer` | optional | Minimum character length (positive integer; `minLength: 0` is refused — express "no minimum" by omitting the key) |
 | **min** | `number` | optional | Minimum value (for number/currency/percent/slider) |
@@ -287,15 +287,6 @@ Form-view select option — the object-field option shape minus the per-option `
 | **color** | `string` | optional | Color code for badges/charts |
 | **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`. On an OBJECT field's option it reads the record's OWN columns: the server never reads a related record there, so a read THROUGH a reference field (`record.account.tier`) would fault and be admitted unchecked, and `objectstack validate` refuses it — enforce such a restriction with a `validations[]` `script` rule, whose `condition` is read one hop through a reference. |
 
-### Nested Shape: `FormField.publicPicker`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **displayFields** | `string[]` | optional | Fields projected into each picker result (with `id`); the visitor's search matches `contains` on the first entry. At most 5 (the route projects no more); omitted → ['name']. |
-| **maxResults** | `integer` | optional | Maximum rows a lookup returns (default 20, hard ceiling 50 — the route clamps; anonymous visitors cannot paginate past it). |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Static pre-filter rows ANDed ahead of the visitor's search (e.g. only active records are searchable). Same `{ field, operator, value }` dialect as list-view filters. |
-| **object** | `string` | optional | Referenced-object override for the picker search; omitted → resolved from the `reference` key on the field definition. |
-
 ### Nested Shape: `FormField.keyField`
 
 | Property | Type | Required | Description |
@@ -306,32 +297,6 @@ Form-view select option — the object-field option shape minus the per-option `
 | **helpText** | `string \| Record<string, string>` | optional | Help text under the key input |
 | **regex** | `string` | optional | JS regex source string the key must match (no flags) |
 | **immutable** | `boolean` | optional (default: `true`) | If true, the key is read-only after creation |
-
-
----
-
-## FormFieldPublicPicker
-
-Public-lookup opt-in: enables GET /forms/:slug/lookup/:field for this field on an anonymous public form (without it the route answers 403 LOOKUP_NOT_PUBLIC).
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **displayFields** | `string[]` | optional | Fields projected into each picker result (with `id`); the visitor's search matches `contains` on the first entry. At most 5 (the route projects no more); omitted → ['name']. |
-| **maxResults** | `integer` | optional | Maximum rows a lookup returns (default 20, hard ceiling 50 — the route clamps; anonymous visitors cannot paginate past it). |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Static pre-filter rows ANDed ahead of the visitor's search (e.g. only active records are searchable). Same `{ field, operator, value }` dialect as list-view filters. |
-| **object** | `string` | optional | Referenced-object override for the picker search; omitted → resolved from the `reference` key on the field definition. |
-
-### Nested Shape: `FormFieldPublicPicker.filter[number]`
-
-View filter rule
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | Field name to filter on |
-| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
-| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
 
 
 ---
@@ -362,7 +327,7 @@ View filter rule
 | **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>` | optional | Field type (auto-infers widget if omitted) |
 | **options** | `{ label: string; value: string; description?: string; color?: string; … }[]` | optional | Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition). On a metadata form (schema-bound, built by `defineForm`), an enum-typed row may list its members here, to give them human labels or to offer a deliberate subset. An option `value` is a lowercase system identifier, so a row whose members cannot be spelled as option values (a hyphen, a capital) omits `options`: the control derives the members from the served JSON Schema, and their meanings go in `helpText`. |
 | **reference** | `string` | optional | Target object name for lookup/master_detail fields |
-| **publicPicker** | `{ displayFields?: string[]; maxResults?: integer; filter?: object[]; object?: string }` | optional | Opt this field into the anonymous public-form lookup picker (GET /forms/:slug/lookup/:field). Without it the route answers 403 LOOKUP_NOT_PUBLIC and the field is stripped from the rendered public form. |
+| **publicPicker** | `never` | optional | [REMOVED] `view.form.sections[].fields[].publicPicker` was removed in @objectstack/spec 17.6.0 (ADR-0087 D2) — an anonymous public form no longer offers record search: lookup, `master_detail` and `user` fields are always left off the anonymous rendering, and the anonymous record-search route (`GET /forms/:slug/lookup/:field`) no longer exists. Delete the key (the whole `publicPicker` block). To let a visitor choose from a fixed list, use a `select` field with static `options`; to let them pick an existing record, put the form behind sign-in. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **maxLength** | `integer` | optional | Maximum character length (positive integer; for text/textarea/email/url/phone) |
 | **minLength** | `integer` | optional | Minimum character length (positive integer; `minLength: 0` is refused — express "no minimum" by omitting the key) |
 | **min** | `number` | optional | Minimum value (for number/currency/percent/slider) |
