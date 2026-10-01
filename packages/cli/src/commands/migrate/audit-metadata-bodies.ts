@@ -3,6 +3,7 @@
 import { Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
 import { createInterface } from 'node:readline';
+import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import {
   printHeader,
   printSuccess,
@@ -148,7 +149,10 @@ export default class MigrateAuditMetadataBodies extends Command {
     }
 
     try {
-      const engine: any = stack.kernel.getService('objectql');
+      // `SchemaStack.kernel` is untyped, so the slot's contract is stated on the
+      // RESULT — the `objectql` slot serves `IObjectQLEngine`, whose
+      // `find` / `findOne` / `update` are exactly what the rewrite calls.
+      const engine = stack.kernel.getService('objectql') as IObjectQLEngine | undefined;
       if (typeof engine?.find !== 'function' || typeof engine?.update !== 'function') {
         throw new Error('No ObjectQL engine on this stack — cannot rewrite audit rows.');
       }

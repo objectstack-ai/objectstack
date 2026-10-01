@@ -108,20 +108,23 @@ describe('migrateStoredMetadataBodyCopies (driven)', () => {
     updates: Array<{ object: string; id: string; data: Record<string, unknown> }>;
   } {
     const updates: Array<{ object: string; id: string; data: Record<string, unknown> }> = [];
+    // The REAL contract's shapes (`Pick<IDataEngine, …>`): `update(object, data,
+    // options)` names the row by `data.id`, never a positional id.
     const engine: StoredMetadataBodyMigrationEngine = {
-      async find(object: string) {
+      async find(object) {
         return rows[object] ?? [];
       },
-      async findOne(object: string, query: Record<string, unknown>) {
+      async findOne(object, query) {
         // Refuse exactly what the real engine refuses (a non-selective findOne).
         assertEngineFindOnePredicate(object, query);
-        if (object !== 'sys_metadata') return undefined;
-        const id = (query as { where?: { id?: unknown } }).where?.id;
-        return (rows.sys_metadata ?? []).find((r) => r.id === id);
+        if (object !== 'sys_metadata') return null;
+        const id = (query as { where?: { id?: unknown } } | undefined)?.where?.id;
+        return (rows.sys_metadata ?? []).find((r) => r.id === id) ?? null;
       },
-      async update(object: string, id: string, data: Record<string, unknown>) {
-        updates.push({ object, id, data });
-        return { ok: true };
+      async update(object, data) {
+        const { id, ...rest } = data as Record<string, unknown>;
+        updates.push({ object, id: String(id), data: rest });
+        return { id, ...rest };
       },
     };
     return { engine, updates };
@@ -148,6 +151,8 @@ describe('migrateStoredMetadataBodyCopies (driven)', () => {
     expect(report.rewritten).toBe(2);
     expect(report.failures).toBe(0);
     expect(updates).toHaveLength(2);
+    // Each write names its row through `data.id` — the single-id form the engine reads.
+    expect(updates.map((u) => `${u.object}/${u.id}`).sort()).toEqual(['sys_activity/ac1', 'sys_audit_log/a1']);
     for (const u of updates) expect(JSON.stringify(u.data)).not.toContain(CRED);
   });
 

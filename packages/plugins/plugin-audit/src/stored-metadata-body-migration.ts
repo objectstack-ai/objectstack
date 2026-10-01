@@ -43,16 +43,17 @@
  */
 
 import {
-  isStoredMetadataBodyObject,
   redactStoredMetadataBody,
   STORED_METADATA_BODY_COLUMN,
+  STORED_METADATA_BODY_OBJECTS,
   STORED_METADATA_TYPE_COLUMN,
 } from '@objectstack/spec/kernel';
+import type { IDataEngine } from '@objectstack/spec/contracts';
 
 /** The two audit-family tables this writer copies stored metadata bodies into. */
 export const STORED_METADATA_BODY_AUDIT_OBJECTS = ['sys_audit_log', 'sys_activity'] as const;
 
-/** Journal/activity write runs as the platform, never as a user. */
+/** The rewrite reads and writes as the platform, never as a user. */
 const SYSTEM_CTX = { isSystem: true } as const;
 
 /**
@@ -144,12 +145,13 @@ export function planActivityRowPatch(
   return { metadata: JSON.stringify({ ...pair, old: oldR.value, new: newR.value }) };
 }
 
-/** The minimal engine surface the runner needs — a read and a system-context update. */
-export interface StoredMetadataBodyMigrationEngine {
-  find(object: string, query: Record<string, unknown>, options?: unknown): Promise<unknown>;
-  findOne?(object: string, query: Record<string, unknown>, options?: unknown): Promise<unknown>;
-  update(object: string, id: string, data: Record<string, unknown>, options?: unknown): Promise<unknown>;
-}
+/**
+ * The engine surface the runner needs — the REAL data-engine contract's three
+ * members, picked rather than re-declared, so every call below is checked
+ * against the signatures the engine actually serves (`update` takes the row's
+ * `id` INSIDE `data`, and the execution context rides the trailing options).
+ */
+export type StoredMetadataBodyMigrationEngine = Pick<IDataEngine, 'find' | 'findOne' | 'update'>;
 
 /** Log sink — the guaranteed `warn` fallback plus optional `info` (#9754 shape). */
 export interface MigrationLogger {
@@ -206,11 +208,7 @@ export async function migrateStoredMetadataBodyCopies(
     if (typeCache.has(recordId)) return typeCache.get(recordId);
     let type: string | undefined;
     try {
-      const finder = engine.findOne ?? engine.find;
-      const found = await finder.call(engine, 'sys_metadata', { where: { id: recordId } }, { context: SYSTEM_CTX });
-      const row = Array.isArray(found) || (found && typeof found === 'object' && 'records' in (found as object))
-        ? asArray(found)[0]
-        : (found as Record<string, unknown> | undefined);
+      const row = await engine.findOne('sys_metadata', { where: { id: recordId } }, { context: SYSTEM_CTX });
       const t = row?.[STORED_METADATA_TYPE_COLUMN];
       type = typeof t === 'string' && t !== '' ? t : undefined;
     } catch {
@@ -226,13 +224,18 @@ export async function migrateStoredMetadataBodyCopies(
     try {
       const result = await engine.find(
         object,
-        { where: { object_name: { $in: [...isStoredMetadataBodyObjectNames()] } } },
+        { where: { object_name: { $in: [...STORED_METADATA_BODY_OBJECTS] } } },
         { context: SYSTEM_CTX },
       );
       rows = asArray(result);
     } catch (e) {
+      // A table this run could not read is NOT a clean table: counted as a
+      // failure so the run says so (and the command exits non-zero) instead of
+      // reporting "nothing to rewrite" for rows it never looked at.
+      report.failures += 1;
       logger.warn(
-        `[stored-metadata-body-migration] could not read ${object} — skipping: ${(e as Error)?.message ?? String(e)}`,
+        `[stored-metadata-body-migration] could not read ${object} — its rows were NOT examined: ` +
+          `${(e as Error)?.message ?? String(e)}`,
       );
       continue;
     }
@@ -254,7 +257,10 @@ export async function migrateStoredMetadataBodyCopies(
         continue;
       }
       try {
-        await engine.update(object, id, patch as Record<string, unknown>, { context: SYSTEM_CTX });
+        // A single-id write: the engine reads the target from `data.id`. Run as
+        // the platform — a system caller is exempt from the static-readonly
+        // strip every audit/activity field carries, so the rewrite is stored.
+        await engine.update(object, { ...patch, id }, { context: SYSTEM_CTX });
       } catch (e) {
         report.failures += 1;
         logger.warn(
@@ -270,9 +276,4 @@ export async function migrateStoredMetadataBodyCopies(
       (report.failures > 0 ? ` (${report.failures} failed — re-run to finish)` : ''),
   );
   return report;
-}
-
-/** The stored-metadata-body object names, as a plain array for an `in` filter. */
-function isStoredMetadataBodyObjectNames(): string[] {
-  return ['sys_metadata', 'sys_metadata_history'].filter(isStoredMetadataBodyObject);
 }
