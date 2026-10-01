@@ -36,13 +36,26 @@
  *
  * ## Spawn shape
  *
- * `bin/run.js` with `NODE_ENV` unset (hence `requireBuiltCli`), the entrypoint
- * an operator runs. Each child gets its own process group (`detached: true`)
- * so `afterEach` can still SIGKILL a survivor — which is exactly what the
- * unrepaired command leaves behind — instead of leaking it into the container.
+ * The SOURCE entry, `bin/run-dev.js`, under the tsx loader passed as an
+ * `--import` flag — never the `tsx` CLI, which spawns the script as a child of
+ * its own and relays signals to it, so the pid this file signals would be tsx's
+ * rather than the command's. Loaded this way the spawned pid IS the `os start` /
+ * `os dev` parent, and the `serve` process is its direct child.
+ *
+ * The subject is the supervisor's wiring in `src/commands/start.ts`, which the
+ * built entry runs byte for byte from `dist/`, so the source entry measures the
+ * same code without a build prerequisite. The `development` posture it pins
+ * re-opens `serve`'s port auto-shift; that is harmless here because the port is
+ * read back out of the child's own banner (`boundPortFromBanner`) rather than
+ * assumed from what this file asked for. The built entry was measured too, by
+ * hand, before and after the repair (the PR that landed this records both).
+ *
+ * Each child gets its own process group (`detached: true`) so `afterEach` can
+ * still SIGKILL a survivor — which is exactly what the unrepaired command
+ * leaves behind — instead of leaking it into the container.
  */
 
-import { describe, it, expect, beforeAll, afterEach } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -53,13 +66,12 @@ import {
   childEnv,
   boundPortFromBanner,
   portIsFree,
-  requireBuiltCli,
   reservePort,
-  RUN_JS_RESOLVES_FROM_DIST,
 } from './helpers/serve-process.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const RUN_JS = resolve(HERE, '../bin/run.js');
+const RUN_DEV_JS = resolve(HERE, '../bin/run-dev.js');
+const TSX_LOADER = resolve(HERE, '../../../node_modules/tsx/dist/loader.mjs');
 
 /** The banner tail `printServerReady` ends with — the boot is fully printed. */
 const BANNER_TAIL = /Press Ctrl\+C to stop/;
@@ -154,19 +166,20 @@ function boot(command: Command): Promise<Booted> {
   const port = reservePort();
 
   return new Promise((resolveBoot, rejectBoot) => {
-    const parent = spawn(process.execPath, [RUN_JS, ...argvFor(command, artifact, port)], {
-      cwd: dir,
-      // `NODE_ENV: undefined` is required by the built entrypoint (#11464):
-      // `development`/`test` sends oclif's command lookup back to `src/`.
-      env: childEnv({
-        NODE_ENV: undefined,
-        NO_COLOR: '1',
-        OS_HOME: join(dir, 'home'),
-        OS_LOG_LEVEL: 'error',
-      }),
-      stdio: ['ignore', 'pipe', 'pipe'],
-      detached: true,
-    });
+    const parent = spawn(
+      process.execPath,
+      ['--import', TSX_LOADER, RUN_DEV_JS, ...argvFor(command, artifact, port)],
+      {
+        cwd: dir,
+        env: childEnv({
+          NO_COLOR: '1',
+          OS_HOME: join(dir, 'home'),
+          OS_LOG_LEVEL: 'error',
+        }),
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: true,
+      },
+    );
     running = parent;
 
     let output = '';
@@ -244,10 +257,6 @@ async function signalParent(command: Command, signal: NodeJS.Signals): Promise<v
 }
 
 describe('a signal to the CLI parent takes its `serve` child down with it', () => {
-  beforeAll(() => {
-    requireBuiltCli(RUN_JS_RESOLVES_FROM_DIST);
-  });
-
   for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     it(
       `os start: ${signal} to the parent leaves no child process and a free port`,
