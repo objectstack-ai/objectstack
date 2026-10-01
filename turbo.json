@@ -466,6 +466,19 @@
         "$TURBO_ROOT$/skills/objectstack-formula/**"
       ]
     },
+    "@objectstack/service-automation#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS", "OS_TEST_SHARD"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "!**/node_modules/**",
+        "$TURBO_ROOT$/packages/connectors/connector-rest/src/**"
+      ]
+    },
     "@objectstack/metadata-protocol#test": {
       "dependsOn": ["^build"],
       "outputs": [],

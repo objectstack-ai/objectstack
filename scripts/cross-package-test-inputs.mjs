@@ -1225,6 +1225,13 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'docs/**': ['packages/rest/src/meta-state-route-doc-spelling.test.ts'],
     },
   },
+  '@objectstack/service-automation': {
+    // src/connector-pull.e2e.test.ts (#20919) drives the connector sync
+    // executor through the REAL `rest` provider, imported from
+    // `connector-rest`'s source by relative path: that package already
+    // dev-depends on this one, so a manifest edge back would close a cycle.
+    globs: ['packages/connectors/connector-rest/src/**'],
+  },
   '@objectstack/metadata-protocol': {
     // src/sys-metadata-repository.draft-drain.test.ts reads the durability
     // log-level gate's own source to pin that the repository stays inside it.
