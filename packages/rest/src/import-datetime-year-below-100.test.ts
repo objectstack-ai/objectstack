@@ -48,7 +48,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server.js';
-import { parseDateCell } from './import-coerce.js';
+import { parseDateCell } from '@objectstack/core';
 
 const SHANGHAI = 'Asia/Shanghai';
 const NEW_YORK = 'America/New_York';

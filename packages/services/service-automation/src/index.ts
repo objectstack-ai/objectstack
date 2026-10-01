@@ -142,6 +142,19 @@ export type { FlowActivationStoreEngine } from './flow-activation-store.js';
 export { AutomationServicePlugin, createPackageFileLoader } from './plugin.js';
 export type { AutomationServicePluginOptions } from './plugin.js';
 
+// [#20919] The connector sync executor — pull a `mapping`'s `connectorSource`
+// and write the records through the import runner. Nothing schedules it: a
+// `job` drives a pull (`AutomationServicePlugin.pullConnectorSource`).
+export { pullConnectorSource, ConnectorPullError, CONNECTOR_PULL_PROVIDERS } from './connector-pull.js';
+export type {
+    ConnectorPullDeps,
+    ConnectorPullOptions,
+    ConnectorPullProtocol,
+    ConnectorPullRefusalReason,
+    ConnectorPullRegistry,
+    ConnectorPullResult,
+} from './connector-pull.js';
+
 // Run identity (ADR-0049 / #1888). Maps a flow run's effective `runAs` to the
 // ObjectQL `context` its data nodes pass — `system` → elevated/RLS-bypassing,
 // `user` → the triggering user. A run that resolves NO principal is refused

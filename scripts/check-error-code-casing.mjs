@@ -67,8 +67,8 @@ const EXEMPT_FILES = new Map([
   // D6 — field-addressed validator vocabularies (#3977)
   ['packages/objectql/src/validation/record-validator.ts', 'D6/ADR-0114 field-level catalog codes'],
   ['packages/objectql/src/validation/rule-validator.ts', 'D6 field-level validator codes'],
-  ['packages/rest/src/import-coerce.ts', 'D6 field-level import coercion codes'],
-  ['packages/rest/src/import-runner.ts', 'D6 field-level import row codes'],
+  ['packages/core/src/utils/import-coerce.ts', 'D6 field-level import coercion codes'],
+  ['packages/core/src/utils/import-runner.ts', 'D6 field-level import row codes'],
   ['packages/plugins/plugin-sharing/src/rule-criteria.ts', 'D6 field-level; top-level code is VALIDATION_FAILED'],
   ['packages/spec/src/ui/action-params.zod.ts', 'D6/ADR-0114 param-addressed issues'],
   ['packages/services/service-automation/src/screen-input-contract.ts', 'D6/ADR-0114 screen-field-addressed issues; the refusal code is INVALID_SCREEN_INPUT'],
@@ -76,7 +76,7 @@ const EXEMPT_FILES = new Map([
   ['packages/metadata-core/src/objects/sys-metadata-audit.object.ts', 'D6b persisted audit vocabulary'],
   ['packages/spec/src/api/errors.test.ts', 'D6 FieldError tests spell field-level codes'],
   ['packages/objectql/src/validation/skip-provenance.test.ts', 'D6 field-level assertions'],
-  ['packages/rest/src/import-runner-selfref.test.ts', 'D6 field-level import codes'],
+  ['packages/core/src/utils/import-runner-selfref.test.ts', 'D6 field-level import codes'],
   // D6c — diagnostics payloads of a 200
   ['packages/metadata-protocol/src/build-probes.ts', 'D6c runtime build-probe diagnostics'],
   ['packages/metadata-protocol/src/metadata-diagnostics.ts', 'D6c spec-validation diagnostics'],
