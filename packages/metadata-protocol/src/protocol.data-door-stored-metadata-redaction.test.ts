@@ -23,7 +23,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
+import { assertEngineFindOnePredicate, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
 import { getMetadataTypeRedactor, registerMetadataTypeRedactor } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
@@ -127,6 +127,7 @@ function makeProtocol(rows: Record<string, Record<string, unknown>[]> = ROWS) {
     const find = vi.fn(async (object: string, opts: any) =>
         (rows[object] ?? []).filter((r) => matches(r, opts?.where)).map((r) => project(r, opts?.fields)));
     const findOne = vi.fn(async (object: string, opts: any) => {
+        assertEngineFindOnePredicate(object, opts);
         const hit = (rows[object] ?? []).find((r) => matches(r, opts?.where));
         return hit ? project(hit, opts?.fields) : null;
     });
