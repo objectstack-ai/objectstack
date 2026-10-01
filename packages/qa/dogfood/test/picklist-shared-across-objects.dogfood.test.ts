@@ -109,7 +109,7 @@ describe('dogfood: one shared picklist, two objects, a package extension', () =>
   let stack: VerifyStack;
   let token: string;
 
-  /** A `/meta` read in a stated language. */
+  /** A `/meta` read of one object, in a stated language. */
   const metaIn = async (locale: string | undefined, object: string): Promise<any> => {
     const res = await stack.api(`/meta/object/${object}`, {
       method: 'GET',
@@ -119,7 +119,10 @@ describe('dogfood: one shared picklist, two objects, a package extension', () =>
       },
     });
     expect(res.status, `GET /meta/object/${object}`).toBe(200);
-    return res.json();
+    // The by-name read answers `{ type, name, item }`; the object is `item`.
+    const body: any = await res.json();
+    expect(body?.item?.name, JSON.stringify(body).slice(0, 300)).toBe(object);
+    return body.item;
   };
 
   beforeAll(async () => {
