@@ -70,9 +70,9 @@ describe('validateDashboardWidgetOptions — the SDUI widget-option check at the
     // The adapter decides nothing: over the same widgets, the lint findings'
     // codes, levels and messages ARE the check's diagnostics on the SDUI node.
     const widgets = [
-      widget('a', { color: 'green', sortBy: 'total_amount' }),
-      widget('b'),
-      widget('c', { showLegend: true, horizontal: true, limit: 5 }),
+      widget('tile_a', { color: 'green', sortBy: 'total_amount' }),
+      widget('tile_b'),
+      widget('tile_c', { showLegend: true, horizontal: true, limit: 5 }),
     ];
     const dash = parsedDashboard(widgets);
     const findings = validateDashboardWidgetOptions({ dashboards: [dash] });
