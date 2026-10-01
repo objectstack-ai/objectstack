@@ -341,6 +341,11 @@ describe('[#21062] a picker whose first display field is masked for its caller â
     it('[#21079] a picker with no queryable display field answers 403 PERMISSION_DENIED, as the engine does, and the engine is never asked', async () => {
         const reference = await engineRefusal(h.engine, PICKERS.c_only.displayFields);
         expect(reference).toMatchObject({ status: 403, code: 'PERMISSION_DENIED' });
+        // The engine's refusal for this caller is object admission, not the
+        // field guard: a query keyed on a field it MAY query on is refused the
+        // same. (Under the field guard alone that query was served.)
+        expect(await engineRefusal(h.engine, PICKERS.c_control.displayFields.slice(0, 1)))
+            .toMatchObject({ status: 403, code: 'PERMISSION_DENIED' });
         const before = h.finds().length;
         for (const q of [undefined, 'A']) {
             const res = await h.lookup('c_only', q);
