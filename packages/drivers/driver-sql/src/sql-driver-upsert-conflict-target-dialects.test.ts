@@ -467,6 +467,42 @@ function declareRefusalSweep(cell: DialectCell): void {
     });
 
     /**
+     * [#21166] The pins above read the STORE. This one reads the ANSWER, which
+     * they never did: the call kept the stored `id` and then answered the
+     * payload's. The read-back looked the row up by the payload's `id`, which a
+     * merge on a business key never writes, found nothing, and fell back to
+     * the payload. Measured before the fix, on both cells:
+     *
+     * ```
+     * upsert({ id: 'os21166_new', email, title: 'second' }, ['email'])
+     *   stored id 'os21166_seed'   answered id 'os21166_new'
+     * upsert({ email, title: 'third' }, ['email'])
+     *   stored id 'os21166_seed'   answered id = the nanoid minted for the insert that lost
+     * ```
+     *
+     * The insert leg is the control: there the payload's `id` IS the stored
+     * one, and a fix that answered the wrong row on that leg goes red here.
+     */
+    it('answers the row the merge landed on: its stored `id`, not the payload’s', async () => {
+      await driver.upsert(BACKED.name, { id: 'os21166_seed', email: 'ans@b.com', title: 'first' }, ['email']);
+
+      const supplied = await driver.upsert(BACKED.name, { id: 'os21166_new', email: 'ans@b.com', title: 'second' }, ['email']);
+      expect(supplied.id, 'the answer names an id no stored row has').toBe('os21166_seed');
+      expect(supplied.title, 'the answer must be the merged row, merged columns included').toBe('second');
+
+      const minted = await driver.upsert(BACKED.name, { email: 'ans@b.com', title: 'third' }, ['email']);
+      expect(minted.id, 'the answer names the nanoid minted for the insert that lost').toBe('os21166_seed');
+      expect(minted.title).toBe('third');
+
+      const stored = await driver.find(BACKED.name, { where: { email: 'ans@b.com' } });
+      expect(stored.map((r: any) => ({ id: r.id, title: r.title }))).toEqual([{ id: 'os21166_seed', title: 'third' }]);
+
+      const inserted = await driver.upsert(BACKED.name, { id: 'os21166_ins', email: 'ins@b.com', title: 'new' }, ['email']);
+      expect(inserted.id, 'the insert leg answers the id it wrote').toBe('os21166_ins');
+      expect(inserted.email).toBe('ins@b.com');
+    });
+
+    /**
      * The counterweight, and the reason the three pins above are a repair rather
      * than a capability removal: re-keying a row is still possible, through the
      * call whose entire job is to write the columns it is handed. This is
