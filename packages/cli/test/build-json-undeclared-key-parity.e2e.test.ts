@@ -285,7 +285,7 @@ describe('#11643 — `os build --json` carries the undeclared-authoring-key warn
     // consumed by both faces. The text output must be what it was.
     const run = await runCli(['build'], dirs.planted);
     expect(run.code, `os build failed:\n${run.stdout}${run.stderr}`).toBe(0);
-    expect(run.stdout).toContain('Undeclared authoring keys (1) — dropped at load (#3786)');
+    expect(run.stdout).toContain('Undeclared authoring keys (1) — dropped at load; reported here, never refused');
     expect(run.stdout).toContain(`${PLANTED_KEY}' is not a declared field key, so its value is dropped at load.`);
   }, 120_000);
 });

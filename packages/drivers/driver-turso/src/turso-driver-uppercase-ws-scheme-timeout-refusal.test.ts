@@ -12,7 +12,7 @@
  * reading only that switch says an uppercase url can never reach the WebSocket
  * arm. It can: `expandConfig` runs BEFORE the switch and has already lowercased
  * the scheme, so the switch never sees the original casing. Measured against
- * `@libsql/core@0.17.4`, whose `lib-esm/config.js` does it on one line —
+ * `@libsql/core@0.18.0`, whose `lib-esm/config.js` does it on one line —
  * `const originalUriScheme = uri.scheme.toLowerCase();`:
  *
  * ```
@@ -23,7 +23,7 @@
  * (and the control that makes those two a reading rather than a coincidence:
  * `'LIBSQL://db.example.turso.io'` expands to `'https'`, so the same call is
  * observably capable of answering something other than the input's own letters.)
- * `@libsql/client@0.17.4`'s node entry is `_createClient(expandConfig(config,
+ * `@libsql/client@0.18.0`'s node entry is `_createClient(expandConfig(config,
  * true))`, so that lowercased scheme IS what the switch reads. An uppercase
  * `WSS://` url therefore reaches the WebSocket client, which has no window seam
  * at all — the reading `refuseWebSocketTimeout` already stands on.

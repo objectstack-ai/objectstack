@@ -34,7 +34,7 @@
     "@objectstack/objectql": "workspace:*",
     "@types/node": "^26.6.3",
     "@types/sql.js": "^1.4.11",
-    "sql.js": "^1.14.1",
+    "sql.js": "^1.14.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },

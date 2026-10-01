@@ -202,7 +202,7 @@ export const CLOUD_CONNECTION_ROUTE_LEDGER: readonly CloudConnectionRouteLedgerE
         note:
             'installs a marketplace package into THIS kernel and caches the manifest to disk. Who builds this URL instead, '
             + 'measured: `packages/cli/src/commands/package/install.ts:170` composes it directly against the runtime base, '
-            + 'and the Console\'s "Installed Apps" view calls it same-origin. Gated on `manage_metadata` (#8976). No '
+            + 'and the Console\'s "Installed Apps" view calls it same-origin. Gated on `manage_metadata`, never merely a signed-in session. No '
             + '`@objectstack/client` method builds it.',
     },
     {
@@ -212,7 +212,8 @@ export const CLOUD_CONNECTION_ROUTE_LEDGER: readonly CloudConnectionRouteLedgerE
         disposition: 'server-only',
         note:
             'lists locally installed marketplace packages. Requires an authenticated principal (anonymous → 401), and '
-            + '`installedBy` / `storageDir` are served only to a `manage_metadata` holder (#9011) — a per-principal '
+            + '`installedBy` / `storageDir` (a user id and a host filesystem path) are served only to a '
+            + '`manage_metadata` holder — a per-principal '
             + 'projection the SDK does not model. Consumed by the CLI and the Console\'s Installed Apps view, not by any '
             + 'client method.',
     },
@@ -224,7 +225,8 @@ export const CLOUD_CONNECTION_ROUTE_LEDGER: readonly CloudConnectionRouteLedgerE
         note:
             'removes the cached manifest from this runtime\'s disk; the kernel must restart to fully unload, since '
             + '`engine.registerApp` is additive only. A filesystem-mutating, restart-coupled operation local to one runtime '
-            + 'is deliberately not SDK surface — the CLI and the Console Setup view drive it. Requires `manage_metadata` (#8976).',
+            + 'is deliberately not SDK surface — the CLI and the Console Setup view drive it. Requires `manage_metadata`, '
+            + 'never merely a signed-in session.',
     },
     {
         route: 'POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data',
@@ -233,7 +235,7 @@ export const CLOUD_CONNECTION_ROUTE_LEDGER: readonly CloudConnectionRouteLedgerE
         disposition: 'server-only',
         note:
             'replays a packaged app\'s sample-data seed into this runtime — a local development/demo affordance behind '
-            + '`manage_metadata` (#8976), driven from the Console\'s Installed Apps view. Not modelled by any client method, '
+            + '`manage_metadata` (never merely a signed-in session), driven from the Console\'s Installed Apps view. Not modelled by any client method, '
             + 'and not a shape an application SDK should be able to trigger against a remote environment.',
     },
     {
@@ -243,7 +245,7 @@ export const CLOUD_CONNECTION_ROUTE_LEDGER: readonly CloudConnectionRouteLedgerE
         disposition: 'server-only',
         note:
             'the destructive mirror of reseed: drops the packaged app\'s seeded rows from this runtime. Behind '
-            + '`manage_metadata` (#8976) and driven from the Console. No `@objectstack/client` method builds this URL, and '
+            + '`manage_metadata` (never merely a signed-in session) and driven from the Console. No `@objectstack/client` method builds this URL, and '
             + 'a bulk data-purge door is deliberately not something the application SDK exposes.',
     },
 
@@ -259,7 +261,8 @@ export const CLOUD_CONNECTION_ROUTE_LEDGER: readonly CloudConnectionRouteLedgerE
             + 'unauthenticated (it exposes only `sys_package.marketplace_listed = true` packages) and this proxy "passes '
             + 'through without any credentials", in the plugin header\'s own words. It exists so the Console SPA stays on '
             + 'the tenant origin and needs no CORS on the cloud side. Ledgered rather than waved through as a lane: an '
-            + '`.all()` that ANSWERS requests is a route, per the trigger-api precedent (#11863); the auth ledger\'s '
+            + '`.all()` that ANSWERS requests is a route and takes a ledger row, as trigger-api\'s host-mounted hook '
+            + 'route does; the auth ledger\'s '
             + 'catch-all exclusion covers a `.all()` that DELEGATES to a vendor router, which this does not.',
     },
 

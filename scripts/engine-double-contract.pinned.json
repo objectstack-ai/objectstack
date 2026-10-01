@@ -732,6 +732,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.layered-code-unshipped-name.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.legacy-overlay-delete.test.ts",
       "verb": "delete",
       "pinned": 2

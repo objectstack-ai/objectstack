@@ -30,7 +30,7 @@
     "@better-auth/oauth-provider": "1.7.3",
     "@better-auth/scim": "1.7.3",
     "@better-auth/sso": "1.7.3",
-    "@noble/hashes": "^2.3.0",
+    "@noble/hashes": "^2.4.0",
     "@objectstack/core": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/rest": "workspace:*",
@@ -38,7 +38,7 @@
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
     "better-auth": "1.7.3",
-    "jose": "^6.2.8"
+    "jose": "^6.2.12"
   },
   "devDependencies": {
     "@objectstack/driver-sql": "workspace:*",
@@ -47,8 +47,8 @@
     "@objectstack/plugin-hono-server": "workspace:*",
     "@objectstack/plugin-security": "workspace:*",
     "@types/node": "^26.6.3",
-    "hono": "^4.13.5",
-    "tsx": "^4.23.12",
+    "hono": "^4.13.9",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },
