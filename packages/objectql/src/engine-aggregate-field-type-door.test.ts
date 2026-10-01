@@ -16,6 +16,15 @@
  * | `avg` over a `datetime` field | 200, `null` | 200, `2026` | 500 `DATABASE_ERROR` |
  * | `max` over a `number`, `min` over a `datetime`, `avg` over a `percent` (controls) | one answer | the same | the same |
  *
+ * …and the `sum` row, released after one landing held it for triage's census
+ * answer, measured on `origin/main` `2821e9f15` the same way:
+ *
+ * | aggregation | InMemoryDriver | SqlDriver, SQLite | SqlDriver, PostgreSQL 16 |
+ * |:--|:--|:--|:--|
+ * | `sum` over a `json`, `text`, `select` or `tags` field | 200, `0` | 200, `0` | 500 `DATABASE_ERROR` |
+ * | `sum` over a `formula` field | 200, `0` | 400 `INVALID_FIELD` (no column) | the same |
+ * | `sum` over a `number`, `currency` or `boolean` (controls) | one answer | the same | the same |
+ *
  * The InMemoryDriver cell is this suite's recording driver by construction:
  * the door answers before a driver is resolved, so no read runs. The SQL cells
  * over a real driver live in `@objectstack/rest`'s
@@ -48,6 +57,7 @@ const PROBE = {
   fields: {
     title: { name: 'title', type: 'text' },
     amount: { name: 'amount', type: 'number' },
+    price: { name: 'price', type: 'currency' },
     pct: { name: 'pct', type: 'percent' },
     due: { name: 'due', type: 'datetime' },
     flag: { name: 'flag', type: 'boolean' },
@@ -57,6 +67,7 @@ const PROBE = {
     picks: { name: 'picks', type: 'select', multiple: true, options: OPTIONS },
     owners: { name: 'owners', type: 'lookup', multiple: true, reference: 'aggregate_type_target' },
     ship_to: { name: 'ship_to', type: 'address' },
+    expected: { name: 'expected', type: 'formula', expression: 'record.amount * 2' },
   },
 };
 
@@ -100,10 +111,12 @@ const ENVELOPE = { code: 'INVALID_FIELD', status: 400, httpStatus: 400 };
 const envelopeOf = (err: Thrown) => ({ code: err?.code, status: err?.status, httpStatus: err?.httpStatus });
 
 /** The function's words in the refusal — a control must never be answered in them. */
-const DOES_NOT = { min: 'does not take the min of', max: 'does not take the max of', avg: 'does not average' } as const;
-const DOES = { min: 'takes the min of', max: 'takes the max of', avg: 'averages' } as const;
+const DOES_NOT = { min: 'does not take the min of', max: 'does not take the max of', avg: 'does not average', sum: 'does not sum' } as const;
+const DOES = { min: 'takes the min of', max: 'takes the max of', avg: 'averages', sum: 'sums' } as const;
 const ACCEPTS_MIN_MAX = 'accepts a field of type number, currency, percent, rating, slider, progress, summary, '
   + 'date, datetime, time, boolean or toggle: aggregate a field of one of those types, or count the rows with count.';
+const ACCEPTS_SUM = 'accepts a field of type number, currency, rating, slider, progress, summary, boolean or toggle: '
+  + 'aggregate a field of one of those types, or count the rows with count.';
 
 describe('[#20914] the engine\'s aggregate door asks the aggregate × field-type table for every row', () => {
   let engine: ObjectQL;
@@ -173,6 +186,33 @@ describe('[#20914] the engine\'s aggregate door asks the aggregate × field-type
     expect(reads).toHaveLength(0);
   });
 
+  it('refuses sum over a json, text, select, formula, tags, percent and datetime field, and a select with multiple: true — the row the census held, released — with INVALID_FIELD / 400 naming the accepted types — no read', async () => {
+    // Flipped from the CONTROL below, where `sum meta` and `sum title` reached
+    // the driver while the row was held: in memory they answered `0`.
+    const cases: ReadonlyArray<readonly [string, string]> = [
+      ['meta', 'json field — a structured-JSON value'],
+      ['title', 'text field'],
+      ['status', 'select field'],
+      ['expected', 'formula field'],
+      ['labels', 'tags field — a multi-value field'],
+      ['pct', 'percent field'],
+      ['due', 'datetime field'],
+      ['picks', 'select field with multiple: true — a multi-value field'],
+    ];
+    for (const [field, declared] of cases) {
+      const label = `sum(${field})`;
+      const err = await refusalOf(engine.aggregate(OBJECT, { aggregations: agg('sum', field) }));
+      expect(envelopeOf(err), label).toEqual(ENVELOPE);
+      expect({ field: err?.field, fields: err?.fields, object: err?.object, param: err?.param }, label)
+        .toEqual({ field, fields: [field], object: OBJECT, param: 'aggregations' });
+      expect(err!.message, label).toMatch(new RegExp(
+        `^aggregate\\('${OBJECT}'\\): aggregations\\[0\\]\\.field sums '${field}', a declared ${declared}, which the engine does not sum\\. The query was NOT run\\.`,
+      ));
+      expect(err!.message, label).toContain(`sum ${ACCEPTS_SUM}`);
+    }
+    expect(reads, 'every refusal precedes the driver').toHaveLength(0);
+  });
+
   it('names the first offending position across functions, and lists every offender', async () => {
     const err = await refusalOf(engine.aggregate(OBJECT, {
       groupBy: ['status'],
@@ -191,19 +231,18 @@ describe('[#20914] the engine\'s aggregate door asks the aggregate × field-type
     expect(reads).toHaveLength(0);
   });
 
-  it('CONTROL a pair the table accepts reaches the driver, never this refusal — and so does every sum (the held row)', async () => {
+  it('CONTROL a pair the table accepts reaches the driver, never this refusal — sum over a number, a currency and a boolean included', async () => {
     const shapes: ReadonlyArray<readonly [string, EngineAggregateOptions]> = [
       ['max amount', { aggregations: agg('max', 'amount') }],
       ['min due', { aggregations: agg('min', 'due') }],
       ['avg pct', { aggregations: agg('avg', 'pct') }],
       ['max flag', { aggregations: agg('max', 'flag') }],
       ['sum amount', { aggregations: agg('sum', 'amount') }],
+      ['sum price', { aggregations: agg('sum', 'price') }],
+      ['sum flag', { aggregations: agg('sum', 'flag') }],
       // `count` compares no value, so a JSON-stored column is countable.
       ['count meta', { aggregations: agg('count', 'meta') }],
       ['count picks', { aggregations: agg('count', 'picks') }],
-      // The held row: not judged here until triage releases it.
-      ['sum meta', { aggregations: agg('sum', 'meta') }],
-      ['sum title', { aggregations: agg('sum', 'title') }],
       ['grouped max amount', { groupBy: ['status'], aggregations: agg('max', 'amount') }],
     ];
     for (const [label, query] of shapes) {
@@ -225,7 +264,7 @@ describe('[#20914] the engine\'s aggregate door asks the aggregate × field-type
     expect(reads).toHaveLength(0);
   });
 
-  it('GUARD the door asks the spec table for every judged row × every FieldType, and the declaration half for every flagged multi-capable type', () => {
+  it('GUARD the door asks the spec table for every row × every FieldType, and the declaration half for every flagged multi-capable type — no row held', () => {
     const judged = (fn: string, def: Record<string, unknown>) => {
       try {
         assertAggregationFieldTypesAccepted(OBJECT, { fields: { f: def } }, agg(fn, 'f'));
@@ -235,7 +274,11 @@ describe('[#20914] the engine\'s aggregate door asks the aggregate × field-type
       }
     };
     const refusedPerRow: Record<string, number> = {};
-    for (const fn of ['count', 'count_distinct', 'avg', 'min', 'max']) {
+    // Every row of the table, read off the table: a row the door skipped would
+    // answer null where the table refuses, and turn this red.
+    const rows = Object.keys(AGGREGATE_FIELD_TYPE_COMPATIBILITY);
+    expect([...rows].sort()).toEqual(['avg', 'count', 'count_distinct', 'max', 'min', 'sum']);
+    for (const fn of rows) {
       // A row that refuses any type-level multi-value type refuses the declaration too.
       const rowRefusesMulti = !isAggregateCompatibleWithFieldType(fn, 'tags');
       refusedPerRow[fn] = 0;
@@ -257,18 +300,18 @@ describe('[#20914] the engine\'s aggregate door asks the aggregate × field-type
     expect(refusedPerRow).toEqual({
       count: 0,
       count_distinct: refusedByTable('count_distinct'),
+      sum: refusedByTable('sum'),
       avg: refusedByTable('avg'),
       min: refusedByTable('min'),
       max: refusedByTable('max'),
     });
     expect(refusedPerRow.max).toBeGreaterThan(30);
-    // The held row: no verdict for any declared type.
-    for (const type of FieldType.options) expect(judged('sum', { type }), `sum × ${type}`).toBeNull();
+    expect(refusedPerRow.sum).toBeGreaterThan(30);
   });
 
   it('GUARD no verdict without a field map, for an undeclared name or a path, an off-vocabulary type, a fieldless aggregation or an off-vocabulary function', () => {
     const judge = (schema: unknown, aggregations: unknown) => () => assertAggregationFieldTypesAccepted(OBJECT, schema, aggregations);
-    for (const fn of ['max', 'min', 'avg', 'count_distinct']) {
+    for (const fn of ['max', 'min', 'avg', 'sum', 'count_distinct']) {
       expect(judge(undefined, agg(fn, 'meta')), fn).not.toThrow();
       expect(judge({}, agg(fn, 'meta')), fn).not.toThrow();
       expect(judge(PROBE, agg(fn, 'nope')), fn).not.toThrow();
