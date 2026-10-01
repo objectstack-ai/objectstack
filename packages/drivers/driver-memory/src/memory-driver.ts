@@ -27,6 +27,11 @@ import {
 } from './memory-tenancy-guard.js';
 import {
   assertFilterConditionShape,
+  // [#21066] What the shape gate is told about the declared fields, and the
+  // one log line a withheld refusal writes.
+  DRIVER_FILTER_CAPABILITIES,
+  type FilterFieldDeclarations,
+  withheldFilterLogLine,
   filterArrayReachedDriverError,
   filterNodeExpectedError,
   filterNodeListExpectedError,
@@ -1441,7 +1446,10 @@ export class InMemoryDriver implements IDataDriver {
       // again. It must run before `normalizeFilterCondition`
       // and not inside it: the translator recurses per key and would therefore
       // refuse or not refuse depending on where in the tree it gave up.
-      assertFilterConditionShape(filters, 'filter');
+      // [#21066] With the object's declarations, so a scalar comparison on a
+      // declared JSON-stored field is refused there too, before mingo answers
+      // it per element.
+      assertFilterConditionShape(filters, 'filter', DRIVER_FILTER_CAPABILITIES, this.filterFieldDeclarations(object));
       // Translate non-standard operators ($contains, $notContains, etc.) to Mingo-compatible format
       return this.normalizeFilterCondition(filters, object);
     }
@@ -2384,6 +2392,41 @@ export class InMemoryDriver implements IDataDriver {
     const shape = object ? this.valueShapes.get(object)?.get(field) : undefined;
     if (!shape) return false;
     return STRUCTURED_JSON_TYPES.has(shape.type) || isMultiValueField(shape);
+  }
+
+  /**
+   * [#21066] What the shape gate is told about `object`'s declared fields
+   * (`FilterFieldDeclarations` in `filter-refusal.ts`): which of them are
+   * JSON-stored, and where the withheld half of a refusal is written.
+   *
+   * The population is {@link isJsonStoredField}'s — the one `$contains` forks
+   * on — so the fields on which `$contains` asks membership are exactly the
+   * fields on which the equality and ordering family is refused: one declared
+   * set, two halves of one contract (the spec's `$contains` docblock names
+   * `$contains` as the operator left working where the family is refused). It
+   * matches `driver-sql`'s JSON-column registry less that registry's
+   * driver-internal aliases, as {@link isJsonStoredField} records.
+   *
+   * **A field with no recorded declaration is not judged**: an object never
+   * passed through {@link syncSchema} keeps answering every operator as it
+   * always has, as `SqlDriver.isJsonColumn` answers `false` for a table it was
+   * never told about. The refusal fires only where the storage shape is KNOWN.
+   *
+   * The diagnostic goes to this driver's logger at `warn` — the level
+   * `driver-sql` writes its withheld filter diagnostics at — so the refusal's
+   * "the full diagnostic is in the server log" is true here too.
+   *
+   * @internal Not private only because the analytics face
+   * (`memory-analytics.ts`) is another class of this package and must judge
+   * its `where` by the same declarations, for the reason
+   * {@link filterContainsTest} is reachable from it. Not a consumer contract:
+   * `FilterFieldDeclarations` is not exported from the package root.
+   */
+  filterFieldDeclarations(object: string | undefined): FilterFieldDeclarations {
+    return {
+      isJsonStoredField: (field) => this.isJsonStoredField(object, field),
+      reportWithheld: (diagnostic) => this.logger.warn(withheldFilterLogLine(diagnostic)),
+    };
   }
 
   /**

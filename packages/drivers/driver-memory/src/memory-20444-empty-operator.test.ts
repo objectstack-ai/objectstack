@@ -28,6 +28,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { Cube, FilterCondition } from '@objectstack/spec/data';
 import { isEmptyFilterValue } from '@objectstack/spec/data';
+import { jsonColumnOperatorRefusalText } from '@objectstack/core';
 import { InMemoryDriver } from './memory-driver.js';
 import { assertFilterConditionShape } from './filter-refusal.js';
 import { MemoryAnalyticsService } from './memory-analytics.js';
@@ -65,7 +66,12 @@ const CASES: Array<{ where: FilterCondition; expected: string[] }> = [
   { where: { $or: [{ score: 5 }, { tags: { $empty: true } }] }, expected: ['r1', 'r2', 'r3', 'r5'] },
   { where: { $and: [{ title: { $empty: false } }, { owners: { $empty: false } }] }, expected: ['r1', 'r4'] },
   { where: { title: { $empty: false, $ne: 'x' } }, expected: ['r4'] },
-  { where: { tags: { $empty: true, $ne: null } }, expected: ['r2'] },
+  // [#21066] This cell was `{ tags: { $empty: true, $ne: null } }` → `r2`. A
+  // `$ne` on a declared multi-value field is now refused, as the SQL family
+  // refuses it (pinned below), so the composition — `$empty` beside a "has a
+  // value" sibling on ONE multi-value field — is held through `$null: false`,
+  // the sibling that still answers there. `driver-sql`/SQLite answers `r2` too.
+  { where: { tags: { $empty: true, $null: false } }, expected: ['r2'] },
 ];
 
 function refusal(run: () => unknown): Promise<{ code?: string; status?: number } | 'answered'> {
@@ -148,6 +154,20 @@ describe('[#20444] InMemoryDriver — $empty on the live path, the by-value read
       .map((r) => r.id);
     expect(live).toEqual([]);
     expect(byValue(rows, { score: { $empty: true } })).toEqual(['blank']);
+  });
+
+  it('[#21066] $ne beside $empty on a declared multi-value field is refused, in the SQL family\'s words', async () => {
+    let thrown: { code?: string; status?: number; message?: string } | undefined;
+    try {
+      await driver.find(TABLE, { where: { tags: { $empty: true, $ne: null } } });
+    } catch (err) {
+      thrown = err as typeof thrown;
+    }
+    expect({ code: thrown?.code, status: thrown?.status, message: thrown?.message }).toEqual({
+      code: 'INVALID_FILTER',
+      status: 400,
+      message: jsonColumnOperatorRefusalText('tags', '$ne', false).message,
+    });
   });
 
   it('a non-boolean flag is refused on the live path and by the shared shape gate itself', async () => {

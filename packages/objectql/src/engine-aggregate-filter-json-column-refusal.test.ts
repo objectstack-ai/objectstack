@@ -27,6 +27,13 @@
 // the one face that evaluates `aggregations[i].filter`); the SQLite and
 // PostgreSQL cells, each beside its live `where` twin, are `packages/rest`'s
 // `aggregation-filter-json-column-refusal.test.ts`.
+//
+// [#21009] The text operators other than the membership pair joined the shared
+// set, so this face refuses `$startsWith` / `$endsWith` / `$icontains` on a
+// multi-valued field too — where it counted `m = 0` for every one of them, a
+// `200` no stored array can support. (The staged `$like` / `$ilike` are refused
+// here earlier, as operators this face does not evaluate; a structured-JSON
+// field meets the text-operator declared-type door first, as before.)
 
 import { describe, it, expect, vi } from 'vitest';
 import { lowerFilterCondition } from '@objectstack/spec/data';
@@ -122,6 +129,19 @@ function family(field: string): Array<readonly [string, Record<string, unknown>,
   ];
 }
 
+/** [#21009] field → [name, filter, operator] — the text family on a MULTI-VALUED field. */
+function textFamily(field: 'owners' | 'tags'): Array<readonly [string, Record<string, unknown>, string]> {
+  const [a] = VALUES[field];
+  return [
+    ['$startsWith', { [field]: { $startsWith: a } }, '$startsWith'],
+    ['$startsWith on the serialization', { [field]: { $startsWith: '[' } }, '$startsWith'],
+    ['$endsWith', { [field]: { $endsWith: a } }, '$endsWith'],
+    ['$icontains', { [field]: { $icontains: a.toUpperCase() } }, '$icontains'],
+    ['$icontains in an $or branch after one that holds', { $or: [{ title: 'x' }, { [field]: { $icontains: a } }] }, '$icontains'],
+    ['$startsWith under $not', { $not: { [field]: { $startsWith: a } } }, '$startsWith'],
+  ];
+}
+
 async function refusalOf(run: () => Promise<unknown>): Promise<Error & { code?: string; status?: number }> {
   try {
     await run();
@@ -169,6 +189,27 @@ describe('[#21007] engine.aggregate — a per-aggregation filter refuses a scala
       });
     }
   }
+
+  for (const field of ['owners', 'tags'] as const) {
+    for (const [name, filter, op] of textFamily(field)) {
+      it(`[#21009] ${field} ${name}: 400 INVALID_FILTER in where's words, and no row is read`, async () => {
+        const { engine, driver, warn } = await makeEngine(ROWS);
+        const err = await refusalOf(() => engine.aggregate(OBJECT, perAggregation(filter)));
+        expectWhereRefusal(err, warn, field, op, false);
+        expect(driver.find).not.toHaveBeenCalled();
+      });
+    }
+  }
+
+  it('[#21009] a structured-JSON field still meets the text-operator declared-type door first', async () => {
+    const { engine, warn } = await makeEngine(ROWS);
+    const err = await refusalOf(() => engine.aggregate(OBJECT, perAggregation({ meta: { $startsWith: 'a' } })));
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
+    expect(err.message).toContain("filter on 'meta' aims the text operator");
+    expect(err.message).not.toContain('WAS NOT APPLIED');
+    expect(warn.mock.calls.map((call: unknown[]) => String(call[0])).join('\n')).not.toContain('WAS NOT APPLIED');
+  });
 
   it('the card on an EMPTY table: refused too — the verdict is the filter\'s, not the data\'s', async () => {
     for (const filter of [{ owners: { $in: ['u1', 'u9'] } }, { owners: { $nin: ['u1', 'u9'] } }]) {
@@ -230,6 +271,9 @@ describe('[#21007] the per-row floor — a caller evaluating rows directly meets
     ['$eq', { tags: { $eq: 'red' } }],
     ['implicit equality', { tags: 'red' }],
     ['$between', { meta: { $between: ['a', 'b'] } }],
+    // [#21009] The text family reads the same set here: `$startsWith` on the
+    // stored array answered `false` for every row before.
+    ['$startsWith', { owners: { $startsWith: 'u1' } }],
   ] as const)('%s', (_name, filter) => {
     let thrown: (Error & { code?: string; status?: number }) | undefined;
     try {

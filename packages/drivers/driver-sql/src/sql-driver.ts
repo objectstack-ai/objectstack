@@ -8865,10 +8865,14 @@ export class SqlDriver implements IDataDriver {
     // transaction (inside one the sequence UPDATE rolls back with the refused
     // INSERT, so nothing is burned and there is nothing to repair — measured).
     const mayRetry = options?.transaction === undefined;
+    // The row the last attempt SENT, in storage form: the read-back below
+    // looks the landed row up by its conflict-key values.
+    let sent: Record<string, any> = {};
     for (let attempt = 0; ; attempt++) {
       const reservations = await this.fillAutoNumberFields(object, toUpsert, options);
 
       const formatted = this.applyWriteColumnMap(object, this.formatInput(object, toUpsert));
+      sent = formatted;
       this.stampInsertTimestamps(object, formatted);
       // [#11176] …and the same slot filled on Postgres/MySQL, where the line
       // above returns early. Without it `updated_at` is not in `formatted`, so
@@ -9052,7 +9056,23 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
-    const readback = this.getBuilder(object, options).where('id', toUpsert.id);
+    // [#21166] Read back the row the statement landed on, by the identity it
+    // MATCHED on: the conflict-key values. Reading it back by `toUpsert.id`
+    // answers the wrong row on exactly the call #8622 protects: a merge on a
+    // business key keeps the stored row's `id`, so the payload's `id` (or the
+    // nanoid minted above) names no row, the read finds nothing, and the
+    // fallback below answered the PAYLOAD. Measured on SQLite and live
+    // Postgres 16: the row stored as `row-a` answered `id: 'row-NEW'`, an id
+    // no stored row has. The conflict-key values name the landed row on both
+    // legs: the inserted row carries them, and the merged row is the one that
+    // matched them. A conflict key the row leaves empty cannot have matched
+    // (NULL never conflicts), so the statement inserted and the row carries
+    // `toUpsert.id`. On the default `['id']` target the two readings are the
+    // same query. The tenant scope is applied to either, as before.
+    const matchedOn = mergeKeys.every((k) => sent[k] !== undefined && sent[k] !== null);
+    const readback = this.getBuilder(object, options);
+    if (matchedOn) for (const k of mergeKeys) readback.where(k, sent[k]);
+    else readback.where('id', toUpsert.id);
     this.applyTenantScope(readback, object, options);
     const result = await readback.first();
     return this.formatOutput(object, result) || toUpsert;

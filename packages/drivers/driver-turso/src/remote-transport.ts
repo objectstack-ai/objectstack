@@ -1651,10 +1651,21 @@ export class RemoteTransport {
       throw e;
     }
 
-    // Fetch the result row
+    // Fetch the row the statement landed on, by the identity it MATCHED on:
+    // the conflict-key values. [#21166] Reading it back by the payload's `id`
+    // answers the wrong row once `id` is insert-only: a merge on a business
+    // key keeps the stored row's `id`, so the payload's `id` (or the nanoid
+    // minted above) names no row, the read finds nothing, and the fallback
+    // below answered the PAYLOAD as if it had been stored. The conflict-key
+    // values name the landed row on both legs: the inserted row carries them,
+    // and the merged row is the one that matched them. A conflict key the
+    // payload leaves empty cannot have matched (NULL never conflicts), so the
+    // statement inserted and the row carries this call's `id`. On the default
+    // `['id']` target the two readings are the same statement.
+    const keyColumns = mergeKeys.every((k) => toUpsert[k] !== undefined && toUpsert[k] !== null) ? mergeKeys : ['id'];
     const result = await this.client!.execute({
-      sql: `SELECT * FROM ${this.tableSql(table)} WHERE "id" = ?`,
-      args: [toUpsert.id],
+      sql: `SELECT * FROM ${this.tableSql(table)} WHERE ${keyColumns.map((k) => `"${k}" = ?`).join(' AND ')}`,
+      args: keyColumns.map((k) => this.serializeValue(toUpsert[k])),
     });
     const rows = this.mapRows(result);
     return rows[0] || toUpsert;

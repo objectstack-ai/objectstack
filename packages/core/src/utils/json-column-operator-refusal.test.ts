@@ -7,7 +7,8 @@
  * Two pins, both against what `driver-sql` answered BEFORE the move:
  *
  * - **The set** — the 22 spellings `driver-sql`'s module-private
- *   `JSON_COLUMN_INCOMPATIBLE_OPERATORS` held, member for member.
+ *   `JSON_COLUMN_INCOMPATIBLE_OPERATORS` held, member for member, and
+ *   [#21009] the five text operators that joined them since.
  * - **The words** — the SHA-256 of each text, captured from `driver-sql`'s
  *   built `jsonColumnOperatorError` at the commit before the move (`8f784959c`)
  *   through a real `SqlDriver` over SQLite: the withheld message (one text for
@@ -28,16 +29,23 @@ import { JSON_COLUMN_INCOMPATIBLE_OPERATORS, jsonColumnOperatorRefusalText } fro
 const sha256 = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
 
 describe('[#21007] JSON_COLUMN_INCOMPATIBLE_OPERATORS', () => {
-  it('holds exactly the spellings driver-sql refused before the move', () => {
+  it('holds exactly the spellings driver-sql refused before the move, and the text family [#21009] added', () => {
     expect([...JSON_COLUMN_INCOMPATIBLE_OPERATORS].sort()).toEqual([
-      '!=', '$between', '$eq', '$gt', '$gte', '$in', '$lt', '$lte', '$ne', '$nin',
+      '!=', '$between', '$endsWith', '$eq', '$gt', '$gte', '$icontains', '$ilike', '$in', '$like',
+      '$lt', '$lte', '$ne', '$nin', '$startsWith',
       '<', '<=', '<>', '=', '==', '>', '>=',
       'between', 'in', 'nin', 'not_in', 'notin',
     ]);
   });
 
-  it('leaves out the membership spelling, the rest of the text family and the null predicates', () => {
-    for (const op of ['$contains', '$notContains', '$startsWith', '$endsWith', '$icontains', '$null', '$exists', '$empty']) {
+  it('[#21009] holds every text operator except the membership pair', () => {
+    for (const op of ['$startsWith', '$endsWith', '$icontains', '$like', '$ilike']) {
+      expect(JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op), op).toBe(true);
+    }
+  });
+
+  it('leaves out the membership pair and the null predicates', () => {
+    for (const op of ['$contains', '$notContains', '$null', '$exists', '$empty']) {
       expect(JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op), op).toBe(false);
     }
   });
@@ -54,6 +62,14 @@ describe('[#21007] jsonColumnOperatorRefusalText — byte for byte what driver-s
     const text = jsonColumnOperatorRefusalText('members', op, bare);
     expect({ sha: sha256(text.message), length: text.message.length }).toEqual(MESSAGE);
     expect({ sha: sha256(text.diagnostic), length: text.diagnostic.length }).toEqual(diagnostic);
+  });
+
+  it('[#21009] a text operator reads the very message the equality family reads, and its diagnostic names it', () => {
+    for (const op of ['$startsWith', '$endsWith', '$icontains', '$like', '$ilike']) {
+      const text = jsonColumnOperatorRefusalText('members', op, false);
+      expect({ sha: sha256(text.message), length: text.message.length }, op).toEqual(MESSAGE);
+      expect(text.diagnostic, op).toContain(`Operator "${op}" on field "members" WAS NOT APPLIED`);
+    }
   });
 
   it('the message names neither the field nor the operator, and prescribes $contains and an $or of it', () => {
