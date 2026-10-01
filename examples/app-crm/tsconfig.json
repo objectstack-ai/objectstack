@@ -25,8 +25,9 @@
     // BUILD ARTIFACT — so `tsc --noEmit` would be checking against whatever was
     // last built rather than against the source in this checkout, and a stale
     // `dist` typechecks green over an engine contract that has since moved.
-    // `pnpm check:type-source-resolution` is the gate; it wants the `paths`
-    // rule, not a registry entry.
+    // `check:type-source-resolution` was the gate, and it wanted the `paths`
+    // rule, not a registry entry, until it was retired on 2026-09-18 (#18373);
+    // no gate checks this rule now.
     "paths": {
       "@objectstack/formula": ["../../packages/formula/src/index.ts"]
     }
