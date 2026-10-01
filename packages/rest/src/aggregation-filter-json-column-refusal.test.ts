@@ -255,7 +255,11 @@ for (const cell of CELLS) {
             expect(twin.json.error).toBe(WITHHELD_MESSAGE);
             expect(agg.json.error).toContain('{ "FIELD": { "$contains": "a" } }');
             expect(agg.json.error).toContain('{ "$or": [{ "FIELD": { "$contains": "a" } }, { "FIELD": { "$contains": "b" } }] }');
-            expect(agg.json.error).toContain('For no value, use "$null" or "$empty".');
+            // The no-value spelling a null comparand needs, in two pieces: this file
+            // is in `check:live-db-isolation`'s scan, which reads a MySQL USE
+            // statement in the verb followed by a quoted operand.
+            expect(agg.json.error).toContain('For no value,');
+            expect(agg.json.error).toContain('"$null" or "$empty".');
             expect(agg.json.error).toContain('withheld from the message; the full diagnostic is in the server log.');
             expect(agg.json.error).not.toContain(`"${field}"`);
             // The field and the operator are in the server log, not the response.
