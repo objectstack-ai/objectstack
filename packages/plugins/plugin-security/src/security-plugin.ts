@@ -5830,14 +5830,11 @@ export class SecurityPlugin implements Plugin {
       // 4. [ADR-0066 D3/⑤] The capability AND-gate, ahead of the grant, for both
       //    principals — a caller missing any required capability is denied
       //    however permissive their grants are.
-      // [#21079] A delegator who resolves NO set is the deny baseline too: the
-      // middleware asks both of its delegator arms over that empty list and
-      // refuses, so neither arm here stands down on it.
       const required = requiredCapsForOperation(requiredPermissions, 'find');
       if (required.length > 0) {
         const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
         if (required.some((cap) => !held.has(cap))) return false;
-        if (delegatorSets) {
+        if (delegatorSets && delegatorSets.length > 0) {
           const delHeld = this.permissionEvaluator.getSystemPermissions(delegatorSets);
           if (required.some((cap) => !delHeld.has(cap))) return false;
         }
@@ -5849,6 +5846,9 @@ export class SecurityPlugin implements Plugin {
       }
 
       // 6. [ADR-0090 D10] The delegator must independently grant the same read.
+      //    [#21079] Asked over the delegator's list whatever its length, as the
+      //    middleware asks it: a delegator who resolves NO set grants nothing,
+      //    the deny baseline for the second principal too.
       if (
         delegatorSets &&
         !this.permissionEvaluator.checkObjectPermission('find', objectName, delegatorSets, { isPrivate })
@@ -6116,14 +6116,12 @@ export class SecurityPlugin implements Plugin {
       }
 
       // 6. [ADR-0066 D3/⑤] The capability AND-gate, ahead of the grant, for both
-      //    principals. [#21079] A delegator who resolves NO set is the deny
-      //    baseline too: the middleware asks both of its delegator arms over
-      //    that empty list and refuses, so neither arm here stands down on it.
+      //    principals.
       const required = requiredCapsForOperation(requiredPermissions, operation);
       if (required.length > 0) {
         const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
         if (required.some((cap) => !held.has(cap))) return false;
-        if (delegatorSets) {
+        if (delegatorSets && delegatorSets.length > 0) {
           const delHeld = this.permissionEvaluator.getSystemPermissions(delegatorSets);
           if (required.some((cap) => !delHeld.has(cap))) return false;
         }
@@ -6135,6 +6133,9 @@ export class SecurityPlugin implements Plugin {
       }
 
       // 8. [ADR-0090 D10] The delegator must independently grant the same write.
+      //    [#21079] Asked over the delegator's list whatever its length, as the
+      //    middleware asks it: a delegator who resolves NO set grants nothing,
+      //    the deny baseline for the second principal too.
       if (
         delegatorSets &&
         !this.permissionEvaluator.checkObjectPermission(operation, objectName, delegatorSets, { isPrivate })
