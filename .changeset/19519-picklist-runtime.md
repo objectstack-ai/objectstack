@@ -2,7 +2,6 @@
 '@objectstack/objectql': minor
 '@objectstack/metadata': patch
 '@objectstack/spec': patch
-'@objectstack/lint': patch
 ---
 
 feat(objectql): the runtime resolves a field's `picklist` onto its served options, validates writes against the resolved list, and merges `picklistExtensions` additively
