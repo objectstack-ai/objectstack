@@ -33,9 +33,10 @@
  * — and each reached its wrong answer by a different route: SQL compared the
  * serialization, the engine compared an array in JS, and mingo compared each
  * member. So the reason the sentence gives is the one that holds on all three:
- * a scalar comparison or text operator met a multi-value or JSON field, and
- * membership is `$contains`. It names no storage form and no backend's wrong
- * answer; those stay in these docblocks, out of what a caller reads.
+ * a scalar comparison or text operator met a multi-value or JSON field;
+ * membership is `$contains`, and no value is `$null` / `$empty`. It names no
+ * storage form and no backend's wrong answer; those stay in these docblocks,
+ * out of what a caller reads.
  *
  * It is also sized for the door it is read through. The REST envelope cuts a
  * 4xx message of 500 characters or more to 499 plus an ellipsis, keeping the
@@ -44,9 +45,10 @@
  * "withheld" sentence included, by a pin that runs it through that function
  * (`json-column-operator-refusal.test.ts`). The diagnostic names the field four
  * times, so its length grows with the name. It is whole on the wire for a field
- * name of up to 32 characters when an author-marked refusal discloses it. Its
- * order (what was refused, why, then the remedy) leaves the any-of example
- * last, so a longer name pushes that out first.
+ * name of up to 26 characters when an author-marked refusal discloses it. Its
+ * order (what was refused, why, then the remedy) leaves the presence clause
+ * and then the any-of example last, so a longer name pushes those out first;
+ * the any-of example survives up to 36 characters.
  *
  * ## The other half of the JSON column's contract
  *
@@ -153,15 +155,27 @@ function refusalReason(op?: string): string {
   const operator = op === undefined
     ? 'a scalar comparison or text operator'
     : `"${op}", a scalar comparison or text operator,`;
-  return `it aims ${operator} at a multi-value or JSON field, which such an operator cannot test for one member.`;
+  return `it aims ${operator} at a multi-value or JSON field, which it cannot test for one member.`;
 }
+
+/**
+ * [#21067] The other half of the prescription. The refused set also catches a
+ * `null` comparand — `{ f: null }`, `$eq: null`, `$ne: null` — whose caller
+ * asked whether the field has a value, not which member it holds, so
+ * `$contains` cannot express it. The presence spellings can, and they answer on
+ * a multi-value or JSON field on every face (they are outside the set):
+ * `$null` is the literal `= null`, and `$empty` also counts an empty list.
+ * One constant clause, never a branch on the comparand, so the withheld message
+ * stays one text.
+ */
+const PRESENCE_REMEDY = 'For no value, use "$null" or "$empty".';
 
 /** The prescription, spelled with `name` in the field position. */
 function containsRemedy(name: string): string {
   return (
     `Use "$contains" for membership ({ "${name}": { "$contains": "a" } }), or an $or of ` +
     `"$contains" for any-of ({ "$or": [{ "${name}": { "$contains": "a" } }, ` +
-    `{ "${name}": { "$contains": "b" } }] }).`
+    `{ "${name}": { "$contains": "b" } }] }). ${PRESENCE_REMEDY}`
   );
 }
 
@@ -208,8 +222,9 @@ function containsRemedy(name: string): string {
  * {@link refusalReason}'s. And the message ran to 748 characters, so the REST
  * envelope cut it at 499, partway through the sentence explaining the refusal,
  * and no caller read the sentence saying the field and the operator were
- * withheld; it is now 461. The mechanism above stays here, where the next
- * author reads it.
+ * withheld; it is now 486, with the presence spellings a `null` comparand
+ * needs (see `PRESENCE_REMEDY`). The mechanism above stays here, where the
+ * next author reads it.
  */
 export function jsonColumnOperatorRefusalText(
   field: string,

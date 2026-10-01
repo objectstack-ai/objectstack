@@ -142,6 +142,10 @@ const CONTROLS: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
   ['title implicit equality', { title: 'x' }],
   ['owners $contains — the prescribed spelling', { owners: { $contains: 'u1' } }],
   ['owners an $or of $contains — the any-of spelling', { $or: [{ owners: { $contains: 'u1' } }, { owners: { $contains: 'u3' } }] }],
+  // [#21067] The presence spellings the refusal prescribes for a `null` comparand answer too.
+  ['owners $null — the no-value spelling', { owners: { $null: true } }],
+  ['owners $empty — the no-value spelling that counts an empty list', { owners: { $empty: true } }],
+  ['owners $null: false — the has-a-value spelling', { owners: { $null: false } }],
 ];
 
 interface Cell {
@@ -251,6 +255,7 @@ for (const cell of CELLS) {
             expect(twin.json.error).toBe(WITHHELD_MESSAGE);
             expect(agg.json.error).toContain('{ "FIELD": { "$contains": "a" } }');
             expect(agg.json.error).toContain('{ "$or": [{ "FIELD": { "$contains": "a" } }, { "FIELD": { "$contains": "b" } }] }');
+            expect(agg.json.error).toContain('For no value, use "$null" or "$empty".');
             expect(agg.json.error).toContain('withheld from the message; the full diagnostic is in the server log.');
             expect(agg.json.error).not.toContain(`"${field}"`);
             // The field and the operator are in the server log, not the response.

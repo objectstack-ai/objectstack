@@ -27,7 +27,8 @@
  *
  * - an unmarked filter: `400` / `INVALID_FILTER`, and the envelope's `error` IS
  *   the shared withheld message — so it was not cut — carrying the `$contains`
- *   remedy and the sentence saying where the field and the operator went;
+ *   remedy, the presence spellings a `null` comparand needs, and the sentence
+ *   saying where the field and the operator went;
  * - the same filter marked `'author'`: the envelope's `error` IS the shared
  *   diagnostic, whole, the remedy spelled with the field's own name.
  *
@@ -139,6 +140,7 @@ function declareWireCell(cell: DialectCell): void {
           expect(withheld.error).toContain(
             '({ "$or": [{ "FIELD": { "$contains": "a" } }, { "FIELD": { "$contains": "b" } }] })',
           );
+          expect(withheld.error).toContain('For no value, use "$null" or "$empty".');
           expect(withheld.error).toContain('withheld from the message; the full diagnostic is in the server log.');
           expect(withheld.error).not.toContain(`"${field}"`);
 

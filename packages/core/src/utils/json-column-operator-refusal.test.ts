@@ -61,12 +61,12 @@ describe('[#21007] JSON_COLUMN_INCOMPATIBLE_OPERATORS', () => {
 });
 
 describe('[#21067] jsonColumnOperatorRefusalText — the words, by hash', () => {
-  const MESSAGE = { sha: '67066b5d8a47b148f5b37a61b737c9c63762cfc8ac5a7696301d5c6b581dafb7', length: 461 };
+  const MESSAGE = { sha: 'f0a54a98fb30ae8e201c7be5e9f0d1715649fd34303e176abea131981dfd36f7', length: 486 };
 
   it.each([
-    ['an operator', '$in', false, { sha: '02eceb6b6edd8e7440667e93b72c4c933b6bb30eba7dc428cbf6f63bf8e81612', length: 381 }],
-    ['$between', '$between', false, { sha: '1a25619f00bf3b117ca282429b9ad35cbd60b0ae284eb3a59fa6b928d57e3edc', length: 391 }],
-    ['the bare equality spelling', '=', true, { sha: 'aa3b34fbf03ade7ccf8762f3c97777361dea94cadfbfe7d4bba9ed183591dce1', length: 393 }],
+    ['an operator', '$in', false, { sha: 'da62717ac99e4e7470c977fd13ec7e36c32bcecb5c7d45b95d5ba09ded5d81cd', length: 406 }],
+    ['$between', '$between', false, { sha: '4ff8d528fb53e31a73b8a190424fa7e2446bd0bd64ac984bf1f70e4ebe1e83d0', length: 416 }],
+    ['the bare equality spelling', '=', true, { sha: '35e2fd3a5e287ac76ef3fb09922d537935283b930143035b69a07267a762cb5c', length: 418 }],
   ] as const)('%s', (_name, op, bare, diagnostic) => {
     const text = jsonColumnOperatorRefusalText('members', op, bare);
     expect({ sha: sha256(text.message), length: text.message.length }).toEqual(MESSAGE);
@@ -109,13 +109,16 @@ describe('[#21067] jsonColumnOperatorRefusalText — whole on the wire, and true
     }
   });
 
-  it('inside the bound: the remedy for one member and for any-of, then where the field and the operator went', () => {
+  it('inside the bound: the remedy for one member, for any-of and for no value, then where the field and the operator went', () => {
     const { message } = jsonColumnOperatorRefusalText('members', '$in', false);
     expect(message.startsWith('A constraint in this filter WAS NOT APPLIED: ')).toBe(true);
     expect(message).toContain(
       'Use "$contains" for membership ({ "FIELD": { "$contains": "a" } }), or an $or of "$contains" for any-of ' +
         '({ "$or": [{ "FIELD": { "$contains": "a" } }, { "FIELD": { "$contains": "b" } }] }).',
     );
+    // A `null` comparand (`{ f: null }`, `$eq: null`, `$ne: null`) is refused too, and asks
+    // about presence, which `$contains` cannot spell: the presence operators are named.
+    expect(message).toContain('For no value, use "$null" or "$empty".');
     expect(message.endsWith(
       'The field and the operator are withheld from the message; the full diagnostic is in the server log.',
     )).toBe(true);
@@ -126,7 +129,8 @@ describe('[#21067] jsonColumnOperatorRefusalText — whole on the wire, and true
       const { message, diagnostic } = jsonColumnOperatorRefusalText('members', op, bare);
       for (const text of [message, diagnostic]) {
         expect(text, op).toContain('a scalar comparison or text operator');
-        expect(text, op).toContain('at a multi-value or JSON field, which such an operator cannot test for one member.');
+        expect(text, op).toContain('at a multi-value or JSON field, which it cannot test for one member.');
+        expect(text, op).toContain('For no value, use "$null" or "$empty".');
         expect(text, op).not.toMatch(/this driver|JSON TEXT|serializ|matched nothing|asked to exclude/);
       }
       // The diagnostic names the operator in the reason too — the bare spelling's as `=`.
@@ -139,7 +143,9 @@ describe('[#21067] jsonColumnOperatorRefusalText — whole on the wire, and true
     const reason = message.slice(message.indexOf(': ') + 2, message.indexOf(' Use "$contains"'));
     expect(diagnostic.startsWith('Operator "$nin" on field "members" WAS NOT APPLIED: ')).toBe(true);
     expect(diagnostic).toContain(reason.replace('a scalar comparison or text operator at', '"$nin", a scalar comparison or text operator, at'));
-    expect(diagnostic.endsWith('{ "$or": [{ "members": { "$contains": "a" } }, { "members": { "$contains": "b" } }] }).')).toBe(true);
+    expect(diagnostic.endsWith(
+      '{ "$or": [{ "members": { "$contains": "a" } }, { "members": { "$contains": "b" } }] }). For no value, use "$null" or "$empty".',
+    )).toBe(true);
     // An author-marked refusal puts this text on the wire (driver-sql's #8220
     // arm): for a field name of an ordinary length it is whole there too.
     expect(truncateClientMessage(diagnostic)).toBe(diagnostic);
