@@ -1715,6 +1715,12 @@ export class SecurityPlugin implements Plugin {
         // [#18386] Its write-side twin: the fields step 2.5 would not refuse.
         // The import template narrows its columns by it. See getWritableFields.
         getWritableFields: (object: string, context?: any) => this.getWritableFields(object, context),
+        // [#20935] Its query-side twin: the fields steps 2.5b and 2.9 would not
+        // refuse as a group key, an aggregate input, a filter or a sort key. A
+        // field served MASKED is readable and NOT queryable, so a door that
+        // compiles its own statement (the analytics raw-SQL path) asks this as
+        // well as the read projection. See getQueryableFields.
+        getQueryableFields: (object: string, context?: any) => this.getQueryableFields(object, context),
         // [#3544] User-level export axis. `export ⊆ list`, so a bulk export
         // reaches the middleware as a plain `find` and `allowExport` would never
         // be consulted — the REST export route asks HERE before it streams.
@@ -1927,7 +1933,7 @@ export class SecurityPlugin implements Plugin {
           discardPermissionSetOverlay(overlayDiscardDeps, callerContext, id),
       });
       ctx.registerService('security', registeredSecurityService);
-      ctx.logger.info('[security] registered "security" service (getReadFilter, canReadObject, getReadableFields, getWritableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, resolvePermissionSetNames, resolvePermissionSetsForContext, explain, audience-binding suggestions, discardPermissionSetOverlay) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0094 / ADR-0106 D7 / #3544 / #3547 / #5493 / #7616');
+      ctx.logger.info('[security] registered "security" service (getReadFilter, canReadObject, getReadableFields, getWritableFields, getQueryableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, resolvePermissionSetNames, resolvePermissionSetsForContext, explain, audience-binding suggestions, discardPermissionSetOverlay) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0094 / ADR-0106 D7 / #3544 / #3547 / #5493 / #7616');
     } catch (e) {
       ctx.logger.warn?.('[security] failed to register "security" service', {
         error: (e as Error).message,
@@ -2880,21 +2886,16 @@ export class SecurityPlugin implements Plugin {
       // (mirrors the write gate in 2.5). `where`-filter probing is a
       // platform-wide class shared with find() and is not widened here.
       if (opCtx.operation === 'aggregate' && permissionSets.length > 0) {
-        let fieldPerms = this.permissionEvaluator.getFieldPermissions(opCtx.object, permissionSets);
-        // [ADR-0066 D3] AND-gate field-level requiredPermissions into the map.
-        fieldPerms = this.foldFieldRequiredPermissions(fieldPerms, secMeta.fieldRequiredPermissions, permissionSets);
-        // [ADR-0090 D10] Intersect with the delegator's field perms — a field
-        // the agent may read but the delegator may not stays forbidden.
-        if (delegatorSets) {
-          let delFieldPerms = this.permissionEvaluator.getFieldPermissions(opCtx.object, delegatorSets);
-          delFieldPerms = this.foldFieldRequiredPermissions(delFieldPerms, secMeta.fieldRequiredPermissions, delegatorSets);
-          fieldPerms = intersectFieldMasks(fieldPerms, delFieldPerms);
-        }
-        // [#8993] A partial-masked field's statistics leak the very span the
-        // mask hides (min/max reveal full values outright on a single-row
-        // group), so masked-for-this-caller fields join the forbidden set.
-        const aggMaskRules = this.computePartialMaskRules(secMeta, permissionSets, delegatorSets);
-        if (Object.keys(fieldPerms).length > 0 || Object.keys(aggMaskRules).length > 0) {
+        // The field map (ADR-0066 D3 `requiredPermissions` AND-gate, ADR-0090
+        // D10 delegator intersection — a field the agent may read but the
+        // delegator may not stays forbidden) with every masked-for-this-caller
+        // field folded in as forbidden: [#8993] a partial-masked field's
+        // statistics leak the very span the mask hides (min/max reveal full
+        // values outright on a single-row group). One derivation, shared with
+        // step 2.9 and the published `getQueryableFields` — see
+        // computeQueryGuardFieldPerms.
+        const queryGuard = this.computeQueryGuardFieldPerms(opCtx.object, secMeta, permissionSets, delegatorSets);
+        if (Object.keys(queryGuard).length > 0) {
           const ast: any = opCtx.ast ?? {};
           const referenced = new Set<string>();
           for (const g of Array.isArray(ast.groupBy) ? ast.groupBy : []) {
@@ -2904,9 +2905,7 @@ export class SecurityPlugin implements Plugin {
           for (const a of Array.isArray(ast.aggregations) ? ast.aggregations : []) {
             if (typeof a?.field === 'string' && a.field) referenced.add(a.field);
           }
-          const forbidden = [...referenced].filter(
-            (f) => (fieldPerms[f] && fieldPerms[f].readable === false) || aggMaskRules[f] !== undefined,
-          );
+          const forbidden = [...referenced].filter((f) => queryGuard[f]?.readable === false);
           if (forbidden.length > 0) {
             throw new PermissionDeniedError(
               `[Security] Field read denied: not permitted to aggregate ` +
@@ -3612,27 +3611,13 @@ export class SecurityPlugin implements Plugin {
       // reference fields the caller cannot read (e.g. owner_id) and must not be
       // rejected.
       if (opCtx.ast) {
-        let guardPerms = this.permissionEvaluator.getFieldPermissions(opCtx.object, permissionSets);
-        guardPerms = this.foldFieldRequiredPermissions(guardPerms, secMeta.fieldRequiredPermissions, permissionSets);
         // [ADR-0090 D10] A field readable only by the agent is not queryable on
-        // the delegator's behalf — intersect before the oracle guard.
-        if (delegatorSets) {
-          let delGuard = this.permissionEvaluator.getFieldPermissions(opCtx.object, delegatorSets);
-          delGuard = this.foldFieldRequiredPermissions(delGuard, secMeta.fieldRequiredPermissions, delegatorSets);
-          guardPerms = intersectFieldMasks(guardPerms, delGuard);
-        }
-        // [#8993] A field this caller sees PARTIALLY MASKED is just as
-        // probe-able as a hidden one — an equality filter reconstructs the
-        // masked span digit by digit (row presence is the same oracle), and
-        // sorting orders by the very characters the mask hides. Fold every
-        // masked-for-this-caller field in as non-queryable; no explicit-deny
-        // exclusion here, because masked and hidden fields answer a predicate
-        // probe identically (reject).
-        for (const f of Object.keys(this.computePartialMaskRules(secMeta, permissionSets, delegatorSets))) {
-          if (guardPerms[f]?.readable !== false) {
-            guardPerms[f] = { readable: false, editable: guardPerms[f]?.editable ?? false };
-          }
-        }
+        // the delegator's behalf, and [#8993] a field this caller sees
+        // PARTIALLY MASKED is just as probe-able as a hidden one — both are
+        // folded in as non-queryable by the one derivation this guard shares
+        // with step 2.5b and the published `getQueryableFields`
+        // (computeQueryGuardFieldPerms).
+        const guardPerms = this.computeQueryGuardFieldPerms(opCtx.object, secMeta, permissionSets, delegatorSets);
         if (Object.keys(guardPerms).length > 0) {
           // [#2982 follow-up] For a bulk WRITE the caller's own predicate is
           // `opCtx.options.where` (untouched); `opCtx.ast.where` may ALREADY
@@ -5495,6 +5480,33 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
+   * [#20935] Query surface: the field names the caller may QUERY ON in
+   * `object` — filter, sort, group or aggregate by — the query-side twin of
+   * {@link getReadableFields}, for the doors that compile their own statement
+   * and so never reach this middleware's field guards.
+   *
+   * It is not a second reading of masking: the answer is every schema field
+   * the ONE query-guard derivation ({@link computeQueryGuardFieldPerms}) does
+   * not mark non-queryable — the same map the predicate guard (step 2.9) and
+   * the aggregate-input guard (step 2.5b) refuse from, so a field is here iff
+   * a query naming it passes both. It differs from {@link getReadableFields}
+   * by exactly the fields this caller is served MASKED: a masked field is a
+   * served column (readable) that no predicate, group key or aggregate may name.
+   *
+   * The settled answers are the projection's ({@link resolveProjectionFieldMask}):
+   * `undefined` when the schema cannot be resolved; the full set for a system
+   * context and for a caller with no permission sets (the middleware then
+   * skips both guards, and no masking rule reaches it); `[]` on an
+   * unresolvable posture or a dangling delegator (fail closed).
+   */
+  async getQueryableFields(object: string, context?: any): Promise<string[] | undefined> {
+    const mask = await this.resolveProjectionFieldMask(object, context, { fallbackOnEmptySets: false });
+    if (mask.kind === 'answer') return mask.fields;
+    const queryGuard = mask.readQueryGuardPerms();
+    return mask.allFields.filter((f) => queryGuard[f]?.readable !== false);
+  }
+
+  /**
    * The derivation both field projections share: the schema's field universe,
    * the caller's permission sets, the evaluator's field map with the ADR-0066
    * D3 `requiredPermissions` fold, and the ADR-0090 D10 delegator intersection
@@ -5513,6 +5525,8 @@ export class SecurityPlugin implements Plugin {
       allFields: string[];
       fieldPerms: Record<string, { readable: boolean; editable: boolean }>;
       readPartialMaskRules: () => Record<string, FieldMaskingRule>;
+      /** [#20935] The middleware's query-guard map for these sets (computeQueryGuardFieldPerms). */
+      readQueryGuardPerms: () => Record<string, { readable: boolean; editable: boolean }>;
     }
   > {
     const objectName = String(object ?? '');
@@ -5570,6 +5584,9 @@ export class SecurityPlugin implements Plugin {
       fieldPerms,
       readPartialMaskRules: () => this.computeReadPartialMaskRules(
         secMeta, permissionSets, delegatorSets, basePerms, delBasePerms,
+      ),
+      readQueryGuardPerms: () => this.computeQueryGuardFieldPerms(
+        objectName, secMeta, permissionSets, delegatorSets,
       ),
     };
   }
@@ -8818,6 +8835,52 @@ export class SecurityPlugin implements Plugin {
         caps.every((c) => held.has(c)) &&
         (!delHeld || caps.every((c) => delHeld.has(c)));
       if (!unmasked) out[field] = rule;
+    }
+    return out;
+  }
+
+  /**
+   * [#8993 / #20935] The engine's ONE answer to "may this caller filter, sort,
+   * group or aggregate by this field of `objectName`?" — a field map in which
+   * every field the caller may NOT query on reads `readable: false`.
+   *
+   * The field map the read mask starts from (the evaluator's grants, the
+   * ADR-0066 D3 `requiredPermissions` AND-gate, and on an on-behalf-of request
+   * the ADR-0090 D10 intersection with the delegator's map: a field readable
+   * only by the agent is not queryable on the delegator's behalf), with every
+   * field whose masking rule applies to this caller
+   * ({@link computePartialMaskRules}) folded in as non-queryable. A partially
+   * masked field is SERVED — its key stays, its value is replaced — yet it is
+   * as probe-able as a hidden one: an equality filter reconstructs the masked
+   * span one probe at a time (row presence is the oracle), sorting orders by
+   * the very characters the mask hides, and a group key or an aggregate hands
+   * back the unmasked value outright. No explicit-deny exclusion applies here,
+   * unlike the read path's {@link computeReadPartialMaskRules}: masked and
+   * hidden fields answer a query probe identically (refuse).
+   *
+   * Three readers, one derivation, so they cannot drift apart: the predicate
+   * guard (step 2.9), the aggregate-input guard (step 2.5b) and
+   * {@link getQueryableFields}, the published answer a door that compiles its
+   * own statement asks instead of re-deriving masking.
+   */
+  private computeQueryGuardFieldPerms(
+    objectName: string,
+    secMeta: Pick<ObjectSecurityMeta, 'fieldMaskingRules' | 'fieldRequiredPermissions'>,
+    permissionSets: PermissionSet[],
+    delegatorSets: PermissionSet[] | null,
+  ): Record<string, { readable: boolean; editable: boolean }> {
+    let guard = this.permissionEvaluator.getFieldPermissions(objectName, permissionSets);
+    guard = this.foldFieldRequiredPermissions(guard, secMeta.fieldRequiredPermissions, permissionSets);
+    if (delegatorSets) {
+      let delegatorGuard = this.permissionEvaluator.getFieldPermissions(objectName, delegatorSets);
+      delegatorGuard = this.foldFieldRequiredPermissions(delegatorGuard, secMeta.fieldRequiredPermissions, delegatorSets);
+      guard = intersectFieldMasks(guard, delegatorGuard);
+    }
+    const out: Record<string, { readable: boolean; editable: boolean }> = { ...guard };
+    for (const f of Object.keys(this.computePartialMaskRules(secMeta, permissionSets, delegatorSets))) {
+      if (out[f]?.readable !== false) {
+        out[f] = { readable: false, editable: out[f]?.editable ?? false };
+      }
     }
     return out;
   }
