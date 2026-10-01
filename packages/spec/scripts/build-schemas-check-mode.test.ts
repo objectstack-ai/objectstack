@@ -4103,7 +4103,9 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
       expect(output).toContain(`${UNPUBLISHED_FAMILY.length} ${NO_REGISTERED_REMOVAL}`);
       for (const def of UNPUBLISHED_FAMILY) {
         expect(output).toContain(`     - json-schema/${def}.json`);
-        expect(output).toContain(`        '${def}',`);
+        // …and the entry file that registers it, never a line for the table.
+        expect(output).toContain(entryFile('retired-defs', def));
+        expect(output).toContain(`export const entry = '${def}';`);
       }
       // The old verdict, in full: check (c) waived all 116 lines as "def no
       // longer emitted", the manifest ratchet said nothing, and the run exited
