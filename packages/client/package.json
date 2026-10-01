@@ -39,7 +39,7 @@
     "@objectstack/runtime": "workspace:*",
     "@objectstack/service-analytics": "workspace:*",
     "@objectstack/service-automation": "workspace:*",
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },

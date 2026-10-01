@@ -333,14 +333,14 @@
     "@types/node": "^26.6.3",
     "@vitest/coverage-v8": "^4.1.11",
     "ai": "^7.0.118",
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.1"
   },
   "dependencies": {
     "pg-connection-string": "^2.14.0",
-    "zod": "^4.6.1"
+    "zod": "^4.6.5"
   },
   "peerDependencies": {
     "ai": "^7.0.0"
