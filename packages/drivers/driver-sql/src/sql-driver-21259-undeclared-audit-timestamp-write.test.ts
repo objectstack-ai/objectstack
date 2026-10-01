@@ -30,7 +30,7 @@
  *
  * Two objects in the two shapes the census found — `created_at` declared,
  * `updated_at` not (the `sys_jwks` shape), and neither declared — written
- * through `create`, `bulkCreate`, `upsert` and `update` with the hook's exact
+ * through `create`, `bulkCreate`, `upsert`, `update` and `updateMany` with the hook's exact
  * value, and read back as the same instant. Each write records the value the
  * driver BOUND for the undeclared column: the MySQL literal on MySQL, and on
  * SQLite and PostgreSQL the hook's text unchanged, byte for byte — those two
@@ -179,6 +179,18 @@ function suite(cell: DialectCell) {
       const row = await stored(CREATED_ONLY, 'p1');
       expect(row.label).toBe('one!');
       expect(row.updated_at).toBe(LATER);
+      expect(bound()).toContain(boundFor(cell, LATER));
+    });
+
+    it('updateMany under `preserveAudit`: the supplied `updated_at` is kept, in the column form', async () => {
+      await driver.create(NEITHER, { id: 'm1', label: 'bulk' }, OPTS);
+      await driver.create(NEITHER, { id: 'm2', label: 'bulk' }, OPTS);
+      writes = [];
+
+      await driver.updateMany(NEITHER, { where: { label: 'bulk' } }, { updated_at: LATER }, { ...OPTS, preserveAudit: true });
+
+      expect((await stored(NEITHER, 'm1')).updated_at).toBe(LATER);
+      expect((await stored(NEITHER, 'm2')).updated_at).toBe(LATER);
       expect(bound()).toContain(boundFor(cell, LATER));
     });
 
