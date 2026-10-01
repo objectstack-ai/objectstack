@@ -972,8 +972,8 @@ describe('validateComponentProps — record:line_items is dispatched (#21142)', 
     const findings = validateComponentProps(stackWith([fieldKeyed]));
     const unknown = unknownKeys(findings);
     expect(unknown.map((f) => f.path)).toEqual([
-      'pages[0].regions[0].components[0].properties.columns[0].field',
-      'pages[0].regions[0].components[0].properties.columns[1].field',
+      'pages[0].regions[0].components[0].properties.columns.0.field',
+      'pages[0].regions[0].components[0].properties.columns.1.field',
     ]);
     for (const f of unknown) {
       expect(f.where).toBe('page "probe_page" · record:line_items');
@@ -981,8 +981,8 @@ describe('validateComponentProps — record:line_items is dispatched (#21142)', 
     }
     // The column's identity is missing too: the value half names it.
     expect(invalid(findings).map((f) => f.path)).toEqual([
-      'pages[0].regions[0].components[0].properties.columns[0].name',
-      'pages[0].regions[0].components[0].properties.columns[1].name',
+      'pages[0].regions[0].components[0].properties.columns.0.name',
+      'pages[0].regions[0].components[0].properties.columns.1.name',
     ]);
   });
 
