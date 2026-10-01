@@ -605,19 +605,49 @@ async function computeThreadVisibilityFilter(
 
   // 2. Per parent object, the visible id subset via the CALLER's context —
   //    the parent object's own RLS/OWD/sharing applies.
-  //
-  //    [#7141] The caller's envelope, minus the operation-private keys: this
-  //    probe reads a DIFFERENT object than the one the middleware resolved its
-  //    depth for, and `__readScope` / `__expandRead` are widening inputs that
-  //    would arrive attached to the wrong question (the security middleware
-  //    re-stamps the depth for THIS object when it resolves any set, so the
-  //    only thing dropping them can do is leave the owner-match at its
-  //    narrowest — the safe direction). Same rule as `callerContext` above.
-  const callerEnvelope = withoutOperationPrivateKeys(
-    (ctx.context ?? {}) as Record<string, unknown>,
-  );
+  const visibleByObject = await resolveReadableParentIds(engine, ctx.context, byObject);
+
+  // 3. Keep the thread ids VERBATIM (never re-assembled from the parts) so the
+  //    emitted filter can only ever match rows the pre-scan actually saw.
+  const visibleThreads: string[] = [];
+  for (const [threadId, target] of threads) {
+    if (visibleByObject.get(target.object)?.has(target.recordId)) visibleThreads.push(threadId);
+  }
+  if (visibleThreads.length === 0) return READ_DENY_ALL;
+  return { thread_id: { $in: visibleThreads } };
+}
+
+/**
+ * Which of these parent records can the CALLER read? Answered per parent
+ * object by ONE caller-scoped engine read of the candidate ids, so the parent
+ * object's own OWD/sharing, RLS and object-level CRUD decide.
+ *
+ * This is the one answer every parent-derived read gate in this package asks:
+ * `sys_comment`'s thread visibility above and `sys_activity`'s parent
+ * visibility (`activity-read-visibility.ts`). Shared as a function rather than
+ * restated, so a record can never be readable under one gate and unreadable
+ * under the other — ⛔ do not hand-copy this probe into a third gate, import it.
+ *
+ * Batched: one read per parent OBJECT, never one per row. An object whose read
+ * throws (unknown to the engine, refused, driver fault) contributes no visible
+ * id — fail closed — and a record that no longer exists is simply not found.
+ *
+ * [#7141] The caller's envelope, minus the operation-private keys: this probe
+ * reads a DIFFERENT object than the one the middleware resolved its depth for,
+ * and `__readScope` / `__expandRead` are widening inputs that would arrive
+ * attached to the wrong question (the security middleware re-stamps the depth
+ * for THIS object when it resolves any set, so the only thing dropping them can
+ * do is leave the owner-match at its narrowest — the safe direction). Same rule
+ * as `callerContext` above.
+ */
+export async function resolveReadableParentIds(
+  engine: Pick<CommentAccessEngine, 'find'>,
+  callerContext: Record<string, unknown> | undefined,
+  idsByObject: ReadonlyMap<string, ReadonlySet<string>>,
+): Promise<Map<string, Set<string>>> {
+  const callerEnvelope = withoutOperationPrivateKeys((callerContext ?? {}) as Record<string, unknown>);
   const visibleByObject = new Map<string, Set<string>>();
-  for (const [parentObject, idSet] of byObject) {
+  for (const [parentObject, idSet] of idsByObject) {
     const ids = [...idSet];
     let visible: string[] = [];
     try {
@@ -634,13 +664,5 @@ async function computeThreadVisibilityFilter(
     }
     visibleByObject.set(parentObject, new Set(visible));
   }
-
-  // 3. Keep the thread ids VERBATIM (never re-assembled from the parts) so the
-  //    emitted filter can only ever match rows the pre-scan actually saw.
-  const visibleThreads: string[] = [];
-  for (const [threadId, target] of threads) {
-    if (visibleByObject.get(target.object)?.has(target.recordId)) visibleThreads.push(threadId);
-  }
-  if (visibleThreads.length === 0) return READ_DENY_ALL;
-  return { thread_id: { $in: visibleThreads } };
+  return visibleByObject;
 }

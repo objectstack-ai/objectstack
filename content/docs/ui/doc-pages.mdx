@@ -180,8 +180,11 @@ Precisely what derives it, in the order it runs:
    First claim wins, so a doc never appears twice.
 3. **Within a group, docs sort by `doc.order`, then by label** (falling back to the doc
    name).
-4. **Anything claimed by nobody is appended last** in a synthetic *Uncategorized* group.
-   Nothing is ever dropped.
+4. **Any doc of the book's own packages that nobody claims is appended last** in a
+   synthetic *Uncategorized* group, so none of the book's docs is ever dropped. The
+   book's packages are the one that ships it plus any package a group names with
+   `package`. A doc of another package is not this book's to catch: it appears in its own
+   package's book. A book that names no package at all collects every unclaimed doc here.
 
 So the AI-authoring property the design was built for holds: create a doc whose name
 matches a rule and it files itself. There is no central array to read, modify and write

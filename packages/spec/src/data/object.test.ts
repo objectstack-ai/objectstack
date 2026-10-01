@@ -2774,19 +2774,45 @@ describe('ObjectSchema.fields — __proto__ / constructor / prototype key refusa
       });
       expect(result.success).toBe(false);
       if (result.success) return;
-      // ⚠️ The refusal is located at the SLOT and no longer at the offending
-      // key. The `banned-keys` arm is a RECORD-level predicate — the only shape
-      // the closed projection list can publish — and `.refine()` carries no
-      // per-key path, so before #19346 this read `fields.<the key>` with code
-      // `invalid_key` and the reason nested one level under zod's fixed
-      // "Invalid key in record". The ban list is closed and two names long, so
-      // the slot is still named and the message names both keys in full.
-      const issue = result.error.issues.find((i) => i.path.join('.') === 'fields');
+      // [#20997] Located AT the offending key — `fields.<the key>` — the path
+      // the `__proto__` guard and the key grammar already report at, so
+      // `saveMetaItem`'s structured issues can point a Studio form at the
+      // field. The `banned-keys` arm is still a RECORD-level predicate (the
+      // only shape the closed projection list can publish); what puts the path
+      // on the key is one single-name refine per reserved name, each carrying
+      // its own name as a static `path`.
+      const issue = result.error.issues.find((i) => i.path.join('.') === `fields.${reserved}`);
       expect(issue).toBeDefined();
       expect(issue?.code).toBe('custom');
       expect(issue?.message).toMatch(/constructor.*prototype|prototype.*constructor/s);
+      // Exactly one refusal, and none left at the bare slot — a pin that only
+      // looked for the keyed issue would pass beside a slot-level duplicate.
+      expect(result.error.issues.map((i) => i.path.join('.'))).toEqual([`fields.${reserved}`]);
     },
   );
+
+  it('refuses `constructor` and `prototype` together as TWO issues, each at its own key', () => {
+    const result = ObjectSchema.safeParse(
+      JSON.parse(
+        '{"name":"lead","label":"Lead","fields":{"constructor":{"type":"text","label":"C"},"prototype":{"type":"text","label":"P"}}}',
+      ),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((i) => [i.code, i.path.join('.')])).toEqual([
+      ['custom', 'fields.constructor'],
+      ['custom', 'fields.prototype'],
+    ]);
+  });
+
+  it('CONTROL: a key the snake_case grammar refuses keeps its own path and code (`invalid_key` at the key)', () => {
+    const result = ObjectSchema.safeParse(
+      JSON.parse('{"name":"lead","label":"Lead","fields":{"title":{"type":"text","label":"T"},"Bad Name":{"type":"text","label":"B"}}}'),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((i) => [i.code, i.path.join('.')])).toEqual([['invalid_key', 'fields.Bad Name']]);
+  });
 
   it('still accepts an ordinary document with no reserved field names', () => {
     const result = ObjectSchema.safeParse({
@@ -2865,7 +2891,13 @@ describe('ObjectSchema.fields — __proto__ / constructor / prototype key refusa
     // The record's own key-TYPE rule survives — the ban is CONJOINED, never
     // substituted, so the reference tables keep the shape they always printed.
     expect(node.propertyNames).toEqual({ type: 'string', pattern: '^[a-z_][a-z0-9_]*$' });
-    expect(node.allOf).toEqual([{ propertyNames: { not: { enum: ['constructor', 'prototype'] } } }]);
+    // One clause per reserved name (#20997): each name is its own single-name
+    // refine so its refusal can carry the name as its path, and the generator
+    // conjoins the two bans — the same rule as one two-name `enum`.
+    expect(node.allOf).toEqual([
+      { propertyNames: { not: { enum: ['constructor'] } } },
+      { propertyNames: { not: { enum: ['prototype'] } } },
+    ]);
   });
 
   it('the runtime and the published keywords agree on every document in the corpus', () => {
@@ -2876,6 +2908,7 @@ describe('ObjectSchema.fields — __proto__ / constructor / prototype key refusa
       JSON.parse('{"constructor":{"type":"text","label":"R"}}'),
       JSON.parse('{"prototype":{"type":"text","label":"R"}}'),
       JSON.parse('{"title":{"type":"text","label":"T"},"constructor":{"type":"text","label":"R"}}'),
+      JSON.parse('{"constructor":{"type":"text","label":"R"},"prototype":{"type":"text","label":"R"}}'),
       // LIT CONTROLS — names the ban does NOT cover. A rule that banned by
       // prefix, or that asked `in` instead of own-property equality, fails
       // here: `to_string` is not `toString`, and `constructors` is not
@@ -2897,6 +2930,6 @@ describe('ObjectSchema.fields — __proto__ / constructor / prototype key refusa
     const census = collectDroppedRefinements('data/Object', ObjectSchema);
     expect(census.dropped.map((site) => site.path)).not.toContain('fields.out.keyType');
     const site = census.projected.find((s) => s.path === 'fields.out');
-    expect(site?.declaredPatterns).toEqual(['banned-keys']);
+    expect(site?.declaredPatterns).toEqual(['banned-keys', 'banned-keys']);
   });
 });

@@ -40,7 +40,7 @@
 // HERE, in the harness, where the test author can see it.
 import { defineConfig } from 'vitest/config';
 import path from 'path';
-import { parseCLI } from 'vitest/node';
+import { parseCLI, type TestUserConfig } from 'vitest/node';
 import {
   exactAndGlobPopulations,
   runFilterPreflight,
@@ -111,8 +111,31 @@ runProjectCliOverridePreflight({
   parse: parseCLI,
 });
 
+// #20820 -- THE FILE-LEVEL SLICE ARRIVES AS AN ENV VAR, NOT AS A PASSTHROUGH.
+// The `Dogfood Regression Gate (k/3)` leg runs `OS_TEST_SHARD=k/3 turbo run test`,
+// the same carrier `packages/cli/vitest.config.ts` documents (#19278). The value
+// reaches vitest HERE because vitest reads no shard variable of its own, and it
+// reaches this process at all only because `turbo.json` declares `OS_TEST_SHARD`
+// in THIS package's `@objectstack/dogfood#test` task `env` (a per-package task
+// entry REPLACES the shared `test` entry's env, it does not extend it -- the
+// shared declaration does not cover this package) -- which is also what puts the
+// slice in the task hash. Unset (every local run) it is `undefined` and the run
+// is unsharded; a `--shard` on the command line still wins, because vitest
+// merges the CLI options OVER this block.
+//
+// Why a passthrough (`-- --shard=k/3`) is no longer the carrier: turbo folds a
+// run-level passthrough into the hash of every task in the run, so the leg had
+// to be `--only`, and `--only` drops the `^build` closure out of the test's hash
+// -- a shard could replay a main-seeded cache entry across an upstream change
+// that put it in the affected set. An env declared on the task reaches only the
+// task. `shard` is typed through `TestUserConfig` because vitest declares it on
+// its CLI options and not on `InlineConfig`; it sits on the ROOT `test` block
+// (the projects below do not carry it), where vitest resolves it for all of them.
 export default defineConfig({
   test: {
+    // The file-level slice, when the dogfood gate runs one (#20820) -- see the
+    // section above `export default` for why it is spread and typed this way.
+    ...({ shard: process.env.OS_TEST_SHARD } satisfies Pick<TestUserConfig, 'shard'>),
     projects: [
       {
         test: {
