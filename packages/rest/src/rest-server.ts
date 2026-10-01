@@ -4827,7 +4827,7 @@ export class RestServer {
                         description:
                             'Atomic cross-object batch endpoint (POST {basePath}/batch): all-or-nothing '
                             + 'create/update/delete across objects in one transaction, with intra-batch '
-                            + '{ $ref: <opIndex> } parent references (#1604 / ADR-0034).',
+                            + '{ $ref: <opIndex> } parent references (ADR-0034).',
                     };
 
                     // [#7541] Global search — the same two-layer AND, for the

@@ -437,36 +437,6 @@
  "packages/qa/downstream-contract/src/stack.ts": {
   "#2035": 1
  },
- "packages/rest/src/import-mapping.ts": {
-  "#2611": 1
- },
- "packages/rest/src/openapi-builtin-paths.ts": {
-  "#5588": 2
- },
- "packages/rest/src/rest-api-plugin.ts": {
-  "#3963": 1
- },
- "packages/rest/src/rest-route-ledger.ts": {
-  "#10179": 1,
-  "#11678": 2,
-  "#11924": 2,
-  "#12038": 9,
-  "#12702": 4,
-  "#3610": 1,
-  "#3611": 1,
-  "#4327": 1,
-  "#5682": 1,
-  "#5950": 1,
-  "#6603": 1,
-  "#7019": 1,
-  "#7526": 1,
-  "#7563": 1,
-  "#8140": 1,
-  "#9180": 1
- },
- "packages/rest/src/rest-server.ts": {
-  "#1604": 1
- },
  "packages/runtime/src/action-execution.ts": {
   "#11519": 1,
   "#5933": 1

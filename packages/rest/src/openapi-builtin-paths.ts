@@ -149,12 +149,12 @@ const PUBLIC_TAG = 'public';
 const BODY_METHODS = new Set(['POST', 'PUT', 'PATCH']);
 
 const RESPONSE_NOTE =
-  'Response envelope. This section describes the route surface — which method and path exist, ' +
-  'and what each is for. Per-route payload schemas are not derived here and are deliberately not ' +
-  'invented (#5588).';
+  'Response envelope. This section is built from the routes this server actually mounts — which method ' +
+  'and path exist, and what each is for. Per-route payload schemas are not derived here and are ' +
+  'deliberately not invented.';
 
 const REQUEST_BODY_NOTE =
-  'JSON request body. Its shape is route-specific and is not described by this document (#5588).';
+  'JSON request body. Its shape is route-specific; this document leaves it undescribed rather than invent one.';
 
 /**
  * Is this wire path served by the document being built for `basePath`?
