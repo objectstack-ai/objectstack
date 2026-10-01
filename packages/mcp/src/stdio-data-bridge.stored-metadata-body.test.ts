@@ -472,15 +472,20 @@ const BRIDGE_MEMBERS: Record<string, string> = {
 };
 
 /**
- * Every engine read call site in this package's non-test sources, by file. The
- * reader each one belongs to is named; a new call site fails the second test
- * below until it is routed through the projection or refuses, and listed here.
+ * Every engine read call site in this package's non-test sources, by file, keyed
+ * `verb(first argument)`. The reader each one belongs to is named; a new call
+ * site fails the second test below until it is routed through the projection or
+ * refuses, and listed here.
+ *
+ * Found by the CALL, not by the receiver's name: an engine read's first argument
+ * is an object name, while an array's `find` takes a callback — so any receiver
+ * (a renamed variable, a cast) is caught, and a callback-taking `find` is not.
  */
 const ENGINE_READ_SITES: Record<string, Record<string, number>> = {
-  // findById (get, and the update / remove existence probes), query; aggregate.
-  'stdio-data-bridge.ts': { 'engine.find': 2, 'engine.aggregate': 1 },
+  // findById (get, and the update / remove existence probes) and query; aggregate.
+  'stdio-data-bridge.ts': { 'find(object)': 2, 'aggregate(object)': 1 },
   // The ADR-0101 record resource reader.
-  'plugin.ts': { 'scopedQl.find': 1 },
+  'plugin.ts': { 'find(objectName)': 1 },
 };
 
 function stripComments(source: string): string {
@@ -498,10 +503,11 @@ describe('[#21207] stdio transport: every reader is classified (a new one fails 
     for (const file of readdirSync(HERE)) {
       if (!file.endsWith('.ts') || file.endsWith('.test.ts') || file.endsWith('.d.ts')) continue;
       const source = stripComments(readFileSync(join(HERE, file), 'utf8'));
-      for (const m of source.matchAll(/\b(\w+)\.(find|findOne|aggregate|count)\s*\(/g)) {
-        const receiver = m[1]!;
-        if (!/^(engine|ql|scopedQl|dataEngine|objectql)$/.test(receiver)) continue;
-        const site = `${receiver}.${m[2]}`;
+      for (const m of source.matchAll(/\.\s*(find|findOne|aggregate|count)\s*\(([^,)]*)/g)) {
+        const firstArg = m[2]!.trim();
+        // A callback is an array / iterator method, not an engine read.
+        if (firstArg.startsWith('(') || firstArg.includes('=>') || /^function\b/.test(firstArg)) continue;
+        const site = `${m[1]}(${firstArg})`;
         (found[file] ??= {})[site] = ((found[file] ?? {})[site] ?? 0) + 1;
       }
     }
