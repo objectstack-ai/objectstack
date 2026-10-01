@@ -288,7 +288,12 @@ describe('PageAccordionProps variant (#6776)', () => {
 // same file's `ComponentRegistry.register('accordion', …)` publishes the key to
 // the Studio block designer at `:1220` (the `items` input, documented as
 // `[{ label, icon?, collapsed?, children }]`). Measured at the pin this repo
-// builds against — `.objectui-sha` = `e420df310`. Re-derived at that pin
+// builds against — `.objectui-sha` = `31971ff1e`. Re-derived at that pin
+// 2026-10-01: `containers.tsx` is byte-identical across the hop from
+// `e420df310` (`git diff --quiet`), and both anchors were re-READ in place and
+// still say what this block says: the icon block `1171-1177`, inside
+// `PageAccordionRenderer`'s `AccordionTrigger`, and the input `1220`, inside
+// the `register('accordion', …)` inputs. At `e420df310`, re-derived at that pin
 // 2026-09-30: `containers.tsx` changed again across the hop from `db11afd49` (40
 // insertions, 26 deletions: objectui#11166's `page:header` breadcrumb slot and
 // objectui#11212's fail-closed permission gates), every hunk of it at `:1286`
@@ -403,8 +408,13 @@ describe('PageTabsProps items[].value / items[].count (#5775)', () => {
 // same file's `ComponentRegistry.register('tabs', …)` publishes the key to the
 // Studio block designer at `:1005` (the `items` input, documented as
 // `[{ label, value?, icon?, count?, visibleWhen?, children }]`). Measured at
-// the pin this repo builds against — `.objectui-sha` = `e420df310`. Re-derived at
-// that pin 2026-09-30: `containers.tsx` changed again across the hop from
+// the pin this repo builds against — `.objectui-sha` = `31971ff1e`. Re-derived at
+// that pin 2026-10-01: `containers.tsx` is byte-identical across the hop from
+// `e420df310` (`git diff --quiet`), and both anchors were re-READ in place and
+// still say what this block says: the icon block `946-952`, inside
+// `PageTabsRenderer`'s `TabsTrigger`, and the input `1005`, inside the
+// `register('tabs', …)` inputs. At `e420df310`, re-derived at that pin
+// 2026-09-30: `containers.tsx` changed again across the hop from
 // `db11afd49` (40 insertions, 26 deletions: objectui#11166's `page:header`
 // breadcrumb slot and objectui#11212's fail-closed permission gates), every hunk
 // of it at `:1286` or below, so both anchors were re-READ in place and NEITHER
@@ -3474,7 +3484,16 @@ describe('#7751 — object-* block props schemas', () => {
 // #16503 — the spec half of objectui#8172 (decision batch #68, 2026-09-07,
 // option A: the contract declares the capability that already ships, is
 // documented and is in use). Measured at the objectui pin this repo builds
-// against (`.objectui-sha` = `e420df310`; re-measured there 2026-09-30 —
+// against (`.objectui-sha` = `31971ff1e`; re-measured there 2026-10-01 —
+// `plugin-kanban/src/types.ts` is byte-identical to `e420df310` and still
+// declares no `limit`; `ObjectKanban.tsx` changed only in the comment above
+// its `navigation` read (objectui#8652), below both anchors, so `:722` and
+// `:97` did not move; `index.tsx` changed below the mapping (objectui#8652's
+// `navigation` input), which did not move from `487-491`; `objectql.ts`
+// MOVED the member `4430` -> `4588` byte-identical, still inside
+// `ObjectKanbanSchema`; and `plugin-kanban.mdx` gained a `navigation`
+// Properties row below the `limit` row and still teaches `limit: 250`. At
+// `e420df310`, re-measured there 2026-09-30 —
 // `plugin-kanban/src/types.ts` is byte-identical to `db11afd49` and still
 // declares no `limit`; the other four files changed, so their anchors were
 // re-READ. `ObjectKanban.tsx` changed at BOTH anchors: objectui#9853 renamed
@@ -3522,7 +3541,7 @@ describe('#7751 — object-* block props schemas', () => {
 // `OBJECT_KANBAN_DATA_SOURCE`, ⚠️ `KanbanSchema` is RETIRED at this pin and
 // `plugin-kanban/src/types.ts` declares the member no more — the published
 // twin is `ObjectKanbanSchema`, declaring `limit?: number` at
-// `packages/types/src/objectql.ts:4430` — and `content/docs/plugins/plugin-kanban.mdx`
+// `packages/types/src/objectql.ts:4588` — and `content/docs/plugins/plugin-kanban.mdx`
 // teaches `limit: 250` with a Properties row. The strict map refused the key by
 // name — the same `unrecognized_keys` verdict as the `bogusProp` control — so an
 // author following the published docs wrote a node the save gate rejected.
@@ -3584,7 +3603,13 @@ describe('ObjectKanbanPropsSchema limit — the row cap four objectui faces alre
 // since retired that block, objectui#8257). Unlike `limit` above — a key four
 // objectui faces already implemented, so the spec was the half that was wrong
 // — `quickAdd` was FORWARDED and never read: at the pin this repo builds
-// against (`.objectui-sha` = `e420df310`; re-measured there 2026-09-30 —
+// against (`.objectui-sha` = `31971ff1e`; re-measured there 2026-10-01 —
+// `KanbanImpl.tsx` and `KanbanBoardCore.tsx` are byte-identical to
+// `e420df310`, so `:621`, `:634`, `:78` and `:111-112` did not move and were
+// re-read in place; `ObjectKanban.tsx` changed only in the comment above its
+// `navigation` read (objectui#8652), above the spread, which MOVED `1641` ->
+// `1639` with its line byte-identical; and the counts re-read the same, 2 /
+// 2 / 11. At `e420df310`, re-measured there 2026-09-30 —
 // `KanbanImpl.tsx` is byte-identical to `db11afd49`, so `:621` and `:634` did
 // not move and were re-read in place; `ObjectKanban.tsx` changed, carrying
 // objectui's own half of this retirement: objectui#8285 stopped forwarding
@@ -3612,7 +3637,7 @@ describe('ObjectKanbanPropsSchema limit — the row cap four objectui faces alre
 // below it, not the spread; at `f8a9d0fb0` (2026-09-24) it
 // had MOVED `1563` -> `1578` the same way (objectui#10068's `$orderby`); both
 // files were byte-identical across the hop onto `62597c588`, and every anchor
-// was re-READ at `87af769e9` 2026-09-20) `ObjectKanban.tsx:1641`
+// was re-READ at `87af769e9` 2026-09-20) `ObjectKanban.tsx:1639`
 // spreads the
 // authored bag into `KanbanBoardCore` (into `KanbanRenderer` until
 // objectui#11234, which reads the pair off it no more) and `KanbanImpl` gates the affordance on
@@ -3715,7 +3740,11 @@ describe('ObjectKanbanPropsSchema quickAdd is retired (#17260)', () => {
 // #9881 and commit 60e0f900a recorded the accordion and tab items; these two close the set.
 //
 // The button record re-measured at the pin this repo builds against —
-// `.objectui-sha` = `e420df310`, re-derived there 2026-09-30: `button.tsx`,
+// `.objectui-sha` = `31971ff1e`, re-derived there 2026-10-01: `button.tsx`,
+// `lazy-icon.tsx`, `resolve-icon.ts` and the generated
+// `lucide-record-icon-names.ts` are byte-identical to `e420df310`
+// (`git diff --quiet`), so every anchor below holds unmoved and was re-read in
+// place. At `e420df310`, 2026-09-30: `button.tsx`,
 // `lazy-icon.tsx`, `resolve-icon.ts` and the generated
 // `lucide-record-icon-names.ts` are byte-identical to `db11afd49`, so every
 // anchor below holds unmoved and was re-read in place. At `db11afd49`,
@@ -3861,8 +3890,12 @@ describe('ObjectMetricPropsSchema icon liveness (#10053)', () => {
 //
 // The acceptance the card names, pinned: each row's KEY SET is the one the
 // renderer's read points support at the pin this repo builds against
-// (`.objectui-sha` = `e420df310`; re-measured there 2026-09-30 — all three
-// renderers changed on the hop off `db11afd49`, `ObjectMap.tsx` in one docblock
+// (`.objectui-sha` = `31971ff1e`; re-measured there 2026-10-01 —
+// `ObjectMap.tsx`, `ObjectGantt.tsx`, `ObjectTree.tsx` and `record-source.ts`
+// are byte-identical across the hop off `e420df310` (`git diff --quiet`), so
+// every anchor below holds unmoved and the set of `schema.*` keys each renderer
+// reads is the one recorded at `e420df310`. At `e420df310`, 2026-09-30 — all
+// three renderers changed on the hop off `db11afd49`, `ObjectMap.tsx` in one docblock
 // only, `ObjectGantt.tsx` +85/-26 (objectui#11141's inclusive date-only end,
 // objectui#8348, objectui#11070) and `ObjectTree.tsx` +29/-26, and the set of
 // `schema.*` keys each reads is the same at both pins. ⚠️ One read changed
