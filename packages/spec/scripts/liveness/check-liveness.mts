@@ -712,6 +712,8 @@ const report: any = {
   orphanEntries: [] as string[], // a ledger row whose property is gone from the schema (the reverse direction)
   tombstonedLive: [] as string[], // a `retiredKey()` tombstone whose row still claims a forbidden status (#19062)
   tombstones: [] as string[], // every `[REMOVED]` tombstone the walk reached — enumerated, not totalled, so the population is checkable (#18133's reason)
+  authorWarnRows: [] as string[], // every row, at every depth, that opts into `authorWarn` — `<type>/<path> (<status>)`, enumerated for the same reason
+  authorWarnOnLive: [] as string[], // ...of which these are graded `live` — the author-side lint throws on them, so they FAIL
   authorable: [] as string[], // the governance DENOMINATOR itself — printed and emitted so "never looked" cannot pass for "nothing to report" (#18133)
   authorableRegistered: 0, // how many of it are registered KINDS (listMetadataTypeSchemaTypes)
   authorableUnregisteredKinds: [] as string[], // …and which are unregistered-kind stack collections (#6245/#6931)
@@ -1083,11 +1085,74 @@ function drillChildren(
   }
 }
 
+// ── author warnings: a `live` row never opts in (#21127) ──
+//
+// `authorWarn: true` asks the author-side lint
+// (packages/lint/src/lint-liveness-properties.ts) to warn whoever authors the
+// key, and the lint picks the verdict it shows from the row's STATUS:
+// `describe()` there answers experimental / planned / dead / live-elsewhere and
+// THROWS on `live`, deliberately — a live key has its runtime effect, so there
+// is nothing to warn about, and a warned `live` row is a shipped-ledger
+// integrity bug. Thrown from inside a lint, that integrity error is the whole
+// answer `os validate` and `os lint` give (exit 1) on EVERY stack that authors
+// the key, and the runtime metadata door returns it as an
+// `authoring-rule-threw` advisory. `mapping.connectorSource` shipped exactly
+// that row: re-graded `live` with its `authorWarn` kept.
+//
+// Nothing here caught it, because the combination is legal for every other
+// check: the status is in the vocabulary, the evidence resolves, and the walk
+// above never even reads the row — a container that drills into `children`
+// has only its CHILDREN graded, while the lint reads the container's own row
+// (and its direct children) for `authorWarn`. So this pass walks the RAW rows,
+// at every depth `children` nests, rather than the graded population.
+//
+// Census before switching it on, across all 41 governed ledgers on 665cab338f:
+// 924 rows walked, 3 opt in with `authorWarn` — `planned` 2, `live` 1 (the
+// `mapping.connectorSource` row this change re-grades). So the rule starts
+// green on the population it measured, and only a NEW warned `live` row can
+// red it — the zero-census argument the tombstone join was switched on under.
+function scanAuthorWarnRows(type: string, rows: Record<string, any>, prefix = ''): void {
+  for (const [key, row] of Object.entries(rows)) {
+    if (!row || typeof row !== 'object') continue;
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (row.authorWarn === true) {
+      report.authorWarnRows.push(`${type}/${path} (${row.status})`);
+      if (row.status === 'live') report.authorWarnOnLive.push(`${type}/${path}`);
+    }
+    if (row.children && typeof row.children === 'object') scanAuthorWarnRows(type, row.children, path);
+  }
+}
+
+/**
+ * The prescription printed under the warned-`live` list. The tempting wrong
+ * fix is the lint's sentinel, so it is ruled out in the same breath.
+ */
+const AUTHOR_WARN_ON_LIVE_GUIDANCE = [
+  'A `live` row says authoring the key changes runtime behaviour, so an author',
+  'has nothing to be warned about — and the author-side lint has no verdict for',
+  'it: `describe()` in packages/lint/src/lint-liveness-properties.ts throws its',
+  'ledger-integrity error on a warned `live` row, so `os validate` and `os lint`',
+  'exit 1 on every stack that authors the key instead of warning.',
+  '',
+  'Fix the ROW: drop `authorWarn` (and its `authorHint`). A caveat an author still',
+  'needs about a live key — a cadence nothing schedules yet, a limit of the',
+  'executor — goes in the key\'s `.describe()`, where every author reads it.',
+  '',
+  'If nothing reads the key yet, the STATUS is what is wrong: grade it `planned`',
+  '(a consumer is being built against it), `experimental` or `dead`, and keep',
+  'the warning.',
+  '',
+  '⛔ Do NOT teach `describe()` a `live` branch: its throw is the loud answer to',
+  'exactly this row, and a warning on a working key is noise an author learns',
+  'to skim.',
+];
+
 for (const type of GOVERNED) {
   const ledger = loadLedger(type);
   const props = ledger.props || {};
   const cat = { classified: 0, unclassified: 0, byStatus: {} as Record<string, number> };
   const walked = topProps(type);
+  scanAuthorWarnRows(type, props);
 
   // ── reverse direction: a row whose property is gone (see orphans.mts) ──
   // Runs off the SAME walk the forward pass classifies against, so the two
@@ -1423,6 +1488,11 @@ const failed =
   // only a NEW false claim can red the gate. A check that starts at (nearly)
   // zero can be red; that is why the census came first.
   report.tombstonedLive.length > 0 ||
+  // A `live` row that opts into `authorWarn` (#21127). Red from day one on the
+  // census stated at scanAuthorWarnRows: the one such row is re-graded by the
+  // change that switched this on, so only a NEW one can red it — and each one
+  // is a crash of `os validate` / `os lint` waiting for the first author.
+  report.authorWarnOnLive.length > 0 ||
   report.verification.errors.length > 0 ||
   report.producers.errors.length > 0 ||
   report.producerMissing.length > 0 ||
@@ -1718,6 +1788,14 @@ if (asJson) {
     console.log('');
     TOMBSTONE_STATUS_GUIDANCE.forEach((line) => console.log(line ? `   ${line}` : ''));
   }
+  if (report.authorWarnOnLive.length) {
+    console.log(
+      `\n✗ ${report.authorWarnOnLive.length} \`live\` ledger row(s) opt into \`authorWarn\` — the author-side lint throws on them:`,
+    );
+    report.authorWarnOnLive.forEach((s: string) => console.log(`    ${s}`));
+    console.log('');
+    AUTHOR_WARN_ON_LIVE_GUIDANCE.forEach((line) => console.log(line ? `   ${line}` : ''));
+  }
   if (report.undrilledNew.length) {
     console.log(`\n✗ ${report.undrilledNew.length} UNDECLARED container inheritance — a blanket verdict covers keys nothing classified:`);
     report.undrilledNew.forEach((s: string) => console.log(`    ${s}`));
@@ -1884,6 +1962,21 @@ if (asJson) {
     `${report.tombstones.length - report.tombstonedLive.length} graded with a status the tombstone allows` +
     (report.tombstonedLive.length ? `, ${report.tombstonedLive.length} FORBIDDEN` : '') + '.',
   );
+  // ── author warnings: asked at every depth, and how many sit on a `live` row ──
+  // Two numbers again: "0 on a live row" reads identically whether no row is
+  // wrong or the raw-row walk reached nothing.
+  const warnedByStatus = new Map<string, number>();
+  for (const row of report.authorWarnRows as string[]) {
+    const status = /\(([^)]*)\)$/.exec(row)?.[1] ?? '?';
+    warnedByStatus.set(status, (warnedByStatus.get(status) ?? 0) + 1);
+  }
+  const warnedParts = [...warnedByStatus].sort(([a], [b]) => a.localeCompare(b)).map(([s, n]) => `${s} ${n}`);
+  console.log(
+    `\nauthor warnings: ${report.authorWarnRows.length} ledger row(s) opt into \`authorWarn\`, at any depth` +
+    (warnedParts.length ? ` (${warnedParts.join(', ')})` : '') +
+    `; ${report.authorWarnOnLive.length} on a \`live\` row` +
+    (report.authorWarnOnLive.length ? ' — FORBIDDEN' : '') + '.',
+  );
 
   // ── container coverage: how much rides on inheritance? ──
   // Printed every run, pass or fail. The gate used to say "all properties are
@@ -1942,7 +2035,7 @@ if (asJson) {
       '\n✓ every governed-type property, at every depth the ledger drills, is classified, every ' +
       'authorable type — registered kind or unregistered-kind stack collection — is governed or ' +
       'explicitly pending, no ledger row outlives its property, no tombstoned key\'s row claims a ' +
-      'status the tombstone forbids, ' +
+      'status the tombstone forbids, no `live` row opts into an author warning, ' +
       `every container inheritance is declared, every ${EVIDENCE_SCANNED_LABEL} entry's repo-local evidence path ` +
       'resolves, every `path:NNN` citation names a line that file actually has, every ' +
       '`path#symbol` anchor names a symbol its file contains, and every cited ' +
