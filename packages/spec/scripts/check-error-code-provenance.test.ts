@@ -22,7 +22,7 @@ import {
   deriveFindings,
   type StampSite,
 } from './check-error-code-provenance';
-import type { ProvenanceWaiver } from '../src/api/error-code-ledger.zod';
+import { ERROR_CODE_LEDGER, type ProvenanceWaiver } from '../src/api/error-code-ledger.zod';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -147,6 +147,43 @@ describe('deriveFindings — the reconciliation, both directions', () => {
     };
     const { waiverProblems } = deriveFindings([site('@objectstack/rogue', 'REGISTERED_ONE')], ledger, [waiver, { ...waiver }]);
     expect(waiverProblems.some((p) => p.includes('duplicate'))).toBe(true);
+  });
+});
+
+describe('rows the scan cannot see, pinned by hand (the declared helper-call blind spot)', () => {
+  // The gate's header declares it BLIND to a helper indirection (a
+  // `makeError(code, …)` call site) and makes widening its patterns a card of
+  // its own. A registered code stamped ONLY through such a helper therefore
+  // has no machine check that its stamping package lists it, so each such row
+  // is pinned here, beside the site it stands for. Read off the ledger module
+  // inside this package, so the suite still reads nothing outside it.
+  //
+  // `@objectstack/service-automation`'s connector sync executor
+  // (`connector-pull.ts`, `pullConnectorSource`) stamps both codes below onto
+  // `ConnectorPullError.code` through its local `refuse(code, status, reason,
+  // message)` helper.
+  const HAND_PINNED_HELPER_ROWS = [
+    {
+      owner: '@objectstack/service-automation',
+      code: 'MAPPING_NOT_FOUND',
+      site: "connector-pull.ts refuse('MAPPING_NOT_FOUND', 404, …)",
+    },
+    {
+      owner: '@objectstack/service-automation',
+      code: 'UNSUPPORTED_TRANSFORM',
+      site: "connector-pull.ts refuse('UNSUPPORTED_TRANSFORM', 400, …)",
+    },
+  ] as const;
+
+  it('the blind spot is real: a refuse(...) call site is no stamp site to the scan', () => {
+    // The day this reads a site, the gate sees the form and the hand pins
+    // below can come out with the widening.
+    expect(scanSourceText("return refuse('REGISTERED_ONE', 404, 'reason', 'message');", registered)).toEqual([]);
+  });
+
+  it.each(HAND_PINNED_HELPER_ROWS)('$owner lists $code ($site)', ({ owner, code }) => {
+    const rows: readonly string[] = ERROR_CODE_LEDGER[owner];
+    expect(rows).toContain(code);
   });
 });
 
