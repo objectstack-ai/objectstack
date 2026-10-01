@@ -169,6 +169,9 @@ The source is real React executed at render by the runtime. The injected scope a
 
 - `React` — hooks (`React.useState`, `React.useEffect`, …)
 - `useAdapter()` — live data: `adapter.find('obj', {…})` / `.findOne` / `.create` / `.update`
+- `useDataInvalidation('obj')` — the data-invalidation bus nonce (a number): name it in the
+  deps of the effect that reads through `useAdapter`, so a page action elsewhere that writes
+  `obj` re-runs that read in place, with no remount
 - the public **data blocks as PascalCase components** — `<ObjectForm>`, `<ListView>`,
   `<ObjectMetric>`, `<ObjectChart>`, `<ObjectKanban>`, … The scope is built at
   runtime from the public block registry (every non-container public block gets a
@@ -200,10 +203,7 @@ why it silently does nothing.
 > It is the authoritative answer to "what props does `<ObjectForm>`/`<ListView>`/…
 > take?" — author against it, not from memory. The `data` props are sourced from the platform's spec schemas (FormView,
 > ListView, Chart, …) — the same protocol the server validates;
-> `binding`/`controlled`/`callback` are the React overlay. The contract covers
-> the **curated core set**; runtime-injected blocks outside it (`<ObjectMetric>`,
-> `<ObjectKanban>`, …) read their props from the block registry at render time —
-> except the `record:*` family, which is rejected on this surface (above).
+> `binding`/`controlled`/`callback` are the React overlay.
 > (Maintainers: regenerate with `pnpm --filter @objectstack/spec gen:react-blocks`.)
 
 Master/detail (click a row → edit it → save refreshes the list):
