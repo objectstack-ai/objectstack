@@ -820,10 +820,12 @@ const REMOTE_SCOPE_PROBE_PREFIX = 'select * where ';
 
 /**
  * [#21226] The refusal for a tenant-scoped remote call whose scope compiled to
- * a shape {@link TursoDriver.remoteTenantScope} does not read. Unreachable while
- * `SqlDriver.applyTenantScope` only adds a `where` group. It exists so a change
- * there fails a call instead of sending it without the scope: fail toward
- * isolation, never toward exposure.
+ * a shape {@link TursoDriver.remoteTenantScope} does not read: anything beside
+ * `where` terms (a limit, an order, a join), or a statement that does not open
+ * with the probe's own prefix. Unreachable while `SqlDriver.applyTenantScope`
+ * only adds a `where` group. It exists so a change there fails a call instead
+ * of sending it without the scope, or with a fragment that is not a predicate:
+ * fail toward isolation, never toward exposure.
  */
 function refuseUnreadableRemoteTenantScope(object: string): never {
   const err = new Error(
@@ -2326,6 +2328,11 @@ export class TursoDriver extends SqlDriver {
   private remoteTenantScope(object: string, options: DriverOptions | undefined): RemoteTenantScope | undefined {
     const probe = this.knex.queryBuilder();
     this.applyTenantScope(probe, object, options);
+    // The chokepoint may add `where` terms and nothing else: a limit, an order
+    // or a join cannot ride into a remote `WHERE`.
+    if (probe.clone().clearWhere().toSQL().sql !== REMOTE_SCOPE_PROBE_UNSCOPED) {
+      refuseUnreadableRemoteTenantScope(object);
+    }
     const { sql, bindings } = probe.toSQL();
     if (sql === REMOTE_SCOPE_PROBE_UNSCOPED) return undefined;
     if (!sql.startsWith(REMOTE_SCOPE_PROBE_PREFIX)) refuseUnreadableRemoteTenantScope(object);
