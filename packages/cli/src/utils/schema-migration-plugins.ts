@@ -98,11 +98,28 @@ import { stackDeclaresMetadata } from './stack-collections.js';
  * ({@link createDeclarationBootWriteGuard}): for the length of the kernel
  * bootstrap, the row-write members of the data-driver contract are refused on
  * every `driver.*` instance the kernel publishes. Phase-agnostic by
- * construction — a fourth phase is covered on the day it ships — and
- * read/log-only hooks still run, which is what an operator reading a plan
- * before a production apply needs them to do. Neutralising `init()`-registered
- * hooks instead would have been neither necessary (a log-only hook violates
- * nothing) nor sufficient (a write arriving by any other path still lands).
+ * construction — a fourth phase is covered on the day it ships. Neutralising
+ * `init()`-registered hooks INSTEAD would have been insufficient (a write
+ * arriving by any other path still lands), and the guard stays the write
+ * guarantee on every phase.
+ *
+ * ## …and why the post-declaration phases do not fire for host code (#21054)
+ *
+ * The guard refuses writes and lets the hooks run, so it cannot stop a hook's
+ * READS — and on a plan a read is not harmless. A host hook that reads a table
+ * the plan's composition never declares fails on every plan and prints a
+ * `DATABASE_ERROR` for it: `examples/app-crm`'s `onEnable` hooks
+ * `kernel:bootstrapped` and reads `sys_position` / `sys_permission_set`, six
+ * such lines on every plan of a fully migrated database. A declaration boot
+ * reads DECLARATIONS, so host code does not run where the kernel contract
+ * says declaring is over: a host plugin's `init()` gets a context that does
+ * not register `kernel:bootstrapped` / `kernel:listening` hooks, and the
+ * config's `onEnable` is not executed ({@link DeclarationBootLifecycle} — the
+ * two doors, why each holds for every app, and what the plan says about it).
+ * `kernel:ready` host hooks still run: the contract leaves late registration
+ * there, and a host that provisions its tables from one is a measured shape
+ * the plan must see. This repo's own plugins are not host code; their hooks on
+ * every phase are untouched.
  *
  * ⚠️ **The residue, stated rather than hidden:** a host plugin that registers
  * its objects in `start()` instead of `init()` is invisible to this
@@ -175,6 +192,11 @@ import { stackDeclaresMetadata } from './stack-collections.js';
  *    network).
  *  - work a hook defers past the end of the bootstrap; the guard covers the
  *    boot window.
+ *  - (#21054, the post-declaration phases) a host that registers a hook
+ *    without the context its `init()` was handed — through `getKernel()`,
+ *    or from a service factory, which the kernel calls with its own context —
+ *    is outside {@link composeForDeclarations}' reach; its writes still meet
+ *    the guard.
  *
  * `PlatformObjectsPlugin` is deliberately NOT suppressed: it is platform
  * infrastructure this CLI already boots fully under the sibling DATA
@@ -212,16 +234,179 @@ async function suppressedStart(): Promise<void> {
 }
 
 /**
+ * The kernel boot phases whose CONTRACT is post-declaration work (#21054), and
+ * which a declaration boot therefore does not fire for host code.
+ *
+ * Read off `IPluginLifecycleEvents` (`packages/spec/src/contracts/`
+ * `plugin-lifecycle-events.ts`), not off a survey of what hosts do there:
+ *
+ *  - `kernel:bootstrapped` is the "all synchronous bootstrap has settled"
+ *    anchor, for "reconcile/backfill work that consumes" the data a
+ *    `kernel:ready` handler produced — reads and writes of rows, never a
+ *    declaration;
+ *  - `kernel:listening` is for work that must happen "strictly after every
+ *    other plugin has had a chance to register routes / services /
+ *    middleware during `kernel:ready`" — most notably HTTP `listen()`.
+ *
+ * Both say in their own words that registration is OVER by the time they
+ * fire. `kernel:ready` is deliberately NOT here: the same contract puts late
+ * registration in it, and a host that provisions its declared objects from a
+ * `kernel:ready` hook is a measured shape (#13028) whose tables the plan has
+ * to see. Writes on `kernel:ready` stay refused by the write guard.
+ *
+ * `kernel:shutdown` is not here either: it is the teardown of what `init()`
+ * opened, the symmetric half `composeForDeclarations` forwards `destroy()` for.
+ */
+const POST_DECLARATION_PHASES = ['kernel:bootstrapped', 'kernel:listening'] as const;
+
+/** One host hook a declaration boot did not register, as the plan reports it. */
+export interface WithheldHostHook {
+  /** The host plugin whose `init()` asked for it. */
+  plugin: string;
+  /** The post-declaration phase it asked for ({@link POST_DECLARATION_PHASES}). */
+  phase: string;
+  /** How many registrations this plugin/phase pair asked for. */
+  count: number;
+}
+
+/**
+ * What a declaration boot held back from HOST CODE (#21054) — the record the
+ * plan's notes are written from.
+ *
+ * The write guard ({@link createDeclarationBootWriteGuard}) refuses a host's
+ * WRITES and still lets its hooks run, which is all a write can be refused
+ * with. A READ cannot be refused that way, and on a plan it is not harmless:
+ * a hook that reads a table the plan's composition never declares fails on
+ * every plan and prints a `DATABASE_ERROR` for it (measured on
+ * `examples/app-crm`, whose `onEnable` hooks `kernel:bootstrapped` and reads
+ * `sys_position` / `sys_permission_set`: six such lines per plan, on a fully
+ * migrated database). So host code reaches a declaration boot through exactly
+ * two doors, and each is closed at the door, for every app:
+ *
+ *  - a host plugin from `config.plugins` — {@link composeForDeclarations}
+ *    hands its `init()` a context whose `hook()` does not register the
+ *    {@link POST_DECLARATION_PHASES}, beside the `start()` it already
+ *    suppressed;
+ *  - the config module's own `onEnable` — run by the `AppPlugin` this
+ *    composition constructs, which is told `skipOnEnable` and withholds it.
+ *    (A compiled artifact cannot carry an `onEnable` at all: it is JSON, and
+ *    its runtime module contributes `functions` only.)
+ *
+ * The platform's own hooks — this repo's plugins the CLI composes — are not
+ * host code and are untouched: the plan still prints, for instance, the
+ * ADR-0104 value-shape gate announcement a `kernel:bootstrapped` hook of the
+ * engine makes.
+ */
+export interface DeclarationBootLifecycle {
+  /** Every host hook not registered so far, per plugin and phase. */
+  readonly withheldHooks: readonly WithheldHostHook[];
+  /** The `AppPlugin` names whose `onEnable` was withheld, once the boot has started them. */
+  readonly withheldOnEnable: readonly string[];
+  /** Record an `AppPlugin` this composition constructed with `skipOnEnable`. */
+  trackApp(plugin: unknown): void;
+  /** @internal what {@link composeForDeclarations} calls on a withheld registration. */
+  recordWithheldHook(plugin: string, phase: string): void;
+  /**
+   * The line for {@link SchemaMigrationComposition.notes} — or `null` when
+   * nothing was withheld, so a host with no such hook and no `onEnable` renders
+   * exactly as it did before this existed. Read after the kernel bootstrap.
+   */
+  describe(): string | null;
+}
+
+/** Build the record. See {@link DeclarationBootLifecycle}. */
+export function createDeclarationBootLifecycle(): DeclarationBootLifecycle {
+  const hooks = new Map<string, WithheldHostHook>();
+  const apps: Array<{ name?: unknown; onEnableWithheld?: unknown }> = [];
+  const withheldOnEnable = (): string[] => apps
+    .filter((app) => app.onEnableWithheld === true)
+    .map((app) => (typeof app.name === 'string' ? app.name : '(unnamed app)'));
+
+  return {
+    get withheldHooks(): readonly WithheldHostHook[] { return [...hooks.values()]; },
+    get withheldOnEnable(): readonly string[] { return withheldOnEnable(); },
+    trackApp(plugin: unknown): void {
+      if (plugin && typeof plugin === 'object') apps.push(plugin as (typeof apps)[number]);
+    },
+    recordWithheldHook(plugin: string, phase: string): void {
+      const key = `${plugin}|${phase}`;
+      const seen = hooks.get(key);
+      if (seen) seen.count += 1;
+      else hooks.set(key, { plugin, phase, count: 1 });
+    },
+    describe(): string | null {
+      const parts: string[] = [];
+      const onEnable = withheldOnEnable();
+      if (onEnable.length > 0) {
+        parts.push(`did not execute runtime.onEnable of ${onEnable.join(', ')}`);
+      }
+      if (hooks.size > 0) {
+        const total = [...hooks.values()].reduce((n, h) => n + h.count, 0);
+        const detail = [...hooks.values()]
+          .map((h) => `${h.plugin} on ${h.phase}${h.count > 1 ? ` x${h.count}` : ''}`)
+          .join(', ');
+        parts.push(`did not register ${total} host hook(s) on post-declaration phases (${detail})`);
+      }
+      if (parts.length === 0) return null;
+      return (
+        `This declaration boot ${parts.join(', and ')}: it composes host code for what it `
+        + 'DECLARES, and reconcile/backfill or listener work belongs to a served boot of the same '
+        + 'stack — so none of it ran here, and none of it affects the plan below.'
+      );
+    },
+  };
+}
+
+/**
+ * The context a host plugin's `init()` receives on a declaration boot: the
+ * kernel's own, with `hook()` declining the {@link POST_DECLARATION_PHASES}.
+ *
+ * A Proxy for the reason {@link composeForDeclarations} is one — every other
+ * member forwarded, exactly one overridden. A hook the host registers on any
+ * other name (`kernel:ready`, `kernel:shutdown`, a data hook, its own event)
+ * is registered as before.
+ */
+function declarationContext(
+  ctx: unknown,
+  owner: string,
+  lifecycle: DeclarationBootLifecycle | undefined,
+): unknown {
+  if (!ctx || typeof ctx !== 'object') return ctx;
+  const target = ctx as Record<string | symbol, unknown>;
+  const hook = (name: unknown, ...rest: unknown[]): unknown => {
+    if ((POST_DECLARATION_PHASES as readonly unknown[]).includes(name)) {
+      lifecycle?.recordWithheldHook(owner, String(name));
+      return undefined;
+    }
+    return Reflect.apply(target.hook as (...a: unknown[]) => unknown, target, [name, ...rest]);
+  };
+  return new Proxy(target, {
+    get(t, prop) {
+      if (prop === 'hook' && typeof t.hook === 'function') return hook;
+      const value = t[prop];
+      return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(t) : value;
+    },
+  });
+}
+
+/**
  * A host plugin composed for its DECLARATIONS: `init()` runs, `start()` does
- * not.
+ * not, and the hooks `init()` registers on the post-declaration phases are
+ * not registered at all (#21054, {@link POST_DECLARATION_PHASES}).
  *
  * A Proxy rather than a hand-copied field list on purpose. The kernel reads
  * several identity/ordering members off a plugin instance — `name`, `version`,
  * `type`, `dependencies`, `optionalDependencies`, `requiresServices`,
  * `providesServices`, and `constructor.name` at more than one presence test —
  * and a copy that misses one does not fail, it silently mis-orders the boot or
- * defeats a de-dup check. Forwarding everything and overriding exactly one
- * member is the only shape in which that cannot happen.
+ * defeats a de-dup check. Forwarding everything and overriding exactly the two
+ * lifecycle members is the only shape in which that cannot happen: `start` is
+ * replaced, `init` is forwarded with {@link declarationContext} in place of the
+ * kernel's context. A host that keeps that context — to register a hook later,
+ * from a `kernel:ready` handler say — keeps the declaration context with it.
+ *
+ * @param lifecycle where a withheld registration is recorded so the plan can
+ *   name it; omitted, the registration is withheld all the same.
  *
  * Two details the trap gets right deliberately:
  *
@@ -235,18 +420,31 @@ async function suppressedStart(): Promise<void> {
  * plugin that connected something during Phase 1 must still be able to close it.
  *
  * ⚠️ **This suppression is not, on its own, the "writes nothing" guarantee**
- * (#13332). `init()` runs, and every hook it registers fires on the phases
- * `kernel.ts` triggers unconditionally after the suppressed start pass. What
- * makes the sentence true is {@link createDeclarationBootWriteGuard}, which
- * refuses the write itself; this Proxy keeps Phase 2 out of a dry run, which is
- * a different and narrower job.
+ * (#13332). `init()` runs, and a hook it registers on `kernel:ready` — the
+ * phase the contract leaves open for late registration — still fires after the
+ * suppressed start pass. What makes the sentence true is
+ * {@link createDeclarationBootWriteGuard}, which refuses the write itself; this
+ * Proxy keeps Phase 2 and the post-declaration phases out of a dry run, which
+ * is a different and narrower job.
  */
-export function composeForDeclarations<T extends object>(plugin: T): T {
+export function composeForDeclarations<T extends object>(
+  plugin: T,
+  lifecycle?: DeclarationBootLifecycle,
+): T {
   return new Proxy(plugin, {
     get(target, prop) {
       if (prop === 'start') return suppressedStart;
       // Read through the target so getters see the right `this`.
       const value = (target as Record<string | symbol, unknown>)[prop];
+      if (prop === 'init' && typeof value === 'function') {
+        const owner = (target as { name?: unknown }).name;
+        const label = typeof owner === 'string' && owner.length > 0 ? owner : '(unnamed plugin)';
+        return (ctx: unknown, ...rest: unknown[]): unknown => Reflect.apply(
+          value as (...args: unknown[]) => unknown,
+          target,
+          [declarationContext(ctx, label, lifecycle), ...rest],
+        );
+      }
       if (typeof value === 'function' && prop !== 'constructor') {
         return (value as (...args: unknown[]) => unknown).bind(target);
       }
@@ -1028,6 +1226,15 @@ export interface SchemaMigrationComposition {
    * returns and appends the line it hands back to {@link notes}.
    */
   writeGuard?: DeclarationBootWriteGuard;
+  /**
+   * What the declaration boot held back from host code (#21054) — the
+   * post-declaration hooks its `init()`s asked for, and the config's
+   * `onEnable`. `undefined` on a boot that composed nothing, like
+   * {@link writeGuard}; `bootSchemaStack` appends its
+   * {@link DeclarationBootLifecycle.describe} line to {@link notes} once the
+   * kernel bootstrap returns.
+   */
+  lifecycle?: DeclarationBootLifecycle;
 }
 
 const NOTHING_COMPOSED: SchemaMigrationComposition = Object.freeze({
@@ -1070,6 +1277,9 @@ export async function buildSchemaMigrationPlugins(opts: {
   // `init()` that writes directly is only refused if the guard is already on
   // the driver by the time it runs. See {@link DeclarationBootWriteGuard}.
   const writeGuard = createDeclarationBootWriteGuard();
+  // #21054 — what this boot holds back from host code, recorded so the plan
+  // can say so. See {@link DeclarationBootLifecycle}.
+  const lifecycle = createDeclarationBootLifecycle();
   const plugins: unknown[] = [writeGuard.plugin];
   const notes: string[] = [];
   let hostConfigLoaded = false;
@@ -1085,7 +1295,7 @@ export async function buildSchemaMigrationPlugins(opts: {
 
       const hostPlugins: unknown[] = Array.isArray(config?.plugins) ? config.plugins : [];
       for (const plugin of hostPlugins) {
-        if (plugin && typeof plugin === 'object') plugins.push(composeForDeclarations(plugin));
+        if (plugin && typeof plugin === 'object') plugins.push(composeForDeclarations(plugin, lifecycle));
       }
 
       // `serve` step 3, same predicate: a host config that ALSO carries
@@ -1100,7 +1310,16 @@ export async function buildSchemaMigrationPlugins(opts: {
       const appAlready = hasArtifactApp || hostPlugins.some(isAppPluginLike);
       if (configHasMetadata && !appAlready) {
         const { AppPlugin } = await import('@objectstack/runtime');
-        plugins.push(new AppPlugin(config, undefined, { skipSeedData: opts.skipSeedData ?? false }));
+        // #21054 — the config's `onEnable` is the app's imperative code, and
+        // this is the one door it reaches a declaration boot through: the
+        // executor withholds it (the AppPlugin owns which object carries the
+        // hook, so it is told rather than handed a stripped copy).
+        const app = new AppPlugin(config, undefined, {
+          skipSeedData: opts.skipSeedData ?? false,
+          skipOnEnable: true,
+        });
+        lifecycle.trackApp(app);
+        plugins.push(app);
       }
 
       hostConfigLoaded = true;
@@ -1154,7 +1373,9 @@ export async function buildSchemaMigrationPlugins(opts: {
     notes.push('Composed PlatformObjectsPlugin (the platform floor `os serve` composes unconditionally).');
   }
 
-  return { plugins, hostConfigPath, hostConfigLoaded, hostConfigError, notes, coverage: null, writeGuard };
+  return {
+    plugins, hostConfigPath, hostConfigLoaded, hostConfigError, notes, coverage: null, writeGuard, lifecycle,
+  };
 }
 
 /**

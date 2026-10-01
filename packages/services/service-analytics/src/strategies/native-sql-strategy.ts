@@ -23,6 +23,9 @@ import { columnObjectOf, relationshipReferenceOf, resolvePathHops, type HopRefer
 import { datasetInvalidError, invalidMemberError } from '../dataset-refusal.js';
 import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
+import { whereContainsMembershipSql } from '../contains-membership-sql.js';
+import { isJsonStoredShape } from '../contains-membership-sql.js';
+import { expandEmptyOperator } from '@objectstack/spec/data';
 import { nextUtcCalendarDay, resolveAnalyticsDateRangeString, isUnboundedAbove } from '@objectstack/core';
 // [#20889] What each aggregate function ANSWERS, and the `'number'` presenter —
 // the rule `driver-sql`'s own `aggregate()` applies, defined once in core.
@@ -296,8 +299,123 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // fail-closed refusal of the form (`read-scope-sql.ts`). The DOTTED member
     // (`account.region`) is a cube member, not this form, and stays here.
     if (this.nestedRelationConditionIn(query, ctx)) return false;
+    // ── [#20987] DECLINE a JSON function on a dialect nobody named ──────────
+    //
+    // The seat's decision on #20987 (5927023075, option A). A `$contains` /
+    // `$notContains` on a field declared multi-valued or JSON-stored is a
+    // MEMBERSHIP test, and `$empty` on a multi-valued one tests for the empty
+    // list. All three compile to a JSON function that differs per SQL dialect,
+    // and on the `'unknown'` dialect this strategy has none to emit: its
+    // emitters refuse there, the read scope with `READ_SCOPE_COMPILE_FAILED` /
+    // 500 and the `where` with `INVALID_FILTER` / 400, rather than read the
+    // stored JSON text as a substring.
+    //
+    // Those refusals fire at COMPILE time, and `'unknown'` is also what a
+    // NON-SQL datasource (memory, mongodb) answers. There the plugin's raw-SQL
+    // bridge would have answered `RAW_SQL_UNSUPPORTED` at EXECUTE time and
+    // `AnalyticsService` would have handed the query to the ObjectQL strategy,
+    // whose engine answers membership. The compile-time refusal preempted that
+    // hand-off and refused a query the platform answers. So the query routes
+    // here instead, before anything compiles: the mechanism of the declines
+    // above, for the same reason. The engine answers through its own driver;
+    // with no ObjectQL bridge nothing can answer and the query is refused,
+    // fail-closed. The emitters' refusals stay as the backstop. See
+    // {@link jsonConstructOnUnknownDialectIn}.
+    if (this.jsonConstructOnUnknownDialectIn(query, ctx)) return false;
     const caps = ctx.queryCapabilities(query.cube);
     return caps.nativeSql && typeof ctx.executeRawSql === 'function';
+  }
+
+  /**
+   * [#20987] Would compiling this query need a JSON function on a datasource
+   * whose SQL dialect the host cannot name? See the decline at
+   * {@link canHandle}.
+   *
+   * Three operators need one on a declared field: `$contains` / `$notContains`
+   * on a multi-valued or JSON-stored field (`isJsonStoredShape`, the population
+   * `contains-membership-sql.ts` compiles membership for), and `$empty` on a
+   * multi-valued one (the spec's `multi_value` row, `empty-operator-sql.ts`).
+   * Each is judged per OBJECT, from the hooks those emitters ask (the host's
+   * declared value shape and its dialect), so the decline fires where an
+   * emitter's `'unknown'` refusal would and nowhere else.
+   *
+   * It reads every filter this strategy would compile through those emitters:
+   * - the caller's `where`, lowered, plus the compiled dataset's own `filter`
+   *   and the `filter` of each requested measure, as
+   *   {@link nestedRelationConditionIn} reads them. Each member is resolved to
+   *   its column's (object, field) by {@link resolveStorageTarget}, as
+   *   `buildFilterClause` resolves it.
+   * - the read scope of every object the statement scopes: the set the door
+   *   resolved (`readScopedObjects`), or the cube's own objects for a context
+   *   built without it, as {@link crossFieldComparisonIn} reads them.
+   *
+   * A member this cannot resolve is not judged. `generateSql` refuses it with
+   * its own message.
+   */
+  private jsonConstructOnUnknownDialectIn(query: AnalyticsQuery, ctx: StrategyContext): boolean {
+    const cube = query.cube ? ctx.getCube(query.cube) : undefined;
+    if (!cube) return false;
+    const baseTable = this.extractObjectName(cube);
+    const referenceOf = relationshipReferenceOf(ctx);
+    type Target = { object: string; field: string } | undefined;
+    const needsJson = (target: Target, op: string): boolean => {
+      if (!target || (op !== '$contains' && op !== '$notContains' && op !== '$empty')) return false;
+      if (sqlDialectFor(ctx, target.object) !== 'unknown') return false;
+      const shape = declaredValueShapeResolver(ctx, target.object)?.(target.field);
+      if (op === '$empty') return shape !== undefined && expandEmptyOperator(shape).arm === 'multi_value';
+      return isJsonStoredShape(shape);
+    };
+    // One filter condition: `$and` / `$or` / `$not` recurse, and a field key
+    // whose value is an operator object is judged operator by operator. A
+    // plain object under a field key is the nested-relation form, which its
+    // own decline above routes.
+    const carries = (node: unknown, targetOf: (key: string) => Target): boolean => {
+      if (!node || typeof node !== 'object' || Array.isArray(node)) return false;
+      for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+        if (key === '$and' || key === '$or') {
+          if (Array.isArray(value) && value.some((child) => carries(child, targetOf))) return true;
+          continue;
+        }
+        if (key === '$not') {
+          if (carries(value, targetOf)) return true;
+          continue;
+        }
+        if (key.startsWith('$') || !value || typeof value !== 'object' || Array.isArray(value)) continue;
+        const ops = Object.keys(value as Record<string, unknown>);
+        if (ops.length === 0 || !ops.every((op) => op.startsWith('$'))) continue;
+        const target = targetOf(key);
+        if (ops.some((op) => needsJson(target, op))) return true;
+      }
+      return false;
+    };
+    const memberTarget = (member: string): Target => {
+      try {
+        return this.resolveStorageTarget(cube, member, baseTable, referenceOf);
+      } catch {
+        return undefined;
+      }
+    };
+    let where: unknown = null;
+    try {
+      where = lowerAnalyticsWhere(query);
+    } catch {
+      // A `where` this compiler cannot even lower is refused downstream, with
+      // its own message. Nothing to route.
+    }
+    if (carries(where, memberTarget)) return true;
+    const datasetScope = query.cube
+      ? (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube)
+      : undefined;
+    if (carries(datasetScope?.filter, memberTarget)) return true;
+    for (const measure of query.measures ?? []) {
+      if (carries(datasetScope?.measureFilters?.[measure], memberTarget)) return true;
+    }
+    if (typeof ctx.getReadScope !== 'function') return false;
+    const scoped = (ctx as DatasetScopedStrategyContext).readScopedObjects;
+    const objects = scoped
+      ? [...scoped]
+      : [baseTable, ...Object.keys(cube.joins ?? {}).map((alias) => cube.joins?.[alias]?.name ?? alias)];
+    return objects.some((object) => carries(ctx.getReadScope!(object), (field) => ({ object, field })));
   }
 
   /**
@@ -1361,6 +1479,24 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       const polarity = textOperatorPolarity(operator);
       if (polarity && nonTextColumnResolver(ctx, target.object)?.(target.field)) {
         return polarity === 'negative' ? SQL_CONST_TRUE : SQL_CONST_FALSE;
+      }
+      // [#20987] On a column the host DECLARES multi-valued or JSON-stored,
+      // `contains` / `notContains` are MEMBERSHIP, not a substring of the
+      // stored JSON text: the read scope's question, from the same
+      // `@objectstack/core` construct `driver-sql` emits. Refused
+      // `INVALID_FILTER` / 400 on the `'unknown'` dialect, before anything
+      // binds. `null` keeps the text match below. See
+      // `contains-membership-sql.ts`.
+      if (operator === 'contains' || operator === 'notContains') {
+        const membership = whereContainsMembershipSql({
+          ctx,
+          target,
+          column: rawCol,
+          value: values[0],
+          negate: operator === 'notContains',
+          bind: (v) => { params.push(v); return `$${params.length}`; },
+        });
+        if (membership !== null) return membership;
       }
       // [#15684] The case-EXACT family picks its construct per DIALECT, because
       // a plain `LIKE` folds ASCII case on SQLite and follows the collation on

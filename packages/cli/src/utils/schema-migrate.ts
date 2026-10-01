@@ -367,15 +367,20 @@ export async function bootSchemaStack(
 
   // #13332 — the kernel bootstrap is over, and with it the window the
   // declaration boot's write guard covers. `composeForDeclarations` suppresses
-  // a host plugin's `start()`, but `kernel.ts` fires `kernel:ready`,
-  // `kernel:bootstrapped` and `kernel:listening` unconditionally afterwards, so
-  // a hook REGISTERED from `init()` runs on a plan; the guard refuses those
-  // writes at the driver instead of at a list of phase names. Everything from
-  // this line on is work the command was ASKED for — `apply`'s confirmed DDL
-  // flush, the #13028 coverage pass — so the guard comes off here and reports
-  // whatever it refused, which the plan prints and `--json` carries.
+  // a host plugin's `start()` and its post-declaration hooks (#21054), but
+  // `kernel.ts` fires `kernel:ready` unconditionally afterwards, so a hook
+  // REGISTERED from `init()` on that phase runs on a plan; the guard refuses
+  // its writes at the driver instead of at a list of phase names. Everything
+  // from this line on is work the command was ASKED for — `apply`'s confirmed
+  // DDL flush, the #13028 coverage pass — so the guard comes off here and
+  // reports whatever it refused, which the plan prints and `--json` carries.
   const refusalNote = composition.writeGuard?.disarm() ?? null;
   if (refusalNote) composition.notes.push(refusalNote);
+  // #21054 — and what the boot did not run for host code at all: the
+  // post-declaration hooks its `init()`s asked for, and the config's
+  // `onEnable`. Read now, after `start()` has decided the latter.
+  const lifecycleNote = composition.lifecycle?.describe() ?? null;
+  if (lifecycleNote) composition.notes.push(lifecycleNote);
 
   const driver = findSqlDriver(kernel);
 

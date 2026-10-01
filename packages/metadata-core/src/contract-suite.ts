@@ -254,7 +254,7 @@ export function runRepositoryContractTests(
       // Asserting only one face would have left the other implementation's
       // divergence unpinned, which is the whole reason this lives in the
       // shared contract suite rather than beside either bug.
-      describe('serialized-form identity (#7856)', () => {
+      describe('serialized-form identity', () => {
         for (const shape of SERIALISATION_SHAPES) {
           it(`version identifies the stored bytes — ${shape.label}`, async () => {
             const repo = await factory();
