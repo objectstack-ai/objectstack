@@ -23,6 +23,9 @@ export const CrmWorkbenchPage = definePage({
   source: `
 function Page() {
   const adapter = useAdapter();
+  // The data-invalidation bus nonce for showcase_project: a page action elsewhere
+  // that writes a project moves it, and the KPI effect below re-reads in place.
+  const projectChanged = useDataInvalidation('showcase_project');
   const [selected, setSelected] = React.useState(null);
   const [mode, setMode] = React.useState('edit');
   const [reloadKey, setReloadKey] = React.useState(0);
@@ -56,7 +59,7 @@ function Page() {
       setStats({ total, active: rows.filter((r) => r.status === 'active').length });
     } catch (e) { console.warn('[CRM Workbench] failed to refresh stats', e); }
   }, [adapter]);
-  React.useEffect(() => { refreshStats(); }, [refreshStats, reloadKey]);
+  React.useEffect(() => { refreshStats(); }, [refreshStats, reloadKey, projectChanged]);
 
   const openNew = () => { setSelected(null); setMode('create'); };
   const onRowClick = (rec) => { setSelected(rec); setMode('edit'); };

@@ -369,7 +369,16 @@ overrides:
   #     Bound at the 4.0.0 major boundary per this block's header rule — never
   #     `<3.4.13`, which would self-invalidate the day 3.4.13 is itself flagged
   #     (the undici 7.28.0 / brace-expansion 5.0.8 specimens, #4961 / #5032).
-  'dompurify@<4.0.0': '^3.4.13'
+  #     2026-10-01 (#21055): that day came. GHSA-p98j-92pf-mc4p (2.3 low) — an
+  #     IN_PLACE node-removing afterSanitize hook leaves the detached subtree's
+  #     event handlers armed (DOM XSS); range introduced:3.4.13 → fixed:3.4.16,
+  #     read from the OSV offline npm database the scanner downloads. Target
+  #     lifted from ^3.4.13, selector unchanged at the 4.0.0 boundary — the
+  #     target-only lift that boundary exists to allow. mermaid@11.16.1's
+  #     ^3.3.3 admits 3.4.16, so this is again a dedupe onto the patched line.
+  #     The floor binds this workspace's resolution only; overrides do not
+  #     reach downstream installs.
+  'dompurify@<4.0.0': '^3.4.16'
   # OSV 2026-08-08 (#6529) — same "it names a fixed version, so take the fix"
   # disposition as the two batches above; no exemption is involved.
   #   nanoid GHSA-2v37-7h3g-55p8 / CVE-2026-67213 (8.2 high) — a custom

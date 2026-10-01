@@ -237,10 +237,11 @@ describe('[#19790] a `book` entry is judged on its readable PAGES', () => {
         // The implicit `ops` book is `org` — the tree read opens (200)…
         const tree = await bookTree(rest, 'ops');
         expect(tree.statusCode).toBe(200);
-        // …and serves `crm_intro` in the synthetic Uncategorized group only. The
-        // spec calls those orphans "not an authored membership claim", so they
-        // are not the book's pages, and the entry is still dropped.
-        expect(tree.body.groups.map((g: any) => g.key)).toEqual(['uncategorized']);
+        // …and serves no group at all: both its pages are gated, and
+        // `crm_intro` is the `crm` package's doc, so it is not this book's
+        // orphan either (#20980, ADR-0046 §6.4 — the synthetic Uncategorized
+        // group holds only the book's own packages' unplaced docs).
+        expect(tree.body.groups.map((g: any) => g.key)).toEqual([]);
     });
 });
 
