@@ -67,6 +67,7 @@ import {
     metaItemLayersDeprecationHeaders,
     metaReadOrganizationId,
     metaRequestLocale,
+    metaTypeReadRefusal,
     projectMetaObjectSchema,
     refuseUnknownMetaListType,
     STORED_VERSION_DOOR_POLICY,
@@ -904,6 +905,22 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         isSystem: (_context.executionContext as any)?.isSystem,
     });
     if (anonymous && !isPublicAudienceRead(method, metaReadRouteOf(parts), parts[0])) return anonymousDeny();
+
+    // [#21087] …and `RestServer`'s type-level read admission, asked of the same
+    // predicate at the same point — after the anonymous deny, before any branch
+    // reads the store: a read of a datasource-family type is admitted on the
+    // capability that type's own door requires, so a dispatcher-only host
+    // refuses the caller `RestServer` refuses, whatever route shape the read
+    // took and whether or not the name exists. A request that names no verb is
+    // a read here (every read branch below accepts `!method`), so it is asked
+    // as one.
+    const typeReadRefusal = metaTypeReadRefusal(method ?? 'GET', parts[0], _context.executionContext);
+    if (typeReadRefusal) {
+        return {
+            handled: true,
+            response: deps.error(typeReadRefusal.message, typeReadRefusal.status, { code: typeReadRefusal.code }),
+        };
+    }
 
     // GET /metadata/types
     if (parts[0] === 'types') {

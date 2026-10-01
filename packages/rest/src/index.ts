@@ -113,6 +113,11 @@ export { refuseRepeatedQueryParams, repeatedQueryParamMessage } from './query-mu
 // deprecated `?layers=` flag's parse (`wantsMetaItemLayers`) and the headers it
 // is served under (`metaItemLayersDeprecationHeaders`). The read itself is each
 // transport's, scoped by `metaReadOrganizationId`.
+//
+// [#21087] …and the type-level read admission both transports ask at their
+// `/meta` entry, before any store read (`metaTypeReadRefusal` over
+// `META_TYPE_READ_CAPABILITIES`): a datasource-family type is read under the
+// capability its own door requires.
 export {
     createMetaBookTreeAnswer,
     createMetaItemAnswer,
@@ -121,10 +126,12 @@ export {
     createMetaListReadGate,
     createMetaListAnswer,
     isPublicAudienceRead,
+    META_TYPE_READ_CAPABILITIES,
     metaCallerOrganizationId,
     metaItemLayersDeprecationHeaders,
     metaReadOrganizationId,
     metaRequestLocale,
+    metaTypeReadRefusal,
     projectMetaObjectSchema,
     refuseUnknownMetaListType,
     STORED_VERSION_DOOR_POLICY,
@@ -151,4 +158,5 @@ export type {
     MetaReadGateCaller,
     MetaReadGatePolicy,
     MetaRequestHttp,
+    MetaTypeReadRefusal,
 } from './meta-item-read-gate.js';

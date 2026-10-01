@@ -5301,6 +5301,24 @@ export class RestServer {
                         const anonymousPublicRead = !context?.userId
                             && RestServer.isPublicAudienceRead(entry, req);
                         if (!anonymousPublicRead && this.enforceAuth(req, res, context)) return;
+                        // [#21087] The type-level read admission — a read of a
+                        // datasource-family type is admitted on the capability
+                        // that type's own door requires. Asked HERE, for the same
+                        // reason the anonymous deny is: every `/meta` route,
+                        // present and future, inherits it, and it runs before any
+                        // handler reads the store, so a refused caller is told
+                        // the same thing whether or not the name exists. The
+                        // decision is `metaTypeReadRefusal` in
+                        // `./meta-item-read-gate.ts`, the one the runtime
+                        // dispatcher's `/meta` entry asks too; this seam only
+                        // writes it, in the ADR-0112 envelope the plain read's
+                        // other `403 PERMISSION_DENIED` (an app the caller may
+                        // not open) is written in.
+                        const typeRefusal = metaReadGate.metaTypeReadRefusal(req?.method, req?.params?.type, context);
+                        if (typeRefusal) {
+                            sendEnvelopeError(res, typeRefusal.status, typeRefusal.code, typeRefusal.message);
+                            return;
+                        }
                         return (inner as (rq: any, rs: any) => unknown)(req, res);
                     },
                 } as any);
