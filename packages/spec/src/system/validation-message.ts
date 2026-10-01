@@ -128,6 +128,13 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     invalid_option: '{{label}} must be one of: {{allowed}}',
     reference_not_found: '{{label}}: no {{target}} record has id "{{value}}"',
     invalid_option_value: '{{label}}: "{{value}}" is not one of: {{allowed}}',
+    // `invalid_option`'s picklist sentences: the field takes its options from a
+    // shared picklist, so the refusal names the list (`{{picklist}}`, a
+    // message-only parameter). `_unresolved` is the field whose list no loaded
+    // package declares, which accepts no value at all.
+    invalid_option_picklist: '{{label}} must be one of the values of picklist "{{picklist}}": {{allowed}}',
+    invalid_option_value_picklist: '{{label}}: "{{value}}" is not a value of picklist "{{picklist}}": {{allowed}}',
+    invalid_option_picklist_unresolved: '{{label}} takes its values from picklist "{{picklist}}", which no loaded package declares, so no value can be accepted',
     // `value_domain` (ADR-0114 member; the field-level `valueDomain` card's
     // spec half) — the code-named default names the domain by its machine
     // word; the three finer variants (one per vocabulary member, rendering
@@ -177,6 +184,9 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     invalid_option: '{{label}}必须是以下值之一:{{allowed}}',
     reference_not_found: '{{label}}:不存在 id 为“{{value}}”的{{target}}记录',
     invalid_option_value: '{{label}}:“{{value}}”不在允许的取值范围内:{{allowed}}',
+    invalid_option_picklist: '{{label}}必须是选项列表“{{picklist}}”中的值之一:{{allowed}}',
+    invalid_option_value_picklist: '{{label}}:“{{value}}”不是选项列表“{{picklist}}”中的值:{{allowed}}',
+    invalid_option_picklist_unresolved: '{{label}}的取值来自选项列表“{{picklist}}”,但没有已加载的包声明该列表,因此无法接受任何值',
     value_domain: '{{label}}必须是 {{valueDomain}} 值域的成员(当前 “{{value}}”)',
     value_domain_iana_time_zone: '{{label}}必须是有效的 IANA 时区标识符,例如 Europe/Zurich(当前 “{{value}}”)',
     value_domain_iso_4217_currency: '{{label}}必须是有效的 ISO 4217 货币代码,例如 CHF(当前 “{{value}}”)',
@@ -219,6 +229,9 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     invalid_option: '{{label}}は次のいずれかを指定してください:{{allowed}}',
     reference_not_found: '{{label}}:id が「{{value}}」の{{target}}レコードは存在しません',
     invalid_option_value: '{{label}}:「{{value}}」は指定できません(指定可能:{{allowed}})',
+    invalid_option_picklist: '{{label}}は選択リスト「{{picklist}}」の値のいずれかを指定してください:{{allowed}}',
+    invalid_option_value_picklist: '{{label}}:「{{value}}」は選択リスト「{{picklist}}」の値ではありません(指定可能:{{allowed}})',
+    invalid_option_picklist_unresolved: '{{label}}の値は選択リスト「{{picklist}}」から取りますが、読み込まれたパッケージにこのリストがないため、値を受け付けられません',
     value_domain: '{{label}}は {{valueDomain}} 値ドメインのメンバーでなければなりません(現在「{{value}}」)',
     value_domain_iana_time_zone: '{{label}}は有効な IANA タイムゾーン識別子でなければなりません(例: Europe/Zurich、現在「{{value}}」)',
     value_domain_iso_4217_currency: '{{label}}は有効な ISO 4217 通貨コードでなければなりません(例: CHF、現在「{{value}}」)',
@@ -261,6 +274,9 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     invalid_option: '{{label}} debe ser uno de: {{allowed}}',
     reference_not_found: '{{label}}: ningún registro de {{target}} tiene el id «{{value}}»',
     invalid_option_value: '{{label}}: «{{value}}» no es uno de: {{allowed}}',
+    invalid_option_picklist: '{{label}} debe ser uno de los valores de la lista de selección «{{picklist}}»: {{allowed}}',
+    invalid_option_value_picklist: '{{label}}: «{{value}}» no es un valor de la lista de selección «{{picklist}}»: {{allowed}}',
+    invalid_option_picklist_unresolved: '{{label}} toma sus valores de la lista de selección «{{picklist}}», que ningún paquete cargado declara, así que no se puede aceptar ningún valor',
     value_domain: '{{label}} debe pertenecer al dominio de valores {{valueDomain}} (actual: «{{value}}»)',
     value_domain_iana_time_zone: '{{label}} debe ser un identificador de zona horaria IANA válido, p. ej. Europe/Zurich (actual: «{{value}}»)',
     value_domain_iso_4217_currency: '{{label}} debe ser un código de moneda ISO 4217 válido, p. ej. CHF (actual: «{{value}}»)',

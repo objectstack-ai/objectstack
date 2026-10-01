@@ -2,21 +2,45 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * doc-line-anchors -- the ONE reader for `file:line` anchors written in docs prose.
+ * doc-line-anchors -- the parser for `file:line` anchors written in docs prose,
+ * built as their ONE reader. Its one in-tree importer today is the merge driver;
+ * "Today, since #15921" below is the current state, and the rest of this header
+ * is the record of why the module exists.
  *
  * A docs page that cites source by `` `<file>.ts:1560` `` has created a
  * two-sided invariant with no owner: the line lives in one tree, the citation in
  * another, and nothing relates them. Measured on
- * `content/docs/permissions/system-context.mdx` over 19 days, **101 of its 111
- * anchors rotted** -- the construct still existed, the line number no longer
- * named it -- while CI stayed green throughout.
+ * `content/docs/permissions/system-context.mdx` over 19 days, while it still
+ * carried them, **101 of its 111 anchors rotted** -- the construct still existed,
+ * the line number no longer named it -- while CI stayed green throughout.
  *
- * This module is the parsing half of the fix, kept separate from the gate that
- * uses it because the defect is not specific to one page: any page carrying
+ * This module was the parsing half of the fix, kept separate from the gate that
+ * used it because the defect is not specific to one page: any page carrying
  * `file:line` anchors has it, and the second page should cost a ledger rather
  * than a parser.
  *
- * ## The three anchor shapes, all of which are real on the corpus
+ * ## Today, since #15921
+ *
+ * That page now cites source by `path#symbol`. The grammar is
+ * `scripts/symbol-anchors.mjs`, which reads a line-number spelling only to report
+ * it as a finding, and the page's census gate reads its anchors through that
+ * module, not this one. So on the page this module was built for,
+ * `extractLineAnchors` finds nothing and `blankAnchorLineNumbers` is the IDENTITY
+ * -- measured on #16612: `extractLineAnchors(page).length === 0` and
+ * `blankAnchorLineNumbers(page) === page`.
+ *
+ * The one in-tree importer is `scripts/git-merge-regen.mjs`: its `'line-anchors'`
+ * comparator is `blankAnchorLineNumbers`, selected by that page's `mixed` field in
+ * `scripts/regen-artifacts.mjs`. The identity is the intended answer there, not a
+ * broken one. The driver proves a deferral lossless only when the incoming side
+ * equals the ancestor or ours byte for byte, so every real edit to the page takes
+ * the text-merge branch, or conflicts loudly, by design -- and the field stays,
+ * because it is what sends the page through that check at all (that row's comment
+ * carries the measurement). The account of `--fix` in `blankAnchorLineNumbers`'s
+ * docblock below is the pre-#15921 one: the census `--fix` no longer touches
+ * anchors, and regenerates only the page's declared counts.
+ *
+ * ## The three anchor shapes, all of which were real on that page
  *
  * A naive reader finds only the first and undercounts by a third.
  *
@@ -54,8 +78,9 @@
  * ## What is deliberately NOT here
  *
  * No knowledge of what a line should CONTAIN. That is the consuming gate's
- * question -- for `system-context.mdx` it is answered by an AST census -- and
- * baking any answer in here would make the module single-use.
+ * question -- for `system-context.mdx` it was answered by an AST census, which
+ * since #15921 holds that page's symbol anchors instead -- and baking any answer
+ * in here would make the module single-use.
  *
  * @module
  */

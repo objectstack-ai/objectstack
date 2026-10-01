@@ -67,7 +67,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -177,7 +177,16 @@ if (existsSync(RECORD_PATH)) {
 // would be for a file sitting in `apps/console/`, and the build tree gets no
 // file written into it. The one other accommodation plain Node needs: `.css`
 // side-effect imports (plugin-dashboard, plugin-map) resolve to an empty module.
-const runnerDir = mkdtempSync(join(tmpdir(), 'sdui-manifest-runner-'));
+//
+// The hook re-anchors only when `parentURL` EQUALS `RUNNER`, and Node reports a
+// module's URL by its REALPATH. So the directory is resolved before any URL is
+// built from it: a temp base reached through a symlink (macOS's default TMPDIR,
+// `/var` -> `/private/var`) otherwise leaves `RUNNER` naming a path Node never
+// reports, nothing is re-anchored, and every registry import fails with
+// `Cannot find package`. `ANCHOR` is only handed on as a parent and never
+// compared, so it needs no resolving. Pinned with a symlinked TMPDIR by
+// `scripts/check-sdui-manifest.mjs --self-test`.
+const runnerDir = realpathSync(mkdtempSync(join(tmpdir(), 'sdui-manifest-runner-')));
 const runnerPath = join(runnerDir, 'sdui-manifest-runner.mjs');
 const runnerUrl = pathToFileURL(runnerPath).href;
 const anchorUrl = pathToFileURL(join(MODULES_ROOT, 'package.json')).href;
