@@ -49,6 +49,7 @@ import { readScopeUnresolvedError } from './read-scope-refusal.js';
 // every member a query names, judged against the caller's readable fields.
 import {
   assertNamedFieldsReadable,
+  assertCallerMembersJudgeable,
   type QueryableFieldsProvider,
   type NamedField,
   type NamedRead,
@@ -502,7 +503,10 @@ function namedQueryFields(
     const sql = entry ? entry.sql : member;
     const fields = typeof sql === 'string' ? fieldsOfColumnSql(cube, baseObject, sql, role, referenceOf) : null;
     if (fields) out.push(...fields);
-    else out.push({ object: baseObject, member, expression: true });
+    // [#21156] `declared` records WHICH text is the expression: the author's
+    // declared `sql` (`entry` present) or the member the caller named itself
+    // (`entry` absent). The caller-supplied kind is refused in every tier.
+    else out.push({ object: baseObject, member, expression: true, declared: !!entry });
   };
   const filterMembers = (where: unknown): string[] => {
     if (!where || typeof where !== 'object') return [];
@@ -1804,6 +1808,45 @@ export class AnalyticsService implements IAnalyticsService {
    * A no-op when no provider is wired (no security service) or when the query
    * names no field.
    */
+  /**
+   * [#21156] The member-SHAPE gate, asked at the door for every member the
+   * caller named — BEFORE inference mints it into the cube and before a
+   * strategy compiles it. A member that is neither a column reference (a field,
+   * a relationship path, or `'*'`) nor a member the cube's author declared is
+   * refused `PERMISSION_DENIED` / 403, the SAME refusal the field-level gate
+   * reaches where it judges (#21153), whoever the caller is and whatever the
+   * tier.
+   *
+   * It is the tier-independent complement of {@link assertFieldsReadable}: that
+   * gate is a no-op with no security service and stands down on an object its
+   * reader answers `undefined` for, which is exactly where caller-supplied text
+   * that is not a column reference reached `NativeSQLStrategy`'s statement as
+   * written. See `field-read-admission.ts`.
+   *
+   * ## Judged against the cube BEFORE inference
+   *
+   * `authorCube` is `scope.getCube(name)` as it stood before {@link ensureCube}
+   * inferred one — `undefined` for an ad-hoc query, which {@link
+   * inferCubeFromQuery} would mint every caller member into. A probe cube with
+   * the base object but NO declared members stands in for that case, so a
+   * caller member laundered into an inferred dimension still reads as
+   * caller-supplied. A dataset's own filter is author text and is deliberately
+   * not judged here (no `datasetScope` is passed); #21153's gate judges it
+   * where it applies.
+   */
+  private assertCallerMembersResolvable(
+    query: AnalyticsQuery,
+    authorCube: Cube | undefined,
+    context: ExecutionContext | undefined,
+  ): void {
+    const name = query.cube;
+    if (!name) return;
+    const probeCube: Cube =
+      authorCube ?? ({ name, title: name, sql: name, measures: {}, dimensions: {} } as Cube);
+    const named = namedQueryFields(query, probeCube, undefined, this.hopReference);
+    assertCallerMembersJudgeable(named, this.logger, context);
+  }
+
   private async assertFieldsReadable(
     query: AnalyticsQuery,
     cube: Cube | undefined,
@@ -1937,7 +1980,14 @@ export class AnalyticsService implements IAnalyticsService {
       scope.getCube(queryInput.cube),
     );
 
+    // [#21156] The pre-inference cube: `undefined` here means the ad-hoc path
+    // will mint one, so every member the caller named must stand on its own.
+    const authorCube = scope.getCube(query.cube!);
     this.ensureCube(query, scope);
+    // [#21156] Refuse a caller-named member that is not a column reference and
+    // names no declared member — in every tier, before a strategy compiles it.
+    // After `ensureCube` so a non-existent cube/object still answers 404 first.
+    this.assertCallerMembersResolvable(query, authorCube, context);
     const ctx = await this.callCtx(query, context, tokenCtx, scope);
     let skip: Set<AnalyticsStrategy> | undefined;
     for (;;) {
@@ -2723,7 +2773,12 @@ export class AnalyticsService implements IAnalyticsService {
       this.resolveQueryTokens(queryInput, tokenCtx),
       scope.getCube(queryInput.cube),
     );
+    // [#21156] Same member-shape gate as `query()`: the dry-run door must not
+    // compile a caller-named non-column member into the statement it hands back
+    // either. Pre-inference cube captured before `ensureCube`.
+    const authorCube = scope.getCube(query.cube!);
     this.ensureCube(query, scope);
+    this.assertCallerMembersResolvable(query, authorCube, context);
     const ctx = await this.callCtx(query, context, tokenCtx, scope);
     const strategy = this.resolveStrategy(query, ctx);
     this.logger.debug(`[Analytics] generateSql on cube "${query.cube}" → ${strategy.name}`);
