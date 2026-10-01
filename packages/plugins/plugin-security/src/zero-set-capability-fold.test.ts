@@ -2,14 +2,17 @@
 
 /**
  * [#21063] A capability-gated field reaches a caller who resolves NO
- * permission set as what it declares: hidden on read, refused on write.
+ * permission set as what it declares: hidden on read, refused on write — and
+ * [#21079] that caller, when it carries a principal, is refused the object
+ * itself (the ADR-0056 D2 deny baseline), ahead of every field gate.
  *
  * `requiredPermissions` on a field declares "mask on read, deny on write;
  * AND-gate" (ADR-0066 D3). A caller who resolves no permission set holds no
  * capability, so the gate applies to it. The field here declares the gate and
  * NO masking rule, so "mask on read" is the hidden state: the key is not
- * served. The explain engine has always reported that; the record doors now
- * agree with it.
+ * served. The explain engine has always reported that, and the field answers
+ * agree with it. The record doors refuse the object outright, which explain's
+ * `object_crud` layer has always reported for this caller too.
  *
  * The caller class is pinned three ways, each by what resolution answers for
  * it rather than by a door (the three `zero-set-masking.test.ts` pins): a
@@ -21,16 +24,15 @@
  *
  * For each, ONE derivation answers every reader:
  *
- *  - the record door (the middleware's result masker) does not serve the
- *    field, and explain's `fls` layer reports it masked from responses: the
- *    two agree;
+ *  - the record door refuses the read at object admission, and explain
+ *    agrees: `object_crud` denies, `allowed` is false, and its `fls` layer
+ *    still reports the field masked from responses;
  *  - `getReadableFields` and `getMetadataReadableFields` leave it out;
- *  - `getQueryableFields` equals the middleware's predicate and
- *    aggregate-input guards field for field, position for position, and
- *    leaves it out;
- *  - a write naming it is refused by the middleware's field write gate, and
- *    `getWritableFields` and `canWriteObject` agree with that gate field for
- *    field.
+ *  - `getQueryableFields` leaves it out, and the middleware refuses every
+ *    query at object admission before its query guards are asked;
+ *  - `getWritableFields` leaves it out, and every write — naming it or not —
+ *    is refused at object admission, with `canWriteObject` agreeing with the
+ *    middleware field for field.
  *
  * Controls: a caller holding the capability is served the stored value and may
  * query and write the field; a caller holding a set without the capability
@@ -112,6 +114,7 @@ async function boot(opts: { noBaseline?: boolean } = {}) {
   const security = registerService.mock.calls.find((c: any[]) => c[0] === 'security')?.[1] as {
     resolvePermissionSetsForContext: (context: unknown) => Promise<PermissionSet[]>;
     explain: (request: { object: string; operation: string }, context: unknown) => Promise<{
+      allowed: boolean;
       layers: Array<{ layer: string; verdict: string; detail: string }>;
     }>;
   };
@@ -127,6 +130,9 @@ const PROBES: ReadonlyArray<readonly [string, 'find' | 'aggregate', (field: stri
 ];
 
 type Verdict = { admitted: true } | { admitted: false; code?: unknown; status?: unknown };
+
+/** [#21079] The middleware's object-admission refusal: the deny baseline's answer to an empty set list. */
+const REFUSED_AT_ADMISSION = { admitted: false, code: 'PERMISSION_DENIED', status: 403 } as const;
 
 async function run(
   middleware: (opCtx: any, next: () => Promise<void>) => Promise<void>,
@@ -191,13 +197,21 @@ describe('[#21063] a caller who resolves no permission set is not served a capab
         expect(await security.resolvePermissionSetsForContext({ ...c.context })).toEqual([]);
       });
 
-      it('the record door does not serve the field, and explain agrees: hidden on both', async () => {
+      it('[#21079] the record door refuses the read at object admission, and explain agrees: the object denied, the field hidden', async () => {
         const { middleware, security } = await boot({ noBaseline: c.noBaseline });
-        const row = await served(middleware, c.context);
-        const door = { title: row.title, gatedServed: GATED in row };
-        const explained = await explainHides(security, c.context, GATED);
-        expect({ door, explainHides: explained }).toEqual({
-          door: { title: ROW.title, gatedServed: false },
+        const door = await run(middleware, {
+          object: 'ledger', operation: 'find', context: { ...c.context }, options: {}, ast: { where: {} },
+        });
+        const decision = await security.explain({ object: 'ledger', operation: 'read' }, { ...c.context });
+        expect({
+          door,
+          explainAllowed: decision.allowed,
+          explainObjectCrud: decision.layers.find((l) => l.layer === 'object_crud')?.verdict,
+          explainHides: await explainHides(security, c.context, GATED),
+        }).toEqual({
+          door: REFUSED_AT_ADMISSION,
+          explainAllowed: false,
+          explainObjectCrud: 'denies',
           explainHides: true,
         });
       });
@@ -208,43 +222,33 @@ describe('[#21063] a caller who resolves no permission set is not served a capab
         expect(await plugin.getMetadataReadableFields('ledger', { ...c.context })).toEqual(WITHOUT_GATED);
       });
 
-      it('the query projection and the middleware\'s query guards agree, field for field, and leave the field out', async () => {
+      it('the query projection leaves the field out, and [#21079] the middleware refuses every query at object admission', async () => {
         const { plugin, middleware } = await boot({ noBaseline: c.noBaseline });
-        const queryable = await plugin.getQueryableFields('ledger', { ...c.context });
-        expect(queryable).toEqual(WITHOUT_GATED);
+        expect(await plugin.getQueryableFields('ledger', { ...c.context })).toEqual(WITHOUT_GATED);
         for (const field of FIELDS) {
           for (const [position, operation, ast] of PROBES) {
             const verdict = await run(middleware, {
               object: 'ledger', operation, context: { ...c.context }, options: {}, ast: ast(field),
             });
-            if (queryable!.includes(field)) {
-              expect(verdict, `${field} as ${position}`).toEqual({ admitted: true });
-            } else {
-              expect(verdict, `${field} as ${position}`).toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403 });
-            }
+            expect(verdict, `${field} as ${position}`).toEqual(REFUSED_AT_ADMISSION);
           }
         }
       });
 
-      it('the write gate refuses the field, and the write projection and the write admission agree with it, field for field', async () => {
+      it('the write projection leaves the field out, and [#21079] every write is refused at object admission, with the write admission agreeing field for field', async () => {
         const { plugin, middleware } = await boot({ noBaseline: c.noBaseline });
-        const writable = await plugin.getWritableFields('ledger', { ...c.context });
-        expect(writable).toEqual(WITHOUT_GATED);
+        expect(await plugin.getWritableFields('ledger', { ...c.context })).toEqual(WITHOUT_GATED);
         for (const operation of ['insert', 'update'] as const) {
           for (const field of FIELDS) {
             const data = { [field]: PAYLOAD_VALUE[field] };
             const verdict = await run(middleware, {
               object: 'ledger', operation, context: { ...c.context }, options: {}, ast: { where: {} }, data,
             });
-            if (writable!.includes(field)) {
-              expect(verdict, `${operation} naming ${field}`).toEqual({ admitted: true });
-            } else {
-              expect(verdict, `${operation} naming ${field}`).toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403 });
-            }
+            expect(verdict, `${operation} naming ${field}`).toEqual(REFUSED_AT_ADMISSION);
             expect(
               await plugin.canWriteObject('ledger', operation, { ...c.context }, data),
               `canWriteObject: ${operation} naming ${field}`,
-            ).toBe(verdict.admitted);
+            ).toBe(false);
           }
         }
       });

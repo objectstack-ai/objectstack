@@ -1,13 +1,15 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#20995] A masking rule reaches a caller who resolves NO permission set.
+ * [#20995] A masking rule reaches a caller who resolves NO permission set —
+ * and [#21079] that caller, when it carries a principal, is refused the object
+ * itself (the ADR-0056 D2 deny baseline).
  *
  * `maskingRule` declares itself for "every non-system caller unless the
  * field's `requiredPermissions` are ALL held", and "masked callers cannot
  * filter/sort/group/aggregate on the field". A caller who holds no permission
- * set holds no capability, so every rule applies to them: the field is served
- * masked and is not queryable.
+ * set holds no capability, so every rule applies to them in the FIELD answers:
+ * the field is a served column that is not queryable.
  *
  * The caller class is pinned three ways, each by what resolution answers for
  * it rather than by a door: a user id on a deployment with no baseline, a
@@ -16,17 +18,20 @@
  * premise (zero sets resolved), so a later change to resolution moves the case
  * out of the class loudly instead of silently testing something else.
  *
- * For each, the published answers and the engine middleware read ONE
- * derivation:
+ * For each:
  *
- *  - `getQueryableFields` equals the middleware's predicate and aggregate-input
- *    guards, field for field and position for position (the equivalence the
- *    #20935 suite holds for callers who resolve sets), and excludes every
- *    masked field;
- *  - result masking serves the masked fields masked, and `getReadableFields`
- *    keeps them as served columns;
- *  - a write echoing the masked placeholder is refused, as for any masked
- *    caller, so serving the mask cannot turn into overwriting the value.
+ *  - `getQueryableFields` still excludes every masked field, and the
+ *    middleware refuses every query at object admission
+ *    (`PERMISSION_DENIED`, 403) before any field guard is asked;
+ *  - the read is refused at object admission and the row scope is the deny
+ *    sentinel, while `getReadableFields` keeps the masked fields as served
+ *    columns (a field answer, not an object one);
+ *  - a write echoing the masked placeholder is refused, now at object
+ *    admission, ahead of the echo gate.
+ *
+ * The result masker's zero-set reading is still reached on the data plane
+ * through the public-form grant, which admits ahead of object admission; that
+ * door is pinned in `public-form-grant-masking.test.ts`.
  *
  * The last block pins the class's boundary: a principal-less context (no
  * position, no named set, no user id) is handed straight through by the
@@ -40,6 +45,7 @@ import type { PermissionSet } from '@objectstack/spec/security';
 import type { FieldMaskingRule } from '@objectstack/spec/data';
 import { SecurityPlugin } from './security-plugin.js';
 import { maskFieldValue } from './field-masker.js';
+import { RLS_DENY_FILTER } from './rls-compiler.js';
 
 const RULE: FieldMaskingRule = { keepHead: 1, keepTail: 1 };
 const SCHEMAS: Record<string, unknown> = {
@@ -135,7 +141,10 @@ const ZERO_SET_CASES: Array<{ label: string; noBaseline?: boolean; context: Reco
   },
 ];
 
-describe('[#20995] a caller who resolves no permission set is served a masked field masked, and may not query on it', () => {
+/** [#21079] The middleware's object-admission refusal: the deny baseline's answer to an empty set list. */
+const REFUSED_AT_ADMISSION = { admitted: false, code: 'PERMISSION_DENIED', status: 403 } as const;
+
+describe('[#20995] a caller who resolves no permission set: every masking rule applies in its field answers, and [#21079] object admission refuses it', () => {
   for (const c of ZERO_SET_CASES) {
     describe(c.label, () => {
       it('premise: resolution answers no permission set for this caller', async () => {
@@ -143,46 +152,36 @@ describe('[#20995] a caller who resolves no permission set is served a masked fi
         expect(await security.resolvePermissionSetsForContext({ ...c.context })).toEqual([]);
       });
 
-      it('the query projection and the middleware\'s query guards agree, field for field, and exclude every masked field', async () => {
+      it('the query projection excludes every masked field, and the middleware refuses every query at object admission', async () => {
         const { plugin, middleware } = await boot({ noBaseline: c.noBaseline });
-        const queryable = await plugin.getQueryableFields('ledger', { ...c.context });
-        expect(queryable).toEqual(FIELDS.filter((f) => !MASKED.includes(f)));
+        expect(await plugin.getQueryableFields('ledger', { ...c.context })).toEqual(FIELDS.filter((f) => !MASKED.includes(f)));
         for (const field of FIELDS) {
           for (const [position, operation, ast] of PROBES) {
             const verdict = await run(middleware, {
               object: 'ledger', operation, context: { ...c.context }, options: {}, ast: ast(field),
             });
-            if (queryable!.includes(field)) {
-              expect(verdict, `${field} as ${position}`).toEqual({ admitted: true });
-            } else {
-              expect(verdict, `${field} as ${position}`).toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403 });
-            }
+            expect(verdict, `${field} as ${position}`).toEqual(REFUSED_AT_ADMISSION);
           }
         }
       });
 
-      it('result masking serves the masked fields masked, and the read projection keeps them as served columns', async () => {
+      it('the read is refused at object admission and its row scope is the deny sentinel; the read projection keeps the masked fields as served columns', async () => {
         const { plugin, middleware } = await boot({ noBaseline: c.noBaseline });
         const opCtx: Record<string, any> = {
-          object: 'ledger', operation: 'find', context: { ...c.context }, options: {}, ast: { where: {} }, result: [{ ...ROW }],
+          object: 'ledger', operation: 'find', context: { ...c.context }, options: {}, ast: { where: {} },
         };
-        expect(await run(middleware, opCtx)).toEqual({ admitted: true });
-        const served = opCtx.result[0];
-        expect(served.title).toBe(ROW.title);
-        for (const f of MASKED) {
-          expect(served[f], f).toBe(maskFieldValue((ROW as Record<string, string>)[f], RULE));
-          expect(served[f], f).not.toBe((ROW as Record<string, string>)[f]);
-        }
+        expect(await run(middleware, opCtx)).toEqual(REFUSED_AT_ADMISSION);
+        expect(await plugin.getReadFilter('ledger', { ...c.context })).toEqual({ ...RLS_DENY_FILTER });
         expect(await plugin.getReadableFields('ledger', { ...c.context })).toEqual(FIELDS);
       });
 
-      it('a write echoing the masked placeholder is refused, so the served mask never overwrites the value', async () => {
+      it('a write echoing the masked placeholder is refused — at object admission, ahead of the echo gate', async () => {
         const { middleware } = await boot({ noBaseline: c.noBaseline });
         const verdict = await run(middleware, {
           object: 'ledger', operation: 'update', context: { ...c.context }, options: {},
           data: { id: 'r1', always_masked: maskFieldValue(ROW.always_masked, RULE) },
         });
-        expect(verdict).toMatchObject({ admitted: false, code: 'VALIDATION_ERROR', status: 400 });
+        expect(verdict).toEqual(REFUSED_AT_ADMISSION);
       });
     });
   }

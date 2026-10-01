@@ -258,6 +258,13 @@ export interface ISecurityService {
    * matches zero rows — never `undefined`. `undefined` means one thing only:
    * this caller has no row restriction on this object.
    *
+   * **The deny baseline (ADR-0056 D2).** A non-system caller that carries a
+   * principal (a position, a named permission set or a user id) and resolves
+   * NO permission set gets the same DENY filter: an empty set list grants no
+   * row, as it grants no object ({@link canReadObject}). Only a context that
+   * carries no principal at all keeps the scope the other layers compose for
+   * it (ADR-0096 stages that context separately).
+   *
    * **⚠️ Request-scoped: call it per request, and never memoise what it
    * returns.** The documented use — `engine.find(object, { where: await
    * security.getReadFilter(object, ctx) })` — puts a PLATFORM-authored
@@ -320,21 +327,22 @@ export interface ISecurityService {
    * the app-declared baseline COMPOSED with the platform `member_default`,
    * #7555) instead of falling open to the data plane's answer for that caller.
    *
-   * **Why the two differ rather than converge.** `getReadableFields` mirrors the
-   * engine middleware, which skips its permission-set GRANT gates for a caller
-   * with no permission sets but still applies each field's own declarations to
-   * it: a `maskingRule` serves the value masked, and a field's
+   * **Why the two differ rather than converge.** `getReadableFields` is a
+   * FIELD-level answer and mirrors the engine middleware's field gates, which
+   * apply each field's own declarations to a caller with no permission sets: a
+   * `maskingRule` serves the value masked, and a field's
    * `requiredPermissions`, none of which that caller holds, keeps the field
-   * from being served. On the DATA plane, reporting a narrowing the enforcement
-   * path would not apply is its own kind of drift, so the full field set minus
+   * from being served. Whether that caller may read the OBJECT is not part of
+   * it — that is {@link canReadObject}'s answer, the deny baseline for a caller
+   * that carries a principal. So on the DATA plane the full field set minus
    * the capability-gated fields that caller is not served is the correct,
-   * drift-free answer there. The metadata plane has no such symmetry to
+   * drift-free field answer. The metadata plane has no such symmetry to
    * preserve — the question is disclosure, and D7 rules that a public/guest
    * deployment's schema exposure must be a deliberate permission-set decision
    * rather than an accidental everything-default. It still answers as the data
    * plane does when the fallback set itself resolves to nothing (no
-   * `member_default` in the deployment at all): that is the "no FLS posture
-   * here" tier, not a restricted caller.
+   * `member_default` in the deployment at all): there is then no baseline to
+   * disclose by, and the field answer is all that is left to give.
    *
    * **Fails SOFT, with the same two distinct empty answers as
    * {@link getReadableFields}:** `undefined` is "no answer — use your own
@@ -564,9 +572,11 @@ export interface ISecurityService {
    *
    * **Fails CLOSED.** This is an access-narrowing answer: implementations return
    * `false` (and callers must treat a throw as `false`) rather than degrading to
-   * "allowed". A system context bypasses and returns `true`; so does a caller
-   * with no resolved permission sets, mirroring the middleware, whose CRUD gate
-   * is skipped entirely when set resolution comes back empty.
+   * "allowed". A system context bypasses and returns `true`. A caller that
+   * carries a principal and resolves no permission set gets `false` — the
+   * ADR-0056 D2 deny baseline, mirroring the middleware, whose CRUD gate
+   * refuses that caller's read; only a context that carries no principal at
+   * all is admitted, as the middleware hands it through (ADR-0096).
    */
   canExport(object: string, context?: SecurityContext): Promise<boolean>;
 
@@ -585,7 +595,9 @@ export interface ISecurityService {
    * deployment. Any door that bypasses the engine middleware MUST ask both.
    *
    * The verdict is the middleware's own read gate, arm for arm and in its order:
-   * the `isSystem` bypass, the "no permission sets resolved" skip, the
+   * the `isSystem` bypass, the ADR-0056 D2 deny baseline for a caller that
+   * carries a principal and resolves no permission set (only a context that
+   * carries no principal at all is handed through), the
    * fail-closed refusal on an unresolvable object posture, the ADR-0066 D3
    * `requiredPermissions` capability AND-gate, the `allowRead` CRUD grant, and
    * the ADR-0090 D10 delegator intersection for an on-behalf-of caller. It is
@@ -600,9 +612,11 @@ export interface ISecurityService {
    *
    * **Fails CLOSED.** This is an access-narrowing answer: implementations return
    * `false` (and callers must treat a throw as `false`) rather than degrading to
-   * "allowed". A system context bypasses and returns `true`; so does a caller
-   * with no resolved permission sets, mirroring the middleware, whose CRUD gate
-   * is skipped entirely when set resolution comes back empty.
+   * "allowed". A system context bypasses and returns `true`. A caller that
+   * carries a principal and resolves no permission set gets `false` — the
+   * ADR-0056 D2 deny baseline, mirroring the middleware, whose CRUD gate
+   * refuses that caller; only a context that carries no principal at all is
+   * admitted, as the middleware hands it through (ADR-0096).
    *
    * **OPTIONAL, and absence is a defined state — not a bug.** A security service
    * that predates this method omits it, and a consumer resolving the service as

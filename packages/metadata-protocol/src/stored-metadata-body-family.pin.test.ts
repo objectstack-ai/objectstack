@@ -30,6 +30,11 @@
  *    (`stored-metadata-body-refusal.test.ts`);
  *  - realtime `data.record.*` events → `@objectstack/objectql`
  *    (`engine-realtime-stored-metadata-body.test.ts`);
+ *  - the MCP stdio transport's engine-only reader — the bridge's query / get /
+ *    aggregate verbs and the ADR-0101 record resource — → `@objectstack/mcp`
+ *    (`stdio-data-bridge.stored-metadata-body.test.ts`, which also enumerates
+ *    every bridge member and every engine read call site of that package, so a
+ *    new reader there fails its pin instead of joining silently) [#21207];
  *  - the generic data door reads / groupBy / filter+sort → this package
  *    (`protocol.data-door-stored-metadata-redaction.test.ts`, and the behaviour
  *    asserted below).
@@ -62,6 +67,16 @@ const FAMILY_SURFACES = [
   { surface: 'audit / activity copy at write time', disposition: 'seam', pin: '@objectstack/plugin-audit' },
   { surface: 'analytics members on the body column', disposition: 'refuses', pin: '@objectstack/service-analytics' },
   { surface: 'realtime data.record.* event body', disposition: 'seam', pin: '@objectstack/objectql' },
+  {
+    surface: 'MCP stdio engine-only reader: query / get verbs and the record resource',
+    disposition: 'seam',
+    pin: '@objectstack/mcp',
+  },
+  {
+    surface: 'MCP stdio engine-only reader: group / filter / sort / aggregate member on the body column',
+    disposition: 'refuses',
+    pin: '@objectstack/mcp',
+  },
 ] as const;
 
 /** A stored datasource body as it sits in the `metadata` column: serialized JSON with credential material. */
@@ -129,8 +144,9 @@ describe('[#21120] stored-metadata-body family — the data door exposes only co
       expect(['seam', 'refuses']).toContain(s.disposition);
       expect(s.pin.length).toBeGreaterThan(0);
     }
-    // One row per the three local data-door surfaces + three cross-package ones.
-    expect(FAMILY_SURFACES).toHaveLength(6);
+    // One row per the three local data-door surfaces + five cross-package ones
+    // (audit, analytics, realtime, and the MCP stdio reader's seam and refusal).
+    expect(FAMILY_SURFACES).toHaveLength(8);
   });
 });
 
