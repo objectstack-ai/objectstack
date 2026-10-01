@@ -37,7 +37,7 @@ import {
   parseDateCell,
   parseNumberCell,
   splitMulti,
-} from './import-coerce.js';
+} from '@objectstack/core';
 import { buildFieldMetaMap } from './export-format.js';
 import { loadXlsxWorkbook } from './xlsx-test-loader.js';
 
