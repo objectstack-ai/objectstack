@@ -418,7 +418,7 @@
     "@objectstack/dogfood#test": {
       "dependsOn": ["^build"],
       "outputs": [],
-      "env": ["OS_TEST_TIERS"],
+      "env": ["OS_TEST_TIERS", "OS_TEST_SHARD"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
