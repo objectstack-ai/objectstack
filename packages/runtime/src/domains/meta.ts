@@ -42,6 +42,9 @@ import {
 // which is the whole reason `MetaDomainProtocol` below is `Pick`ed rather than
 // written out. Same move `domains/packages.ts` and `domains/mcp.ts` make.
 import type { MetadataProtocol } from '@objectstack/spec/api';
+// [#21002] The implementation class, for the ONE member it declares that this
+// domain asks (`isShippedFlowName`) — `Pick`ed below, never restated.
+import type { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 // [#20193] THE per-caller read gate of a `/meta/:type/:name` document — the one
 // `RestServer` asks, published by `@objectstack/rest` so this transport asks it
 // too instead of a second audience resolver (ruling `5793362670` item 1).
@@ -145,10 +148,18 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
  * `unknown` rather than `string`, for the same reason the verbs above keep
  * `any` requests — nothing declares its type, and the only thing that branch
  * asks of it is whether it is `undefined`.
+ *
+ * [#21002] A third group: `isShippedFlowName`, the predicate the layered read
+ * decides its effective layer with, which `/published` asks so it follows that
+ * decision. Its signature is DECLARED — on `ObjectStackProtocolImplementation`
+ * itself — so it is `Pick`ed from that class, never restated: a rename at the
+ * producer is a compile error here, the same move `domains/automation.ts`
+ * makes for `packagedBaseRefusal`.
  */
 export type MetaDomainProtocol =
     Partial<Pick<MetadataProtocol,
         'getMetaTypes' | 'getMetaItems' | 'getMetaItem' | 'saveMetaItem' | 'getMetaItemLayered'>>
+    & Partial<Pick<ObjectStackProtocolImplementation, 'isShippedFlowName'>>
     & {
         /** ⚠️ Undeclared request shapes — see "Where the ledger honestly ends". */
         listDrafts?(request: any): Promise<any>;
@@ -1132,7 +1143,19 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     ...(organizationId ? { organizationId } : {}),
                 });
                 if (layered?.overlay !== undefined && layered?.overlay !== null) {
-                    publishedOverlay = layered.overlay;
+                    // [#21002, ADR-0126 §2] As `RestServer`'s `/published`: when
+                    // the layered read put the LOADER's body over this stored
+                    // row — a shipped flow name, decided by the protocol's
+                    // `isShippedFlowName`, asked with the answer's own `type` /
+                    // `name` and never re-derived here — serve that effective
+                    // layer, not the row (`flow` is Regime C, "never an overlay
+                    // read path"). Every other stored row, an `object`'s
+                    // included, and every row of a protocol without the
+                    // predicate, is served exactly as before.
+                    publishedOverlay = typeof protocol.isShippedFlowName === 'function'
+                        && protocol.isShippedFlowName(layered.type, layered.name)
+                        ? layered.effective
+                        : layered.overlay;
                 }
             } catch { /* fall through to the code/package snapshot below */ }
         }

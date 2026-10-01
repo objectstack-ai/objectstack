@@ -8494,7 +8494,26 @@ export class RestServer {
                                         : {}),
                                 });
                                 if (layered?.overlay !== undefined && layered?.overlay !== null) {
-                                    publishedOverlay = layered.overlay;
+                                    // [#21002, ADR-0126 §2] When the layered
+                                    // read put the LOADER's body over this stored
+                                    // row — a shipped flow name, decided by the
+                                    // protocol's `isShippedFlowName` — this door
+                                    // serves that effective layer, not the row:
+                                    // `flow` is Regime C, "never an overlay read
+                                    // path". The predicate is ASKED of its owner
+                                    // with the answer's own `type` / `name`,
+                                    // never re-derived here, so this door and
+                                    // `getMetaItemLayered` read one rule. Every
+                                    // other stored row is served exactly as
+                                    // before — an `object` too, whose effective
+                                    // layer differs from its row by folding, not
+                                    // by this decision — and so is every row of a
+                                    // protocol that brings no such predicate.
+                                    const shippedFlow: { isShippedFlowName?(type: string, name: unknown): boolean } = publishedProtocol;
+                                    publishedOverlay = typeof shippedFlow.isShippedFlowName === 'function'
+                                        && shippedFlow.isShippedFlowName(layered.type, layered.name)
+                                        ? layered.effective
+                                        : layered.overlay;
                                 }
                             } catch (overlayError: any) {
                                 // [#5532] The overlay read is NOT blanket-swallowed,
