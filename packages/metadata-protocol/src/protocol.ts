@@ -32,6 +32,7 @@ import {
     SDUI_MANIFEST_SERVICE,
     isUsableSduiManifest,
     stampHtmlPageRequires,
+    findPageRequiresAbsentFromManifest,
     type RuntimePendingDeclarations,
 } from './runtime-authoring-gate.js';
 // [#7560] ADR-0070's read-only-package rule, shared with the `/packages`
@@ -5049,6 +5050,12 @@ export class ObjectStackProtocolImplementation implements
      * cached from a too-early read would switch the save door's page compile
      * off for the life of the process. A re-registered value is therefore seen
      * by the next publish.
+     *
+     * The same read serves the two other moments ADR-0080 §5 meets a page's
+     * `requires`: the draft → active promotion ({@link promoteDraftForPublish}
+     * re-stamps the promoted body) and the load of stored pages
+     * ({@link loadMetaFromDb} reports a page naming a plugin the manifest does
+     * not carry). One channel, three readers — never a second manifest read.
      *
      * `undefined` when nothing is registered: the save door then judges an html
      * page exactly as it did before the key existed, and the host that
@@ -18862,8 +18869,22 @@ export class ObjectStackProtocolImplementation implements
             name: request.name,
             org: orgId ?? 'env',
         } as Parameters<typeof repo.promoteDraft>[0];
+        // [#20312] ADR-0080 §5: `requires` is derived from the source at save,
+        // and this promotion is the second way a body reaches `active`. The
+        // draft's own `requires` was computed against whatever manifest the
+        // host had at the DRAFT's save — none at all for a draft saved before
+        // the host registered one — so carrying it forward would let a stale
+        // stamp, or no stamp, become the active row. The promoted body is
+        // re-stamped with the save door's own computation instead, against the
+        // manifest read now, through the same key. The gate above already
+        // refused a draft whose source does not compile or whose `requires`
+        // disagrees with it (exactly as an active save refuses them), so what
+        // reaches the stamp is a body it either fills in or re-spells. A host
+        // with no manifest promotes the draft as written, as it saves it.
+        const sduiManifest = this.resolveSduiManifest();
         try {
             const result = await repo.promoteDraft(ref, {
+                deriveActiveBody: (draftBody) => stampHtmlPageRequires(singularType, draftBody, sduiManifest),
                 // #4556 — NULL, not 'system', for an actor-less publish.
                 actor: request.actor ?? null,
                 source: 'protocol.publishMetaItem',
@@ -23265,6 +23286,11 @@ export class ObjectStackProtocolImplementation implements
      *     `_diagnostics`. This is that same read-side verdict, surfaced once
      *     at boot where operators look.
      *
+     * [#20312] A stored `page` gets one more report-only check, after it has
+     * loaded: a `requires` naming a plugin the deployment's SDUI manifest does
+     * not carry is reported, page and plugin named — ADR-0080 §5's "validated
+     * at save and load" — see {@link reportPageRequiresAbsentAtLoad}.
+     *
      * #5897 / ADR-0110 D3 — the return value can now say **"the store was not
      * read at all"**. `loaded: 0` alone cannot: it is equally the truth for an
      * empty store, an un-provisioned store, and a database this process could
@@ -23312,6 +23338,18 @@ export class ObjectStackProtocolImplementation implements
                 organization_id: null,
             };
             const records = await this.engine.find('sys_metadata', { where });
+            // [#20312] ADR-0080 §5 — a page's `requires` is validated at save
+            // AND at load. The deployment's manifest, read once for this load
+            // through the key the save door reads per publish (one channel,
+            // never a second reader), and only when a stored page is in hand.
+            // It is readable here on the host that registers it: `os serve`
+            // registers it before any plugin inits, and this hydration runs in
+            // `ObjectQLPlugin.start()`, after every init. A host that registers
+            // nothing gets `undefined` and no page is judged — the save door's
+            // posture on that host, announced by the host at boot.
+            const sduiManifest = (records as Array<{ type?: unknown }>).some(
+                (r) => (PLURAL_TO_SINGULAR[String(r.type)] ?? r.type) === 'page',
+            ) ? this.resolveSduiManifest() : undefined;
             for (const record of records) {
                 try {
                     const data = this.convertStoredItem(
@@ -23427,7 +23465,7 @@ export class ObjectStackProtocolImplementation implements
                         // env-wide rows") stops depending on a query filter
                         // staying correct, because the hydrator refuses an
                         // org-scoped row whatever selected it.
-                        this.hydrateOverlayIntoRegistry(
+                        const hydrated = this.hydrateOverlayIntoRegistry(
                             normalizedType,
                             data,
                             {
@@ -23435,6 +23473,13 @@ export class ObjectStackProtocolImplementation implements
                                 organizationId: (record as { organization_id?: string | null }).organization_id ?? null,
                             },
                         );
+                        // [#20312] Reported AFTER the page has loaded, and only
+                        // when it did: the report never decides whether the
+                        // page loads — a page is refused at save and reported
+                        // at load, never refused at load.
+                        if (hydrated && normalizedType === 'page') {
+                            this.reportPageRequiresAbsentAtLoad(String(record.name), data, sduiManifest);
+                        }
                     }
                     loaded++;
                 } catch (e) {
@@ -23526,6 +23571,44 @@ export class ObjectStackProtocolImplementation implements
             }
         }
         return { loaded, errors, invalid, storeUnavailable };
+    }
+
+    /**
+     * [#20312] The load half of ADR-0080 §5's plugin-presence check: one line
+     * for a stored page whose `requires` names a namespace no component in the
+     * deployment's SDUI manifest carries — a plugin the console this
+     * deployment serves does not load — naming the page and every such
+     * namespace.
+     *
+     * A diagnostic, never a verdict on the page: it is called only for a page
+     * that has already loaded, and it changes nothing about it. The page is
+     * served; what its source draws from the absent plugin is what will not
+     * render. That is a functional degradation visible to whoever opens the
+     * page, so the line is `warn` (AGENTS.md, "Degradation log levels").
+     *
+     * How a stored page gets here: it was saved on a host with no manifest
+     * (stored as written), or the plugin was removed from the console after
+     * the page's `requires` was stamped. A host with a manifest refuses the
+     * same page at save — the reason this is a report and not a refusal.
+     *
+     * `sduiManifest` is {@link resolveSduiManifest}'s answer for this load;
+     * `undefined` judges nothing, which is the save door's posture on a host
+     * that registered no manifest.
+     */
+    private reportPageRequiresAbsentAtLoad(name: string, body: unknown, sduiManifest: unknown): void {
+        const absent = findPageRequiresAbsentFromManifest('page', body, sduiManifest);
+        if (!absent || absent.length === 0) return;
+        const one = absent.length === 1;
+        const named = absent.map((ns) => `'${ns}'`).join(', ');
+        console.warn(
+            `[Protocol] [page_requires_plugin_absent] stored page/${name} requires ${named}, `
+            + `${one ? 'a namespace' : 'namespaces'} no component in this deployment's SDUI component manifest `
+            + `carries: the plugin${one ? ' that provides it is' : 's that provide them are'} not loaded in the `
+            + `console this deployment serves. The page is loaded and served anyway, and what its source draws `
+            + `from ${one ? 'that plugin' : 'those plugins'} will not render. Install ${one ? 'it' : 'them'} in `
+            + `that console, or take ${one ? 'its' : 'their'} components out of the page's source and save the `
+            + `page without \`requires\` — it is derived from the source at save.`,
+        );
     }
 
     /**
