@@ -1049,9 +1049,10 @@ interface LoweredWrite {
  * wrote `$lt` and `$ne` too: this translator applied the whole-day upper bound
  * itself (a bare-day `$lte` became `$lt` the next day, the last supported day
  * `$ne: null`). That rule is applied once at the seams now, and `$lte` and
- * `$between` write only the keys above. The rank and the promotion below are
- * unchanged, because a seam-fed filter carries the lowering's own `$lt` beside
- * an author's — see `mongodb-operator-key-clobber.test.ts`.
+ * `$between` write only the keys above. Where the lowering's `$lt` meets an
+ * author's own `$lt` on one column, the lowering emits it as a conjunct of its
+ * own (one operator per conjunct), so both bounds reach this translator and
+ * survive it — `mongodb-operator-key-clobber.test.ts` pins both sides.
  *
  * One of those rows had not been named anywhere. The `$regex` row is this driver's alone:
  * `driver-memory` promotes its string family to `$and` branches already

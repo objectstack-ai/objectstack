@@ -114,7 +114,7 @@ import {
 // the spec and shared by every JS evaluation face — so a `check` evaluated here
 // and the same predicate compiled to SQL by `read-scope-sql.ts` fold the same
 // domain.
-import { utcInstantMs, asciiCaseInsensitiveContains } from '@objectstack/spec/data';
+import { nextUtcCalendarDay, utcInstantMs, asciiCaseInsensitiveContains, isUnboundedAbove } from '@objectstack/spec/data';
 // [#7536] `$like`/`$ilike`'s pattern language, likewise defined once in the
 // spec: this face evaluates the pattern in JS, `driver-sql` compiles the same
 // one to `LIKE`/`GLOB`, and a translation written twice would agree on the day
@@ -665,20 +665,12 @@ function evalOp(actual: unknown, op: string, raw: unknown, record: Record<string
     case '$gt': return actual != null && v != null && order(actual, v, (a, b) => a > b);
     case '$gte': return actual != null && v != null && order(actual, v, (a, b) => a >= b);
     case '$lt': return actual != null && v != null && order(actual, v, (a, b) => a < b);
-    // [ADR-0053 D-D1 items 5 and 9, as amended] `$lte` and `$between` compare
-    // the comparand they are handed. A bare-day upper bound means "through the
-    // whole of that day", and that rule is applied once, by the shared
-    // `lowerFilterCondition` at the seams — for this evaluator, the RLS compile
-    // seam (`judgeCompiledComparands`), which lowers `check` and `using` alike —
-    // so a seam-fed policy arrives here as `$lt` the next day and with no
-    // `$between`. A caller that reaches this evaluator without a seam gets the
-    // comparison it wrote.
-    case '$lte': return actual != null && v != null && order(actual, v, (a, b) => a <= b);
+    case '$lte': return actual != null && v != null && lteBound(actual, v);
     case '$in': return Array.isArray(v) && v.some((x) => looseEq(actual, x));
     case '$nin': return Array.isArray(v) && !v.some((x) => looseEq(actual, x));
     case '$between':
       return Array.isArray(v) && v.length === 2 && actual != null && v[0] != null && v[1] != null
-        && order(actual, v[0], (a, b) => a >= b) && order(actual, v[1], (a, b) => a <= b);
+        && order(actual, v[0], (a, b) => a >= b) && lteBound(actual, v[1]);
     case '$contains': return typeof actual === 'string' && typeof v === 'string' && actual.includes(v);
     /**
      * [#6520] `$contains`' case-INSENSITIVE twin, folding ASCII case and nothing
@@ -846,6 +838,41 @@ function assertComparableReference(
 }
 
 /**
+ * The inclusive-upper-bound comparison, with the calendar-day rule the rest of
+ * the platform applies (ADR-0053 D-D, #3777): a bare `YYYY-MM-DD` bound means
+ * "through that whole day", so it is evaluated half-open against the next day
+ * rather than against that day's midnight.
+ *
+ * Without this, a `check` policy of the shape `{ signed_on: { $lte: '{today}' } }`
+ * evaluated on a `datetime` post-image **denied every write made after 00:00** —
+ * the write-side twin of the read-side data loss #3777 fixed, and the reason
+ * this evaluator had to stop being the one backend that disagreed. The four
+ * other backends (SQL compiler, memory, mongo, the analytics preview) already
+ * share this rule via the same primitive.
+ *
+ * String ordering makes `< nextDay` equivalent to `<= day` for a plain
+ * `YYYY-MM-DD` value, so no field-type lookup is needed — which matters here,
+ * because this evaluator sees a bare record and has no schema to consult.
+ * A full-ISO or non-string bound keeps exact-instant semantics.
+ *
+ * [#20600] `9999-12-31`, the last supported day, has no next day to compare
+ * against (`UNBOUNDED_ABOVE`): every instant the platform stores is on or
+ * before it, so a value that denotes an instant ({@link utcInstantMs}) is
+ * inside the bound, and any other value keeps the comparison as written — no
+ * schema here says it is temporal, and the check must not admit a value the
+ * operands do not justify. The five-digit `'10000-01-01'` this compared
+ * against before sorted below every `'2026-…'` value, so the bound DENIED
+ * every write it should have admitted.
+ */
+function lteBound(actual: unknown, bound: unknown): boolean {
+  if (bound == null) return false;
+  const nextDay = nextUtcCalendarDay(bound);
+  if (isUnboundedAbove(nextDay)) return utcInstantMs(actual) !== null || order(actual, bound, (a, b) => a <= b);
+  if (nextDay != null) return order(actual, nextDay, (a, b) => a < b);
+  return order(actual, bound, (a, b) => a <= b);
+}
+
+/**
  * Apply an ordering comparison, lifting the pair to instants when exactly one
  * side is a JS `Date` — the cross-type case JS relational operators answer
  * `false` to unconditionally (they coerce with hint `number`, so the `Date`
@@ -943,7 +970,8 @@ const CALENDAR_DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
  * value of the same column:
  *
  *   - a bare calendar day (`YYYY-MM-DD`, the `Field.date` storage form) stays a
- *     calendar day, so a `date` column compared against it orders day by day;
+ *     calendar day — which is what keeps {@link lteBound}'s half-open rule
+ *     ("through that whole day") in force for a `$lte` against a shifted day;
  *   - an ISO instant string (the `Field.datetime` canonical form) stays an ISO
  *     string with its time of day intact;
  *   - a `Date` stays a `Date`; an epoch number stays a number.
