@@ -23,7 +23,7 @@
  * `additionalProperties: false` 663 to 637). So the fix gates the authoring
  * derivation behind a degeneracy check, and the load-bearing assertion is the
  * BLAST RADIUS: exactly one served type may differ from the pre-fix
- * derivation. A suite that only pinned `action`'s 48 keys would stay green
+ * derivation. A suite that only pinned `action`'s key count would stay green
  * through a later widening to `io: 'input'` for everything — which is the
  * change this card exists to refuse. This one goes red on it.
  *
@@ -239,15 +239,18 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
 
         const properties = served!.properties as Record<string, unknown>;
         expect(properties, '`action` must name its properties').toBeDefined();
-        // [#17502] 48 is the key set `action` DECLARES — 45 accepted plus the
+        // [#17502] 49 is the key set `action` DECLARES — 46 accepted plus the
         // three that admit no instance and are therefore refused — and that
         // declared total stays the pinned authority. The served document no
         // longer carries those three, so they are added back rather than the
         // constant being lowered — a live key going missing is still red.
-        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(48);
+        // [#21095] 48 → 49: `outcomeMessages` joined the accepted set, and it
+        // is named in the sample below so the served schema is held to
+        // carrying it, not merely to having one more key than before.
+        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(49);
         // A sample an author would actually address, and the one #17500's
         // repeater titles need a node to sit on.
-        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations']) {
+        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages']) {
             expect(Object.keys(properties)).toContain(key);
         }
     });
