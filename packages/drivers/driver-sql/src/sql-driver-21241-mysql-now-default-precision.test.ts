@@ -40,6 +40,11 @@
  * instant the column DEFAULT stored, and the server's own catalogue reports the
  * declared column's type and default equal to `created_at`'s. SQLite and
  * PostgreSQL passed before the fix and are the control; MySQL failed at sync.
+ *
+ * §3 is MySQL only: a legacy `TIMESTAMP` NOW() column, widened to `DATETIME(n)`
+ * at schema sync, keeps a default — the same one `created_at` keeps. Before,
+ * the widening restated the audit columns' default and dropped the declared
+ * one, so an insert omitting the field answered `null`.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -239,6 +244,29 @@ function measure(cell: DialectCell): void {
       expect(answer.stamped_at).not.toBeNull();
       expect(Number.isNaN(asInstant(answer.stamped_at))).toBe(false);
     });
+
+    if (cell.id === 'mysql') {
+      it('§3 a legacy TIMESTAMP NOW() column keeps its default through the DATETIME widening', async () => {
+        // The pre-DATETIME(3) shape, when every datetime column was TIMESTAMP
+        // and a bare CURRENT_TIMESTAMP default was legal on it. Schema sync
+        // widens such a column with `ALTER … MODIFY`, which drops any default
+        // the statement does not restate.
+        await knex().raw(
+          `create table ${TABLE} (id varchar(255) not null primary key, ` +
+            'created_at timestamp null default current_timestamp, ' +
+            'updated_at timestamp null default current_timestamp, ' +
+            'title varchar(255) null, stamped_at timestamp null default current_timestamp)',
+        );
+        await driver.initObjects([OBJECT]);
+
+        const declared = await catalogueColumn(cell, knex(), 'stamped_at');
+        expect(String(declared.type), 'the widening ran').toMatch(/^datetime\(/);
+        expect(declared).toEqual(await catalogueColumn(cell, knex(), 'created_at'));
+        const answer = await driver.create(TABLE, { title: 'after widening' });
+        expect(answer.stamped_at).not.toBeNull();
+        expect(Number.isNaN(asInstant(answer.stamped_at))).toBe(false);
+      });
+    }
   });
 }
 

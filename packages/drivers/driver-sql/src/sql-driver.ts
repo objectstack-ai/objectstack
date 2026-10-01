@@ -13087,9 +13087,18 @@ export class SqlDriver implements IDataDriver {
         // The default is re-stated because MySQL drops a column's DEFAULT when
         // MODIFY does not repeat it, and an audit column without
         // `CURRENT_TIMESTAMP(3)` would start inserting NULL.
+        //
+        // A declared `defaultValue: 'NOW()'` column is the same case (#21241),
+        // and the TIME twin ({@link migrateMysqlTimeColumns}) already restates
+        // it. Measured on MySQL 8.0.46 before this line: a legacy
+        // `timestamp null default current_timestamp` NOW() column came out of
+        // the widening as `datetime(3)` with NO default, and an insert omitting
+        // it answered `null`. Both take the expression a fresh column gets,
+        // from {@link nowColumnDefault}, so the widening cannot spell a third.
         const isAudit = (AUDIT_TIMESTAMP_COLUMNS as readonly string[]).includes(col.name);
+        const isNowDefault = isNowDefaultValue(fields[col.name]?.defaultValue);
         const nullClause = col.nullable ? 'null' : 'not null';
-        const defaultClause = isAudit ? ` default current_timestamp(${MYSQL_DATETIME_PRECISION})` : '';
+        const defaultClause = isAudit || isNowDefault ? ` default ${this.nowColumnDefault('datetime').toString()}` : '';
         return {
           sql: `alter table ?? modify column ?? datetime(${MYSQL_DATETIME_PRECISION}) ${nullClause}${defaultClause}`,
           bindings: [table, col.name] as unknown[],
