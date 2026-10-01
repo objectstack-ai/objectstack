@@ -304,15 +304,16 @@ export const REGEN_ARTIFACTS = Object.freeze([
   // (`scripts/symbol-anchors.mjs`), which does not move when its file grows, and the
   // census gate reports a surviving line number as a finding. So
   // `blankAnchorLineNumbers` finds nothing to blank, and the `'line-anchors'`
-  // comparator is the IDENTITY on this page — measured on #16612:
-  // `extractLineAnchors(page).length === 0` and `blankAnchorLineNumbers(page) === page`.
+  // comparator is the IDENTITY on this page — measured on #16612,
+  // `extractLineAnchors(page).length === 0` and
+  // `blankAnchorLineNumbers(page) === page`.
   // A deferral is proven lossless only when THEIRS equals the ancestor or OURS byte
   // for byte, so every real edit — prose, an anchor, a declared count — takes the
   // text-merge branch, or conflicts loudly. That is by design, not a degraded mode:
   // it is the safe half of #14064's trade, and what it gives up is the 24-in-25
   // renumbering case, which can no longer occur because there are no numbers left to
-  // renumber. A clean text merge is still recorded as owing `gen:system-context-census`,
-  // which `pre-commit` collects.
+  // renumber. A clean text merge is still recorded as owing
+  // `gen:system-context-census`, which `pre-commit` collects.
   //
   // ⛔ Keep `mixed: 'line-anchors'` anyway. The field is not only the comparator's
   // name; it is what routes this row through the lossless check at all. Without it
