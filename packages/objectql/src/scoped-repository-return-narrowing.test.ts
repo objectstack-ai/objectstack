@@ -5,12 +5,12 @@ import ts from 'typescript';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// ─── [#16786] the repository a CLASS-typed call site reaches is declared ────
+// ─── [commit 5c8f5af50] the repository a CLASS-typed call site reaches is declared ────
 //
 // `IScopedObjectRepository` (`packages/spec/src/contracts/scoped-context.ts`)
 // declares `findOne` as `Promise<Record<string, any> | null>` and `update` as
 // `Promise<Record<string, any> | number | null>` — ruling A on #16231, landed
-// as PR #16783. `IDataEngine`, the call each `ObjectRepository` member forwards
+// as commit 854639b31. `IDataEngine`, the call each `ObjectRepository` member forwards
 // to, declares the same shapes. `ObjectRepository` sat between those two narrow
 // declarations and re-widened the result back to `Promise<any>`.
 //
@@ -34,7 +34,7 @@ import { fileURLToPath } from 'node:url';
 //
 // ⚠️ The first line is why the probes below are written through the CLASS and
 // the exported engine door rather than through `HookContext`. `HookContext.api`
-// was narrowed to `IScopedContext` by #5945/#6311, so a handler typed
+// was narrowed to `IScopedContext` by #5945 / commit 59b794f71, so a handler typed
 // `(ctx: HookContext) => …` reads the narrow type today and read it before this
 // fix too — a probe written that way is GREEN on both sides and pins nothing.
 // The `any` lives on the class-typed doors, so that is where the probes go.

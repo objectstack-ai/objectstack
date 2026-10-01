@@ -14,7 +14,7 @@
  *     exists for; it has occurred five times (#12745, #12928, #10673, #8617,
  *     cloud#1239 — one a credentials table) and every instance was found by a
  *     person reading call sites, never by the control.
- *   - `isSystem` x a GENUINELY GLOBAL object = OUT of scope. #8672's reasoning
+ *   - `isSystem` x a GENUINELY GLOBAL object = OUT of scope. Commit ff08691e6's recorded reasoning
  *     ("an org-less row is defensible for `sys_permission_set`") inherits **per
  *     object**; the wholesale `sys_ / cloud_ / ai_` namespace exemption is
  *     withdrawn.
@@ -31,7 +31,7 @@
  * ⛔ The census that measures this is NOT restated here. It is derived by
  * `scripts/platform-object-tenancy-census.mjs`, committed as
  * `scripts/platform-object-tenancy-census.json`, and held to the tree by
- * `scripts/check-platform-object-tenancy-census.mjs` (#14957). Its PREDICATE is
+ * `scripts/check-platform-object-tenancy-census.mjs` (commit 26144c204). Its PREDICATE is
  * the half this paragraph used to leave out: an object is inside the machinery
  * when `resolveTenantFieldName` answers non-null on the registered schema —
  * after `applySystemFields`, because the injected column is what the engine
@@ -50,7 +50,7 @@
  *
  * The ARGUMENT survives that measurement, and no digit was load-bearing for it:
  * the great majority of platform-namespace objects carry the tenant column —
- * `sys_permission_set`, #8672's own example of a legitimately org-less object,
+ * `sys_permission_set`, commit ff08691e6's own example of a legitimately org-less object,
  * among them — so a schema read admits nearly all of them in one stroke, i.e.
  * it replaces a wholesale exemption with a wholesale inclusion. The ruling's classification source is
  * "有列**且有写手填**" — the column AND a writer that fills it — and the second
@@ -100,7 +100,7 @@ import { isPlatformNamespaceObject } from './system-write-organization';
 export type PlatformObjectTenancy =
   /** Column present AND a citable writer fills it. In scope. */
   | 'tenant-scoped'
-  /** #8672's reasoning inherits: rows are deliberately org-less. Out of scope. */
+  /** Commit ff08691e6's reasoning inherits: rows are deliberately org-less. Out of scope. */
   | 'global'
   /** Not determinable from the tree. Out of scope, PENDING ADJUDICATION. */
   | 'unclassified';
@@ -141,7 +141,7 @@ export const PLATFORM_OBJECT_TENANCY: Readonly<Record<string, PlatformObjectTena
       '2026-08-28 for the rows it had stranded (`backfill-sys-file-organizations.ts`). An org-less row ' +
       'here is a defect, not a design.',
   },
-  // #12928 (insert, FORWARD-STAMP-ONLY) + #13178 (update)
+  // #12928 (insert, FORWARD-STAMP-ONLY) + commit f087c376f (update)
   sys_upload_session: {
     tenancy: 'tenant-scoped',
     evidence:
@@ -149,7 +149,7 @@ export const PLATFORM_OBJECT_TENANCY: Readonly<Record<string, PlatformObjectTena
       'update half (`metadata-store.ts`). The rows that predate the insert repair are historic and were ' +
       'ruled FORWARD-STAMP-ONLY — they say nothing about a NEW write.',
   },
-  // #10101 (PR #11311, writer) + maintainer 2026-08-23 direction 3 (backfill); cloud#1395
+  // #10101 (commit 1272f0a6b, writer) + maintainer 2026-08-23 direction 3 (backfill); cloud#1395
   sys_approval_request: {
     tenancy: 'tenant-scoped',
     evidence:
@@ -187,7 +187,7 @@ export const PLATFORM_OBJECT_TENANCY: Readonly<Record<string, PlatformObjectTena
       '`SqlOutbox.enqueue` writes `organization_id` from the organization the messaging service derives ' +
       'for the notification (`sql-outbox.ts`, `messaging-service.ts#notificationOrganization`).',
   },
-  // #14484 (writer + backfill), ruled 2026-09-02 — decision batch #11 item 3,
+  // Commit 3f64fe6c6 (writer + backfill), ruled 2026-09-02 — decision batch #11 item 3,
   // maintainer verbatim 「#13564 转维护者处理；其他同意」 ("其他同意" adopts A:
   // tenant-scoped, writer-repaired, existing rows backfilled from the record
   // they grant access to). The per-table order the `sys_file` precedent
@@ -206,7 +206,7 @@ export const PLATFORM_OBJECT_TENANCY: Readonly<Record<string, PlatformObjectTena
   },
 
   // ── global ───────────────────────────────────────────────────────────────
-  // #8672, named verbatim by the 2026-08-31 ruling; the driver predicate is #2734.
+  // Commit ff08691e6's example, named verbatim by the 2026-08-31 ruling; the driver predicate is #2734.
   // ⚠️ `ensure-default-organization.ts` DOES stamp org-scoped permission sets, so
   // this object holds BOTH populations. It is `global` on the maintainer naming
   // it, not on an absence of org-scoped writes — flagged for the adjudicating

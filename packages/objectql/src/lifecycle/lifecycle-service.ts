@@ -22,7 +22,7 @@ import type {
  *     rotation falls back to an age-based reap bounded by `shards × unit`.
  *   - **Archiver** (P3): copies audit-class cold rows to the declared archive
  *     datasource, then deletes them from the hot store. Cold is `created_at`
- *     past `archive.after`, or [#10347] `ttl.field` past `ttl.expireAfter`
+ *     past `archive.after`, or [commit 530c1df65] `ttl.field` past `ttl.expireAfter`
  *     when the object declares a `ttl` beside its `archive`. **Safety rule:** an
  *     object that declares `archive` is never hot-deleted unless the archive
  *     copy succeeded — a compliance ledger must not be dropped unarchived.
@@ -109,7 +109,7 @@ export interface LifecycleObjectLike {
   lifecycle?: Lifecycle;
   fields?: Record<string, unknown>;
   /**
-   * [#16729] The object's tenancy posture, DECLARED here because the Archiver
+   * [commit 0f38ab084] The object's tenancy posture, DECLARED here because the Archiver
    * hands this very object to a driver that reads the key
    * (`cold.syncSchema(object, obj)` below), and every driver resolves a
    * uniqueness partition from it: `tenancy.enabled: false` means one row per
@@ -122,7 +122,7 @@ export interface LifecycleObjectLike {
    * `tenancy` and therefore omits it. The object then reaches `syncSchema` as
    * the `{ name, fields }` shape, which is exactly the partial re-registration
    * `SqlDriver.computeAndRecordTenantField`'s sticky record exists to survive.
-   * Declaring the key is the same correction #16711 made where the shard leaf
+   * Declaring the key is the same correction commit 7862fb711 made where the shard leaf
    * narrowed `indexes` and `tenancy` off the object it was handed: a type must
    * not refuse a key the code below it reads.
    */
@@ -1005,7 +1005,7 @@ export class LifecycleService {
     // store; when the archive datasource isn't registered, rows are retained
     // (never dropped unarchived) and the object is reported as skipped.
     //
-    // [#10347] This return is not a policy DROP. A lifecycle may declare `ttl`
+    // [commit 530c1df65] This return is not a policy DROP. A lifecycle may declare `ttl`
     // beside `archive` — that pair parses — and until this card the ttl branch
     // below was simply unreachable for it, so the declared per-row expiry never
     // ran anywhere. {@link archiveObject} now applies that window itself (see
@@ -1028,7 +1028,7 @@ export class LifecycleService {
         'global',
         report,
       );
-      // [#10165] `ttl.onlyWhen` rides the same argument `retention.onlyWhen`
+      // [commit 801296050] `ttl.onlyWhen` rides the same argument `retention.onlyWhen`
       // does below — one reap path, one scope spread (see `reap()`'s `scope`).
       outcomes.push(await this.reap(engine, object, lc, 'ttl', lc.ttl.field, windowMs, report, lc.ttl.onlyWhen));
     }
@@ -1225,7 +1225,7 @@ export class LifecycleService {
   /**
    * Archiver (ADR-0057 §3.3 / P3): copy rows past `archive.after` from the
    * hot store to the archive datasource, then delete the copied rows hot.
-   * [#10347] When the object ALSO declares `ttl`, the declared per-row expiry
+   * [commit 530c1df65] When the object ALSO declares `ttl`, the declared per-row expiry
    * is what selects candidates — `ttl.field` past its `expireAfter` window —
    * instead of `created_at` past `archive.after`.
    * Batched (500 × 20 per sweep) so a large backlog drains across sweeps
@@ -1262,7 +1262,7 @@ export class LifecycleService {
       await cold.syncSchema(object, obj);
     }
 
-    // [#10347] WHICH ROWS ARE DUE. `archive` alone moves rows by age from
+    // [commit 530c1df65] WHICH ROWS ARE DUE. `archive` alone moves rows by age from
     // `created_at`, bounded by `archive.after` — unchanged. But a lifecycle may
     // also declare `ttl` beside `archive`: ADR-0057 §3.5's refine is satisfied
     // (`ttl` IS a bounding policy) and the `archive.after === retention.maxAge`
@@ -1290,8 +1290,8 @@ export class LifecycleService {
     // author has not decided yet — against the retain-first posture that makes
     // this method refuse to hot-delete anything the cold store has not taken.
     //
-    // [#10643] `retention` declared beside `ttl` + `archive`: once an open
-    // question at this line (#10527), since decided — and decided at parse
+    // [commit 5649efbf9] `retention` declared beside `ttl` + `archive`: once an open
+    // question at this line, since decided by that commit — and decided at parse
     // time rather than here. `LifecycleSchema` (`packages/spec`, the
     // superRefine on the lifecycle block) refuses that triple unless the ttl
     // restates the age bound exactly: `ttl.field` must be `created_at` and
@@ -1309,10 +1309,10 @@ export class LifecycleService {
     // straight back on this line, so it is not a spec-local change. Which
     // WINDOW governs is a separate leg either way: with `ttl` declared it is
     // the `expireAfter` override key that applies, not `maxAge` (see the
-    // #10528 block below).
+    // commit 7d483e1e5 block below).
     const dueField = lc.ttl ? lc.ttl.field : 'created_at';
 
-    // [#10528] WHICH WINDOW IS DUE — resolved through ADR-0057 P4 governance,
+    // [commit 7d483e1e5] WHICH WINDOW IS DUE — resolved through ADR-0057 P4 governance,
     // the same {@link effectiveWindowMs} every window on the reap path goes
     // through. Until this card the cutoff below was read straight off the
     // declaration, and that was not one forgotten call: `reapObject` RETURNS
@@ -1325,7 +1325,7 @@ export class LifecycleService {
     //
     // Resolved HERE rather than in `reapObject` before it delegates, because
     // the selection above is what decides WHICH window is governed and that
-    // decision lives in this method by the 2026-08-20 ruling (#10347).
+    // decision lives in this method by the 2026-08-20 ruling (commit 530c1df65).
     // Resolving in the caller would mean either duplicating the selection or
     // splitting one decision across two methods — and the per-tenant leg is a
     // pass over this method's own hot/cold batch loop, which cannot leave it
@@ -1411,7 +1411,7 @@ export class LifecycleService {
       return moved;
     };
 
-    // [#10528] Per-tenant windows (ADR-0057 §3.2), in the shape `reap()` uses:
+    // [commit 7d483e1e5] Per-tenant windows (ADR-0057 §3.2), in the shape `reap()` uses:
     // each overriding tenant gets its own cutoff on its own rows, then one
     // global pass covers everyone else INCLUDING rows with no organization —
     // a bare `$nin` would silently skip NULL-org rows, since a value that is
@@ -1458,7 +1458,7 @@ export class LifecycleService {
 
     // Cold-side retention: `keep` bounds the archive itself.
     //
-    // [#10528] Governance deliberately does NOT reach this line. `keep` bounds
+    // [commit 7d483e1e5] Governance deliberately does NOT reach this line. `keep` bounds
     // the ARCHIVE — how long cold rows survive — not which hot rows are due,
     // and the `lifecycle` settings namespace has no key for it
     // (`retention_overrides` carries `maxAge` / `expireAfter` only). It also
@@ -1504,7 +1504,7 @@ export class LifecycleService {
     const tenantWindows = (this.governance.tenantOverrides.get(object) ?? []).filter(
       (t) => typeof t[overrideKey] === 'string',
     );
-    // `retention.onlyWhen` / `ttl.onlyWhen` [#10165] narrow every delete to
+    // `retention.onlyWhen` / `ttl.onlyWhen` [commit 801296050] narrow every delete to
     // the declared row filter — rows outside it (live workflow state, audit
     // tombstones) are retained regardless of age/expiry.
     const scope = onlyWhen ?? {};

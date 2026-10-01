@@ -1,18 +1,18 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #6300 — `find`/`findOne` take the AUTHOR state (`z.input`), and the engine
+ * Commit 74155c735 — `find`/`findOne` take the AUTHOR state (`z.input`), and the engine
  * fills the defaults the schemas declare before the AST leaves it.
  *
  * ADR-0122's core argument is "the first key an author writes must default
  * correctly". `engine.find(obj, { orderBy: [{ field: 'updated_at' }] })` is
  * the natural spelling of "newest-ish first" — and until this card it did not
- * compile: #6083 pinned `find`/`findOne` back to `EngineQueryOptionsParsed`
+ * compile: commit 53068c130 pinned `find`/`findOne` back to `EngineQueryOptionsParsed`
  * (`z.infer`) because the engine built its `QueryAST` by bare spread and
  * filled no default, so admitting the author state would have sent
  * `order: undefined` to the driver.
  *
- * The measured driver-side status quo (part of #6300's own premise): every
+ * The measured driver-side status quo (part of commit 74155c735's own premise): every
  * driver coalesces a missing `order` to `'asc'` — `sql-driver.ts`
  * (`s.order || 'asc'`), `memory-driver.ts`, `mongodb-driver.ts`,
  * `mongodb-aggregation.ts`, `remote-transport.ts`. So the filled `'asc'`
@@ -150,7 +150,7 @@ describe('find/findOne accept the author state and the engine fills the declared
     });
 
     // ── (1) The contract flip, pinned by the compiler ────────────────────────
-    // Every call in this block is UNCAST. Under #6083's `...Parsed` parameter
+    // Every call in this block is UNCAST. Under commit 53068c130's `...Parsed` parameter
     // none of them compiled — `orderBy[].order` was required to write. The
     // `IDataEngine`-typed alias pins the spec contract, not just the class.
 
@@ -213,7 +213,7 @@ describe('find/findOne accept the author state and the engine fills the declared
     // ── (4) The schema's strictness rides with its defaulting parse ──────────
     // These callers bypass the type (`as unknown as EngineQueryOptions` — the
     // #4918 spelling for a DELIBERATELY off-contract probe), which is the only
-    // way these shapes can occur. Before #6300 the engine forwarded them
+    // way these shapes can occur. Before commit 74155c735 the engine forwarded them
     // verbatim and each driver decided alone: memory honored `direction`,
     // SQL/Mongo silently dropped it and sorted ascending — one query, two
     // orders (#4721's class).

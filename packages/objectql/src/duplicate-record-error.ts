@@ -3,7 +3,7 @@
 import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
 
 /**
- * The ADR-0112 envelope `engine.insert` (#14095) and `engine.update` (#14390)
+ * The ADR-0112 envelope `engine.insert` (#14095) and `engine.update` (commit 9d7f7259f)
  * raise when a driver refuses a row as a unique-constraint violation.
  *
  * ## The defect this retires
@@ -36,7 +36,7 @@ import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/type
  *    caller of `engine.insert` / `engine.update` (a hook, a flow node, a
  *    script holding the engine) branches on, on every driver. ⛔ It is not
  *    the WIRE spelling: every REST route — the single-record door, the
- *    whole-request bulk / import doors, and since #14723 the per-row reports
+ *    whole-request bulk / import doors, and since commit 65846bc46 the per-row reports
  *    of `POST /data/:object/batch` and the import runner alike — reports a
  *    unique-constraint refusal as `UNIQUE_VIOLATION`, the standard-catalog
  *    member the published protocol docs give for the 409 constraint-violation
@@ -134,7 +134,7 @@ function buildDuplicateMessage(object: string, field?: string): string {
 }
 
 /**
- * A write door's driver-error exit — `insert` (#14095) and `update` (#14390),
+ * A write door's driver-error exit — `insert` (#14095) and `update` (commit 9d7f7259f),
  * by-id and predicate alike: the platform envelope for a unique violation, or
  * the caller's own error unchanged for anything else.
  *

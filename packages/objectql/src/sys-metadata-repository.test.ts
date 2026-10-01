@@ -701,7 +701,7 @@ describe('SysMetadataRepository', () => {
         const ref = { org: 'org_alpha', type: 'app' as const, name: 'ticket_service_app' };
         // `intent: 'runtime-only'` — a whole-app build stages a BRAND-NEW app
         // (nothing artifact-backed under this name), which is exactly the
-        // intent the protocol layer computes for it. Required since #6483
+        // intent the protocol layer computes for it. Required since commit ee58392e1
         // rolled `app`'s `allowOrgOverride` back to `false` (ADR-0005): the
         // repository's default `override-artifact` intent now 403s for `app`,
         // while the runtime-create tier this write actually belongs to stays
@@ -714,7 +714,7 @@ describe('SysMetadataRepository', () => {
         // Same `runtime-only` intent the real caller computes: the protocol's
         // publish handler derives intent from `isArtifactBacked` and nothing
         // ships an artifact under this name (promoteDraft's own default is
-        // `override-artifact`, which #6483's `app` rollback now 403s).
+        // `override-artifact`, which commit ee58392e1's `app` rollback now 403s).
         await repo.promoteDraft(ref, { actor: 'admin', intent: 'runtime-only' });
         const activeRow = Array.from(engine.rows.values()).find(
             (r) => (r as any).type === 'app'

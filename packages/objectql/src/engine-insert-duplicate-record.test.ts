@@ -101,7 +101,7 @@ const mysqlDuplicate = () =>
     errno: 1062,
   });
 
-/** driver-memory (#13197): already an ADR-0112 envelope, in the platform's own vocabulary. */
+/** driver-memory (commit 56c093c4d): already an ADR-0112 envelope, in the platform's own vocabulary. */
 const memoryDuplicate = () =>
   Object.assign(
     new Error('Unique constraint violated on `doc.email`: a record with that value already exists.'),
@@ -264,7 +264,7 @@ describe('engine.insert — a driver unique violation is a DUPLICATE_RECORD enve
     });
 
     it('normalises a driver that already speaks an envelope — one code, not two', async () => {
-      // driver-memory raises `UNIQUE_VIOLATION` / 409 (#13197). It is a platform
+      // driver-memory raises `UNIQUE_VIOLATION` / 409 (commit 56c093c4d). It is a platform
       // envelope, but it is a DIFFERENT one, so an application branching on the
       // insert door would still need two spellings. The door answers one.
       const raw = memoryDuplicate();

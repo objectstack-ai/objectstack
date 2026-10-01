@@ -328,7 +328,7 @@ describe('#8738 — the declared-field door on update()', () => {
       // inject `created_at` / `updated_at` itself and the case would prove
       // nothing about the door. `id` is the one name the registry does NOT
       // inject, so it is the door's tolerance being read here, and only its.
-      // [#13657] `description` is declared alongside `name` because this
+      // [commit b003cf2e8] `description` is declared alongside `name` because this
       // harness's own `beforeUpdate` hook STAMPS it (`derived-for-…`), and the
       // post-hook door now judges the hook's output too. Without the
       // declaration the fixture would be refused for the hook's key and this

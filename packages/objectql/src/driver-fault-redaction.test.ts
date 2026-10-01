@@ -106,7 +106,7 @@ describe('redactStatementFromMessage', () => {
   });
 });
 
-// #8823 — the tail is kept because it names IDENTIFIERS, and on MySQL's
+// Commit 4dfa369a9 — the tail is kept because it names IDENTIFIERS, and on MySQL's
 // duplicate-entry family it does not: `ER_DUP_ENTRY` prints the conflicting
 // VALUE in the diagnostic itself. These cases pin both halves of the remedy —
 // the value goes, the index name stays — because a fix that blanked the tail
@@ -136,7 +136,7 @@ describe('#8823 — a caller value inlined in the diagnostic itself', () => {
   });
 
   it('redacts a BARE diagnostic too — the shape that reaches us without a statement', () => {
-    // Before #9030 the shared leak predicate did not recognise this phrasing,
+    // Before commit 27a567dd8 the shared leak predicate did not recognise this phrasing,
     // so a bare `Duplicate entry …` was turned away at the door and kept its
     // value. That limb landed for a different reason; the two compose here.
     const out = redactStatementFromMessage(`Duplicate entry '${EMAIL}' for key 'crm_account.email'`);
@@ -284,7 +284,7 @@ describe('#9160 — the value-bearing families the live probe measured', () => {
   });
 
   describe('postgres invalid_text_representation (22P02) / invalid_datetime_format (22007)', () => {
-    // ⛔ The family the #8823 note was waiting for. Postgres' UNIQUE violation is
+    // ⛔ The family the commit 4dfa369a9 note was waiting for. Postgres' UNIQUE violation is
     // saved only because its value sits on `error.detail`, which
     // `ObjectLogger.write` never serializes — "coincidence, not a defence". This
     // family puts the caller's value on `error.message`, which IS serialized, so
@@ -761,7 +761,7 @@ describe('#8682 half B — the write-path loggers', () => {
   }
 
   /**
-   * The one driver double in this file. #8823 needed a MySQL-shaped fault and
+   * The one driver double in this file. Commit 4dfa369a9 needed a MySQL-shaped fault and
    * the shape is a PARAMETER rather than a second double — one fake engine per
    * file keeps the contract the double implements reviewable in one place.
    */
@@ -864,7 +864,7 @@ describe('#8682 half B — the write-path loggers', () => {
   });
 
   /**
-   * [#8823] The same write path, with the fault MySQL raises instead — where
+   * [commit 4dfa369a9] The same write path, with the fault MySQL raises instead — where
    * the caller's value is in the DIAGNOSTIC and not only in the statement, so
    * the statement cut alone never reached it.
    */

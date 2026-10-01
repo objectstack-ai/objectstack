@@ -168,7 +168,7 @@ describe('#6602 — the premise, read from the registry rather than restated', (
             allowOrgOverride: true,
         });
         // `flow` reaches the same seam through the OTHER write tier: not
-        // per-org overridable (#6283 / PR #6478) but still runtime-creatable,
+        // per-org overridable (#6283 / commit 474f131cf) but still runtime-creatable,
         // which is the tier a Studio-authored flow uses.
         expect(DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === 'flow')).toMatchObject({
             allowOrgOverride: false,

@@ -190,7 +190,7 @@ function findByName(items: any[], name: string): any {
     return (items as any[]).find((it) => it?.name === name);
 }
 
-// #6483 rolled `app`'s `allowOrgOverride` back to `false` (ADR-0005 — the
+// Commit ee58392e1 rolled `app`'s `allowOrgOverride` back to `false` (ADR-0005 — the
 // amendment table says ❌ for `page`/`app`/`action`), so overriding the
 // PACKAGED app these suites are built around now needs the ONE documented
 // door that remains: the `OS_METADATA_WRITABLE` operator escape hatch, which
@@ -296,7 +296,7 @@ describe('registry shadow — control-plane PUT → GET → DELETE keeps the art
 });
 
 describe('registry shadow — scoped-kernel lock enforcement is shadow-immune', () => {
-    // Same #6483 door as above: with `app` no longer allowOrgOverride, the
+    // Same commit ee58392e1 door as above: with `app` no longer allowOrgOverride, the
     // save would 403 NOT_OVERRIDABLE at the type gate and never reach the
     // L3 lock this case exists to prove is shadow-immune. Behind the hatch
     // the type gate passes and the LOCK is what refuses — the ordering the

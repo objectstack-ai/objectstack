@@ -2,7 +2,7 @@
 
 /**
  * [#15252] The boot-time action-governance audit reaches a SCOPED metadata
- * service — the C4 cell #14423's ruling left open.
+ * service — the C4 cell commit a56baa2bd left open.
  *
  * ## What was broken
  *

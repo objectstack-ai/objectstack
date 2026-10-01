@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `engine.validate()` — validate-only (#6037, #4633 ruling D).
+ * `engine.validate()` — validate-only (commit 18189983d, #4633 ruling D).
  *
  * The operation exists so a dry run can stop PREDICTING the write's verdict
  * and start ASKING for it. Two properties therefore carry the whole design,

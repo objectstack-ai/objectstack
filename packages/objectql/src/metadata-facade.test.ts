@@ -51,7 +51,7 @@ describe('MetadataFacade provenance passthrough', () => {
         // getItem('object', …) routes to the merged-object path, so read the
         // generic collection directly to inspect what register() stored.
         //
-        // [#6725] The direct read is STILL the right instrument here, and for
+        // [commit 1507ba356] The direct read is STILL the right instrument here, and for
         // the same reason as before: this pin is about the STORED document, and
         // the two object reads answer the contributor copy — which now exists,
         // and which deliberately does carry the `'sys_metadata'` sentinel (see
@@ -87,7 +87,7 @@ describe('MetadataFacade provenance passthrough', () => {
 });
 
 /**
- * [#6725] The write/read pin.
+ * [commit 1507ba356] The write/read pin.
  *
  * `MetadataFacade.register('object', …)` wrote through `registerItem` into the
  * generic `metadata` map, while every one of this class's object reads resolves
@@ -98,7 +98,7 @@ describe('MetadataFacade provenance passthrough', () => {
  * `register('object', …)` through both members; this file is the gate for the
  * facade's half of that.
  *
- * Refs #6725, #6505 / PR #6723, #6808, ADR-0010, ADR-0029.
+ * Refs commit 1507ba356, #6505 / commit 8ad609c69, #6808, ADR-0010, ADR-0029.
  */
 describe('MetadataFacade object write/read round-trip', () => {
     let registry: SchemaRegistry;
@@ -147,7 +147,7 @@ describe('MetadataFacade object write/read round-trip', () => {
     });
 
     it('serves the runtime-effective object, as the contract says it does', async () => {
-        // #6505 / PR #6723: `getObject` answers the object as the engine runs
+        // #6505 / commit 8ad609c69: `getObject` answers the object as the engine runs
         // it, not the document its author wrote. The materialization seam is
         // `registerObject`'s, so it only runs now that the write reaches it.
         const multiTenantRegistry = new SchemaRegistry({ multiTenant: true });

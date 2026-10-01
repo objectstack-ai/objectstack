@@ -403,7 +403,7 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
             // allowOrgOverride:false (no per-org agent fork). The kernel ships
             // exactly two platform agents; tenants extend via skills + tools.
             expect(allowedFromRegistry.has('agent')).toBe(false);
-            // #6483 — `permission`/`position` rolled BACK to
+            // Commit ee58392e1 — `permission`/`position` rolled BACK to
             // allowOrgOverride:false (with page/app/action/dataset/book/
             // tool/skill; the whole nine-type divergence family). ADR-0005's
             // security row has always said ❌: "Authorization correctness;

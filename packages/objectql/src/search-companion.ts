@@ -94,7 +94,7 @@ function isCompanionSourceType(type: string | undefined): boolean {
 }
 
 /**
- * [#10290] Field names that carry the record's PRIMARY KEY — its address —
+ * [commit 2570ab05c] Field names that carry the record's PRIMARY KEY — its address —
  * rather than any human-authored text.
  *
  * Keyed on the NAME because that is where the role lives: the driver
@@ -111,7 +111,7 @@ function isCompanionSourceType(type: string | undefined): boolean {
 const RECORD_ADDRESS_FIELD_NAMES: ReadonlySet<string> = new Set<string>([SystemFieldName.ID, '_id']);
 
 /**
- * [#10290] Is `fieldName` the object's primary key?
+ * [commit 2570ab05c] Is `fieldName` the object's primary key?
  *
  * Exported so the refusal in {@link resolveSearchCompanionSources} is one
  * named judgement a caller can ask about, rather than a literal buried in a
@@ -149,7 +149,7 @@ export function isCompanionSourceEligible(fieldMeta: CompanionFieldMeta | undefi
  * hook — deriving both from the same function means there is no stored
  * mapping to drift.
  *
- * ## [#10290] The PRIMARY KEY is never a source
+ * ## [commit 2570ab05c] The PRIMARY KEY is never a source
  *
  * ADR-0079's derivation ends at "first title-eligible field by declaration
  * order", and on a table whose only text column IS its primary key — system
@@ -201,7 +201,7 @@ export function resolveSearchCompanionSources(schema: CompanionObjectMeta | unde
   if (!schema?.fields) return [];
   const display = resolveDisplayField(schema as any);
   if (!display) return [];
-  // [#10290] Before the metadata gate: the primary key's METADATA is a
+  // [commit 2570ab05c] Before the metadata gate: the primary key's METADATA is a
   // perfectly ordinary readable text column, so only its name can refuse it.
   if (isPrimaryKeyField(display)) return [];
   const meta = schema.fields[display];

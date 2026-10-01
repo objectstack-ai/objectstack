@@ -2,7 +2,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { QueryAST, QueryInput, HookContext, ServiceObject } from '@objectstack/spec/data';
-// [#6300] The defaulting node schema `fillQueryAstDefaults` runs author input
+// [commit 74155c735] The defaulting node schema `fillQueryAstDefaults` runs author input
 // through — the declared `.default()` stays in `packages/spec`, the engine
 // only invokes it.
 import { SortNodeSchema } from '@objectstack/spec/data';
@@ -22,7 +22,7 @@ import {
   type DroppedFieldsEvent
 } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
-// The validate-only result IS the protocol's response shape (#6037): the
+// The validate-only result IS the protocol's response shape (commit 18189983d): the
 // engine is what `metadata-protocol.validateData` returns, so letting the two
 // drift would put a translation layer between a verdict and its contract.
 import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/api';
@@ -247,9 +247,9 @@ import {
   AssembledViewArtifactSchema,
   isViewContainerShaped,
 } from '@objectstack/spec';
-// [#14399] The ONE spelling of "which object does an aggregated `defineView`
+// [commit 3c1bbd2a8] The ONE spelling of "which object does an aggregated `defineView`
 // container bind to", imported rather than re-spelled — from the LEAF subpath,
-// for the reason the `/errors` import above states (#14680). See
+// for the reason the `/errors` import above states (commit 3bd9b3498). See
 // `resolveMetadataItemName` below for why this registrar lost its fourth copy.
 import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
 // [#20331] The divergent view-container `name` refusal — the ONE judge this
@@ -265,7 +265,7 @@ import { collectPredicateRelationships, evaluateValidationRules, optionVisibilit
 // SAME value. Armed and sealed in `update()`; the module owns the argument for
 // why neither end may move.
 import { recordHookPayloadWrites } from './hook-write-provenance.js';
-// [#17219] The hide pass's other half: when a hook faults reaching THROUGH a
+// [commit 706ad0fcc] The hide pass's other half: when a hook faults reaching THROUGH a
 // key that pass withheld, this names the key, says the platform withheld it,
 // and points at `ctx.previous` — the module owns the measurement and the
 // reason the explanation cannot be composed any further downstream.
@@ -1640,7 +1640,7 @@ function assertOrderByIsMaterializable(
     // doors: a caller refused at the REST boundary and a caller refused here
     // must not be sent two different ways.
     //
-    // [#8648] With the SEARCH axis the agreement is in SUBSTANCE, not in
+    // [commit e5eeb499c] With the SEARCH axis the agreement is in SUBSTANCE, not in
     // words, and saying otherwise here was simply false — measured from the
     // running doors, #6673's correction emits "Mirror the computed value onto
     // a stored text field on '<object>' and search that instead." All three
@@ -2370,7 +2370,7 @@ export interface HookEntry {
    * ⚠️ That idiom is deliberately stated WITHOUT naming a live registration.
    * It used to name one: `sys_attachment` declared #4757's delete refusal on
    * `beforeDelete` and on no update registration — true when this paragraph was
-   * written (#9974), false since #10091 gave that guard's update verb a refusal
+   * written (#9974), false since commit da891e0ef gave that guard's update verb a refusal
    * of its own. A replacement exemplar would only be the next referent free to
    * move, so none is named: the past-tense sentence cannot be falsified by the
    * tree moving on, because it is a claim about what those two cards did rather
@@ -2430,7 +2430,7 @@ function hookTargetList(target: string | string[] | undefined): string[] {
  * The allow half keeps the TRUTHINESS test both copies used verbatim, rather
  * than the `!== undefined` that reads more precisely. They differ on exactly one
  * input, `object: ''`, which reads here as a GLOBAL hook (falsy ⇒ no filter).
- * That read is deliberately UNCHANGED, and #6573 is why: flipping it would turn
+ * That read is deliberately UNCHANGED, and commit 708431313 says why: flipping it would turn
  * a hook firing on everything into one firing on nothing, silently — the same
  * class of defect pointing the other way. The shape is closed at the
  * registration door instead ({@link assertValidHookObject}), so no live entry
@@ -2514,7 +2514,7 @@ function assertValidHookExcludeObjects(
 }
 
 /**
- * [#6573] Registration-time refusal for the `object` (ALLOW) face, closing
+ * [commit 708431313] Registration-time refusal for the `object` (ALLOW) face, closing
  * #4281 / #4001's "an empty target is not *no* target" ruling on the path that
  * ruling never reached.
  *
@@ -2568,7 +2568,7 @@ function assertValidHookObject(
 }
 
 /**
- * [#6573] Refuse a scope whose two faces cancel each other out —
+ * [commit 708431313] Refuse a scope whose two faces cancel each other out —
  * `{ object: 'account', excludeObjects: 'account' }` and its list forms.
  *
  * The exclusion face subtracts from the allow face, so when the allow face is a
@@ -2797,7 +2797,7 @@ export interface OperationContext {
    */
   tenantLayer0Verdict?: TenantLayer0Verdict;
   /**
-   * [#16608] The INSERT post-image seam — where an enforcement layer gets to
+   * [commit a016f08b8] The INSERT post-image seam — where an enforcement layer gets to
    * judge the row that will actually be stored.
    *
    * An `insert` has no pre-image, so a middleware's only image of the write is
@@ -2838,7 +2838,7 @@ export interface OperationContext {
 }
 
 /**
- * [#16608] The judgement {@link OperationContext.postHookWriteImageCheck}
+ * [commit a016f08b8] The judgement {@link OperationContext.postHookWriteImageCheck}
  * carries, and the acknowledgement its installer reads back.
  *
  * `evaluate` receives the images the driver is about to store, and REFUSES by
@@ -2910,7 +2910,7 @@ export type EngineMiddleware = (
 
 /**
  * "Which of these tombstoned `sys_file` rows is something still holding?"
- * (#11427).
+ * (commit c3c72a4bc).
  *
  * Takes the whole tombstoned set from ONE record read and returns the subset
  * still held, as a set of stringified ids. Batched rather than per-row on
@@ -3022,7 +3022,7 @@ const METADATA_ARRAY_KEYS = [
  * `/api/v1/meta/views/:object`, `getViewsByObject()` and
  * `GET /meta/view?object=` all address it by.
  *
- * ⚠️ [#14399] The sentence that used to stand here — "per spec, `ViewSchema`
+ * ⚠️ [commit 3c1bbd2a8] The sentence that used to stand here — "per spec, `ViewSchema`
  * does NOT have a top-level `name` field" — is measurably false and was the
  * premise for consulting `item.name` first. `ViewSchema` declares an optional
  * `name` (`view.zod.ts`), described there as "supplied by the metadata door;
@@ -3033,7 +3033,7 @@ const METADATA_ARRAY_KEYS = [
  */
 function resolveMetadataItemName(key: string, item: any): string | undefined {
   if (!item) return undefined;
-  // [#14399] The aggregated `views` CONTAINER branch, taken FIRST and answered
+  // [commit 3c1bbd2a8] The aggregated `views` CONTAINER branch, taken FIRST and answered
   // by the shared derivation. Everything below is unchanged.
   //
   // This registrar used to consult `item.name` before anything else, for every
@@ -3775,9 +3775,9 @@ export class ObjectQL implements IObjectQLEngine {
     // first, so the combined check below can assume well-formed names.
     // [#5928] An exclusion face that subtracts nothing (`''`) or everything (`'*'`).
     assertValidHookExcludeObjects(options?.excludeObjects, event);
-    // [#6573] An allow face that names nothing (`''` → global, `[]`/`['']` → never fires).
+    // [commit 708431313] An allow face that names nothing (`''` → global, `[]`/`['']` → never fires).
     assertValidHookObject(options?.object, event);
-    // [#6573] Two well-formed faces that cancel out (`'account'` minus `'account'`).
+    // [commit 708431313] Two well-formed faces that cancel out (`'account'` minus `'account'`).
     assertHookScopeNotSelfCancelling(options?.object, options?.excludeObjects, event);
     // [#9719/#9974] The unscoped-multi-write flag on an event whose dispatch never reads it.
     assertValidUnscopedMultiWriteFlag(options?.dispatchUnscopedMultiWrite, event);
@@ -4642,7 +4642,7 @@ export class ObjectQL implements IObjectQLEngine {
 
   /**
    * "Which of these tombstoned `sys_file` rows is something still holding?"
-   * (#11427) — supplied by the storage plugin, never derived here.
+   * (commit c3c72a4bc) — supplied by the storage plugin, never derived here.
    *
    * File-field hydration must answer the same question the download path
    * answers (#10246) or one row gets two answers. That question has exactly one
@@ -4658,7 +4658,7 @@ export class ObjectQL implements IObjectQLEngine {
   private _heldFileResolver?: HeldFileResolver;
 
   /**
-   * Wire the batched holder question (#11427). Last registration wins; leaving
+   * Wire the batched holder question (commit c3c72a4bc). Last registration wins; leaving
    * it unwired keeps tombstoned files un-hydrated, which is what this engine
    * did before the seam existed.
    */
@@ -5268,7 +5268,7 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
-   * [#13644] Build the declared `HookContext.referentialFieldClear` marker —
+   * [commit 34ce8e7db] Build the declared `HookContext.referentialFieldClear` marker —
    * the read-only hook-context projection of the operation-private
    * `__referentialFieldClear` that {@link ObjectQL.cascadeDeleteRelations}
    * stamps on the cleanup write's ExecutionContext (#3023).
@@ -5447,7 +5447,7 @@ export class ObjectQL implements IObjectQLEngine {
       // reading (2026-08-31 ruling, execution point 1).
       //
       // It used to mute EVERY elevated write, whatever the object was. The
-      // #13178 census measured what that cost: 135 of 175 write call sites
+      // census cited in commit e49d98896's message measured what that cost: 135 of 175 write call sites
       // (77%) were silenced here — at the control's LARGEST gate, sitting
       // ahead of the condition the control is about — and the control has
       // never produced a finding, while all five known instances of the defect
@@ -5625,7 +5625,7 @@ export class ObjectQL implements IObjectQLEngine {
     // [#13491] Platform-namespace objects are excluded PER OBJECT, not
     // wholesale. The 2026-08-31 ruling withdrew the blanket
     // `isPlatformNamespaceObject(object)` exemption that used to stand here:
-    // #8672's "an org-less row is defensible for `sys_permission_set`"
+    // commit ff08691e6's "an org-less row is defensible for `sys_permission_set`"
     // inherits per object, and the namespace also holds objects whose org-less
     // rows are a defect — five instances of that class, all found by hand.
     // `unclassified` keeps the old exclusion so an unadjudicated object's
@@ -6330,14 +6330,14 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * | driver | `supports.autonumber` | fallback path? | uniqueness on the column | a collision appears as |
    * |:---|:---|:---|:---|:---|
-   * | driver-memory | `supports = {}` | **yes** | field-level `unique`, since #13197 (ADR-0120 D1/D3 scoping) | `UNIQUE_VIOLATION` / 409 → re-seed + re-issue, here |
+   * | driver-memory | `supports = {}` | **yes** | field-level `unique`, since commit 56c093c4d (ADR-0120 D1/D3 scoping) | `UNIQUE_VIOLATION` / 409 → re-seed + re-issue, here |
    * | driver-mongodb | absent (`{ batchSchemaSync: true }`) | **yes** | single-field unique index when the field declares `unique` | `E11000 duplicate key` → re-seed + re-issue, here |
    * | driver-sql | `autonumber: true` | no | — | — |
    * | driver-sqlite-wasm | inherited (`extends SqlDriver`, no `supports` override) | no | — | — |
    * | driver-turso | inherited (`...super.supports`) | no | — | — |
    *
    * So the retry protects the TWO fallback backends — and it protected only one
-   * of them until #13197, because `driver-memory` enforced no uniqueness at all
+   * of them until commit 56c093c4d, because `driver-memory` enforced no uniqueness at all
    * and had nothing to reject with. Which driver ISSUES the number is a
    * separate question and is unmoved by that: it is the reading the repo
    * already ruled and gates, in
@@ -6351,12 +6351,12 @@ export class ObjectQL implements IObjectQLEngine {
    * a second answer to "who owns the autonumber counter" is the same
    * one-contract-two-numbers defect this lane keeps closing (#6832).
    *
-   * ⚠️ **This paragraph used to record a live defect; #13197 closed it, and the
+   * ⚠️ **This paragraph used to record a live defect; commit 56c093c4d closed it, and the
    * ⛔ below is why the closure went where it did.** `InMemoryDriver.create` was
    * a `table.push()` storing no constraints of any kind (#4065's WEAK-oracle
    * docstring), so an out-of-process duplicate raised nothing for this method to
    * catch and the number landed twice in the rendered field with no error
-   * anywhere. Since #13197 that driver enforces field-level `unique`
+   * anywhere. Since commit 56c093c4d that driver enforces field-level `unique`
    * (`driver-memory`'s `memory-unique-constraint.ts`, with `driver-sql`'s
    * ADR-0120 D1/D3 scoping) and refuses the collision in the ADR-0112 envelope,
    * which `isUniqueViolationError` reads — so the branch below is reachable
@@ -6372,7 +6372,7 @@ export class ObjectQL implements IObjectQLEngine {
    * driver, NOT a pre-issue existence probe here: a probe costs a query on every
    * insert (the cost this resync was designed to avoid) and is still racy, so it
    * would trade a silent duplicate for a rarer silent duplicate at double the
-   * read cost. That argument is UNCHANGED by #13197 and is not a historical
+   * read cost. That argument is UNCHANGED by commit 56c093c4d and is not a historical
    * note — it is the standing reason no probe is added here, and it is what the
    * driver-side fix was chosen over. (`packages/drivers/**` was under the #5499
    * investment freeze when this comment was first written, which is why the work
@@ -6672,7 +6672,7 @@ export class ObjectQL implements IObjectQLEngine {
              // widens its values to `unknown`. State the contract once, on the
              // entries, rather than casting the argument at the call: the map
              // values ARE authored `ServiceObject`s — the INPUT shape, which is
-             // what `registerObject` takes since ADR-0122 phase 2 (#6083).
+             // what `registerObject` takes since ADR-0122 phase 2 (commit 53068c130).
              for (const [name, objDef] of Object.entries(manifest.objects) as [string, ServiceObject][]) {
                 // Ensure name in definition matches key
                 objDef.name = name;
@@ -6762,7 +6762,7 @@ export class ObjectQL implements IObjectQLEngine {
           this.logger.debug('Registering kinds from manifest', { id, kindCount: manifest.contributes.kinds.length });
           for (const kind of manifest.contributes.kinds) {
             this._registry.registerKind(kind);
-            // [#10729] Name the kind by its declared `id`. `contributes.kinds`
+            // [commit 10485009a] Name the kind by its declared `id`. `contributes.kinds`
             // items are `{ id, description? }` (`manifest.zod.ts`; `globs` was
             // retired unread, #11169) and
             // `registerKind` keys the item on `id` (`registerItem('kind', kind, 'id')`),
@@ -6940,7 +6940,7 @@ export class ObjectQL implements IObjectQLEngine {
                   this.logger.warn(`Skipping ${pluralToSingular(key)} without a derivable name`, { id: ownerId });
                   continue;
               }
-              // [#14666] The DIVERGENT-container refusal (maintainer ruling
+              // [commit d0ee598e6] The DIVERGENT-container refusal (maintainer ruling
               // 2026-09-03, direction 2). This seam used to reconcile a
               // container's own `name` to the derived key silently, one line
               // below: the author's field discarded with no diagnostic, while
@@ -7161,7 +7161,7 @@ export class ObjectQL implements IObjectQLEngine {
 
   /**
    * Hand a freshly-registered driver the ADR-0104 media arm — the kernel→driver
-   * supply seam (#15989, the ruling on #15041 step 2).
+   * supply seam (#15989, sequencing step 2 of ADR-0104's 2026-09-05 addendum).
    *
    * ## Why here, and why a closure rather than a value
    *
@@ -9857,7 +9857,7 @@ export class ObjectQL implements IObjectQLEngine {
 
   /**
    * Have this deployment's file-family COLUMNS moved to the bare-id encoding
-   * (#15989 — the ruling on #15041, step 2)?
+   * (#15989 — sequencing step 2 of ADR-0104's 2026-09-05 addendum)?
    *
    * The kernel-side half of the arm a SQL driver writes on. The driver cannot
    * ask this itself: the fact lives in a `sys_migration` row, which is a row
@@ -11099,7 +11099,7 @@ export class ObjectQL implements IObjectQLEngine {
           referenceObject,
           {
             where,
-            // [#6300] The `as any` these two carried is gone: `find` takes the
+            // [commit 74155c735] The `as any` these two carried is gone: `find` takes the
             // author state now, and the parsed nodes a `QueryAST` holds are
             // valid author input (a present `order` is legal to write).
             ...(nestedAST.fields
@@ -11282,7 +11282,7 @@ export class ObjectQL implements IObjectQLEngine {
     }
 
     const fileMap = new Map<string, any>();
-    // [#11427] `committed` is servable and always was. A TOMBSTONE
+    // [commit c3c72a4bc] `committed` is servable and always was. A TOMBSTONE
     // (`status: 'deleted'` + `deleted_at`) is recoverable state, not a delete:
     // it is a claim about the future (this row is reapable once the grace
     // window ends) that the sweep re-checks and often withdraws. #10246 already
@@ -11318,7 +11318,7 @@ export class ObjectQL implements IObjectQLEngine {
         }
       } catch (error) {
         // Unreadable evidence is not evidence of a holder. Keep the ids
-        // un-hydrated — the answer this pass gave before #11427, and the same
+        // un-hydrated — the answer this pass gave before commit c3c72a4bc, and the same
         // direction the download path fails in (`isServableForDownload`) and
         // the reap guard fails in (it vetoes rather than reaps when it cannot
         // tell). Distinct from the #6116 catch above, which covers the
@@ -11624,13 +11624,13 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
-   * [#6300] Fill the author-state defaults the query schemas declare, so the
+   * [commit 74155c735] Fill the author-state defaults the query schemas declare, so the
    * AST handed to middlewares, hooks and drivers is the PARSED state
    * `QueryAST` (a `z.infer` type) promises.
    *
    * ADR-0122 made `EngineQueryOptions` the author state (`z.input`): a key
    * with a declared `.default()` is optional to write. `find`/`findOne` kept
-   * demanding the parsed state anyway (#6083 pinned them back) because the
+   * demanding the parsed state anyway (commit 53068c130 pinned them back) because the
    * engine built its AST by bare spread and filled no default — `order:
    * undefined` would have ridden straight to the driver. This is the filling.
    * Each defaulting node is run through ITS OWN schema rather than
@@ -11763,7 +11763,7 @@ export class ObjectQL implements IObjectQLEngine {
     // ADR-0122 the caller-supplied `context` is the AUTHOR state (every key
     // optional) while `QueryAST` carries the parsed one, so spreading it in and
     // removing it a line later would type the AST with a context it never holds.
-    // [#6300] The rest of the bag is author state too now — the defaults its
+    // [commit 74155c735] The rest of the bag is author state too now — the defaults its
     // schemas declare are filled here, before anything downstream reads the AST.
     const { context: _findContext, ...findQuery } = query ?? {};
     const ast: QueryAST = { ...this.fillQueryAstDefaults(findQuery), object };
@@ -11925,7 +11925,7 @@ export class ObjectQL implements IObjectQLEngine {
    * ## The two facts this frame used to merge
    *
    * "The table has not been created yet" and "the read failed" are different
-   * facts, and until #13273 this line reported both at `error`, with a stack.
+   * facts, and until commit 3a86a65e7 this line reported both at `error`, with a stack.
    * The first one is the ordinary state of a database nobody has migrated yet,
    * and every caller on that path already treats it as a normal answer and says
    * so in its own code: {@link readMigrationFlagVerified} ("an unreadable table
@@ -12057,7 +12057,7 @@ export class ObjectQL implements IObjectQLEngine {
     // last — findOne is single-row by contract.
     // Same reason as find(): the caller's `context` is the author state and the
     // AST carries the parsed one, so it leaves before the AST is typed.
-    // [#6300] And the same default-filling as find(), for the same reason.
+    // [commit 74155c735] And the same default-filling as find(), for the same reason.
     const { context: _findOneContext, ...findOneQuery } = query ?? {};
     const ast: QueryAST = { ...this.fillQueryAstDefaults(findOneQuery), object: objectName, limit: 1 };
 
@@ -12302,7 +12302,7 @@ export class ObjectQL implements IObjectQLEngine {
   // site under its own `computed` reason (`insertDrops`) — in every context,
   // `isSystem` included, since a `formula` value has no column to land in.
   /**
-   * Validate-only (#6037, #4633 ruling D) — run the write path's own verdict
+   * Validate-only (commit 18189983d, #4633 ruling D) — run the write path's own verdict
    * over candidate rows and report it, WITHOUT persisting anything.
    *
    * ## Why this exists
@@ -12941,7 +12941,7 @@ export class ObjectQL implements IObjectQLEngine {
         rowHookWrittenKeys[i] = sealed?.hookWrittenKeys;
       }
 
-      // ── [#13657] The POST-hook half of the declared-field door ───────────
+      // ── [commit b003cf2e8] The POST-hook half of the declared-field door ───────────
       //
       // #8737 moved the door above ahead of the hooks so that no work — no
       // autonumber, no secret row — is done for a payload about to be refused.
@@ -13008,10 +13008,10 @@ export class ObjectQL implements IObjectQLEngine {
         if (postRefusal) throw postRefusal;
       }
 
-      // ── [#16608] EVERY VALUE-CHANGING PASS, AHEAD OF THE SEAM ──────────
+      // ── [commit a016f08b8] EVERY VALUE-CHANGING PASS, AHEAD OF THE SEAM ──────────
       //
       // The two strips below used to run AFTER the seam, and the contract
-      // review of PR #16805 measured what that cost: a static-`readonly`
+      // review commit a016f08b8 records measured what that cost: a static-`readonly`
       // scoping field — the natural shape for a server-stamped column, and
       // exactly what an RLS `check` compares (ADR-0055) — was judged by the
       // seam with the CALLER’s value still on the row, then stripped and
@@ -13196,7 +13196,7 @@ export class ObjectQL implements IObjectQLEngine {
         }
       }
 
-      // ── [#16608] The INSERT POST-IMAGE seam ──────────────────────────────
+      // ── [commit a016f08b8] The INSERT POST-IMAGE seam ──────────────────────────────
       //
       // The enforcement layer's write `check` used to be evaluated in its
       // middleware, against `opCtx.data` — the caller's payload as it arrived.
@@ -13207,7 +13207,7 @@ export class ObjectQL implements IObjectQLEngine {
       // the same objects `rows` is built from below and the driver is handed.
       //
       // Placement obeys the rule #8682 wrote for the declared-field door and
-      // #13657 restated for its post-hook half: a refusal must cost nothing.
+      // commit b003cf2e8 restated for its post-hook half: a refusal must cost nothing.
       // This sits after that door and BEFORE every producer —
       // `resolveSystemInsertOrganization`, `encryptSecretFields` (which writes
       // a `sys_secret` row), `applyAutonumbers` (which CONSUMES a sequence
@@ -13215,7 +13215,7 @@ export class ObjectQL implements IObjectQLEngine {
       //
       // ## What runs between here and the driver — stated, not waved at
       //
-      // The contract review of PR #16805 measured the version of this comment
+      // The contract review commit a016f08b8 records measured the version of this comment
       // that said "nothing between here and the driver adds a value the caller
       // could have steered" and then let TWO caller-steerable passes run after
       // the seam. Both now run ABOVE (`stripRuntimeOwnedFields` and the static
@@ -13706,7 +13706,7 @@ export class ObjectQL implements IObjectQLEngine {
   /**
    * Update one record by id, or every record a predicate selects.
    *
-   * # The error contract on a unique violation (#14390)
+   * # The error contract on a unique violation (commit 9d7f7259f)
    *
    * A driver's unique-constraint refusal leaves this door as the ADR-0112
    * envelope `DuplicateRecordError` — `code: 'DUPLICATE_RECORD'`, `status: 409`,
@@ -14183,7 +14183,7 @@ export class ObjectQL implements IObjectQLEngine {
           submitted: Object.freeze({ ...suppliedValues }) as Record<string, unknown>,
           session: this.buildSession(opCtx.context),
           provenance: this.buildProvenance(opCtx.context),
-          // [#13644] The declared referential-cleanup marker. Conditional
+          // [commit 34ce8e7db] The declared referential-cleanup marker. Conditional
           // spread, not a bare assignment: the contract is "absent unless
           // true", and an explicit `undefined` member would survive the
           // per-row context spreads as a present-but-undefined key.
@@ -14363,7 +14363,7 @@ export class ObjectQL implements IObjectQLEngine {
            // permanently true here: it states the invariant, and the invariant
            // outlives this call site.
            if (priorRecord) hookContext.previous = coerceBooleanFields(updateSchema as any, priorRecord as any) as any;
-           // [#17219] All three `beforeUpdate` dispatch sites inside the hide
+           // [commit 706ad0fcc] All three `beforeUpdate` dispatch sites inside the hide
            // window share one wrapper, so a hook that faults reaching THROUGH a
            // key this pass withheld names that key instead of surfacing the
            // platform's own contract enforcement as the author's crash. It
@@ -14483,7 +14483,7 @@ export class ObjectQL implements IObjectQLEngine {
 
        // ── [#14088] SEAL the hook-write recording ───────────────────────────
        //
-       // The same CONFLUENCE #13657 uses one comment down, and for the same
+       // The same CONFLUENCE commit b003cf2e8 uses one comment down, and for the same
        // reason: on either branch this is the line at which
        // `hookContext.input.data` is the final POST-hook payload and nothing
        // engine-owned has written to it yet. One seal covers both branches, so
@@ -14578,7 +14578,7 @@ export class ObjectQL implements IObjectQLEngine {
          }
        }
 
-       // ── [#13657] The POST-hook half of the declared-field door ──────────
+       // ── [commit b003cf2e8] The POST-hook half of the declared-field door ──────────
        //
        // The insert path's twin, applied to the second write verb — same
        // function, same envelope, same reason (see the long-form note at the
@@ -14959,7 +14959,7 @@ export class ObjectQL implements IObjectQLEngine {
                  updateSchema, hookContext.input.data as Record<string, unknown>,
                  opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
                );
-               // [#14390] The by-id driver exit — where a driver's refusal
+               // [commit 9d7f7259f] The by-id driver exit — where a driver's refusal
                // leaves this door, and where a recognised unique violation
                // stops being the driver's error. `envelopeUniqueViolation`
                // returns everything else untouched (a NOT NULL, a deadlock, a
@@ -15260,7 +15260,7 @@ export class ObjectQL implements IObjectQLEngine {
                  opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
                );
                // `updateMany` presence is part of the ladder verdict resolved above.
-               // [#14390] The predicate driver exit, enveloped on the same
+               // [commit 9d7f7259f] The predicate driver exit, enveloped on the same
                // terms as the by-id exit above. A multi-row write names no
                // row: `field` is whatever `uniqueViolationColumn` reads off
                // the driver's error, and NOTHING is invented about which of
@@ -15418,7 +15418,7 @@ export class ObjectQL implements IObjectQLEngine {
           // redaction, same one argument — the message, the level and the
           // `object` are unchanged.
           //
-          // [#14390] …and, as on the insert door (#14095), the line still
+          // [commit 9d7f7259f] …and, as on the insert door (#14095), the line still
           // carries what the DATABASE said now that the caller receives an
           // envelope: the platform logger serializes `message` and `stack`
           // only, so logging the envelope would silently drop the failing
@@ -16372,7 +16372,7 @@ export class ObjectQL implements IObjectQLEngine {
             // — same trust model as `__expandRead`), so it cannot be forged from
             // a request to bypass the guard on an ordinary write.
             //
-            // [#13644] This same marker is what `update()`'s hook-context
+            // [commit 34ce8e7db] This same marker is what `update()`'s hook-context
             // assembly projects onto the DECLARED `HookContext.
             // referentialFieldClear` (see buildReferentialFieldClear), so an
             // app guard can recognise the cleanup without reading an
@@ -18227,10 +18227,10 @@ export class ObjectRepository implements IScopedObjectRepository {
   }
 
   /**
-   * [#16786] Declared `Promise<Record<string, any> | null>`, not `Promise<any>`.
+   * [commit 5c8f5af50] Declared `Promise<Record<string, any> | null>`, not `Promise<any>`.
    *
    * `IScopedObjectRepository.findOne` has declared that shape since #16231's
-   * ruling A landed (PR #16783), and `IDataEngine.findOne` — the call this
+   * ruling A landed (commit 854639b31), and `IDataEngine.findOne` — the call this
    * method forwards to, one line down — declares it too. This method sat
    * between two narrow declarations and re-widened the value back to `any` on
    * the way out, so `implements IScopedObjectRepository` stayed satisfied (a
@@ -18261,7 +18261,7 @@ export class ObjectRepository implements IScopedObjectRepository {
   }
 
   /**
-   * [#16786] Declared `Promise<Record<string, any> | number | null>`, the same
+   * [commit 5c8f5af50] Declared `Promise<Record<string, any> | number | null>`, the same
    * re-widening as {@link findOne} and repaired the same way: the record for
    * the single-record form, the affected-row count for the predicate form
    * (`{ where, multi: true }`), `null` when the write matched nothing.
@@ -18269,7 +18269,7 @@ export class ObjectRepository implements IScopedObjectRepository {
    * ⛔ `updateById` is deliberately NOT touched here. Its `Promise<any>` is
    * what `IScopedObjectRepository.updateById` itself declares, so the class
    * matches its contract and there is no drift to repair on this side; that
-   * member is `packages/spec`'s to narrow and stays open on #16786.
+   * member is `packages/spec`'s to narrow (its spec half: commit 6059b29c0).
    */
   async update(data: any, options: any = {}): Promise<Record<string, any> | number | null> {
     return this.engine.update(this.objectName, data, {
