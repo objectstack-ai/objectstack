@@ -89,7 +89,7 @@ describe('#4073 end state — the plugin serves transport and /me/* only', () =>
         // The message must carry the remedy, not just the diagnosis.
         expect(hit[0]).toContain('@objectstack/rest');
         expect(hit[0]).toContain('@objectstack/runtime');
-        expect(hit[0]).toContain('#4073');
+        expect(hit[0]).toContain('transport adapter and serves neither');
     });
 
     it('a REST-composed boot stays quiet', async () => {

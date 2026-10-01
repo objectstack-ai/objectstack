@@ -88,7 +88,7 @@ function engineThatCannotBeRead(
     error: (object: string) => unknown,
     registryItems: Record<string, any> = {},
 ) {
-    // [#13324] The object reaches the factory, so a missing-table fault can be
+    // [commit 4cda78c9b] The object reaches the factory, so a missing-table fault can be
     // phrased for the table that was actually read. A driver never names one
     // table while failing a read of another, and `isMissingTableError` now
     // tells those two apart — a fixed phrase would make this fixture assert
@@ -361,7 +361,7 @@ describe('[#5707] the layered read stops painting an outage as "nothing was cust
         // perfectly readable was reported as "no overlay" because the org read
         // failed ahead of it.
         //
-        // ⚠️ [#14907] `view`, not `object` — and the type is now load-bearing
+        // ⚠️ [commit e1d4f9e3f] `view`, not `object` — and the type is now load-bearing
         // rather than incidental. This verb gates its organization through
         // `organizationIdForMetaRead`, so an `allowOrgOverride: false` type
         // (`object`, which the rest of this file uses as its generic subject)

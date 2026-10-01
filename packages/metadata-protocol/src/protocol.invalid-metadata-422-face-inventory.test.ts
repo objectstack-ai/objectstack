@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #10888 — the face inventory for `saveMetaItem`'s spec-validation
+ * Commit d806081dd — the face inventory for `saveMetaItem`'s spec-validation
  * `422 INVALID_METADATA`, and the pins that hold its conclusion.
  *
  * ## The duplication that raised the card
@@ -17,10 +17,10 @@
  * A blanket trim was tried during #10524 and reverted: some faces put this
  * sentence on a **200 response body** or in a **log**, where no structured
  * channel exists and the sentence is the SOLE carrier of the author's
- * prescription. #10886 reached the same verdict for the sibling 409.
+ * prescription. Commit 809e61221 reached the same verdict for the sibling 409.
  *
  * The maintainer ruling on #11017 (2026-08-22, option D) resolved it by
- * reusing #11015/#11099's per-face rendering rather than by declaring a
+ * reusing commit 82cb6e849/#11099's per-face rendering rather than by declaring a
  * response contract for `duplicatePackage`: faces that already carry a
  * structured `issues[]` drop the prose restatement; the duplicate face keeps
  * it in full.
@@ -290,7 +290,7 @@ describe('[#10888 · GUARD] a face that carries no `issues[]` keeps the whole se
         const duplicate = await refusal(protocol, 'package-duplicate');
         const plain = await refusal(protocol);
 
-        // #10886's verdict, unchanged: `failed[].error` is the sole carrier.
+        // Commit 809e61221's verdict, unchanged: `failed[].error` is the sole carrier.
         // (The end-to-end pin through `duplicatePackage` itself is P10 in
         // `protocol.batch-verb-driver-text.test.ts`, still green, untouched.)
         expect(duplicate.message).toBe(plain.message);

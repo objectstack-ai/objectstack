@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#6037 / #4633 ruling D] `validateData` — the DataProtocol's validate-only
+// [commit 18189983d / #4633 ruling D] `validateData` — the DataProtocol's validate-only
 // operation.
 //
 // The ruling attached one clause to this operation specifically: DECLARATION

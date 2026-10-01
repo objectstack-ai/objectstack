@@ -578,7 +578,7 @@ describe('[#11967] §7 distinct reads never share an entry', () => {
         expect((scoped.items as any[]).map((i) => i.name)).toEqual(['beta']);
     });
 
-    // ⚠️ [#14683] `view`, NOT `object`, and the type is LOAD-BEARING here in a
+    // ⚠️ [commit 96326040f] `view`, NOT `object`, and the type is LOAD-BEARING here in a
     // way it is not in this section's three siblings. `getMetaItems` now
     // resolves its own read scope through `organizationIdForMetaRead`, so a
     // type the registry declares NON-overridable has exactly one partition to

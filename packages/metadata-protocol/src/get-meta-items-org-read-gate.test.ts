@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#14683] `getMetaItems` applies the registry read gate ITSELF, so a sweep
+ * [commit 96326040f] `getMetaItems` applies the registry read gate ITSELF, so a sweep
  * that reads MORE THAN ONE type per request is scoped per type instead of per
  * request.
  *

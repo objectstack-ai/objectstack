@@ -454,7 +454,7 @@ describe('[#8570] section 6 — anti-vacuity: the doubles are the shapes they cl
     });
 });
 
-// ─── [#14723] The row speaks the WIRE spelling of a unique-constraint refusal ─
+// ─── [commit 65846bc46] The row speaks the WIRE spelling of a unique-constraint refusal ─
 
 /**
  * MEASURED — `@objectstack/objectql`'s `DuplicateRecordError` as it reaches
