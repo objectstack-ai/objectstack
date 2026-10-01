@@ -1025,7 +1025,8 @@
  * Measured on PR #20961's own diff (`git diff 75519e1c0a...d9d0d38cfc`) with
  * `--declaration no`: exit 4, three rows. The two T3 rows on
  * `packages/spec/api-surface/ui.json` are true — two new exports. The T1 on
- * `packages/spec/src/ui/component.zod.ts:932` is false: its change block
+ * `packages/spec/src/ui/component.zod.ts#PageCardProps` (new-file line 932, the
+ * `body` key) is false: its change block
  * removes `body: retiredKey(` and adds `body: retiredComponentSlot(retiredKey(`,
  * the SAME tombstone with a marker call around it, and the marker hands back
  * the very instance it is given.
@@ -1075,7 +1076,7 @@
  * of the 1,979 non-merge commits touching `packages/spec/src`, 1,933 carry a
  * non-test `.ts` diff — 5,865 file diffs. The merge-base version of this file
  * raises 4,915 rows and this one **4,914 — ONE differing commit, ONE row**:
- * `315888d660` (PR #20961 as it landed), whose T1 at `component.zod.ts:932`
+ * `315888d660` (PR #20961 as it landed), whose T1 on `PageCardProps.body`
  * declines. No other row moves and none begins firing (T1 2,390 · T2 2,040 ·
  * T4 484 stand). On the PR's own diff `--declaration no` still exits 4, on the
  * two true T3 rows alone. The shape's population on `packages/spec/src/**` is
@@ -6311,7 +6312,7 @@ export function selfTest() {
   // -- #20969: a tombstone RE-DECLARED through a transparent wrapper ---------
   //
   // The live pair is PR #20961: `git diff 75519e1c0a...d9d0d38cfc` exited 4
-  // with three rows, and the T1 on `component.zod.ts:932` was false — the block
+  // with three rows, and the T1 on `PageCardProps.body` was false — the block
   // removes `body: retiredKey(` and adds `body: retiredComponentSlot(retiredKey(`,
   // the same tombstone with a marker call around it. The two T3 rows on the
   // same run were true and must stay.
