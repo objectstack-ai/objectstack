@@ -1,0 +1,206 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+import { Command, Flags } from '@oclif/core';
+import chalk from 'chalk';
+import { createInterface } from 'node:readline';
+import type { IObjectQLEngine } from '@objectstack/spec/contracts';
+import {
+  printHeader,
+  printSuccess,
+  printWarning,
+  printError,
+  printInfo,
+  printStep,
+  createTimer,
+  emitJson,
+  isExitSignal,
+  errorCodeFields,
+} from '../../utils/format.js';
+import { bootSchemaStack } from '../../utils/schema-migrate.js';
+import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
+import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
+import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
+
+async function confirm(question: string): Promise<boolean> {
+  if (!process.stdin.isTTY) return false; // non-interactive → require --yes
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer: string = await new Promise((resolve) => rl.question(question, resolve));
+    return /^y(es)?$/i.test(answer.trim());
+  } finally {
+    rl.close();
+  }
+}
+
+/**
+ * `os migrate audit-metadata-bodies` — the one-off rewrite of at-rest cleartext
+ * metadata-body copies in `sys_audit_log` / `sys_activity` (#21120).
+ *
+ * The audit writer COPIES a `sys_metadata` / `sys_metadata_history` row whole
+ * into `sys_audit_log.new_value` / `old_value` and `sys_activity.metadata` at
+ * write time — a second, admin-readable, at-rest store. For a datasource body
+ * that copy carried stored credential material. The writer now projects the
+ * body through the shared redactor before it records it, but that reaches only
+ * NEW writes; rows copied before the fix keep their cleartext. This command
+ * rewrites them, projecting each copied body through the SAME redactor.
+ *
+ * Dry run by default (writes nothing), `--apply` to rewrite. Idempotent: a
+ * second run finds nothing — a redacted copy has no credential left — so
+ * re-running and reading a clean report is the verification. No `sys_migration`
+ * flag is recorded: nothing gates irreversible behaviour on this rewrite (the
+ * posture `os migrate summary-nulls` takes).
+ */
+export default class MigrateAuditMetadataBodies extends Command {
+  static override description =
+    'Rewrite at-rest cleartext metadata-body copies the audit writer left in sys_audit_log / sys_activity, ' +
+    'projecting each copied body through the shared credential redactor. Dry run by default; --apply writes.';
+
+  static override examples = [
+    '$ os migrate audit-metadata-bodies',
+    '$ os migrate audit-metadata-bodies --apply',
+    '$ os migrate audit-metadata-bodies --apply --yes --json',
+  ];
+
+  static override flags = {
+    'database-url': Flags.string({
+      description: 'Database URL to migrate (defaults to $OS_DATABASE_URL / the project DB)',
+      env: 'OS_DATABASE_URL',
+    }),
+    apply: Flags.boolean({
+      description: 'Rewrite the affected rows (default is a read-only dry run)',
+      default: false,
+    }),
+    yes: Flags.boolean({ char: 'y', description: 'Skip the --apply confirmation prompt', default: false }),
+    force: Flags.boolean({
+      description: 'Apply even when another process is using the database (SQLite occupancy check)',
+      default: false,
+    }),
+    json: Flags.boolean({ description: 'Output as JSON (implies non-interactive; requires --yes to apply)' }),
+  };
+
+  async run(): Promise<void> {
+    const { flags } = await this.parse(MigrateAuditMetadataBodies);
+    const timer = createTimer();
+    const apply = flags.apply;
+
+    if (!flags.json) printHeader('Migrate · audit-metadata-bodies');
+
+    const occupancy = await probeMigrationTarget(flags['database-url']);
+    if (occupancy.status === 'busy' && apply && !flags.force) {
+      if (flags.json) {
+        await emitJson(
+          { error: 'database_busy', database: occupancy.filename, signal: occupancy.signal, detail: occupancy.detail, hint: OCCUPANCY_HINT },
+          0,
+          { compact: true },
+        );
+        this.exit(1);
+        return;
+      }
+      printError(describeOccupancy(occupancy));
+      printWarning(OCCUPANCY_HINT);
+      this.exit(1);
+      return;
+    }
+    if (occupancy.status === 'busy' && !flags.json) {
+      printWarning(apply
+        ? `--force: ${describeOccupancy(occupancy)} Rewriting anyway — the live process may write rows mid-walk.`
+        : `${describeOccupancy(occupancy)} The dry run below writes nothing, but its counts may shift while that process is running.`);
+    }
+    if (occupancy.status === 'unknown' && !flags.json) {
+      printWarning(`Could not check whether the database is in use — ${occupancy.detail}`);
+    }
+
+    if (apply && !flags.yes) {
+      if (flags.json || !process.stdin.isTTY) {
+        if (flags.json) {
+          await emitJson({ error: 'confirmation_required', hint: 'pass --yes' }, 0, { compact: true });
+          this.exit(1);
+          return;
+        }
+        printWarning('Apply mode rewrites audit/activity rows. Re-run with --yes to confirm, or run without --apply to preview.');
+        this.exit(1);
+        return;
+      }
+      const ok = await confirm(
+        chalk.bold('\nRewrite every audit/activity row carrying a stored metadata body on this database? [y/N] '),
+      );
+      if (!ok) {
+        printInfo('Aborted — no changes made.');
+        return;
+      }
+    }
+
+    if (!flags.json) {
+      printStep(apply ? 'Booting data stack (APPLY mode)…' : 'Booting data stack (dry run)…');
+    }
+
+    let stack;
+    try {
+      stack = await bootSchemaStack({
+        jsonOutput: flags.json,
+        databaseUrl: flags['database-url'],
+        extraPlugins: await buildDataMigrationPlugins({ audit: true }),
+      });
+    } catch (error: any) {
+      if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
+      printError(error.message || String(error));
+      this.exit(1);
+      return;
+    }
+
+    try {
+      // `SchemaStack.kernel` is untyped, so the slot's contract is stated on the
+      // RESULT — the `objectql` slot serves `IObjectQLEngine`, whose
+      // `find` / `findOne` / `update` are exactly what the rewrite calls.
+      const engine = stack.kernel.getService('objectql') as IObjectQLEngine | undefined;
+      if (typeof engine?.find !== 'function' || typeof engine?.update !== 'function') {
+        throw new Error('No ObjectQL engine on this stack — cannot rewrite audit rows.');
+      }
+
+      const { migrateStoredMetadataBodyCopies } = await import('@objectstack/plugin-audit');
+
+      const logger = flags.json
+        ? { info: (m: string) => console.error(m), warn: (m: string) => console.error(m) }
+        : { info: (m: string) => printInfo(m), warn: (m: string) => printWarning(m) };
+
+      const report = await migrateStoredMetadataBodyCopies(engine, logger, { apply });
+
+      if (flags.json) {
+        await emitJson({ database: stack.dbLabel, apply, report, duration: timer.elapsed() });
+        if (report.failures > 0) this.exit(1);
+        return;
+      }
+
+      printInfo(`Database: ${chalk.white(stack.dbLabel)}`);
+      console.log('');
+      for (const [object, stats] of Object.entries(report.byObject)) {
+        console.log(`  ${chalk.white(object)}: ${stats.scanned} scanned, ${stats.rewritten} ${apply ? 'rewritten' : 'to rewrite'}`);
+      }
+      console.log('');
+
+      if (report.failures > 0) {
+        printError(`${report.failures} row(s) could not be rewritten — re-run to finish them.`);
+      } else if (apply && report.rewritten > 0) {
+        printSuccess(
+          `Rewrote ${report.rewritten} audit/activity row(s). Re-run any time — it only revisits rows still carrying a body.`,
+        );
+      } else if (apply) {
+        printSuccess('Nothing to rewrite — no audit/activity row carries a stored metadata body.');
+      } else if (report.rewritten > 0) {
+        printInfo(`Dry run only — ${report.rewritten} row(s) would be rewritten. Re-run with --apply.`);
+      } else {
+        printSuccess('Nothing to rewrite — no audit/activity row carries a stored metadata body.');
+      }
+      console.log(chalk.dim(`  ${timer.display()}`));
+      console.log('');
+      if (report.failures > 0) this.exit(1);
+    } catch (error: any) {
+      if (isExitSignal(error)) throw error;
+      if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
+      printError(error.message || String(error));
+      this.exit(1);
+    } finally {
+      await stack.shutdown();
+    }
+  }
+}

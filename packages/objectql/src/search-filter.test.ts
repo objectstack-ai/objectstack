@@ -180,4 +180,72 @@ describe('expandSearchToFilter', () => {
       ] });
     });
   });
+
+  /**
+   * [#21009] A field the object declares MULTI-VALUED is stored as a JSON array,
+   * where every operator but the membership pair is refused (`INVALID_FILTER` /
+   * 400). So it is searched by MEMBERSHIP: a label term becomes one `$contains`
+   * per matched option value, and a term matching no label — or a field with no
+   * options — becomes `$contains: term`. A scalar field keeps its clause.
+   */
+  describe('[#21009] a multi-valued field is searched by membership', () => {
+    // app-todo's `todo_task.tags` shape: a `select` declared `multiple: true`,
+    // in the auto-default set (no `searchableFields`).
+    const taskFields: Record<string, { type: string; multiple?: boolean; options?: Array<{ label: string; value: string }> }> = {
+      subject: { type: 'text' },
+      tags: { type: 'select', multiple: true, options: [
+        { label: 'Important', value: 'important' },
+        { label: 'Quick Win', value: 'quick_win' },
+        { label: 'Quick Fix', value: 'quick_fix' },
+      ] },
+      status: { type: 'select', options: [{ label: 'Open', value: 'open' }] },
+    };
+
+    it('the auto-default set includes the multi-valued select — the premise', () => {
+      expect(resolveSearchFields({ fields: taskFields })).toContain('tags');
+    });
+
+    it('a label term: one $contains per matched option value, never $in', () => {
+      // The auto-default set: the scalar `status` beside it keeps its fallback.
+      expect(expandSearchToFilter('important', { fields: taskFields })).toEqual({ $or: [
+        { subject: { $icontains: 'important' } },
+        { tags: { $contains: 'important' } },
+        { status: { $icontains: 'important' } },
+      ] });
+      // Two labels match → two membership clauses in the same $or (any-of).
+      expect(expandSearchToFilter('QUICK', { fields: taskFields, searchableFields: ['tags'] })).toEqual({ $or: [
+        { tags: { $contains: 'quick_win' } },
+        { tags: { $contains: 'quick_fix' } },
+      ] });
+    });
+
+    it('a term matching no label: $contains of the term, never $icontains', () => {
+      const f: SearchFilter | null = expandSearchToFilter('meeting', { fields: taskFields, searchableFields: ['tags'] });
+      expect(f).toEqual({ $or: [{ tags: { $contains: 'meeting' } }] });
+      expect(JSON.stringify(f)).not.toContain('$icontains');
+      expect(JSON.stringify(f)).not.toContain('$in');
+    });
+
+    it('an option-less multi-valued field (tags, a multi-valued lookup): $contains of the term', () => {
+      const noteFields = {
+        title: { type: 'text' },
+        labels: { type: 'tags' },
+        owners: { type: 'lookup', multiple: true },
+      };
+      expect(expandSearchToFilter('red', { fields: noteFields, searchableFields: ['title', 'labels', 'owners'] })).toEqual({ $or: [
+        { title: { $icontains: 'red' } },
+        { labels: { $contains: 'red' } },
+        { owners: { $contains: 'red' } },
+      ] });
+    });
+
+    it('a scalar select and a scalar text field keep their clauses — the control', () => {
+      expect(expandSearchToFilter('open', { fields: taskFields, searchableFields: ['subject', 'status'] })).toEqual({ $or: [
+        { subject: { $icontains: 'open' } },
+        { status: { $in: ['open'] } },
+      ] });
+      expect(expandSearchToFilter('zzz', { fields: taskFields, searchableFields: ['status'] }))
+        .toEqual({ $or: [{ status: { $icontains: 'zzz' } }] });
+    });
+  });
 });

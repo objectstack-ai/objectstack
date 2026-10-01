@@ -1975,3 +1975,69 @@ describe('audit writers — the writer reads the session key the engine emits (#
     expect(emits.find((e) => e.topic === 'collab.mention')?.organizationId).toBe('org-2');
   });
 });
+
+describe('[#21120] stored metadata body copies are redacted at write time', () => {
+  const CRED = 'writer-cred-5d02';
+  const dsBody = (cred = CRED) =>
+    JSON.stringify({ name: 'ds', driver: 'turso', config: { url: 'libsql://db.turso.io', encryptionKey: cred } });
+
+  // sys_metadata is a stored-metadata-body table: a `type` + `metadata` row.
+  const SCHEMAS = {
+    ...SINGLE_TENANT,
+    sys_metadata: ['id', 'name', 'type', 'scope', 'metadata'],
+    sys_metadata_history: ['id', 'name', 'type', 'metadata'],
+  };
+
+  it('a sys_metadata create withholds the stored credential from new_value and the activity copy', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMAS);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterInsert', {
+      object: 'sys_metadata',
+      input: { id: 'meta-1' },
+      result: { id: 'meta-1', name: 'ds', type: 'datasource', scope: 'platform', metadata: dsBody() },
+      session: { userId: 'admin-1' },
+    });
+    const audit = created.find((c) => c.object === 'sys_audit_log');
+    const activity = created.find((c) => c.object === 'sys_activity');
+    expect(audit).toBeDefined();
+    expect(JSON.stringify(audit!.row)).not.toContain(CRED);
+    // The audit copy still records the change: type survives, the projected body is present.
+    const newValue = JSON.parse(audit!.row.new_value);
+    expect(newValue.type).toBe('datasource');
+    expect(JSON.parse(newValue.metadata).config.encryptionKey).toBeUndefined();
+    expect(JSON.parse(newValue.metadata).config.url).toBe('libsql://db.turso.io');
+    expect(JSON.stringify(activity!.row)).not.toContain(CRED);
+  });
+
+  it('a sys_metadata update records the change but withholds the rotated credential', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMAS);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterUpdate', {
+      object: 'sys_metadata',
+      input: { id: 'meta-1', data: { metadata: dsBody() } },
+      previous: { id: 'meta-1', name: 'ds', type: 'datasource', metadata: dsBody('old-cred-0000') },
+      result: { id: 'meta-1', name: 'ds', type: 'datasource', metadata: dsBody() },
+      session: { userId: 'admin-1' },
+    });
+    const audit = created.find((c) => c.object === 'sys_audit_log');
+    // A credential rotation still produces a row (the values differ)…
+    expect(audit).toBeDefined();
+    // …with neither the old nor the new credential in it.
+    expect(JSON.stringify(audit!.row)).not.toContain(CRED);
+    expect(JSON.stringify(audit!.row)).not.toContain('old-cred-0000');
+  });
+
+  it('a credential-free sys_metadata body is copied intact (nothing to withhold)', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMAS);
+    installAuditWriters(engine as any, 'test.audit');
+    const clean = JSON.stringify({ name: 'v', type: 'view', columns: ['a'] });
+    await fire('afterInsert', {
+      object: 'sys_metadata',
+      input: { id: 'meta-2' },
+      result: { id: 'meta-2', name: 'v', type: 'view', scope: 'platform', metadata: clean },
+      session: { userId: 'admin-1' },
+    });
+    const audit = created.find((c) => c.object === 'sys_audit_log');
+    expect(JSON.parse(audit!.row.new_value).metadata).toBe(clean);
+  });
+});
