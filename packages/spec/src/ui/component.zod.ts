@@ -4537,7 +4537,18 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
    * `object-kanban`'s above.
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
-   * `e420df310`; re-measured there 2026-09-30 — `ObjectCalendar.tsx` changed
+   * `31971ff1e`; re-measured there 2026-10-01 — `ObjectCalendar.tsx` changed
+   * across the hop from `e420df310` in one place (+11/-19, objectui#8652, the
+   * objectui half of the same ruling): `navigation` is now DECLARED on
+   * `ObjectCalendarSchema`, so the ledger comment `1008-1025` that recorded
+   * the one cast objectui#8651 left standing is replaced by the declaration
+   * note `1008-1017`, and the read `1026` -> `1018` CHANGED CONTENT, toward
+   * this row: it is spelled `schema.navigation ?? { mode: 'drawer' }`, with no
+   * cast. Every anchor after it MOVED up by 8 with its cited text
+   * byte-identical — the hand-off `1028-1029` -> `1020-1021`, the event click
+   * `1421` -> `1413`, the overlay render `1341` -> `1333`, its
+   * `NavigationOverlay` `1354-1367` -> `1346-1359`. At `e420df310`
+   * (2026-09-30) `ObjectCalendar.tsx` changed
    * across the hop from `db11afd49` in comments only (+6/-3, objectui#11073),
    * two of them inside the ledger comment, which now says `@objectstack/spec`
    * 17.5.0 ships the `navigation` declaration that card waited on and that
@@ -4574,12 +4585,12 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
    * move, and the three after the change MOVED with their cited text
    * byte-identical — the event click `1293` -> `1317`, the overlay render
    * `1218` -> `1237`, its `NavigationOverlay` `1228-1241` -> `1250-1263`. At
-   * `87af769e9` (2026-09-22) none was at its `53ded82bf` number. Unlike its
-   * `object-kanban` twin the cast is still spelled here, ledgered at
-   * `:1008-1025` as the one objectui#8651 left standing): `ObjectCalendar.tsx:1026`
-   * reads `(schema as any).navigation ?? { mode: 'drawer' }`, `:1028-1029` hands
-   * it to `useNavigationOverlay`, `:1421` fires it on an event click and
-   * `:1341` renders the overlay (its `NavigationOverlay` is `:1354-1367`) —
+   * `87af769e9` (2026-09-22) none was at its `53ded82bf` number. Through
+   * `e420df310` the cast was still spelled here, unlike its `object-kanban`
+   * twin; at this pin it is gone on both): `ObjectCalendar.tsx:1018`
+   * reads `schema.navigation ?? { mode: 'drawer' }`, `:1020-1021` hands
+   * it to `useNavigationOverlay`, `:1413` fires it on an event click and
+   * `:1333` renders the overlay (its `NavigationOverlay` is `:1346-1359`) —
    * standalone, with no enclosing view.
    */
   navigation: NavigationConfigSchema.optional()
