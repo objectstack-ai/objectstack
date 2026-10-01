@@ -750,7 +750,7 @@ export default class Compile extends Command {
       //     `os start` crash. Absent-but-installable is a `pnpm add` hint.
       //
       //     Not a registry rule: it reads `node_modules`, not the stack.
-      if (!flags.json) printStep('Checking capability providers (#3366)...');
+      if (!flags.json) printStep('Checking that every required capability has a provider installable in this edition...');
       const capPreflight = preflightRequiredCapabilities({
         requires: Array.isArray((config as { requires?: unknown[] }).requires)
           ? ((config as { requires?: unknown[] }).requires as unknown[])
@@ -821,7 +821,7 @@ export default class Compile extends Command {
         ...lintUnknownAuthoringKeys(normalized as Record<string, unknown>, ObjectStackDefinitionSchema),
       ].map(formatUnknownAuthoringKey);
       if (unknownKeyWarnings.length > 0 && !flags.json) {
-        printWarning(`Undeclared authoring keys (${unknownKeyWarnings.length}) — dropped at load (#3786)`);
+        printWarning(`Undeclared authoring keys (${unknownKeyWarnings.length}) — dropped at load; reported here, never refused`);
         // [#11642] The header already states the true total, so before this
         // notice the block printed two numbers that disagreed and explained
         // neither. The pointer resolves because #11643 put this exact list

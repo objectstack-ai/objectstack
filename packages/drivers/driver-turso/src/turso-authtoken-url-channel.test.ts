@@ -14,8 +14,8 @@
  *
  * # What was measured (all four answers are on the wire, not inferred)
  *
- * Measured against **`@libsql/client@0.17.4`** (`@libsql/core@0.17.4`, native
- * `libsql@0.5.29`) — the range in `package.json` is `^0.17.3`, so the resolved
+ * Measured against **`@libsql/client@0.18.0`** (`@libsql/core@0.18.0`, native
+ * `libsql@0.5.29`) — the range in `package.json` is `^0.18.0`, so the resolved
  * version is part of the result and this file asserts it.
  *
  * 1. **`url` + `?authToken=` → HONOURED.** The token becomes a real
@@ -278,7 +278,7 @@ describe('[#8860] `?authToken=` as a credential channel in an authored URL', () 
     }
     // Answer 4. A caret range means this can move without anyone editing a file;
     // when it does, re-run the legs below rather than bumping this line blind.
-    expect(version).toBe('0.17.4');
+    expect(version).toBe('0.18.0');
   });
 
   describe('remote mode — the `url` channel', () => {

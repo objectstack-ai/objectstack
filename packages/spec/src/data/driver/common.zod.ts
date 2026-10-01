@@ -266,7 +266,7 @@ export function urlUserinfoUsername(value: string): string | undefined {
  * Every entry is MEASURED against the client the driver actually hands the URL
  * to, in the versions pinned by this tree — never inferred from documentation:
  *
- *  - `turso: ['authToken']` — `@libsql/core@0.17.4` `expandConfig` reads
+ *  - `turso: ['authToken']` — `@libsql/core@0.18.0` `expandConfig` reads
  *    `?authToken=` from the parsed URL and assigns it OVER the config-level
  *    `authToken`, so a query-embedded token does not merely authenticate: it
  *    silently overrides the secret the datasource binder injects at connect.

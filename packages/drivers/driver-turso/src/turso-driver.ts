@@ -150,7 +150,7 @@ export interface TursoDriverConfig {
    * Operation timeout in milliseconds for remote operations.
    * Effective in replica and remote modes; `0` or unset means no bound.
    *
-   * What it bounds, per arm (measured against `@libsql/client@0.17.4`):
+   * What it bounds, per arm (measured against `@libsql/client@0.18.0`):
    *
    * - **Remote mode over HTTP** (`libsql://`, `https://`, `http://`): every
    *   request the client's HTTP transport makes, when THIS driver creates the
@@ -934,7 +934,7 @@ function remoteOperationTimedOut(what: string, timeoutMs: number): Error & { cod
  * set.
  *
  * Why this seam and not `Config.timeout`: measured against
- * `@libsql/client@0.17.4` (`@libsql/core@0.17.4`), that option is the BUSY
+ * `@libsql/client@0.18.0` (`@libsql/core@0.18.0`), that option is the BUSY
  * timeout for lock contention on local `file:` databases — its own docblock
  * says "remote clients ignore it" — so forwarding the driver's key to it would
  * have left remote mode exactly as inert as before while giving replica mode a
@@ -995,7 +995,7 @@ function timeoutWindow(config: TursoDriverConfig): number | undefined {
  * `wss` / `ws` → its ws client, `https` / `http` → its HTTP client), but it
  * never sees the url as the author spelled it: the node entry is
  * `_createClient(expandConfig(config, true))`, and `expandConfig` has ALREADY
- * lowercased the scheme by then — `@libsql/core@0.17.4`,
+ * lowercased the scheme by then — `@libsql/core@0.18.0`,
  * `lib-esm/config.js`: `const originalUriScheme = uri.scheme.toLowerCase();`.
  * Executed against that version:
  * `expandConfig({ url: 'WSS://db.example.turso.io' }, true).scheme === 'wss'`
@@ -1026,7 +1026,7 @@ function ridesWebSocketTransport(url: string): boolean {
 /**
  * `timeout` beside a `wss://` / `ws://` url — refused at construction.
  *
- * On those two schemes the window reaches nothing. `@libsql/client@0.17.4`'s
+ * On those two schemes the window reaches nothing. `@libsql/client@0.18.0`'s
  * WebSocket client (`lib-esm/ws.js` → `hrana.openWs(url, authToken)`) consults
  * neither `Config.fetch` — the seam {@link fetchBoundedBy} rides — nor any
  * timeout option of its own: over `@libsql/hrana-client@0.10.0`'s
@@ -1064,7 +1064,7 @@ function refuseWebSocketTimeout(url: string, timeoutMs: number): never {
   const err = new Error(
     `\`TursoDriverConfig.timeout\` (${timeoutMs} ms) is set beside a \`${scheme}\` url, and on that ` +
       `scheme it bounds nothing: a \`${scheme}\` url rides @libsql/client's WebSocket transport, which ` +
-      `takes no fetch and no timeout option (measured against @libsql/client 0.17.4), so the window would ` +
+      `takes no fetch and no timeout option (measured against @libsql/client 0.18.0), so the window would ` +
       `be accepted and never delivered. Either omit \`timeout\` and run this remote unbounded, or keep it ` +
       `and spell the url \`libsql://\` or \`https://\` — the client resolves \`libsql://\` to HTTPS — ` +
       `where every request IS bounded and a stalled endpoint fails as TIMEOUT / 504.`,
@@ -1124,7 +1124,7 @@ function refuseSuppliedClientTimeout(timeoutMs: number): never {
     `\`TursoDriverConfig.timeout\` (${timeoutMs} ms) is set beside \`TursoDriverConfig.client\` in remote ` +
       `mode, and on that pair it bounds nothing: the window is the \`fetch\` this driver hands ` +
       `@libsql/client while CREATING the remote client, and a pre-configured client is already built — ` +
-      `its transport is not the driver's to replace (measured against @libsql/client 0.17.4), so the ` +
+      `its transport is not the driver's to replace (measured against @libsql/client 0.18.0), so the ` +
       `window would be accepted and never delivered. Either drop \`client\` and let the driver create the ` +
       `remote client, where every request IS bounded and a stalled endpoint fails as TIMEOUT / 504, or ` +
       `keep \`client\` and omit \`timeout\`, building the bound into that client yourself when you call ` +
@@ -1275,7 +1275,7 @@ function refuseIgnoredSyncKey(message: string): never {
  * comparing the scheme's letters in any case?
  *
  * A url's scheme is case-insensitive, and `@libsql/client` reads it that way:
- * `@libsql/core@0.17.4` `lib-esm/config.js` routes on
+ * `@libsql/core@0.18.0` `lib-esm/config.js` routes on
  * `uri.scheme.toLowerCase()`. Executed against that version, `expandConfig`
  * answers `https` for `LIBSQL://…`, `wss` for `Wss://…` and `file` for
  * `FILE:./x.db`, and `createClient` opens each of them. Every reader of the url
@@ -1307,7 +1307,7 @@ function isFileUrl(url: string): boolean {
 /**
  * Does this url name an in-memory database, by `@libsql/client`'s own reading?
  *
- * `@libsql/core@0.17.4` `lib-esm/config.js` expands a bare `:memory:` to
+ * `@libsql/core@0.18.0` `lib-esm/config.js` expands a bare `:memory:` to
  * `file::memory:`, and `isInMemoryConfig` then answers true for a `file` scheme
  * whose path is `:memory:` or starts with `:memory:?`. Mirrored here so the
  * replica refusal below covers exactly the urls the client's own embedded
@@ -1351,7 +1351,7 @@ type LocalEngineDefect = 'remote-url' | 'unrecognised-url' | 'in-memory-replica'
  * `URL_INVALID` ("Embedded replica must use file for local db"). So:
  *
  * - `'remote-url'`: a url {@link TursoDriver.detectMode} would call remote, in
- *   a local or replica mode. `@libsql/client@0.17.4` builds no embedded replica
+ *   a local or replica mode. `@libsql/client@0.18.0` builds no embedded replica
  *   for it: `lib-esm/node.js` routes `http`/`https` to its HTTP client and
  *   `ws`/`wss` to its WebSocket client, and `syncUrl` is read by
  *   `lib-esm/sqlite3.js` alone (a `syncUrl` grep over `http.js` and `ws.js`
@@ -1376,7 +1376,7 @@ type LocalEngineDefect = 'remote-url' | 'unrecognised-url' | 'in-memory-replica'
  *
  *   The scheme is now matched in any letter case (see {@link startsWithScheme}),
  *   so an uppercase remote url is remote, as the client routes it. What is left
- *   has no durable reading at all: `@libsql/client@0.17.4` refuses a bare path
+ *   has no durable reading at all: `@libsql/client@0.18.0` refuses a bare path
  *   as `URL_INVALID` ("not in a valid format") and an unsupported scheme as
  *   `URL_SCHEME_NOT_SUPPORTED`. Treating a bare path as `file:` instead was
  *   rejected: that invents a url spelling the client refuses, so the same
@@ -1447,7 +1447,7 @@ function refuseNonDurableLocalEngine(
       `read back, then be lost on restart, and none of them would reach the remote. ` +
       (mode === 'replica'
         ? '(@libsql/client builds a plain remote client for a remote url and ignores `syncUrl` beside ' +
-          'it, measured against @libsql/client 0.17.4, so there is no embedded replica to sync.) '
+          'it, measured against @libsql/client 0.18.0, so there is no embedded replica to sync.) '
         : '') +
       `To use the remote database, ${toRemote}. ${toLocal}`;
   } else if (defect === 'unrecognised-url') {
@@ -1480,7 +1480,7 @@ function refuseNonDurableLocalEngine(
       'local SQLite engine that can open only a `file:` url or `:memory:`. On this url it would run ' +
       'on a private in-memory database instead: writes would succeed and read back, then be lost on ' +
       'restart. (@libsql/client refuses such a url itself: a bare path as URL_INVALID, an unsupported ' +
-      `scheme as URL_SCHEME_NOT_SUPPORTED, measured against @libsql/client 0.17.4.) ${toFile} ${toRemote}`;
+      `scheme as URL_SCHEME_NOT_SUPPORTED, measured against @libsql/client 0.18.0.) ${toFile} ${toRemote}`;
   } else {
     const drop = config.mode
       ? "`mode: 'replica'`" + (config.syncUrl ? ' and `syncUrl`' : '')

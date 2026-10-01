@@ -43,7 +43,7 @@
   ],
   "dependencies": {
     "@objectstack/spec": "workspace:*",
-    "zod": "^4.6.1"
+    "zod": "^4.6.5"
   },
   "peerDependencies": {
     "vitest": "^4.0.0"

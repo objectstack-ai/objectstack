@@ -230,7 +230,7 @@ export default class Dev extends Command {
     }),
     restart: Flags.boolean({
       description:
-        'Restart the server after each successful rebuild so the running server always matches dist/objectstack.json (#5148). With --no-restart the watcher only rebuilds the artifact — the running server keeps the build it booted with until you restart it yourself, and every rebuild says so.',
+        'Restart the server after each successful rebuild so the running server always matches dist/objectstack.json. With --no-restart the watcher only rebuilds the artifact — the running server keeps the build it booted with until you restart it yourself, and every rebuild says so.',
       default: true,
       allowNo: true,
     }),

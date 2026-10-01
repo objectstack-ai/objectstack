@@ -78,7 +78,8 @@ async function confirm(question: string): Promise<boolean> {
 export default class MigrateSummaryNulls extends Command {
   static override description =
     'Backfill roll-up count/sum summary columns still stored as NULL on parent rows created before the ' +
-    'insert-time seed (#5749). Dry-run by default; --apply recomputes and writes each affected row.';
+    'insert-time seed, which now writes 0 for an empty child set. ' +
+    'Dry-run by default; --apply recomputes and writes each affected row.';
 
   static override examples = [
     '$ os migrate summary-nulls',

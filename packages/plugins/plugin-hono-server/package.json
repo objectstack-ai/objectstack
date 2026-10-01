@@ -24,11 +24,11 @@
     "@objectstack/observability": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
-    "hono": "^4.13.5"
+    "hono": "^4.13.9"
   },
   "devDependencies": {
     "@types/node": "^26.6.3",
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },

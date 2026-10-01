@@ -1520,13 +1520,15 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // email_template.json` is 13 props / 0 warn keys and `mapping.json` was 7 /
     // 0 (lit control, same script, same dir: `tool.json` 6/1, `object.json`
     // 35/1), so these two writes dispatched this rule and it judged NOTHING.
-    // [#20919] `mapping.json` is 8 / 1 now: `connectorSource` (the connector
-    // sync binding) is `live` with `authorWarn`, because nothing schedules a
-    // pull until the `job` stage lands — so a `mapping` write that authors
-    // `connectorSource` is warned here, and one that does not is still judged
-    // silent. That is the ruled end state, not a half-landing: the ruling
-    // dispatched the wiring and ⛔ no ledger population («the empty warn maps
-    // stay empty until a real property needs a row — zero pull, the wiring is
+    // [#20919] `mapping.json` is 8 / 0 again: `connectorSource` (the connector
+    // sync binding) went `live` and, since #21127, carries no `authorWarn` — a
+    // warned `live` row made this rule throw instead of warn, so a `mapping`
+    // write authoring it got an `authoring-rule-threw` advisory and `os
+    // validate` / `os lint` exited 1. The scheduling caveat (nothing schedules
+    // a pull until the `job` stage lands) is on the key's description, and
+    // `check:liveness` refuses a warned `live` row. That is the ruled end
+    // state, not a half-landing: the ruling dispatched the wiring and ⛔ no
+    // ledger population («the empty warn maps stay empty until a real property needs a row — zero pull, the wiring is
     // the whole deliverable»). `runtime-gate.inert-type-writes.test.ts` pins
     // both halves — that the rule is dispatched, and that it is silent — so
     // the day a ledger row lands the door lights up with no second edit here.

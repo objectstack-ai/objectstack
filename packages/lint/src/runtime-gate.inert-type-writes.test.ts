@@ -726,14 +726,40 @@ describe('#19542 — group C: wired, dispatched, and silent by ledger (email_tem
     // remembered. The ruling dispatched the wiring and ⛔ no ledger population,
     // so this silence is the ruled end state. The day a property earns an
     // `authorWarn` row the door lights up with no second edit — which is what
-    // the dispatch pin above is for. [#20919] `mapping` has one such row now,
-    // `connectorSource` (nothing schedules a pull until the `job` stage), and
-    // the item below does not author it.
+    // the dispatch pin above is for. [#20919] `mapping` had one such row,
+    // `connectorSource`, until #21127 dropped it: the key is `live`, and a
+    // warned `live` row made this rule throw (the case below pins the binding
+    // judged silent at this door).
     const item = type === 'email_template'
       ? { name: 'acme_welcome', label: 'Welcome', subject: 'Hi', bodyHtml: '<p>Hi</p>', category: 'workflow' }
       : { name: 'acme_feed', label: 'Feed', sourceFormat: 'csv', targetObject: 'acme_invoice', mode: 'upsert' };
     const result = runRuntimeAuthoringRules({ type, item, context: CONTEXT });
 
+    expect(result.errors, dump(result)).toEqual([]);
+    expect(result.advisories, dump(result)).toEqual([]);
+  });
+
+  it('[#21127] a `mapping` write that DOES author `connectorSource` is judged silent — not thrown on', () => {
+    // `connectorSource` is `live`: the connector sync executor reads every key,
+    // so authoring it warns nothing. While its ledger row still carried
+    // `authorWarn`, this write came back with an `authoring-rule-threw`
+    // advisory — the liveness rule's ledger-integrity error, not a verdict
+    // about the body. The binding is the card's; the target is this file's.
+    const result = runRuntimeAuthoringRules({
+      type: 'mapping',
+      item: {
+        name: 'acme_invoice_pull',
+        label: 'Invoice pull',
+        sourceFormat: 'json',
+        targetObject: 'acme_invoice',
+        mode: 'upsert',
+        fieldMapping: [{ source: 'state', target: 'status', transform: 'none' }],
+        connectorSource: { connector: 'crm_api', action: 'request' },
+      },
+      context: CONTEXT,
+    });
+
+    expect(result.rulesRun).toContain('lintLivenessProperties');
     expect(result.errors, dump(result)).toEqual([]);
     expect(result.advisories, dump(result)).toEqual([]);
   });

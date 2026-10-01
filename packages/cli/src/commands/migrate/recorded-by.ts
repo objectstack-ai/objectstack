@@ -66,7 +66,8 @@ async function confirm(question: string): Promise<boolean> {
  */
 export default class MigrateRecordedBy extends Command {
   static override description =
-    "Rewrite the legacy 'system' sentinel in sys_metadata_history.recorded_by to NULL (#4556). " +
+    "Rewrite the legacy 'system' sentinel in sys_metadata_history.recorded_by to NULL, the value a " +
+    'system-initiated write stores now. ' +
     'Dry-run by default; --apply runs the conversion through the migration journal.';
 
   static override examples = [
