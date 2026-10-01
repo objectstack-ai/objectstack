@@ -1653,6 +1653,22 @@ export class RemoteTransport {
    * from the schema it holds and this class does not (the same division
    * `setFilterColumnSql` and `setTenantFieldResolver` draw). A column named
    * here that is also a merge key is simply a merge key.
+   *
+   * `fence` — [#21185] the organization the merge leg may land in: a tenant
+   * column and the value the row is written under. When given, the merge
+   * statement carries the predicate `… DO UPDATE SET … WHERE` the stored
+   * column `IS` the written one (`excluded`), so a conflict on a row of
+   * another organization — or of none — leaves that row untouched, in the one
+   * statement; and the read-back of the landed row is scoped to the written
+   * value exactly. A row the predicate left alone is then not found, and the
+   * answer is `null` — on a fenced call only, never otherwise: the driver,
+   * which knows why the row is not there, turns that into its refusal. Told
+   * WHICH column and value, not WHY, as with `insertOnlyColumns`.
+   *
+   * The read-back decides, not the statement's `rowsAffected`: with no column
+   * left to merge the statement is `DO NOTHING`, which affects zero rows for a
+   * conflict inside the written organization too, so a `rowsAffected` verdict
+   * would refuse an ordinary same-organization upsert.
    */
   async upsert(
     object: string,
@@ -1660,7 +1676,8 @@ export class RemoteTransport {
     conflictKeys?: string[],
     table: string = object,
     insertOnlyColumns: readonly string[] = [],
-  ): Promise<Record<string, unknown>> {
+    fence?: { column: string; value: unknown },
+  ): Promise<Record<string, unknown> | null> {
     await this.ensureConnected();
 
     const { _id, ...rest } = data as any;
@@ -1685,6 +1702,11 @@ export class RemoteTransport {
     sql += ` ON CONFLICT(${mergeKeys.map((k) => `"${k}"`).join(', ')})`;
     if (updateClauses) {
       sql += ` DO UPDATE SET ${updateClauses}`;
+      // [#21185] The organization fence, inside the statement: the merge leg
+      // runs only on a row whose stored tenant column `IS` (NULL-safe) the one
+      // this row is written under. The written value is never NULL on a fenced
+      // call, so a platform row with no organization is fenced off as well.
+      if (fence) sql += ` WHERE ${this.tableSql(table)}."${fence.column}" IS excluded."${fence.column}"`;
     } else {
       sql += ` DO NOTHING`;
     }
@@ -1713,11 +1735,18 @@ export class RemoteTransport {
     // statement inserted and the row carries this call's `id`. On the default
     // `['id']` target the two readings are the same statement.
     const keyColumns = mergeKeys.every((k) => toUpsert[k] !== undefined && toUpsert[k] !== null) ? mergeKeys : ['id'];
+    // [#21185] A fenced call reads back under the written organization exactly
+    // — this face applies no tenant scope to any other read, and a read-back
+    // that found another organization's row would hand its columns to the
+    // caller. Not found means the predicate above left the row alone.
+    const fenceSql = fence ? ` AND "${fence.column}" = ?` : '';
+    const fenceArgs = fence ? [this.serializeValue(fence.value)] : [];
     const result = await this.client!.execute({
-      sql: `SELECT * FROM ${this.tableSql(table)} WHERE ${keyColumns.map((k) => `"${k}" = ?`).join(' AND ')}`,
-      args: keyColumns.map((k) => this.serializeValue(toUpsert[k])),
+      sql: `SELECT * FROM ${this.tableSql(table)} WHERE ${keyColumns.map((k) => `"${k}" = ?`).join(' AND ')}${fenceSql}`,
+      args: [...keyColumns.map((k) => this.serializeValue(toUpsert[k])), ...fenceArgs],
     });
     const rows = this.mapRows(result);
+    if (fence) return rows[0] ?? null;
     return rows[0] || toUpsert;
   }
 
