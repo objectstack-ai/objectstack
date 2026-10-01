@@ -286,7 +286,7 @@ describe('?template=true — the IMPORT door\'s gates decide, not the export\'s 
     const builder = vi.spyOn(rest as any, 'answerImportTemplate');
     const out = await get({ template: 'true' });
     expect(out.status()).toBe(403);
-    expect(out.json()).toMatchObject({ code: 'PERMISSION_DENIED', object: 'deal' });
+    expect(out.json()).toMatchObject({ success: false, error: { code: 'PERMISSION_DENIED', details: { object: 'deal' } } });
     expect(out.body().length).toBe(0);
     expect(builder).not.toHaveBeenCalled();
     expect(getWritableFields).not.toHaveBeenCalled();
@@ -299,7 +299,7 @@ describe('?template=true — the IMPORT door\'s gates decide, not the export\'s 
     const builder = vi.spyOn(rest as any, 'answerImportTemplate');
     const out = await get({ template: 'true' });
     expect(out.status()).toBe(403);
-    expect(out.json()).toMatchObject({ code: 'PERMISSION_DENIED', object: 'deal' });
+    expect(out.json()).toMatchObject({ success: false, error: { code: 'PERMISSION_DENIED', details: { object: 'deal' } } });
     expect(out.body().length).toBe(0);
     expect(builder).not.toHaveBeenCalled();
     expect(getWritableFields).not.toHaveBeenCalled();
@@ -312,7 +312,7 @@ describe('?template=true — the IMPORT door\'s gates decide, not the export\'s 
     });
     const out = await get({ template: 'true' });
     expect(out.status()).toBe(403);
-    expect(out.json()).toMatchObject({ code: 'PERMISSION_DENIED' });
+    expect(out.json()?.error?.code).toBe('PERMISSION_DENIED');
     expect(out.body().length).toBe(0);
   });
 

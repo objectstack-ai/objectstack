@@ -2572,12 +2572,16 @@ export class RestServer {
             allowed = false; // access-narrowing answer → a throw is a denial
         }
         if (allowed) return false;
-        res.status(403).json({
-            code: 'PERMISSION_DENIED',
-            error: `Creating records on object '${objectName}' is not permitted for this user, `
+        // Built through the SHARED envelope (`{ success: false, error: { code,
+        // message, details } }`), not in the flat sibling-`code` dialect the
+        // export gate above still answers in — `check:route-envelope` ratchets
+        // that dialect down and refuses a new body in it.
+        sendEnvelopeError(
+            res, 403, 'PERMISSION_DENIED',
+            `Creating records on object '${objectName}' is not permitted for this user, `
                 + 'so its import template is not served',
-            object: objectName,
-        });
+            { details: { object: objectName } },
+        );
         return true;
     }
 
