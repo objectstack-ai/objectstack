@@ -381,9 +381,9 @@ structured-JSON types (`json`, `composite`, `repeater`, `record`, `location`, `a
 `vector`), `multiselect` / `checkboxes` / `tags`, or a `select` / `lookup` / `user` /
 `file` / `image` declared `multiple: true` — is refused `400 INVALID_FIELD` by the engine
 before any driver runs, because no two backends compare such values for equality alike.
-Store the part you count in a field of its own, or count the rows with `count`. Since the
-aggregate door now asks the same field-type table for every function, `min`, `max` and
-`avg` over a type the table refuses answer the same `400 INVALID_FIELD` on every driver.
+Store the part you count in a field of its own, or count the rows with `count`. `min`, `max` and
+`avg` over a type the table refuses answer the same `400 INVALID_FIELD` on every driver
+(`sum` is not judged by that door yet).
 </Callout>
 
 <Callout type="warn">
