@@ -49,7 +49,7 @@ const result = ImportFieldMappingSchema.parse(data);
 | **fieldMapping** | `{ source: string \| string[]; target: string \| string[]; transform: Enum<'none' \| 'constant' \| 'lookup' \| 'split' \| 'join' \| 'javascript' \| 'map'>; params?: object }[]` | ✅ |  |
 | **mode** | `Enum<'insert' \| 'update' \| 'upsert'>` | optional (default: `"insert"`) |  |
 | **upsertKey** | `string[]` | optional | Fields to match for upsert (e.g. email) |
-| **connectorSource** | `{ connector: string; action: string; input?: Record<string, any>; recordsPath?: string; … }` | optional | Pull binding: the rest/openapi connector this mapping pulls rows from (one-way, full or timestamp-incremental; a `job` sets the cadence). Pulled when a job drives it; nothing schedules it yet |
+| **connectorSource** | `{ connector: string; action: string; input?: Record<string, any>; recordsPath?: string; … }` | optional | Pull binding: the rest/openapi connector this mapping pulls rows from (one-way, full or timestamp-incremental; a `job` sets the cadence). Pulled when a job drives it; nothing schedules it yet, so the binding alone moves no rows — schedule the pull with a `job` once a job can drive one |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |

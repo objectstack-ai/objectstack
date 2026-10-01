@@ -47,6 +47,7 @@
  */
 
 import { redactDatasourceConfig } from '../data/datasource-credential-redaction';
+import { PLURAL_TO_SINGULAR } from '../shared/metadata-collection.zod';
 
 /** What a {@link MetadataTypeRedactor} returns: the servable item, and what was withheld. */
 export interface MetadataRedactionResult {
@@ -144,4 +145,119 @@ export function listMetadataTypeRedactorTypes(): string[] {
   const types = new Set<string>(Object.keys(BUILTIN_METADATA_TYPE_REDACTORS));
   for (const t of EXTRA_METADATA_TYPE_REDACTORS.keys()) types.add(t);
   return Array.from(types).sort();
+}
+
+// ---------------------------------------------------------------------------
+// Stored metadata ROWS — the family-wide definition of "this row holds a
+// serialized metadata body", and the one redaction of that body (#21120)
+// ---------------------------------------------------------------------------
+
+/**
+ * [#21120] The object (table) names whose `metadata` column stores one
+ * serialized metadata BODY, of the type the same row's `type` column names —
+ * the table every `/meta` read exit rehydrates from (`sys_metadata`) and its
+ * version snapshots (`sys_metadata_history`).
+ *
+ * This is the family boundary for the stored-metadata-body security invariant:
+ * every surface that can SERVE, COPY or EVALUATE one of these rows' body is a
+ * credential read exit, and either projects the body through the ONE redactor
+ * below or refuses. It lives HERE — not in `@objectstack/metadata-protocol` —
+ * for the same reason {@link getMetadataTypeRedactor} does: the surfaces that
+ * must consult it are service packages (`@objectstack/service-analytics`),
+ * plugins (`@objectstack/plugin-audit`) and the engine
+ * (`@objectstack/objectql`), and **none of them depends on
+ * `@objectstack/metadata-protocol`**, while all of them already import
+ * `@objectstack/spec/kernel`. A copy per surface is exactly the
+ * two-definitions-drift this module's header refuses for the registry.
+ */
+export const STORED_METADATA_BODY_OBJECTS: ReadonlySet<string> = new Set([
+  'sys_metadata',
+  'sys_metadata_history',
+]);
+
+/** The column holding the serialized body, on every {@link STORED_METADATA_BODY_OBJECTS} member. */
+export const STORED_METADATA_BODY_COLUMN = 'metadata';
+
+/** The column naming the body's metadata type — what selects its redactor. */
+export const STORED_METADATA_TYPE_COLUMN = 'type';
+
+/** Whether `object`'s rows carry a stored metadata body a read exit must project. */
+export function isStoredMetadataBodyObject(object: string): boolean {
+  return STORED_METADATA_BODY_OBJECTS.has(object);
+}
+
+/**
+ * Redact one stored metadata body VALUE (the `metadata` column), choosing the
+ * redactor by `type` through {@link getMetadataTypeRedactor} — the single
+ * credential definition every read exit shares.
+ *
+ * Returns the input BY REFERENCE when there is nothing to withhold: no
+ * redactor for the type, a non-object body, or a redactor that found nothing.
+ * Fails CLOSED on the two shapes it cannot judge, by returning `undefined`
+ * (the caller withholds the body): a body whose type has a redactor but that
+ * does not parse, and — because the column is serialized JSON (a `textarea`) —
+ * a body that is a string naming a redacted type but will not parse. A body
+ * whose type registers no redactor is served as stored, parseable or not,
+ * because the absence of a redactor is a fact about the type.
+ *
+ * A string body is re-serialized only when a redaction actually happened, so a
+ * clean row's stored bytes reach the caller unchanged.
+ *
+ * ⛔ A throwing redactor is NOT swallowed here: failing closed is the only
+ * defensible answer for a security control, so a `catch` that served the
+ * cleartext this function exists to withhold is deliberately absent.
+ */
+export function redactStoredMetadataBody(
+  type: unknown,
+  body: unknown,
+): { ok: true; body: unknown } | { ok: false } {
+  if (body === undefined || body === null) return { ok: true, body };
+  if (typeof type !== 'string' || type === '') return { ok: false };
+  const redactor = getMetadataTypeRedactor(PLURAL_TO_SINGULAR[type] ?? type);
+  if (!redactor) return { ok: true, body };
+
+  let parsed: unknown = body;
+  if (typeof body === 'string') {
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return { ok: false };
+    }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { ok: true, body };
+  const result = redactor(parsed as Record<string, unknown>);
+  if (!result || result.redactedKeys.length === 0) return { ok: true, body };
+  const served = result.item;
+  return { ok: true, body: typeof body === 'string' ? JSON.stringify(served) : served };
+}
+
+/**
+ * Redact the stored metadata body column of one row of a
+ * {@link STORED_METADATA_BODY_OBJECTS} table, in place of serving it raw. Every
+ * other column is left as the engine returned it.
+ *
+ * A row the redactor cannot judge ({@link redactStoredMetadataBody} answering
+ * `{ ok: false }`) has its body column OMITTED rather than served. Rows of any
+ * object outside the set, and non-object rows, pass through unchanged — so this
+ * is safe to call at a generic read exit without first checking the object.
+ */
+export function redactStoredMetadataRow<T>(object: string, row: T): T {
+  if (!isStoredMetadataBodyObject(object) || !row || typeof row !== 'object' || Array.isArray(row)) {
+    return row;
+  }
+  const record = row as Record<string, unknown>;
+  if (!(STORED_METADATA_BODY_COLUMN in record)) return row;
+  const outcome = redactStoredMetadataBody(record[STORED_METADATA_TYPE_COLUMN], record[STORED_METADATA_BODY_COLUMN]);
+  if (outcome.ok) {
+    if (outcome.body === record[STORED_METADATA_BODY_COLUMN]) return row;
+    return { ...record, [STORED_METADATA_BODY_COLUMN]: outcome.body } as T;
+  }
+  const { [STORED_METADATA_BODY_COLUMN]: _withheld, ...rest } = record;
+  return rest as T;
+}
+
+/** {@link redactStoredMetadataRow} over a list. Non-array input passes through. */
+export function redactStoredMetadataRows<T>(object: string, rows: T[]): T[] {
+  if (!Array.isArray(rows) || !isStoredMetadataBodyObject(object)) return rows;
+  return rows.map((row) => redactStoredMetadataRow(object, row));
 }

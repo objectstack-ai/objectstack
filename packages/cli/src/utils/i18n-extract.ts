@@ -2351,7 +2351,7 @@ export function renderSourceHashModule(
   lines.push(' *');
   lines.push(" * Each entry is the digest of the SOURCE REVISION that this locale's leaf at");
   lines.push(' * that path is still a byte copy of — provenance for the generated half of the');
-  lines.push(' * bundles (commit 09b4f4e4e, maintainer ruling #12069 Option A, extending #8765 Option B).');
+  lines.push(' * bundles (commit 09b4f4e4e): a leaf whose digest no longer matches its source is stale and serves the source text instead.');
   lines.push(' *');
   lines.push(' * An entry exists only while the leaf IS such a copy. Re-translate the leaf in');
   lines.push(' * `<locale>.objects.generated.ts` and the next extract drops its entry by');

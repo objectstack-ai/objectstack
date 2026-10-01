@@ -365,10 +365,13 @@ export const MappingSchema = lazySchema(() => strictObject({
    *
    * EXECUTED WHEN A JOB DRIVES IT: `@objectstack/service-automation`'s
    * connector sync executor (`pullConnectorSource`) reads every key here and
-   * writes through the import runner. Nothing schedules a pull yet — the
-   * `job` that drives it is the next stage — so the liveness ledger keeps
-   * `authorWarn` on the container until it lands. A pull makes ONE action
-   * call and reads ONE response (see `watermark`). `sourceFormat` keeps
+   * writes through the import runner, so the liveness ledger grades every key
+   * `live`. Nothing schedules a pull yet — the `job` that drives it is the
+   * next stage — and that is the one caveat an author must read before
+   * writing the binding, so the `.describe()` below carries it. It is not a
+   * ledger warning: a `live` row carries no `authorWarn` (the author-side lint
+   * has no verdict for one, and `check:liveness` refuses it). A pull makes ONE
+   * action call and reads ONE response (see `watermark`). `sourceFormat` keeps
    * governing the manual import door; a pulled row is the connector's JSON
    * record.
    */
@@ -424,7 +427,8 @@ export const MappingSchema = lazySchema(() => strictObject({
     ),
   }).optional().describe(
     'Pull binding: the rest/openapi connector this mapping pulls rows from (one-way, full or '
-    + 'timestamp-incremental; a `job` sets the cadence). Pulled when a job drives it; nothing schedules it yet',
+    + 'timestamp-incremental; a `job` sets the cadence). Pulled when a job drives it; nothing schedules it yet, '
+    + 'so the binding alone moves no rows — schedule the pull with a `job` once a job can drive one',
   ),
 
   // `extractQuery`, `errorPolicy` and `batchSize` were removed in 17.0.0

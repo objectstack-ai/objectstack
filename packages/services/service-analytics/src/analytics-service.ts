@@ -55,6 +55,10 @@ import {
   type FieldReadRole,
   type ReadableFieldsProvider,
 } from './field-read-admission.js';
+// [#21120] The stored-metadata-body door refusal — a query naming the stored
+// body column of `sys_metadata` / `sys_metadata_history` as a member is refused
+// here, on the one family seam, before any strategy runs.
+import { storedMetadataBodyAnalyticsRefusal } from './stored-metadata-body-refusal.js';
 // [#15768] The measure result-type rule — which aggregates return a value of
 // the aggregated field's own type, and which are numeric whatever they read.
 // Owned in its own module so the enumerated verdict per `AggregationFunction`
@@ -1601,6 +1605,18 @@ export class AnalyticsService implements IAnalyticsService {
     // the objects admitted and the objects scoped are one value, not two calls.
     const objects = this.queryObjects(query, scope);
     await this.assertReadAdmitted(objects, context);
+    // [#21120] …and the stored-metadata-body refusal — a hard product refusal,
+    // not a permission check, so it runs ahead of (and independent of) the
+    // field gate below whether or not a security provider is wired. A query
+    // that names the stored body column of `sys_metadata` / `sys_metadata_history`
+    // as a member would evaluate the stored body (a credential read exit), so it
+    // is refused here on the same seam every other door uses. See
+    // `stored-metadata-body-refusal.ts`.
+    this.assertStoredMetadataBodyNotQueried(
+      query,
+      query.cube ? scope.getCube(query.cube) : undefined,
+      query.cube ? reads.getDatasetScope(query.cube) : undefined,
+    );
     // [#20917] …and the FIELD-level gate, right behind it and for the same
     // reason: every member the query names is judged here, once, so every
     // strategy — and the SQL echo — inherits the verdict by construction. The
@@ -1822,6 +1838,31 @@ export class AnalyticsService implements IAnalyticsService {
       this.logger,
       this.queryableFieldsProvider,
     );
+  }
+
+  /**
+   * [#21120] Refuse a query that names the stored body column of
+   * `sys_metadata` / `sys_metadata_history` as a dimension, measure, filter or
+   * sort key. The members are resolved the SAME way the strategies and the
+   * field gate resolve them ({@link namedQueryFields}), so the refusal reaches
+   * the auto-inferred `sys_metadata` cube and an inline dataset that names the
+   * body field alike. See `stored-metadata-body-refusal.ts` for why the body
+   * column is refused rather than projected on this door.
+   *
+   * Unconditional — not gated on a security provider — because the body is a
+   * credential read exit on every deployment, and evaluating it is a
+   * disclosure regardless of who the caller is.
+   */
+  private assertStoredMetadataBodyNotQueried(
+    query: AnalyticsQuery,
+    cube: Cube | undefined,
+    datasetScope: DatasetScope | undefined,
+  ): void {
+    if (!cube) return;
+    const refusal = storedMetadataBodyAnalyticsRefusal(
+      namedQueryFields(query, cube, datasetScope, this.hopReference),
+    );
+    if (refusal) throw refusal;
   }
 
   /**
@@ -2165,6 +2206,14 @@ export class AnalyticsService implements IAnalyticsService {
         // fields the published ones do.
         const previewService = {
           query: async (q: AnalyticsQuery) => {
+            // [#21120] The body-column refusal rides this preview path too —
+            // a drafted seed row carries the same stored body the published
+            // ones do.
+            this.assertStoredMetadataBodyNotQueried(
+              q,
+              compiled.cube,
+              { filter: compiled.filter, measureFilters: compiled.measureFilters },
+            );
             await this.assertFieldsReadable(
               q,
               compiled.cube,

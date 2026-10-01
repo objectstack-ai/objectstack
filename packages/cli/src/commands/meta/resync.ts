@@ -68,7 +68,8 @@ export function resyncSkipExplanationLine(resyncSkipped: number): string | null 
   return (
     "  Expected, not a failure — resync only reconciles platform-owned rows. " +
     "A stored 'admin' stamp (or the legacy 'user' spelling) isn't always a deliberate Setup takeover: " +
-    "on installs from before #8692, the platform's own seeded defaults carry that same stamp, so a " +
+    "on installs created before the seeder began stamping its default sets 'platform', the platform's own " +
+    "seeded defaults carry that same stamp, so a " +
     "persistent skip count here can be permanent by design. A package-owned row, by contrast, is " +
     "always a deliberate override by the package that owns it."
   );
@@ -100,7 +101,7 @@ export function resyncSkipExplanationLine(resyncSkipped: number): string | null 
  */
 export default class MetaResync extends Command {
   static override description =
-    'Reconcile materialized metadata (default permission sets) to the compiled dist without a --fresh wipe (#2705)';
+    'Reconcile materialized metadata (default permission sets, which boot seeds insert-once) to the compiled dist without a --fresh wipe';
 
   static override examples = [
     '$ os meta resync',

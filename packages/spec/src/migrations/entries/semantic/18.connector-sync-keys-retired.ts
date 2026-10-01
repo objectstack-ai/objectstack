@@ -24,8 +24,8 @@ export const entry: SemanticMigration = {
     + 'instance it pulls from (`connector`), the action that reads the records (`action`, with a '
     + 'fixed `input` and a `recordsPath`) and, for a timestamp-incremental pull, a `watermark` '
     + '(`field` on the record, `param` on the request); a `job` sets the cadence. The pull executor '
-    + 'reads the binding when a `job` drives it; nothing schedules a pull yet, and authoring it '
-    + 'warns until a job can.',
+    + 'reads the binding when a `job` drives it; nothing schedules a pull yet, so the binding alone '
+    + 'moves no rows.',
   reason: 'The D2 conversion `connector-sync-keys-removed` deletes `syncConfig` and '
     + '`fieldMappings` from every connector, stack entry and stored connector row, one notice per '
     + 'key, and the delete is lossless: no engine ever ran a connector-attached sync or moved a '
