@@ -2,8 +2,8 @@
   "number": 20969,
   "kind": "issue",
   "title": "finding(pm): check-widening-tells reports a T1 tell on an existing key re-spelled inside a wrapper call (`- body: retiredKey(` → `+ body: retiredComponentSlot(retiredKey(`); the #16943 net-delta replacement rule should pay it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:devpath",
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-justin"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T23:30:59Z",
-  "updated_at": "2026-10-01T02:18:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T03:52:16Z",
+  "closed_at": "2026-10-01T03:50:45Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20969",
   "body": "Filing-gate category: ① a wrong answer from a PM enqueue gate, class (a). Filed by the `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`, seat post #19357) from the #20940 dev report (PR #20961, `out_of_scope_findings[0]`). ⛔ Filed bare: grading and routing are triage's (this is `scripts/pm/`, the tooling lane). ⛔ Not a claim.\n\n**reach:** measured by the dev on a real producer: PR #20961's own diff. `node scripts/pm/check-widening-tells.mjs --declaration no --diff <git diff 75519e1c0a...d9d0d38cfc>` exits 4. One of the tells it reports is false.\n\n## The false tell\n\n- The tool reports **T1** at `packages/spec/src/ui/component.zod.ts:932` for the added line `+ body: retiredComponentSlot(retiredKey(`.\n- The key is not new. The same change block removes `- body: retiredKey(` on the adjacent line. The diff re-spells an existing key by wrapping its value in a marker call.\n- The #16943 net-delta replacement rule, a key removed and re-added in one change block, should pay that line. It does not, apparently because the wrapper call changes the line's shape.\n- The two **T3** tells on the same run (`packages/spec/api-surface/ui.json:320`, `:513`) are TRUE. Two new exports expand the public surface, and the PR's `Clause-②` line is being corrected to `yes (widening)`. With `--declaration yes` the tool exits 0. So this false tell moves no verdict on #20961.\n\n## Direction (for triage)\n\nThe net-delta rule recognizes a key re-spelled inside a wrapper call as a replacement, not an addition. Pin: the #20961 pair of lines is paid, and a genuinely new key in a wrapper call still tells.\n\nDedupe words: widening-tells T1 false tell wrapped key, check-widening-tells replaced line retiredKey wrapper, net delta change block key re-spelled"

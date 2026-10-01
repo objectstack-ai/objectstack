@@ -2,8 +2,8 @@
   "number": 20980,
   "kind": "issue",
   "title": "[finding] GET /meta/book/:name/tree puts every package's ungrouped docs in the book's synthetic Uncategorized group — resolveBookTree's orphan catch-all ignores bookPackage, against ADR-0046 §6.4 and the portal's per-package answer",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T00:02:47Z",
-  "updated_at": "2026-10-01T02:36:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T05:43:04Z",
+  "closed_at": "2026-10-01T05:40:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20980",
   "body": "Filing gate: ① — a declared-contract divergence (class b) at a public door, with a named site. Filed by the `domain:devx` seat 2 PM (`session_01JAhu8u8QfBvRjVZDox7CP9`, seat post #20163). It surfaced in the first run of `studio-authoring.doc-on-app-menu` (run record #20975; PR #20973, dev report `5921712708`), and the at-tier review of that PR traced it to source. ⛔ Not a claim; routing and grading are triage's.\n\n## The divergence\n\n- **Contract — ADR-0046 §6.4 (Lifecycle):** \"The package is its own implicit book … authoring several **suppresses** the synthetic one, and any doc left unplaced rolls up under a synthetic *Uncategorized* group shown after them.\" The unplaced docs are the **package's**. §6.2.1 / §6.4 also say: \"A doc matched by no rule and pinned by no override falls to a synthetic *Uncategorized* group (never dropped).\"\n- **Server:** `packages/spec/src/system/book.zod.ts:301`, `resolveBookTree(book, docs, bookPackage?)`.\n  - It scopes a group's `include` by `group.package ?? bookPackage`.\n  - It computes the orphan catch-all over **every** doc passed in.\n  - The book-tree read passes `book._packageId` as `bookPackage` (`packages/rest/src/meta-item-read-gate.ts`, about `:608`, per the review). So `GET /api/v1/meta/book/:name/tree` lists other packages' ungrouped docs under that book's Uncategorized group.\n- **Portal (objectui):** `apps/console/src/pages/book-nav.ts` `scopeDocsToBook` drops other packages' ungrouped docs before resolving. Since objectui PR 11274 (objectui#11245), it does so while keeping explicit `group` members. objectui#11245's own pin keeps \"another package's ungrouped docs … out of Uncategorized\", and its record calls the portal's answer \"the ruled narrowing of the endpoint's\".\n\nSo one operation has two implementations that disagree: the tree endpoint answers wider than the portal renders, and wider than ADR-0046 §6.4 describes.\n\n## Reach (measured)\n\n- Run #20975 (this repo's `main` showcase at `f6ccca4a`): the server's `GET /meta/book/B/tree` placed docs from other packages in B's synthetic Uncategorized group, while the portal resolved that group per package. Both answers were **audience-correct** in that run. This is a placement divergence, not an audience leak.\n- objectui#11245's dev, on `@objectstack/spec` 17.5.0's `resolveBookTree`: with the package scope passed and no pre-filter, the spec resolver answers `uncategorized=[other_note]`, another package's ungrouped doc.\n- Readers of the endpoint get a book tree the portal never shows. That includes AI clients reading `/meta/book/:name/tree` as the book's contents, and the Studio doc editor, which reads placement back through the tree endpoint (objectui#11245 body).\n\n`Seam: spec:resolveBookTree(orphans) → runtime:packages/rest/src/meta-item-read-gate.ts (book tree read) | renderer:objectui apps/console/src/pages/book-nav.ts scopeDocsToBook`\n\n## Who acts\n\n- Triage routes it. The fix site is `packages/spec/src/system/book.zod.ts` `resolveBookTree`'s orphan pass, which is spec-lane; or the REST caller, if the reading lands there.\n- The spec reading to confirm first: whether the orphan catch-all is bounded by `bookPackage`, as §6.4's wording and objectui#11245's triage reading `5917816890` (\"The package scope bounds `include` (and the orphan catch-all), never an explicit placement\") both suggest.\n- If yes, the fix is one scope test in the orphan pass, plus a pin that another package's ungrouped doc stays out of the endpoint's Uncategorized. After that, the portal's pre-filter can stop doing the resolver's job.\n- The checklist neighbours `platform-core.docs-audience-gate` / `platform-core.docs-portal-render` own the assertion.\n\n## Dedupe\n\nMCP `search_issues`, 2026-10-01, open and closed:\n- objectstack: `book tree Uncategorized group spans every package resolveBookTree orphans not scoped to book package` → 0; `resolveBookTree book tree endpoint` → 0. Control: `book audience permission set docs portal meta doc refusal` → 2 (#20939, #20129), so the index answers.\n- objectui: `synthetic Uncategorized book group cross-package docs meta book tree` → 1, objectui#11245 (closed). That card is the portal half, fixed by keeping explicit `group` members; it left the endpoint's unscoped orphans as they are.\n\nDedupe words: `resolveBookTree orphans bookPackage` · `book tree Uncategorized cross-package` · `scopeDocsToBook endpoint divergence`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

@@ -2,8 +2,8 @@
   "number": 20715,
   "kind": "issue",
   "title": "scripts/check-test-typecheck.mts writes the dead #13470 into the generated _comment of every test-typecheck-debt.json (19 files): re-anchor at the producer and regenerate",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "documentation",
     "domain:spec",
-    "pm:dispatched",
     "priority:p3",
     "tooling"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-29T20:28:49Z",
-  "updated_at": "2026-10-01T01:37:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T03:22:04Z",
+  "closed_at": "2026-10-01T03:19:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20715",
   "body": "Filing gate: **① a family with a named population**, class (a): a shipped-tree citation of a tracker number that answers 404, the rot that ruling C+D on #19123 (`5749154545`, maintainer 「同意」) set out to remove. It is filed as its own card because both carriers that could hold it are closed: #20556 (dead citations outside `packages/spec/src`) and #20597 (the `domain:spec` lane's stage). Filed by the `domain:cli` execution seat (#6024, session `local_1d2a197c-c20e-4e90-9be8-413d4d432289`) from #20594's stage 7 dev (PR #20713). ⛔ Filed bare: routing belongs to triage (the lane table puts gate-type `scripts/` with `domain:spec`). ⛔ Not a claim.\n\n## The site\n\n- **Producer:** `scripts/check-test-typecheck.mts:138` is a string literal that writes #13470 (404) into the generated `_comment` of every `test-typecheck-debt.json`.\n- **Population:** 19 generated copies on the tree, one per package that carries a test-typecheck debt ledger (for example `packages/mcp/test-typecheck-debt.json:2`).\n- **`reach:`** every package's test-typecheck ledger; the copies ship in no tarball, but every agent and reviewer reading a ledger meets a pointer that answers 404.\n\n## Why no lane stage reaches it\n\n- The producer is in `scripts/**`, outside every package lane's stage.\n- The copies are generated, so a hand edit is wrong, and every lane stage leaves them alone.\n- A `.json` `_comment` is outside the census's declared surface (comment prose in `packages/**/src/**/*.{ts,tsx}`).\n\n## The fix shape (the precedent is #20594's stage 3, PR #20656, for the `#11671` header)\n\nRe-anchor the literal at the producer: in form C (the commit that decided the test-typecheck debt mechanism), or in form D (the lesson in words, no number). Then regenerate every copy with its package's own `gen:test-typecheck-debt`, ⛔ never by hand. Prove that each regenerated copy changes only its `_comment` line.\n\n## Re-check\n\n`git grep -n \"#13470\" origin/main -- '*/test-typecheck-debt.json' scripts/check-test-typecheck.mts` answers 20 hits today (19 copies plus the producer), and 0 once fixed.\n\nDedupe: a search for `check-test-typecheck 13470` and `test-typecheck-debt _comment` finds no card. Dedupe words: `test-typecheck-debt _comment 13470` · `check-test-typecheck producer dead citation` · `gen:test-typecheck-debt regenerate`"

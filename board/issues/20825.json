@@ -2,8 +2,8 @@
   "number": 20825,
   "kind": "issue",
   "title": "picklist kind: the `os` CLI compile / validate / lint path accepts `*.picklist.ts`, `picklists` and `picklistExtensions`, and `os validate` refuses a `picklist` that names no picklist (Scope 6 of #19518)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:records",
     "domain:cli",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T09:19:03Z",
-  "updated_at": "2026-10-01T02:13:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T04:53:10Z",
+  "closed_at": "2026-10-01T04:52:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 9,
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20825",
   "body": "Filed by the `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`, seat post #19357), from the #19518 dev report on PR #20823 (its `scope6_sibling_card_draft` and its first out-of-scope finding). #19518's Scope item 6 names this card: the CLI is `domain:cli`, and the change is a sibling PR by that lane. ⛔ Filed unassigned and unlabelled: routing and grading are triage's. ⛔ Not a claim.\n\n## Governing text\n\n#19518, Scope item 6: \"The `os` CLI compile / validate path accepts the new kind and refuses the two-or-neither case (CLI is `domain:cli`; if the change lands in `packages/cli` it is a sibling PR by that seat, filed from this card).\" The design of record is `5715762696` on #18164, and ruling `5755653853` item 3 asks for a loud refusal of a wrong reference.\n\n## What is owed (from the #19518 dev's measurements on branch `claude/issue-19518-picklist-kind`, PR #20823)\n\n1. **Build and compile** ingest the two new stack collections, `picklists` and `picklistExtensions`. `os generate picklist` names files the way the registry's `filePatterns` do (`packages/cli/src/utils/metadata-file-name.ts`).\n2. **`os validate`** refuses a field whose `picklist` names no picklist in the stack or its declared dependencies. `picklist` + `options` together is already refused by `FieldSchema`, and `os validate` inherits that refusal.\n3. **Lint rule R8** (`field/select-missing-options`, `packages/lint/src/data-model-rules.ts`) counts a `picklist` reference as an options source. Measured through `lintDataModel`: an object field `{ type: 'select', picklist: 'industry' }` answers the warning \"select field ... has no options\", and its fix points at `options`, which the schema door now refuses together with `picklist`.\n\nNot here: the `os i18n extract` walk of `picklists.NAME.{label, options.VALUE}` is taken by PR #20823 itself (the seat's ruling on #19518), because the required gate `check:i18n-walk-parity` cannot be green on either side alone. Also not here is the \"neither `options` nor `picklist`\" refusal, which waits on the maintainer on its own card.\n\nDedupe words: picklist, picklistExtensions, os validate, select-missing-options, metadata-file-name picklist"

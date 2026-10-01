@@ -2,7 +2,7 @@
   "number": 21013,
   "kind": "pull_request",
   "title": "docs(cli): state the package-docs search as the any-depth rule it is",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T01:37:31Z",
-  "updated_at": "2026-10-01T02:05:18Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-01T03:23:51Z",
+  "closed_at": "2026-10-01T03:23:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-01T03:23:50Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/21013",

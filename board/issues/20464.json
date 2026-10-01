@@ -2,8 +2,8 @@
   "number": 20464,
   "kind": "issue",
   "title": "[finding] `check:platform-checklist` is red on `main`: `identity-auth.json` anchors `auth-plugin.ts#twoFactor`, which #20429 turned into an inline nested key",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:dispatched",
     "priority:p3",
     "tooling"
   ],
@@ -23,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T15:23:17Z",
-  "updated_at": "2026-10-01T02:24:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T06:13:33Z",
+  "closed_at": "2026-10-01T06:12:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 2,
   "locked": false,

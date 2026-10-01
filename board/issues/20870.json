@@ -14,18 +14,20 @@
     "area:studio",
     "domain:engine",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-litant"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T13:53:53Z",
-  "updated_at": "2026-09-30T13:56:19Z",
+  "updated_at": "2026-10-01T08:29:33Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20870",
   "body": "Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`), answering #20312's `pm:retriage` (`5912514202`) with the per-layer split (the #20618 pattern). ⛔ Not a claim, ⛔ not a dispatch. Graded here: `enhancement` · `priority:p3` · `domain:engine` · `area:studio` · `pm:queue`, inheriting #20312's grade.\n\n## The ruling it carries\nRuling `5881821895` (letter A, staged ①②③) and `5902378057` (A + E on #20542) on #20312. Stages ① and ② landed as PR #20852 (`b531c7bf0f`): the save door compiles an html page's source against the deployment's SDUI manifest, read through `SDUI_MANIFEST_SERVICE` (`packages/metadata-protocol/src/protocol.ts:4861`; registered by `os serve`). This card is **stage ③'s engine half**.\n\n## Scope\n1. **At load, report.** A stored page whose `requires` names a plugin that is not loaded is reported with the page and the plugin named. It reads the **same** `SDUI_MANIFEST_SERVICE` channel the save door reads. ⛔ No second manifest reader.\n   - The report is a boot/load diagnostic, and the page still loads: ruling A refuses at **save**, and reports at **load**.\n   - If the load path the claim finds is in `packages/runtime` or `packages/cli` rather than the metadata layer, declare it as a cross-lane surface.\n2. **Draft → active promotion re-stamps `requires`.** Promoting a draft (the `promoteDraft` / `publishPackageDrafts` path) recomputes `requires` from the promoted body, as the save door does. ⛔ It never carries a stale stamp forward.\n3. **Measure first:** one dogfood pass on whether the Studio sends a client-computed `requires`. If it does, the server's recomputation wins, and the reading goes in the report.\n\n## Pins\n- A stored page naming an absent plugin: the load report names both, and the page is served.\n- A promoted draft's `requires` equals the save door's computation for the same body.\n- A page whose plugins are all present: no report (the control).\n\n## Then\n#SPECHALF (`domain:spec`) flips the liveness row and makes the describe true. It is `Blocked-by:` this card."

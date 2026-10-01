@@ -2,8 +2,8 @@
   "number": 21002,
   "kind": "issue",
   "title": "metadata: the layered read of a shipped flow name reports a stored row as the effective layer, so after #20946 it disagrees with the by-name read and the list (and the published-snapshot read serves that layer)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:access",
     "bug",
     "domain:cli",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T01:11:04Z",
-  "updated_at": "2026-10-01T02:27:12Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T08:32:22Z",
+  "closed_at": "2026-10-01T08:29:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 13,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21002",
   "body": "**What.** Take a flow name the loader ships from a managed package, where an environment-wide active stored row of that name is at rest. `GET /api/v1/meta/flow/NAME/layers` answers `200`, and its effective layer is the stored row's body. The response's provenance and lock flags name the package.\n- **In source:** `getMetaItemLayered` in `packages/metadata-protocol/src/protocol.ts` computes the effective layer as overlay-wins: `effectiveBase = overlay !== null ? … overlay … : code`. That is about `:9378-9381` on PR #20994's head `07843e6889`.\n- **Its own docblock** (about `:9042-9044`) states the effective layer is \"what `getMetaItem` would return\".\n- **Once PR #20994 (#20946) lands,** `getMetaItem` answers the loader's body for such a name, as the flow list and the execution view have since PR #20942 (#20913). The layered read is then the one read door that disagrees about that name, and its docblock is false for it.\n\n**Measured by** the #20946 dev (report `5922452902`, open question 1, and PR #20994's out-of-scope finding). The measurement was on the showcase composition with a database file, over a cold boot: `200`, the effective layer is the stored body, both before and after PR #20994. The contract review `5922658606` on PR #20994 confirms it by source reading at the head.\n\n**The same family, one more door, by source reading only (not measured):**\n- **The doors:** the published-snapshot read, `GET /api/v1/meta/flow/NAME/published` (`packages/rest/src/rest-server.ts`, about `:8270-8430`), and its runtime-dispatcher twin in `packages/runtime/src/domains/meta.ts`.\n- **What they do:** both read `getMetaItemLayered`, and when the overlay layer is present they serve that layer as the response. For a shipped flow name with a stored row, that is the stored body.\n\n**The doors that reach `getMetaItemLayered` for this case:**\n- the layered door, `/meta/flow/NAME/layers`;\n- the deprecated layers query flag on the by-name door;\n- the runtime dispatcher's layered answer;\n- the published-snapshot door and its dispatcher twin.\n\n**Reach:** the same at-rest state #20913 and #20946 name. It is an environment-wide, active flow row whose name the loader ships. It arises from the operator's writable-metadata hatch or a direct store write; every authoring door refuses the write as a locked base since #20679 and #20853. The Studio diff tab is the layered read's named consumer.\n\n**Governing text:**\n- ADR-0126 §2 (`flow` is Regime C): \"⛔ Never silent override, never an overlay read path\".\n- ADR-0131 D6: managed definitions are sealed.\n- #20761's ruling, rule 1 (`5904938166`): a body's package-provenance stamps are display only.\n- The method's own docblock: the effective layer is what `getMetaItem` would return.\n\n**Remedy shape named by the review, not chosen here:**\n- **The likely shape:** the layered read applies the same two predicates PR #20942 introduced and PR #20994 reuses. For a shipped flow name, the effective layer is the code layer, and a stored row is not an overlay.\n- **Still open:** whether the stored row still shows as a separate layer for diagnosis, and what the published-snapshot door answers. Both are triage's or the fix's call.\n- **Not this card's:** the rows' fate is #15206's (`pm:blocked`).\n\n**Where it likely lands (for triage):** `getMetaItemLayered` in `packages/metadata-protocol/src/protocol.ts`, and possibly the published door's choice of layer in `packages/rest/src/rest-server.ts` and `packages/runtime/src/domains/meta.ts`.\n- **Related:** #20946 (the by-name read), #20913 (the list and execution faces), #15206, and epic #12150.\n- **Not a duplicate of #20680.** That card is a dashboard org overlay whose plain read never serves it while the layered read reports it effective. The disagreement there runs the other way, with a different cause.\n\n⚠️ This card derives from the `security` card #20761. Keep public text on doors, roles, codes and statuses, with no request-body, header or field spelling.\n\nFiled by the `domain:cli` seat (`session_01VvcEokUG1tvVxkceYfR5XB`). It is unlabelled, for triage.\n\nDedupe words: `meta flow layers effective stored row shipped name` · `layered read effective overlay flow regime C` · `published snapshot flow stored row served` · `getMetaItemLayered effective disagrees with getMetaItem`"

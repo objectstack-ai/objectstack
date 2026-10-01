@@ -2,7 +2,7 @@
   "number": 20973,
   "kind": "pull_request",
   "title": "docs(qa): studio-authoring.doc-on-app-menu — the doc app-menu acceptance item, with its first run",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs-user-decision",
     "size/s",
     "skip-changeset"
   ],
@@ -22,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T23:39:38Z",
-  "updated_at": "2026-10-01T02:18:09Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-01T03:54:31Z",
+  "closed_at": "2026-10-01T03:50:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-01T03:50:43Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/20973",

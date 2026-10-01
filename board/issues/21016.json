@@ -2,7 +2,7 @@
   "number": 21016,
   "kind": "pull_request",
   "title": "fix(pm): check-widening-tells pays a tombstone re-declared through a transparent wrapper",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T01:46:57Z",
-  "updated_at": "2026-10-01T02:18:24Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-01T03:50:45Z",
+  "closed_at": "2026-10-01T03:50:43Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": "2026-10-01T03:50:43Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/21016",

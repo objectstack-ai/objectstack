@@ -1,0 +1,37 @@
+{
+  "number": 21083,
+  "kind": "pull_request",
+  "title": "fix(deps): take the fix for next GHSA-vcvr-r3jv-pc5j (critical) and dompurify GHSA-p98j-92pf-mc4p",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T05:04:17Z",
+  "updated_at": "2026-10-01T06:27:18Z",
+  "closed_at": "2026-10-01T06:27:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-01T06:27:16Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21083",
+  "body": "Fixes #21055\n\nClause-②: no\n\n## Summary\n\n`Validate Package Dependencies` runs OSV-Scanner against `pnpm-lock.yaml`. On `main` it flags two rows, so the scheduled scan is red, and so is every PR that touches a `package.json`:\n\n| Advisory | CVSS | Package | Locked on main | Fixed in |\n|---|---|---|---|---|\n| GHSA-vcvr-r3jv-pc5j | 9.5 | `next` | 16.3.3 | 16.3.6 |\n| GHSA-p98j-92pf-mc4p | 2.3 | `dompurify` | 3.4.13 | 3.4.16 |\n\nBoth advisories name a fixed version, so this PR takes the fix. `osv-scanner.toml` is untouched and still holds zero exemptions.\n\n## Change\n\n- **`apps/docs/package.json`:** the direct `next` pin moves from `16.3.3` to `16.3.6`. The pin stays exact, as it was. 16.3.6 is the advisory's fixed version and the same target as Dependabot's grouped #21029, so after this lands, that PR's `next` line is already satisfied rather than in conflict. The newer patches (16.3.7, 16.3.8) are left to the Dependabot group. No workspace manifest declares `eslint-config-next` or any `@next/*` package. The nine `@next/*` packages in the lockfile are `next`'s own dependencies and move with it.\n- **`pnpm-workspace.yaml`:** the existing `dompurify` override's target goes from `^3.4.13` to `^3.4.16`. Its selector is unchanged, still bounded at the 4.0.0 major. The OSV comment above it is extended in place, in the style of its neighbours. This PR adds no second override and does not touch the root `package.json`.\n- **`pnpm-lock.yaml`:** regenerated, not hand-edited (see below).\n\n**Correction to the issue body.** The issue says the root `pnpm.overrides` has no floor for `dompurify`. On `main`, the workspace's overrides live in `pnpm-workspace.yaml`, because pnpm 10 ignores `pnpm.overrides` in `package.json`. A `dompurify` entry was already there at `^3.4.13`, added for an earlier advisory (#6407). The new advisory's range is introduced 3.4.13, fixed 3.4.16, so the old floor was itself the first affected version. The existing comment had predicted this: it explains that the selector is bounded at the major so that a target-only lift is all a case like this needs. `mermaid@11.16.1` declares `dompurify ^3.3.3`, which admits 3.4.16, so this is a dedupe onto the patched line and does not force an upgrade past what `mermaid` supports.\n\n**Reach.** `apps/docs/app/og/docs/[...slug]/route.tsx` imports `ImageResponse` from `next/og`. That is the surface GHSA-vcvr-r3jv-pc5j names (\"Remote Code Execution in next/og ImageResponse\").\n\n## Lockfile\n\nRegenerated with `pnpm install --lockfile-only` under pnpm 10.31.0, the `packageManager` version.\n\n- **Size:** 69 lines changed on each side, 138 in total.\n- **Locked package set:** 11 entries removed and 11 added, and the count stays at 1369. The entries are `next`, `@next/env`, the eight `@next/swc-*` binaries, and `dompurify`.\n- **Everything else:** the other changed lines are peer-suffixed snapshot keys that embed the `next` version. They belong to `better-auth`, its three `@better-auth/*` plugins, and `fumadocs-core` / `fumadocs-mdx` / `fumadocs-ui`. None of those packages changes version.\n- **Frozen install:** `pnpm install --frozen-lockfile` passes on the result.\n\n## OSV-Scanner, before and after\n\nI ran OSV-Scanner v2.3.8, the version the workflow's action pins. The binary's SHA-256 (`bc98e153…`) matches the release's checksum file. The command was `scan --offline-vulnerabilities --lockfile=pnpm-lock.yaml`. The container's egress proxy refuses `api.osv.dev`, so the scan reads the offline npm database the scanner downloads, the same method as #20774.\n\n| Tree | Exit | Result |\n|---|---|---|\n| `main` at `5dbeb7d7b7` | 1 | exactly the two rows above (1 Critical, 1 Low) |\n| this branch at `68c26aa189` | 0 | `No issues found` (1369 packages) |\n\n## Changeset decision\n\nNo changeset; this PR should carry the `skip-changeset` label. Nothing it touches is published:\n\n- `apps/docs` is `\"private\": true`.\n- `pnpm-workspace.yaml` overrides and `pnpm-lock.yaml` are in no package's `files[]`, and no published manifest changes.\n\n`check:override-consistency` still reports its 9 published-manifest declarations covered, and `check:published-files` is green.\n\n## What I ran\n\nThe final head is `68c26aa189`: my commit, then a merge of `main` at `0c5a71b094`. Every row below was measured on that head. The build and the docs checks were also green on `3714ec8cef`, before the merge.\n\n| Check | Result |\n|---|---|\n| `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` | 41 commands |\n| All 41, run on `68c26aa189` after a rebuild, codes recorded with the `--ran` idiom | 41 exit 0 |\n| `dispatch-gates --ran` | `41 derived, 41 run, 0 NOT-MEASURED, 0 UNRUN` |\n| `pnpm build` under the shared verify lock, `--concurrency=2` | 72/72, both at `3714ec8cef` and at `68c26aa189` |\n| `pnpm --filter @objectstack/docs typecheck` (`fumadocs-mdx && next typegen && tsc --noEmit`) | exit 0 |\n| Docs production build command (`apps/docs/vercel.json`): `pnpm turbo run build --filter=@objectstack/docs` | exit 0, `Next.js 16.3.6`, `.next/BUILD_ID` written, and the docs task was a cache miss, so it really executed |\n| `check:override-consistency`, `check:vendor-export-contract-resolve`, `check-osv-exemptions`, `check:nul-bytes`, `check:workspace-manifest-cycles` | all exit 0 (within the 41) |\n\nOne deliberate difference from CI: the docs build ran without CI's `TURBO_FORCE`, which would also re-execute the `spec` build. The docs task itself missed the cache and ran. No package test suite applies, because no package source changes. CI's shard, dogfood and workspace type-check lanes are left to CI.\n\n## Acceptance notes\n\n- The premise correction above, about where the `dompurify` override lives, applies to the issue body only. It does not affect the remedy.\n- Dependabot's grouped #21029 stays open. Once this lands, its `next` line is already satisfied, and Dependabot will rebase its lockfile.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01JAhu8u8QfBvRjVZDox7CP9)_\n"
+}

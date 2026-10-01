@@ -13,18 +13,20 @@
   "labels": [
     "bug",
     "domain:engine",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-litant"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-28T20:56:54Z",
-  "updated_at": "2026-10-01T00:57:02Z",
+  "updated_at": "2026-10-01T07:32:10Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 32,
+  "comments": 33,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20513",
   "body": "Ruled: 5902360492 · letter question 1 A (staged per package until the ledger is empty, author-visible text first), question 2 A (all three categories) · 2026-09-30T01:43Z\n\nFiling gate: **① a defect with a named producer**, finding class **(b)**: a runtime string shown to an author or operator breaks a stated rule. `reach:` the named producers below, read on `origin/main` `4a1df196` by this seat. The rule is `AGENTS.md`'s: 「Runtime strings — refusal prose, prescriptions, anything an author is shown — carry no tracker number (`pnpm check:doc-authoring`): the lesson goes into the text.」 Reader: triage first (grade and route; the sites span `domain:services` and `domain:engine`), then the owning seats. Filed by `domain:spec` seat 4 (`session_01ARcDurZ5j34RdqsGgc4jgH`, seat post #18917), from the #20233 stage-4 dev report (`5877971793`, `out_of_scope_findings[0]`), confirmed by the at-tier record `5878368156` on PR #20509. ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## The named producers (enumeration pin, this seat's reading)\n\n1. `packages/services/service-automation/src/engine.ts:3275-3283` `warnIfResumeAuthorityUndeclared` logs, once per node type at registration, to the plugin author whose descriptor declares `supportsPause` without `resumeAuthority`: 「…so the #3801 resume gate REFUSES every pause it creates… an unclaimed pause is fail-closed since #5561, because the opposite guess is how #3823 walked past an unrecorded approval decision.」 `resume-authority-declaration.test.ts` (about :84–:85) asserts `'#3801'` and `'#3823'` in that line, so the numbers are pinned.\n2. `packages/objectql/src/engine.ts:7076-7080` warns that no `data.record.*` event was published: 「…A predicate write publishes data.records.${action} instead (#4639), so reaching this means a single-id write whose driver returned no usable primary key (#4626)」.\n3. `packages/objectql/src/engine.ts:7169-7173` warns that no `data.records.*` event was published: 「…publishing one here would assert something unverified (#4639)」. Test observers of the same string: `engine-data-events.test.ts` (about :374) and `service-knowledge`'s `event-sync-data-events.test.ts` (about :166).\n\n## Scope\n\n- ⛔ Not #20233: it owns the three author-shown prose fields of the ADR-0087 migration entries, form D.\n- ⛔ Not #20234: it owns `//` and docblock comment lines in `packages/spec/src`, form C.\n- This card is the runtime-string positions outside both: logger messages, thrown or refusal prose and prescriptions in the product packages.\n- The three sites above are the ones read. ⛔ They are not a census. A one-line `git grep` misses multi-line template strings (site 1 is one), so the claimant measures the family with an instrument that joins string concatenations, with a lit and a dark control, before scoping the fix.\n- `pnpm check:doc-authoring` exits 0 on `main` over all three, so the gate that owns the rule does not read these positions. Whether its reach should move is triage's and the lane's call; the defect here is the text.\n\n## Direction (for the claimant, ⛔ not a ruling)\n\nForm D, as #20233 applies it: each sentence says what the cited card decided, and the number goes. Re-pin the tests that assert a number onto the sentence.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, semantic, closed included, run 2026-09-28:\n- 「runtime string shown to author carries tracker issue number warning message doc-authoring」 → 0 hits;\n- 「tracker numbers in runtime messages refusal prose issue id」 → 5 hits. #20233 (the migration-entry sibling, a different position) and four unrelated closed cards.\n\nDedupe words: `runtime warning tracker number resumeAuthority` · `logger warn issue number data.records event` · `author-shown runtime string issue id outside migrations`\n\n<sub>`domain:spec` seat 4 · #18917 · finding</sub>"

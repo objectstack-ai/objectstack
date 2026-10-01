@@ -1,0 +1,32 @@
+{
+  "number": 21096,
+  "kind": "issue",
+  "title": "[finding] `os lint` prints a liveness row's internal ledger `note`, tracker ids included, as the fix text on opted-in rows (`object.externalSharingModel` cites #2696 on app-showcase)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:devx",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T06:24:25Z",
+  "updated_at": "2026-10-01T07:07:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21096",
+  "body": "Filing gate: **① a defect with a named landing site and a measured reach.**\n- Landing site: `packages/lint/src/lint-liveness-properties.ts`, `checkItem`'s hint expression for rows that opt in with `authorWarn`. That branch is `authorHint ?? note ?? defaultHint`, so a row with no `authorHint` shows its internal ledger `note`.\n- `reach:` a public door, `os lint`, on a shipped example. On `examples/app-showcase`, the two `liveness-planned-property` findings on `showcase_account` and `showcase_announcement` print `object.externalSharingModel`'s 728-character ledger note as their fix text, and that note cites `#2696`.\n\n**The rule it breaks.** `AGENTS.md`: runtime strings, refusal prose, prescriptions and \"anything an author is shown\" carry no tracker number.\n\n**Measured** (the #16094 dev, `os-dev-report` patch round on #16094, at PR #21092 head `64e0275024`; this branch of the expression is unchanged from `origin/main`):\n- At `origin/main` `88b484e00c`, `packages/spec/liveness/object.json` → `props.externalSharingModel` is `status: planned`, `authorWarn: true`, has no `authorHint`, and has a 728-character `note` containing `#2696`.\n- Of the 9 ledger rows that warned before the #16094 ruling (8 on `main` after #21047 made `field.picklist` live), 6 show their note as the author's fix text.\n\n**Why it is not fixed in #16094.** PR #21092 makes only the rows that newly warn by verdict (`dead` / `live-elsewhere`, with no `authorWarn`) show `authorHint` or the verdict's default hint instead of the note. Opted-in and `experimental` rows were left byte for byte as they were, on purpose. That PR's at-tier contract review (`5925918475`) escalated this pre-existing leak to its own card.\n\n**Shape of a fix (not a ruling):** either the same narrow rule extended to opted-in rows (author-facing text comes from `authorHint` or the default, never from `note`), or an `authorHint` written on each opted-in row in the spec lane's ledger. The first is structural. The second needs per-row discipline from then on.\n\n**Reader:** the `domain:devx` lane seat that next takes a lint card; `checkItem` is the same expression #21092 touches.\n\n**Duplicate check**, taken in the act that filed this card:\n- REST listing of 512 `domain:devx` issues, open and closed, titles grepped for `authorHint|liveness.*(hint|note)|hint.*(tracker|note)|externalSharingModel`: 0 hits.\n- All open issues repo-wide, same pattern: 0 hits.\n\nFiled by the `domain:devx` seat 2 PM (`session_01JAhu8u8QfBvRjVZDox7CP9`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\nDedupe words: `liveness hint note fallback` · `authorHint tracker number lint hint` · `externalSharingModel 2696 os lint fix text`"
+}

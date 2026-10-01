@@ -1,0 +1,33 @@
+{
+  "number": 21126,
+  "kind": "pull_request",
+  "title": "docs(adr): close ADR-0006 v4 open question 2 as org (#20892)",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "needs-user-decision",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T08:05:47Z",
+  "updated_at": "2026-10-01T08:33:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21126",
+  "body": "Fixes #20892\nClause-②: no\n\nADR-0006 v4 open question 2 (visibility default for CLI-created packages) keeps its original text and gains one dated resolution line, stated in business terms. This is the Tier H docs half of the ruling; the code half landed in `32d3b3c76e` (PR #21099). Diff: `docs/adr/0006-project-environment-split.v4.md`, +1 / -0 against main. No code, no changeset, no generated file.\n\nRevision: an approver asked that the ADR say only the business point (review 5376699282). The first version of the line carried the ruling's comment id, the commit, the file path and the director's letter; all of that is cut. The provenance lives here instead of in the ADR: ruling 5921191703 on #20900 (maintainer 「同意」, 2026-09-30).\n\nThe line added, verbatim:\n\n> **Resolved (2026-09-30, #20892): `org`.** A new package is visible to every environment of its owner organization by default, not `private`. Re-publishing without `--visibility` leaves an existing package's visibility unchanged, and listing on the public marketplace remains an explicit choice.\n\n## 维护者速读(草稿)\n\n### 改了什么\n\nADR-0006 v4「开放问题 2」(CLI 创建的包默认可见性)的原文一字未动,只在它下面加了一行带日期的结论:以 `org` 关闭。按审阅意见,这一行已收短成业务陈述:新建的包默认对所属组织的全部环境可见,不再是 `private`;重新发布时不带 `--visibility`,不改变包已有的可见性;上架公开市场仍须发布者显式选择。整个 PR 仍只有这 1 行新增,0 行删除。\n\n### 为什么改\n\n代码半边(PR #21099)已经把默认值改成 `org`,但 ADR 里这个问题仍停在旧的 `private` 立场、读起来像未决。不补这一行,以后读 ADR 的人(包括 AI)会把 `private` 当成现行决定,与代码和已发布文档对不上。裁决明确要求这一半走独立的 Tier H 文档 PR、不与代码 PR 混在一起,所以单独成篇;文字只留业务结论,裁决评论和提交号这类溯源留在本 PR 正文,不进 ADR。\n\n### 风险与代价(含回滚)\n\n只改一份 ADR 文档,不触运行时,不产生任何发布物;没有 changeset,没有生成物。代价有两点:ADR 里旧立场与新结论并存(旧文按裁决原样保留);这一行不再自带裁决编号和提交号,追溯要看本 PR 正文和 #20892。回滚:revert 本 PR 的提交,或直接删掉新增的那一行。\n\n### 席位意见\n\n### 你要做的\n\n读上面那一行;没有异议就在本 PR 上点 Approve(审阅人要求收短的意见已按其原话处理)。\n\n## Acceptance notes\n\n- Each business statement in the line was read against `origin/main` `a11faeecb3` before it was written:\n  - New packages default to `org`: `packages/spec/src/marketplace/package.zod.ts:233` reads `visibility: PackageVisibilitySchema.default('org')`; what `org` reaches is `:39` (\"org = all envs in owner org\").\n  - A re-publish without the flag leaves visibility alone: both commands set the key only when the flag is passed (`packages/cli/src/commands/package/publish.ts:536`, `packages/cli/src/commands/plugin/publish.ts:186`), neither flag carries a default (`package/publish.ts:333-342`, `plugin/publish.ts:71-77`), and the flag help says \"Omit it to leave an existing package's visibility unchanged\" (`package/publish.ts:339`, `plugin/publish.ts:74`). The control-plane half, patching only when the body carries the key, is cloud's route as quoted at `package/publish.ts:328-329`; cloud was not read here (NOT MEASURED).\n  - The public marketplace stays explicit: the flag options are `private`, `org`, `marketplace` with no default (`package/publish.ts:341`), and a marketplace listing needs the visibility \"already stored, or set with --visibility marketplace\" (`package/publish.ts:368-369`).\n- The code already cites this entry as \"ADR-0006 v4 open question 2\" (the CLI publish test, the spec default test, and the spec default-changes row), so the entry's heading and number are unchanged on purpose.\n- The original sentence says `private` is \"consistent with `sys_package.visibility` default\". It is kept verbatim per the ruling. The `sys_package` table is not defined in this repository's sources, so its stored default was not checked here (NOT MEASURED: cloud-side table default).\n- Gates at head `d8f4f77f6b`: `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` derived 19 commands; all 19 ran with recorded exit codes (all 0) and `--ran` reports 19 derived, 19 run, 0 NOT-MEASURED. `pnpm check:pm-governed-prose` (not path-derived) also ran: exit 0. The previous head `737a7507d8` gave the same 19/19.\n- `skip-changeset` is on the PR; nothing in this diff publishes.\n- Written by session `session_01VvcEokUG1tvVxkceYfR5XB` (attribution kept in prose because a body edit does not keep a session-URL footer)."
+}

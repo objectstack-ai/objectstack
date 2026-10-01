@@ -2,8 +2,8 @@
   "number": 20800,
   "kind": "issue",
   "title": "type-check coverage: graduate the last three DEBT packages (cloud-connection, hono, observability) — the remainder of #4311",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:cli",
-    "pm:dispatched",
     "priority:p3",
     "tooling"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T07:15:41Z",
-  "updated_at": "2026-10-01T01:30:36Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T08:31:23Z",
+  "closed_at": "2026-10-01T08:29:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20800",
   "body": "Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) as the one carrier the maintainer's 「4311 关」 creates. ⛔ Not a claim, ⛔ not a dispatch. Graded here: `tooling` · `priority:p3` · `domain:cli` · `area:devpath` · `pm:queue`.\n\n## Where #4311 ended\n\n#4311 (July) measured 66 of 77 packages building with `tsup` and no `tsc` reading them, with 380 code-tier errors across 18 packages. Its three proposals have all landed on `main` (read at `41dcf11884`):\n1. **The coverage ratchet.** `pnpm check:type-check-coverage` fails any package that neither declares `typecheck` nor carries a measured DEBT/EXEMPT ledger entry; `check:type-check-debt` re-measures each ledger number. 70 of 74 workspace packages under `packages/` now declare `typecheck` (2 in July).\n2. **The test-layer template.** Per-package `tsconfig.test.json` files named by the `typecheck` script; 20 packages hold a per-file `test-typecheck-debt.json`.\n3. **The code-tier burn-down.** `driver-sql` (241 of the 380) and the other big entries graduated.\n\n## What is left (this card)\n\nThree packages still have **no `typecheck` script** and sit in the `DEBT` ledger of `scripts/check-type-check-coverage.mjs`. All three are `domain:cli` surfaces:\n\n| package | ledgered | ledger note |\n|---|---:|---|\n| `@objectstack/cloud-connection` | 13 | code-tier 11 (TS2493 tuple indexing) + 2 config-tier |\n| `@objectstack/observability` | 11 | all code-tier (TS2554 wrong arity ×10, TS2552) |\n| `@objectstack/hono` (`packages/adapters/hono`) | 3 | all code-tier (TS2769 / TS18046) |\n\n**Direction, per package** (the road #15048 / #15050 took):\n- Add a `tsconfig.test.json` over the test layer and a `typecheck` script that names it.\n- Re-measure first and say both readings (the build config vs the test config), so config-tier and code-tier are separated before anything is fixed.\n- Fix each code-tier error at its cause: a mock typed to the call site it stubs, the call's real arity. ⛔ No cast, ⛔ no `@ts-expect-error`, ⛔ no widened source signature to make a test compile.\n- Delete the `DEBT` entry, don't lower it. The gate's RECONCILED direction then holds the package.\n\nA package whose errors turn out to be a real source defect (not a test shape) is split to its own card instead of being fixed under this one.\n\n**Not here:**\n- `@objectstack/console` is `EXEMPT` (a published objectui build artifact with no TypeScript sources). That is correct and stays.\n- The `spec-monorepo` root entry (26, almost all one missing `types:[\"node\"]` on the root program). It is not a package and moves with `scripts/`; it is not this card's.\n\n**Why p3.** Each package is covered by the ratchet, so nothing can regress silently; what remains is 27 ledgered errors in three small packages, and no user is measured waiting on them."

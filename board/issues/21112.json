@@ -1,0 +1,34 @@
+{
+  "number": 21112,
+  "kind": "pull_request",
+  "title": "docs: point the two stale merge-tree probe copies at the fetch-first recipe (#20970)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T07:21:31Z",
+  "updated_at": "2026-10-01T08:29:51Z",
+  "closed_at": "2026-10-01T08:29:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-01T08:29:50Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21112",
+  "body": "Fixes #20970\nClause-②: no\n\n## What\n\nTwo copies of the driver-free `merge-tree` probe still taught the fetch-less form, which reads a missing object as a conflict. Both now carry the canonical recipe and reading from `scripts/pm/os-regen-merge.sh` (#20968): clone, then `fetch . BASE:refs/b HEAD:refs/h`, then merge `refs/b refs/h`; exit 1 with no tree id is a missing object, never a conflict; a real conflict prints the tree id first.\n\n- `.claude/skills/pm-dispatch/references/platform-readings.md` L35: replaced `clone --bare --shared` with a pointer to the script plus the reading, one line, 469 lines before and after (ceiling 469, headroom 0 unchanged), 118 bytes (under the 120-byte line budget). Cost: the old clause 对照复现的是被测条件不只是命令 was dropped to fit the budget; the surrounding bullets L31-34 still carry the instrument-mismatch point.\n- `packages/spec/src/migrations/entries/README.md` L146-147: the Reproduce-any-row block rewritten to the same recipe plus the reading, still driver-less (no `merge.os-regen.driver`), `--messages` kept, ending with `rm -rf /tmp/driverless.git` (as os-regen-merge.sh does) so a second run clones cleanly. Both failure modes of the old form disappear: shallow source with `--shared` (no alternates) and `--no-local` on a non-bare clone (branches land as `origin/BRANCH_A`).\n\nL30 (`git merge-tree --write-tree origin/main REF` after fetching the PR ref) is judged fine and untouched: it runs in the working checkout, where the fetch it names is what puts both commits in the object store, so it cannot misread a missing object as a conflict. It is a different probe (driver-registered, local), not the bare-clone one.\n\n## Proof (this shallow checkout; synthetic pairs built with plumbing; A/B edit the same line, A/C touch different files)\n\n```\nOLD README form (--shared --no-local, ids A B):\n  merge-tree: 4f85fdf5f2... - not something we can merge      exit=1  (no tree id)\nOLD platform-readings form (bare, source objects not carried, ids A B):\n  merge-tree: 4f85fdf5f2... - not something we can merge      exit=1  (no tree id)\nNEW recipe, conflicting pair A/B:\n  7a261b54c6fe...  + stage lines for zz-probe.txt + CONFLICT (content)   exit=1\nNEW recipe, --name-only form, A/B:\n  7a261b54c6fe...  zz-probe.txt  + CONFLICT (content)                    exit=1\nNEW recipe, clean pair A/C:\n  f2fabc132606...                                                    exit=0\n```\n\nSynthetic non-shallow repo (BRANCH_A/B conflict, BRANCH_C clean), the README's second failure mode:\n\n```\nOLD form: merge-tree: BRANCH_A - not something we can merge / Did you mean origin/BRANCH_A   exit=1\nNEW recipe conflict: 77a65f5217b2...  stage lines  CONFLICT (content): Merge conflict in f   exit=1\nNEW recipe clean:    f65c11628da9...                                                          exit=0\n```\n\nNote: from a LINKED worktree of a shallow checkout the old bare `--shared` form does not misread (it writes alternates, the hiding mode the script header describes); the old-form leg above used a non-alternates clone to show the misreading.\n\n## Changeset\n\nPatch changeset for @objectstack/spec: the README ships in the tarball (npm pack --dry-run). `.changeset/20970-migration-entries-readme-probe.md`; changeset gates (check-changeset-no-major, check-empty-changeset, check:changeset-gate-self-tests, check:objectui-changeset, check:pm-changeset-deadline-census, check:nul-bytes) all exit 0 on head aaeb55a6b9 (the later README-only commit f89138ab9b does not touch the changeset).\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands`: 80 derived, all run, `--ran` reconciled: 70 run (exit 0), 10 NOT MEASURED (exit 3, prerequisite: no built dist/, nothing measured; none reads a markdown file): spec `check:api-surface`, `check:browser-reachable-entries`, `check:dual-source-exports`, `check:entry-nameability`, `check:exported-any`, lint `check:doc-formula-expressions`, root `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:sourcemap-no-sources-content`. `check:docs`, `check:nul-bytes`, `check:pm-skill-ratchet` (469/469, line budget clean), `check:pm-governed-merges`, `check:pm-prior-rulings`, `check:skill-frame-sync` and `check:published-files` pass. Gates ran on the tree of this diff before a message-only amend (trailer pair made model-free).\n\n## 维护者速读(草稿)\n\n**改了什么**:两处教人探「GitHub 视角能否合并」的文字,从无 fetch 的旧写法改成 #20968 的规范配方;一处是 PM 技能参考的一行,一处是迁移登记 README 的复现块(含收尾的 rm -rf)。\n\n**为什么改**:旧写法在浅检出里会把「对象缺失」读成「有冲突」,PM 可能据此错派冲突卡。\n\n**风险与代价(含回滚)**:纯文字。platform-readings 为守行数上限(零余量)删去了一句原则性短语;已补 patch changeset(README 随 spec 包发运)。回滚即 revert 本 PR。\n\n**席位意见**:契约复核判定被删短语可接受,没有丢失 L31-34 未承载的规则。\n\n**你要做的**:无。Tier S,席位在契约复核 PASS 且检查全绿后落地。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VDtqoecgES7ScQYGbFVDRv)_"
+}

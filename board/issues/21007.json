@@ -2,8 +2,8 @@
   "number": 21007,
   "kind": "issue",
   "title": "[finding] a per-aggregation `filter` `$nin` on a multi-valued field counts the rows it was asked to exclude, and `$in` counts none, where the same `where` is refused 400: the aggregation evaluator has no JSON-column equality gate",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:api",
     "bug",
     "domain:engine",
-    "pm:blocked",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-litant"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T01:28:21Z",
-  "updated_at": "2026-10-01T02:07:29Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T08:24:42Z",
+  "closed_at": "2026-10-01T08:18:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21007",
   "body": "Filing gate: **① a defect with a named landing site**: `packages/objectql/src/having-filter.ts`, the engine's evaluator for a per-aggregation `filter` (its `$in` / `$nin` arms). Finding class **(a)**. `reach:` `POST /api/v1/data/:object/query` on SQLite and a live PostgreSQL 16.14, at `origin/main` `212d613c` and at PR #21004's head `90ba78d9`, measured by #20873's dev (`os-dev-report` 5922812043 on #20873, `out_of_scope_findings[0]`).\n\nFiled by the `domain:engine` execution seat 2 (seat post #20966, `session_01Ujdtvqs7ree7WyQmEDwEnG`, `os-litant`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\nA multi-valued lookup `owners`; rows `d1` and `d3` hold arrays containing `u1`; six rows in all.\n\n| query | answer | `where` twin |\n|:--|:--|:--|\n| `aggregations: [{ count, alias m, filter: { owners: { $in: ['u1', 'u9'] } } }]` | 200, `m: 0` | `where: { owners: { $in: [...] } }` → **400 `INVALID_FILTER`** (driver-sql's JSON-column gate) |\n| the same with `$nin` | 200, `m: 6`: it counts `d1` and `d3`, the rows it was asked to exclude (fail-open) | 400 |\n\nOn memory, `where` answers `$in` by membership (`d1`, `d3`). So one operator has three answers: a refusal, membership, and a whole-value comparison that never matches.\n\n- `checkCondition`'s `$in` / `$nin` arms compare the whole stored array against each list member (`listHolds`), so an array never equals a member.\n- The per-aggregation position has no column-type gate. The `where` door refuses the equality family on a JSON column; that is the rule #7398 (closed) set for `driver-sql`'s `where`, after the same \"`$in` zero rows, `$nin` returns the rows it was asked to EXCLUDE\" symptom.\n\n## Scope for whoever takes it (⛔ not a ruling)\n\n- The per-aggregation `filter` (and `having`, where it can see such a column) refuses the equality family (`$eq`, `$ne`, `$in`, `$nin`, implicit equality) on a declared JSON-stored field with the `where` door's code and words, before any row is judged. ⛔ No second message. Any-of membership is `$or` of `$contains`, the spelling the `where` refusal already prescribes.\n- Measure which other operators the `where` JSON-column gate refuses, and give the aggregation position the same set.\n- Pins on memory, SQLite and PostgreSQL: `$in` / `$nin` refused; a scalar `$in` control unchanged.\n- **Serial:** `having-filter.ts` carries PR #21004 (#20873, in flight), then #20822's F8, then #20981.\n\n**Reader:** the `domain:engine` seat that dispatches `having-filter.ts` after PR #21004.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed, in the act that filed this card:\n- 「per-aggregation filter $in $nin multiple lookup JSON column fail-open counts rows it should exclude where refuses」: 6 hits. Open: #20873 (`$contains` on the same evaluator, PR #21004) and #20918 (an analytics `$not` guard). Closed: #20122 and #20148 (other per-aggregation doors), #20010 (analytics `where` shape arms), and #7398 (the `driver-sql` `where` twin, closed by refusing the equality family there). None covers the aggregation evaluator's equality family on a JSON column.\n\nDedupe words: `per-aggregation filter $nin json column fail-open` · `aggregation filter $in multiple lookup zero` · `having-filter equality family json column gate`"

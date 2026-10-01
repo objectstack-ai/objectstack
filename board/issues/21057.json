@@ -1,0 +1,32 @@
+{
+  "number": 21057,
+  "kind": "issue",
+  "title": "[finding] The delegated-admin gate resolves an EMPTY subtree on a stock `objectstack dev` boot — seeded business units are organization-less while every session carries an active organization, so every in-scope delegated write is refused",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:services",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T03:53:36Z",
+  "updated_at": "2026-10-01T08:09:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21057",
+  "body": "Blocked-by: #15193\n\nFiling gate: **① a reproducible product defect with a named landing site** — `packages/plugins/plugin-security/src/delegated-admin-gate.ts`. `reach:` the public REST data API, reproduced on four fresh `objectstack dev --seed-admin` showcase boots (runner + independent verifier). Reader: triage first touch, then the lane owning `plugin-security`. Dedupe: semantic search \"delegated admin subtree business unit organization_id null outside the delegated subtree\" (open + closed) → 8 hits, none this defect; nearest are the same gate's cross-organization repairs #19775 / #19819 / #19860 (closed) and the ADR-0131 epic #15194 (open, no NULL `organization_id`).\n\nQA-source: #21056 · access-security.crud-permission-matrix · acceptance[0]\n\n## What happens\n\nADR-0090 D12 delegated administration does not work on a stock dev boot. A delegate holding `showcase_field_ops_delegate` (adminScope `Field Operations` + subtree, `manageAssignments`, `assignablePermissionSets: [showcase_contributor, showcase_manager]`) is refused every in-subtree assignment. The gate fails closed, so this is over-refusal, not exposure.\n\n## Reproduction\n\n1. Fresh boot: `OS_PORT=<p> pnpm -C examples/app-showcase exec objectstack dev --seed-admin -p <p> -d file:<fresh>.db`; admin `admin@objectos.ai` / `admin123`.\n2. Admin invites + signs up a delegate D and a target T (`POST /api/v1/auth/organization/invite-member`, then `POST /api/v1/auth/sign-up/email`).\n3. Admin: `POST /api/v1/data/sys_user_permission_set {\"user_id\":D,\"permission_set_id\":<showcase_field_ops_delegate>}` → 201; `POST /api/v1/data/sys_business_unit_member {\"business_unit_id\":\"bu_field_ops\",\"user_id\":D}` → 201.\n4. D: `POST /api/v1/data/sys_user_position {\"user_id\":T,\"position\":\"contributor\",\"business_unit_id\":\"bu_west_coast\"}` (`bu_west_coast` is a child of `bu_field_ops`).\n   - Expected: 2xx.\n   - Actual: `403 PERMISSION_DENIED \"delegated 'insert' on sys_user_position rejected — business unit 'bu_west_coast' is outside the delegated subtree (scope from 'showcase_field_ops_delegate')\"`.\n   - Control: admin posting the identical payload → 201.\n5. Discriminating experiment: admin `PATCH`es `organization_id` onto the seeded `bu_field_ops` / `bu_west_coast` / `bu_east_coast` → D's same call now → **201**. An org-stamped \"Field Operations\" tree created through REST also works.\n\n## Mechanism\n\n- The seeded `sys_business_unit` rows have `organization_id: null` by design — the seed loader never stamps the fallback organization on `sys_*` seeds (`packages/metadata-protocol/src/seed-loader.ts`).\n- `delegated-admin-gate.ts` `callerOrganizationId()` returns `context.organizationId ?? context.tenantId` without consulting the tenancy posture. Its docblock says the value is \"Undefined for a `single`-posture caller\", but the dev boot's default-organization bootstrap gives every session an `activeOrganizationId`, so it is always defined (boot banner: `Tenancy: single`).\n- `resolveSubtree` then reads the scope root through `resolveOwnOrganizationRow(...).own`, which only matches rows stamped with that organization (`per-organization-catalog.ts`); `resolveSubtreeById` also drops children whose `organization_id !== organizationId`. The org-less seeded tree is filtered out, the subtree is empty, and every write fails closed.\n- The rest of the plugin reads the opposite way: `per-organization-catalog.ts` calls org-less rows \"the CORRECT shape\" under the `single` posture, and the enforcement loader `dbLoaderFor` in `security-plugin.ts` uses `own ?? organizationLessResidue`, with a comment that `resolveOwnOrganizationRow` is written for seeders. `DelegatedAdminGate` is constructed with `{ ql, resolveSets, logger }` only and receives no posture.\n\n## Why the pin is green\n\n`packages/qa/dogfood/test/showcase-permission-zoo.dogfood.test.ts` (13/13) boots the shared stack without `orgContext`, so `packages/verify/src/harness.ts` sets `autoDefaultOrganization: false`; the context carries no organization and the gate takes its by-name branch. The pin never models the real dev boot.\n\n## Landing site and acceptance\n\n- `delegated-admin-gate.ts` (`callerOrganizationId` / `resolveSubtree` / `resolveSubtreeById`): resolve the scope the way `dbLoaderFor` does — accept the org-less residue under a non-walled posture (or pass the posture in), without reopening the cross-organization by-name hazard #19775 closed.\n- Pin: run the delegate-assignment cases in an isolated project with `orgContext: true` (the shared stack cannot carry it), asserting an in-subtree assignment succeeds and an out-of-subtree one is refused.\n- Done when step 4 answers 2xx on a stock dev boot and `access-security.crud-permission-matrix` acceptance[0] re-runs green.\n\nRelated symptom, same class, not verified here: every stock boot warns `[sharing-rule] share_new_inquiries_with_field_ops expands to NO recipients … not organization-stamped`.\n\nTriage note (not a verdict): a delegate's PATCH/DELETE on an assignment ANOTHER user created is also refused by the platform ownership floor (`record_access_denied`) even after the units are stamped; the floor does not yield to `adminScope.manageAssignments`, so a fixed gate may still not let a delegate re-staff others' assignments.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n"
+}

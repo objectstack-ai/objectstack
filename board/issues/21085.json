@@ -1,0 +1,33 @@
+{
+  "number": 21085,
+  "kind": "pull_request",
+  "title": "docs(data): count_distinct is lowered on the SQL family; state the real limit",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T05:15:21Z",
+  "updated_at": "2026-10-01T06:12:51Z",
+  "closed_at": "2026-10-01T06:12:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-01T06:12:49Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21085",
+  "body": "Fixes #21039\nClause-②: no\n\n## What this changes\n\nDocs only, two hand-written pages. Both said the SQL drivers refuse `count_distinct` with `501 NOT_IMPLEMENTED` and that its SQL lowering is \"scheduled\". It has been lowered since #6409; both callouts now state what `main` does.\n\n## Before / after\n\n| page | before | after |\n|:--|:--|:--|\n| `content/docs/data-modeling/queries.mdx` (warn callout under the function table) | \"`count_distinct` is not yet lowered by the SQL drivers ... refuse it as a capability gap, `501 NOT_IMPLEMENTED` ... its SQL lowering is scheduled\" | Computed on every backend: SQL drivers (SqlDriver, both Turso transports) lower it to `COUNT(DISTINCT field)`; MongoDB, the in-memory driver and the engine's in-memory fallback count distinct non-null values; no `field` is `400 INVALID_QUERY`. The one real limit: a JSON-stored field (structured-JSON types, `multiselect` / `checkboxes` / `tags`, or `multiple: true`) is `400 INVALID_FIELD` at the engine before any driver runs. One sentence on the merged #21037 effect (min / max / avg over a refused type answer the same `400 INVALID_FIELD`). |\n| `content/docs/protocol/objectql/query-syntax.mdx` (callout after \"Schema enum\", old lines 971-982) | \"Only count, sum, avg, min, max are portable today. count_distinct ... not yet by the SQL drivers ... 501 ... Its SQL lowering is scheduled\" | All six functions computed on every backend, same backend list, `median` still `400 INVALID_QUERY`, same JSON-stored limit. Callout type warn to info. This also removes the page's self-contradiction with its own line 118 (`COUNT(DISTINCT field)` on both SQL faces since #6409). |\n\n## Code anchors (origin/main a75311dd2)\n\n- SQL lowering table: `packages/drivers/driver-sql/src/sql-driver.ts:1524` (`['count_distinct', { sql: 'count', distinct: true }]`); emission `:10252-10254` (`count(distinct ??)`); fieldless refusal `:10222` calling `refuseDistinctAggregateWithoutField` (`:1827`, `INVALID_QUERY` / 400).\n- Turso remote transport: `packages/drivers/driver-turso/src/remote-transport.ts:677` and `:1408`. Local Turso `extends SqlDriver` (`turso-driver.ts:631`).\n- Memory driver: `packages/drivers/driver-memory/src/memory-driver.ts:2164` (null and undefined excluded). Engine in-memory fallback: `packages/objectql/src/in-memory-aggregation.ts:234`. MongoDB: `packages/drivers/driver-mongodb/src/mongodb-aggregation.ts:406`.\n- Engine refusal: `packages/objectql/src/aggregate-field-type-door.ts:236` (`assertAggregationFieldTypesAccepted`; `INVALID_FIELD` at `:261`, status 400 at `:262`), called at `packages/objectql/src/engine.ts:16891`. Table row: `packages/spec/src/data/aggregate-field-type-compatibility.ts:214` (`count_distinct: DISTINCT_COMPARABLE_FIELD_TYPES`; JSON-stored list `:190-196`).\n- Pins: `packages/objectql/src/engine-json-stored-group-distinct-door.test.ts:189`; `packages/rest/src/data-json-stored-group-distinct-door.test.ts:219` (read; its SQLite cell always runs, PostgreSQL / MySQL cells are skips without `OS_TEST_POSTGRES_URL` / `OS_TEST_MYSQL_URL`).\n- #21037 at write time: MERGED (2026-10-01T04:51:07Z, head 9497f4c61). Its `aggregate-field-type-door.ts` is on this base, so the one sentence about min / max / avg is true on main.\n- Not run locally: the pins above (docs-only change; the claims are read from the code and the pin files, not re-executed).\n\n## Census of hand-written pages mentioning `count_distinct`\n\n- `data-modeling/queries.mdx`: stale, fixed here.\n- `protocol/objectql/query-syntax.mdx`: stale at the callout, fixed here; lines 104, 118, 134 and 1067 current (118 states the lowering correctly; 134 is the interface union; 1067 points to the aggregation).\n- `ai/natural-language-queries.mdx` (lines 18, 27): current. Lists `count_distinct` among the `aggregate_records` functions, which the tool declares (`packages/mcp/src/mcp-http-tools.ts:821`); no capability claim.\n- `api/data-api.mdx` (line 418): current. The `_count_distinct` measure suffix is the one the analytics service names (`packages/services/service-analytics/src/analytics-service.ts:2882`).\n- `deployment/validating-metadata.mdx` (lines 210-213): current. States exactly the table row: every type except the structured-JSON types and `multiselect` / `checkboxes` / `tags` (`aggregate-field-type-compatibility.ts:190-214`).\n- `kernel/contracts/data-engine.mdx` (lines 152, 498, 509): current. \"every face computes\" holds for the vocabulary on all backends above; the JSON-stored limit is a field-type refusal, not a face gap.\n- `ui/dashboards.mdx` (line 328): current. Function table row, no capability claim.\n- `content/docs/references/**` and `content/docs/releases/**`: not touched.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands`: 40 derived; `--ran` reports 40 run, 0 NOT-MEASURED, 0 UNRUN. Five gates (two in `@objectstack/lint`, `check:skill-examples`, `check:docs-transcript-drift`) first answered exit 3 PREREQUISITE NOT MET and `check:docs` exit 1 before the spec / lint / client-react packages were built; after the builds all exit 0. No changeset (docs only).\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01VDtqoecgES7ScQYGbFVDRv\n"
+}

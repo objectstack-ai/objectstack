@@ -2,8 +2,8 @@
   "number": 20958,
   "kind": "issue",
   "title": "spec(ui): refuse two or more measures on a dimensionless dashboard widget whose type declares no multi-measure rendering (pie, donut, funnel, scatter, radar, treemap, sankey): ruling D's principle, objectui#8894 Q1",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:reports",
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T22:53:59Z",
-  "updated_at": "2026-10-01T00:33:49Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T05:21:02Z",
+  "closed_at": "2026-10-01T05:17:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20958",
   "body": "Filed by the triage seat (objectstack-wide, seat post #6015, `session_01AavokzJ5DndAwitDXvKy4U`) as the spec half of triage's answer to objectstack-ai/objectui#8894's Q1. ⛔ Not a claim, ⛔ not a dispatch. Graded here: `enhancement` · `priority:p3` · `domain:spec` · `area:reports` · `pm:queue`.\n\n## Why\n\n- **Ruling D** (maintainer, on objectui#8894, `5643392537`) judged the protocol wrong where it admits measures that a widget type cannot render: 「协议不正确的应该先修改协议」. That narrowed the metric family. Its ADR-0087 entry named `table` and the chart families as the remedy: \"`type: 'table'` renders a row of measures, and the chart families (`bar` / `line` / `area` / `combo`) render one mark per measure\".\n- objectui#11261 (PR objectui#11278) delivers that for `table` / `pivot` and the `bar` / `line` / `area` / `combo` families. objectui#8894's next claim adds `column` / `horizontal-bar`, the bar family's orientations.\n- **Measured by objectui#11261's dev** (`5920760284`): the other seven `ChartTypeSchema` members, **`pie`, `donut`, `funnel`, `scatter`, `radar`, `treemap`, `sankey`**, with no dimension and two or more measures render `values[0]` and drop the rest. Every door accepts them.\n- **Census:** 0 authored dimensionless multi-measure widgets of any type in objectstack's examples or objectui's `examples/apps`.\n- So the spec admits a shape it does not declare how to render. That is ruling D's case, with zero pull.\n\n## Scope (`packages/spec`)\n\n1. **An object-level check beside `checkDashboardWidgetMetricMeasureArity`** (`packages/spec/src/ui/dashboard.zod.ts`). A widget whose `dimensions` is empty or absent, whose `values` has two or more measures, and whose type is **outside** the multi-measure set is refused at `values`, naming the widget's `id`, the count and the type.\n   - The multi-measure set is `table`, `pivot`, `bar`, `column`, `horizontal-bar`, `line`, `area` and `combo`.\n   - The set is **one exported constant**, read by the check, the refusal text and objectui's mirror. ⛔ No second list.\n2. **The refusal steers:** to `table` (a row of measures) or a bar-family type, or to one widget per measure.\n3. **An ADR-0087 entry** (semantic, as the metric entry is, since splitting tiles is a layout decision). `Clause-②: yes` (a narrowing). Ships at once: nothing renders the dropped measures today.\n4. **Relaxing later is free.** If one of the seven gains a declared multi-measure rendering (a radar of measures, a funnel of measure stages), it joins the set with no migration. ⛔ This card does not invent those renderings.\n\n## Pins\n\n- Each of the seven types, dimensionless with two measures, is refused.\n- The same type with one dimension, or with one measure, parses.\n- Each type in the multi-measure set parses dimensionless with three measures (the control).\n- The metric family's existing refusal is unchanged.\n\n## Then\n\n- **objectui's mirror** re-attaches the check (as PR objectui#11257 did for the metric family) at the spec bump. That is a coordination child this claim files.\n- **objectui#8894's warning** keeps its \"a declared measure is not rendered\" condition for stored rows."

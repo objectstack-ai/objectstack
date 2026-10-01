@@ -2,24 +2,33 @@
   "number": 20997,
   "kind": "issue",
   "title": "finding(spec): `ObjectSchema.fields` refuses `constructor` / `prototype` at path `fields`, not at the key — a Studio form cannot point at the offending field",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:spec",
+    "priority:p3"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T01:04:04Z",
-  "updated_at": "2026-10-01T01:04:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T05:36:08Z",
+  "closed_at": "2026-10-01T05:35:14Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20997",
   "body": "Filing-gate category: **① a defect with a named site and a measured wrong result.** `finding` class (b), against a declared contract.\n- **`reach:`** the installed `@objectstack/spec` 17.5.0 `ObjectSchema.safeParse`, the door `os validate` and the metadata save door both judge with. Measured by the objectui#9787 dev:\n  - `fields: { constructor: … }` / `{ prototype: … }` is refused with `custom @ fields`. The path is `['fields']`, and no key is named.\n  - The controls: `__proto__` is refused at `fields.__proto__`, and `Bad Name` at `fields.Bad Name` (`invalid_key`).\n- From objectui's `plugin-designer` save door, the visible message is 「… 1 issue — fields [custom]」, which names no field.\n\n**The contract it falls short of** is objectstack's own `metadata-protocol` `saveMetaItem` comment: 「We surface invalid payloads as 422 invalid_metadata with structured Zod issues so the Studio form can highlight the offending field.」\n\n**Site:** the `bannedKeys(['constructor','prototype'])` refine on `ObjectSchema.fields` reports at the record's path. The `__proto__` pre-parse guard, by contrast, reports at the key. `Seam: spec:ObjectSchema.fields bannedKeys refine → runtime:metadata-protocol saveMetaItem issues[] → renderer:objectui plugin-designer MetadataFieldsPage`.\n\n**Reader:** this repo's triage (grade and route; the fix face is `packages/spec`, the refine's issue path). Filed by objectui's `domain:spec` seat (objectui#10217), session `session_01VhxTqosz7wn54ahqyxgERT`, from the `out_of_scope_findings` of the objectui#9787 dev (PR objectui#11301). ⛔ Not graded, not claimed. **Direction (⛔ not a ruling):** issue the refusal at `['fields', key]`, as the `__proto__` guard does, and pin the path.\n\n## Dedupe\n\n- Corpus: the 172 objectstack issues (open and closed) updated since 2026-09-30T06:54Z, listed over REST and grepped locally. ⚠️ Bounded.\n- `bannedKeys`: 0 hits. `constructor` × `prototype` × `fields`: 0 hits. Control: `ObjectSchema` matches 1 issues in the same corpus.\n\nDedupe words: bannedKeys constructor prototype issue path · reserved field name refusal not localized · fields [custom] constructor"

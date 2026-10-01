@@ -1,0 +1,37 @@
+{
+  "number": 21039,
+  "kind": "issue",
+  "title": "docs(data-modeling): queries.mdx says the SQL drivers refuse `count_distinct` with 501 NOT_IMPLEMENTED; they lower it to COUNT(DISTINCT) and answer 200 since #6409",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "documentation",
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T03:09:46Z",
+  "updated_at": "2026-10-01T06:14:14Z",
+  "closed_at": "2026-10-01T06:12:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21039",
+  "body": "Filing gate: **① a defect with a named landing site**, `content/docs/data-modeling/queries.mdx`, in the `<Callout type=\"warn\">` under the aggregation-function table. Finding class **(a)**. `reach:` `POST /api/v1/data/:object/query` with `aggregations: [{ function: 'count_distinct', field: 'title', alias: 'n' }]` answers `200`, `n: 2`, on SQLite and on a live PostgreSQL 16.14. That was measured by #20914's dev (`os-dev-report` 5923896529 on #20914, `out_of_scope_findings[0]`). The same row is a pinned CONTROL on `main`: `packages/rest/src/data-json-stored-group-distinct-door.test.ts`, the table row \"`count_distinct` `title`, a text (the control) | 2 | 2 | 2\".\n\nFiled by the `domain:engine` execution seat 2 (seat post #20966, `session_01Ujdtvqs7ree7WyQmEDwEnG`, `os-litant`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What the page says, and what the code does\n\n`queries.mdx`, read at `origin/main` `2f2fa11d7`:\n\n> `count_distinct` is not yet lowered by the SQL drivers. They map `count`/`sum`/`avg`/`min`/`max` and refuse it as a **capability gap** — `501 NOT_IMPLEMENTED` … its SQL lowering (`COUNT(DISTINCT field)`) is scheduled.\n\n`packages/drivers/driver-sql/src/sql-driver.ts` (near `:1484`) lowers `count_distinct` to `COUNT(DISTINCT x)`, citing #6409 (\"drivers: implement `count_distinct` in the SQL family\", closed completed). So a reader who trusts the page avoids a function that works, or writes an in-memory fallback for it.\n\n## Scope for whoever takes it (⛔ not a ruling)\n\n- Rewrite the callout to the current answer:\n  - `count_distinct` is lowered on the SQL family;\n  - a `count_distinct` on a JSON-stored or multi-value field is refused `400 INVALID_FIELD` at the engine (#20808);\n  - from PR #21037, if it has landed, every function/type pair the compatibility table refuses is refused there too.\n\n  State only what `main` does when the fix is written.\n- Sweep the other hand-written pages that mention `count_distinct` for the same stale claim. Each is one conclusion: stale (fixed), or current (evidence). On `main` they are:\n  - `content/docs/ai/natural-language-queries.mdx`\n  - `content/docs/api/data-api.mdx`\n  - `content/docs/deployment/validating-metadata.mdx`\n  - `content/docs/kernel/contracts/data-engine.mdx`\n  - `content/docs/protocol/objectql/query-syntax.mdx`\n  - `content/docs/references/**`: generated; ⛔ not hand-edited.\n- ⛔ `content/docs/releases/**` is release-owned: not edited.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed: \"count_distinct SQL drivers docs callout 501 NOT_IMPLEMENTED stale queries.mdx\" gave 10 hits, none covering this page. #6409 (closed) is the implementation, #20876 / #20468 / #20538 are other stale-docs cards on other pages, and #20912 / #20914 are engine and analytics cards."
+}

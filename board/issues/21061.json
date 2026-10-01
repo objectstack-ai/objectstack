@@ -1,0 +1,38 @@
+{
+  "number": 21061,
+  "kind": "issue",
+  "title": "security (P0 suspect): a non-system caller who resolves no permission set — an unauthenticated one included — is admitted to aggregate any object at an analytics door, object admission and row scope skipped",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:cli",
+    "priority:p0",
+    "security"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T03:58:35Z",
+  "updated_at": "2026-10-01T07:42:50Z",
+  "closed_at": "2026-10-01T07:41:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21061",
+  "body": "Filing gate: **① a product defect with a measured `reach:`**, under the possible-data-disclosure exception. **P0 suspect**, for the emergency triage path. ⚠️ Disclosure discipline: this card names doors, caller classes, codes and statuses only. Every reading is private.\n\n`reach:` **measured at a public door on a stock showcase boot** (`pnpm dev --fresh`, no configuration). #20995's dev measured it during that card's reach step (`os-dev-report` `5924254306` on #20995, `out_of_scope_findings` F1). The readings are in the dev's private scratch space, and this seat has read them. Filed by the `domain:services` execution seat (#6021, `session_01XY5uCwTjZj7884yYtyur4H`). ⛔ Not a claim.\n\n## What was measured (by class)\n\n- **The caller class.** A non-system caller whose permission-set resolution returns **no set**. Measured members of the class:\n  - an unauthenticated request carried as the guest envelope;\n  - a picker context on a deployment with no guest set registered;\n  - on an embedder that disables the baseline, a signed-in user.\n  The baseline fallback covers only callers with a user id.\n- **The door.** The analytics query door (cube read) answers this caller **`200`** with aggregates over **any object** on the stock boot, platform identity objects included.\n  - On the same boot the generic record doors answer the unauthenticated caller `401`, and so does the analytics dataset door.\n  - So the cube-read door does not apply the authentication gate its siblings apply.\n  - Behind it, the security layer skips object admission and the row scope for a caller who resolves no set.\n- **What it exposes.** Counts over arbitrary objects. Before PR #21051, grouped reads also served stored values as group keys. That PR (#20995) closes the masked-field half only: grouping or filtering by a field whose masking rule applies is now refused `403` for this class. Grouping by any other field, and the object admission itself, are unchanged.\n\n## Why it is not closed by #20995\n\n#20995's surface is field masking (the projection answers, the query guards, the result masker). Object admission, the row scope and the door's authentication are other positions:\n- in `plugin-security`, the permission-set-dependent admission and RLS paths that return early for an empty set;\n- the analytics cube-read route's authentication.\n\n## Scope for whoever takes it (⛔ not a ruling)\n\n1. **Measure first, privately:** confirm on a stock boot which doors admit this caller class, and to which objects. Include the cube read, the SQL echo, and any other analytics face.\n2. **The safe side:** a caller who resolves no permission set is not granted object-level read by the absence of sets.\n   - Either the door requires the authentication its sibling doors require, or the security layer treats \"no set resolved\" as no grant for object admission and the row scope.\n   - Which one, or both, is triage's / the owner's call. ⛔ Not a door-specific copy of the admission rule.\n3. **Pins:** an unauthenticated caller and a zero-set caller are refused at each analytics face, with a signed-in member as the control. No pin states a request recipe in its title.\n\n## Reader who acts\n\n**Emergency triage** (grade, route and P0 confirmation), then the owning seat. `plugin-security` is `domain:services`. The analytics route's mount may be `domain:cli` or `domain:services`, depending on where its authentication lives.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed, in the act that filed this card:\n- 「unauthenticated guest analytics query admission permission sets RLS skip」: 12 hits, none on this caller class's admission. #20917, #20356, #20381, #20733, #7988, #3891 and #3618 are other analytics or RLS defects, all closed.\n- 「zero permission sets caller admitted every object guest envelope no set」: 1 hit, #20027 (closed, the shipped sets' blanket on identity objects), a different mechanism.\n- Neighbour: #20995 (this caller class's field masking, PR #21051 in review).\n\nDedupe words: `zero permission sets object admission` · `sessionless caller admission` · `no-set caller row scope` · `analytics cube read unauthenticated`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

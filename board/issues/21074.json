@@ -1,0 +1,34 @@
+{
+  "number": 21074,
+  "kind": "pull_request",
+  "title": "ci(dogfood): carry the shard slice in a task env so the dogfood test hash sees its upstream closure",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T04:43:33Z",
+  "updated_at": "2026-10-01T05:51:33Z",
+  "closed_at": "2026-10-01T05:51:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-01T05:51:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21074",
+  "body": "Fixes #20820\n\nClause-②: no\n\n## What\n\nThe required `Dogfood Regression Gate (k/3)` leg ran `turbo run test --filter=@objectstack/dogfood --only -- --shard=k/3`. `--only` drops the `^build` closure out of the `dogfood#test` hash, so a PR that changed only an upstream package could match a main-seeded cache entry and be replayed green. This ports #19278's shape to the dogfood leg:\n\n- `turbo.json`: `@objectstack/dogfood#test` now declares `OS_TEST_SHARD` in its `env`. The shared `test` task already declares it (#20824), but a per-package task entry REPLACES the shared entry's `env` instead of extending it, so the shared declaration did not cover dogfood: measured, the pre-change plan listed only `OS_TEST_TIERS` for that task.\n- `packages/qa/dogfood/vitest.config.ts`: reads `process.env.OS_TEST_SHARD` into the root `test.shard` (same spelling as `packages/cli/vitest.config.ts`).\n- `.github/workflows/ci.yml`: the leg exports `OS_TEST_SHARD=\"k/3\"` and runs `pnpm turbo run test --filter=@objectstack/dogfood --log-order=stream`: no `--`, no `--only`, no `--force`. Stall guard, `dogfood.log` tee, `NODE_OPTIONS` / `--report-dir`, cache restore/save are untouched. The step's comment states the new mechanism.\n\nAlso touched (comment only, one deviation from the card's file surface, flagged): the comment of the preceding closure-build step said it exists \"so that the sharded run in the next step can be `--only`\", which is now false; it now says so. The step itself is unchanged.\n\nNo second shard mechanism. `scripts/measure-test-shard-timings.mjs` / `partition-test-shards.mjs` / `report-test-timings.mjs` are untouched: the dogfood leg passes no `--summarize` and has no timings consumer, so there is nothing to reuse or change.\n\n## Measurements\n\nturbo 2.10.10 dry-runs (`--dry=json`) and real vitest runs, in this worktree at head 55bd9e0579.\n\nPin 1, hash moves (shard 1/3, edit = append a comment line to the file, restored from HEAD after):\n\n| leg | clean | + `packages/objectql/src/index.ts` |\n|---|---|---|\n| old (`--only -- --shard=1/3`) | a963b53363c79e20 | a963b53363c79e20 (unchanged: the defect) |\n| new, pre-build tree | d6f169ed1431553e | 2ee13c0afd852c96 (moves) |\n| new, post-build tree | bd114335fad78510 | 55dc2dd1da35f8e0 (moves) |\n\nThe pre-build and post-build clean hashes differ (d6f169ed vs bd114335); I did not isolate why (suspect built output under the `examples/app-showcase/**` input). Each row's before/after is on one tree.\n\nPin 2, lit control (post-build tree, shard 1/3, clean bd114335fad78510):\n\n- `packages/client-react/src/index.tsx` (a workspace package NOT in the dogfood closure, checked against the plan): bd114335fad78510, unchanged.\n- `packages/qa/dogfood/test/action-params-contract.dogfood.test.ts` (dogfood-internal): a5dc81d7aadebe29, moves.\n\nPin 3, shards differ: post-build 1/3 bd114335fad78510, 2/3 0387e6b5b568a93c, 3/3 d3b158ab11f62582; pre-build d6f169ed1431553e / fd1f57f4bbe9537f / bc48cac953e838cc. Pins 1 to 3 are dry-run hash readings, not executions.\n\nPin 4, the shard is honoured: vitest 4.1.11 (lockfile). Real `OS_TEST_SHARD=k/3 vitest run` in `packages/qa/dogfood` ran 50 / 49 / 49 test files (148 in total, 148 in the union, 0 overlap between any two shards), 0 failed in each. `vitest list --filesOnly` is NOT a valid measure of this: it prints all 148 files for any shard, even with `--shard=1/3` on the command line. #21032's vitest 5.0.2 is NOT MEASURED; the env-read shape is the one `packages/cli/vitest.config.ts` already uses, so the dogfood read breaks together with it if a vitest line stops honouring `test.shard`.\n\nPlan cost of dropping `--only` (`OS_TEST_SHARD=1/3 turbo run test --filter=@objectstack/dogfood --dry=json`): 66 tasks. Against the cache the step above fills: 63 HIT / 3 MISS (the test, plus two `#build` nodes of packages with no `build` script, which never execute); cold cache: 66 MISS. The leg's 65 `build` hashes are identical to `turbo run build --filter=@objectstack/dogfood`'s plan (65 same, 0 differ, 0 missing), so the closure replays rather than rebuilds. The old leg planned 1 task.\n\nPin 5, nothing is replayed green: a replay needs an equal `dogfood#test` hash. That hash now carries the shard value (pin 3), the upstream closure (pin 1) and the package's own files (pin 2), the control shows it is not moving on everything, and pin 4 shows the shard value is what selects the files that execute. NOT MEASURED: an end-to-end executed replay across an upstream edit on the new leg.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands`: 79 derived; 78 run, all exit 0, recorded with `--ran`. `pnpm check:dual-build-cjs-loads` exited 3 (PREREQUISITE NOT MET: `Run pnpm build first`, nothing measured), so it is NOT MEASURED; the diff changes no built output. `pnpm --filter @objectstack/dogfood typecheck` exit 0, but that program does not compile `vitest.config.ts` (0 hits in `tsc --listFiles`), so the `satisfies` clause is checked only by vitest loading the file. actionlint is not installed here: NOT MEASURED; `ci.yml` parses as YAML and `turbo.json` as JSON.\n\n## Changeset\n\nNone. `@objectstack/dogfood` is `\"private\": true`, and `ci.yml` / `turbo.json` ship in no package's `files[]`.\n\n## Acceptance notes\n\nNone beyond the above.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01VDtqoecgES7ScQYGbFVDRv\n"
+}

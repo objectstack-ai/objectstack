@@ -2,8 +2,8 @@
   "number": 20951,
   "kind": "issue",
   "title": "finding(lint): field-no-consumers still calls two in-use child fields \"inert\" — a subform entry's `amountField` is read against the parent, and an inline grid with no `inlineColumns` draws derived columns the scan never credits",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:devpath",
     "bug",
     "domain:spec",
-    "pm:blocked",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T22:02:32Z",
-  "updated_at": "2026-09-30T22:58:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T06:36:00Z",
+  "closed_at": "2026-10-01T06:31:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20951",
   "body": "Filing-gate category: ① a wrong answer at an authoring door, class (a). Filed by the `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`, seat post #19357). It comes from the #20929 dev report `5920475185` (`out_of_scope_findings` 1 and 2), which asked to put both into one card for the family rather than two point cards. ⛔ Filed unassigned and unlabelled: routing and grading are triage's. ⛔ Not a claim.\n\n**reach:** measured by the dev. `os validate --json` (the CLI from source at PR #20950's head `f849aa53f6`, a probe stack) exits 0 with `valid: true`, and `field-no-consumers` warns \"Verdict: inert\" on fields that are in use.\n\n## The two sites\n\n1. **A subform entry's `amountField` is read in the parent's context.** `FormViewSchema.subforms[].amountField` (`packages/spec/src/ui/view.zod.ts:4383`) is described as \"Numeric child column summed for the running total\". It names a field of the entry's `childObject`. The consumer walk in `packages/lint/src/validate-field-consumers.ts` reads it against the object the view is bound to, the parent. So the child field it names is reported inert.\n   - The entry's sibling `totalField` names a PARENT field (the rollup target). So the entry cannot simply switch its whole context to `childObject`: the read has to be per key.\n2. **An `inlineEdit: 'grid'` relationship field with no `inlineColumns`.** objectui derives the grid's columns from the child object's fields (`deriveColumns`). The scan credits nothing, so every derived column's field is reported inert.\n   - The derivation lives in objectui, not the spec. Whether the scan credits it, and against which rule, is a design question. The spec already owns a comparable derivation, `deriveFieldGroupLayout`, which may be the precedent.\n\n## Not in this card\n\n- PR #20950 (#20929) credits `inlineColumns` (child = the declaring object, when the field sets `inlineEdit`) and `form` / `formViews` `subforms[].columns` (child = `childObject`).\n- #20928's claim carries the master-detail `details[].columns` carrier.\n\n## Direction (for triage)\n\n- Site 1: read `amountField` against the entry's `childObject`, and keep `totalField` on the parent. Pin both, with a control.\n- Site 2: decide whether a derived inline grid credits the child fields it draws. If it does, derive the credit from the same rule the renderer uses, not from a second copy of it.\n\nDedupe: the seat read every `domain:spec` card updated since 2026-09-29 for `amountField`, `deriveColumns`, \"derived inline\" and `field-no-consumers`, and found #20929 only.\n\nDedupe words: field-no-consumers amountField child object, subform entry context, inlineEdit without inlineColumns inert, deriveColumns consumer scan"

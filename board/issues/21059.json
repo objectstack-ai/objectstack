@@ -1,0 +1,32 @@
+{
+  "number": 21059,
+  "kind": "issue",
+  "title": "metadata: once a stored flow row under a name no package ships is hydrated, the layered read reports it as the code layer, against the spec's \"null when no artifact ships this item\"",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:cli",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T03:54:57Z",
+  "updated_at": "2026-10-01T06:09:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21059",
+  "body": "**What.** Take a flow name that no package ships, with an environment-wide active stored row of that name. Once boot hydration has put that row in the registry's bare slot, `GET /api/v1/meta/flow/NAME/layers` answers `200` with the code layer equal to the stored body. Before hydration, the same read answers `code: null`.\n\n- **In source** (`packages/metadata-protocol/src/protocol.ts` on `origin/main`): the layered read's code layer is `lookupArtifactItem(…) ?? this.engine.registry.getItem(…)` (`:9255-9256`).\n  - For an unshipped name, `lookupArtifactItem` finds no composite. Its bare fallback requires the code-artifact test, which a hydrated tenant row fails.\n  - So `getItem` answers the bare slot, which the hydration filled from the store.\n  - The fallback's inline comment says it serves items registered at runtime without a package. Hydrated rows share that bare slot.\n- **The contract it breaks:**\n  - the spec's layered response, layer 1: \"`null` when no artifact ships this item (it exists only as an overlay)\" (`packages/spec/src/api/protocol.zod.ts:494-497`);\n  - the method's own docblock: \"`code` is null if no artifact baseline exists\" (`protocol.ts:9050`);\n  - the same docblock's `#5707` / `#5840` rule: a layer is an assertion made only from a read that actually happened.\n- **The layer depends on hydration state,** the same family as #20946's post-hydration case.\n\n**Measured by** the #21002 dev (report `5924071476`, out-of-scope finding 1) on the showcase composition with a database file, over a cold boot. It was measured at `2f2fa11d75` and on PR #21043's branch. The contract review `5924388874` on PR #21043 confirms it by source reading (③ flag 4) as its own defect, not #21002's: a different name class (unshipped), a different layer (`code`, not `effective`), and a different governing text.\n\n**Reach:**\n- the layered door;\n- the deprecated layers flag on the by-name door;\n- the runtime dispatcher's layered answer;\n- the Studio diff tab, the layered read's named consumer.\n\nThe published-snapshot door is unaffected: it reads the stored layer. The flags name no package here (the lock source is the tenant row, and it is not artifact-backed).\n\n**Open, for the fix:**\n- The tenant marker the hydrator writes is the likely discriminator between a hydrated stored row and a runtime-registered item in the bare slot.\n- One case the review did not read: a stored body under an unshipped name that carries package-provenance stamps feeds the lock-state resolver as `code`. Whether the marker or the stamps decide its flags is open.\n\n**Where it likely lands (for triage):** `getMetaItemLayered`'s code-layer fallback in `packages/metadata-protocol/src/protocol.ts`. It is the same method #21002 edits, in a different region; PR #21043 changes only the effective-layer binding.\n- **Related:** #21002, #20946, #20913.\n- **Not a duplicate of #4624** (closed): that card was about the hydration's unscoped artifact lookup.\n\n⚠️ This card derives from the #20761 family's investigation. Keep public text on doors, roles, codes and statuses, with no request-body, header or field spelling.\n\nFiled by the `domain:cli` seat (`session_01VvcEokUG1tvVxkceYfR5XB`). It is unlabelled, for triage.\n\nDedupe words: `layered read code layer stored row unshipped` · `getMetaItemLayered code layer hydrated bare slot` · `code null when no artifact ships`"
+}

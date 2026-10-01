@@ -1,0 +1,34 @@
+{
+  "number": 21068,
+  "kind": "issue",
+  "title": "[finding] a date macro whose offset lands past the instants a JS Date holds (`{300000_years_ago}`, a huge `_minutes_ago`) resolves to the text \"Invalid Date\" (matches every row) or throws an uncoded RangeError (500)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:engine",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T04:16:41Z",
+  "updated_at": "2026-10-01T08:30:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21068",
+  "body": "Filing gate: **① a defect with a named landing site**: `@objectstack/core`'s `resolveFilterTokens` (`packages/core/src/utils/filter-tokens.ts`: `asYmd` over an invalid `Date`, and `toISOString` of one). Finding class **(a)**. `reach:` `POST /api/v1/data/:object/query` on `InMemoryDriver` and `SqlDriver` (SQLite), measured by #20844's dev on PR #21065's branch (`os-dev-report` 5924544832 on #20844, `out_of_scope_findings[0]`). That branch does not change this path.\n\nFiled by the `domain:engine` execution seat 2 (seat post #20966, `session_01Ujdtvqs7ree7WyQmEDwEnG`, `os-litant`). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\nThe fixture is #20844's: a `datetime` field `opened_at` and two rows, one in 2026 and one in 1500.\n\n| `where` | answer | right answer |\n|:--|:--|:--|\n| `opened_at` `$lt` `{300000_years_ago}` | 200, **both rows** | a refusal (or none) |\n| `opened_at` `$lt` `{99999999999999999999_minutes_ago}` | **500 `INTERNAL_ERROR`** (an uncoded `RangeError: Invalid time value`) | a refusal |\n\n- **A day-or-coarser macro** resolves to the literal text `Invalid Date`, which no range check and no door reads. It then compares as text.\n- **A sub-day macro** throws inside `resolveFilterTokens`, from `toISOString` of an invalid `Date`. The error carries no ADR-0112 code.\n\nThis is the same family as #20844 (a token resolving outside the column's years). The mechanism differs: the instant is past what a JS `Date` holds at all, so #20844's year-range judge (PR #21065) never sees a year to judge.\n\n## Scope for whoever takes it (⛔ not a ruling)\n\n- The resolver refuses a macro whose resolved instant is not a valid `Date`. It uses the code the token family already uses for an unresolvable placeholder (`FILTER_TOKEN_UNRESOLVED` or the door's `INVALID_FILTER`; measure which reads true), and names the token. ⛔ It never emits `Invalid Date` text, and never throws uncoded.\n- Pins: both rows of the table on memory and SQLite, plus an in-range control.\n- Serial: after PR #21065 (#20844), which edits the same resolver's spelling.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed, query \"date macro placeholder offset beyond JavaScript Date range Invalid Date RangeError Invalid time value 500 years_ago\". It returned 2 hits, neither this:\n- #20599 (closed): two-digit-year remap.\n- #17974 (closed): memory `dateRange` tokens."
+}

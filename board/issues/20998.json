@@ -2,7 +2,7 @@
   "number": 20998,
   "kind": "pull_request",
   "title": "feat(spec)!: an analytics cube member's sql is a column reference, and the showcase done rate moves to its dataset (#20943)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -23,10 +23,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T01:06:14Z",
-  "updated_at": "2026-10-01T02:34:20Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-01T04:12:07Z",
+  "closed_at": "2026-10-01T04:12:06Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": "2026-10-01T04:12:06Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/20998",

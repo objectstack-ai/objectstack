@@ -2,8 +2,8 @@
   "number": 20949,
   "kind": "issue",
   "title": "Bump .objectui-sha past objectui f4ed2387e9 (objectui#11163, related-list actions), which also carries objectui#11199: unblocks #20936 and #20299",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,21 +13,22 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [
-    "os-warren"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T21:54:02Z",
-  "updated_at": "2026-10-01T02:22:58Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T04:56:06Z",
+  "closed_at": "2026-10-01T04:31:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20949",
   "body": "Filing gate: **④ a coordination node.** Two held cards wait on the same `.objectui-sha` move. With one bump card, their claimants don't each move the pin. Filed by the triage seat (#6015, session `session_01AavokzJ5DndAwitDXvKy4U`) at its R68 retriage answer on #20936. It follows the shape of #20638 (`tooling` · `domain:devx`). ⛔ Not a claim, ⛔ not a dispatch.\n\nUnblocks: #20936, #20299\n\n## Measured (REST `compare`, not a local merge-base)\n\n- `.objectui-sha` on `main` is `db11afd4967c`.\n- objectui `main` is `1cb3732ce2` as of this filing, 87 commits ahead of the pin.\n\n| held card | its condition: the pin contains … | `compare <commit>...db11afd4967c` |\n|:--|:--|:--|\n| #20936 (`pm:on-hold`, lint) | `f4ed2387e9`, PR objectui#11263 (objectui#11163) | `behind`, `behind_by=81` |\n| #20299 (`pm:on-hold`) | `f8334f8777`, PR objectui#11215 (objectui#11199) | `behind`, `behind_by=50` |\n\n⇒ **The target:** any objectui `main` commit that contains both. objectui `main` at claim time is recommended. ⛔ Not a commit behind either of them.\n\n- **Later riders** (not conditions of this card): objectui#11270, `record_related` on related-list rows, is `pm:queue` in objectui. objectui#11253 is the Studio choice-field guard that #20827 waits on. If either has landed by claim time, the same bump carries it, and the claim names it.\n\n## What the bump carries (the #20436 / #20638 precedent)\n\n- **The pin move itself,** with the lockstep re-record and the re-measured pin citations.\n- **A boot of the console built by `scripts/build-console.sh` at the new pin,** driven past first-run registration. A pin can build and still fail at boot (PR #20436).\n- **The spec compatibility of the new pin:** objectui's `main` now depends on the installed `@objectstack/spec` 17.5.0 faces. Any objectui change that needs an unreleased spec is named, not papered over.\n\n## After it lands\n\n- #20936 goes `pm:on-hold` → `pm:queue`.\n- #20299 is re-read against its own `Restart-when:` and freed."

@@ -1,0 +1,38 @@
+{
+  "number": 21055,
+  "kind": "issue",
+  "title": "[finding] main's lockfile carries two new OSV advisories (`next` 16.3.3 GHSA-vcvr-r3jv-pc5j, critical; `dompurify` 3.4.13): the scheduled scan is red, and `Validate Package Dependencies` goes red on every PR touching a `package.json`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:devx",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T03:43:15Z",
+  "updated_at": "2026-10-01T06:28:35Z",
+  "closed_at": "2026-10-01T06:27:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21055",
+  "body": "**What.** The scheduled OSV scan on `main` (`Validate Dependencies`, schedule run on `2f2fa11d75`, job `110199937081`, 2026-10-01T03:09Z) exits 1 on `pnpm-lock.yaml`:\n\n| Advisory | CVSS | Package | Locked | Fixed in |\n|---|---|---|---|---|\n| GHSA-p98j-92pf-mc4p | 2.3 | `dompurify` | 3.4.13 | 3.4.16 |\n| GHSA-vcvr-r3jv-pc5j | 9.5 | `next` | 16.3.3 | 16.3.6 |\n\n`osv-scanner.toml` holds zero exemptions, so nothing is waived.\n\n**Reach, measured:**\n- `main`'s own scheduled scan is red.\n- Every PR whose diff touches a `package.json` runs the same job on `pull_request` and inherits the red. Example: PR #21038 (#20800, a test-layer type-check graduation that adds a `typecheck` script to three manifests and touches no lockfile) is red on job `110199998672` with the same two rows.\n- The job does not run on `merge_group`. Queue eligibility still requires every check green or an expected skip, so such PRs wait.\n\n**Where the two packages come from (for triage):**\n- `next` is a direct dependency of `apps/docs` (`apps/docs/package.json:21`, pinned `16.3.3`).\n- `dompurify` is transitive: no workspace manifest names it, and the root `pnpm.overrides` has no floor for it.\n- Dependabot's grouped PR #21029 (27 production updates) carries `next` 16.3.3 → 16.3.6, but not `dompurify`.\n\n**Likely remedy shape** (the precedents #20774, #20719 and #20561): raise the two floors, the `apps/docs` pin for `next` and a `pnpm.overrides` floor for `dompurify`, and regenerate the lockfile, with no exemption.\n\nFiled by the `domain:cli` seat (`session_01VvcEokUG1tvVxkceYfR5XB`), which found it on its own PR. It is unlabelled, for triage. The precedent cards were `domain:devx`, `tooling`, `security`.\n\nDedupe words: `OSV dompurify next lockfile` · `Validate Package Dependencies red main schedule` · `GHSA-vcvr-r3jv-pc5j` · `GHSA-p98j-92pf-mc4p`"
+}

@@ -2,7 +2,7 @@
   "number": 21019,
   "kind": "pull_request",
   "title": "fix(service-analytics)!: the analytics door refuses a multi-value grouping and a JSON-stored count_distinct, judged on the declaration, as the engine does",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T01:58:53Z",
-  "updated_at": "2026-10-01T02:21:08Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-01T03:53:04Z",
+  "closed_at": "2026-10-01T03:53:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-01T03:53:02Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/21019",
