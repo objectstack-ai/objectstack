@@ -4100,7 +4100,21 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * Row cap (#16503 — the spec half of objectui#8172; decision batch #68,
    * 2026-09-07, option A: the contract declares the capability that already
    * ships, is documented and is in use). Measured at the objectui pin this
-   * repo builds against (`.objectui-sha` = `e420df310`; re-measured there
+   * repo builds against (`.objectui-sha` = `31971ff1e`; re-measured there
+   * 2026-10-01 — `plugin-kanban/src/types.ts` (still no row-cap member) and
+   * `ElementDataSourceGate.tsx` are byte-identical to `e420df310`, so
+   * `:218-220` and `:437-456` did not move; `ObjectKanban.tsx` changed only in
+   * the comment above its `navigation` read (objectui#8652), below every
+   * anchor here, so the query `715-725`, the default `:97`, the `queryFilter`
+   * resolution `:584-585` and the import `:10` did not move;
+   * `plugin-kanban/src/index.tsx` changed below the mapping (objectui#8652's
+   * `navigation` input), which did not move from `487-491`;
+   * `element-data-source.ts` changed above `savedViewRawLimit` (+33/-6,
+   * objectui#8945's re-stated `dataSource.filter` note), which MOVED byte-identical `241-245` -> `268-272`;
+   * `objectql.ts` MOVED the member `4430` -> `4588` byte-identical, still
+   * inside `ObjectKanbanSchema`; and `plugin-kanban.mdx` gained a `navigation`
+   * Properties row below the `limit` row, which, with the `limit: 250`
+   * snippet, did not change. At `e420df310`, re-measured there
    * 2026-09-30 — `plugin-kanban/src/types.ts` (still no row-cap member),
    * `ElementDataSourceGate.tsx` and `element-data-source.ts` are
    * byte-identical to `db11afd49`, so `:218-220`, `:437-456` and `:241-245` did
@@ -4175,7 +4189,7 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * through is `ObjectKanbanSchema` — ⚠️ `KanbanSchema` was RETIRED on this hop
    * (maintainer ruling 2026-09-09) and `plugin-kanban/src/types.ts` no longer
    * declares the member at all — imported at `ObjectKanban.tsx:10` and
-   * declaring `limit?: number` at `packages/types/src/objectql.ts:4430`,
+   * declaring `limit?: number` at `packages/types/src/objectql.ts:4588`,
    * and `content/docs/plugins/plugin-kanban.mdx`
    * teaches it with a typed snippet (`limit: 250`) plus a Properties row. So
    * an author following the published docs wrote a node the save gate
@@ -4218,7 +4232,7 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    *
    * ⚠️ And the view half is `pagination.pageSize` ALONE on this face.
    * `savedViewLimit` does fall back to a flat `view.limit`
-   * (`core/src/data-scope/element-data-source.ts:241-245`), but that names a
+   * (`core/src/data-scope/element-data-source.ts:268-272`), but that names a
    * THIRD face — a saved-view RECORD as the adapter's `listViews()` returns it
    * — not an authored view document. Measured on this tree: `ListViewSchema`
    * REFUSES a flat `limit` with `unrecognized_keys: ["limit"]`, the same
@@ -4268,8 +4282,15 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * React-host `kanban-ui` block).
    *
    * Measured at the objectui pin this repo builds against
-   * (`.objectui-sha` = `e420df310`; re-measured there 2026-09-30 —
-   * `KanbanImpl.tsx` is byte-identical to `db11afd49`, so `:621` and `:634` did
+   * (`.objectui-sha` = `31971ff1e`; re-measured there 2026-10-01 —
+   * `KanbanImpl.tsx` and `KanbanBoardCore.tsx` are byte-identical to
+   * `e420df310`, so `:621`, `:634` and `:78` did not move and were re-read in
+   * place; `ObjectKanban.tsx` changed only in the comment above its
+   * `navigation` read (objectui#8652), above the spread, which MOVED `1641` ->
+   * `1639` with its line byte-identical; and `plugin-kanban/src/index.tsx`
+   * changed below the exported `KanbanRenderer` (objectui#8652's `navigation`
+   * input), whose pass-through did not move from `345-346`. At `e420df310`
+   * (2026-09-30) `KanbanImpl.tsx` was byte-identical to `db11afd49`, so `:621` and `:634` did
    * not move and were re-read in place. objectui's own half of this retirement
    * landed on this hop and changed the PATH, not the verdict: objectui#8285
    * stopped forwarding `quickAdd`, and objectui#11234 retired
@@ -4310,9 +4331,10 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * host-supplied FUNCTION that JSON cannot carry and no producer puts on an
    * `object-kanban` node. `ObjectKanban.tsx` names neither half of the pair
    * in code (0 occurrences each, against 11 for the sibling `onCardClick` in the same
-   * file — re-counted at `db11afd49`, at `f8a9d0fb0` and at `62597c588`; at this
-   * pin 2 each, all four inside the two objectui#11234 comments that record
-   * the cut, and still 11 for `onCardClick`; this record said 6, which the identical
+   * file — re-counted at `db11afd49`, at `f8a9d0fb0` and at `62597c588`; at
+   * `e420df310` and again at this pin 2 each, all four inside the two
+   * objectui#11234 comments that record the cut, and still 11 for
+   * `onCardClick`; this record said 6, which the identical
    * file at `87af769e9` does not reproduce either, so the control was
    * miscounted rather than moved, and the verdict rests on the 0). So the gate was permanently false and authoring the key was a
    * parse-clean no-op — the accepted-and-dropped class.
@@ -4329,7 +4351,7 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * `kanban-ui`, the block a React host renders directly and can hand the
    * runtime function to. ⚠️ Re-read at `e420df310`: objectui retired the
    * schema-only `kanban-ui` registration long before this pin (objectui#8257;
-   * 0 registrations at `dd3f7e1be`, `db11afd49` and this pin), and the pair
+   * 0 registrations at `dd3f7e1be`, `db11afd49`, `e420df310` and this pin), and the pair
    * now lives on the exported `KanbanRenderer` React component a host mounts
    * directly (`plugin-kanban/src/index.tsx:345-346`), not on any block a
    * document can name. Sources are stripped by the D2 conversion
@@ -4353,7 +4375,15 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * element schemas).
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
-   * `e420df310`; re-measured there 2026-09-30 — `ObjectKanban.tsx` changed on
+   * `31971ff1e`; re-measured there 2026-10-01 — `ObjectKanban.tsx` changed on
+   * this hop in one place, the comment above the `navigation` read (+12/-14,
+   * objectui#8652, the objectui half of the same ruling: the key is now
+   * declared on `ObjectKanbanSchema`), so the read itself did not change and
+   * every anchor MOVED up by 2 with its cited text byte-identical: the read
+   * `1282` -> `1280`, the hand-off `1290-1291` -> `1288-1289`, the overlay
+   * render `1540` -> `1538` and its `NavigationOverlay` `1556-1569` ->
+   * `1554-1567`, and the card click `1665` -> `1663`. At `e420df310`
+   * (2026-09-30) `ObjectKanban.tsx` changed on
    * this hop, +40/-13: objectui#9853's renamed fetch-batch default, and
    * objectui#11234's internal `KanbanBoardCore` with the comments that record
    * the Quick Add cut, all of it re-mapped through the diff. Every anchor MOVED
@@ -4379,15 +4409,17 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * re-READ at `87af769e9` 2026-09-22 — every anchor re-derived from that
    * tree rather than carried, none of them at its `53ded82bf` number and one
    * of them no longer spelled the way this record quoted it):
-   * `ObjectKanban.tsx:1282`
+   * `ObjectKanban.tsx:1280`
    * reads `schema.navigation ?? { mode: 'drawer' }` and hands it to
-   * `useNavigationOverlay` (`:1290-1291`), whose result drives the card click
-   * (`:1665`) and the detail overlay (`:1540`, whose `NavigationOverlay` is
-   * `:1556-1569`) — on a STANDALONE board, with no enclosing view to resolve
+   * `useNavigationOverlay` (`:1288-1289`), whose result drives the card click
+   * (`:1663`) and the detail overlay (`:1538`, whose `NavigationOverlay` is
+   * `:1554-1567`) — on a STANDALONE board, with no enclosing view to resolve
    * a mode from. ⚠️ The `(schema as any)` cast this record used to quote is
-   * GONE at this pin: the read is spelled `schema.navigation` and compiles
-   * through `BaseSchema`'s index signature, which the comment above it
-   * records (objectui#9726). The READ is unchanged — only its spelling is —
+   * GONE at this pin: the read is spelled `schema.navigation`, and it now
+   * compiles through a DECLARED `ObjectKanbanSchema.navigation` member
+   * (objectui#8652, the mirror of this row), where through `e420df310` it
+   * compiled through `BaseSchema`'s index signature, as the comment above it
+   * then recorded (objectui#9726). The READ is unchanged — only its spelling is —
    * so nothing this record says about the key moves. Until this key the same
    * document ran correctly in the renderer and was refused BY NAME at the
    * authoring door, through the generic `unrecognized_keys` rule a typo gets.
