@@ -214,10 +214,20 @@ for (const strategy of ['native', 'objectql'] as const) {
       expectRefusedBeforeAnyRead(res, before, aggregate);
     });
 
-    it.each(NON_COUNT_AGGREGATES)("a SAVED dataset (body.datasetName) stored with '*' under %s → the same 400 at its first query, nothing read", async (aggregate) => {
+    it.each(NON_COUNT_AGGREGATES)("a SAVED dataset (body.datasetName) stored with '*' under %s → the same 400 when the query selects that measure, nothing read", async (aggregate) => {
+      const before = { ...reads };
+      const res = await post({ datasetName: `stored_star_${aggregate}`, selection: { measures: ['wildcard'], dimensions: ['category'] } });
+      expectRefusedBeforeAnyRead(res, before, `stored ${aggregate}`);
+    });
+
+    // Fail closed, never a stand-down: the route parses the whole stored
+    // definition, so a query that selects only the dataset's healthy count —
+    // which answered 200 before the narrowing — is refused too, until the
+    // member is fixed. The blast radius is the dataset, by design.
+    it.each(NON_COUNT_AGGREGATES)("a SAVED dataset stored with '*' under %s → 400 even when the query selects only its count", async (aggregate) => {
       const before = { ...reads };
       const res = await post({ datasetName: `stored_star_${aggregate}`, selection: { measures: ['row_count'], dimensions: ['category'] } });
-      expectRefusedBeforeAnyRead(res, before, `stored ${aggregate}`);
+      expectRefusedBeforeAnyRead(res, before, `stored ${aggregate}, count selected`);
     });
 
     it("CONTROL: count over '*' and a count with no field both answer the row count — 200, through this strategy", async () => {
