@@ -144,10 +144,10 @@ export const CommandCenterPage = definePage({
               panel({
                 id: 'cc_kpi', title: '核心指标 · Key Metrics', accent: A.c3, minHeight: '0px', pad: '14px 18px 16px',
                 child: band('cc_kpi_grid', 6, [
-                  kpi('cc_k1', 'showcase_project', '活跃项目 Active', 'blue', { field: 'id', function: 'count' }, { status: 'active' }),
-                  kpi('cc_k2', 'showcase_task', '待办任务 Open', 'teal', { field: 'id', function: 'count' }, { status: { $ne: 'done' } }),
-                  kpi('cc_k3', 'showcase_task', '待复审 Review', 'purple', { field: 'id', function: 'count' }, { status: 'in_review' }),
-                  kpi('cc_k4', 'showcase_project', '风险项目 At-Risk', 'danger', { field: 'id', function: 'count' }, { health: 'red' }),
+                  kpi('cc_k1', 'showcase_project', '活跃项目 Active', 'blue', { field: 'id', function: 'count' }, [{ field: 'status', operator: 'equals', value: 'active' }]),
+                  kpi('cc_k2', 'showcase_task', '待办任务 Open', 'teal', { field: 'id', function: 'count' }, [{ field: 'status', operator: 'not_equals', value: 'done' }]),
+                  kpi('cc_k3', 'showcase_task', '待复审 Review', 'purple', { field: 'id', function: 'count' }, [{ field: 'status', operator: 'equals', value: 'in_review' }]),
+                  kpi('cc_k4', 'showcase_project', '风险项目 At-Risk', 'danger', { field: 'id', function: 'count' }, [{ field: 'health', operator: 'equals', value: 'red' }]),
                   kpi('cc_k5', 'showcase_account', '客户 Accounts', 'orange', { field: 'id', function: 'count' }),
                   kpi('cc_k6', 'showcase_project', '总预算 Budget', 'success', { field: 'budget', function: 'sum' }, undefined, '0.0a'),
                 ], '10px'),
