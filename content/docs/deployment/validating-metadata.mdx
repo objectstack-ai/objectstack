@@ -236,13 +236,18 @@ Both checks also judge the members of an analytics cube (`analyticsCubes`),
 because an authored cube is queried through the same analytics door. A cube
 dimension whose `sql` column is declared with a structured-JSON type or as a
 multi-value field is refused (`dimension-json-stored-field-refused`) at
-`analyticsCubes[N].dimensions.<key>.sql`, and so is a `count_distinct` measure
-over such a column (`measure-aggregate-field-type-refused`, at
-`analyticsCubes[N].measures.<key>.type`). The column is read where the door
+`analyticsCubes[N].dimensions.<key>.sql`. A cube measure is judged exactly as a
+dataset measure is, its `type` being the aggregate: a pair outside the table is
+refused (`measure-aggregate-field-type-refused`, at
+`analyticsCubes[N].measures.<key>.type`). That covers `sum`, `avg`, `min` or
+`max` over a column whose type their row does not accept (a `sum` over a `text`
+column, say), and `count_distinct` over a JSON-stored column; the analytics
+door refuses each of them with `400 INVALID_FIELD` when a query names the
+measure. `count` is accepted over every type. The column is read where the door
 reads it: on the object the cube's `sql` names, or, for a relationship path,
 on the object the last hop reaches — the join the cube declares for that hop,
-else the lookup's `reference`. A cube's other measure types and the row
-wildcard `'*'` are not judged by this check.
+else the lookup's `reference`. A measure of an expression type (`number`,
+`string`, `boolean`) and the row wildcard `'*'` are not judged by this check.
 
 ### 7. Navigation exposing objects nobody can read
 
