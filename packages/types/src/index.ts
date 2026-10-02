@@ -58,6 +58,21 @@ export * from './unique-violation.js';
 // so adopting the predicate adds no edge. `@objectstack/metadata/errors` still
 // re-exports `isMissingTableError` for its published consumers.
 export * from './driver-error-classification.js';
+// [#21385, maintainer ruling 2026-10-02 letter A] THE driver-fault redaction:
+// the one cut that keeps a statement's bound values and inlined literals out of
+// every log face and out of the error that leaves the engine. Moved here from
+// `@objectstack/objectql` because its callers are the engine and `driver-sql`'s
+// own log lines, and the family's next face, `operatorFacingErrorText` (#21418),
+// lives in this package: this is the one home all of them reach, so adopting it
+// adds no edge. Named rather
+// than `export *`: the module's template table and its load-time guard stay
+// package-internal (their cases live beside them).
+export {
+  redactBoundStatement,
+  redactStatementFromMessage,
+  redactPropagatedDriverFault,
+  type DriverFaultOrigin,
+} from './driver-fault-redaction.js';
 // [#8567] The OPPOSITE question, kept deliberately separate: "is this the
 // database refusing an ON CONFLICT target that no unique index backs?" One
 // measured limb per dialect that can raise it (SQLite, Postgres); MySQL cannot,

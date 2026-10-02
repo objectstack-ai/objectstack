@@ -280,14 +280,19 @@ describe(`[#8931] driver-sql — the terminal backend-fault envelope (${cell.lab
   // THE LOG — a withholding, not a deletion
   // ───────────────────────────────────────────────────────────────
 
-  it('writes the full dialect text to the SERVER LOG, statement included', async () => {
+  it('writes the dialect diagnostic to the SERVER LOG, the statement cut', async () => {
     const { err, logged } = await withLog(driver, () => driver.find(MISSING_TABLE, {}));
     expect(err.code).toBe('DATABASE_ERROR');
     const line = logged.find((l) => l.includes(MISSING_TABLE));
     expect(line, 'an operator must still be able to read what the backend said').toBeDefined();
-    // The half that makes it a redaction rather than a deletion: the statement
-    // the caller may not see is in the log, where an operator can.
-    expect(String(line)).toMatch(/\bselect\b/i);
+    // [#21385, maintainer ruling 2026-10-02] A redaction, not a deletion, and
+    // since this ruling a cut one: the dialect's diagnostic still reaches the
+    // log for an operator, the statement and its bound values do not (a server
+    // log leaves the data's trust boundary). The cut's marker says one stood
+    // there. The sentinel pins for this line live in
+    // `sql-driver-21385-refusal-log-line-redaction.test.ts`.
+    expect(String(line)).not.toMatch(/\bselect\b/i);
+    expect(String(line)).toContain('[statement and bound values redacted]');
     expect(String(line)).toContain('DATABASE_ERROR');
   });
 
@@ -423,9 +428,22 @@ describe('[#8931] postgres — the dotted route and the value-bearing diagnostic
     // absence above is a withholding rather than a statement about a string
     // that never held it. This is the assertion that would go green for the
     // wrong reason if pg ever stopped naming the value.
+    //
+    // [#21385, maintainer ruling 2026-10-02] Read on the dialect error the
+    // envelope keeps under `cause`, no longer on the log: the log line now
+    // takes the shared driver-fault cut, whose 22P02 template drops the value
+    // and keeps Postgres' words, so it must NOT carry it.
+    expect(
+      String((err as { cause?: { message?: unknown } }).cause?.message).includes(SECRET_LITERAL),
+      "postgres' own 22P02 diagnostic should have carried the caller's value",
+    ).toBe(true);
     expect(
       logged.some((l) => l.includes(SECRET_LITERAL)),
-      "postgres' own 22P02 diagnostic should have carried the caller's value into the log",
+      "the caller's value reached the server log line",
+    ).toBe(false);
+    expect(
+      logged.some((l) => l.includes('invalid input syntax for type integer') && l.includes('[value redacted]')),
+      "the log line keeps Postgres' diagnostic with the value slot cut",
     ).toBe(true);
   });
 });

@@ -168,7 +168,9 @@ import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/type
 import { DuplicateRecordError, envelopeUniqueViolation } from './duplicate-record-error.js';
 // [#8682] The write-path loggers' redaction — bound values never reach the log.
 // [#21274] …and its boundary face — nor the error that leaves the engine.
-import { redactBoundStatement, redactPropagatedDriverFault } from './driver-fault-redaction.js';
+// [#21385] It lives in `@objectstack/types` now, so `driver-sql`'s own log lines
+// call the same cut; nothing about it changed in the move.
+import { redactBoundStatement, redactPropagatedDriverFault } from '@objectstack/types';
 // [#8844] The runtime half of #8686's ruling: a system-context write on a
 // tenant-scoped object resolves the install's organization the way a session
 // write does, or is refused rather than filed under the `__global__`
