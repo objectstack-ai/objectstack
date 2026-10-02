@@ -55,8 +55,9 @@ import { readDeclaredDatasources } from './orphans.js';
  * persisted key file, the way every host resolves it. It is constructed in the
  * strict posture and with the auto-key opt-in withheld, whatever `NODE_ENV`
  * says, so this command never mints a key: a minted key can open nothing that
- * is stored. No key is a refusal, before any row is opened. The provider is
- * `LocalCryptoProvider`, the one every in-tree host constructs.
+ * is stored. It is resolved before the boot, so the key state it sees is the
+ * one the operator left. No key is a refusal, before any row is opened. The
+ * provider is `LocalCryptoProvider`, the one every in-tree host constructs.
  */
 export default class SecretRewrap extends Command {
   static override description =
@@ -138,18 +139,37 @@ export default class SecretRewrap extends Command {
       planSysSecretRewrap,
       rewrapUnfinished,
     } = await import('../../utils/sys-secret-rewrap.js');
-    const { ciphertextDerivationStatus, LocalCryptoProvider } = await import('@objectstack/service-settings');
+    const { ciphertextDerivationStatus, LocalCryptoProvider, SettingsServicePlugin } =
+      await import('@objectstack/service-settings');
     const { PlatformObjectsPlugin } = await import('@objectstack/platform-objects/plugin');
+
+    // ── The provider, resolved BEFORE the boot, from a key that already exists ──
+    // Before, because the boot composes the settings service, and in a
+    // development posture that service's own provider may mint a key file when
+    // none exists. Resolved first, this run sees the key state as the operator
+    // left it. The strict posture never mints, and the auto-key opt-in is
+    // withheld. A missing key is refused only once the plan has a row to open,
+    // so a run with nothing to open still reports.
+    let provider: (RewrapProviderLike & { keySource: string }) | null = null;
+    let keyUnavailable: string | null = null;
+    try {
+      provider = new LocalCryptoProvider({
+        mode: 'production',
+        env: { ...process.env, OS_CRYPTO_AUTOKEY: undefined },
+      });
+    } catch (error) {
+      keyUnavailable = error instanceof Error ? error.message : String(error);
+    }
 
     let stack;
     try {
       stack = await bootSchemaStack({
         jsonOutput: json,
         databaseUrl: flags['database-url'],
-        // The platform objects register `sys_secret` and every holder object
-        // the union reads. Nothing else is composed: the settings service is
-        // not needed here, and it would construct a provider of its own.
-        extraPlugins: [new PlatformObjectsPlugin()],
+        // The same composition `os secret orphans` boots: the platform objects
+        // register `sys_secret` and the holder objects, and the settings
+        // service registers `sys_setting`, the settings family's holder.
+        extraPlugins: [new PlatformObjectsPlugin(), new SettingsServicePlugin({ registerRoutes: false })],
         // The dry run boots READ-ONLY, the boot `os migrate plan` takes.
         // `--apply` keeps the plain boot: it writes rows.
         ...(flags.apply ? {} : { deferSchemaDdl: true, readOnlyProbe: true }),
@@ -231,25 +251,17 @@ export default class SecretRewrap extends Command {
         return;
       }
 
-      // ── The provider, from a key that already exists, or a refusal ───────
-      let provider: (RewrapProviderLike & { keySource: string }) | null = null;
-      if (plan.attempts > 0) {
-        try {
-          provider = new LocalCryptoProvider({
-            mode: 'production',
-            env: { ...process.env, OS_CRYPTO_AUTOKEY: undefined },
-          });
-        } catch (error) {
-          const message =
-            'Refusing to re-wrap: no existing data key was found (OS_SECRET_KEY, OS_DEV_CRYPTO_KEY or the '
-            + 'persisted key file), and a key minted now could open nothing that is stored. Run this with '
-            + 'the key the deployment seals with. No row was opened or written. Cause: '
-            + `${error instanceof Error ? error.message : String(error)}`;
-          if (json) { await emitJson({ error: 'crypto_key_unavailable', message }, 1, { compact: true }); return; }
-          printError(message);
-          this.exit(1);
-          return;
-        }
+      // ── A row to open needs a key that already existed before this run ───
+      if (plan.attempts > 0 && !provider) {
+        const message =
+          'Refusing to re-wrap: no existing data key was found (OS_SECRET_KEY, OS_DEV_CRYPTO_KEY or the '
+          + 'persisted key file), and a key minted now could open nothing that is stored. Run this with '
+          + 'the key the deployment seals with. No row was opened or written. Cause: '
+          + `${keyUnavailable ?? 'no provider'}`;
+        if (json) { await emitJson({ error: 'crypto_key_unavailable', message }, 1, { compact: true }); return; }
+        printError(message);
+        this.exit(1);
+        return;
       }
 
       if (flags.apply && plan.attempts > 0 && !flags.yes) {
@@ -269,7 +281,12 @@ export default class SecretRewrap extends Command {
         derivationOf: ciphertextDerivationStatus,
         writer,
       });
-      const report = buildRewrapReport({ mode, plan, result, keySource: provider?.keySource ?? null });
+      const report = buildRewrapReport({
+        mode,
+        plan,
+        result,
+        keySource: plan.attempts > 0 ? provider?.keySource ?? null : null,
+      });
       const exitCode = flags.apply && rewrapUnfinished(result) ? 1 : 0;
 
       if (json) { await emitJson({ mode, report }, exitCode, { compact: true }); return; }

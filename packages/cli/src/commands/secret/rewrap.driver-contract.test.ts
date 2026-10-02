@@ -31,7 +31,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
-import { ciphertextDerivationStatus, LocalCryptoProvider } from '@objectstack/service-settings';
+import { ciphertextDerivationStatus, LocalCryptoProvider, SettingsServicePlugin } from '@objectstack/service-settings';
 import type { CryptoContext } from '@objectstack/spec/contracts';
 import { bootSchemaStack, type SchemaStack } from '../../utils/schema-migrate.js';
 import type { SecretReferenceEngineLike } from '../../utils/secret-reference-union.js';
@@ -103,7 +103,7 @@ describe('os secret rewrap — the concrete driver and the command, end to end (
       jsonOutput: false,
       databaseUrl: `file:${dbFile}`,
       // Byte-identical to `rewrap.ts`'s own list.
-      extraPlugins: [new PlatformObjectsPlugin()],
+      extraPlugins: [new PlatformObjectsPlugin(), new SettingsServicePlugin({ registerRoutes: false })],
     });
     const engine = stack.kernel.getService('objectql') as SecretReferenceEngineLike | undefined;
     if (!engine) throw new Error('no objectql engine on the booted stack — nothing to measure');
