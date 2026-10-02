@@ -1047,11 +1047,14 @@ describe('translateDashboard', () => {
     expect(out.widgets[1].title).toBe('Other');
   });
 
-  // #7862 — `subCaption` overlays the metric widget's `options.description`,
-  // a DIFFERENT authored field from `widget.description` (#5428 item 4: two
-  // authored fields, two keys).
-  describe('widget subCaption (#7862)', () => {
-    const subBundle: TranslationBundle = {
+  // The metric sub-caption is RETIRED at both ends (#21257; ruling C on
+  // objectui#11389, which reverses #5428 item 4). Until then `translateDashboard`
+  // overlaid a `subCaption` bundle entry onto the widget's `options.description`
+  // (#7862); it now writes nothing into `options`. The bundle key is a
+  // tombstone, so a well-typed bundle cannot carry it — the residue below is
+  // cast, standing in for a stored row the conversion has not reached yet.
+  describe('widget options — the retired sub-caption overlay (#21257)', () => {
+    const residueBundle = {
       'zh-CN': {
         dashboards: {
           system_overview: {
@@ -1065,7 +1068,7 @@ describe('translateDashboard', () => {
           },
         },
       },
-    };
+    } as unknown as TranslationBundle;
     const metricDashboard = {
       name: 'system_overview',
       widgets: [
@@ -1074,43 +1077,30 @@ describe('translateDashboard', () => {
           type: 'metric',
           title: 'Total Users',
           description: 'Total registered users',
-          options: { description: 'vs last month', sortBy: 'created' },
-        },
-        {
-          id: 'widget_other',
-          type: 'metric',
-          title: 'Other',
-          description: 'Other card copy',
-          options: { description: 'untouched extra' },
+          options: { sortBy: 'created' },
         },
       ],
     };
 
-    it('overlays `options.description` and carries the other options keys through', () => {
-      const out = translateDashboard(metricDashboard, subBundle, { locale: 'zh-CN' });
-      expect(out.widgets[0].options).toEqual({ description: '较上月', sortBy: 'created' });
+    it('writes nothing into `options` — the bag is carried through by reference', () => {
+      const out = translateDashboard(metricDashboard, residueBundle, { locale: 'zh-CN' });
+      expect(out.widgets[0].options).toBe(metricDashboard.widgets[0].options);
+      expect(out.widgets[0].options).toEqual({ sortBy: 'created' });
     });
 
-    it('keeps the two authored fields on their own keys — `description` never reaches `options.description`, `subCaption` never reaches `widget.description`', () => {
-      const out = translateDashboard(metricDashboard, subBundle, { locale: 'zh-CN' });
+    it('a residual `subCaption` entry reaches neither `options.description` nor `widget.description`', () => {
+      const out = translateDashboard(metricDashboard, residueBundle, { locale: 'zh-CN' });
+      expect(out.widgets[0].options).not.toHaveProperty('description');
+      // `description` translates `widget.description` — the card-header
+      // subtitle, the one authored description a widget keeps.
       expect(out.widgets[0].description).toBe('系统中注册的用户总数');
-      expect(out.widgets[0].options?.description).toBe('较上月');
+      expect(out.widgets[0].title).toBe('用户总数');
     });
 
-    it('leaves `options` of a widget without a subCaption entry untouched (same reference semantics as title)', () => {
-      const out = translateDashboard(metricDashboard, subBundle, { locale: 'zh-CN' });
-      expect(out.widgets[1].options).toEqual({ description: 'untouched extra' });
-    });
-
-    it('does not mutate the input document', () => {
-      translateDashboard(metricDashboard, subBundle, { locale: 'zh-CN' });
-      expect(metricDashboard.widgets[0].options.description).toBe('vs last month');
-    });
-
-    it('creates the options bag when the bundle carries a subCaption and the widget has none — mirroring how a bundle-only `title` renders', () => {
+    it('creates no `options` bag on a widget that declares none', () => {
       const bare: DashboardLike = { name: 'system_overview', widgets: [{ id: 'widget_total_users' }] };
-      const out = translateDashboard(bare, subBundle, { locale: 'zh-CN' });
-      expect(out.widgets?.[0]?.options).toEqual({ description: '较上月' });
+      const out = translateDashboard(bare, residueBundle, { locale: 'zh-CN' });
+      expect(out.widgets?.[0]).not.toHaveProperty('options');
     });
   });
 
@@ -1247,7 +1237,7 @@ describe('translateDashboard — the catalog loses to an explicit override (#206
     label: 'System Overview',
     description: 'Platform health',
     widgets: [
-      { id: 'widget_total_users', title: 'Total Users', description: 'Registered users', options: { description: 'all time' } },
+      { id: 'widget_total_users', title: 'Total Users', description: 'Registered users' },
       { id: 'widget_organizations', title: 'Organizations' },
     ],
     globalFilters: [
@@ -1265,7 +1255,7 @@ describe('translateDashboard — the catalog loses to an explicit override (#206
           label: 'System Overview',
           description: 'Platform health',
           widgets: {
-            widget_total_users: { title: 'Total Users', description: 'Registered users', subCaption: 'all time' },
+            widget_total_users: { title: 'Total Users', description: 'Registered users' },
             widget_organizations: { title: 'Organizations' },
           },
           globalFilters: { region: { label: 'Region', options: { emea: 'EMEA', '1': 'One' } } },
@@ -1278,7 +1268,7 @@ describe('translateDashboard — the catalog loses to an explicit override (#206
           label: '系统概览',
           description: '平台健康',
           widgets: {
-            widget_total_users: { title: '用户总数', description: '注册用户', subCaption: '全部时间' },
+            widget_total_users: { title: '用户总数', description: '注册用户' },
             widget_organizations: { title: '组织' },
             // An id the package does not ship — addressed only to prove a
             // tenant-added widget keeps its own title.
@@ -1297,7 +1287,7 @@ describe('translateDashboard — the catalog loses to an explicit override (#206
     const out: any = translateDashboard(clone(PACKAGED), BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
     expect(out.label).toBe('系统概览');
     expect(out.description).toBe('平台健康');
-    expect(widget(out, 'widget_total_users')).toMatchObject({ title: '用户总数', description: '注册用户', options: { description: '全部时间' } });
+    expect(widget(out, 'widget_total_users')).toMatchObject({ title: '用户总数', description: '注册用户' });
     expect(widget(out, 'widget_organizations').title).toBe('组织');
     expect(out.globalFilters[0].label).toBe('区域');
     expect(out.globalFilters[0].options.map((o: any) => o.label)).toEqual(['欧洲', '一']);
@@ -1317,24 +1307,21 @@ describe('translateDashboard — the catalog loses to an explicit override (#206
     doc.widgets[0].title = 'Total Users (edited)';
     const out: any = translateDashboard(doc, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
     expect(widget(out, 'widget_total_users').description).toBe('注册用户');
-    expect(widget(out, 'widget_total_users').options.description).toBe('全部时间');
     expect(widget(out, 'widget_organizations').title).toBe('组织');
     expect(out.label).toBe('系统概览');
   });
 
-  it('every translatable string follows the same rule — label, description, widget description, sub-caption, filter label, option label', () => {
+  it('every translatable string follows the same rule — label, description, widget description, filter label, option label', () => {
     const doc = clone(PACKAGED);
     doc.label = 'Ops Overview';
     doc.description = 'Our health';
     doc.widgets[0].description = 'People';
-    doc.widgets[0].options!.description = 'since launch';
     doc.globalFilters[0].label = 'Territory';
     doc.globalFilters[0].options[0].label = 'Europe';
     const out: any = translateDashboard(doc, BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED });
     expect(out.label).toBe('Ops Overview');
     expect(out.description).toBe('Our health');
     expect(widget(out, 'widget_total_users').description).toBe('People');
-    expect(widget(out, 'widget_total_users').options.description).toBe('since launch');
     expect(out.globalFilters[0].label).toBe('Territory');
     // The edited option keeps its label; its unedited sibling is still
     // translated, matched by the value's string spelling (`1` against `'1'`).

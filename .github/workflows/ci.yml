@@ -178,6 +178,48 @@ jobs:
               - 'pnpm-lock.yaml'
               - 'tsconfig.json'
               - '.github/workflows/ci.yml'
+              # BUILD INPUTS outside every package (#21202): turbo.json itself,
+              # its `globalDependencies`, and each `$TURBO_ROOT$/…` input of a
+              # build task Build Core's `pnpm build` runs. A diff confined to
+              # one of them moves the build hashes it reaches, and before these
+              # entries it matched nothing here, so Build Core skipped and the
+              # merge queue ran that build first (PR #21199, turbo.json only).
+              # Every core-gated job starts on such a diff, not Build Core
+              # alone: each one builds, and turbo re-runs every task downstream
+              # of a moved build hash.
+              #
+              # scripts/check-ci-filter-parity.mjs DERIVES the required set from
+              # turbo.json and the root `build` script, and reds while a declared
+              # build input is uncovered here, or while a literal entry beside
+              # them covers none (a leftover). `tsconfig.json` and the
+              # `packages/cli/...` input are covered by the entries above;
+              # `@objectstack/docs#build` (its input is `content/**`) is the
+              # docs filter's, since `pnpm build` excludes that package.
+              #
+              # WIDTH: literal files, not `scripts/**`. Over the 3288
+              # first-parent commits of `main` in the 30 days to `1371dc980c`,
+              # through picomatch 2.3.1 and 4.0.5 (they agree on every row),
+              # `core` matched 2247; these entries add 28, `scripts/**` with
+              # turbo.json and tsup.config.ts would add 593, 516 of them diffs
+              # touching a `scripts/pm/` tool or a `scripts/check-*` gate.
+              - 'turbo.json'
+              - 'tsup.config.ts'
+              - 'scripts/build-input-hash.mjs'
+              - 'scripts/check-dev-prereqs.mjs'
+              - 'scripts/check-dts-emitted.mjs'
+              - 'scripts/check-dts-references.mjs'
+              - 'scripts/check-regen-pending.mjs'
+              - 'scripts/cli-build-prerequisite.mjs'
+              - 'scripts/git-env.mjs'
+              - 'scripts/import-prerequisite.mjs'
+              - 'scripts/invoked-as.mjs'
+              - 'scripts/js-comment-mask.mjs'
+              - 'scripts/regen-artifacts.mjs'
+              - 'scripts/sync-scaffold-emission-policy.mjs'
+              - 'scripts/sync-template-versions.mjs'
+              - 'scripts/ts-parse.mjs'
+              - 'scripts/tsup-drop-sources-content.mjs'
+              - 'scripts/workspace-enumerator.mjs'
             # Build inputs of the vendored Console SPA — see the Console Pin Gate
             # job at the bottom of this file. `.objectui-sha` is a ROOT DOTFILE, so
             # it matches neither filter above: a pin-only diff skipped `core` and
@@ -2046,6 +2088,16 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # 67 package build commands end with `node …/scripts/check-dts-emitted.mjs`,
+      # so the `pnpm build` below runs that checker on every package it builds,
+      # and until this step no workflow ran its `--self-test`. It surfaced when
+      # the `core:` filter began naming the file as a build input (#21202) and
+      # `check:self-test-wired` saw a workflow name a self-test it never runs.
+      # Milliseconds, no prerequisites; placed before the build so a broken
+      # checker is reported before the 67 verdicts that rely on it.
+      - name: check-dts-emitted self-test
+        run: node scripts/check-dts-emitted.mjs --self-test
 
       # ── Turbo remote cache (#21186) ─────────────────────────────────────
       # Vercel's managed Turborepo remote cache. objectstack-ai/cloud's

@@ -7,6 +7,7 @@ import { z } from 'zod';
 // ────────────────────────────────────────────────────────────────────────────
 
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
@@ -745,6 +746,49 @@ const FLOW_SCREEN_FIELD_NO_OPTIONS =
   + '`objects.<object>.fields.<field>.options` uses — cannot address them unambiguously. Author the '
   + "option labels on the node's `config`.";
 
+/**
+ * The tombstone prescription for `dashboards.<name>.widgets.<id>.subCaption`
+ * — the metric sub-caption, retired at both ends by ruling C on
+ * objectui#11389 (batch #264 item 5), which reverses #5428 item 4.
+ *
+ * The key overlaid the widget's `options.description`, a sub-caption key the
+ * dashboard schema never declared and no authored widget wrote (0 producers in
+ * either repository, measured), so the string existed in the served document
+ * only when this key put it there. A widget keeps ONE authored description,
+ * `widget.description`, which renders as the card-header subtitle and is
+ * translated by the widget node's `description` key. If a named user later
+ * needs a caption under a metric's value, it returns as a declared
+ * widget-level key outside `options` — never as `options.description`.
+ */
+const WIDGET_SUB_CAPTION_RETIRED =
+  '`dashboards.<name>.widgets.<id>.subCaption` was removed in @objectstack/spec 17.7.0 '
+  + '(ADR-0049 enforce-or-remove) — it overlaid the metric sub-caption onto the widget\'s '
+  + '`options.description`, a key the dashboard schema never declared and no authored widget '
+  + 'wrote, so it translated a string that existed only when this entry put it there. Delete the '
+  + 'entry. A widget has one authored description, `widget.description`, which renders as the '
+  + "card-header subtitle; translate it through this widget's `description` entry. "
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+/**
+ * The former `subtitle → subCaption` alias, re-homed as `guidance` when
+ * `subCaption` became a tombstone (the chart `accessibility` / `ariaProps`
+ * precedent in `ui/chart.zod.ts`): an alias whose target is a tombstone is
+ * the shape `alias-integrity` refuses, because it sends the author to the one
+ * key guaranteed to be rejected next.
+ *
+ * ⛔ Deliberately NOT repointed at `description`. The alias existed because a
+ * `subtitle` on a metric widget meant the caption under the number; a
+ * did-you-mean that now answered `description` would silently change what the
+ * word is taken to mean. The refusal names both readings instead, so the
+ * author picks the one they meant.
+ */
+const WIDGET_SUBTITLE_RETIRED =
+  '`subtitle` was the alias spelling of `subCaption`, which was removed in @objectstack/spec '
+  + '17.7.0 (ADR-0049 enforce-or-remove) — the metric sub-caption it translated is retired, and '
+  + 'no widget renders a caption under its value. If this string is the card-header subtitle, it '
+  + "belongs under this widget's `description` entry, which translates `widget.description`; if "
+  + 'it is a caption under the metric\'s value, delete the key.';
+
 const appTranslationDataShape = () => ({
   /** Object translations */
   objects: z.record(z.string(), ObjectTranslationDataSchema).optional().describe('Object translations keyed by object name'),
@@ -824,7 +868,6 @@ const appTranslationDataShape = () => ({
    *   dashboards.<name>.actions.<actionUrl>.label
    *   dashboards.<name>.widgets.<widgetId>.title
    *   dashboards.<name>.widgets.<widgetId>.description
-   *   dashboards.<name>.widgets.<widgetId>.subCaption
    *   dashboards.<name>.globalFilters.<filterName>.label
    *   dashboards.<name>.globalFilters.<filterName>.options.<value>
    */
@@ -852,29 +895,25 @@ const appTranslationDataShape = () => ({
       // A widget's headline is `title`; a dashboard's is `label`. Same document,
       // one level apart, opposite spellings — so `label` on a widget is the
       // likeliest mistake on this surface and the least likely to be noticed.
-      //
-      // `subtitle` points at `subCaption`, not `description`: on a metric
-      // widget the string an author calls the "subtitle" is the sub-caption
-      // under the number (`widget.options.description`), a DIFFERENT authored
-      // field from `widget.description` (the copy under the card header). The
-      // #5428 ruling (2026-08-06, item 4) gives each authored field its own
-      // key — 「两个作者字段两个 key」 — so steering `subtitle` authors at
-      // `description` would steer them at exactly the shared key the ruling
-      // forbids (#7862).
-      aliases: { label: 'title', name: 'title', heading: 'title', subtitle: 'subCaption' },
+      aliases: { label: 'title', name: 'title', heading: 'title' },
+      // `subtitle` used to alias `subCaption`; it carries the retirement
+      // instead of a rename now that its target is a tombstone — see
+      // WIDGET_SUBTITLE_RETIRED for why it is not repointed at `description`.
+      guidance: { subtitle: WIDGET_SUBTITLE_RETIRED },
     }, {
       title: z.string().optional().describe('Translated widget title'),
-      description: z.string().optional().describe('Translated widget description'),
+      description: z.string().optional().describe('Translated widget description (overlays `widget.description`, the card-header subtitle)'),
       /**
-       * Overlays the metric widget's sub-caption — the authored
-       * `widget.options.description`, NOT `widget.description`. Two authored
-       * fields, two keys (#5428 item 4, #7862): `description` above translates
-       * `widget.description`; this key translates `options.description`.
-       * Resolved by `translateDashboard` (i18n-resolver.ts); objectui's
-       * client-side renderer half consumes the same
-       * `dashboards.<name>.widgets.<widgetId>.subCaption` path.
+       * RETIRED — the metric sub-caption (ruling C on objectui#11389, which
+       * reverses #5428 item 4). It overlaid `widget.options.description`; the
+       * overlay is gone from `translateDashboard` and a widget keeps one
+       * authored description, `widget.description`, translated by
+       * `description` above. Tombstoned rather than deleted so the rejection
+       * carries the prescription at `tsc` and at the parse; the
+       * `translation-widget-sub-caption-removed` conversion strips the key
+       * from stored bundles and items.
        */
-      subCaption: z.string().optional().describe("Translated metric sub-caption (overlays the widget's `options.description`, a different authored field from `description`)"),
+      subCaption: retiredKey(WIDGET_SUB_CAPTION_RETIRED),
     })).optional().describe('Widget translations keyed by widget id'),
     /**
      * Global-filter copy, keyed by the filter's stable `name`

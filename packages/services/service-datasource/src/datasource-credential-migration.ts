@@ -266,8 +266,10 @@ export function planCredentialMigration(record: StoredDatasource): CredentialMig
         action: 'refuse',
         reason:
           `Datasource '${record.name}' holds ${named}, which the ${String(record.driver)} driver does not `
-          + 'read as its credential — a pre-#8078 alias spelling, or a key that is credential-shaped but '
-          + 'deliberately still writable (turso\'s `encryptionKey`, #8081 item 4). Binding one into the '
+          + 'read as its credential — an alias spelling from before inline credentials were refused at '
+          + 'publish, which no connection builder reads, or a key that is credential-shaped but '
+          + 'deliberately still writable (turso\'s `encryptionKey`, which has no secret slot of its own: '
+          + 'the one slot carries the `authToken`). Binding one into the '
           + 'single secret slot would hand the driver a credential it does not use, or add authentication '
           + 'to a connection that works without it today.',
         remedy:

@@ -125,7 +125,14 @@ export {
   collectSecretFields,
   collectMaskedReadFields,
   collectCredentialFields,
+  // [#21197] The flag-keyed collector, beside the type-keyed ones: the audit
+  // ledger's CRUD mirror omits what it collects, exactly as the read path does.
+  collectInternalReadFields,
+  // [#21197] The one dereference of an `internal` column for rows a consumer
+  // holds — stripped-versus-unset by declaration, fail-closed.
+  readInternalColumn,
 } from './secret-fields.js';
+export type { InternalColumnSource } from './secret-fields.js';
 
 // Utilities
 export {

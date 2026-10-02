@@ -22,7 +22,7 @@ export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_approval_delegation._views.active.emptyState.message": "1095d61c017b6db2",
   "objects.sys_approval_delegation._views.active.emptyState.title": "799d28e51d88963e",
   "objects.sys_approval_delegation._views.active.label": "eee107cf4e466779",
-  "objects.sys_approval_delegation.description": "432b0435aa15f6b9",
+  "objects.sys_approval_delegation.description": "517790acf02a372d",
   "objects.sys_approval_delegation.fields.created_at.label": "1f02d416befb595b",
   "objects.sys_approval_delegation.fields.delegate_id.help": "9cfc641f7b0b04f9",
   "objects.sys_approval_delegation.fields.delegate_id.label": "afd6d8733dc5bc14",

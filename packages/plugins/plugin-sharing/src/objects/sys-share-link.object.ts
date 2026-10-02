@@ -102,9 +102,20 @@ export const SysShareLink = ObjectSchema.create({
     }),
 
     // ── Token (the secret) ───────────────────────────────────────
+    //
+    // [#21197] `internal: true` on this object's two credential columns: the
+    // capability token below and `password_hash` further down. The generic
+    // data path's get/list doors and the compliance ledger's CRUD mirror both
+    // honour the flag, so neither column leaves through them. Storage, the
+    // unique index and the `where: { token }` lookup are untouched. This
+    // plugin's own routes read both back through the engine's privileged
+    // accessor (`readShareLinkInternalColumn` in `share-link-service.ts`):
+    // redemption verifies the password against the recovered hash, and the
+    // creator's own link list gets its tokens back to build each URL.
     token: Field.text({
       label: 'Token',
       required: true,
+      internal: true,
       maxLength: 64,
       description: 'Opaque URL-safe random token (≥ 22 chars). The only secret in this row.',
       group: 'Token',
@@ -201,8 +212,10 @@ export const SysShareLink = ObjectSchema.create({
       group: 'Access Policy',
     }),
 
+    // [#21197] `internal: true` — see the note on `token` above.
     password_hash: Field.text({
       label: 'Password Hash',
+      internal: true,
       maxLength: 256,
       description: 'Argon2/bcrypt hash. When set, the UI prompts for a password before rendering.',
       group: 'Access Policy',

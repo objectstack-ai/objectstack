@@ -277,9 +277,11 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * (`apps.setup.navigation.group_overview.label`).
  *
  * A generic deep walk rather than an enumeration of the known shapes: the
- * sections grow keys (`subCaption`, `pages.<n>.components.<id>.<copyKey>`) and
- * an enumeration would silently stop covering the new ones — the same
- * declared-but-unwalked failure this module exists to close.
+ * sections grow keys (`dashboards.<n>.globalFilters.<key>.options.<value>`,
+ * `pages.<n>.components.<id>.<copyKey>`) and an enumeration would silently stop
+ * covering the new ones — the same declared-but-unwalked failure this module
+ * exists to close. (They shrink too: the widget `subCaption` key this sentence
+ * once cited was retired, and a deep walk needs no edit for that either.)
  */
 export function collectSourceLeaves(data: TranslationData | undefined): Map<string, string> {
   return collectLeavesOf(data, HAND_AUTHORED_SECTIONS);

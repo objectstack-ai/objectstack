@@ -24,7 +24,9 @@
  * objectui's `src/dashboard-widget-options.ts` SAVE FOR ONE TOKEN, called out
  * at the site itself: the emitted `code` is spelled as an inline literal here
  * and as the constant there, because this repo runs a vocabulary gate objectui
- * does not. The emitted `code`, `severity`, `message` and the whole census
+ * does not. One census MEMBER differs too, for a bounded window: objectui's
+ * copy at the pin still lists `description`, which this one dropped with the
+ * retired metric sub-caption (see `CONSUMED_WIDGET_OPTION_KEYS`). The emitted `code`, `severity`, `message` and the whole census
  * scope are identical, and `__tests__/dashboard-widget-options.test.ts`
  * re-derives that rather than trusting it — including an explicit pin that the
  * literal equals `UNCONSUMED_WIDGET_OPTION`. Change these functions only
@@ -50,17 +52,16 @@
  *   dateGranularity, sortBy, sortOrder, limit   (query-affecting, framework#3588)
  *   stageOrder                                  (funnel stage order — the only type that reads it)
  *
- * plus ONE undeclared key with a real read site:
- *
- *   description — the metric-card sub-caption channel. `translateDashboard`
- *   OVERLAYS the `widgets.{id}.subCaption` translation onto this key, and that
- *   pipeline lives IN THIS REPO: `packages/spec/src/system/i18n-resolver.ts`
- *   documents `WidgetLike.options` as "the renderer-extras bag …
- *   `translateDashboard` writes exactly one key into it — `description`"
- *   (objectstack#5428 item 4, objectstack#7862). Warning on a key the
- *   platform's own translation pipeline writes would be a false positive on
- *   legal metadata, so it is in the accepted set even though the dataset-bound
- *   render path does not currently display it.
+ * and nothing undeclared. `description` used to be the one undeclared member:
+ * the metric-card sub-caption channel, which `translateDashboard` overlaid from
+ * a `widgets.{id}.subCaption` translation (objectstack#5428 item 4,
+ * objectstack#7862), so warning on it would have flagged the platform's own
+ * output. Ruling C on objectui#11389 retired that channel at both ends,
+ * objectstack first (objectstack#21257): the overlay is gone, the bundle key is
+ * a tombstone, and a widget keeps ONE authored description, `widget.description`
+ * — never `options.description`. With no writer left, `description` left this
+ * census, so an `options.description` now draws the warning like any other key
+ * the dataset-bound path is not meant to read.
  *
  * Notably NOT consumed on the path a widget really renders through:
  * `thresholds` and `format`. Both were widely believed to work; both draw this
@@ -114,12 +115,18 @@ export const DASHBOARD_WIDGET_HOST_TYPES: ReadonlySet<string> = new Set([
 
 /**
  * The accepted set: every `options` key with a renderer read site on the
- * dataset-bound path, plus the sub-caption convention key. Alphabetical; the
- * warning message prints it verbatim. Derivation and evidence: file header.
+ * dataset-bound path. Alphabetical; the warning message prints it verbatim.
+ * Derivation and evidence: file header.
+ *
+ * ⚠️ One member short of objectui's copy until objectui#11389 lands: objectui's
+ * renderer at the pin still reads `options.description` for the retired metric
+ * sub-caption, and its census lists it; that card drops the read and the member
+ * together. The window errs in the safe direction — this copy warns on a key
+ * objectui's strict authoring face already refuses — and no served document
+ * carries the key, because its only writer was the retired overlay.
  */
 export const CONSUMED_WIDGET_OPTION_KEYS: readonly string[] = [
   'dateGranularity',
-  'description',
   'limit',
   'sortBy',
   'sortOrder',
