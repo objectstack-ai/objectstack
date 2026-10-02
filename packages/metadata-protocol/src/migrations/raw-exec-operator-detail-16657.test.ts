@@ -515,7 +515,7 @@ describe('[#21418] a bound sentinel reaches no carrier at any site in this packa
             const err = rawStatementFault(
                 knexDump(sql, [], `Duplicate entry '${SENTINEL}' for key 't.idx_real'`),
             );
-            Object.assign((err as { cause: object }).cause, { code: 'ER_DUP_ENTRY', errno: 1062 });
+            Object.assign((err as unknown as { cause: object }).cause, { code: 'ER_DUP_ENTRY', errno: 1062 });
             return err;
         };
         const options = {
@@ -548,6 +548,13 @@ describe('[#21418] a bound sentinel reaches no carrier at any site in this packa
          * with the organization the probe finds BEING the sentinel, so the
          * stamp and the counter merge bind it themselves, and every refusal
          * composed from the statement and parameters actually sent.
+         *
+         * ⚠️ The run's receipt names the organization it adopted, on purpose
+         * and not through the helper: `organizationId` is a declared field of
+         * the result (and of the `info` line a repair writes, which this
+         * logger does not record). So the scan below reads the result WITHOUT
+         * that one field, and pins the field's value separately, rather than
+         * calling a declared receipt a leak.
          */
         function sentinelExec(refuse: (sql: string) => boolean) {
             return async (sql: string, params?: unknown[]): Promise<unknown> => {
@@ -629,7 +636,9 @@ describe('[#21418] a bound sentinel reaches no carrier at any site in this packa
 
                 expect(fixture.seen.length, 'the site was never refused').toBeGreaterThan(0);
                 expect(fixture.seen.every((m) => m.includes(SENTINEL))).toBe(true);
-                expect(inspect(result, { depth: 8 })).not.toContain(SENTINEL);
+                const { organizationId, ...carriers } = result as typeof result & { organizationId?: string };
+                expect([undefined, SENTINEL]).toContain(organizationId);
+                expect(inspect(carriers, { depth: 8 })).not.toContain(SENTINEL);
                 expect(logged(log)).not.toContain(SENTINEL);
                 if (line === '') {
                     expect(result.status).toBe('absent');
