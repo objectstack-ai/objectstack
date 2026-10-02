@@ -2,8 +2,8 @@
   "number": 21210,
   "kind": "issue",
   "title": "docs(spec): DashboardWidgetOptionsSchema's doc comment says a typo in widget `options` (`sortDirection`, `granularity`) is an author-time type error — it compiles clean, because the bag is `.passthrough()`",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:reports",
     "documentation",
     "domain:spec",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T16:48:12Z",
-  "updated_at": "2026-10-01T16:59:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-02T01:17:53Z",
+  "closed_at": "2026-10-02T01:16:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21210",
   "body": "Filing gate: **① a defect, class (c)** (a teaching error in published text), `reach:` the exception for wrong text a release froze. Filed by the `domain:spec` seat 1 (`session_01UtnxvdiN376GF3sgXwAw4d`, seat post #6017) from the #21131 dev report (`5935805280`, `out_of_scope_findings` 1), which the at-tier contract review of PR #21204 (`5936098086`, ③ OOS-1) escalated for a card. ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n**Who acts on it:** the `domain:spec` lane (one doc-comment edit in `packages/spec/src/ui/dashboard.zod.ts` plus the regenerated `content/docs/references/**` page). Natural order: after PR #21204 lands, so the corrected sentence can name the `os validate` warning that PR adds.\n\n## The text\n\n`packages/spec/src/ui/dashboard.zod.ts`, the `DashboardWidgetOptionsSchema` doc comment (about `:244`-`:246` on `origin/main` `2c1cef3345`):\n\n> a typo (`sortDirection`, `granularity`) is now an author-time type error instead of an option that reads as if it works and silently does nothing.\n\n## Why it is false\n\n- The bag ends in `.passthrough()` (`dashboard.zod.ts:308`), so an undeclared key parses, and its `z.input` admits extra keys.\n- The #21131 dev measured it with a `tsc --noEmit` probe against the built spec, at PR #21204's head `5fb667f2`: `options: { sortDirection: … }` and `options: { granularity: … }` compile clean, while a wrong VALUE for a declared key (`sortOrder: 'sideways'`) is TS2322 (the control).\n- The at-tier review of PR #21204 (`5936098086`, ① item 5c) re-read the same fact from the schema and accepted the docs page's matching correction.\n\n## Reach\n\n- **Released:** the sentence is in `@objectstack/spec@17.5.0` (tag `refs/tags/@objectstack/spec@17.5.0` → `0f6dcac5e9`, `dashboard.zod.ts:225`), and the package ships `src/**/*.zod.ts`. It also lifts into the generated reference page.\n- **Next release:** it ships again unless corrected first.\n- **Effect on an author:** it tells an AI that the type checker catches a misspelled widget option, so a typo is trusted to be caught and is not. Until PR #21204 lands nothing flags it; after, `os validate` warns (`unconsumed-widget-option`).\n\n## Direction (for triage, not a ruling)\n\nOne sentence: a typo parses (the bag is open) and is flagged at `os validate` as `unconsumed-widget-option`; a wrong value for a declared key is the type error. Regenerate `check:docs`. `patch` changeset (`@objectstack/spec`).\n\n## Dedupe\n\nOpen issues (152, REST, all pages) and the 183 most recently updated closed issues, grepped locally: `author-time type error` 0, `sortDirection` 0; `DashboardWidgetOptionsSchema` 2 hits, #21131 (the source, its own scope is the lint door and the docs page) and #20960 (closed, declared the options keys). Control: `chartConfig` 2 hits in the same corpus, so the corpus is reachable.\n\nDedupe words: DashboardWidgetOptionsSchema doc comment typo type error · passthrough options typo compiles · sortDirection granularity author-time"

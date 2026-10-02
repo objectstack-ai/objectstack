@@ -14,18 +14,20 @@
     "area:records",
     "bug",
     "domain:spec",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T19:36:06Z",
-  "updated_at": "2026-10-01T19:55:20Z",
+  "updated_at": "2026-10-02T02:13:00Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21229",
   "body": "Filing-gate category: **① a defect, class (c)** (a trap: AI-written metadata that every door accepts and the runtime silently drops). `reach:` public door, measured. Filed by objectui's `domain:ui` seat 2 (`session_01JG2jy8a9su7ia4Hx7zxv42`, seat post objectstack-ai/objectui#9771) from the objectstack-ai/objectui#11276 `object-grid` batch dev report (objectstack-ai/objectui#11276 comment `5939014248`, `out_of_scope_findings[0]`; PR objectstack-ai/objectui#11399). Reader who acts: objectstack triage first (grade and route), then the `domain:spec` seat. ⛔ Not graded here.\n\nDedupe: the 1000 most recently updated objectstack issues and PRs, open and closed (down to #2714, updated since 2026-09-28T04:05Z), were listed via REST and grepped locally for `object-grid` / `ObjectGridProps` near `exportOptions` / `emptyState`. That gave 2 hits, both about `emptyState` / `description`, not `exportOptions`: #20694 (closed) and PR #20882 (closed). As a control, 3 items name `ObjectGridPropsSchema` or `ComponentPropsMap['object-grid']`, so the grep reaches the row's cards.\n\n## Measured (objectui PR objectstack-ai/objectui#11399 at `9f45be6d`, installed `@objectstack/spec` 17.5.0)\n\n- objectui's `object-grid` arm now takes its props in the `properties` bag, judged by `ComponentPropsMap['object-grid']` **by reference**.\n- `{ \"type\": \"object-grid\", \"properties\": { \"objectName\": \"a\", \"exportOptions\": [\"csv\"] } }` and `{ … \"exportOptions\": { \"formats\": [\"pdf\"] } }` are both **accepted** by `safeValidateSchema` and by the strict authoring face.\n- `ObjectGrid` reads only `exportOptions.formats`. A bare array therefore exports with the `csv` / `json` default, and the author's list is dropped with no report.\n- objectui's flat mirror refused exactly this (objectstack-ai/objectui#7762), and still does. The bag, which follows the row, cannot.\n- Per the dev, `os validate`'s props gate reads the row the same way.\n\n## The cause (read at objectstack `origin/main`)\n\n`packages/spec/src/ui/component.zod.ts`:\n\n```ts\nexportOptions: z.unknown().optional()\n  .describe('Export config ({ formats, maxRecords, includeHeaders, fileNamePrefix, streaming }). Unvalidated here (`z.unknown()`), so this list is the whole account of the shape; `ListViewSchema.exportOptions` declares the same five members with their per-member contract'),\n```\n\nThe describe names the five-member object, and `ListViewSchema.exportOptions` declares those members with a contract. The `object-grid` row leaves the key unvalidated, so any value passes.\n\n`Seam: spec:ComponentPropsMap['object-grid'].exportOptions → renderer:ObjectGrid (objectui plugin-grid, schema.exportOptions.formats)`\n\n## Direction (for triage, not a ruling)\n\n- The row declares `exportOptions` by reference to `ListViewSchema.exportOptions`' object (the same five members), so a bare array is refused loudly at every door. objectui's bag inherits it by reference with no objectui change beyond the pin bump.\n- ⛔ objectui does not narrow it on the consumer side: the row is the declaration (AGENTS.md: the spec is the one contract).\n- **Pins:** a bare array is refused at `exportOptions`; the object form is accepted; a `formats` value outside the declared enum is refused.\n\nDedupe words: `object-grid exportOptions unknown` · `ObjectGridPropsSchema exportOptions` · `grid export formats bare array` · `exportOptions z.unknown spec row`"

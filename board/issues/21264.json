@@ -1,0 +1,34 @@
+{
+  "number": 21264,
+  "kind": "issue",
+  "title": "lint: os validate does not judge an action translation's resultDialog title / description / acknowledge copy when the action declares no resultDialog, so the copy passes clean and is never read",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T23:37:42Z",
+  "updated_at": "2026-10-02T02:05:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21264",
+  "body": "Filing gate: **① a defect, class (c)**: an authoring door lets a never-read key through. `reach:` measured at the public door `os validate`. Filed by the `domain:spec` seat 1 (`session_01UtnxvdiN376GF3sgXwAw4d`, seat post #6017) from the #21216 dev report (`5942505415`, `out_of_scope_findings` 2). The at-tier review of PR #21258 (`5942733858`, ③) confirmed it at the code and asked for its own carrier, since PR #21258 closes #21216. ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## Reach (measured by the #21216 dev, CLI built at PR #21258's head `dd39cf54`)\n\n- A probe stack declares an action `plain_probe` with no `resultDialog`. Its bundle carries `objects.probe_env._actions.plain_probe.resultDialog.title`.\n- `os validate --json` gives no finding for that key.\n- `translateAction` from `@objectstack/spec/system` returns no `resultDialog` for the action, so the copy is never read.\n- The review read the same at the code. `resolveActionResultDialog` (`packages/spec/src/system/i18n-resolver.ts`) returns the declared spec untouched when the action declares no `resultDialog`. That holds for `title`, `description` and `acknowledge` alike.\n\n## Why PR #21258 leaves it\n\nPR #21258 judges every KEYED child of an action's translation entry against the declaration: `outcomeMessages.OUTCOME`, `resultDialog.fields.PATH` and `params.NAME.options.VALUE`. Its coverage pin classifies `resultDialog` as a container, so the leaf copy under an undeclared dialog is outside that walk. The review judged leaving it out acceptable for that PR, as long as the position gets its own carrier. This card is that carrier.\n\n## Direction (for triage, not a ruling)\n\n- Extend the same action-entry walk in `packages/lint/src/validate-translation-references.ts`. A `resultDialog.*` leaf under an action that declares no `resultDialog` is `translation-target-unknown`, at the level the walk uses for an undeclared target. ⛔ No second vocabulary.\n- Pins: the undeclared-dialog leaf is refused; the same leaf under a declared dialog passes (the control); both `_actions.ACTION` and `globalActions.ACTION` are covered.\n- **Docs, read for the same family:** the rule table of `content/docs/protocol/kernel/i18n-standard.mdx` (`:1048`-`:1050` on `origin/main`) lists only `_actions.{action}`, `.params.{param}` and `globalActions.{action}`. So it omits the key shapes PR #21258 begins judging (`outcomeMessages`, `resultDialog.fields`, `params.NAME.options`). `skills/objectstack-i18n/SKILL.md` (Tier H) enumerates them likewise. The review called both incomplete, not false. The taker updates the docs page with this card; the skill text goes to a separate Tier H PR. `:1050` also restates the `globalActions` rule that #21261 questions, so whichever way #21261 resolves, that row follows it.\n\n## Dedupe\n\nThe 159 open objectstack issues and the 300 most recently updated closed ones were listed over REST and grepped locally for `resultDialog.title|description|acknowledge`, `resultDialog`, `i18n-standard` and `objectstack-i18n`. The hits were #21216 and PR #21258 (the source), PR #21214 (which added `outcomeMessages`) and #10663 (a QA run record, unrelated). None covers this position. As a control, `globalActions` answers 3 hits in the same corpus, so the scan was live.\n\nDedupe words: resultDialog translation undeclared dialog · resultDialog.title never read · action translation leaf undeclared node"
+}

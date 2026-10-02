@@ -1,0 +1,37 @@
+{
+  "number": 21275,
+  "kind": "pull_request",
+  "title": "docs(spec): the DashboardWidgetOptionsSchema doc comment says a misspelled options key compiles and parses, and a wrong value is the type error",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ui",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T00:24:57Z",
+  "updated_at": "2026-10-02T01:16:01Z",
+  "closed_at": "2026-10-02T01:15:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-02T01:15:59Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21275",
+  "body": "Fixes #21210\nClause-②: no\n\n## What changed\n\n`packages/spec/src/ui/dashboard.zod.ts`: the `DashboardWidgetOptionsSchema` doc comment said that a misspelled widget `options` key (`sortDirection`, `granularity`) \"is now an author-time type error\". That is false. The bag ends in `.passthrough()`, so such a key compiles and parses. The paragraph now says three things:\n\n- A wrong VALUE for a declared key (`sortOrder: 'sideways'`) is the author-time type error and the parse error.\n- A misspelled KEY compiles and parses like any other extra key, and it changes nothing.\n- The `unconsumed-widget-option` warning from `os validate`, `os build` and `os lint` names the misspelled key. It is a warning, so none of the three commands fails on it.\n\n`.changeset/21210-widget-options-docblock.md` is `'@objectstack/spec': patch` with `Clause-②: no`. The comment ships to npm in two places. It is in `src/**/*.zod.ts`. After the build it is also in the published `dist/ui/index.d.ts` and `dist/ui/index.d.mts`, where the new sentence is measured. The schema's shape does not change.\n\n## The measurements behind each clause (HEAD `9c765bf4f5`)\n\n1. **Type error.** `tsc --noEmit` ran against the BUILT spec, with TypeScript 6.0.3, `strict` and `NodeNext`. `--listFiles` shows 33 files under `packages/spec/dist` and 0 under `packages/spec/src`. Each case is written twice: once as a `DashboardWidgetOptions` annotation, and once inside `defineStack({ dashboards })`.\n   - `{ sortBy: 'total_amount', sortDirection: 'desc' }` compiles clean.\n   - `{ granularity: 'month' }` compiles clean.\n   - `{ sortBy: 'total_amount', sortOrder: 'sideways' }` is TS2322 at both sites: `Type '\"sideways\"' is not assignable to type '\"asc\" | \"desc\" | undefined'`.\n   - The control, `{ dateGranularity: 'month', sortBy: 'total_amount', sortOrder: 'desc', limit: 10 }`, compiles clean.\n   - tsc exits 2, and both errors come from the wrong-value file.\n2. **Doors.** A probe project ran through the built CLI. It is a `defineStack` with one object, one dataset and one dashboard. The dashboard has a control widget with only declared keys, a widget with `sortDirection` and a widget with `granularity`.\n   - `os validate` exits 0 with 2 warnings. `--json` reports `rule: unconsumed-widget-option` and `severity: warning` at `dashboards[0].widgets[1].options` and `dashboards[0].widgets[2].options`.\n   - `os build` exits 0 with the same 2 warnings, and names the rule.\n   - `os lint` exits 0 with `Warnings (2)`, and names the rule.\n   - The control widget draws no finding.\n   - Wrong-value control: the same probe with `sortOrder: 'sideways'` makes `os validate` exit 1 with `dashboards.0.widgets.0.options.sortOrder: Invalid value 'sideways'. Expected one of: asc, desc.`\n   - The level and the three commands match the rule's registration in `packages/lint/src/authoring-rules.ts` (`tier: 'advisory'`, `commands: ALL`).\n\n## Census of the same claim\n\n`git grep -i \"author-time type error\"` over `packages/spec/src`, `content/docs` and `skills`:\n\n- `packages/spec/src/ui/dashboard.zod.ts` is corrected in this PR.\n- `content/docs/ui/dashboards.mdx` is already correct on `main`. It says a misspelled key parses and the warning names it.\n- `skills/objectstack-ui/rules/dashboards.md` has the claim at this branch's base `30c530e5c0`. PR #21205 already corrected it on `main` (`f148852752`; `git merge-base --is-ancestor f148852752 origin/main` exits 0). No separate Tier H PR is needed, and this PR does not touch `skills/**`.\n- `content/docs/references/**` has 0 hits. build-docs does not lift a schema-level doc comment into the reference page. It lifts only the module header and the `.describe()` text. `check:docs` is green after the edit with no regenerated diff, so no reference page changes in this PR.\n\n## Verification (HEAD `9c765bf4f5`)\n\n- `pnpm --filter @objectstack/spec build`: exit 0 (lock verdict `command-exit 0`).\n- `pnpm --filter @objectstack/spec check:generated`: all 15 generated artifacts are up to date, read against the dist that build produced.\n- `pnpm --filter @objectstack/spec typecheck`: exit 0.\n- `pnpm --filter @objectstack/spec exec vitest run --project local --maxWorkers=2`: 597 files and 17465 tests passed, 1 todo.\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` (no paths) derives 79 families. All 79 ran and exited 0. The `--ran` reconcile reads 79 derived, 79 run, 0 NOT-MEASURED, 0 UNRUN. `check:dual-build-cjs-loads` first exited 3 (PREREQUISITE NOT MET, because 9 packages had no `dist/`). After those packages were built, it exited 0.\n- eslint was narrowed to the one changed `.ts` file. `--print-config` resolves that file, so it is in the linted population, with 5 rules. `--format json` reports 1 file, 0 errors and 0 warnings. The config enables no type-aware linting (no `parserOptions.project`, no `projectService`), so a comment edit in this file cannot change any other file's result. The repo-wide `pnpm lint` is left to CI.\n\n## Acceptance notes\n\n- `os validate` prints the warning text without the rule code in its human output. `os build` and `os lint` print `unconsumed-widget-option`, and `os validate --json` carries it. The doc comment uses the code as the warning's name, and all three commands carry that code in their machine output. Noted here, not filed.\n- The card says the sentence lifts into the generated reference page. The measurement shows it does not (see the census).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UtnxvdiN376GF3sgXwAw4d)_"
+}

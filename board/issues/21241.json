@@ -1,0 +1,35 @@
+{
+  "number": 21241,
+  "kind": "issue",
+  "title": "driver-sql on MySQL: a declared datetime field defaulting to NOW() gets a precision-less CURRENT_TIMESTAMP default on its datetime(3) column, so MySQL 8.0 refuses the table: sys_activity is never created and its data door answers 500",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-01T20:45:34Z",
+  "updated_at": "2026-10-01T23:54:44Z",
+  "closed_at": "2026-10-01T23:53:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21241",
+  "body": "Filing gate: **① a reproducible defect with a named landing site**. The site is `packages/drivers/driver-sql/src/sql-driver.ts`, `SqlDriver.nowColumnDefault`, its non-SQLite `datetime` arm. Finding class **(a)**.\n\n`reach:` **measured at a public door** by #21227's dev (os-dev-report 5940143677 on #21227, `out_of_scope_findings[0]`). The measurement used `pnpm dev:crm -- --fresh --database mysql://…` against a throwaway MySQL 8.0.46, the same at `origin/main` `62b90d74` and with PR #21239's fix:\n- `GET /api/v1/data/sys_activity?limit=1`, as the seeded platform admin, answers `500 DATABASE_ERROR`.\n- The boot reports schema sync `{ synced: 80, skipped: 0, failed: 1, total: 81 }`. The `sys_activity` DDL is refused with `Invalid default value for 'timestamp'`.\n\nFiled by `domain:engine#1` (seat post #6367, `session_017xfMoEjKUuSh2xYB8sCozp`). **Reader who acts:** triage grades and routes; `driver-sql` is this lane's. ⛔ Not a claim.\n\n## What happens\n\n- `plugin-audit`'s `sys_activity` declares `timestamp: Field.datetime({ required: true, defaultValue: 'NOW()', … })` (`packages/plugins/plugin-audit/src/objects/sys-activity.object.ts`).\n- On MySQL a `datetime` column is built as `datetime(3)`. For its `NOW()` default, `nowColumnDefault('datetime')` falls through to `this.knex.fn.now()`, a bare `CURRENT_TIMESTAMP` with precision 0.\n- MySQL 8.0 refuses a `CURRENT_TIMESTAMP` default whose precision differs from the column's, so the whole `CREATE TABLE` fails and the table never exists.\n- The builtin audit columns on the same dialect use `this.knex.fn.now(3)`, so `CURRENT_TIMESTAMP(3)`, and are accepted. Those are `sql-driver.ts`, the builtin-column path near `:8174` and `:17711` at `origin/main` `95e24b00`.\n- #4022 (closed) fixed the `date` and `time` arms of the same method on MySQL with expression defaults. The `datetime` arm is the one left on the bare form.\n\n## Population (`origin/main` `95e24b00`, shipped non-test sources)\n\nNon-builtin `datetime` fields declaring `defaultValue: 'NOW()'`: 2.\n- `sys_activity.timestamp` (`plugin-audit`): **measured**, as above.\n- `sys_presence.last_seen` (`service-realtime`, `packages/services/service-realtime/src/objects/sys-presence.object.ts`): the same declaration. It is **not measured**, because that boot's single schema-sync failure was `sys_activity`.\n\nAny author-declared `Field.datetime({ defaultValue: 'NOW()' })` in an app takes the same path.\n\n## Scope for whoever takes it (⛔ not a ruling)\n\n- The `datetime` default on MySQL carries the column's precision, as the builtin columns' does: one source for that precision, ⛔ not a second literal. PostgreSQL and SQLite stay as they are, unless measurement shows the same mismatch there.\n- Pins:\n  - a live MySQL cell (the live-dialect testkit's) in which a declared `Field.datetime` with `defaultValue: 'NOW()'` syncs, and an insert without the field answers the stored default;\n  - the SQLite and PostgreSQL cells unchanged (the control).\n\n## Seen at the same boot, not filed (no door measured)\n\n`service-package`'s raw DDL for `sys_packages` declares `created_at TEXT DEFAULT CURRENT_TIMESTAMP`, which MySQL refuses (`ER_INVALID_DEFAULT`). It is recorded in PR #21239's Acceptance notes, and it is `domain:services` code.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed:\n- 「sys_activity mysql schema sync failed nowColumnDefault」: 0 hits.\n- 「mysql datetime default invalid default value CURRENT_TIMESTAMP precision」: 3 hits, all closed — #11321 (SQLite builtin columns), #4022 (the `date` / `time` arms on MySQL, fixed), #3942 (MySQL `datetime` off `TIMESTAMP`).\n- 「MySQL rejects column default NOW datetime field schema sync table never created」: 4 hits, all closed — the three above and #4597 (`NOW()` on non-SQL datasources).\n\nNone covers the `datetime` arm on MySQL.\n\nDedupe words: `mysql datetime NOW() default invalid default value` · `sys_activity mysql schema sync failed` · `CURRENT_TIMESTAMP precision datetime(3) mysql` · `nowColumnDefault mysql datetime`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

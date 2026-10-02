@@ -1,0 +1,34 @@
+{
+  "number": 21285,
+  "kind": "issue",
+  "title": "cli: drop the never-loaded @oclif/plugin-help and @oclif/plugin-plugins from oclif.plugins, and correct every published text that says `os plugins` works",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "dependencies",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T01:41:41Z",
+  "updated_at": "2026-10-02T01:45:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21285",
+  "body": "Filing-gate class: ③ maintainer-directed task.\nBody last written 2026-10-02T01:43Z: the spec TSDoc sentence was split out to the spec-lane card #21286; this card does not touch `packages/spec`.\nRouting: the maintainer direct-dispatch channel (`session_018gA1pE6eJtwHhqx72G8U9X`) routes this card to `domain:cli` and `area:devpath`; triage grades the priority.\nActing reader: the maintainer direct-dispatch session (`Seat: domain:devx#3`), which dispatches one `os-dev`.\nDedup: I listed 558 objectstack issues and PRs over REST (open, plus the most recently updated closed) and grepped titles and bodies for `oclif.plugins`, `os plugins install`, `plugin-plugins` and `plugin-help`. The only hits are today's version bump (#21125 / PR #21212) and the Dependabot PRs it replaced (#21031, #21035). None removes the entries.\n\n## Maintainer ruling (verbatim)\n\n> 同意：`oclif.plugins`: 里面那两个插件只装在 devDependencies,所以从来没加载过,`os help` 和 `os plugins` 都不是可用命令。我建议删掉这两条配置。\n\nGiven in session `session_018gA1pE6eJtwHhqx72G8U9X` on 2026-10-02, in reply to the seat's recommendation after #21212 landed.\n\n## Measured (at `origin/main` `c7396f1a9`)\n\n- `packages/cli/package.json` → `oclif.plugins` lists `@oclif/plugin-help` and `@oclif/plugin-plugins`. Both packages appear only in `devDependencies` (`^7.0.2`, `^7.0.3`).\n- oclif's core-plugin loader matches `oclif.plugins` names only against `dependencies`, so neither plugin ever loads:\n  - `bin/run.js:84-94` records the measurement: `os --help` lists 34 topics, and none of them is `plugins`.\n  - #21212's dev re-measured on `@oclif/core` 5.1.2: the root help lists no plugins and no help topic.\n- Text that names this configuration or the commands it was meant to supply:\n  - `content/docs/plugins/index.mdx:400-408`;\n  - `packages/cli/README.md` `### os plugins (oclif)` (about line 206) and `## oclif Plugin System` (about lines 216-277);\n  - `packages/cli/bin/run.js:84-94`;\n  - `packages/cli/src/commands/doctor.ts:2377-2380` and `doctor-deprecation-hint-commands.test.ts:15`;\n  - `packages/cli/test/plugin-commands.test.ts:22-23`;\n  - `docs/qa/platform-checklist/areas/cli.json:658`;\n  - `packages/spec/src/kernel/cli-extension.zod.ts:17-18`, plus its generated page `content/docs/references/kernel/cli-extension.mdx:21` (carried by #21286, not this card).\n\n## What to do\n\n1. **Remove the `plugins` array** from `oclif` in `packages/cli/package.json`. Change no other `oclif` key.\n2. **The two devDependencies exist only to back that array.**\n   - Measure every remaining consumer: imports, `require`, scripts, fixtures. A name inside a comment is not a consumer.\n   - If none remains, remove both from `devDependencies` and regenerate `pnpm-lock.yaml` with the repo's tooling. ⛔ Never hand-edit it.\n   - Lockfile acceptance: only those two subtrees leave, and no resolved version goes DOWN against the merge base.\n   - If a real consumer exists, keep them and report it.\n   - (This is the seat's reading of the ruling: it removes the dead surface whole, and stops Dependabot proposing majors for packages nothing loads, as #21031 and #21035 did on 2026-10-01.)\n3. **Behaviour acceptance: nothing an operator sees changes**, because the plugins never loaded.\n   - Show `os --help` and the full command list byte-identical before and after.\n   - Take a positive control first: show that the reading would catch a real difference.\n4. **Fix the published text this change makes false or touches.** Each site gets a conclusion in the PR body: changed; already true (with evidence); or out of scope (with the reason). No site is skipped silently.\n   - `content/docs/plugins/index.mdx` callout. Its stated reason (\"lists `@oclif/plugin-plugins` under `oclif.plugins`, but the package sits in `devDependencies`\") becomes false. Restate the fact as it will be: `@objectstack/cli` ships no plugin manager, `os plugins …` and `os help` are not commands, and `os --help` is the help entry. Keep the build-your-own-distribution route only if it is still true.\n   - `packages/cli/README.md`: `### os plugins (oclif)` and `## oclif Plugin System` describe `os plugins install/uninstall/update` as available, which is false. Correct them.\n   - `packages/cli/bin/run.js:84-94`: its reasoning names the `devDependencies` placement. Restate it to the new fact.\n   - `doctor.ts:2377-2380` and `doctor-deprecation-hint-commands.test.ts:15` say \"neither bundled plugin … supplies one\". After this change there is no bundled plugin. Restate.\n   - `test/plugin-commands.test.ts:22-23` asserts both entries are present. Rewrite it to pin the new truth (no `oclif.plugins`, no plugin manager). ⛔ Do not just delete the guard.\n   - `docs/qa/platform-checklist/areas/cli.json:658`: the evidence text names the array's contents.\n   - ⛔ Not this card: `packages/spec/src/kernel/cli-extension.zod.ts:17-18` and its generated page `content/docs/references/kernel/cli-extension.mdx:21` (\"or users install it via `os plugins install <pkg>`\"). That sentence sits on the spec contract surface, which is spec-lane work. It is carried by #21286. Leave both files untouched.\n5. **Changeset:** a `patch` for `@objectstack/cli` (its published manifest's `oclif` field and its README). Not `skip-changeset`.\n\n## Out of scope (a separate maintainer question)\n\nWith no plugin manager and no listed plugins, the CLI-extension protocol in `cli-extension.zod.ts` (`OclifPluginConfig`) describes a capability no `os` user can reach today, short of building their own `os` distribution. Whether to deliver it (a plugin manager as a real dependency) or retire the protocol (ADR-0049 enforce-or-remove) goes to the maintainer separately. ⛔ This card corrects false sentences only. It changes no schema or export.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n"
+}

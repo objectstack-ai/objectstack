@@ -2,8 +2,8 @@
   "number": 21180,
   "kind": "issue",
   "title": "spec(forms): retire `publicPicker` — anonymous public forms stop taking lookup / master_detail / user fields, and the anonymous picker route goes (ruling E on #21079)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:access",
     "domain:spec",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T14:01:23Z",
-  "updated_at": "2026-10-01T18:26:58Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-01T21:49:03Z",
+  "closed_at": "2026-10-01T21:47:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21180",
   "body": "Filed by the director seat, summon #32, `session_016tKoy8NJa35Yih1FdzrVmn`, as the second half of the maintainer's ruling **E** on #21079. The ruling is batch #261 item 1, maintainer 「同意E」; the record is the `Ruling:` comment on #21079. ⛔ Not a claim.\n\n## What was ruled\n\nAnonymous public forms no longer take lookup, `master_detail` or `user` fields, so the anonymous record-search picker goes.\n- This **reverses the #7467 ruling** (option 1, \"declare `publicPicker`\"). The maintainer reversed it in the #21079 decision thread.\n- The other half of E is #21079's deny baseline, landed alone (route D). After it lands, the picker door answers 403 on every deployment without a set literally named `guest_portal`. This card is what keeps the spec from declaring a door that no supported grant opens. So it is graded p1 alongside #21079, not after it.\n\n## Readings that decided it (taken before the ruling, at the refs named)\n\n- **Zero producers, across all four repos.** `git grep -n publicPicker origin/main`, excluding `packages/spec`, tests and changelogs:\n  - objectstack `fbcc05f400`: docs, the lint reader `validate-preset-comparands.ts`, the REST route and its ledger row only. No example declares one.\n  - hotcrm `fb408a7304`: 0. cloud: 0.\n- **No first-party UI caller.** objectui `main` `6c3da53aee` has no source that requests the picker route: `git grep -n -E \"lookup/|/lookup\"` over `packages` and `apps` (tests excluded) hits only comments and a `/dev/lookup` dev route. Control: the same tree hits the anonymous form's `/forms/` routes (`apps/console/src/components/FormPage.tsx:5`).\n- **Pin safety.** objectui at objectstack's pinned `.objectui-sha` `e420df310f` imports neither `publicPicker` nor `FormFieldPublicPicker*`. Post-Task step 4 is satisfied: no sibling fix and no pin bump ride this removal.\n\n## Scope\n\nFollow the `spec-property-retirement` skill (`.claude/skills/`). The ADR-0087 D2 route, immediate retirement, with no staged window.\n1. **Spec.** In `packages/spec/src/ui/view.zod.ts`, `FormFieldBaseSchema.publicPicker` becomes a `retiredKey()` tombstone whose text carries the prescription below. `FormFieldPublicPickerSchema` and its two exported types are removed. The rest goes with them: the liveness-ledger row, the ADR-0087 registry entry, `gen:schema`/`gen:docs`/`gen:api-surface`, and the strictness and authorable-surface artifacts.\n2. **REST.**\n   - Delete the `GET /forms/:slug/lookup/:field` handler in `packages/rest/src/rest-server.ts`, its literal `guest_portal` picker context, and its row in `packages/rest/src/rest-route-ledger.ts`.\n   - The public-form resolve route keeps stripping lookup / `master_detail` / `user` fields from the anonymous rendering, now unconditionally. ⛔ No new gate (the maintainer's no-new-gates default).\n   - `LOOKUP_NOT_PUBLIC` leaves `packages/spec/src/api/error-code-ledger.zod.ts` by that ledger's own retirement rule (ADR-0112).\n3. **Lint and tests.** Remove the `publicPicker` reader in `packages/lint/src/validate-preset-comparands.ts` and its cases. Delete or re-pin the picker tests: `packages/rest/src/public-form-lookup-*.test.ts` and `public-form-routes*.test.ts`, the picker cases of `rest-server-query-number-census.test.ts`, `packages/spec/src/ui/view-public-picker.test.ts`, and `packages/qa/dogfood/test/public-picker-queryable-key.dogfood.test.ts`. Also the picker door case in `packages/qa/dogfood/test/zero-set-masking.dogfood.test.ts`; see Serial.\n4. **Docs.** Remove the picker section of `content/docs/ui/forms.mdx` (its two tables included). The references regenerate.\n5. **ADR-0061** (`docs/adr/0061-record-search-architecture.md:54` says anonymous search \"keeps the existing `publicPicker` model\"). Add a dated note under that entry naming the retirement and this ruling. ⛔ The original text is not rewritten. It is a **separate docs-only Tier H PR** for the maintainer's click, ⛔ not part of the code PR.\n6. **Changeset.** BREAKING, `Clause-②: yes (narrowing)`, with the ADR-0087 disposition marker. FROM → TO: *delete the `publicPicker` block; an anonymous public form no longer offers record search. Use a `select` field with static `options`, or put the form behind sign-in.*\n\n## Lane and parameters (ruled with E)\n\n- `domain:spec`, level M, `mode:subagent`. The contract review runs at `CONTRACT_REVIEW_TIER`.\n- **Serial:** #21079's build re-pins `zero-set-masking.dogfood.test.ts` too. Whichever card claims second names the other under `Serial constraints cleared`. Either order is fine.\n- **Supersedes #21137** (open, `pm:queue`): its two defects are both on the retired key. It is closed `not_planned` in the act that files this card.\n- Not in scope: the guest-anchor grant channel (ADR-0090 D9). That is #21158, on hold until a first-party anonymous data door exists.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed: 「retire publicPicker anonymous public form lookup picker」 → 4 hits. #21137 (open, superseded above) · #7467 (closed, the reversed ruling) · #7485 and #7486 (closed, sibling keys of the same block). None retires the key.\n\nDedupe words: `publicPicker retirement` · `anonymous form lookup field` · `public lookup picker route` · `LOOKUP_NOT_PUBLIC`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
