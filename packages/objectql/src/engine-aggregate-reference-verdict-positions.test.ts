@@ -84,15 +84,18 @@ const POSTURE: Record<CrossFieldComparisonVerdict['verdict'], 'answered' | 'refu
   unjudged: 'not judged',
 };
 
+/** A single-choice type is a legal declaration only with its options (`FieldSchema`). */
+const OPTIONS = [{ label: 'Open', value: 'open' }];
+
 /** One declared column per row of the spec's class table, plus the two its rows do not hold. */
-function representativeFields(): Record<string, CrossFieldComparisonFieldMeta> {
-  const fields: Record<string, CrossFieldComparisonFieldMeta> = {};
+function representativeFields(): Record<string, CrossFieldComparisonFieldMeta & { options?: typeof OPTIONS }> {
+  const fields: Record<string, CrossFieldComparisonFieldMeta & { options?: typeof OPTIONS }> = {};
   for (const row of CROSS_FIELD_COMPARISON_TYPE_CLASSES) {
     const type = [...row.types][0];
-    fields[`f_${type}`] = { type };
+    fields[`f_${type}`] = type === 'select' || type === 'radio' ? { type, options: OPTIONS } : { type };
   }
   // A multi-capable type flagged `multiple: true` — the spec reads it as `list-or-object`.
-  fields.f_select_multi = { type: 'select', multiple: true };
+  fields.f_select_multi = { type: 'select', multiple: true, options: OPTIONS };
   // A type outside `FieldType` — the spec does not judge it (`unjudged`).
   fields.f_outside = { type: 'string' };
   return fields;
