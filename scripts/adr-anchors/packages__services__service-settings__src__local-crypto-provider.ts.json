@@ -1,0 +1,7 @@
+{
+  "file": "packages/services/service-settings/src/local-crypto-provider.ts",
+  "adrs": [
+    "ADR-0128"
+  ],
+  "invariant": "Every seal is AAD derivation version 2: a 0xFF lead byte, a versioned label, then scope, namespace and key each length-prefixed, marked `v2:` on the ciphertext. A ciphertext with no marker is version 1 (the bare base64 every earlier release sealed), opened read-only with the old namespace-and-key derivation; any other marker is refused, fail closed. `decrypt` dispatches on the recorded marker and never tries a second derivation; a context without a member of the closed scope set is refused, never defaulted (ADR-0128 D1-D3)."
+}

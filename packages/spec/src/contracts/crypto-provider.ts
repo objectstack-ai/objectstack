@@ -143,12 +143,14 @@ export type CryptoContextScope = (typeof CRYPTO_CONTEXT_SCOPES)[number];
  *     or a canonical structured encoding. ⛔ Never an unescaped join:
  *     neither a settings specifier key nor a caller-supplied datasource
  *     namespace is barred from containing any separator.
- *  3. **Record its derivation in what it seals** (D3). A provider whose AAD
- *     derivation changes records, in the ciphertext it returns, which
- *     derivation sealed it. `decrypt` and `rotateKey` open a ciphertext with
- *     the derivation it records, and refuse — fail closed — one whose
- *     derivation they do not know. ⛔ Never try a second derivation, or a
- *     second scope, after one fails: the record decides, nothing is guessed.
+ *  3. **Record its derivation in what it seals** (§4's versioned handle). A
+ *     provider whose AAD derivation changes records, in the ciphertext it
+ *     returns, which derivation sealed it. `decrypt` and `rotateKey` open a
+ *     ciphertext with the derivation it records, and refuse — fail closed —
+ *     one whose derivation they do not know. ⛔ Never try a second
+ *     derivation, or a second scope, after one fails (D3: the fix lives at
+ *     the producer of the AAD, never in a fallback): the record decides,
+ *     nothing is guessed.
  *
  * ⚠️ **What it does not cover yet.** A ciphertext sealed before its
  * provider adopted the scope (for `LocalCryptoProvider`: every handle whose
