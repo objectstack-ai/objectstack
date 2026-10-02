@@ -2,7 +2,7 @@
 "@objectstack/spec": patch
 ---
 
-Liveness ledger: `agent.guardrails` (`maxTokensPerInvocation`, `maxExecutionTimeSec`, `blockedTopics`) is now `live`, not `experimental`. The cloud AI runtime enforces it on every user turn. The token and time limits are checked before each model round, a call to a blocked tool name or category is refused, and each refusal is audited.
+Liveness ledger: `agent.guardrails` (`maxTokensPerInvocation`, `maxExecutionTimeSec`, `blockedTopics`) is now `live`, not `experimental`. The cloud AI runtime enforces it on every user turn. The token and time limits are checked before each model round, with each limit refusal audited, and a blocked tool name or category is removed from the offer and refused at call time.
 
 Clause-②: no
 
