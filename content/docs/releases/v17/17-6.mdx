@@ -738,7 +738,8 @@ value from `ctx.input.data` reads `ctx.submitted`.
   remove it.
 - Rename flows whose name starts with `_`.
 - Give every `api` flow's start node a non-blank `config.secret`, or declare a
-  flow that is only started explicitly `type: 'autolaunched'`.
+  flow that is only started explicitly `type: 'autolaunched'` with no
+  `triggerType: 'api'` on its start node.
 - Code that builds an `AutomationEngine` without `AutomationServicePlugin`
   must attach a reader with `setPackagedFlowSource(reader)`; code that calls
   `resolveFlowPrecedence` or `describeFlowContender` itself passes
@@ -789,17 +790,19 @@ from stored connector rows on load.
   organization's row (or an organization-less one) answers `409
   UNIQUE_VIOLATION` and writes nothing, and an upsert never changes a row's
   organization.
-- **Remote Turso and the memory driver refuse JSON-incompatible operators on
-  JSON-stored fields** and answer `$contains` / `$notContains` by membership
-  (`862f12c`, #21208; `45ce12a`, #21159), as the SQL drivers already did.
-  Over a `multiple: true` lookup, remote Turso's `$nin` / `$ne` matched every
-  row and `$contains: 'u1'` matched a row holding only `u10`; the memory driver
-  answered `$eq` per element, so tests on it passed filters every SQL backend
-  refuses.
+- **Remote Turso refuses JSON-incompatible operators on JSON-stored fields**
+  and answers `$contains` / `$notContains` by membership (`862f12c`, #21208),
+  as the SQL drivers already did; over a `multiple: true` lookup its `$nin` /
+  `$ne` matched every row and `$contains: 'u1'` matched a row holding only
+  `u10`. **The memory driver refuses the equality and ordering family there**
+  — `$eq`, `$ne`, orderings, `$between`, `$in`, `$nin` and implicit equality —
+  where it used to answer `$eq` per element, so tests on it passed filters
+  every SQL backend refuses (`45ce12a`, #21159).
 - **MongoDB's `$contains` / `$notContains` test membership on JSON-stored
   fields**, and so does `matchesFilterCondition` — and with it the RLS write
   `check` (`e18fea6`, #21196). A `check` such as `record.tags.contains('x')`
-  now admits a post-image `['x']` and refuses the scalar `tags: 'x'`.
+  now admits a post-image `['x']`, and a lone scalar `tags: 'x'` is judged as
+  the `['x']` it is stored as (`d2bc644`, #21253).
 - **A Turso config that forces `mode: 'local'` beside a non-empty `syncUrl`
   is refused** at authoring and when the driver is built (`05cb2bc`, #20669).
   It used to run as a synced replica under a `local` label. A stored datasource
@@ -808,8 +811,12 @@ from stored connector rows on load.
   `OS_ALLOW_DRIVER_CONNECT_FAILURE` is set.
 - **Drivers no longer keep their own whole-day bound or `$not` rewrite**
   (`ceee88f`, #20988; `53ed3d1`, #21105; `8460592`, #20925). Reads through the
-  engine and the RLS seam are unchanged — the shared `lowerFilterCondition`
-  already lowers them — but a direct `SqlDriver`, `SqliteWasmDriver`,
+  engine and the RLS seam keep their whole-day answer on declared `datetime`
+  columns, because the shared `lowerFilterCondition` lowers them first. On
+  MongoDB and the memory driver, a bare-day bound on a column that is not
+  declared `datetime` is now compared as written, as on SQL; an unregistered
+  object, and an RLS policy compiled with no field guard, are lowered
+  type-blind. A direct `SqlDriver`, `SqliteWasmDriver`,
   `TursoDriver`, `MongoDBDriver` or `InMemoryDriver` call now compares a
   bare-day `$lte` against midnight and treats `$between` as inclusive. The
   `protected` methods `calendarDayExclusiveUpperBound`,
@@ -821,8 +828,9 @@ from stored connector rows on load.
   with no organization, call without `tenantId`. To move a row between
   organizations, use `update()`, not an upsert payload's tenant value.
 - Rewrite filters on JSON-stored fields as `$contains` for one member, an `$or`
-  of `$contains` for any-of and `$not` for exclusion. Send multi-valued fields
-  as lists (`tags: ['x']`) when an RLS `check` uses `contains`.
+  of `$contains` for any-of and `$not` for exclusion. A policy such as
+  `!record.tags.contains('x')` now refuses a write of `tags: 'x'`, which it used
+  to admit.
 - For an embedded Turso replica, drop `mode` (keep `url` and `syncUrl`); for a
   plain local database, drop `syncUrl`. Fix stored datasource rows in this
   shape too.
@@ -888,7 +896,9 @@ from stored connector rows on load.
 
 Block `properties` are an open bag, so the page-block checks above surface as
 `component-props-*` findings on `os validate`, `os build` and `os lint` and as
-TypeScript errors; stored pages keep saving and loading.
+TypeScript errors; stored pages keep saving and loading. The exception is
+`scale` on an `object-master-detail-form` detail column over a `currency`
+field, which `defineStack` refuses (`STACK_CROSS_REFERENCE_INVALID`, `422`).
 
 **Migration.**
 
@@ -970,8 +980,9 @@ measure and a tile accent to `colorVariant`.
   optional**, beside a new `outcome` (`d6d6e87`, #21214).
 - **`os dev --no-watch` turns watch mode off** (`c90f9fb`, #20839). In
   monorepo mode, a PACKAGE argument that selects no workspace package now exits
-  `1` (it used to run `pnpm --filter false dev` and exit `0`), which needs pnpm
-  8.13.1 or later.
+  `1`, where it used to exit `0` with nothing started (`os dev --watch=false`,
+  for example, ran `pnpm --filter false dev`); this needs pnpm 8.13.1 or later.
+  `os dev --no-watch` in monorepo mode exits `1` and names the flag.
 - **`@objectstack/cli` depends on `@oclif/core` 5** (`e2ed61a`, #21212).
   Only code that extends its exported Command classes is affected; command
   output and exit codes are unchanged.
@@ -1144,9 +1155,9 @@ the deployment sentence (`748b240`, #21270).
 - A stored page whose `requires` names a plugin the console does not load is
   reported at boot as `[page_requires_plugin_absent]` (`250dec8`, #21121).
 - An organization's published edit to a packaged dashboard or view is served
-  as written in every locale, instead of the packaged translation of the
-  string it replaced (`7afdc5c`, #20832; `1940afd`, #20728; `9ad6544`,
-  #20770).
+  by the `/meta` reads as written in every locale, instead of the packaged
+  translation of the string it replaced (`7afdc5c`, #20832; `1940afd`, #20728;
+  `9ad6544`, #20770). The console may still draw the packaged translation.
 
 **Identity.** Discovery reports `authFamilies.admin`, saying whether the
 better-auth admin routes are mounted (`70dae53`, #21145). `AuthPlugin` accepts
