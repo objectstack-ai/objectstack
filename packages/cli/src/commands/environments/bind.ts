@@ -5,7 +5,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { printError, printStep, printKV, emitJson, isExitSignal, errorCodeFields } from '../../utils/format.js';
-import { createApiClient, requireAuth } from '../../utils/api-client.js';
+import { createControlPlaneApiClient, requireControlPlaneAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 
 /**
@@ -99,8 +99,8 @@ export default class EnvironmentsBind extends Command {
         this.exit(1);
       }
 
-      const { client, token } = await createApiClient({ url: flags.url, token: flags.token });
-      requireAuth(token);
+      const { client, token } = await createControlPlaneApiClient({ url: flags.url, token: flags.token });
+      requireControlPlaneAuth(token);
 
       // Fetch existing metadata so we don't blow it away.
       const current = await client.environments.get(args.environmentId);

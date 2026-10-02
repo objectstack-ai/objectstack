@@ -2,7 +2,7 @@
 
 import { Command, Flags } from '@oclif/core';
 import { printError, emitJson, errorCodeFields } from '../../utils/format.js';
-import { createApiClient, requireAuth } from '../../utils/api-client.js';
+import { createControlPlaneApiClient, requireControlPlaneAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 
 /**
@@ -38,12 +38,12 @@ export default class EnvironmentsList extends Command {
     const { flags } = await this.parse(EnvironmentsList);
 
     try {
-      const { client, token, environmentId: activeId } = await createApiClient({
+      const { client, token, environmentId: activeId } = await createControlPlaneApiClient({
         url: flags.url,
         token: flags.token,
       });
 
-      requireAuth(token);
+      requireControlPlaneAuth(token);
 
       const res = await client.environments.list({
         organization_id: flags.org,

@@ -2,18 +2,21 @@
 
 import { Args, Command, Flags } from '@oclif/core';
 import { printError } from '../../utils/format.js';
-import { createApiClient, requireAuth } from '../../utils/api-client.js';
+import { createControlPlaneApiClient, requireControlPlaneAuth } from '../../utils/api-client.js';
 import { readAuthConfig, writeAuthConfig } from '../../utils/auth-config.js';
 import { recordCloudActiveEnvironmentId } from '../../utils/active-environment.js';
 
 /**
  * `os environments switch <id>` — set the active environment for this CLI session.
  *
- * Calls `POST /api/v1/cloud/environments/:id/activate` to update the
- * server-side session, then persists `activeEnvironmentId` into
+ * Authenticates through `createControlPlaneApiClient` — `credentials.json`'s
+ * session where it targets the server, else `cloud.json`'s (the order is
+ * written once, there). Calls `POST /api/v1/cloud/environments/:id/activate`
+ * to update the server-side session, then persists `activeEnvironmentId` into
  * `~/.objectstack/credentials.json` so subsequent CLI commands (and any
  * client they create via `createApiClient`) automatically target this
- * environment.
+ * environment — unless the switch ran on `cloud.json`'s session, whose server
+ * is not the one `credentials.json` names.
  *
  * When the control plane it just talked to IS the one `~/.objectstack/cloud.json`
  * records, the same id is written there as well, so `os package publish --install`
@@ -48,8 +51,8 @@ export default class EnvironmentsSwitch extends Command {
     const { args, flags } = await this.parse(EnvironmentsSwitch);
 
     try {
-      const { client, token, baseUrl } = await createApiClient({ url: flags.url, token: flags.token });
-      requireAuth(token);
+      const { client, token, baseUrl, session } = await createControlPlaneApiClient({ url: flags.url, token: flags.token });
+      requireControlPlaneAuth(token);
 
       // Sanity-check the id resolves — fail fast before writing the cred file
       const lookup = await client.environments.get(args.id);
@@ -68,10 +71,12 @@ export default class EnvironmentsSwitch extends Command {
       // `credentials.json` at all).
       const recordedForCloud = await recordCloudActiveEnvironmentId(environment.id, baseUrl);
 
-      // Runtime store: unchanged behaviour. This is the copy `createApiClient`
-      // reads, so the `data` / `meta` / `environments` families keep targeting
-      // the environment you just switched to.
-      const cfg = await readAuthConfig().catch(() => null);
+      // Runtime store: the copy `createApiClient` reads, so the `data` / `meta`
+      // families keep targeting the environment you just switched to. Skipped
+      // when this switch ran on `cloud.json`'s session: the server it talked to
+      // is cloud.json's, and the environment would not resolve on the server
+      // `credentials.json` names.
+      const cfg = session === 'cloud' ? null : await readAuthConfig().catch(() => null);
       if (cfg) {
         cfg.activeEnvironmentId = environment.id;
         cfg.lastUsedAt = new Date().toISOString();

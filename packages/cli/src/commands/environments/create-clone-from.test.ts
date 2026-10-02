@@ -52,7 +52,7 @@ vi.mock('../../utils/api-client.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../utils/api-client.js')>();
   return {
     ...actual,
-    createApiClient: async () => ({ client: stub.client, token: stub.token, baseUrl: 'https://door.test' }),
+    createControlPlaneApiClient: async () => ({ client: stub.client, token: stub.token, baseUrl: 'https://door.test' }),
   };
 });
 

@@ -12,7 +12,7 @@
  * | Backend | Where |
  * |---|---|
  * | SQL compiler | `driver-sql` `applyFilterCondition` |
- * | In-memory matcher | `driver-memory` `memory-matcher` |
+ * | In-memory query path | `driver-memory` `normalizeFilterCondition`, then mingo (the reference matcher `memory-matcher` held this row until commit `8fec76a2b` retired it) |
  * | Record-at-a-time evaluator | `formula` `matchesFilterCondition` (RLS write-side `check`) |
  * | Read-scope SQL lowering | `service-analytics` `read-scope-sql` |
  * | MongoDB query translator | `driver-mongodb` `translateFilter` |

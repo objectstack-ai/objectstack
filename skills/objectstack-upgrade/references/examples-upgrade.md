@@ -86,8 +86,7 @@ _N sites, M conversions. Ported into sources from `os migrate meta --out`._
 ## The v17-canonical shapes, compiled
 
 What the protocol-16 shapes in this skill's examples look like after the
-upgrade. This block is type-checked against the published spec, so it cannot rot
-into teaching a shape that no longer compiles:
+upgrade. This block is type-checked against the published spec:
 
 <!-- os:check -->
 ```typescript
@@ -102,7 +101,8 @@ export const Lead = ObjectSchema.create({
   label: 'Lead',
   fields: {
     name: { type: 'text', required: true, storage: { notNull: true } },
-    status: { type: 'select', required: true, storage: { notNull: true } },
+    status: { type: 'select', required: true, storage: { notNull: true },
+      options: [{ label: 'New', value: 'new' }, { label: 'Qualified', value: 'qualified' }] },
     due_date: { type: 'date', requiredWhen: 'record.stage == "closed"' },
     notes: { type: 'textarea' },
   },

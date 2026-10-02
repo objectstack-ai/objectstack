@@ -20,6 +20,13 @@
  * Keeping them in separate files makes it unambiguous which token a
  * command is going to use, and makes it impossible to accidentally
  * publish a package with a runtime-scoped token.
+ *
+ * The control-plane commands (`os environments …`) are the one family that
+ * can run on either session, because a control plane is either the hosted
+ * cloud or a self-hosted server. Which one they use is decided in ONE place,
+ * `createControlPlaneApiClient` in `api-client.ts`: `credentials.json`'s
+ * session where it targets the server, else this file's — and for that
+ * family this file's token goes only to this file's `url`.
  */
 
 import { chmod, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
@@ -43,8 +50,9 @@ export interface CloudConfig {
   /**
    * Active environment id **on this control plane**, recorded by
    * `os environments switch` and read back by `os package publish` as the
-   * `--env` fallback. It sits here, beside this file's own `url`, because an
-   * environment id is only resolvable on the server it was chosen on — see
+   * `--env` fallback, and by `os environments` when it runs on this session.
+   * It sits here, beside this file's own `url`, because an environment id is
+   * only resolvable on the server it was chosen on — see
    * `active-environment.ts`, which owns that gate.
    */
   activeEnvironmentId?: string;

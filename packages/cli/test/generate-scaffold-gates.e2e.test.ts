@@ -36,17 +36,25 @@
  * A CONTROL leg runs the three commands on the bare starter: zero findings,
  * which is what makes a finding in any other leg one that `os g` caused.
  *
- * ## The one exemption, and why it is a ledger and not a filter
+ * ## The starter ledger — EMPTY since #21370, and shrink-only
  *
- * The bare starter is clean, but not because it has nothing to report: its
- * own `note` object declares a `body` field that nothing reads, and
- * `field-no-consumers` stays silent only while the stack has no consumer root
- * at all (a stack of objects is judged to be another stack's object library).
- * The first view, flow, action, app, dashboard or skill in the project — any
- * of them, generated or hand-written — wakes that finding on the STARTER's
- * object. It is the starter template's to fix (`os g` cannot give someone
- * else's field a consumer), so it is recorded below, ⛔ never filtered by rule
- * or by path pattern. The ledger is SHRINK-ONLY and holds itself honest:
+ * A bare starter can be clean without being clean: `field-no-consumers` stays
+ * silent while the stack has no consumer root at all (a stack of objects is
+ * judged to be another stack's object library), so a starter field nothing
+ * reads stays latent until the first view, flow, action, app, dashboard or
+ * skill in the project, generated or hand-written, wakes it on the STARTER's
+ * object. `os g` cannot give someone else's field a consumer, so such a
+ * finding is the starter template's to fix, and this file recorded the one it
+ * met in a ledger below, ⛔ never in a filter by rule or by path pattern. That
+ * entry was the starter note's `body`. #21370 placed every starter field in a
+ * keyed field group (`fieldGroups` + `group`), which the rule credits as
+ * displayed, and deleted it; `starter-field-consumers.test.ts` and its `.e2e`
+ * sibling hold every starter to that.
+ *
+ * The ledger is SHRINK-ONLY, so EMPTY is where it stays: a starter finding a
+ * leg meets is a template to fix, ⛔ never a line to add. Its floor is pinned
+ * below. The two checks that held each entry honest stay with it, in case a
+ * maintainer ever lifts that floor:
  *
  *   - an entry must name a finding on an object the bare starter declares,
  *     so it can never cover what a scaffold wrote;
@@ -90,14 +98,10 @@ const PREREQUISITE_STEM: Record<string, string> = { object: 'gate_target', flow:
 /**
  * Findings the bare starter carries latently, by `rule@path`. SHRINK-ONLY —
  * see the header: each must sit on an object the starter declares, and each
- * must still fire somewhere, or this file is red.
+ * must still fire somewhere, or this file is red. EMPTY since #21370; keep it
+ * that way.
  */
-const STARTER_LATENT_FINDINGS: Record<string, string> = {
-  'field-no-consumers@objects[0].fields.body':
-    "The starter's own `note` object declares `body` and nothing in the starter reads it. "
-    + 'Silent while the stack has no consumer root; the first view, flow, action, app, '
-    + 'dashboard or skill wakes it. The starter template owns the fix.',
-};
+const STARTER_LATENT_FINDINGS: Record<string, string> = {};
 
 const GATES = ['validate', 'build', 'lint'] as const;
 type Gate = (typeof GATES)[number];
@@ -248,6 +252,13 @@ describe('[#21325] every generator: fresh starter + `os g <kind>` → zero findi
 });
 
 describe('[#21325] the starter ledger cannot outlive its defect or cover a scaffold', () => {
+  it('[#21370] is at its floor: EMPTY — a starter finding is a template to fix, never a line to add', () => {
+    expect(
+      Object.keys(STARTER_LATENT_FINDINGS),
+      'STARTER_LATENT_FINDINGS is shrink-only and was emptied by #21370: fix the starter template instead',
+    ).toEqual([]);
+  });
+
   const fired = (key: string) =>
     Object.entries(legs).flatMap(([leg, l]) =>
       GATES.filter((gate) => l.gates[gate].findings?.includes(key)).map((gate) => ({ leg, gate })));

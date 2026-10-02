@@ -1684,7 +1684,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * OR ABSORBER, so a `null` branch makes the whole disjunction unconstrained
    * instead of collapsing it to its surviving branches (#5325). FALSE is handed
    * to the engine as `{$not: {}}`, the spelling `driver-sql`, `formula` and
-   * `driver-memory`'s matcher all already pin as the zero-row filter (#5134) —
+   * `driver-memory`'s query path all already pin as the zero-row filter (#5134) —
    * this strategy invents no second one.
    */
   private filterNodeToCondition(
@@ -2052,9 +2052,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       //      filter tree no longer travelled between two consumers of the same
       //      contract sitting in the same directory.
       //   3. On a backend that reads `$regex` as a real regex — driver-memory's
-      //      `memory-matcher.ts` does, deliberately, for plugin-auth's adapter
-      //      — an unescaped comparand changes what the author asked for:
-      //      `a.b` also matched `axb`, and `50% (+)` did not compile at all, so
+      //      `memory-matcher.ts` did, deliberately, for plugin-auth's adapter,
+      //      until #4706 retired `$regex` (commit `8fec76a2b` has since retired
+      //      the matcher too) — an unescaped comparand changes what the author
+      //      asked for: `a.b` also matched `axb`, and `50% (+)` did not compile at all, so
       //      the `catch { return false }` answered zero rows in silence.
       //      `driver-sql` meanwhile compiles `$regex` to a substring LIKE, so
       //      the same widget returned different row sets per driver.
