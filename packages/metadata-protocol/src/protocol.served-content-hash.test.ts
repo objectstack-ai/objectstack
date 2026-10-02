@@ -12,8 +12,9 @@
  * about withheld credential material offline. Every door that takes a version
  * token back (the save door's and the reset door's optimistic lock) compares it
  * in keyed form against the current stored value and hands the STORED value to
- * the repository. With no provider registered nothing is served and an inbound
- * token is refused: fail closed.
+ * the repository. With no provider registered the key is a process-scoped
+ * ephemeral one: tokens are still served, so the optimistic lock never fails
+ * open on an empty token.
  *
  * Pinned per door, as an administrator would read it:
  *  - the served value is neither the stored hash nor a recomputation from the
@@ -22,7 +23,8 @@
  *    the ADR-0112 envelope (`METADATA_CONFLICT` / 409);
  *  - the refusal's text and attributes carry the keyed value or none, and the
  *    decision-audit note it writes carries no hash at all;
- *  - no provider: nothing served, every inbound token refused.
+ *  - no provider: tokens keyed under the process key, never empty; an empty,
+ *    withheld, raw or stale token is refused on every door.
  *
  * The engine is an in-memory double of the stored tables with the repository's
  * own read and write shapes (the `protocol.lifecycle-audit-rows.test.ts` double,
@@ -329,38 +331,101 @@ describe('[#21207] inbound version tokens are compared in keyed form', () => {
     });
 });
 
-describe('[#21207] no crypto provider: nothing served, every inbound token refused (fail closed)', () => {
-    it('receipts and history serve no hash; an unconditional save still writes', async () => {
+describe('[#21207] no crypto provider: tokens keyed under a process-scoped ephemeral key', () => {
+    it('receipts and history serve a keyed token: never empty, never stored, distinct per content, stable', async () => {
         const h = makeEngine({ provider: false });
         const p = new ObjectStackProtocolImplementation(h.engine);
-        const saved: any = await p.saveMetaItem({ ...ref, item: viewBody('v1') } as any);
-        expect(saved.success).toBe(true);
-        expect(saved.version).toBe('');
-        await p.saveMetaItem({ ...ref, item: viewBody('v2') } as any);
+        const v1: any = await p.saveMetaItem({ ...ref, item: viewBody('v1') } as any);
+        const stored1 = activeHash(h);
+        expect(v1.version).toMatch(KEYED);
+        expect(v1.version).not.toBe(stored1);
+        expect(v1.version).not.toBe(hashSpec(viewBody('v1')));
+        // Not this file's test key either: the key is the process's own.
+        expect(v1.version).not.toBe(await keyedDigest(stored1));
 
-        const { events } = await p.historyMetaItem({ type: 'view', name: 'case_grid', organizationId: ORG });
-        expect(events.length).toBeGreaterThanOrEqual(2);
-        for (const ev of events) {
-            expect(ev.hash).toBeNull();
-            expect(ev.parentHash).toBeNull();
-        }
-        expectNoStoredHash(JSON.stringify({ saved, events }), storedHashes(h));
+        const v2: any = await p.saveMetaItem({ ...ref, item: viewBody('v2'), parentVersion: v1.version } as any);
+        expect(v2.version).toMatch(KEYED);
+        expect(v2.version).not.toBe(v1.version);
+
+        const read1 = await p.historyMetaItem({ type: 'view', name: 'case_grid', organizationId: ORG });
+        const read2 = await p.historyMetaItem({ type: 'view', name: 'case_grid', organizationId: ORG });
+        expect(read1.events.length).toBeGreaterThanOrEqual(2);
+        for (const ev of read1.events) expect(ev.hash).toMatch(KEYED);
+        expect(read1.events.map((e) => e.hash)).toContain(v2.version);
+        expect(JSON.stringify(read2)).toBe(JSON.stringify(read1));
+        expectNoStoredHash(JSON.stringify({ v1, v2, read1 }), storedHashes(h));
     });
 
-    it('an inbound token — raw or not — is refused on both doors, and the refusal carries no hash', async () => {
+    it('the served token is accepted on both doors; a stale, raw, empty or withheld token is refused (METADATA_CONFLICT / 409)', async () => {
         const h = makeEngine({ provider: false });
+        const p = new ObjectStackProtocolImplementation(h.engine);
+        const v1: any = await p.saveMetaItem({ ...ref, item: viewBody('v1') } as any);
+        const v2: any = await p.saveMetaItem({ ...ref, item: viewBody('v2'), parentVersion: v1.version } as any);
+        expect(v2.success).toBe(true);
+        const raw = activeHash(h);
+
+        for (const token of [v1.version, raw, '', '(withheld)']) {
+            for (const run of [
+                () => p.saveMetaItem({ ...ref, item: viewBody('lost'), parentVersion: token } as any),
+                () => p.deleteMetaItem({ ...ref, parentVersion: token } as any),
+            ]) {
+                const refused = await rejection(run);
+                expect(refused.code).toBe('METADATA_CONFLICT');
+                expect(refused.status).toBe(409);
+                expectNoStoredHash(refused, storedHashes(h));
+            }
+        }
+        expect(activeHash(h)).toBe(raw);
+
+        const reset: any = await p.deleteMetaItem({ ...ref, parentVersion: v2.version } as any);
+        expect(reset.success).toBe(true);
+    });
+
+    it('one key per process: a second protocol answers the first one\'s token', async () => {
+        const h = makeEngine({ provider: false });
+        const first = new ObjectStackProtocolImplementation(h.engine);
+        const second = new ObjectStackProtocolImplementation(h.engine);
+        const v1: any = await first.saveMetaItem({ ...ref, item: viewBody('v1') } as any);
+        const v2: any = await second.saveMetaItem({ ...ref, item: viewBody('v2'), parentVersion: v1.version } as any);
+        expect(v2.success).toBe(true);
+    });
+
+    it('a provider registered later moves the tokens: the held token is refused once, the next served one is accepted', async () => {
+        const h = makeEngine({ provider: false });
+        const p = new ObjectStackProtocolImplementation(h.engine);
+        const before: any = await p.saveMetaItem({ ...ref, item: viewBody('v1') } as any);
+
+        h.engine.getKeyedDigest = () => keyedDigest;
+        const refused = await rejection(() =>
+            p.saveMetaItem({ ...ref, item: viewBody('v2'), parentVersion: before.version } as any));
+        expect(refused.code).toBe('METADATA_CONFLICT');
+        expect(refused.status).toBe(409);
+
+        const { events } = await p.historyMetaItem({ type: 'view', name: 'case_grid', organizationId: ORG });
+        const current = events.find((e) => e.hash === refused.actualHead);
+        expect(refused.actualHead).toBe(await keyedDigest(activeHash(h)));
+        expect(current).toBeDefined();
+        const after: any = await p.saveMetaItem({ ...ref, item: viewBody('v2'), parentVersion: refused.actualHead } as any);
+        expect(after.success).toBe(true);
+        expect(after.version).toBe(await keyedDigest(activeHash(h)));
+    });
+});
+
+describe('[#21207] a sent token is never read as no pin', () => {
+    it('an empty or withheld token is refused on both doors with a provider registered (METADATA_CONFLICT / 409)', async () => {
+        const h = makeEngine();
         const p = new ObjectStackProtocolImplementation(h.engine);
         await p.saveMetaItem({ ...ref, item: viewBody('v1') } as any);
         const raw = activeHash(h);
-
-        for (const run of [
-            () => p.saveMetaItem({ ...ref, item: viewBody('v2'), parentVersion: raw } as any),
-            () => p.deleteMetaItem({ ...ref, parentVersion: raw } as any),
-        ]) {
-            const refused = await rejection(run);
-            expect(refused.code).toBe('METADATA_CONFLICT');
-            expect(refused.status).toBe(409);
-            expectNoStoredHash(refused, storedHashes(h));
+        for (const token of ['', '(withheld)']) {
+            for (const run of [
+                () => p.saveMetaItem({ ...ref, item: viewBody('lost'), parentVersion: token } as any),
+                () => p.deleteMetaItem({ ...ref, parentVersion: token } as any),
+            ]) {
+                const refused = await rejection(run);
+                expect(refused.code).toBe('METADATA_CONFLICT');
+                expect(refused.status).toBe(409);
+            }
         }
         expect(activeHash(h)).toBe(raw);
     });
@@ -377,11 +442,11 @@ describe('[#21207] a change note that quotes a stored hash', () => {
         for (const note of notes) expect(note).not.toMatch(SHA256);
     });
 
-    it('the history read serves a stored note\'s quoted hash keyed, and withheld with no provider', async () => {
+    it('the history read serves a stored note\'s quoted hash keyed, under the provider\'s key or the process key', async () => {
         for (const provider of [true, false]) {
             const h = makeEngine({ provider });
             const p = new ObjectStackProtocolImplementation(h.engine);
-            await p.saveMetaItem({ ...ref, item: viewBody('v1') } as any);
+            const saved: any = await p.saveMetaItem({ ...ref, item: viewBody('v1') } as any);
             const stored = activeHash(h);
             // A row written before the publish door stated its own message.
             for (const row of h.historyRows) row.change_note = `publish draft (hash ${stored})`;
@@ -389,7 +454,9 @@ describe('[#21207] a change note that quotes a stored hash', () => {
             const { events } = await p.historyMetaItem({ type: 'view', name: 'case_grid', organizationId: ORG });
             expect(events.length).toBeGreaterThan(0);
             for (const ev of events) {
-                expect(ev.message).toBe(provider ? `publish draft (hash ${await keyedDigest(stored)})` : 'publish draft (hash (withheld))');
+                // The quote is served as the very token the receipt served.
+                expect(ev.message).toBe(`publish draft (hash ${saved.version})`);
+                if (provider) expect(saved.version).toBe(await keyedDigest(stored));
             }
             expectNoStoredHash(JSON.stringify(events), storedHashes(h));
         }

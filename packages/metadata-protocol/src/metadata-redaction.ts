@@ -66,6 +66,7 @@
  * belongs on that list first; that file is `packages/spec`'s to change.
  */
 
+import { createHmac, randomBytes } from 'node:crypto';
 import { getMetadataTypeRedactor } from '@objectstack/spec/kernel';
 import type { MetadataTypeRedactor } from '@objectstack/spec/kernel';
 // [#21120] The family-wide stored-metadata-body primitives — the object set,
@@ -829,8 +830,8 @@ const QUOTED_STORED_HASH = /(?<![\w-])sha256:[0-9a-f]{64}/g;
 
 /**
  * Free text with every quoted stored content hash replaced by its served form:
- * the keyed digest, or `(withheld)` with no crypto provider. Text that quotes
- * none is returned as is.
+ * the keyed digest, or `(withheld)` when the caller holds no digest. Text that
+ * quotes none is returned as is.
  */
 export async function serveStoredHashTokens(text: string, digest: StoredHashDigest | undefined): Promise<string> {
     const quoted = text.match(QUOTED_STORED_HASH);
@@ -844,11 +845,45 @@ export async function serveStoredHashTokens(text: string, digest: StoredHashDige
 export type StoredHashDigest = (plain: string) => Promise<string>;
 
 /**
+ * [#21207] The process key {@link ephemeralStoredHashDigest} keys under: 32
+ * random bytes, drawn on first use, held only in this module, never written,
+ * logged or served.
+ */
+let ephemeralDigestKey: Buffer | undefined;
+
+/**
+ * [#21207] The keyed digest the `/meta` doors serve and compare metadata
+ * version tokens under while NO crypto provider is registered: `hmac-sha256:`
+ * plus hex, the provider contract's own output shape, under a process-scoped
+ * ephemeral key.
+ *
+ * Why a key and not "serve nothing": a version token is an optimistic lock.
+ * Serving none hands every caller the same empty token, and a client that
+ * (rightly) sends no pin for an empty token turns every pinned write into an
+ * unpinned one, so the lock fails OPEN without a word. A token keyed under a
+ * secret nobody outside this process holds keeps the three properties the lock
+ * needs: it differs when the content differs; it is never the unkeyed stored
+ * hash, so it confirms no guess at withheld material offline; and no empty or
+ * withheld value ever equals it.
+ *
+ * What it costs: the key dies with the process. A token held across a restart,
+ * or across the moment a host registers a real provider (the doors read the
+ * provider per use), names no current version and is refused once with
+ * `409 METADATA_CONFLICT`; the next read or receipt serves the current one.
+ * Every protocol in one process shares this key, so per-environment protocols
+ * answer one another's tokens.
+ */
+export const ephemeralStoredHashDigest: StoredHashDigest = async (plain: string): Promise<string> => {
+    ephemeralDigestKey ??= randomBytes(32);
+    return `hmac-sha256:${createHmac('sha256', ephemeralDigestKey).update(plain, 'utf8').digest('hex')}`;
+};
+
+/**
  * The form a stored content hash is SERVED in: the keyed digest of the stored
- * value under the provider's server-held key; `null` when nothing is stored
- * (a delete event, a first version's parent); `undefined` — WITHHELD — when no
- * provider is registered, or when the stored value is not a string this
- * function can judge. ⛔ Never the stored value itself.
+ * value under a server-held key; `null` when nothing is stored (a delete
+ * event, a first version's parent); `undefined` (WITHHELD) when the caller
+ * holds no digest, or when the stored value is not a string this function can
+ * judge. ⛔ Never the stored value itself.
  *
  * A failing digest is not caught: a provider that cannot compute it fails the
  * read rather than serving what it exists to replace.
@@ -865,9 +900,9 @@ export async function servedContentHash(
 /**
  * Serve one row of a stored-metadata table with its content-hash columns in
  * their served form ({@link servedContentHash}): keyed, `null` kept `null`, and
- * the column OMITTED when the value is withheld — and, with no crypto provider,
- * both columns omitted outright. A row of any other object, and a row carrying
- * neither column, is returned by reference.
+ * the column OMITTED when the value is withheld — and, when the caller holds no
+ * digest, both columns omitted outright. A row of any other object, and a row
+ * carrying neither column, is returned by reference.
  */
 export async function serveStoredMetadataHashColumns<T>(
     object: string,
@@ -879,7 +914,7 @@ export async function serveStoredMetadataHashColumns<T>(
     const out: Record<string, unknown> = { ...row };
     for (const column of STORED_METADATA_HASH_COLUMNS) {
         if (!(column in out)) continue;
-        // No provider: the column is not served at all — a `null` included, so
+        // No digest: the column is not served at all — a `null` included, so
         // a reader cannot tell a withheld hash from an absent one either.
         const served = digest ? await servedContentHash(out[column], digest) : undefined;
         if (served === undefined) delete out[column];

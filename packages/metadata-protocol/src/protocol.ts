@@ -194,6 +194,7 @@ import {
     storedMetadataBodyProjection,
     // [#21207] The stored content hash of the same rows: served keyed, never
     // evaluated — see `STORED_METADATA_HASH_COLUMNS`.
+    ephemeralStoredHashDigest,
     isStoredMetadataBodyObject,
     servedContentHash,
     serveStoredHashTokens,
@@ -2621,21 +2622,17 @@ function declaresClientRefusal(err: unknown): boolean {
  * A `ConflictError`, so each door's existing conflict branch — the 409
  * `METADATA_CONFLICT` and its decision-audit row — handles it unchanged; told
  * apart from the repository's own race conflict because its `expectedParent`
- * is the CALLER's token rather than a stored hash, and `unverifiable` marks the
- * deployment with no crypto provider, where no token can be checked at all.
- * The message is replaced: the base class prints both values, and one of them
- * is the stored hash.
+ * is the CALLER's token rather than a stored hash. The message is replaced:
+ * the base class prints both values, and one of them is the stored hash.
  */
 class InboundVersionConflictError extends ConflictError {
     constructor(
         ref: { org: string; type: string; name: string },
         token: string,
         currentStored: string | null,
-        readonly unverifiable: boolean,
     ) {
         super(ref as ConstructorParameters<typeof ConflictError>[0], token, currentStored);
-        this.message = `Conflict on ${ref.type}/${ref.name}: the version token sent `
-            + (unverifiable ? 'cannot be checked (no crypto provider is registered)' : 'is not the current version');
+        this.message = `Conflict on ${ref.type}/${ref.name}: the version token sent is not the current version`;
     }
 }
 
@@ -12004,7 +12001,7 @@ export class ObjectStackProtocolImplementation implements
         // [#21207] …and its stored CONTENT HASH (`checksum`, `previous_checksum`)
         // is served in keyed form — never the stored value, which beside the
         // projected body confirms a guess at the withheld material offline —
-        // and omitted when no crypto provider is registered.
+        // under the provider's key, or the process-scoped ephemeral one.
         const records = await serveStoredMetadataHashColumnRows(
             request.object,
             redactStoredMetadataRows(
@@ -12138,7 +12135,7 @@ export class ObjectStackProtocolImplementation implements
                 object: request.object,
                 id: request.id,
                 // [#21207] Same served form as the list path: the content-hash
-                // columns keyed, or omitted with no crypto provider.
+                // columns keyed.
                 record: await serveStoredMetadataHashColumns(
                     request.object,
                     redactStoredMetadataRow(request.object, result, { dropType: bodyProjection.addedType }),
@@ -15790,32 +15787,37 @@ export class ObjectStackProtocolImplementation implements
     // producers and the parent links are untouched — but no door hands it out.
     // It is a hash over the WHOLE stored body, withheld credential material
     // included, so beside the projected body it confirms a guess at that
-    // material offline. Every door that serves it serves the crypto provider's
-    // keyed digest of it; every door that takes a version token back compares
-    // the token in that same form and hands the STORED value to the repository;
-    // with no provider registered nothing is served and every token is refused.
+    // material offline. Every door that serves it serves a keyed digest of it
+    // (the crypto provider's, or with none registered a process-scoped
+    // ephemeral key's); every door that takes a version token back compares the
+    // token in that same form and hands the STORED value to the repository.
 
     /**
-     * The registered crypto provider's keyed digest, read from the engine at
-     * the moment of use — a host registers the provider AFTER the kernel starts,
-     * so a value read once at construction would answer "none" for good.
-     * `undefined` when none is registered (or the host engine has no such
-     * accessor, which is the same fact): the doors then withhold and refuse.
+     * The keyed digest the doors serve and compare under: the registered crypto
+     * provider's, read from the engine at the moment of use — a host registers
+     * the provider AFTER the kernel starts, so a value read once at
+     * construction would answer "none" for good — and, while none is registered
+     * (or the host engine has no such accessor), {@link ephemeralStoredHashDigest}.
+     *
+     * ⛔ Never `undefined`: a door with no key would serve no token, every
+     * caller would then hold the same empty one, and a client that sends no pin
+     * for an empty token would turn every pinned write into an unpinned one —
+     * the optimistic lock failing OPEN.
      */
-    private storedHashDigest(): StoredHashDigest | undefined {
+    private storedHashDigest(): StoredHashDigest {
         const accessor = this.engine?.getKeyedDigest;
-        return typeof accessor === 'function' ? accessor.call(this.engine) : undefined;
+        const provider: StoredHashDigest | undefined =
+            typeof accessor === 'function' ? accessor.call(this.engine) : undefined;
+        return provider ?? ephemeralStoredHashDigest;
     }
 
     /**
      * A write receipt's `version` — the version token a caller sends back as
      * `If-Match` — for a write whose stored content hash is `stored`: its keyed
-     * digest. With no crypto provider the deployment issues no token, and the
-     * receipt's required `version` carries the empty string: a value that names
-     * nothing and that every inbound comparison refuses.
+     * digest ({@link storedHashDigest}). Never empty, never the stored value.
      */
     private async receiptVersion(stored: string): Promise<string> {
-        return (await servedContentHash(stored, this.storedHashDigest())) ?? '';
+        return this.storedHashDigest()(stored);
     }
 
     /**
@@ -15824,9 +15826,10 @@ export class ObjectStackProtocolImplementation implements
      * keyed digest of that head, and the stored value is what the repository's
      * own optimistic lock then compares. `null` keeps its meaning ("expect no
      * row") and carries no hash. Anything else — the raw stored hash a pre-keying
-     * client still holds, a stale token, a token sent to a deployment with no
-     * crypto provider — is an {@link InboundVersionConflictError}, which the
-     * door's conflict branch answers 409.
+     * client still holds, a stale token, an empty or withheld token, a token
+     * keyed before a restart or before a provider was registered — is an
+     * {@link InboundVersionConflictError}, which the door's conflict branch
+     * answers 409. ⛔ A sent token is never read as "no pin".
      */
     private async storedParentForToken(
         ref: { org: string; type: string; name: string },
@@ -15834,10 +15837,10 @@ export class ObjectStackProtocolImplementation implements
         currentStored: string | null,
     ): Promise<string | null> {
         if (token === null) return null;
-        const digest = this.storedHashDigest();
-        if (!digest) throw new InboundVersionConflictError(ref, token, currentStored, true);
-        if (currentStored !== null && (await digest(currentStored)) === token) return currentStored;
-        throw new InboundVersionConflictError(ref, token, currentStored, false);
+        if (currentStored !== null && token !== '' && (await this.storedHashDigest()(currentStored)) === token) {
+            return currentStored;
+        }
+        throw new InboundVersionConflictError(ref, token, currentStored);
     }
 
     /**
@@ -15848,8 +15851,7 @@ export class ObjectStackProtocolImplementation implements
      *
      *  - a repository race (the stored head moved between the door's read and
      *    its write): `Expected parent X but current is Y`, both keyed;
-     *  - a caller's token naming no current head: the keyed current head;
-     *  - no crypto provider: no value, and the remedy.
+     *  - a caller's token naming no current head: the keyed current head.
      *
      * A side with no served form is `(withheld)`; an absent side is `null`.
      */
@@ -15857,13 +15859,6 @@ export class ObjectStackProtocolImplementation implements
         const conflict: any = new Error(subject);
         conflict.code = 'METADATA_CONFLICT';
         conflict.status = 409;
-        if (err instanceof InboundVersionConflictError && err.unverifiable) {
-            conflict.message = `${subject}: the version token sent cannot be checked, so the write was not run. `
-                + 'This deployment registers no crypto provider, so it issues no version tokens and compares none. '
-                + 'Send the write without a version token (no If-Match) to write unconditionally, or register a '
-                + 'crypto provider (engine.setCryptoProvider) so version tokens are issued and checked.';
-            return conflict;
-        }
         const digest = this.storedHashDigest();
         const show = (served: string | null | undefined) => (served === undefined ? '(withheld)' : served ?? 'null');
         const current = await servedContentHash(err.actualHead, digest);
@@ -18678,8 +18673,8 @@ export class ObjectStackProtocolImplementation implements
                     item,
                     mode: state === 'draft' ? 'draft' : 'publish',
                     // [#21207] The STORED hash this pass read itself — the
-                    // in-process spelling, never compared in keyed form (a
-                    // deployment with no crypto provider still migrates).
+                    // in-process spelling, never compared in keyed form (the
+                    // pass already holds the stored value; nothing to key).
                     storedParentVersion: row.checksum ?? null,
                     packageId,
                     force: true,
@@ -18798,8 +18793,7 @@ export class ObjectStackProtocolImplementation implements
         if (request.limit !== undefined) opts.limit = request.limit;
         // [#21207] Each event's hash and parent hash are served in keyed form —
         // the same value the write receipts hand out, so an event still names
-        // the token a caller holds — and `null` with no crypto provider (a
-        // delete event's own `null` is kept either way).
+        // the token a caller holds; a delete event's own `null` is kept.
         // The event's message is the row's change note, which can QUOTE a stored
         // hash (`publish draft (hash …)` on rows written before the publish door
         // stated its own message) — each quote is served the same way.

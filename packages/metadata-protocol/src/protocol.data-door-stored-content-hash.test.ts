@@ -14,7 +14,7 @@
  *  - SERVED: each column is the crypto provider's keyed digest of the stored
  *    value — neither the stored value nor a recomputation, stable across reads,
  *    moving on any body change including a credential-only one; a `null` stays
- *    `null`; with no provider both columns are omitted;
+ *    `null`; with no provider the key is the process-scoped ephemeral one;
  *  - EVALUATED: a filter, sort or grouping on either column is refused before
  *    the engine is asked — `INVALID_FIELD` / 400, the shape the body column's
  *    refusals already answer — and a search never scans them (nor the body
@@ -156,20 +156,23 @@ describe('[#21207] data door — the content-hash columns are served keyed', () 
         expect(got.record.previous_checksum).toMatch(KEYED);
     });
 
-    it('no provider: both columns are omitted on every read, the other columns untouched', async () => {
+    it('no provider: both columns keyed under the process key, never stored, stable across reads', async () => {
         const { p } = makeProtocol({ provider: false });
         const list: any = await p.findData({ object: 'sys_metadata', query: {} });
-        for (const row of list.records) {
-            expect('checksum' in row).toBe(false);
-            expect(typeof row.name).toBe('string');
+        const again: any = await p.findData({ object: 'sys_metadata', query: {} });
+        for (const row of SYS_METADATA_ROWS) {
+            const served = byId(list.records, row.id);
+            expect(served.checksum).toMatch(KEYED);
+            expect(served.checksum).not.toBe(row.checksum);
+            expect(served.checksum).not.toBe(await keyedDigest(row.checksum));
+            expect(byId(again.records, row.id).checksum).toBe(served.checksum);
+            expect(typeof served.name).toBe('string');
         }
         const hist: any = await p.findData({ object: 'sys_metadata_history', query: {} });
-        for (const row of hist.records) {
-            expect('checksum' in row).toBe(false);
-            expect('previous_checksum' in row).toBe(false);
-        }
+        expect(byId(hist.records, 'h_1').previous_checksum).toBeNull();
+        for (const row of hist.records) expect(row.checksum).toMatch(KEYED);
         const got: any = await p.getData({ object: 'sys_metadata', id: 'm_view' });
-        expect('checksum' in got.record).toBe(false);
+        expect(got.record.checksum).toBe(byId(list.records, 'm_view').checksum);
         expect(got.record.name).toBe('all_tasks');
     });
 
@@ -261,7 +264,7 @@ describe('[#21207] data door — the history change note that quotes a stored ha
     const QUOTED = hashSpec({ quoted: true });
     const NOTE_ROWS = [{ id: 'h_note', type: 'view', name: 'all_tasks', version: 3, operation_type: 'publish', metadata: '{}', checksum: QUOTED, previous_checksum: null, change_note: `publish draft (hash ${QUOTED})` }];
 
-    it('is served with the quote keyed, and withheld with no provider', async () => {
+    it('is served with the quote keyed, under the provider\'s key or the process key', async () => {
         const saved = [...HISTORY_ROWS];
         HISTORY_ROWS.push(...(NOTE_ROWS as any));
         try {
@@ -269,9 +272,12 @@ describe('[#21207] data door — the history change note that quotes a stored ha
             const got: any = await p.getData({ object: 'sys_metadata_history', id: 'h_note' });
             expect(got.record.change_note).toBe(`publish draft (hash ${await keyedDigest(QUOTED)})`);
             const bare = makeProtocol({ provider: false });
-            const withheld: any = await bare.p.findData({ object: 'sys_metadata_history', query: {} });
-            expect(byId(withheld.records, 'h_note').change_note).toBe('publish draft (hash (withheld))');
-            expect(JSON.stringify(withheld.records)).not.toContain(QUOTED);
+            const keyed: any = await bare.p.findData({ object: 'sys_metadata_history', query: {} });
+            const note = byId(keyed.records, 'h_note');
+            // The quote is served as the row's own served hash column.
+            expect(note.change_note).toBe(`publish draft (hash ${note.checksum})`);
+            expect(note.checksum).toMatch(KEYED);
+            expect(JSON.stringify(keyed.records)).not.toContain(QUOTED);
         } finally {
             HISTORY_ROWS.length = 0;
             HISTORY_ROWS.push(...saved);

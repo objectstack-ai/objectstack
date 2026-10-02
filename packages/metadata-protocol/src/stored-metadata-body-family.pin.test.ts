@@ -42,8 +42,9 @@
  * [#21207] Exit two — the same rows' stored CONTENT HASH (`checksum`, and the
  * history table's `previous_checksum`), a hash over the whole stored body,
  * withheld credential material included. Every surface that SERVES it serves
- * the crypto provider's keyed digest (`keyed`), every surface that takes a
- * version token back compares it keyed, every COPY drops it (`withheld`), and
+ * a keyed digest (`keyed`: the crypto provider's, or a process-scoped ephemeral
+ * key's while none is registered), every surface that takes a version token
+ * back compares it keyed, every COPY drops it (`withheld`), and
  * every EVALUATE shape refuses — enumerated as rows below, each with its pin,
  * plus a third tooth: the hash columns the object definitions declare are
  * exactly `STORED_METADATA_HASH_COLUMNS`, so a new hash-like column fails here
