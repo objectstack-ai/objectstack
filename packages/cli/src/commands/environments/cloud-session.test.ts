@@ -266,6 +266,15 @@ describe('os environments: the stored session it authenticates with', () => {
       expect(cloudPlane.seen[0].environmentId).toBe('env_from_credentials_json');
     });
 
+    it.each(SUBCOMMANDS)('%s: credentials.json wins where both name the --url server', async (name, run) => {
+      await writeCloud({ url: cloudPlane.url, token: 'cloud_tok' });
+      await writeCredentials({ url: cloudPlane.url, token: 'runtime_tok' });
+
+      const outcome = await invoke(run, ['--url', cloudPlane.url]);
+
+      expectServedBy(name, outcome, cloudPlane, runtimePlane, 'runtime_tok');
+    });
+
     it.each(SUBCOMMANDS)('%s: with no --url, credentials.json still picks the server', async (name, run) => {
       await writeCloud({ url: cloudPlane.url, token: 'cloud_tok' });
       await writeCredentials({ url: runtimePlane.url, token: 'runtime_tok' });
