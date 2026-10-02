@@ -1709,16 +1709,12 @@ os verify --rls --multi-tenant --json          # Org-scoped boot, structured rep
    fidelity failure fails the run. With `--rls`, a second fresh boot proves the
    cross-owner invariant — a member must not write what it cannot read — for a
    probe persona and for one persona per declared position, and a hole fails
-   the run.
+   the run. `--multi-tenant` boots org-scoped so tenant-isolation RLS policies
+   apply; a walled tenancy posture (`OS_TENANCY_POSTURE` set to `isolated` or
+   `group`) asks for the same boot.
 
-**Options.**
-
-| Flag | What it does |
-|---|---|
-| `-a, --app <path>` | Path to the app config. Omitted, the config is auto-detected — see [Config File Auto-Detection](#config-file-auto-detection) |
-| `--rls` | Also run the cross-owner RLS invariant, on its own fresh boot |
-| `--multi-tenant` | Boot org-scoped so tenant-isolation RLS policies apply. A walled tenancy posture — `OS_TENANCY_POSTURE` set to `isolated` or `group`, or the legacy `OS_MULTI_ORG_ENABLED` it falls back to — asks for the same boot |
-| `--json` | Emit the result as JSON — see below |
+The config is the one `--app` names, or the auto-detected one — see
+[Config File Auto-Detection](#config-file-auto-detection).
 
 **Exit status.**
 
