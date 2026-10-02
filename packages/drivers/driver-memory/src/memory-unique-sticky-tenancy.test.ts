@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#16729] The explicit `tenancy.enabled: false` opt-out is STICKY across a
+ * [commit 0f38ab084] The explicit `tenancy.enabled: false` opt-out is STICKY across a
  * partial `syncSchema` re-registration — the uniqueness partition a
  * platform-global object declares survives a later call that carries only
  * `{ name, fields }`.

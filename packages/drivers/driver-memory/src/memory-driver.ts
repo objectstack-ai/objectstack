@@ -59,7 +59,7 @@ import {
   indexTemporalFields,
   type TemporalFieldKind,
 } from './memory-temporal.js';
-// [#13197] Field-level uniqueness — the constraint this driver enforced
+// [commit 56c093c4d] Field-level uniqueness — the constraint this driver enforced
 // NOWHERE, and the reason an out-of-process duplicate autonumber used to land
 // silently. The scoping semantics are `driver-sql`'s, measured; see the
 // module docblock.
@@ -81,7 +81,7 @@ import {
  * the day it is declared, and the rank of `$exists` (after every comparison,
  * set and text operator in the spec's list; only `$empty` follows it since
  * #20446) is what makes this generalisation emit, byte for byte, the documents
- * #13195's guard already emits for the one operator it moved.
+ * commit 9dac1ae01's guard already emits for the one operator it moved.
  *
  * An operator absent from the vocabulary cannot reach the assembly — the
  * `default:` arm throws first — so the `?? Number.MAX_SAFE_INTEGER` fallback is
@@ -144,7 +144,7 @@ interface LoweredWrite {
  *
  * Free key → merge inline (the overwhelmingly common case: one operator, one
  * key). Taken key → the write becomes its own `$and` branch on the same field,
- * where both constraints survive. That is exactly the guard #13195 landed for
+ * where both constraints survive. That is exactly the guard commit 9dac1ae01 landed for
  * `$exists` alone, generalised to every writer rather than restated per
  * operator — the reference matcher (`memory-matcher.ts`, retired since #5930
  * step 4), which looped the operators and therefore COULD NOT express this
@@ -427,7 +427,7 @@ function indexValueShapes(fields: Record<string, unknown> | undefined): Map<stri
  *
  * ## What this driver enforces, and what it still does not
  *
- * Since #13197 it enforces **field-level `unique`**, and since #13239
+ * Since commit 56c093c4d it enforces **field-level `unique`**, and since #13239
  * **object-level declared `indexes[]` entries carrying `unique`** — both
  * declaration surfaces `driver-sql` materializes uniqueness from, with its
  * ADR-0120 D1/D3 scoping (`memory-unique-constraint.ts` carries the measured
@@ -444,7 +444,7 @@ function indexValueShapes(fields: Record<string, unknown> | undefined): Map<stri
  * Since #13340 {@link bulkCreate} is ALL-OR-NOTHING: it builds and checks every
  * row — against the table AND against the rest of the batch — before it pushes
  * any of them, so a refused row leaves the table exactly as it found it. That
- * is the posture {@link updateMany} has had since #13197, and the one
+ * is the posture {@link updateMany} has had since commit 56c093c4d, and the one
  * `driver-sql` gets from sending a batch as a single insert. `bulkCreate` used
  * to be `Promise.all(map(create))`, where a refusal left every row accepted
  * BEFORE it standing — a refused 2-row batch on a 2-row table left THREE rows
@@ -519,7 +519,7 @@ export class InMemoryDriver implements IDataDriver {
   private valueShapes: Map<string, Map<string, ValueShapeFieldDef>> = new Map();
 
   /**
-   * [#13197, #13239] Declared unique constraints per object, populated by
+   * [commit 56c093c4d, #13239] Declared unique constraints per object, populated by
    * {@link syncSchema} — both declaration surfaces in one list (field-level
    * `unique` and object-level `indexes[]` entries carrying `unique`), with the
    * same shape and the same lifetime as {@link temporalFields} above, and for
@@ -530,7 +530,7 @@ export class InMemoryDriver implements IDataDriver {
   private uniqueConstraints: Map<string, MemoryUniqueEnforcement[]> = new Map();
 
   /**
-   * [#16729] Objects whose schema EXPLICITLY declared `tenancy.enabled: false`,
+   * [commit 0f38ab084] Objects whose schema EXPLICITLY declared `tenancy.enabled: false`,
    * this driver's counterpart of `SqlDriver.tenantOptOutByTable` and the record
    * {@link computeAndRecordTenantField} maintains.
    *
@@ -703,7 +703,7 @@ export class InMemoryDriver implements IDataDriver {
   // ===================================
 
   /**
-   * Declared as the contract declares it (#14435): `IDataDriver.find()` says
+   * Declared as the contract declares it (commit 20032594f): `IDataDriver.find()` says
    * `Promise<Record<string, unknown>[]>`, and the explicit annotation is what
    * keeps that visible to `tsc`. Left to inference the return type collapses
    * to `any[]` through the backing store's `any[]` rows (`db` -> `getTable`),
@@ -711,7 +711,7 @@ export class InMemoryDriver implements IDataDriver {
    * result was unchecked. Same repair shape as `update`/`upsert` (#13878).
    */
   async find(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('find', object, options);
     this.logger.debug('Find operation', { object, query });
@@ -788,7 +788,7 @@ export class InMemoryDriver implements IDataDriver {
   // called it. Page through `find()` with `limit`/`offset`.
 
   /**
-   * Declared as the contract declares it (#14435): the `null` arm is the
+   * Declared as the contract declares it (commit 20032594f): the `null` arm is the
    * "no row matched" answer the `results[0] || null` below has always given,
    * and the explicit annotation is what keeps that arm visible to `tsc` —
    * left to inference it is swallowed by the `any` arriving from `find()`,
@@ -796,7 +796,7 @@ export class InMemoryDriver implements IDataDriver {
    * to narrow. The same shape `update()` was repaired with (#13878).
    */
   async findOne(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown> | null> {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('findOne', object, options);
     this.logger.debug('FindOne operation', { object, query });
@@ -814,7 +814,7 @@ export class InMemoryDriver implements IDataDriver {
   // driver's own tests read `.name` off a create() result and no tsc had ever
   // told them it wasn't there).
   //
-  // #14435: this annotation existed but read `Record<string, any>`, so it
+  // Commit 20032594f: this annotation existed but read `Record<string, any>`, so it
   // named the arity of the contract without its element type — the emitted
   // `.d.ts` published `Promise<Record<string, any>>` and every property read
   // off a `create()` result stayed unchecked, exactly the hole #4311 opened
@@ -824,7 +824,7 @@ export class InMemoryDriver implements IDataDriver {
   // breaking change, and method parameters compare bivariantly against the
   // contract's `Record<string, unknown>`, so the declaration is satisfied.
   async create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown>> {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('create', object, options);
     this.logger.debug('Create operation', { object, hasData: !!data });
@@ -838,7 +838,7 @@ export class InMemoryDriver implements IDataDriver {
       updated_at: data.updated_at || new Date().toISOString(),
     });
 
-    // [#13197] Refuse a declared-unique collision instead of landing it. Checked
+    // [commit 56c093c4d] Refuse a declared-unique collision instead of landing it. Checked
     // on the STORED form, so a temporal value is compared in the one shape this
     // driver stores (#4047), and BEFORE the push, so a refused write leaves the
     // table exactly as it found it.
@@ -859,7 +859,7 @@ export class InMemoryDriver implements IDataDriver {
    * `Promise<any>` and no caller was ever asked to narrow.
    */
   async update(object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown> | null> {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('update', object, options);
     this.logger.debug('Update operation', { object, id });
@@ -883,7 +883,7 @@ export class InMemoryDriver implements IDataDriver {
       updated_at: new Date().toISOString(),
     });
 
-    // [#13197] The row being updated is excluded from its own check — an update
+    // [commit 56c093c4d] The row being updated is excluded from its own check — an update
     // that does not touch the unique field must not collide with itself.
     this.assertUnique(object, updatedRecord, table[index].id);
 
@@ -894,7 +894,7 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   async upsert(object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, unknown>> {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('upsert', object, options);
     this.logger.debug('Upsert operation', { object, conflictKeys });
@@ -927,7 +927,7 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   async delete(object: string, id: string | number, options?: DriverOptions) {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('delete', object, options);
     this.logger.debug('Delete operation', { object, id });
@@ -950,7 +950,7 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   async count(object: string, query?: DriverQuery, options?: DriverOptions) {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('count', object, options);
     let records = this.getTable(object);
@@ -971,7 +971,7 @@ export class InMemoryDriver implements IDataDriver {
   // ===================================
 
   async bulkCreate(object: string, dataArray: Record<string, any>[], options?: DriverOptions): Promise<Record<string, any>[]> {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('bulkCreate', object, options);
     this.logger.debug('BulkCreate operation', { object, count: dataArray.length });
@@ -979,7 +979,7 @@ export class InMemoryDriver implements IDataDriver {
     const table = this.getTable(object);
 
     // [#13340] Build and CHECK every row before pushing ANY of them — the
-    // posture `updateMany` took in #13197, one method over. This used to be
+    // posture `updateMany` took in commit 56c093c4d, one method over. This used to be
     // `Promise.all(dataArray.map(data => this.create(...)))`, and `create`
     // writes into the table synchronously, so every row accepted BEFORE a
     // refusal stayed in the store: the caller got a rejection describing a
@@ -1018,7 +1018,7 @@ export class InMemoryDriver implements IDataDriver {
   }
   
   async updateMany(object: string, query: DriverQuery, data: Record<string, any>, options?: DriverOptions): Promise<number> {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('updateMany', object, options);
       this.logger.debug('UpdateMany operation', { object, query });
@@ -1036,7 +1036,7 @@ export class InMemoryDriver implements IDataDriver {
       
       const count = targetRecords.length;
       
-      // [#13197] Prepare and CHECK every row before mutating any of them: an
+      // [commit 56c093c4d] Prepare and CHECK every row before mutating any of them: an
       // `updateMany` that stamps the same unique value onto two rows collides
       // by construction, and a half-applied batch is worse than a refusal. The
       // pending rows are checked against each other too, which a per-row check
@@ -1063,7 +1063,7 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   async deleteMany(object: string, query: DriverQuery, options?: DriverOptions): Promise<number> {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('deleteMany', object, options);
       this.logger.debug('DeleteMany operation', { object, query });
@@ -1096,7 +1096,7 @@ export class InMemoryDriver implements IDataDriver {
   // Compatibility aliases
   /**
    * [#13435] All-or-nothing, generalized from {@link updateMany}'s posture
-   * (#13197) to a PER-ID patch. Used to be
+   * (commit 56c093c4d) to a PER-ID patch. Used to be
    * `Promise.all(updates.map(u => this.update(object, u.id, u.data, options)))`,
    * and `update` writes into the table synchronously and calls
    * {@link assertUnique}, so a mid-batch refusal left every row processed
@@ -1126,7 +1126,7 @@ export class InMemoryDriver implements IDataDriver {
    * follows that established convention rather than inventing a second one.
    */
   async bulkUpdate(object: string, updates: { id: string | number, data: Record<string, any> }[], options?: DriverOptions) {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('bulkUpdate', object, options);
     this.logger.debug('BulkUpdate operation', { object, count: updates.length });
@@ -1358,7 +1358,7 @@ export class InMemoryDriver implements IDataDriver {
    * ]);
    */
   async aggregate(object: string, pipeline: Record<string, any>[] | DriverQuery, options?: DriverOptions): Promise<any[]> {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('aggregate', object, options);
     // ObjectQL's engine calls driver.aggregate(object, AST) with the SAME
@@ -1663,7 +1663,7 @@ export class InMemoryDriver implements IDataDriver {
         // of the two constraints silently overwriting the other, so each
         // becomes its own `$and` branch — see `assembleLoweredWrites()`. This
         // consumed a single `_presenceAnd` when the guard covered `$exists`
-        // alone (#13195); it is a LIST now because the class has several
+        // alone (commit 9dac1ae01); it is a LIST now because the class has several
         // members and one field constraint can contest more than one key.
         if (normalized._extraAnd) {
           const promoted: Record<string, any>[] = normalized._extraAnd;
@@ -1729,7 +1729,7 @@ export class InMemoryDriver implements IDataDriver {
      * {@link assembleLoweredWrites} after the loop. Collected rather than
      * assigned because an arm cannot know whether the key it wants is already
      * spoken for by a sibling operator the author wrote LATER — which is the
-     * whole of the defect this replaces. It also subsumes #13195's
+     * whole of the defect this replaces. It also subsumes commit 9dac1ae01's
      * single-operator `presence` collection: `$exists` is now one writer among
      * eighteen, ranked by the same rule as the rest.
      */
@@ -1862,7 +1862,7 @@ export class InMemoryDriver implements IDataDriver {
         case '$in': case '$nin':
           put(op, store(val));
           break;
-        // [#13195] `$exists` means "the field HAS A VALUE" (`!= null`), never
+        // [commit 9dac1ae01] `$exists` means "the field HAS A VALUE" (`!= null`), never
         // key presence — #5298 leg 3 / #5369, landed in PR #5962, and ruled
         // onto this exit by the maintainer on 2026-08-30.
         //
@@ -1909,7 +1909,7 @@ export class InMemoryDriver implements IDataDriver {
 
     // [#13524] Assemble every lowered write, and do NOT let one clobber another.
     //
-    // #13195 landed this rule for `$exists` alone — free key merges inline, a
+    // Commit 9dac1ae01 landed this rule for `$exists` alone — free key merges inline, a
     // taken key becomes its own `$and` branch — and said in this spot that the
     // identical clobber was reachable through `$null`, `$between` and
     // `$notContains`. Enumerating the declared vocabulary instead of the noticed
@@ -2072,7 +2072,7 @@ export class InMemoryDriver implements IDataDriver {
               if (!field || field === '*') return records.length;
               return values.filter(v => v !== null && v !== undefined).length;
               
-          // [#11065] A BOOLEAN is an aggregand worth 1 or 0 — not a value to
+          // [commit 20950404c] A BOOLEAN is an aggregand worth 1 or 0 — not a value to
           // drop. `typeof v === 'number'` dropped every one of them, so a
           // whole boolean column aggregated to `nums.length === 0` and `avg`
           // returned `null` while `sum` returned `0`. That is one query with
@@ -2193,7 +2193,7 @@ export class InMemoryDriver implements IDataDriver {
   // ===================================
 
   async syncSchema(object: string, schema: any, options?: DriverOptions) {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('syncSchema', object, options);
     // #6915 — metadata-level half of the tenancy guard: an object asking for
@@ -2222,7 +2222,7 @@ export class InMemoryDriver implements IDataDriver {
     // [#20444] …and each field's declared value shape, in the same pass, for
     // the `$empty` operator's declared row.
     this.valueShapes.set(object, indexValueShapes(schema?.fields));
-    // [#13197, #13239] Learn the object's unique constraints in the same pass —
+    // [commit 56c093c4d, #13239] Learn the object's unique constraints in the same pass —
     // BOTH declaration surfaces `driver-sql` materializes uniqueness from:
     // field-level `unique` and object-level `indexes[]` entries carrying
     // `unique`. Deliberately NOT retroactive: rows already in the table arrived
@@ -2232,7 +2232,7 @@ export class InMemoryDriver implements IDataDriver {
     // an already-duplicated pair is reported by the first write that touches
     // it — the same posture `driver-sql` takes when a unique index cannot be
     // built over dirty data (it announces, it does not delete rows).
-    // [#16729] Resolve the tenant column through the STICKY record rather than
+    // [commit 0f38ab084] Resolve the tenant column through the STICKY record rather than
     // from this call's schema alone. `syncSchema` is idempotent and is called
     // again with whatever schema the caller happens to hold; a call carrying no
     // `tenancy` block would otherwise fall through to the implicit
@@ -2255,13 +2255,13 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   async dropTable(object: string, options?: DriverOptions) {
-    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // [commit 555a89cbd] Seam 3: refuse a call the engine scoped — FIRST, before any
     // store access or delegation, so a refusal leaves no partial effect.
     assertCallNotTenantScoped('dropTable', object, options);
     if (this.db[object]) {
       const recordCount = this.db[object].length;
       delete this.db[object];
-      // [#13197] The declaration dies with the table. A constraint left behind
+      // [commit 56c093c4d] The declaration dies with the table. A constraint left behind
       // would be enforced over a table nobody declared — the inverse of the
       // gap this closes, and just as invisible.
       this.uniqueConstraints.delete(object);
@@ -2556,7 +2556,7 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   /**
-   * [#13197, #13239] Refuse `candidate` if it violates one of `object`'s
+   * [commit 56c093c4d, #13239] Refuse `candidate` if it violates one of `object`'s
    * declared unique constraints — field-level or object-level declared index.
    *
    * The ONE seam every write path goes through, so create, update and

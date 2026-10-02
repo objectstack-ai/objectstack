@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#13195] `$exists` = HAS A VALUE, and the four exits of this package that do
+ * [commit 9dac1ae01] `$exists` = HAS A VALUE, and the four exits of this package that do
  * not all say so — measured, not read.
  *
  * ## The ruling
@@ -259,7 +259,7 @@ describe('[#13195] `$exists` on a row with NO VALUE — the two readings, the fo
   });
 
   /**
-   * [#13195] `$exists` SHARING a field constraint with another operator.
+   * [commit 9dac1ae01] `$exists` SHARING a field constraint with another operator.
    *
    * Not in the recorded table, not in the card, and not a cell the ruling
    * names — it is a consequence of the lowering the ruling prescribes, found by
