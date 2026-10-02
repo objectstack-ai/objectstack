@@ -161,8 +161,7 @@ export function sliceOfCliArguments(args) {
 // So the digest is matched against every slice the partitioner CAN emit for
 // that package, and nothing else: `k/n` for 1 <= k <= n, where n is
 // FILE_SHARDED_PACKAGES[package] from partition-test-shards.mjs. The bound is
-// that map -- n candidates for a package it slices (2 for @objectstack/cli
-// today), none for one it does not.
+// that map -- n candidates for a package it slices, none for one it does not.
 //
 // ⛔ A digest that matches no candidate is REFUSED, never read as a whole
 // package. That is the #16173 direction exactly: one slice's window recorded as
@@ -1181,12 +1180,33 @@ function selfTest() {
     if (r.samples.get('cli') !== 118.073) throw new Error('env slice: the slice window was not kept as the sample');
   });
   check(() => {
-    // The REAL map, the real package name, a digest of the form turbo writes.
-    const n = FILE_SHARDED_PACKAGES['@objectstack/cli'];
-    const r = samplesFromSummary(summary([envTask('@objectstack/cli', 0, 1000, `${n}/${n}`)]), 'f');
-    const s = r.slices.get('@objectstack/cli');
-    if (!s || s.index !== n || s.count !== n) {
-      throw new Error(`env slice: the live FILE_SHARDED_PACKAGES did not resolve ${n}/${n} (got ${JSON.stringify(s ?? null)})`);
+    // The REAL map, a real package name, a digest of the form turbo writes:
+    // the default `sliced` IS the partitioner's live map. Written for either
+    // state the partitioner's slice-count pin can leave that map in -- a live
+    // entry must resolve its own last slice, and an EMPTY map must refuse a
+    // slice digest on the CLI naming the empty map -- so it reds when the
+    // default stops being the live map, whichever state that is.
+    const live = Object.entries(FILE_SHARDED_PACKAGES);
+    if (live.length > 0) {
+      const [name, n] = live[0];
+      const r = samplesFromSummary(summary([envTask(name, 0, 1000, `${n}/${n}`)]), 'f');
+      const s = r.slices.get(name);
+      if (!s || s.index !== n || s.count !== n) {
+        throw new Error(`env slice: the live FILE_SHARDED_PACKAGES did not resolve ${name} ${n}/${n} (got ${JSON.stringify(s ?? null)})`);
+      }
+    } else {
+      let message = '';
+      try {
+        samplesFromSummary(summary([envTask('@objectstack/cli', 0, 1000, '1/2')]), 'f');
+      } catch (e) {
+        message = e.message;
+      }
+      if (!message.includes('FILE_SHARDED_PACKAGES does not slice it')) {
+        throw new Error(
+          'env slice: with the live FILE_SHARDED_PACKAGES empty, a CLI slice digest was not refused ' +
+            `naming the empty map (got ${JSON.stringify(message || 'no throw')})`
+        );
+      }
     }
   });
   check(() => {
