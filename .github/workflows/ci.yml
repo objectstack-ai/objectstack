@@ -190,8 +190,8 @@ jobs:
               #
               # scripts/check-ci-filter-parity.mjs DERIVES the required set from
               # turbo.json and the root `build` script, and reds while a declared
-              # build input is uncovered here, or while a `scripts/` entry here
-              # covers no declared one. `tsconfig.json` and the
+              # build input is uncovered here, or while a literal entry beside
+              # them covers none (a leftover). `tsconfig.json` and the
               # `packages/cli/...` input are covered by the entries above;
               # `@objectstack/docs#build` (its input is `content/**`) is the
               # docs filter's, since `pnpm build` excludes that package.
@@ -2088,6 +2088,16 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # 67 package build commands end with `node …/scripts/check-dts-emitted.mjs`,
+      # so the `pnpm build` below runs that checker on every package it builds,
+      # and until this step no workflow ran its `--self-test`. It surfaced when
+      # the `core:` filter began naming the file as a build input (#21202) and
+      # `check:self-test-wired` saw a workflow name a self-test it never runs.
+      # Milliseconds, no prerequisites; placed before the build so a broken
+      # checker is reported before the 67 verdicts that rely on it.
+      - name: check-dts-emitted self-test
+        run: node scripts/check-dts-emitted.mjs --self-test
 
       # ── Turbo remote cache (#21186) ─────────────────────────────────────
       # Vercel's managed Turborepo remote cache. objectstack-ai/cloud's

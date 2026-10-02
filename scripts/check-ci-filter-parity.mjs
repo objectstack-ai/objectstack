@@ -166,16 +166,20 @@
  * constant is turbo.json itself, which is the config being read.
  *
  * Findings: a declared build input no `core` entry covers (same pure-string
- * rule as above), and the reverse direction, a `core` entry under `scripts/`
- * that covers no declared build input -- `scripts/` is in `core` only because
- * builds read files in it, so such an entry starts the core pipeline on a diff
- * no build reads. Refusals: no `build-core` job, its `if:` no longer naming
+ * rule as above), and the reverse direction where the declarations alone can
+ * decide it: a literal `core` entry in a directory that holds a declared
+ * literal build input, covering none of them, is a leftover from an input
+ * turbo.json dropped, and it starts the core pipeline on a diff no build reads.
+ * Root-level files and pattern entries are not judged that way -- nothing here
+ * says why `package.json` or `packages/**` is in `core`. Refusals: no `build-core` job, its `if:` no longer naming
  * `core`, no `run: pnpm build` step, turbo.json or the root manifest unreadable
  * or not JSON, no `tasks` map, no build task, and a `build` script that is not
  * `turbo run build ...`.
  *
- * Known bound: a package-level turbo.json (none is tracked today) would add
- * build inputs this subject does not read.
+ * Known bounds: a package-level turbo.json (none is tracked today) would add
+ * build inputs this subject does not read; and a leftover in a directory where
+ * turbo.json no longer declares ANY build input is not reported (the cheap
+ * direction: it over-schedules, it never under-schedules).
  *
  * ## Wiring
  *
@@ -595,13 +599,12 @@ export const ROOT_MANIFEST = 'package.json';
 const BUILD_COMMAND = 'pnpm build';
 /** The prefix turbo.json spells a repo-root-relative input with. */
 const TURBO_ROOT = '$TURBO_ROOT$/';
-/**
- * The root that only build inputs open in `core:`. Every `core` entry under it
- * is there because some build declares a file in it, so an entry covering no
- * declared build input is stale -- the same reverse direction `crosspkg` is
- * held to.
- */
-const BUILD_INPUT_ROOT = 'scripts';
+
+/** The directory part of a repo-relative path; '' for a root-level file. */
+function dirOf(path) {
+  const cut = path.lastIndexOf('/');
+  return cut === -1 ? '' : path.slice(0, cut);
+}
 
 /** Is this turbo.json task key a build task? `build`, or `<package>#build`. */
 function isBuildTask(task) {
@@ -738,9 +741,17 @@ export function judgeBuildInputs(source, turboSource, manifestSource) {
     const verdict = coverageVerdict(row.path, entries);
     (verdict.covered ? covered : uncovered).push({ ...row, ...verdict });
   }
+  // The reverse direction, judged only where it is decidable from the
+  // declarations alone: a LITERAL entry in a directory that holds a declared
+  // literal build input is there for the same reason those are, so one that
+  // covers none of them is a leftover. Root-level files and pattern entries are
+  // not this subject's to judge -- nothing here says why they are in `core`.
+  const inputDirs = new Set(declared.rows.filter(({ path }) => !WILDCARD.test(path)).map(({ path }) => dirOf(path)).filter(Boolean));
   const stale = entries.filter(
     (entry) =>
-      entry.split('/')[0] === BUILD_INPUT_ROOT && !declared.rows.some(({ path }) => coverageVerdict(path, [entry]).covered),
+      !WILDCARD.test(entry) &&
+      inputDirs.has(dirOf(entry)) &&
+      !declared.rows.some(({ path }) => coverageVerdict(path, [entry]).covered),
   );
 
   return { entries, condition, inputs: declared.rows, covered, uncovered, stale, excludedTasks: declared.excludedTasks };
@@ -758,17 +769,17 @@ function reportBuildInputs(verdict) {
         `${CI_WORKFLOW}. A diff confined to one moves the build hashes it reaches and starts no Build Core, so the\n` +
         `    merge queue is the first place that build runs:\n` +
         verdict.uncovered.map((r) => `      ${r.path}   (${r.from.join(', ')})`).join('\n') +
-        `\n    Add each one VERBATIM to the \`${BUILD_FILTER}:\` filter in ${CI_WORKFLOW}. Not \`${BUILD_INPUT_ROOT}/**\`: that ` +
-        `starts the whole\n    core pipeline on every tooling diff, and the declaration is the narrower list.`,
+        `\n    Add each one VERBATIM to the \`${BUILD_FILTER}:\` filter in ${CI_WORKFLOW}. Not the subtree it sits in: over a\n` +
+        '    tooling directory that starts the whole core pipeline on every tooling diff, and the declaration is the\n' +
+        '    narrower list.',
     );
   }
   if (verdict.stale.length > 0) {
     problems.push(
-      `${CI_WORKFLOW}'s \`${BUILD_FILTER}:\` filter carries \`${BUILD_INPUT_ROOT}/\` entr(ies) that cover no build input ` +
-        `${TURBO_CONFIG} declares any more:\n` +
+      `${CI_WORKFLOW}'s \`${BUILD_FILTER}:\` filter carries literal entr(ies) beside declared build inputs that cover none of them -- ` +
+        `left over from an input ${TURBO_CONFIG} no longer declares:\n` +
         verdict.stale.map((e) => `      ${e}`).join('\n') +
-        `\n    Delete them. A \`${BUILD_INPUT_ROOT}/\` entry is in \`${BUILD_FILTER}:\` only because a build reads it, and one ` +
-        'covering nothing starts\n    the core pipeline on a diff no build reads.',
+        `\n    Delete them. Each one starts the whole core pipeline on a diff no build reads.`,
     );
   }
   if (problems.length > 0) {
@@ -780,8 +791,8 @@ function reportBuildInputs(verdict) {
   console.log(
     `OK: all ${verdict.inputs.length} build input(s) ${TURBO_CONFIG} declares outside the packages (itself, ` +
       `${fromGlobal} globalDependencies, and every \`$TURBO_ROOT$\` input of a build Build Core runs) are covered by ` +
-      `\`${BUILD_FILTER}\`, which the \`${BUILD_JOB}\` job's \`if:\` reads; every \`${BUILD_FILTER}\` entry under ` +
-      `\`${BUILD_INPUT_ROOT}/\` covers one. Left out because \`${BUILD_COMMAND}\` excludes their package: ` +
+      `\`${BUILD_FILTER}\`, which the \`${BUILD_JOB}\` job's \`if:\` reads; no literal \`${BUILD_FILTER}\` entry beside ` +
+      `them is a leftover. Left out because \`${BUILD_COMMAND}\` excludes their package: ` +
       `${verdict.excludedTasks.length > 0 ? verdict.excludedTasks.join(', ') : 'none'}.`,
   );
   return 0;
@@ -1466,9 +1477,16 @@ export async function selfTest() {
     uncoveredPaths(docsBuilt).join(',') === 'content/**',
     'the root `build` script no longer excluding a package puts that build\'s root inputs back in the required set -- the exclusion is read, not declared',
   );
-  const staleEntry = judgeBuild({ workflow: buildWorkflow({ core: ['packages/**', 'package.json', 'tsconfig.json', 'turbo.json', 'tsup.config.ts', 'scripts/a.mjs', 'scripts/b.mjs', 'scripts/old.mjs'] }) });
-  assert((staleEntry.stale ?? []).join(',') === 'scripts/old.mjs', 'a `scripts/` entry in `core:` covering no declared build input is reported stale');
-  assert(!(staleEntry.stale ?? []).includes('package.json'), '-- while an entry outside `scripts/` is not this subject\'s to judge');
+  const staleEntry = judgeBuild({
+    workflow: buildWorkflow({
+      core: ['packages/**', 'package.json', CI_WORKFLOW, 'tsconfig.json', 'turbo.json', 'tsup.config.ts', 'scripts/a.mjs', 'scripts/b.mjs', 'scripts/old.mjs'],
+    }),
+  });
+  assert((staleEntry.stale ?? []).join(',') === 'scripts/old.mjs', 'a literal `core:` entry beside declared build inputs, covering none of them, is reported stale');
+  assert(
+    (staleEntry.stale ?? ['(no verdict)']).length === 1,
+    '-- while a root-level file, a pattern entry and a literal in a directory holding no declared build input are not judged',
+  );
   assert(buildExclusions('turbo run build --filter !@objectstack/docs').excluded?.has('@objectstack/docs'), 'the spaced `--filter !<pkg>` spelling is read as an exclusion too');
 
   // Refusals: never a clean zero over a subject that was not read.
@@ -1572,7 +1590,7 @@ export async function selfTest() {
       `observed red, and the report path red over the checked-in ci.yml with one hashed path dropped from the filter; ` +
       `and Build Core's build inputs: a build input dropped from \`core\` observed red by path and declaring task, ` +
       `turbo.json itself, a globalDependencies entry and a new-root input each required, test-task and negated inputs ` +
-      `and the excluded docs build left out until the build script stops excluding it, a stale \`scripts/\` entry, ` +
+      `and the excluded docs build left out until the build script stops excluding it, a leftover literal entry, ` +
       `ten refusals, and the checked-in tree green with one input dropped observed red through the report path.`,
   );
   selfTestReachedVerdict = true;
