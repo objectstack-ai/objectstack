@@ -1,5 +1,186 @@
 # @objectstack/service-messaging
 
+## 17.6.0
+
+### Patch Changes
+
+- 89801cd: **A flow `http` node's `signingSecret` now signs the request on every arm, with one scheme, and a secret that does not resolve refuses the node instead of letting the request leave unsigned.**
+  
+  `signingSecret` is declared as "HMAC-SHA256 secret → X-Objectstack-Signature", with no arm named. Only the durable arm honoured it, because only the messaging outbox signed. The default inline request, and a `durable: true` node on a host with no messaging HTTP outbox (which degrades to that inline request), were sent without the header while the run reported success.
+  
+  - `@objectstack/core`: **new exports** `signHttpBody(body, secret)` and `HTTP_SIGNATURE_HEADER`, the outbound HTTP signature scheme: `X-Objectstack-Signature: sha256=<lowercase hex HMAC-SHA256 of the exact body bytes>`, where a request with no body is signed over the empty string. They were `@objectstack/service-messaging`'s own, and they moved here so a sender with no outbox can sign with the same code.
+  - `@objectstack/service-messaging`: `signHttpBody` and `HTTP_SIGNATURE_HEADER` are still exported under the same names. They are now re-exports of the `@objectstack/core` bindings, not a second implementation. Delivery rows and the headers the outbox sends are unchanged.
+  - `@objectstack/service-automation`: the `http` node's inline request carries `X-Objectstack-Signature` whenever `signingSecret` is set. It is computed over the exact body the node sends (its JSON serialization of `config.body`, or the empty string when there is none), so a receiver that verifies with `signHttpBody` over the bytes it received accepts it on every arm.
+    - A non-empty `signingSecret` that renders to nothing at run time now fails the node with a guard refusal naming `config.signingSecret`, and nothing is sent. This covers a `{token}` with no value in the run, or one that renders the empty string. The refusal is on every arm, including the outbox arm, which used to enqueue such a delivery unsigned. A fault edge does not route it. The fix is to give the run the value the template reads.
+    - An authored `signingSecret: ''` still sends unsigned on purpose, on every arm.
+  
+  Clause-②: yes (widening) — two new exports on `@objectstack/core`'s root. Nothing is removed or renamed on any package. The one newly refused case is a node whose authored secret did not resolve, which the published contract already said signs.
+- e47355b: Auth, webhook and outbound-delivery refusals, warnings and field help no longer cite tracker numbers; each one states the decision behind it in words
+  
+  Clause-②: no
+  
+  Some strings these three packages show to operators, administrators and callers pointed at an issue-tracker number for the reason behind them. The number goes; where the sentence did not already say what was decided, it now does.
+  
+  - `@objectstack/plugin-auth`: an unrecognised audience posture is refused because it must not fall through to a more permissive posture than the one intended; the `ObjectQL` adapter's case-insensitive warning says the `$ieq` operator is deliberately deferred until there is demonstrated pull for it; the `internal`-column refusal says the column is withheld from every ordinary read and recovered only through the engine's accessor; the 2FA re-enrollment errors say a re-enrolled TOTP secret may be live at sign-in without having been confirmed; the walled-owner boot warning says a declared owner is stamped verified only when an operator-provisioned path creates the account; the OTP send-budget lines name the budget without a number.
+  - `@objectstack/plugin-webhooks`: the parked-event record says the event is recorded rather than delivered unsigned (or without its authored headers) and rather than discarded without a trace; the redeliver refusals say a delivery that cannot be signed is refused rather than sent unsigned; the zero-trigger warning says the `api` trigger was removed because nothing could fire it; the seed and legacy-migration warnings say a credential is never stored in cleartext instead and that a failed migration leaves it cleartext in `definition_json`.
+  - `@objectstack/service-messaging`: the `sys_http_delivery` field help for `attempts` (in every shipped locale) says a parked row is not redeliverable because it carries no signature; the `headers_json` and `error` help and the outbox refusals drop their citations; the notification `ack()` refusal says cancelling a pending row is not part of the outbox contract until a live consumer needs it.
+  
+  Text only: no status, error code, field, route or control flow moves. A client or log filter that matches the old text (for example a tracker-number suffix) needs the new spelling.
+- 422db78: Provenance comments in `service-messaging` were re-anchored
+  
+  Comment and docblock lines under `src/` that cited tracker numbers which no
+  longer resolve on GitHub now cite the commit in this repository's history that
+  decided the matter, and say in their own words what was decided. Comments
+  only: no type, schema, export, refusal text or runtime behaviour changes.
+- Updated dependencies [e5c7d07]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [fa0a4b6]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [05a7547]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [3fbf3ca]
+- Updated dependencies [24d521e]
+- Updated dependencies [f4ce10c]
+- Updated dependencies [b785c3b]
+- Updated dependencies [2473e26]
+- Updated dependencies [3a89d45]
+- Updated dependencies [f379f57]
+- Updated dependencies [889139c]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [7510663]
+- Updated dependencies [a6866da]
+- Updated dependencies [1a75e39]
+- Updated dependencies [cd901d7]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [89801cd]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [cd6d8a5]
+- Updated dependencies [ace770d]
+- Updated dependencies [ed54768]
+- Updated dependencies [99786f9]
+- Updated dependencies [5757463]
+- Updated dependencies [63bfe69]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [b9087d7]
+- Updated dependencies [f10d802]
+- Updated dependencies [856321f]
+- Updated dependencies [6b004c0]
+- Updated dependencies [93e9e42]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [ceee88f]
+- Updated dependencies [e18fea6]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [dcd3309]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [26437ae]
+- Updated dependencies [d1633f3]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [58a77db]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [a11faee]
+- Updated dependencies [2c1cef3]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [097ef80]
+- Updated dependencies [70dae53]
+- Updated dependencies [665cab3]
+- Updated dependencies [682873d]
+- Updated dependencies [1bd14c9]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [df1feae]
+- Updated dependencies [336e191]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [24c554d]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [d2bc644]
+- Updated dependencies [cfa9315]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+- Updated dependencies [00f045d]
+  - @objectstack/spec@17.6.0
+  - @objectstack/platform-objects@17.6.0
+  - @objectstack/core@17.6.0
+  - @objectstack/types@17.6.0
+
 ## 17.5.0
 
 ### Minor Changes

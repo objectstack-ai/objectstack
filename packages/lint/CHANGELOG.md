@@ -1,5 +1,460 @@
 # @objectstack/lint
 
+## 17.6.0
+
+### Minor Changes
+
+- b616c0a: Authoring a key whose liveness-ledger verdict is `dead` now draws a `liveness-dead-property` warning, and a `live-elsewhere` key a `liveness-live-elsewhere-property` warning, with no per-row `authorWarn` opt-in: the verdict itself is the warning. Before this, both rule ids were exported and never produced, because no shipped `dead` or `live-elsewhere` row opted in.
+  
+  Clause-②: no
+  
+  **Which keys warn.** A ledger row warns when its status is `dead`, `live-elsewhere` or `experimental`, or when it sets `authorWarn: true` (still the only way a `planned` row warns). Among authorable keys in the metadata types the rule walks, four are `dead` today: a view container's own `name` and `label` (the `defineView` container, not `list.label`), and a permission set's `rowLevelSecurity[].label` and `rowLevelSecurity[].description`. No walk visits `manifest`, `connectors` or realtime subscriptions, so their rows still warn nobody. That includes `manifest.runtime`, the one `live-elsewhere` row.
+  
+  **The hint.** A row that warns only because of its `dead` or `live-elsewhere` verdict shows its `authorHint`, else the verdict's default hint: "Remove it — it is declared in the spec but not consumed at runtime." for `dead`. It never shows the ledger's internal `note`. Rows that opt in with `authorWarn`, and `experimental` rows, show exactly the hint they showed before.
+  
+  **Retired keys.** A `retiredKey` tombstone keeps its `dead` row. Every command that parses (`os validate`, `os build`, the runtime publish gate) still refuses the key first, so it gets no second report. `os lint` does not parse: a config it accepts without `defineStack` that carries a retired key now gets a `liveness-dead-property` warning where it got nothing.
+  
+  **What changes for a project.** Nothing is refused, and nothing changes without `--strict`. `os lint --strict` and `os validate --strict` now exit 1 instead of 0 on a stack that was otherwise warning-clean and authors a view container `label` or `name`, or a row-level-security policy `label` or `description`. A view container that carries its own `name` and `label` beside its `object` binding is one such shape: it draws two warnings per container, and under `--strict` that flips the exit. Across this repository's example apps, only `app-showcase` gains warnings: two, on one permission set's policy `label` and `description`, and no example's exit code changes. To clear the warning, delete the key: nothing reads it.
+- e651556: `os validate`, `os build` and `os lint` refuse an `api` flow with no per-flow secret, the flow the automation engine already refuses to register (#20553).
+  
+  Clause-②: yes (narrowing — `os validate` / `os build` / `os lint` newly refuse a secretless `api`-bound flow; the new exported rule id `FLOW_API_TRIGGER_SECRET_MISSING` widens `@objectstack/lint`)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable changes spelling or type: `packages/spec` is untouched, and the start node `config` stays the open record it was. What changes is that three authoring commands, `os validate` / `os build` / `os lint`, now refuse one authored shape: an `api`-bound flow whose start node carries no usable `config.secret`. `objectstack migrate meta` could not rewrite that shape even in principle, because the missing value is a shared secret only the author and the sending system can supply. A stored flow of that shape has been refused at registration by `@objectstack/service-automation` since 17.5.0, whose published changelog entry records that load path's disposition; nothing here judges a stored row. -->
+  
+  **BREAKING** — an accept-set narrowing on three authoring commands, shipped as
+  `minor` under the launch-window convention (`check-changeset-no-major` refuses
+  `major` until GA; breaking-ness is carried by this banner and the ADR-0087
+  disposition above, not by the level). A stack that declares an `api`-bound flow
+  whose start node carries no usable `config.secret` used to pass `os validate`,
+  `os build` and `os lint`; they now exit non-zero and name the flow.
+  **One-line fix:** set a non-blank `config.secret` on the flow's start node — or,
+  for a flow that is only ever started explicitly, declare `type: 'autolaunched'`
+  with no `triggerType: 'api'`.
+  
+  `@objectstack/lint` gains one rule id, `flow-api-trigger-secret-missing`, at `error`, emitted by a new exported rule, `validateFlowApiTriggerSecret`, in the `validate-flow-trigger-readiness` family. It names a flow whose binding resolves to the inbound `api` trigger when that flow's start node carries no usable `config.secret`. A usable secret is a string that is non-empty after trimming. The rule fires for a missing, blank or non-string secret, and for an `api` flow with no start node.
+  
+  **Why.** ADR-0041's `trigger-api` acceptance criteria require a per-flow secret with HMAC verification. Since 17.5.0 the automation engine refuses such a flow in `registerFlow`, whatever its `status`: the `/automation` write doors answer `400`, and a boot skips the flow with a warning. `ApiTrigger.start()` also refuses to arm it. `os validate` builds neither, so it answered `✓ Validation passed` for a flow no runtime would register. It now exits non-zero and names the flow.
+  
+  **Which flows count as `api`-bound.** The rule uses the engine's own binding, `deriveTriggerBinding`. An array-form record `triggerType` goes to the record-change trigger first. Otherwise the flow gets the kind `resolveFlowTriggerKind` answers, which is a flow declaring `type: 'api'` or a start-node `triggerType: 'api'`. The engine gives the record-change, time-relative and schedule triggers precedence over `api`. So a `type: 'api'` flow whose start node also carries a `record-*` token, a `timeRelative` descriptor or a `config.schedule` binds that other trigger. The engine never asks that flow for a secret, and the rule stays silent on it.
+  
+  **Where the refusal surfaces.** `os validate`, `os build` and `os lint`. The runtime metadata publish gate is deliberately not covered yet (#20611): it judges a `/meta` save before the stored secret the flow read path withholds is restored, so for now a secretless flow saved there is still stored, and the engine then refuses it at registration.
+  
+  **Fix.** Set a non-blank `config.secret` on the flow's start node, and sign each post with it in the `x-objectstack-signature` header. A flow that is only ever started explicitly and never receives inbound posts is `type: 'autolaunched'`, with no `triggerType: 'api'` on its start node, and it needs no secret.
+  
+  `validateFlowApiTriggerSecret` and `FLOW_API_TRIGGER_SECRET_MISSING` are exported from `@objectstack/lint`.
+- 31ed067: The runtime metadata publish gate refuses an `api` flow with no per-flow secret, and reads a secret the flow read path withheld as present (#20611).
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable changes spelling or type: `packages/spec` is untouched, and the start node `config` stays the open record it was. What changes is that the runtime metadata write door now refuses one authored shape at publish: an `api`-bound flow whose start node carries no usable `config.secret`. `objectstack migrate meta` could not rewrite that shape even in principle, because the missing value is a shared secret only the author and the sending system can supply. Rows at rest are not judged or rewritten; the automation engine has refused to register such a flow since 17.5.0, and that load path's disposition is recorded in its own published changelog entry. -->
+  
+  **BREAKING** — an accept-set narrowing on the runtime metadata write door,
+  shipped as `minor` under the launch-window convention (`check-changeset-no-major`
+  refuses `major` until GA; breaking-ness is carried by this banner and the ADR-0087
+  disposition above, not by the level). An `active` save through `/meta` of an
+  `api`-bound flow whose start node carries no usable `config.secret` (a
+  `PUT /api/v1/meta/flow/:name`, or the publish of such a draft) used to be stored;
+  the automation engine then refused to register it (`400` on the `/automation`
+  doors, a skip with a warning at boot). It is now refused at the save with
+  `422 INVALID_METADATA`, the issue naming `flow-api-trigger-secret-missing` at the
+  start node's `config.secret`, and nothing is stored. A draft save is still
+  accepted; its publish is refused the same way.
+  **One-line fix:** set a non-blank `config.secret` on the flow's start node — or,
+  for a flow that is only ever started explicitly, declare `type: 'autolaunched'`
+  with no `triggerType: 'api'`.
+  
+  **What does not change: a signed flow's round trip.** Every served flow definition withholds the start node's `config.secret`, so a body saved back after a read arrives without it, and the save restores the stored secret only after every gate has run, so that no gate handles a restored credential. The gate is now told WHERE the save will restore a credential from the stored row: those positions only, never the values. `flow-api-trigger-secret-missing` reads a secret that was withheld and is stored as present, and one that is absent and not stored as missing. So a GET → edit → PUT of a signed flow, and the first save of a code-authored flow whose secret is in the app's source, keep passing and keep their secret. An explicit empty `config.secret` is the author's own value and is refused as blank.
+  
+  `@objectstack/lint`:
+  
+  - `validateFlowApiTriggerSecret` now runs on the runtime publish gate too (`surfaces` `['cli', 'runtime-publish']`, `runtimeTypes: ['flow']`). Its `surfaceReason` is gone.
+  - `AuthoringRuleContext` gains an optional `restoredCredentialPaths`: a `ReadonlySet<string>` of stack-relative positions in the rules' own finding-path spelling (`flows[0].nodes[1].config.secret`). Only the runtime publish gate sets it; `runAuthoringRules` never forwards it, so `os validate`, `os build` and `os lint` judge the author's own values as before.
+  - `runRuntimeAuthoringRules` accepts an optional `restoredCredentialPaths`: item-relative dotted positions in the `@objectstack/spec/kernel` redactor registry's `redactedKeys` spelling (`nodes.1.config.secret`). The gate re-spells them against the written item's place in its snapshot.
+  - `validateFlowApiTriggerSecret(stack, options?)` accepts an optional `{ restoredCredentialPaths }`, and treats a listed start-node secret position as present.
+  
+  `@objectstack/metadata-protocol`: `saveMetaItem` hands the runtime authoring gate the positions its own credential carry-forward will fill, computed from the same stored body. This costs one indexed `sys_metadata` read on an `active` save of a type with a registered redactor (`datasource`, and `flow` where the automation plugin registers one), and nothing for any other type or for a draft save. The carry-forward itself is unchanged and still runs after every gate. The draft→active promotion judges the stored draft row, which already holds what that draft's save carried forward, so it needs no such positions.
+- ed54768: A credential typed as a literal into a flow position that every flow reader is served now draws one `flow-credential-literal` warning at `os validate`, `os build`, `os lint` and the runtime publish gate, and the spec describes of those positions route an outbound credential to a declarative connector's `credentialRef` (#20654).
+  
+  Clause-②: no
+  
+  **Why.** A flow definition is served, as authored, to every member who can read flows. The flow read path withholds the credential slots the spec declares, but it cannot withhold a value inside an open map or a url, because it cannot tell a credential there from an ordinary value. The supported home for an outbound credential is a declarative connector: its `auth: { type, credentialRef }` names a secrets-layer reference that is resolved at boot and never stored in metadata.
+  
+  **What the warning covers.** An `http` node's `config.headers` entry, a query parameter of an `http` node's `config.url`, and a node's `connectorConfig.input` at any depth, including nodes inside `try_catch`, `loop` and `parallel` regions. A value draws when it is a non-blank string with no `{…}` template, and either its name reads as a credential (`Authorization`, `Cookie`, `x-api-key`, a name carrying `token`, `secret`, `password` and similar) or it opens with an auth scheme (`Bearer`, `Basic`, `Token`, `Digest`, `ApiKey`) followed by a value. A `{variable}` template is resolved per run and draws nothing.
+  
+  **What it does not do.** It never refuses: every finding is a `warning`, and a save, validate, build or lint that passed before still passes (`--strict` promotes it, as it promotes every warning). It never echoes the value it names. Nothing is withheld on any read.
+  
+  **Fix, by where the credential sits.** Declare a `connectors:` entry with a `provider` and call it from a `connector_action` node. A header credential goes to `auth: { type: 'bearer', credentialRef }`, or to `auth: { type: 'api-key', headerName, credentialRef }` for a key in a named header. A key in the url's query string goes to `auth: { type: 'api-key', paramName, credentialRef }`. On a connector node, drop the credential from `input`: the connector authenticates through its own `auth.credentialRef`.
+  
+  `@objectstack/lint` exports the rule `lintFlowCredentialLiterals`, its id `FLOW_CREDENTIAL_LITERAL`, and the one predicate it asks, `isCredentialShapedLiteral(name, value)`. In `@objectstack/spec`, only the descriptions of `HttpConfigSchema.headers` and a flow node's `connectorConfig.input` change; no shape changes.
+- 5e470f8: fix(lint)!: `os validate`, `os build` and `os lint` refuse a dataset dimension over a JSON-stored field, the group key the analytics door already refuses at query time
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a grouping TARGET at authoring time: a dataset dimensions entry whose field resolves to a declared structured-JSON field (json, composite, repeater, record, location, address, vector) or multi-value field (multiselect, checkboxes, tags, or a select, radio, lookup, user, file or image declared multiple: true). It is the authoring leg of the analytics door that already refuses every query grouping by such a column with 400 INVALID_FIELD, and that door's own changeset declared this category for this surface. No authorable key, spelling, export or stored shape moves: DatasetSchema keeps parsing every dimension, no stored row is read or rewritten, and which scalar part of a document, or which member of a list, an author meant to group on is not something a ledger entry can rewrite. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers a grouping target, and dataset-measure-aggregate-field-type-refused says in its own reason that a field used as a DIMENSION is untouched (not already-registered); and the change is a rule verdict, not a declaration (not runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING**: metadata that passed `os validate`, `os build` and `os lint` can now fail, and so can a runtime dataset save (Studio, REST `/meta`, MCP), which runs the same rule. A dataset dimension is a group key, and the analytics door refuses a query that groups by a JSON-stored column with `400 INVALID_FIELD` before any SQL is built, so such a dimension could be declared but never served. The new rule `dimension-json-stored-field-refused` (gating, `error`) refuses it where the author writes it. It ships as `minor` under the launch-window convention for accept-set narrowings. No export is removed. The package entry exports the new id as `DIMENSION_JSON_STORED_FIELD_REFUSED`, beside `MEASURE_AGGREGATE_FIELD_TYPE_REFUSED`, and the `rule` member of `DatasetMeasureAggregateFinding` gains it.
+  
+  **What is refused.** A dimension whose `field` resolves, on the dataset's object or across its join chain, to a field declared with a structured-JSON type (`json`, `composite`, `repeater`, `record`, `location`, `address`, `vector`) or a multi-value declaration (`multiselect`, `checkboxes`, `tags`, or a `select`, `radio`, `lookup`, `user`, `file` or `image` declared `multiple: true`). The two classes are `@objectstack/spec/data`'s `STRUCTURED_JSON_TYPES` and `isMultiValueField`, the predicates the analytics door reads.
+  
+  **What an author sees now.** The finding names the dataset, the dimension, the field, the object that declares it and its declaration, and says the analytics door refuses every query that groups by it. It names the route: group by a field that stores one scalar value, storing the part of the document you group on in a field of its own; for a multi-value field, filter by one member with `$contains` in a record query, one query per member. It is located at `datasets[N].dimensions[M].field`, name-keyed on the runtime wire.
+  
+  **Unchanged.** A dimension over any other field, a single-value `select` or `lookup` included; a dimension whose field does not resolve (`dataset-field-unknown` reports that) or declares no type; a dataset over an object this stack does not define; measures, filters and every other position. A cube dimension (`analyticsCubes`) is not judged: no authoring rule reads cubes.
+- 5e470f8: fix(lint)!: a dataset `count_distinct` measure over a field declared `multiple: true` is refused by `measure-aggregate-field-type-refused`, as the compile leg and the engine already refuse it
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered dataset-measure-aggregate-field-type-refused) the registered entry carries this family's hand-migration, an aggregate the field accepts with count as the one that stays for a JSON-stored field, and the count_distinct narrowing over the JSON-stored types already rides it. A select, radio, lookup, user, file or image field declared multiple: true is the one JSON-stored shape the per-type table cannot see; the dataset compile leg and the engine's count_distinct door refuse it beside the table's row, and this is the authoring leg of that same pair, so it adds no surface of its own. -->
+  
+  **BREAKING**: metadata that passed `os validate`, `os build` and `os lint` can now fail, and so can a runtime dataset save, which runs the same rule. `measure-aggregate-field-type-refused` reads the field's declaration, not its type alone: `count_distinct` over a `select`, `radio`, `lookup`, `user`, `file` or `image` field declared `multiple: true` is refused, because that field is a list stored as JSON and no two backends compare such values for equality alike. The dataset compile leg already answers the pair `400 DATASET_INVALID`, and the engine's `count_distinct` door answers it `400 INVALID_FIELD`. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  **What an author sees now.** The finding names the measure, the field, the object and the declaration with its flag (`select` with `multiple: true`), and says the aggregate accepts its row's types, none of them with `multiple: true`. The hint names the aggregates the declaration does accept, read from the same predicate: `count`.
+  
+  **What to write instead.** `count` over the field, or `count_distinct` over a field that stores one scalar value. To count the records holding one member, filter by it with `$contains` in a record query.
+  
+  **Unchanged.** `count_distinct` over the same types without the flag; `count` over any field; every other aggregate, whose rows accept no multi-capable type and whose verdicts therefore do not move; and the skips the rule already had.
+- ce8a6d2: `os validate`, `os build` and `os lint` now warn on a dashboard widget `options` key that no renderer reads, by name, as `unconsumed-widget-option` — the check the SDUI page save gate already ran on a `dashboard` node, now run over dashboard metadata (`*.dashboard.ts`, `defineStack({ dashboards })`).
+  
+  Clause-②: yes
+  
+  **What is flagged.** Every key in a dataset-bound widget's `options` outside the read set `CONSUMED_WIDGET_OPTION_KEYS` from `@objectstack/sdui-parser`: `dateGranularity`, `description`, `limit`, `sortBy`, `sortOrder`, `stageOrder`. `DashboardWidgetOptionsSchema` stays open (`.passthrough()`), so such a key still parses; it just stops being silent. Typical cases are `icon`, `columns`, `format`, `currency`, `color`, `suffix`, `showLegend` and `horizontal`, none of which styles anything on a widget bound to a dataset, and a misspelled declared key such as `sortDirection` or `granularity`. The finding is reported at `dashboards[N].widgets[M].options`, and its message names the key.
+  
+  **Where presentation goes instead.** A number's format and currency are the dataset measure's `format` and `currency`; a tile's accent is the widget's `colorVariant`; a chart's look is the widget's `chartConfig`.
+  
+  **Same check, same level, same exemptions.** The rule is `validateDashboardWidgetOptions`, exported from `@objectstack/lint` and registered for all three commands. It calls `checkDashboardWidgetOptions` from `@objectstack/sdui-parser` and keeps its `warning` level and `code`. Widgets with no `dataset`, legacy `component` widgets and widgets carrying `suppressWarnings: ['unconsumed-widget-option']` are not flagged. It does not run on the Studio/REST/MCP publish path.
+  
+  **What changes for a project.** Nothing is refused, and nothing changes without `--strict`. `os validate --strict` and `os lint --strict` now exit 1 instead of 0 on a stack that was otherwise warning-clean and writes such a key. Across this repository's example apps (`app-crm`, `app-todo`, `app-showcase`, `app-multi-package`), no dashboard writes one: zero findings, and no example's exit code changes. To clear the warning, delete the key, or move the intent to the home named above.
+- ee42f00: `os validate`, `os build` and `os lint` now check every keyed child of an action's translation entry against what the action declares, under both `objects.OBJECT._actions.ACTION` and `globalActions.ACTION`. Before this, only `params.NAME` was checked.
+  
+  Clause-②: yes
+  
+  **What is refused.** Two keys are new `translation-target-unknown` errors, the same code and level an undeclared `params` key already gets:
+  
+  - `outcomeMessages.OUTCOME` when the action's own `outcomeMessages` does not declare that outcome, or declares no `outcomeMessages` at all. `translateAction` overlays only the outcomes the action declares, so such copy is never shown.
+  - `resultDialog.fields.PATH` when no entry of the action's `resultDialog.fields[]` has that literal `path`, or the action declares no `resultDialog` or a dialog with no `fields`. The label lookup is keyed by each declared field's `path`, dots included, so such a label is never shown. The finding's config path quotes a dotted key as one member (`resultDialog.fields["client.ghost"]`).
+  
+  **What is warned.** `params.NAME.options.VALUE` under a declared param is judged against that param's inline `options[].value`. It is a `translation-option-key-unknown` warning, the code and level a field's `options` key already gets, and it names the stored value when the key is a display label. An options map under a param with no inline options and no `field` is warned once, because nothing reads it. A field-backed param with no inline `options` inherits its list from the field when the dialog renders, so its option keys are not judged.
+  
+  **What changes for a project.** A bundle that carries one of the refused keys now fails `os validate` with exit 1 instead of passing, and `os build` refuses it. The fix is to rename the key to a declared outcome or result-field `path`, declare the outcome or field on the action first, or delete the key. The option-key warning changes an exit code only under `--strict`. The four example apps (`app-crm`, `app-todo`, `app-showcase`, `app-multi-package`) and the bundle shipped with `@objectstack/platform-objects` produce no finding on any of these keys, so none of their exit codes change.
+
+### Patch Changes
+
+- f29c83d: Provenance comments in `@objectstack/lint`'s authoring-rule registry were re-anchored
+  
+  Five comment and docblock lines in `src/authoring-rules.ts` that cited tracker
+  numbers which no longer resolve on GitHub now cite the commit in this
+  repository's history that decided the matter, and keep saying what was
+  decided. Comments only: no rule id, finding message, hint, severity, type or
+  runtime behaviour changes.
+- c6b37cd: The `react-prop-deprecated` warning states its reason in words instead of citing a tracker number
+  
+  The finding `validateReactPageProps` reports for a react-page prop written in a
+  deprecated react-tier spelling used to end by pointing the author at an issue
+  number that no longer resolves. It now says what that decision was, in the
+  sentence being read: the react tier converges on the metadata-tier vocabulary,
+  so the deprecated spelling keeps working through the deprecation window and is
+  removed after it. The block tag, the prop and the canonical metadata-tier
+  spelling it names are unchanged, and so are the rule id, the `warning`
+  severity, the hint and every other finding.
+- 975b248: fix(objectql,spec)!: a `groupBy` on a multi-value field and a `count_distinct` on a JSON-stored field are refused with `INVALID_FIELD` / 400 at the engine's `aggregate`, on every driver, and the aggregate × field-type table stops accepting `count_distinct` over the JSON-stored types
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered dataset-measure-aggregate-field-type-refused) the one metadata-facing half of this change is a row of AGGREGATE_FIELD_TYPE_COMPATIBILITY narrowing, and that family's hand-migration is already registered under protocol major 18 by this id: "an aggregate the field's type accepts, per AGGREGATE_FIELD_TYPE_COMPATIBILITY", with every refused pair of the table refused at the compile door. The non-temporal sum / avg narrowing rode the same id the same way; this diff amends that entry's surface and acceptance prose to name the count_distinct rider, and corrects the min / max entry's route that called count_distinct valid over every type. The engine-door halves refuse a query shape, not a stored one: no authorable key, export or stored row moves. -->
+  
+  **BREAKING** (`@objectstack/objectql`): this narrows what `aggregate` accepts, in two positions, on every driver and for every caller that reaches the engine (the REST query door, a flow or hook, and the analytics strategy that lowers a cube query onto `engine.aggregate`). Shipped as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  - A `groupBy` entry that names a **multi-value** field: an inherently-multi option type (`multiselect`, `checkboxes`, `tags`), or a `select`, `lookup`, `user`, `file` or `image` field declared `multiple: true`. Both entry spellings are judged, the field name and the `{ field }` object.
+  - A `count_distinct` aggregation over a **JSON-stored** field: a structured-JSON type (`json`, `composite`, `repeater`, `record`, `location`, `address`, `vector`), an inherently-multi option type, or a multi-capable field declared `multiple: true`.
+  
+  **BREAKING** (`@objectstack/spec`): `AGGREGATE_FIELD_TYPE_COMPATIBILITY.count_distinct` no longer lists the ten JSON-stored types (the structured-JSON seven and `multiselect`, `checkboxes`, `tags`), so `isAggregateCompatibleWithFieldType('count_distinct', type)` answers `false` for them. Every reader of the table refuses those pairs now: the dataset-measure lint rule (`measure-aggregate-field-type-refused`, run by `os validate` and at a runtime dataset save), the analytics dataset compile leg (`400 DATASET_INVALID`), and the engine door above. The `count` row is unchanged.
+  
+  **What an author sees now.** `400 INVALID_FIELD`, naming the position (`groupBy[0]`, `groupBy[0].field`, or `aggregations[0].field`), the field and its declaration, saying the query was not run, and naming the route inside the first 500 characters the REST door keeps. For a multi-value field the route is to filter by one member: `where` with `$contains` on the field, one query per member. For a structured-JSON field it is to store the part you count in a field of its own, or to count rows with `count`. The thrown error carries `field`, `fields`, `object` and `param` (`groupBy` or `aggregations`).
+  
+  **Why a refusal.** Every SQL driver stores these values in a JSON column, and the drivers share no meaning for one as a group key or a distinct key. Measured through `POST /api/v1/data/:object/query` over three rows: grouping by any of the eight multi-value declarations answered one group per array on the in-memory driver, one group per serialized array on SQLite, and 500 `DATABASE_ERROR` on PostgreSQL 16. `count_distinct` over any structured-JSON or multi-value field answered 3 on the in-memory driver (equal values counted apart), 2 on SQLite (serialized text compared), and 500 on PostgreSQL (no equality operator for `json`). No example app and no published stack groups by a multi-value field or counts one distinct, so no meaning is defined for either here.
+  
+  **What to write instead.** A dataset measure or a query that counted a JSON-stored field distinct: use `count` over it, or store the scalar part you meant to count in a field of its own and `count_distinct` that field. A grouping by a multi-value field: filter by each member with `$contains` and count.
+  
+  **Who is affected.** A caller that grouped by a multi-value field, or counted a JSON-stored field distinct, on the in-memory driver or on SQLite and read the answer as a real one; on PostgreSQL both were already a 500. A dataset whose measure pairs `count_distinct` with a JSON-stored field is refused by the lint rule and the compile leg.
+  
+  **Unchanged.** (Two shapes the structured-JSON `groupBy` entry of this same release lists as unchanged are narrowed here: a `multiple: true` select as a group key, and `count_distinct` over a structured-JSON field. This entry is the later word on both.) A `groupBy` or `count_distinct` on a scalar-stored field, a single-value `select` or `lookup` included; `count` over any field; the `having`, filter and sort positions; and an undeclared name, which the REST door answers `INVALID_FIELD` as unknown before the engine is reached.
+  
+  `@objectstack/lint`: the dataset-measure refusal's hint no longer says `count_distinct` accepts every type.
+  
+  `@objectstack/service-analytics`: the dataset compile leg's refusal of a `count_distinct` measure over a JSON-stored field says why it diverges (the drivers compare the values for equality three ways) and prescribes `count`, or a scalar field for the part being counted; its other refusals no longer say `count_distinct` accepts every type.
+- b84b240: feat(cli)!: `objectstack validate` and `objectstack build` refuse a field whose `picklist` names no picklist the stack declares, and lint R8 counts `picklist` as an options source (#20825)
+  
+  Clause-②: no (narrowing — `objectstack validate` / `objectstack build` newly refuse a field `picklist` that names no picklist the stack declares; the R8 change removes a false-positive warning and widens no accept set of its own)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable changes spelling or type: `packages/spec` is untouched, and `Field.picklist` stays the snake_case name it was. What changes is that two authoring commands now refuse one authored shape, a field whose `picklist` names no picklist in the stack. `objectstack migrate meta` could not rewrite that shape even in principle, because which list the author meant is not in the metadata. Nothing here judges a stored row. -->
+  
+  **BREAKING** — an accept-set narrowing on two authoring commands, shipped as
+  `minor` under the launch-window convention. A stack with a select field whose
+  `picklist` names no picklist the stack declares — `picklist: 'industy'` beside a
+  `picklists: [{ name: 'industry', … }]` — used to pass `objectstack validate` and
+  `objectstack build` (which wrote the artifact). Both now exit 1 and name the field
+  and the list it names (`picklist-reference-unknown`).
+  **One-line fix:** correct `picklist` to a list the stack declares, or declare the
+  list it names (`picklists: [{ name, label, options }]`, or a `*.picklist.ts` file the
+  stack imports).
+  
+  **Which references are judged.** The ones the load path registers: the top-level
+  `objects` and `objectExtensions` of a one-package stack, or each `packages[]`
+  entry's own. A reference resolves against every picklist the stack declares,
+  including one a sibling package in the same artifact owns.
+  
+  **A list from a package outside the stack is reported, not refused.** When the
+  package declaring the field lists a `manifest.dependencies` entry the stack does not
+  carry, the list may live there, and these commands cannot read it. That reference is
+  an `info` notice (`picklist-reference-unverified`) in `warnings` and on the console,
+  naming the field, the list and the dependencies — never a failure, not even under
+  `--strict`.
+  
+  **Lint R8 (`field/select-missing-options`)** no longer reports a select, multiselect
+  or radio field that names a `picklist`: the picklist is its options source. The
+  warning it used to give pointed at `options`, which a field naming a `picklist`
+  cannot add — the field schema refuses the two together. A select with neither still
+  warns, and its fix now names both sources as alternatives.
+- a29a0ea: feat(spec)!: an `object-master-detail-form` block's detail entries are a strict shape, and their columns are the inline grid column contract (#20928)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered ui-object-master-detail-form-details-closed -->
+  
+  **BREAKING** — an accept-set narrowing on a published authoring surface, shipped as `minor` under the repo's launch-window convention for accept-set narrowings. The console's master-detail grid reads one column shape from three carriers: a relationship field's `inlineColumns`, a form view's `subforms[].columns`, and an `object-master-detail-form` page block's `details[].columns`. The first two were judged; the third was `z.array(z.unknown())`.
+  
+  **`@objectstack/spec`**
+  
+  - **`ComponentPropsMap['object-master-detail-form'].details`** is now an array of strict detail entries: `childObject` (required), `relationshipField`, `columns`, `formFields`, `inlineMode` (`grid` | `form`), `amountField`, `sortField`, `totalField`, `title`, `minRows`, `maxRows` and `addLabel` — the keys the console's `MasterDetailForm` reads off an entry. An unknown key is named, with a rename for the near-misses a form view's `subforms[]` entry also answers (`foreignKey` → `relationshipField`, `object` → `childObject`, …).
+  - **`details[].columns`** references `InlineGridColumnSchema`, the strict, name-keyed column the other two carriers take. Every rule the column schema holds applies here too, with its own message: an unknown key is named; the retired `field` spelling (and `fieldName`, `key`) is refused with the prescription naming `name`; a column without `name` is refused; `scale` on a column declaring `type: 'currency'` is refused with the currency ruling's remedy. Page-component `properties` is read by the component-props gate, so `objectstack validate`, `build` and `lint` report these as advisory `component-props-unknown-key` / `component-props-invalid` findings; a stored page still saves and loads, because `properties` is not parsed on the metadata save or load path.
+  - **`defineStack`'s cross-reference check** now reaches the block wherever a page carries it (a region, a container's children, a slot) and judges a detail column that declares no `type` as the type it renders, as it already does on the other two carriers: an identity-only column over a `currency` field of the entry's `childObject` that carries `scale` is refused with the column schema's own message (`STACK_CROSS_REFERENCE_INVALID`, 422). A child object the stack does not declare, a column naming no field of it, and a column the column schema refuses on its own (left to the component-props gate) are not judged there.
+  - **New type `ObjectMasterDetailFormPropsParsed`** — the post-parse shape of `ObjectMasterDetailFormProps`. The two now differ, because a column's `readonlyWhen` / `requiredWhen` bare-string predicate normalizes to an Expression envelope at parse.
+  
+  **`@objectstack/lint`**
+  
+  - **`field-no-consumers`** reads an `object-master-detail-form` detail entry as the child collection it is: a column `name`, `amountField` and `relationshipField` credit the field of the entry's `childObject`, `totalField` the parent's, and an entry with no `columns` credits the columns the child derives. A child field drawn only by a master-detail block's grid was reported inert.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `details: [{ title: 'Lines' }]` | `details: [{ title: 'Lines', childObject: 'invoice_line' }]` |
+  | `details: [{ childObject: 'invoice_line', columns: ['product', 'quantity'] }]` | `details: [{ childObject: 'invoice_line', columns: [{ name: 'product' }, { name: 'quantity' }] }]` |
+  | `details: [{ childObject: 'invoice_line', columns: [{ field: 'quantity' }] }]` | `details: [{ childObject: 'invoice_line', columns: [{ name: 'quantity' }] }]` |
+  | `details: [{ childObject: 'invoice_line', columns: [{ name: 'amount', type: 'currency', scale: 2 }] }]` | `details: [{ childObject: 'invoice_line', columns: [{ name: 'amount', type: 'currency' }] }]` |
+  | `columns: [{ name: 'amount', scale: 2 }]` where `amount` is a `currency` field of the entry's `childObject` | `columns: [{ name: 'amount' }]` |
+  | a detail entry or column carrying a key its shape does not declare | the entry or column without that key |
+  
+  The one-line fix: give every detail entry its `childObject`, write each column as `{ name, … }` using only the keys a relationship field's `inlineColumns` accepts, and delete `scale` from any column that renders as a currency column, whether it declares `type: 'currency'` or takes it from a `currency` child field. Nothing replaces `scale` there: the currency's ISO 4217 minor unit decides the displayed decimals.
+  
+  ## Who is affected, measured
+  
+  On `origin/main` `ebdb6f2aca`: one authored `object-master-detail-form` block in the examples (the showcase project workspace, one entry `{ title, childObject, addLabel }`, no columns), which parses unchanged, and one documentation example whose three bare-string columns are rewritten as `{ name }` columns in this change. Zero `field`-keyed detail columns. Deployed metadata was not measured.
+- 3693a1b: `field-no-consumers` no longer calls a field inert when an inline grid column names it
+  
+  `os validate`, `os build` and `os lint` warned that a child object's field was inert ("no site of any kind names it") when the only thing naming it was an inline master-detail grid column, such as `{ name: 'quantity' }`. The warning told an author to delete a field the grid draws. A column's `name` is now read as a reference to the child object's field, on both carriers of the column:
+  
+  - a relationship field's `inlineColumns`. The field sits on the child object and its `reference` names the parent, so the column names a field of the object that declares the relationship field. The grid is drawn only when that field sets `inlineEdit`. Without it, the columns draw nothing, and the field is reported `carrier-only` with the column listed as a site a removal must clean.
+  - a form view's `subforms[].columns`, on the view's `form` and on every `formViews` entry. The column names a field of the entry's `childObject`, not of the object the view is bound to.
+  
+  `name` anywhere else is still a literal and never a field reference. The rule id, the `warning` severity and the finding's shape are unchanged. The message now also lists an inline grid column among the consumers, and an `inlineColumns` entry on a field without `inlineEdit` among the carriers.
+- e07566b: `deriveInlineGridColumns` (`@objectstack/spec/data`) derives the default columns of an inline master-detail grid, and `field-no-consumers` stops calling two kinds of in-use child field "inert" (#20951).
+  
+  Clause-②: yes (widening)
+  
+  - **`@objectstack/spec`.** New exports from `@objectstack/spec/data`: `deriveInlineGridColumns(def, { relationshipField?, exclude?, maxColumns? })`, its element type `DerivedInlineGridColumn`, and `DEFAULT_MAX_INLINE_GRID_COLUMNS` (`6`). The function answers which child fields an inline grid draws when its author listed no columns: a relationship field with `inlineEdit` and no `inlineColumns`, or a `subforms` entry with no `columns`. It returns identity-only entries (`{ name }`, plus `defaultHidden: true` on columns past the visible budget, which collapse into the column chooser and are never dropped), in the child's field order, skipping system, audit, tenancy, ownership and sort-position names, the relationship field, `system` / `readonly` / `hidden` fields and the types a grid cell cannot edit. It is the renderer's current rule, reproduced exactly; the renderer hydrates each column from the child field. No schema accepts anything new or refuses anything new.
+  - **`@objectstack/lint`.** `field-no-consumers` now reads a `subforms` entry's `amountField` and `relationshipField` against the entry's `childObject`, and keeps `totalField` on the parent. It also credits the columns of a derived inline grid through `deriveInlineGridColumns`. Before, `os validate` warned that the child's summed amount column, the subform's relationship field and every derived grid column were inert, and credited a same-named parent field in the amount column's place. A field the derivation leaves out (for example a `hidden` one) is still reported.
+- 327391c: fix(lint): a liveness finding's fix text is the row's `authorHint`, else the verdict's default hint, and never the row's internal ledger `note`, for every row class. Before this, a row that opted in with `authorWarn`, and an `experimental` row, with no `authorHint` printed its `note` as the fix text: on `app-showcase`, the two `liveness-planned-property` findings for `externalSharingModel` printed a 728-character maintainer note that cites a tracker id. They now print "Keep it — a consumer is being built against this property; it has no runtime effect yet." No rule id, message, severity or exit code changes, and a row that has an `authorHint` prints it exactly as before (#21096)
+  
+  Clause-②: no
+- 3dc33b2: **BREAKING** — an anonymous public form no longer offers record search. The form field's `publicPicker` block (`view.form.sections[].fields[].publicPicker`: `displayFields`, `maxResults`, `filter`, `object`) is removed, and the anonymous lookup route `GET /api/v1/forms/:slug/lookup/:field` is deleted. A public form's `lookup`, `master_detail` and `user` fields are now always left off its anonymous rendering, whatever the form declares.
+  
+  Clause-②: yes (narrowing)
+  
+  Retired immediately (ADR-0087 D2), with no alias window: the maintainer's ruling reverses the earlier one that had declared the key. Mainstream web-to-lead forms do not let an anonymous visitor search records either, and no example, template, plugin or first-party UI declared or called the picker.
+  
+  ## FROM → TO
+  
+  | you wrote (17.5 and earlier) | write instead |
+  | --- | --- |
+  | `{ field: 'account', publicPicker: { displayFields: ['name'], maxResults: 10 } }` on a public form | delete the `publicPicker` block — the field is left off the anonymous rendering anyway |
+  | a public form whose visitors chose from a short, fixed list of records | a `select` field with static `options` listing the choices |
+  | a public form whose visitors had to pick an existing record | the same form behind sign-in (an internal form), where the lookup field searches with the signed-in user's own access |
+  | a client calling `GET /api/v1/forms/:slug/lookup/:field` | nothing to call: the path is no longer registered and answers what any unregistered path answers (`404 ENDPOINT_NOT_FOUND`) |
+  
+  **The one-line fix:** delete the `publicPicker` block; an anonymous public form no longer offers record search. Use a `select` field with static `options`, or put the form behind sign-in.
+  
+  **What an author who still writes it sees.** `tsc` fails at the authoring site (`FormFieldInput` types the key `never`), and the parse — `defineView()`, `defineStack({ views })`, `os validate`, `PUT /api/v1/meta/view/:name` — refuses it at `…sections[N].fields[N].publicPicker` with the prescription:
+  
+  > `view.form.sections[].fields[].publicPicker` was removed in @objectstack/spec 17.6.0 (ADR-0087 D2) — an anonymous public form no longer offers record search: lookup, `master_detail` and `user` fields are always left off the anonymous rendering, and the anonymous record-search route (`GET /forms/:slug/lookup/:field`) no longer exists. Delete the key (the whole `publicPicker` block). To let a visitor choose from a fixed list, use a `select` field with static `options`; to let them pick an existing record, put the form behind sign-in. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.
+  
+  **What a REST client sees.** The two error codes only that route produced, `LOOKUP_NOT_PUBLIC` and `LOOKUP_TARGET_MISSING`, leave the error-code ledger with it. `GET /api/v1/forms/:slug` and `POST /api/v1/forms/:slug/submit` are unchanged apart from the unconditional strip above.
+  
+  ## The retirement kit
+  
+  - **A `retiredKey()` tombstone on the form field**, so the parse carries the prescription instead of a bare unknown-key verdict. The block's own schema and its two types go with it: `FormFieldPublicPickerSchema`, `FormFieldPublicPicker` and `FormFieldPublicPickerParsed` are no longer exported, and `ui/FormFieldPublicPicker` is no longer published as a JSON Schema.
+  - **The D2 conversion `form-field-public-picker-removed`** (protocol 18, retired from the load path) deletes the key from every form field of every form payload — `sections[]`, `groups[]`, top-level `fields[]` and nested rows. Its D3 record is the semantic entry `form-field-public-picker-retired`, which asks the author how a visitor should now choose.
+  - **`@objectstack/rest`:** the lookup route and its filter-lowering helper are deleted, and the resolve route's strip of lookup / `master_detail` / `user` fields no longer has an opt-in.
+  - **`@objectstack/lint`:** the preset-comparand rule no longer reads a picker's `filter` (its claiming reader for that position went with the key).
+  
+  ## What an operator with a STORED form sees
+  
+  A `sys_metadata` view row saved before this release may still carry the key. Nothing breaks at read: the conversion replays on rehydration and strips it, so the view is served canonical and parses, and the field stays off the anonymous rendering either way. `os migrate meta --stored` lists those rows, and `--apply` rewrites them.
+  
+  <!-- adr-0087: registered form-field-public-picker-removed, form-field-public-picker-retired -->
+- aa23e2c: Provenance comments in `@objectstack/lint` were re-anchored
+  
+  Comment and docblock lines under `src/` that cited tracker numbers which no
+  longer resolve on GitHub now cite the commit in this repository's history that
+  decided the matter, and say in their own words what was decided. Comments
+  only: no rule id, finding message, hint, severity, type or runtime behaviour
+  changes.
+- 315888d: feat(spec): one list of page-component slot positions, derived from the component rows and read by every page walk — `page:card`'s `footer` is now walked by all three (#20940)
+  
+  The platform has three walks that descend into a page component's `properties` bag, and each kept its own list of where child components hang: the ADR-0087 conversion walker (`children`, `body`, `footer`, `items[].children`), `@objectstack/lint`'s `walkPageComponents` (the same four) and the exported `walkAddressedPageComponents` (`children`, `items[].children`). So a node in a card's `footer` — a declared, rendered slot ("Card footer components (slot)") — was judged by `os lint` and skipped by every consumer of the exported walk: `translatePage` left its copy untranslated, `os i18n extract` offered no key for it, and objectui's validator passed it unjudged.
+  
+  **`@objectstack/spec` — new exports `pageComponentSlotPositions()` and `PageComponentSlotPosition` (`@objectstack/spec/ui`).** The component rows now mark each composition slot at its declaration, and `pageComponentSlotPositions()` derives the one list from `ComponentPropsMap`: `children`, `footer` and the panel position `items[].children`, plus the tombstoned `body` flagged `retired: true`. The marker changes nothing about the schema it marks — the parse, the JSON Schema and the authorable surface are unchanged. The list is derived on first call and memoized, never at import. `minor` because the package's public surface grows by these two exports.
+  
+  **`walkAddressedPageComponents` descends `properties.footer`.** It reads the list's authorable entries, in the list's order (`children`, `footer`, then `items[].children`); signature and return shape are unchanged. What follows from it:
+  
+  - `translatePage` translates the copy of a component in a card footer through `pages.<name>.components.<id>`, like any other nested component.
+  - `os i18n extract` offers those keys, and `os i18n check` counts them, for a stack whose card footers hold components with an `id` and copy.
+  - objectui's validator, which judges the nodes this walk visits, now judges a card footer's nodes.
+  
+  `page:card.body` stays undescended, as #5775 ruled: it is not an authorable spelling.
+  
+  **The conversion walker reads every entry, the retired one included.** Its reach does not change: it descends `children`, `body`, `footer` and `items[].children`, as before. Stored documents still carry `body`, the renderers still draw it, and a conversion that runs before `page-card-body-to-children` meets the sub-tree there. Within one component the visit order is now `children`, `body`, `footer`, then the panels. That order is observable only as the order of the notices for a component that carries both a direct slot and panels.
+  
+  **`@objectstack/lint` — `walkPageComponents` reads the list's authorable entries.** It walks `footer` as before, and it stops walking the retired `body` spelling. The walk matches by shape, so this drops a `body` array on any component, not only on `page:card`. #5775 (maintainer ruling 2026-08-06, direction A) made `children` the one composition key. The renderers keep reading `body` only as a back-compat fallback for stored documents. On `page:card` the tombstone's rename prescription still refuses `body`, and so does the thin containers' guidance; the sub-tree is judged once it sits under `children`. So the rules built on this walk no longer report findings about nodes under any component's `body` array. The conversion walker keeps reaching them for stored documents.
+  
+  **`@objectstack/cli`:** no code change. `os i18n extract` and `os i18n check` pick up the `footer` component keys through the shared walk. The extractor's object-section pass stops reading `record:details` sections under a retired `body`, through lint's walk.
+  
+  **Why no ADR-0087 ledger entry.** Nothing an author writes moves: no spec key is retired or renamed, no stored `sys_metadata` shape changes, and no conversion or migration id is touched. `objectstack migrate meta` has nothing to act on.
+- Updated dependencies [e5c7d07]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [a093ce3]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [3fbf3ca]
+- Updated dependencies [24d521e]
+- Updated dependencies [3a89d45]
+- Updated dependencies [f379f57]
+- Updated dependencies [5bed1f6]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [7510663]
+- Updated dependencies [1a75e39]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [ace770d]
+- Updated dependencies [ed54768]
+- Updated dependencies [99786f9]
+- Updated dependencies [63bfe69]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [f10d802]
+- Updated dependencies [93e9e42]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [ceee88f]
+- Updated dependencies [e18fea6]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [26437ae]
+- Updated dependencies [05be352]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [70dae53]
+- Updated dependencies [665cab3]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [df1feae]
+- Updated dependencies [336e191]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [24c554d]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [cfa9315]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [b8191f7]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+  - @objectstack/spec@17.6.0
+  - @objectstack/sdui-parser@17.6.0
+  - @objectstack/formula@17.6.0
+
 ## 17.5.0
 
 ### Minor Changes

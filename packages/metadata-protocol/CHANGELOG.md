@@ -1,5 +1,668 @@
 # @objectstack/metadata-protocol
 
+## 17.6.0
+
+### Minor Changes
+
+- 9905e61: fix(metadata-protocol,spec)!: a saved view stores the parsed value of every key its body carried, and a ViewItem record's top-level `options` bag is refused by name (#20051)
+  
+  **BREAKING** — two narrowings on the `view` write door (`PUT /api/v1/meta/view/:name`, the Studio and MCP save). They ship as `minor` under the repo's launch-window convention for breaking changes. This is stage (iv), the last stage, of ruling 甲 on #20051. The storage half follows the maintainer's ruling on its Q2, letter B (「同意  批次 #256」).
+  
+  Clause-②: no (narrowing)
+  
+  ## What changes
+  
+  **1. What a saved view stores.** `saveMetaItem` used to validate a `view` body and then store the request body as sent, with two normalizations grafted back (filter operator spellings, and form `groups` → `sections`). It now stores the parsed value of every key the body carried, and nothing else:
+  
+  - **An undeclared key is dropped.** The members' top-level `.strip()` used to drop it from the parse only, so it lived in the store and nowhere in the contract. Every key the console reads back off a stored row is declared (`VIEW_CONSOLE_ROUND_TRIP_KEYS`), so nothing the console relies on is lost. The keys the console writes that are dropped are the ones mapped rather than declared in that record: a sort row's `id` (the builders mint a fresh one), a top-level `id` (read only when a row has no `name`), and `objectName` (every reader falls back to `object`, which both writers stamp).
+  - **A declared key keeps its normalized value.** Examples: `notEquals` → `not_equals`, `exportOptions: ['csv']` → `{ formats: ['csv'] }`, and a CEL string → its expression object.
+  - **A moved key is stored under its canonical spelling.** Examples: `groups` → `sections`, and `visibleOn` → `visibleWhen`. The second was never grafted before, so a form stored with `visibleOn` kept the legacy spelling.
+  - **A schema default the author did not write is NOT stored.** This is ADR-0087's `storable` rule, the one flows already follow: a stored row never pins the day's default. A console toolbar save (sort, density, hidden fields, column widths, inline edit) stores no `type: 'grid'`. A form stores no `sharing.enabled` and no section `collapsible` / `collapsed` / `columns` it did not write. Storing the whole parse output instead would also have minted rows that fail their own re-save: a column-less toolbar patch carrying the `grid` default is refused as "sets `type` but lists no `columns`".
+  
+  The stored row re-parses to exactly what the save accepted, so a GET → PUT of it is judged the same. Every other metadata type keeps its request body, with the two grafts, as before.
+  
+  **2. A ViewItem record's top-level `options` bag is refused.** On a record (`{ name, object, viewKind, config }`), the member's top-level strip used to drop `options` from the parse unread while the save stored it. The interface page then rendered it and the object page did not. It is now refused by name with `422 INVALID_METADATA` at `options`, and the message prescribes `config.KIND`. No console write puts the bag on a record. The flattened list overlay's legacy `options` bag is unchanged: it is judged key by key, and objectui pins it.
+  
+  ## FROM → TO
+  
+  | you wrote | the stored row / the door now |
+  |:--|:--|
+  | a view body with a key its member does not declare (`objectName`, a form-only `layout` on a list view, `isPinned` on a form) | the key is not stored: write only declared keys (`object`, not `objectName`) |
+  | a view body relying on a schema default being written into the row | the row carries only what you wrote; the parse applies the default on every read |
+  | `sort: [{ id, field, order }]` | stored as `sort: [{ field, order }]` |
+  | `groups: [...]` / `visibleOn: '…'` on a form | stored as `sections: [...]` / `visibleWhen: { dialect: 'cel', source: '…' }` |
+  | a ViewItem record with `options: { kanban: {...} }` | `422` at `options`: move it to `config: { kanban: {...} }` (`config.KIND`), or remove it |
+  
+  **The one-line fix:** write the declared spelling. A stored view you read back is what the contract accepts, and a record's per-kind blocks live under `config`.
+  
+  ## Existing rows
+  
+  Stored rows are not migrated and not re-read differently. The maintainer's word on this card is 「20051 不考虑现有的数据」. A row keeps its bytes until its next save, and that save stores it as described above. A record carrying a top-level `options` is refused on its next save and served as stored until then.
+  
+  <!-- adr-0087: registered view-item-options-bag-refused -->
+- b531c7b: `os serve` hands the runtime metadata save door the deployment's SDUI component manifest, and the save door compiles an html page's `source` against it: an unknown component or a `requires` that disagrees with the source is refused with a `422`, and `requires` is stamped from the compiled source (ADR-0080 §5).
+  
+  Clause-②: yes (narrowing — on a host that registers a manifest, the runtime metadata save door newly refuses an html page whose source uses a component the manifest does not declare, or whose `requires` disagrees with its source; the new exported `SDUI_MANIFEST_SERVICE` widens `@objectstack/metadata-protocol`)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable changes spelling or type: `packages/spec` is untouched, and `page.source` and `page.requires` keep their declared shapes. What changes is that the runtime metadata write door, on a host that registers the deployment's SDUI component manifest, now refuses two authored shapes at publish: an html page whose source uses a component the manifest does not declare, and one whose `requires` disagrees with the namespaces its source uses. `objectstack migrate meta` could not rewrite either even in principle: which component a page meant, and which plugin should provide it, is the author's decision. Rows at rest are not judged or rewritten. -->
+  
+  **BREAKING** — an accept-set narrowing on the runtime metadata save door, shipped
+  as `minor` under the launch-window convention (`check-changeset-no-major` refuses
+  `major` until GA; breaking-ness is carried by this banner and the ADR-0087
+  disposition above, not by the level). On a server that has a manifest, a
+  `PUT /api/v1/meta/page/NAME` (and the draft publish) of a `kind: 'html'` page used
+  to store the source unjudged; it now answers `422 INVALID_METADATA` when the source
+  uses a component the deployment's console does not provide, naming the component in
+  each issue's `where` and `message`, or when a hand-written `requires` lists a
+  namespace the source does not use, omits one it does, or names one no component in
+  the manifest carries. **One-line fix:** use a component the manifest declares (or
+  install the plugin that provides it in the console the deployment serves), and omit
+  `requires` — it is derived from the source.
+  
+  **The channel.** `@objectstack/metadata-protocol` exports `SDUI_MANIFEST_SERVICE`
+  (`'sdui-manifest'`), a plain service key. `os serve` resolves the manifest once at
+  boot through the same resolver `os validate` uses — the project's own
+  `sdui.manifest.json` beside the served config, then the copy `@objectstack/console`
+  ships — and registers it under that key. The save door reads the key on every
+  publish, so a host that registers or replaces it later is seen by the next save.
+  
+  **The compile.** The save door runs `@objectstack/sdui-parser`'s `compile()`, the
+  compiler behind `os validate`'s JSX page gate, against the registered manifest. Its
+  diagnostics carry the same rule ids the CLI reports (`jsx-forbidden-tag`,
+  `jsx-unknown-component`, …); errors refuse the publish, warnings ride the response's
+  `advisories`. A disagreeing `requires` is refused under
+  `page-requires-disagrees-with-source`. A page that compiles is stored with the
+  `requires` its source yields, on a draft save too; a draft that does not compile, or
+  whose `requires` disagrees, is stored as written (drafts are not gated) and its
+  publish refuses it.
+  
+  **Without a manifest nothing changes.** A host that resolves no manifest registers
+  nothing and prints one boot line — `Page source and \`requires\` not validated at
+  save`, naming every place looked — and the save door stores html pages exactly as
+  before. A registered value with no `components` map is warned about once and never
+  compiled against.
+  
+  Measured before the refusal shipped: the three html pages in this repository
+  (`examples/app-showcase`: `showcase_capability_map`, `showcase_command_center_jsx`,
+  `showcase_start_here`) all compile against the pinned console's manifest with no
+  diagnostic and yield `requires: ['ui']`; none authors `requires`.
+- c96beb2: fix(security): a flow's inbound-hook secret is withheld from every served flow definition, and a read → edit → republish round trip keeps it (#20552)
+  
+  Clause-②: yes (widening)
+  
+  **The widening.** `@objectstack/metadata-protocol` gains one public method,
+  `ObjectStackProtocolImplementation.getMetaItemsForExecution`. It returns the stored
+  bodies without the serving decorations, for in-process binders that execute what they
+  read. No door that answers a caller may use it.
+  
+  An `api` flow's start node carries its inbound hook's HMAC secret (`config.secret`,
+  ADR-0041), the one credential that hook has. Every read that served the flow's
+  definition served the secret with it, to any authenticated caller. It is now
+  withheld from what is SERVED, and from nothing the engine executes.
+  
+  **What no longer carries the secret.** The automation domain's flow-definition read
+  and the flow its `POST` / `PUT` / clone doors answer with; and on the metadata plane,
+  every read of a flow — item, list, layered, draft preview, published snapshot, diff,
+  audit — plus a package export. The key is removed, not masked: a mask is a non-blank
+  string the registration gate would accept as the secret.
+  
+  **Consequence for a reader.** A client that read the secret back from a definition
+  no longer can. A package exported from one deployment and imported into another
+  arrives without it, and its `api` flows are refused at registration until a secret is
+  set on the start node again.
+  
+  **The round trip.** A save that carries the projected form — no `secret` where the
+  read served none — keeps the stored secret, on both authoring surfaces (the metadata
+  plane's save door and the automation domain's `PUT` / `POST`). Only an explicit value
+  replaces it, so a rotation is written as before. The start node is matched by its
+  `id`, not its position, so an edit that reorders `nodes` keeps it too. The first save of an item that has no stored row yet, such as a code-authored flow or datasource, takes the value from the code layer the read served, for every type with a registered redactor.
+  
+  - `@objectstack/service-automation` owns the projection (`redactFlowCredentials`) and
+    registers it as the `flow` read-path redactor at plugin `init`. The engine keeps
+    binding with the stored secret: it now reads flows from the protocol's execution
+    face, because the served face no longer holds the credential its hooks verify
+    against.
+  - `@objectstack/metadata-protocol` gains `getMetaItemsForExecution` on
+    `ObjectStackProtocolImplementation` — the same flattened list `getMetaItems`
+    serves, without the serving decorations (no `_diagnostics`, no credential
+    redaction). It is for in-process engines that execute what they read; every door
+    that answers a caller keeps serving `getMetaItems`. `carryForwardRedactedValues`
+    now follows a redacted path through an array by the element's `id`.
+  - `@objectstack/metadata`'s `getPublished` applies the type's registered read-path
+    redactor to the body it returns. It was the one metadata read exit that served a
+    stored body without it.
+- 31ed067: The runtime metadata publish gate refuses an `api` flow with no per-flow secret, and reads a secret the flow read path withheld as present (#20611).
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable changes spelling or type: `packages/spec` is untouched, and the start node `config` stays the open record it was. What changes is that the runtime metadata write door now refuses one authored shape at publish: an `api`-bound flow whose start node carries no usable `config.secret`. `objectstack migrate meta` could not rewrite that shape even in principle, because the missing value is a shared secret only the author and the sending system can supply. Rows at rest are not judged or rewritten; the automation engine has refused to register such a flow since 17.5.0, and that load path's disposition is recorded in its own published changelog entry. -->
+  
+  **BREAKING** — an accept-set narrowing on the runtime metadata write door,
+  shipped as `minor` under the launch-window convention (`check-changeset-no-major`
+  refuses `major` until GA; breaking-ness is carried by this banner and the ADR-0087
+  disposition above, not by the level). An `active` save through `/meta` of an
+  `api`-bound flow whose start node carries no usable `config.secret` (a
+  `PUT /api/v1/meta/flow/:name`, or the publish of such a draft) used to be stored;
+  the automation engine then refused to register it (`400` on the `/automation`
+  doors, a skip with a warning at boot). It is now refused at the save with
+  `422 INVALID_METADATA`, the issue naming `flow-api-trigger-secret-missing` at the
+  start node's `config.secret`, and nothing is stored. A draft save is still
+  accepted; its publish is refused the same way.
+  **One-line fix:** set a non-blank `config.secret` on the flow's start node — or,
+  for a flow that is only ever started explicitly, declare `type: 'autolaunched'`
+  with no `triggerType: 'api'`.
+  
+  **What does not change: a signed flow's round trip.** Every served flow definition withholds the start node's `config.secret`, so a body saved back after a read arrives without it, and the save restores the stored secret only after every gate has run, so that no gate handles a restored credential. The gate is now told WHERE the save will restore a credential from the stored row: those positions only, never the values. `flow-api-trigger-secret-missing` reads a secret that was withheld and is stored as present, and one that is absent and not stored as missing. So a GET → edit → PUT of a signed flow, and the first save of a code-authored flow whose secret is in the app's source, keep passing and keep their secret. An explicit empty `config.secret` is the author's own value and is refused as blank.
+  
+  `@objectstack/lint`:
+  
+  - `validateFlowApiTriggerSecret` now runs on the runtime publish gate too (`surfaces` `['cli', 'runtime-publish']`, `runtimeTypes: ['flow']`). Its `surfaceReason` is gone.
+  - `AuthoringRuleContext` gains an optional `restoredCredentialPaths`: a `ReadonlySet<string>` of stack-relative positions in the rules' own finding-path spelling (`flows[0].nodes[1].config.secret`). Only the runtime publish gate sets it; `runAuthoringRules` never forwards it, so `os validate`, `os build` and `os lint` judge the author's own values as before.
+  - `runRuntimeAuthoringRules` accepts an optional `restoredCredentialPaths`: item-relative dotted positions in the `@objectstack/spec/kernel` redactor registry's `redactedKeys` spelling (`nodes.1.config.secret`). The gate re-spells them against the written item's place in its snapshot.
+  - `validateFlowApiTriggerSecret(stack, options?)` accepts an optional `{ restoredCredentialPaths }`, and treats a listed start-node secret position as present.
+  
+  `@objectstack/metadata-protocol`: `saveMetaItem` hands the runtime authoring gate the positions its own credential carry-forward will fill, computed from the same stored body. This costs one indexed `sys_metadata` read on an `active` save of a type with a registered redactor (`datasource`, and `flow` where the automation plugin registers one), and nothing for any other type or for a draft save. The carry-forward itself is unchanged and still runs after every gate. The draft→active promotion judges the stored draft row, which already holds what that draft's save carried forward, so it needs no such positions.
+- cd6d8a5: fix(objectql,platform-objects,metadata-protocol)!: the platform's `sys_migration` primary-key lookups go through `findOne`, so an existing deployment no longer prints "Paged read of 'sys_migration' is NOT deterministic" on every boot and every `os migrate plan` (#20648)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/platform-objects/src/system/migration-flag.ts#MigrationFlagEngine, packages/metadata-protocol/src/migrations/seed-tenancy-backfill.ts#SeedTenancyLedger) two duck-typed engine interfaces, each the parameter type of a published helper, whose one read method moves from `find` to `findOne`. Neither is a Zod schema, a `packages/spec` declaration or an object definition, neither is a projection of a schema, and no metadata surface references either, so `objectstack migrate meta` has nothing to rewrite. The body carries no migration prescription. The only party affected is the TypeScript author of a hand-written stand-in, and that author's fix is carried by the compiler at their own call site, which names the missing `findOne`. The other categories are closed on facts: both packages publish (not `unpublished`); no ADR-0087 id covers an engine interface's method set, and this diff adds none (not `registered` / `already-registered`); and both interfaces were concretely typed at the merge base, not erased (not `type-surface-only`). This category, not the broader `no-migration-prescription`, because the positive reading it verifies is available here: the named symbols have no metadata surface. -->
+  
+  The deployment ledger is read one row at a time, by primary key. Five readers
+  spelled that read as `find(sys_migration, { where: { id }, limit: 1 })`: the
+  engine's migration-gate read (`readMigrationFlagVerified`, behind
+  `haveFileColumnsMoved`, `isFileReferencesMigrationVerified` and
+  `isValueShapesMigrationVerified`), the engine's deviation marker and
+  creation-attestation revocation, `readDataMigrationFlag` in
+  `@objectstack/platform-objects/system`, and the seed-tenancy repair's receipt.
+  The SQL driver cannot tell that read from page one of a walk. The engine's gate
+  read runs at boot before the schema pass registers `sys_migration` with the
+  driver, and on a table the driver has not registered an unsorted paged read
+  warns that its pages may repeat or skip rows. Measured on a SQLite database
+  created by 17.4.0: every 17.5.0 boot and every `os migrate plan` printed that
+  warning once, for a lookup that cannot return two rows. All five readers now use
+  `findOne`, the single-row route the driver already exempts. The driver's check is
+  unchanged: an unsorted `limit` read on a table the driver did not create still
+  warns.
+  
+  **BREAKING**: this narrows what two published engine interfaces accept. The
+  first is `MigrationFlagEngine` in `@objectstack/platform-objects/system`. It is
+  the parameter type of `readDataMigrationFlag`, `isDataMigrationVerified`,
+  `mayActIrreversibly`, `recordDataMigrationRun`, `recordFileColumnMove` and
+  `attestFreshDatastore`, and part of `FilesToReferencesEngine` in
+  `@objectstack/service-storage`. The second is `SeedTenancyLedger` in
+  `@objectstack/metadata-protocol`, the type of a `SeedTenancySeam`'s `ledger`.
+  Each now requires `findOne` where it required `find`, so a hand-written stand-in
+  that provides only `find` no longer satisfies either type. It ships as `minor`
+  under the launch-window convention for accept-set narrowings. The ObjectQL engine
+  has both methods, so a host that passes the engine needs no change.
+  
+  **Your fix:** a stand-in that implemented `find` for these helpers implements
+  `findOne(object, options)` instead, answering the row whose `where.id` matches,
+  or `null`.
+  
+  At run time, a stand-in that still provides only `find` fails the read.
+  `readDataMigrationFlag` then answers `null`, the same answer as a missing row, so
+  the gates it feeds stay closed. `resolveSeedTenancySeam` now attaches a `ledger`
+  only for a host that has `getObject`, `findOne`, `insert` and `update`. For a
+  find-only host the seam's `ledger` is `undefined`, and when the seed-tenancy
+  repair applies, it says at `warn` that it could not record its receipt.
+- 4b45afa: fix(runtime): the `/automation` write doors refuse a packaged flow, as the metadata door does (#20679)
+  
+  Clause-②: yes (widening)
+  
+  A flow that a code package ships has a locked base (ADR-0126 §2): changing or removing it in place is refused. `PUT /api/v1/meta/flow/:name` already refused it. The two `/automation` definition doors did not: an administrator holding `manage_metadata` could rewrite a packaged flow in the live engine with `PUT /api/v1/automation/:name` or with `POST /api/v1/automation` under its name (a create onto an existing name overwrites it), or remove it with `DELETE /api/v1/automation/:name`.
+  
+  All three now answer a packaged flow with the same code and status the metadata door gives (`403` `NOT_OVERRIDABLE`), and with the same sentence wherever the metadata protocol's own package door answers. The refusal comes before the engine is called, so nothing is registered or removed. On `DELETE`, it also comes before the engine's own `DELETE_RESTRICTED` / `409` for a packaged subflow that packaged callers still reach.
+  
+  What is not refused:
+  
+  - A flow that no code package ships, including a flow created with `POST /api/v1/automation` or authored through the metadata door. It is updated and removed as before.
+  - `POST /api/v1/automation/:name/clone`, which copies a packaged flow under a new name. This is the supported way to customize one (ADR-0126 §7.1).
+  - `POST /api/v1/automation/:name/toggle`, the switch that turns a packaged flow on or off (ADR-0126 §7.2).
+  - A deployment that sets `OS_METADATA_WRITABLE=flow`. It opens both doors, as the refusal message says.
+  
+  **The widening.** `@objectstack/metadata-protocol` gains one public method, `ObjectStackProtocolImplementation.packagedBaseRefusal({ type, name, operation })`. It returns the refusal the metadata door would give for writing (`'save'`) or removing (`'delete'`) an existing item because a code package ships it, or `null` when that door would not refuse on this ground. `saveMetaItem` and `deleteMetaItem` call the same code, so the two doors cannot disagree. Their own refusals are unchanged.
+- 1940afd: fix(metadata-protocol): `getPackagedDashboardBase(name)` answers the dashboard a code package ships, before any overlay (#20680)
+  
+  `ObjectStackProtocolImplementation` gains `getPackagedDashboardBase(name)`, the dashboard twin of `getPackagedObjectBase`. It returns the packaged (code-layer) declaration of a dashboard, which is the `packagedBase` that `translateDashboard` compares a served dashboard against, so that a tenant's published overlay is not overwritten by the packaged translation catalog.
+  
+  It reads the artifact registry's code-package entry only. An overlay that was hydrated under the plain registry key can therefore never be returned as the base it is compared against. It returns `undefined` for a dashboard that no code package ships, for an unknown or empty name, and for a registry that cannot answer. A caller treats `undefined` as "no base known", and the catalog applies as before.
+  
+  The method is additive. No existing read changes answer: the item and list reads already serve a published org overlay by the same identity the write stored (`type`, name, `package_id`, organization). Nothing is removed or renamed.
+- 9ad6544: fix(metadata-protocol): `getPackagedViewBase(name)` answers the view a code package ships, before any overlay (#20731)
+  
+  `ObjectStackProtocolImplementation` gains `getPackagedViewBase(name)`, the view twin of `getPackagedDashboardBase`. It returns the packaged (code-layer) declaration of a view, which is the `packagedBase` that `translateView` compares a served view against, so that a tenant's published overlay is not overwritten by the packaged translation catalog.
+  
+  `name` is the view's registry identity, the qualified `<object>.<viewKey>` that each view of a `defineView` container is registered under and that the overlay row and both reads carry. The bare view key that the catalog uses under its object is not an identity (another object may ship a view with the same key), and it answers `undefined`.
+  
+  It reads the artifact registry's code-package entry only, through the same lookup as `getPackagedDashboardBase`. An overlay that was hydrated under the plain registry key can therefore never be returned as the base it is compared against. It returns `undefined` for a view that no code package ships, for an unknown or empty name, and for a registry that cannot answer. A caller treats `undefined` as "no base known", and the catalog applies as before.
+  
+  The method is additive. No existing read changes answer, and `getPackagedDashboardBase` answers exactly as before. Nothing is removed or renamed.
+- 76bd58f: fix(automation): which flows are packaged is the package loader's fact, never the flow definition's own, and every flow written through an authoring door is authored in the deployment (#20761)
+  
+  Clause-②: yes (widening)
+  
+  A flow counts as packaged only when a managed package's loader registered it (ADR-0126 §2, ADR-0131 D6). Before this change, a flow definition written through an authoring door could carry a code package's provenance, and the automation engine then treated that flow as the package's.
+  
+  - **The automation engine reads the loader's set.** The ADR-0126 §7.3 subflow guards, the arming gate, the activation switch and the package an activation row names now come from the packages the loader registered. The provenance a flow definition carries is kept for display only. `AutomationEngine` gains `setPackagedFlowSource(reader)` and `packagedFlowOwner(name)`, and the package exports the `PackagedFlowSource` type. `AutomationServicePlugin` attaches the reader for you: it asks the metadata protocol when the engine needs the answer. An engine with no reader attached treats no flow as packaged.
+  - **One authoring rule for flows.** `ObjectStackProtocolImplementation` gains two methods. `packagedArtifactOwner({ type, name })` names the package whose loader registered an item. `tenantAuthoredWriteRefusal({ type, name, item, packageId? })` is the rule every flow write door asks: the automation create, update and clone doors, and the metadata door's flow write.
+    - A write to a name a package ships is refused as a locked base. The answer is `packagedBaseRefusal`'s own (`403 NOT_OVERRIDABLE`), so sending a shipped flow's definition back is refused.
+    - A definition that claims a code package's provenance for a name no package ships is refused with `422 INVALID_METADATA`, and nothing is written. Before, the automation doors kept the claim and the metadata door removed it without saying so.
+    - A customer flow's definition sent back as it was read is accepted as before. That includes a stored flow bound to one of your own packages, whose read carries that binding.
+    - `packagedBaseRefusal` also takes an optional `packageId`, the base a save names.
+  - **The metadata door's other types are unchanged.** Only flows are judged by this rule. Migrating stored rows and duplicating a package are not affected either.
+  - **A clone is saved.** `POST /automation/:name/clone` now writes its copy as a stored flow of the deployment, through the metadata protocol's save, with no package provenance. The copy reads back on the metadata door and is still there after a restart. Before, it lived only in the running engine and was gone after a restart. If the save fails, the clone is withdrawn and the failure is returned.
+  
+  **If a write of yours is now refused with `422 INVALID_METADATA`:** remove the package provenance from the flow definition and send it again. To customize a packaged flow, clone it under a new name.
+- b1aee33: fix(metadata-protocol)!: a flow saved through the metadata door naming, as its base, a package this deployment has not installed is refused, instead of being stored bound to a package that does not exist (#20863)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata changes shape and nothing an author wrote is renamed or removed, so `objectstack migrate meta` has nothing to rewrite. What moves is which flow saves the metadata door accepts: a save that names a package no installed package holds is now refused. -->
+  
+  **BREAKING**: shipped as `minor` under the launch-window convention. `PUT /api/v1/meta/flow/:name` answered `200` and stored the flow live when the save named, as the package the flow belongs to, a package id this deployment has never installed. It now answers `422 WRITABLE_PACKAGE_REQUIRED`, and nothing is written, served or registered.
+  
+  **What changed.** The one authoring rule every flow write door asks (`tenantAuthoredWriteRefusal`) now also judges the base a save names. After the locked-base refusal and before the provenance check, a named base must be a package the registry holds as installed: a code package, an installed package, or a tenant's own writable base created through the package door. That is the same registry read the metadata write path already resolves a base against, so no second list of packages is kept. The refusal does not depend on what the definition carries: a save with no provenance of its own and a save whose provenance names that same missing package were both stored before, and both are refused now. It applies on a single-kernel host and on an environment kernel alike.
+  
+  - The code is `WRITABLE_PACKAGE_REQUIRED` / `422`, the one ADR-0070 D1 already uses for a runtime create whose base is missing or read-only. The refusal names the package id the save sent.
+  - **Unchanged:** a flow saved without naming a package; a flow saved into an installed package; the locked-base refusal of a shipped flow, which still answers first; every other metadata type, whose saves keep their old handling; the `/automation` create, update and clone doors, which name no package; and the server-stated rewrites of stored rows (the stored-metadata migration and package duplication), which the rule does not judge.
+  
+  **What to send instead.** Save the flow into a package this deployment has installed (the package list shows them, and a base that does not exist yet is created first through the package door), or save the flow without naming a package.
+- 250dec8: A stored page whose `requires` names a plugin the deployment's console does not load is reported when the page loads, and a draft → active promotion re-stamps an html page's `requires` with the save door's own computation (ADR-0080 §5: `requires` is validated at save and load, and derived from the source).
+  
+  Clause-②: no
+  
+  **At load.** The boot hydration of stored metadata (`loadMetaFromDb`) prints one `warn` line for each stored page whose `requires` lists a namespace no component in the deployment's SDUI component manifest carries, naming the page and every such namespace under the marker `[page_requires_plugin_absent]`. It is a report, never a refusal: the page has already loaded when the line is printed, and it is served. The manifest is read through the same `SDUI_MANIFEST_SERVICE` key the save door reads; `os serve` registers it before any plugin initialises, so it is there when stored pages load. A host that registers no manifest judges no page at load, exactly as it judges none at save.
+  
+  **At promotion.** `publishMetaItem` and `publishPackageDrafts` now store the promoted body with the `requires` that an active save of the same body would store, computed against the manifest registered at the moment of the publish. Before, the draft's `requires` was carried into the active row as it was. A draft saved before the host had a manifest reached `active` with no `requires`, and an agreeing list kept the draft's own spelling (its order and any repeats). Nothing is newly refused: wherever the runtime authoring gate runs, it already refused a draft whose source does not compile, or whose `requires` disagrees with its source, and it still does. A host with no manifest promotes the draft as written.
+  
+  `SysMetadataRepository.promoteDraft` takes an optional `deriveActiveBody(draftBody)` that derives the active row's body from the draft row it promotes. When it is omitted, the draft body is promoted unchanged, as before.
+- 657b6b7: The dry run and the partial-success batch insert now say which row lost which field. `ObjectQL.validate` (and `validateData`, which relays it) answers `droppedFields` on each accepted row of `results`, and `ObjectQL.insertMany` (and `insertManyData`, which passes it through) answers `droppedFields` on each `ok` outcome: the caller-supplied fields the engine legally strips from that row, one `DroppedFieldsEvent` per reason, in the engine's own reason vocabulary (`computed` for a `formula` value, `readonly` for a static `readonly` or runtime-owned field). The key is absent when nothing was taken from the row.
+  
+  - **Recorded at the strips, never inferred from the union.** Each strip records what it takes from each row as it runs. A `beforeInsert` hook that assigns a protected key on one row keeps it there, so that row is not named, while a sibling row that supplied the same key and lost it is.
+  - **A row the write does not complete carries none.** A preview row the verdict refuses, and an `ok: false` outcome, carry no `droppedFields`: a drop means the write completed without the field.
+  - **The dry run and the commit agree.** On `insert` mode the preview runs the same strips the write runs, so a row's preview drops and its outcome drops are the same list. One gap is unchanged: the preview runs no hooks, so a key a `beforeInsert` hook assigns is reported by the preview and kept by the write. An `update`-mode preview does not run the `readonlyWhen` or primary-key strips, which judge a prior record the preview does not read.
+  - **Unchanged:** the `onFieldsDropped` listener on `insert`, `insertMany` and `validate` still reports the batch-level union, one event per reason, naming no row. So does `insertManyData`'s top-level `droppedFields`. `insert(object, rows[])` still returns the records, with no per-row slot. `strictReadonlyWrites` still refuses the whole batch before any outcome is built.
+  
+  Graded `minor` in both packages: each widens a published method's declared answer with a new optional key (`InsertManyRowOutcome` gains `droppedFields`, and so does each outcome of `insertManyData`'s return type), which is an additive widening of the public surface. Nothing is removed, renamed or refused. The keys on the wire, `ValidateDataResponseSchema.results[].droppedFields` and `ImportRowResultSchema.droppedFields`, were already declared in `@objectstack/spec`.
+- 514001a: fix(rest,runtime): the published-snapshot read of a flow name a managed package ships answers the package's flow, as the layered read does (#21002)
+  
+  Clause-②: yes (widening)
+  
+  `flow` is in ADR-0126's Regime C: a managed package's flow is sealed, and there is no overlay read path for it. Since the previous half of #21002, the layered read, `GET /api/v1/meta/flow/:name/layers`, reports the package's flow as the effective layer for a name a managed package ships, and a stored flow of that name as a separate layer that does not take effect. The published-snapshot read, `GET /api/v1/meta/:type/:name/published`, and its runtime-dispatcher twin read that same layered answer, but served its stored layer whenever one was present. So for such a name they still answered `200` with the stored flow, not the package's.
+  
+  Both published-snapshot doors now serve the layered read's effective layer when that read put the package's flow over a stored flow, which is the package's flow. They ask the metadata protocol's own check for that decision rather than repeating it. In every other case they answer exactly as before: a flow name no managed package ships, and every other metadata type, `object` included, still answer the stored layer when one is present, and an item with no stored layer still falls through to the code/package snapshot. The stored flow is not deleted, rewritten or refused.
+  
+  **The widening.** `@objectstack/metadata-protocol` makes one existing method public: `ObjectStackProtocolImplementation.isShippedFlowName(type, name)`. It answers whether `name` is a flow name a managed package ships. It was private to the class, so a door in another package could not ask it any other way. Its answer is unchanged, and the layered read, the by-name read and the flow list keep calling it.
+- cfad7de: fix(metadata-protocol)!: stored metadata bodies read through the generic data door are served as their type's read projection, so stored credentials are withheld there too; grouping those tables by the body column is refused (#21086)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a grouping TARGET on the generic data door: a groupBy entry naming the stored body column of sys_metadata or sys_metadata_history. No authorable key, spelling, export or stored shape moves (the helpers are internal to the package; `@objectstack/metadata-protocol` exports nothing new and nothing less), and no stored row is read differently by any metadata consumer or rewritten. A whole stored body has no meaning as a group key that a ledger entry could rewrite to. The other categories are closed on facts: the package publishes (not `unpublished`); no ADR-0087 id covers a grouping target (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what the generic data door's query accepts as a grouping target on two system tables. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **What changes.** A row of `sys_metadata` or `sys_metadata_history` read through `GET /api/v1/data/:object`, `POST /api/v1/data/:object/query`, `GET /api/v1/data/:object/:id` (and anything that reads through the same `findData` / `getData`, such as the export route) now carries its `metadata` column as the body's type's read projection: the same object every `/meta` read exit serves, chosen through the same `@objectstack/spec/kernel` redactor registry. For a `datasource` body that means the stored credential material the datasource doors already withhold is withheld here too, decided by the same redactor. A body with nothing to withhold, and every body of a type that registers no redactor, is served as the stored bytes.
+  
+  - A projection that names `metadata` without `type` (`?select=metadata`) still works: the door reads `type` to choose the redactor and does not serve it.
+  - A body the door cannot judge is omitted rather than served: one whose row carries no `type`, and one that does not parse while its type registers a redactor.
+  
+  **What an author sees now on a grouping.** `400 INVALID_FIELD` for a `groupBy` entry naming `metadata` on either table, located at the entry (`groupBy[0]`, or `groupBy[0].field` for the object form), saying the query was not run and naming the route: group by `type`, `name` or another scalar column, and read the bodies with a plain list. A group key stands for every row that shares it, and the redactor is chosen per row, so the key cannot be projected without changing which rows it counts.
+  
+  **Unchanged.** Every other object, including one with a column of its own named `metadata`; every other grouping on these tables; and every internal reader of `sys_metadata`, which reads through the engine rather than through this door and keeps reading the stored body.
+- 336e191: fix(security)!: stored metadata bodies are projected or refused at the audit, analytics, realtime and data-door filter/sort exits too
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) further read/copy/evaluate exits for a stored metadata body (sys_metadata / sys_metadata_history), each routed through the one shared redactor or refused: the audit/activity write-time copy is projected, a data-door filter or sort on the body column is refused (the sibling of the already-registered-as-not-required groupBy refusal), an analytics query member on the body column is refused, and a data.record.* realtime event body is projected. No authorable key, spelling, export or stored shape moves, and no stored row is read differently by any metadata consumer; the published surfaces gain and lose nothing. The other categories are closed on facts: the packages publish (not `unpublished`); no ADR-0087 id covers a filter/sort target, an analytics member or an event body (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what three doors accept or serve for the two stored-metadata tables — the generic data door refuses a filter or sort on the body column, the analytics door refuses it as a dimension / measure / filter / sort member, and the realtime event and the audit/activity copy now carry the body as its type's read projection instead of the stored bytes. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **What changes.**
+  
+  - **Audit / activity copy (`@objectstack/plugin-audit`).** The audit writer copies a `sys_metadata` / `sys_metadata_history` row into `sys_audit_log.new_value` / `old_value` and `sys_activity.metadata`. That copy now projects the body through the shared redactor, so stored credential material is withheld from the second store too. A new `os migrate audit-metadata-bodies` command rewrites the copies already at rest (dry run by default, `--apply` to write, idempotent).
+  - **Analytics (`@objectstack/service-analytics`).** A query naming the stored body column of these objects as a dimension, measure, filter or sort is refused with `400 INVALID_FIELD`, before any strategy runs — the posture analytics already takes for a member it will not evaluate.
+  - **Realtime (`@objectstack/objectql`).** A `data.record.*` event projects its `after` / `changes` body through the same redactor, so a subscriber to these objects' events receives no stored credential.
+  - **Data door filter / sort (`@objectstack/metadata-protocol`).** A filter or sort on the body column is refused with `400 INVALID_FIELD`, the same family and shape as the existing groupBy refusal.
+  
+  **What stays answerable.** Every scalar column of these objects — `type`, `name`, `scope`, `state`, timestamps — is still grouped, filtered, sorted, counted and served; only the body column is affected. Every other object is unchanged.
+
+### Patch Changes
+
+- fe463b4: metadata-protocol refusals, hints and log lines no longer cite tracker numbers; each states the reason in words
+  
+  Clause-②: no
+  
+  Many messages the metadata protocol shows to authors, administrators and operators ended with an
+  issue-tracker number where the reason belonged. The number goes, and where the sentence did not
+  already say what was decided, it now does:
+  
+  - Refusals: `insertManyData` without an engine `insertMany` now names what that method is (the
+    partial-success batch insert, so a bad row neither fails the whole batch nor runs the good rows'
+    `beforeInsert` hooks twice); the unknown-metadata-type refusal says a plugin cannot declare a type
+    because `additionalTypes` was retired, having never been read; the stored non-canonical type
+    refusals on publish and revert say the `/meta` URL door now folds a type to its canonical spelling
+    before it writes, so such a row predates that.
+  - The schedule-flow `organization_id` hint says why the author's value is the only source: the engine
+    fills only an organization the run resolved, and a schedule resolves none.
+  - Log lines: the three `kernel:ready` "migration skipped" warnings now say what the migration that did
+    not run would have ensured; the history-counter abort says the old path took a failed read for an
+    empty table; the publish-closure degrade says the batch's own drafts are left out of the closure;
+    the cold-boot org-scoped audit calls the write refusal it points at declared-types-only. The
+    overlay, `sys_view_definition` and `sys_setting` index messages, the seed/API tenancy repair and its
+    receipt, the batch-row withhold and the object-existence gate's no-registry warning lose only the
+    citation, because their sentences already said it.
+  - The live-MySQL testkit's isolation error loses its citation.
+  
+  Text only: no error code, field name, status or behaviour changes.
+- 3f45b6c: fix(security): every credential a flow definition holds is withheld from what is served, at every depth, and an edit round trip keeps each one where it belongs (#20590)
+  
+  Clause-②: no
+  
+  **What is now withheld.** Beside an `api` flow's inbound-hook secret (the start node's
+  `config.secret`), every served flow definition now also withholds an `http` node's
+  outbound signing secret (`config.signingSecret`), and both are withheld wherever the
+  node sits: at the top level, or inside a `loop` body, a `parallel` branch, or a
+  `try_catch` region. The engine still executes the stored values.
+  
+  **Removing a signing secret.** A definition saved back without the key keeps the
+  stored secret, because an absent key is what every read serves. To remove it, save
+  the key as the empty string (`signingSecret: ''`): the durable callout is then
+  delivered unsigned, and the empty value is served as written, so the next round trip
+  keeps it cleared.
+  
+  **Changing a node's kind.** An edit that keeps a node's `id` and changes its kind no
+  longer carries that node's stored credential onto it. The credential belonged to the
+  old kind; a start node that needs a secret asks for one again at registration.
+  
+  **Moving a node.** A node moved into or out of a `loop` body, a `parallel` branch or a
+  `try_catch` region keeps its stored credential across the round trip, as long as its
+  `id` and kind are unchanged and it is the only node, at the top level or in any region,
+  that carries that `id`. An edge or a config value with the same `id` does not count.
+  
+  **The `/meta` list read on a dispatcher host.** When the metadata protocol's list read
+  fails, the list answers that failure (`503 SERVICE_UNAVAILABLE` for a store outage, or
+  the protocol's own refusal) instead of serving the metadata service's stored list,
+  which applies no credential redaction. A host whose protocol has no list verb keeps
+  its metadata-service fallback.
+- a7d9768: Provenance comments in `@objectstack/metadata-protocol` cite the commits that decided them, not tracker numbers that no longer resolve
+  
+  Clause-②: no
+  
+  Docblocks and comments across the package cited issue-tracker numbers that now answer 404 on GitHub.
+  Each one now cites the commit in this repository's history that made the decision it describes
+  (and ADR-0005's design-principle-3 correction where that record exists). Some of these docblocks sit
+  on exported members, so the reworded text appears in the published `index.d.ts` / `index.d.cts`, and
+  a few comments that esbuild keeps appear in the JavaScript output.
+  
+  Comment only: no export, type, error code, status, message text or runtime behaviour changes.
+- ca5408c: fix(metadata-protocol): a dotted relation filter path names the nested-relation form as the route
+  
+  A filter key such as `account.industry` — a dotted path through a relation field — is still refused with `INVALID_FIELD` / 400 at the query parameter door. Its words no longer say a filter reaches only the object's own columns, which stopped being true when the engine began serving the nested-relation form in `where`: they now name that form, `{ "account": { "industry": VALUE } }`, beside the denormalise remedy, in the same words as the engine's own refusal.
+- 4d0b9cd: fix(metadata-protocol): the refusal of an in-place edit or removal of a packaged flow names the clone and the on/off switch, not a redeploy or `OS_METADATA_WRITABLE` (#20819)
+  
+  Clause-②: no
+  
+  A write or removal that targets a flow shipped by a code package, and does not name that package, is refused with `403 NOT_OVERRIDABLE`. That covers `PUT /api/v1/meta/flow/:name` without `?package=`, `DELETE /api/v1/meta/flow/:name`, `PUT` and `DELETE /api/v1/automation/:name`, and `POST /api/v1/automation` onto a packaged flow's name. The refusal used to say "Edit the source artifact and redeploy, or set OS_METADATA_WRITABLE to grant a runtime escape hatch", and cited ADR-0005. The administrator of an installed package can do neither.
+  
+  The refusal now names the two paths ADR-0126 sanctions for a packaged flow, and cites ADR-0126:
+  
+  - clone it under a new name to customize it: `POST /api/v1/automation/:name/clone` with `{ name, label }`;
+  - or switch it off: `POST /api/v1/automation/:name/toggle` with `{ enabled: false }`. Where one install serves several organizations, only the platform operator can use the switch.
+  
+  The status, the code and which writes are refused are unchanged. `OS_METADATA_WRITABLE=flow` still opens the lock as before; the refusal just no longer suggests it. Every other metadata type's refusal reads exactly as before. A write that names the shipping package with `?package=` is refused with `403 ITEM_LOCKED` by a separate limb, which this change leaves as it was.
+- 0c5a71b: fix(metadata-protocol): every refusal of an in-place edit of a packaged flow, action or permission set names that type's own sanctioned path, at every door, and a packaged action's removal names one too, not a redeploy or `OS_METADATA_WRITABLE` (#20910)
+  
+  Clause-②: no
+  
+  ADR-0126 puts `flow`, `action` and `permission` in Regime C. The packaged base is locked, and the refusal names the sanctioned path. Until now only a flow's package-less refusal did, and only at one of the three places that refuse such a write. The other places prescribed "Edit the source artifact and redeploy, or set OS_METADATA_WRITABLE …" or "Set OS_METADATA_WRITABLE to enable additional types at runtime". A packaged action's removal named no path at all.
+  
+  There is now one regime table, and each type's row names only the primitives that type has:
+  
+  - a packaged flow: clone it under a new name with `POST /api/v1/automation/:name/clone` and `{ name, label }`, or switch it off with `POST /api/v1/automation/:name/toggle` and `{ enabled: false }`;
+  - a packaged action: switch it off with `POST /api/v1/actions/_activation/:object/:action` and `{ enabled: false }` (`:object` is `global` for an object-less action). No clone is named, because cloning an action is not a sanctioned path;
+  - a packaged permission set: clone it under a new name, with the "Clone" action on the permission set or `POST /api/v1/data/sys_permission_set` with a new name. This is the same wording the permission-set lock in `@objectstack/plugin-security` already uses.
+  
+  The switches are operator-only where one install serves several organizations. Every refusal cites ADR-0126. All three places that refuse such a write read the same table:
+  
+  - **`403 NOT_OVERRIDABLE` on an environment-scoped kernel.** This covers `PUT /api/v1/meta/:type/:name` without `?package=`, and for a flow or an action `DELETE` too.
+  - **`403 NOT_OVERRIDABLE` where the `/meta` protocol is not environment-scoped**, for example the default local `pnpm dev` boot. The metadata repository refuses that write one layer down, and now with the same sentence.
+  - **`403 ITEM_LOCKED` for a write that names the read-only package with `?package=`, while `OS_METADATA_WRITABLE` is not set for the type.** The sentence now opens "Cannot overlay 'TYPE' in package 'ID': that package is read-only, and its packaged base is locked against in-place edits." and then names the path.
+  
+  A packaged flow's package-less sentence is byte-for-byte unchanged. Statuses, codes, `lockSource`, `packageId`, `docs` and which writes are refused are unchanged too. `OS_METADATA_WRITABLE` still opens the lock for a write that names no package. The `ITEM_LOCKED` refusal given while the variable IS set reads exactly as before. Removing a permission set's overlay row is still allowed, as repair. Every type with no declared regime reads exactly as before, at every door.
+- 75519e1: fix(metadata-protocol): a stored flow under a name a managed package ships is no longer registered or listed as the package's flow (#20913)
+  
+  Clause-②: no
+  
+  `flow` is in ADR-0126's Regime C: a managed package's flow is sealed, and there is no overlay read path for it. Two places still treated a stored flow of a shipped name as an overlay of the package's flow:
+  
+  - The startup hydration registered the stored flow carrying the package's provenance, so the automation engine could not tell it apart from the package's own flow. It is now registered as the tenant-authored row it is.
+  - The flattened flow list served the stored flow in the package's place, marked as the package's. That list is `GET /api/v1/meta/flow` and the execution view the automation engine binds flows from. For a name a managed package ships, the list now serves the package's flow.
+  
+  The stored flow is not deleted, rewritten or refused. It stays in the store, and the automation engine reports it as a shadowed definition at startup. Every other metadata type, and every flow name no managed package ships, is listed as before. The by-name read, `GET /api/v1/meta/flow/:name`, is not changed.
+- 25f2e64: fix(metadata-protocol): the by-name read of a flow name a managed package ships serves the package's flow, as the flow list does (#20946)
+  
+  Clause-②: no
+  
+  `flow` is in ADR-0126's Regime C: a managed package's flow is sealed, and there is no overlay read path for it. The flow list, `GET /api/v1/meta/flow`, and the execution view the automation engine binds flows from already serve the package's flow for a name a managed package ships (#20913). The by-name read, `GET /api/v1/meta/flow/:name`, did not: for such a name it served a stored flow of that name, marked as the package's flow. So the two read doors answered two different flows for one name.
+  
+  The by-name read now applies the same rule the list applies, through the same checks. For a name a managed package ships, it serves the package's flow, with or without a package scope, whatever the stored flow's own package binding or markings say.
+  
+  The stored flow is not deleted, rewritten or refused. It stays in the store, and the automation engine still reports it as a shadowed definition at startup. Pending drafts, flow names no managed package ships, organization-scoped rows and every other metadata type are read as before.
+- 94990a2: fix(metadata-protocol): the layered read of a flow name a managed package ships reports the package's flow as the effective layer, as the by-name read and the flow list do (#21002)
+  
+  Clause-②: no
+  
+  `flow` is in ADR-0126's Regime C: a managed package's flow is sealed, and there is no overlay read path for it. The flow list, `GET /api/v1/meta/flow`, and the by-name read, `GET /api/v1/meta/flow/:name`, already serve the package's flow for a name a managed package ships (#20913, #20946). The layered read, `GET /api/v1/meta/flow/:name/layers`, did not: for such a name it reported a stored flow of that name as the effective layer, while its lock and provenance flags named the package. So the layered read and the other two read doors answered two different flows for one name.
+  
+  The layered read now decides the effective layer with the same check the other two doors use. For a name a managed package ships, the effective layer is the package's flow, with or without a package scope, whatever the stored flow's own package binding or markings say. The stored flow is still reported, as a separate layer of its own scope that does not take effect. The deprecated layers flag on the by-name read answers the same.
+  
+  The stored flow is not deleted, rewritten or refused. Flow names no managed package ships, organization-scoped rows and every other metadata type are read as before.
+- 70dae53: feat(spec): discovery reports which optional `/auth` route families are mounted, starting with the better-auth admin family (`authFamilies.admin`) (#21046)
+  
+  Clause-②: yes
+  
+  **New key.** `DiscoverySchema` declares an optional `authFamilies` block, `{ admin: boolean }`. `admin` says whether the better-auth admin family (`{routes.auth}/admin/*`: `list-users`, `set-role`, `update-user`, `ban-user`, …) is mounted on this deployment. On a deployment that does not enable the admin plugin those routes answer a plain `404`, the same as a mistyped path, so a caller checks `authFamilies.admin` before building a URL into the family. `@objectstack/spec/api` also exports the block's schema (`AuthFamiliesSchema`, type `AuthFamilies`) and its reader, `readAuthFamilies(authService)`.
+  
+  **Same answer as `/auth/config`.** The value is the auth service's own `getPublicConfig().features.admin`, the object `GET /api/v1/auth/config` serves. Both discovery producers read it through `readAuthFamilies`: `getDiscovery()` in `@objectstack/metadata-protocol` (served by `@objectstack/rest` at `GET /api/v1/discovery`) and `getDiscoveryInfo()` in `@objectstack/runtime` (served at `GET /.well-known/objectstack`). Neither re-derives whether the admin plugin is on, so on one boot the two documents and `/auth/config` agree. On a stock boot `authFamilies.admin` is `false`. With the admin plugin on (`plugins.admin: true`, or SCIM, which forces it on) it is `true`.
+  
+  **When the key is absent.** A producer that cannot read the answer emits no `authFamilies`, rather than a guessed `false`. That happens when no `auth` service is registered (then `routes.auth` is absent too), when the registered service has no `getPublicConfig()`, or when that call throws (`/auth/config` answers `500 AUTH_CONFIG_ERROR` in that state). Treat an absent block as "not known to be mounted".
+  
+  **What did not change.** No existing key, route or status moved. The unmounted admin routes still answer a plain `404`.
+- d34aa58: fix(metadata-protocol): the layered read's code layer is empty for an item no package ships, whether or not a stored copy of it has been loaded into the registry (#21059)
+  
+  Clause-②: no
+  
+  The layered read, `GET /api/v1/meta/:type/:name/layers`, reports an item's code layer as the packaged definition, and as empty when no package ships the item and it exists only as a stored customization. For an item no package ships, it answered that correctly only until the stored copy had been loaded into the in-memory registry, for example by a restart's startup load or by a list read. After that, the code layer answered the stored copy, and the lock and provenance flags were derived from it. So the same read of the same item gave two answers, depending on what had been loaded.
+  
+  The code layer now skips a stored copy the registry holds, using the tenant-authorship mark the startup load already puts on every stored copy it registers. An item no package ships has an empty code layer before and after the load, and its flags come from the stored layer both times. This includes a stored copy whose own content claims a package's provenance: a claim is not a packaged definition. The deprecated layers flag on the by-name read, `GET /api/v1/meta/:type/:name`, answers the same.
+  
+  Packaged items keep their packaged code layer. An item registered at runtime with no package keeps its code layer, as before. The stored rows are not changed.
+- f3b16fc: Raise the published dependency floors to the 2026-10 production dependency group. No API changes. A consumer install resolves these ranges:
+  
+  Clause-②: no
+  
+  - `zod` `^4.6.1` → `^4.6.5`: `@objectstack/spec`, `@objectstack/core`, `@objectstack/objectql`, `@objectstack/rest`, `@objectstack/runtime`, `@objectstack/cli`, `@objectstack/mcp`, `@objectstack/metadata`, `@objectstack/metadata-core`, `@objectstack/metadata-protocol`, `@objectstack/driver-turso`.
+  - `@libsql/client` `^0.17.3` → `^0.18.0`: `@objectstack/driver-turso`. Every behaviour the driver documents was re-measured on 0.18.0 and holds unchanged. That covers the URL scheme routing, the `URL_INVALID` and `URL_SCHEME_NOT_SUPPORTED` refusals, the WebSocket transport having no `fetch` or timeout seam, `syncUrl` being read only by the embedded-replica client, and the `?authToken=` precedence on `url` and `syncUrl`. The driver's refusal messages now name 0.18.0 as the measured version. 0.18.0 changes only the local `file:` client, which now pools connections. The driver creates that client only for an embedded replica, and calls only `sync()` on it.
+  - `@modelcontextprotocol/sdk` `^1.30.0` → `^1.30.1`: `@objectstack/connector-mcp`, `@objectstack/mcp`.
+  - `chalk` `^6.0.0` → `^6.0.1`: `@objectstack/cli`, `create-objectstack`. `yaml` `^2.9.0` → `^2.9.1` and `tsx` `^4.23.12` → `^4.23.15`: `@objectstack/cli`.
+  - `mongodb` `^7.5.0` → `^7.6.0`: `@objectstack/driver-mongodb`.
+  - `sql.js` `^1.14.1` → `^1.14.2`: `@objectstack/driver-sqlite-wasm`.
+  - `@noble/hashes` `^2.3.0` → `^2.4.0` and `jose` `^6.2.8` → `^6.2.12`: `@objectstack/plugin-auth`. The better-auth family stays at exactly `1.7.3`.
+  - `hono` `^4.13.5` → `^4.13.9`: `@objectstack/plugin-hono-server`.
+  - `pinyin-pro` `^3.29.1` → `^3.29.4`: `@objectstack/plugin-pinyin-search`.
+  - `@noble/ciphers` `^2.3.0` → `^2.4.0`: `@objectstack/service-settings`.
+- Updated dependencies [b616c0a]
+- Updated dependencies [e5c7d07]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [a093ce3]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [05a7547]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [3572916]
+- Updated dependencies [3fbf3ca]
+- Updated dependencies [24d521e]
+- Updated dependencies [b785c3b]
+- Updated dependencies [2473e26]
+- Updated dependencies [3a89d45]
+- Updated dependencies [c96beb2]
+- Updated dependencies [e651556]
+- Updated dependencies [f379f57]
+- Updated dependencies [5bed1f6]
+- Updated dependencies [889139c]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [7510663]
+- Updated dependencies [f29c83d]
+- Updated dependencies [c6b37cd]
+- Updated dependencies [a6866da]
+- Updated dependencies [1a75e39]
+- Updated dependencies [cd901d7]
+- Updated dependencies [31ed067]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [89801cd]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [ace770d]
+- Updated dependencies [ed54768]
+- Updated dependencies [99786f9]
+- Updated dependencies [63bfe69]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [b9087d7]
+- Updated dependencies [f10d802]
+- Updated dependencies [856321f]
+- Updated dependencies [6b004c0]
+- Updated dependencies [93e9e42]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [ceee88f]
+- Updated dependencies [8460592]
+- Updated dependencies [e18fea6]
+- Updated dependencies [b84b240]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [dcd3309]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [26437ae]
+- Updated dependencies [05be352]
+- Updated dependencies [d1633f3]
+- Updated dependencies [5e470f8]
+- Updated dependencies [5e470f8]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [3693a1b]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [58a77db]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [a11faee]
+- Updated dependencies [2c1cef3]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [097ef80]
+- Updated dependencies [70dae53]
+- Updated dependencies [665cab3]
+- Updated dependencies [682873d]
+- Updated dependencies [1bd14c9]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [327391c]
+- Updated dependencies [df1feae]
+- Updated dependencies [336e191]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [ce8a6d2]
+- Updated dependencies [24c554d]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [ee42f00]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [d2bc644]
+- Updated dependencies [cfa9315]
+- Updated dependencies [61455de]
+- Updated dependencies [aa23e2c]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [b8191f7]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+- Updated dependencies [00f045d]
+  - @objectstack/lint@17.6.0
+  - @objectstack/spec@17.6.0
+  - @objectstack/metadata@17.6.0
+  - @objectstack/sdui-parser@17.6.0
+  - @objectstack/core@17.6.0
+  - @objectstack/metadata-core@17.6.0
+  - @objectstack/formula@17.6.0
+  - @objectstack/types@17.6.0
+
 ## 17.5.0
 
 ### Minor Changes

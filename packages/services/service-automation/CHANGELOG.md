@@ -1,5 +1,536 @@
 # @objectstack/service-automation
 
+## 17.6.0
+
+### Minor Changes
+
+- 5363e2d: feat(spec,service-automation): a flow run's result carries the flow's authored label as `flowLabel` (#20318)
+  
+  Clause-②: yes (widening)
+  
+  **The widening.** `AutomationResult` (`@objectstack/spec/contracts`) gains one
+  optional member, `flowLabel?: string`, and `TriggerFlowResponseSchema`
+  (`@objectstack/spec/api`) mirrors it on `data`. The automation engine sets it to
+  the flow definition's `label`, copied verbatim, the same way it copies
+  `successMessage` and `errorMessage`. Nothing is removed or renamed, and no
+  existing member changes meaning.
+  
+  **Why.** A flow runner names the flow it is running, in its header and in its
+  completion toast, and translates that name against the `flows.<flow>.label`
+  translation key, falling back to the authored label. The runner only held the
+  flow's API name, so there was no authored label to fall back to. The console's
+  reader of the translation key is a separate change.
+  
+  **Which results carry it.**
+  
+  - **Set** on every result of an evaluation of a registered flow: `status: 'paused'`
+    (first attempt, retry attempt, a resume that pauses again), a terminal success
+    (including the two skip exits), `'failed'` (including an exhausted retry budget),
+    `'stranded'`, `'refused'`, and a resumed parent whose delegated child failed.
+  - **Absent** on every refusal that carries a `code` (the run never dispatched, or a
+    resume never continued it) and when the flow is not registered.
+  - **Subflow chains** answer with the label of the run the caller addressed, which
+    is the parent. The child that supplied the screen does not lend its label.
+  - **Never the API name.** `FlowSchema` requires `label`, so the value is always
+    what the author wrote, an empty string included.
+  
+  **At the wire.** Both runner doors relay the result verbatim on a `200`, so
+  `data.flowLabel` arrives on `POST /api/v1/automation/:name/trigger` (a paused or
+  finished launch) and on `POST /api/v1/automation/:name/runs/:runId/resume` (a
+  further pause or the completion). A `400 FLOW_FAILED` answer is unchanged: its
+  `error.details` keep their fixed set (`errorMessage`, `summary` and, on resume,
+  the stranded verdict), with no `flowLabel`.
+  
+  **For a consumer.** A client that parses the trigger response with
+  `TriggerFlowResponseSchema` now keeps `data.flowLabel`, where an undeclared key
+  would have been stripped. A caller that deep-compares a whole `AutomationResult`
+  from `execute()` or `resume()` sees one more key on the results listed above.
+- 36d043b: fix(service-automation)!: disabling a packaged subflow completes once its packaged callers are switched off and hold no parked run, and the refusal names the parked runs and the cancel door (#20678)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata changes shape and nothing an author wrote is renamed or removed, so `objectstack migrate meta` has nothing to rewrite. What moves is which calls the activation switch accepts, in both directions. -->
+  
+  **BREAKING**: shipped as `minor` under the launch-window convention. `toggleFlow(name, enabled)` on the automation service, and so `POST /api/v1/automation/:name/toggle`, now accepts some disables it used to refuse (the widening) and refuses one corner of enables it used to accept (the narrowing).
+  
+  **The disable direction (the widening).** Disabling a packaged flow that a packaged flow calls as a subflow (the `flowName` of a `subflow` or `map` node) was refused while any such caller existed, even one already switched off. So the refusal's own remedy, "disable the calling flow first", could never complete. A caller now guards the disable only while it can still reach the subflow node:
+  
+  - **An enabled caller** guards, as before. The refusal names it, and the step is to disable it first.
+  - **A disabled caller** (switched off in the activation ledger, or disabled by its definition's `status`) guards only while it holds a **parked run**: a run paused at a wait, an approval, a screen, or at a `map` node between items. Switching a flow off stops its new runs only, and a parked run still resumes into its subflow node. The refusal names each parked run id and the operator cancel door, `POST /api/v1/automation/:name/runs/:runId/cancel` (ADR-0044). Cancel those runs, or let them finish, and the disable completes.
+  - **A disabled caller with no parked run** no longer guards, so "disable the caller, then the callee" completes.
+  
+  Parked runs are read from both the in-process runs and the durable suspended-run store, including runs a previous process parked. If the durable store cannot be listed at that moment, the disable fails with the store's own error and nothing is written; it is never read as "no parked run". The refusal keeps `DELETE_RESTRICTED` / `409` and its `subflowCallers` list, which now names exactly the callers that guard.
+  
+  **The enable direction (the narrowing).** A subflow in a cycle of ledger-switched-off flows with the flow being enabled was skipped whole, even when its definition's `status` also disabled it. So the enable was accepted onto a subflow that stays disabled, and the publish remedy was never named. Such a subflow is now named, with both reasons and both steps (publish it with status `active`, then enable it). The cycle exemption covers the activation switch only, because no enable order changes a status.
+- 679f95e: fix(service-automation)!: re-enabling a packaged flow is refused while a packaged subflow it calls is disabled, and the refusal names a remedy that subflow's state admits (#20678)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata changes shape and nothing an author wrote is renamed or removed, so `objectstack migrate meta` has nothing to rewrite. What moves is which enable calls the activation switch accepts. -->
+  
+  **BREAKING**: shipped as `minor` under the launch-window convention. `toggleFlow(name, true)` on the automation service, and so `POST /api/v1/automation/:name/toggle` with `{"enabled": true}`, now refuses an enable it used to accept.
+  
+  **What changed.** A packaged flow switched off in the activation ledger could be switched back on while a packaged flow it calls (the `flowName` of a `subflow` node, or of a `map` node) was itself disabled. The enable was accepted, and every run of the flow then failed at that node on the child's `FLOW_DISABLED` refusal. That enable is now refused with `RESOURCE_CONFLICT` / `409`, before anything is written: the ledger row still reads off, the trigger stays unbound, and runs are still refused. The message names each disabled subflow and what holds it off, and the remedy follows from that:
+  
+  - **Switched off in the activation ledger**: enable that subflow first, then this flow.
+  - **Disabled by its own definition's `status`** (`obsolete` or `invalid`): the activation switch never changes a status, so enabling the subflow through it would change nothing. Publish the subflow with status `active` (for a package that is read-only in this environment, that takes a package version that ships it active), then enable this flow.
+  
+  **Not refused:**
+  
+  - Enabling a flow that is already enabled. Nothing is re-armed.
+  - A subflow the customer authored. A flow the customer authored is not this switch's to enable at all: the activation switch switches packaged flows only, and it refuses a customer-authored flow for that reason before this guard is asked (see the entry "the toggle door refuses a flow no package ships, naming its status switch").
+  - A subflow in a cycle of switched-off flows with the flow being enabled, including a flow that calls itself. Each flow in such a cycle would refuse the others, so no order could complete. A subflow in such a cycle whose definition's `status` also disables it is still named, with its publish remedy: no enable order changes a status.
+  
+  The disable direction of the same guard is described in its own entry, "disabling a packaged subflow completes once its packaged callers are switched off and hold no parked run".
+- 0d9349f: fix(service-automation)!: a packaged flow is never armed onto a disabled packaged subflow on any door, removing a packaged subflow its packaged callers can still reach is refused, and the disable refusal reads a caller's parked runs completely (#20725)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata changes shape and nothing an author wrote is renamed or removed, so `objectstack migrate meta` has nothing to rewrite. What moves is which flows the engine arms, which removals it accepts, and which disables it can see a parked run behind. -->
+  
+  **BREAKING**: shipped as `minor` under the launch-window convention. ADR-0126 §7.3 refuses one state: a packaged flow armed while a packaged flow it calls (the `flowName` of a `subflow` or `map` node) is disabled, so that the caller fails at that node on the child's refusal. The activation switch (`POST /api/v1/automation/:name/toggle`) already refused it in both directions. It now holds on every other door too.
+  
+  **Arming declines it; registration is never refused.** Creating, republishing, upgrading or hot-reloading a flow, a cold boot, and a trigger registering at `kernel:ready` all arm through one gate. That gate now leaves a packaged flow **unarmed** while a packaged subflow it calls is disabled, by the activation ledger or by its definition's `status` (`obsolete` / `invalid`). The flow still registers, so a boot or an upgrade never fails on an installation's choice:
+  
+  - `GET /api/v1/automation/_status` reports it `enabled: true, bound: false`, with a `reason` naming each disabled subflow and the step that re-arms it. The `kernel:bootstrapped` binding audit prints the same reason.
+  - The engine logs one warning naming each subflow and its remedy (enable it, or publish it with status `active`).
+  - It is armed the moment its subflow is enabled, through the switch or by republishing the subflow `active`. A flow held back by two subflows is armed when both are on.
+  - An armed caller is unarmed when its subflow is republished `obsolete` or `invalid`, or when the activation ledger read at boot switches that subflow off.
+  - In a cycle of flows switched off in the activation ledger, enabling the first one is still accepted, but it stays unarmed until the flow it calls is enabled; then both are armed.
+  - A flow the customer authored, or a subflow the customer authored, is not judged.
+  
+  **Removing a packaged subflow is refused while a packaged caller can still reach it.** `AutomationEngine.unregisterFlow`, and so `DELETE /api/v1/automation/:name`, now refuses with `DELETE_RESTRICTED` / `409` and `subflowCallers`, the same refusal the switch gives on disable. Nothing is removed. The message names each caller and the steps:
+  
+  - **An enabled caller** guards: disable it first.
+  - **A switched-off caller** guards while the subflow itself is still enabled. The removal door cannot read whether that caller still holds a parked run, so it names the switch instead: switch the subflow off (that refusal names each parked run to cancel), then remove it.
+  - Once the subflow is switched off and every caller is switched off, the removal completes.
+  
+  A flow an artifact reload no longer ships (a package upgrade or uninstall, a Studio package publish, a dev reload) is removed through the new `AutomationEngine.withdrawFlow`, which does not take this refusal: the package decided the removal, and the next cold boot would not register the flow either.
+  
+  **The disable refusal reads a caller's parked runs completely.** Disabling a packaged subflow under a switched-off caller that holds a parked run was decided from the durable store's deployment-wide list of paused runs, which reads at most 1000 rows. A caller whose run lay beyond them read as holding none, and the disable was accepted. The refusal now asks the store for the named callers' runs, all of them: `SuspendedRunStore` gains an optional `listByFlow(flowNames)` (complete by contract, or an error), and `ObjectStoreSuspendedRunStore.listByFlow` reads the `(flow_name, status)` index page by page to its end. A store without it is read through `list()`. The deployment-wide listing (`listSuspendedRunsDurable`) is unchanged.
+- c8111a5: fix(service-automation)!: the toggle door refuses a flow no package ships, naming its status switch (#20726)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata changes shape and nothing an author wrote is renamed or removed, so `objectstack migrate meta` has nothing to rewrite. What moves is which flows the activation switch accepts: a flow without package provenance is refused, and its own `status`, which it always had, is its switch. -->
+  
+  **BREAKING**: shipped as `minor` under the launch-window convention. `toggleFlow(name, enabled)` on the automation service, and so `POST /api/v1/automation/:name/toggle` and `client.automation.toggle`, now switches packaged flows only: a flow a code package ships.
+  
+  **What was wrong.** The switch records an installation's choice in the packaged-metadata activation ledger (`sys_metadata_activation`, ADR-0126 §7.2), whose rows name the package that ships the flow. For a flow authored in the deployment it wrote a row anyway:
+  
+  - A flow with no package id, such as one created through `POST /api/v1/automation` or the clone door, was refused with 400 `VALIDATION_FAILED` "Package is required", naming a field the caller never sent.
+  - A flow carrying the runtime-row package sentinel or an app package id was accepted, and a ledger row was written for it. That gave it a second off-switch beside its own `status`.
+  - With no ledger attached, the flip was accepted in process only.
+  
+  **What changed.** A flow without package provenance is now refused with `RESOURCE_CONFLICT` / `409`, in both directions and with or without a ledger. The refusal comes before anything is written or changed. The message says the switch turns packaged flows on and off. It names the flow's own switch: its definition's `status`, published with the complete definition through `PUT /api/v1/automation/:name`. `obsolete` switches it off and `active` arms it. The switch never rewrites a definition itself. Packaged flows toggle exactly as before.
+  
+  **Migration.** To switch a customer-authored flow off, stop sending `POST /api/v1/automation/NAME/toggle` with `{"enabled": false}`. Instead, send `PUT /api/v1/automation/NAME` with the flow's complete definition and `status: 'obsolete'`, and `status: 'active'` to arm it again. In the SDK, `client.automation.toggle(name, false)` becomes `client.automation.update(name, { ...definition, status: 'obsolete' })`.
+  
+  **A customer flow that a ledger row already holds off.** If this switch turned a customer flow off before this release, its ledger row still holds the flow off after the upgrade, and no `status` clears that row. The refusal says so and names the step that completes: clone the flow under a new name through `POST /api/v1/automation/NAME/clone`, which arms the copy, then remove the old one.
+- 76bd58f: fix(automation): which flows are packaged is the package loader's fact, never the flow definition's own, and every flow written through an authoring door is authored in the deployment (#20761)
+  
+  Clause-②: yes (widening)
+  
+  A flow counts as packaged only when a managed package's loader registered it (ADR-0126 §2, ADR-0131 D6). Before this change, a flow definition written through an authoring door could carry a code package's provenance, and the automation engine then treated that flow as the package's.
+  
+  - **The automation engine reads the loader's set.** The ADR-0126 §7.3 subflow guards, the arming gate, the activation switch and the package an activation row names now come from the packages the loader registered. The provenance a flow definition carries is kept for display only. `AutomationEngine` gains `setPackagedFlowSource(reader)` and `packagedFlowOwner(name)`, and the package exports the `PackagedFlowSource` type. `AutomationServicePlugin` attaches the reader for you: it asks the metadata protocol when the engine needs the answer. An engine with no reader attached treats no flow as packaged.
+  - **One authoring rule for flows.** `ObjectStackProtocolImplementation` gains two methods. `packagedArtifactOwner({ type, name })` names the package whose loader registered an item. `tenantAuthoredWriteRefusal({ type, name, item, packageId? })` is the rule every flow write door asks: the automation create, update and clone doors, and the metadata door's flow write.
+    - A write to a name a package ships is refused as a locked base. The answer is `packagedBaseRefusal`'s own (`403 NOT_OVERRIDABLE`), so sending a shipped flow's definition back is refused.
+    - A definition that claims a code package's provenance for a name no package ships is refused with `422 INVALID_METADATA`, and nothing is written. Before, the automation doors kept the claim and the metadata door removed it without saying so.
+    - A customer flow's definition sent back as it was read is accepted as before. That includes a stored flow bound to one of your own packages, whose read carries that binding.
+    - `packagedBaseRefusal` also takes an optional `packageId`, the base a save names.
+  - **The metadata door's other types are unchanged.** Only flows are judged by this rule. Migrating stored rows and duplicating a package are not affected either.
+  - **A clone is saved.** `POST /automation/:name/clone` now writes its copy as a stored flow of the deployment, through the metadata protocol's save, with no package provenance. The copy reads back on the metadata door and is still there after a restart. Before, it lived only in the running engine and was gone after a restart. If the save fails, the clone is withdrawn and the failure is returned.
+  
+  **If a write of yours is now refused with `422 INVALID_METADATA`:** remove the package provenance from the flow definition and send it again. To customize a packaged flow, clone it under a new name.
+- 27bf358: fix(automation): boot-time flow precedence takes which same-named flow is the packaged one from the package loader's set, not from the flow definitions' own provenance (#20864)
+  
+  Clause-②: yes (widening)
+  
+  When several flow definitions share one name at startup, the automation plugin arms one of them and shadows the rest. Which contender counts as the packaged one is now the answer of the set of flows a managed package's loader registered. That is the same answer the ADR-0126 §7.3 subflow guards, the arming gate and the activation switch read since #20761. The package provenance a flow definition carries is kept for display only.
+  
+  - `resolveFlowPrecedence(items, logger?, packagedFlowOwner?)` and `describeFlowContender(item, packagedFlowOwner?)` take the reader as a new optional last argument, typed `PackagedFlowSource` (the reader `AutomationEngine.setPackagedFlowSource` takes). `AutomationServicePlugin` passes the engine's own `packagedFlowOwner` for you.
+  - A definition that claims a package's provenance for a name no package loaded ranks as a flow of the deployment. The shadowing record (`getShadowedFlows()`, and the startup warnings) no longer names that package as its source.
+  - With no reader, no contender is packaged. That is the engine's own answer when no reader is attached.
+  - Two contenders that both rank as the deployment's keep the order they were listed in. The package id orders packaged contenders only, as before.
+  - A startup whose registry the package loader and the stored-flow hydration filled arms the same flows as before: those entries already agree with the loader's set.
+  
+  **If you call `resolveFlowPrecedence` or `describeFlowContender` yourself:** pass the loader's-set reader as the last argument, for example `(name) => engine.packagedFlowOwner(name)`. Without it no contender ranks as packaged.
+- 8368f1c: feat(service-automation): the connector sync executor pulls a `mapping`'s `connectorSource` and writes it through the import runner (#20919)
+  
+  `AutomationServicePlugin.pullConnectorSource({ mapping, context })` (and the
+  exported `pullConnectorSource(deps, opts)`) reads the mapping through the
+  protocol's `getMetaItem`, resolves `connectorSource.connector` to a declared
+  (`connectors[]`) `rest` or `openapi` instance, makes ONE call to its read action,
+  takes the array at `recordsPath` (default `body`), projects it through the
+  mapping's `fieldMapping` and writes it with `@objectstack/core`'s `runImport` —
+  the import door's coercion, `mode` / `upsertKey` matching and per-row verdicts,
+  with the door's defaults for every knob `connectorSource` does not declare.
+  
+  - **Watermark, read from the target.** For `connectorSource.watermark`, the
+    starting point sent as `query[watermark.param]` is the highest value already
+    stored in the target field a `fieldMapping` entry copies `watermark.field` onto
+    (transform `none`). Nothing else stores it.
+  - **One response per pull.** The connector's paging is not followed.
+  - **Loud refusals,** each a `ConnectorPullError` (`code`, `status`, `reason`)
+    raised before anything is written: a plugin-registered or unregistered
+    connector, a degraded instance, a provider other than `rest` / `openapi`, an
+    undeclared action, `update` / `upsert` with an empty `upsertKey`, a
+    `javascript` transform, an unmapped `watermark.field`, an `ok: false` answer,
+    a non-array at `recordsPath` and a non-object record.
+  - **Nothing schedules a pull** — a `job` will drive it; the caller supplies the
+    execution context.
+  
+  The plugin now records the provider of each declared connector instance it
+  materializes, which the executor reads.
+
+### Patch Changes
+
+- 5a23096: Warnings, refusals and hints that cited a tracker number now say what was decided
+  
+  Clause-②: no
+  
+  Several runtime strings an author or operator reads sent the reader to an issue-tracker number for
+  the reason behind them. Each now states that reason in the sentence itself:
+  
+  - `@objectstack/objectql`: the two data-event warnings. A write that names no single record publishes
+    no per-record event rather than one with an empty `recordId`; a predicate (`multi: true`) write
+    publishes its own `data.records.*` event carrying the affected-row count and nothing else, so a
+    driver result that is not a count publishes no bulk event either.
+  - `@objectstack/service-automation`: the warning for a pausing node type that never declares
+    `resumeAuthority`, the generic-route resume refusal (its log line and its error text), and the
+    refusal of a suspension from a type that declares `supportsPause: false`. An undeclared
+    `resumeAuthority` resolves to `'service'` (fail-closed), so the generic resume route refuses those
+    pauses; guessing `'any'` is how a raw resume once walked past an approval decision no service had
+    recorded.
+  - `@objectstack/runtime`: the endpoint step's `NOT_IMPLEMENTED` message and its two hints (the
+    composed runtime always threads the policy context and the execution wiring, because execution is
+    reachable only past the policy chain), and the endpoint mapping refusals (the publish gate rejects
+    the same shapes, so a declaration that reaches the runtime check was stored without passing it).
+  
+  Text only: no error code, field name, status or behaviour changes.
+- c96beb2: fix(security): a flow's inbound-hook secret is withheld from every served flow definition, and a read → edit → republish round trip keeps it (#20552)
+  
+  Clause-②: yes (widening)
+  
+  **The widening.** `@objectstack/metadata-protocol` gains one public method,
+  `ObjectStackProtocolImplementation.getMetaItemsForExecution`. It returns the stored
+  bodies without the serving decorations, for in-process binders that execute what they
+  read. No door that answers a caller may use it.
+  
+  An `api` flow's start node carries its inbound hook's HMAC secret (`config.secret`,
+  ADR-0041), the one credential that hook has. Every read that served the flow's
+  definition served the secret with it, to any authenticated caller. It is now
+  withheld from what is SERVED, and from nothing the engine executes.
+  
+  **What no longer carries the secret.** The automation domain's flow-definition read
+  and the flow its `POST` / `PUT` / clone doors answer with; and on the metadata plane,
+  every read of a flow — item, list, layered, draft preview, published snapshot, diff,
+  audit — plus a package export. The key is removed, not masked: a mask is a non-blank
+  string the registration gate would accept as the secret.
+  
+  **Consequence for a reader.** A client that read the secret back from a definition
+  no longer can. A package exported from one deployment and imported into another
+  arrives without it, and its `api` flows are refused at registration until a secret is
+  set on the start node again.
+  
+  **The round trip.** A save that carries the projected form — no `secret` where the
+  read served none — keeps the stored secret, on both authoring surfaces (the metadata
+  plane's save door and the automation domain's `PUT` / `POST`). Only an explicit value
+  replaces it, so a rotation is written as before. The start node is matched by its
+  `id`, not its position, so an edit that reorders `nodes` keeps it too. The first save of an item that has no stored row yet, such as a code-authored flow or datasource, takes the value from the code layer the read served, for every type with a registered redactor.
+  
+  - `@objectstack/service-automation` owns the projection (`redactFlowCredentials`) and
+    registers it as the `flow` read-path redactor at plugin `init`. The engine keeps
+    binding with the stored secret: it now reads flows from the protocol's execution
+    face, because the served face no longer holds the credential its hooks verify
+    against.
+  - `@objectstack/metadata-protocol` gains `getMetaItemsForExecution` on
+    `ObjectStackProtocolImplementation` — the same flattened list `getMetaItems`
+    serves, without the serving decorations (no `_diagnostics`, no credential
+    redaction). It is for in-process engines that execute what they read; every door
+    that answers a caller keeps serving `getMetaItems`. `carryForwardRedactedValues`
+    now follows a redacted path through an array by the element's `id`.
+  - `@objectstack/metadata`'s `getPublished` applies the type's registered read-path
+    redactor to the body it returns. It was the one metadata read exit that served a
+    stored body without it.
+- 3f45b6c: fix(security): every credential a flow definition holds is withheld from what is served, at every depth, and an edit round trip keeps each one where it belongs (#20590)
+  
+  Clause-②: no
+  
+  **What is now withheld.** Beside an `api` flow's inbound-hook secret (the start node's
+  `config.secret`), every served flow definition now also withholds an `http` node's
+  outbound signing secret (`config.signingSecret`), and both are withheld wherever the
+  node sits: at the top level, or inside a `loop` body, a `parallel` branch, or a
+  `try_catch` region. The engine still executes the stored values.
+  
+  **Removing a signing secret.** A definition saved back without the key keeps the
+  stored secret, because an absent key is what every read serves. To remove it, save
+  the key as the empty string (`signingSecret: ''`): the durable callout is then
+  delivered unsigned, and the empty value is served as written, so the next round trip
+  keeps it cleared.
+  
+  **Changing a node's kind.** An edit that keeps a node's `id` and changes its kind no
+  longer carries that node's stored credential onto it. The credential belonged to the
+  old kind; a start node that needs a secret asks for one again at registration.
+  
+  **Moving a node.** A node moved into or out of a `loop` body, a `parallel` branch or a
+  `try_catch` region keeps its stored credential across the round trip, as long as its
+  `id` and kind are unchanged and it is the only node, at the top level or in any region,
+  that carries that `id`. An edge or a config value with the same `id` does not count.
+  
+  **The `/meta` list read on a dispatcher host.** When the metadata protocol's list read
+  fails, the list answers that failure (`503 SERVICE_UNAVAILABLE` for a store outage, or
+  the protocol's own refusal) instead of serving the metadata service's stored list,
+  which applies no credential redaction. A host whose protocol has no list verb keeps
+  its metadata-service fallback.
+- 14f80e2: The `http` node's designer form says an outbound credential never goes in the node's `url` or `headers`, and where it goes instead (#20590)
+  
+  Clause-②: no
+  
+  The `http` action descriptor's `configSchema` is what the flow designer's palette and property form read (`GET /api/v1/automation/actions`). It described `url` as "Target URL" and `headers` as "Request headers", with no word about credentials. Both values are stored in the flow definition, and a flow definition is served to every member who can read flows; of the node's config, only `signingSecret` is withheld. The two field descriptions now say this, and name where the credential goes instead:
+  
+  - a credential in a header: a `connector_action` on a declarative connector whose `auth.credentialRef` names the secret;
+  - a key in the query string: a declarative `rest` connector with `api-key` auth, whose `paramName` names the parameter and whose `auth.credentialRef` names the secret;
+  - a webhook whose path is the secret: a token-authenticated connector instead, such as the `slack` connector with its bot token. No `credentialRef` variant carries a secret in the url path.
+  
+  Description text only. No config key is added or removed, nothing more is withheld on read, and there is nothing to migrate.
+- 73155fe: Provenance comments in `service-automation` were re-anchored
+  
+  Comment and docblock lines under `src/` that cited tracker numbers which no
+  longer resolve on GitHub now cite the record in this repository that decided
+  the matter (an ADR where one exists, otherwise the commit in this repository's
+  history), and say in their own words what was decided. Comments only: no type,
+  schema, export, log or refusal text, or runtime behaviour changes.
+- 89801cd: **A flow `http` node's `signingSecret` now signs the request on every arm, with one scheme, and a secret that does not resolve refuses the node instead of letting the request leave unsigned.**
+  
+  `signingSecret` is declared as "HMAC-SHA256 secret → X-Objectstack-Signature", with no arm named. Only the durable arm honoured it, because only the messaging outbox signed. The default inline request, and a `durable: true` node on a host with no messaging HTTP outbox (which degrades to that inline request), were sent without the header while the run reported success.
+  
+  - `@objectstack/core`: **new exports** `signHttpBody(body, secret)` and `HTTP_SIGNATURE_HEADER`, the outbound HTTP signature scheme: `X-Objectstack-Signature: sha256=<lowercase hex HMAC-SHA256 of the exact body bytes>`, where a request with no body is signed over the empty string. They were `@objectstack/service-messaging`'s own, and they moved here so a sender with no outbox can sign with the same code.
+  - `@objectstack/service-messaging`: `signHttpBody` and `HTTP_SIGNATURE_HEADER` are still exported under the same names. They are now re-exports of the `@objectstack/core` bindings, not a second implementation. Delivery rows and the headers the outbox sends are unchanged.
+  - `@objectstack/service-automation`: the `http` node's inline request carries `X-Objectstack-Signature` whenever `signingSecret` is set. It is computed over the exact body the node sends (its JSON serialization of `config.body`, or the empty string when there is none), so a receiver that verifies with `signHttpBody` over the bytes it received accepts it on every arm.
+    - A non-empty `signingSecret` that renders to nothing at run time now fails the node with a guard refusal naming `config.signingSecret`, and nothing is sent. This covers a `{token}` with no value in the run, or one that renders the empty string. The refusal is on every arm, including the outbox arm, which used to enqueue such a delivery unsigned. A fault edge does not route it. The fix is to give the run the value the template reads.
+    - An authored `signingSecret: ''` still sends unsigned on purpose, on every arm.
+  
+  Clause-②: yes (widening) — two new exports on `@objectstack/core`'s root. Nothing is removed or renamed on any package. The one newly refused case is a node whose authored secret did not resolve, which the published contract already said signs.
+- defc7f7: fix(service-automation): a flow switched off in the activation ledger stays unbound after a restart, and a trigger-fired refusal no longer logs an ERROR claiming a run-history row (#20677)
+  
+  Clause-②: no
+  
+  **What was wrong.** A packaged flow switched off through the ADR-0126 activation
+  ledger (`POST /api/v1/automation/:name/toggle` with `enabled: false`) came back
+  `bound: true` after every cold restart. Its runs were still refused, so the switch
+  itself held, but its trigger was armed again. At boot the automation service pulls
+  the flows and applies the ledger, which leaves a switched-off flow unbound. The
+  trigger plugins register later, at `kernel:ready`, and registering a trigger armed
+  every matching flow without asking whether it may run. So `GET
+  /api/v1/automation/_status` reported the flow `enabled: false, bound: true`. Each
+  matching event also logged `ERROR Trigger-fired run of flow '…' failed`, saying the
+  failure "is recorded in the flow's run history", while no run row was written.
+  
+  **What changed.**
+  
+  - The engine checks whether a flow may run in one place: at the step that arms a
+    trigger. Every arming path goes through it: flow registration (boot pull,
+    publish, hot reload), trigger registration, and the enable toggle. A flow that
+    either disable dimension switches off (the activation ledger, or an `obsolete` /
+    `invalid` status) is never armed, whenever its trigger registers.
+  - Re-enabling a flow arms it on its trigger as before. Re-enabling the ledger bit
+    of a flow whose `status` is still `obsolete` or `invalid` no longer arms it, since
+    every run it fired would be refused.
+  - A trigger-fired run refused because the flow is disabled (for example, an event
+    already in flight when the flow was switched off) is logged at `info`, saying
+    nothing ran and no run-history row records it. It is no longer an `ERROR`.
+  - The `ERROR` line for any other trigger-fired failure says the failure is
+    recorded in the run history only for a run that dispatched and failed. A run
+    refused before it dispatched gets the same line without that claim.
+  
+  **What is not affected.** The runtime refusal (`FLOW_DISABLED`) and its message are
+  unchanged. The enabled flows beside a disabled one arm exactly as before. No export,
+  option, route or response shape changes.
+- b280546: A caller-supplied value for a `formula` field is stripped on every engine write path, in every context, and reported through `droppedFields` / `onFieldsDropped` under a new `reason`, `computed`; and `ObjectQL.validate` runs the write's own field doors, so a dry run built on it predicts what the write will do (#20805).
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a change of runtime behaviour at the engine's write doors and its validate-only preview, plus one new arm on an OUTPUT enum. No authorable key, spelling, export or stored shape moves: `DroppedFieldsEvent` is an event the engine emits, never metadata an author writes, so widening its `reason` enum leaves every stored row and every authored file valid as it stands; `ObjectQL.validate` gains an optional listener and keeps its signature otherwise. The narrowing refuses, in the preview, a key the write already refused, so there is nothing for a ledger entry to rewrite: the payload was never writable. The other categories are closed on facts: the packages publish (not `unpublished`); no ADR-0087 id covers a write payload's keys or a strip's report (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: `ObjectQL.validate` now refuses a row that carries a key the object does not declare, exactly as `insert` and `update` refuse it: the call throws `INVALID_FIELD` / 400 naming the field. It used to answer `valid: true` for that row while the write it previews refused it, so the protocol's `validateData` and the import dry run built on it said "ok" for rows the commit then failed. It ships as `minor` under the launch-window convention; the widening half is the new `reason` arm.
+  
+  **A formula value is stripped, never refused.** A `formula` field is computed on every read and no driver has a column for it, so a full read returns the key and a record written back carries it: a form save, a flow's `update_record`, a `GET` then `PUT`. The key used to reach the driver, and the driver decided. On SQL drivers the whole write failed with the driver's own error (`SqliteError` "table … has no column named …", with no `status` and no `field`; the REST door relabelled it `400 INVALID_FIELD` "Unknown field" for a field the object declares). On the in-memory driver the value was stored as a shadow column nothing reads. Now the engine takes the value out before the defaults, the hooks and the other strips, completes the write, and reports one `{ reason: 'computed' }` event per call. That holds on `insert` (one row or a batch), `insertMany`, and `update` by id and by predicate, on every driver, and in every context, `isSystem` included: there is no column for any caller's value to land in. Measured on SQLite and the in-memory driver through `protocol.createData`, `POST /api/v1/data/:object`, `PATCH /api/v1/data/:object/:id` and `engine.update`: each now answers success with `droppedFields: [{ fields: ['doubled'], reason: 'computed' }]`, the stored row carries no such key, and the read still returns the computed value.
+  
+  - **`computed` is not `readonly`.** `isSystem` exempts the static `readonly` strip and does not exempt this one. A `formula` field also declared `readonly: true` is reported once, as `computed`.
+  - **`strictReadonlyWrites` refuses it.** That option's coverage is derived from what `onFieldsDropped` reports, so a caller that passes it and sends a formula value now gets `ERR_READONLY_FIELD_REJECTED` with a `computed` drop in `drops`, and nothing is written, `isSystem` included. The refusal message names the reason and its remedy; a refusal without a `computed` drop reads exactly as before.
+  - **Hooks are handed the payload that will be stored.** A `beforeInsert` / `beforeUpdate` hook no longer sees the formula key in `ctx.input.data`; `ctx.submitted` on update still carries the caller's submission as sent.
+  - **Consumers of `DroppedFieldsEvent['reason']` must handle `computed`.** The contract requires a branch on `reason` to be exhaustive. In this release the strict refusal message (`@objectstack/objectql`) and the flow `create_record` / `update_record` step warning (`@objectstack/service-automation`) word it.
+  
+  **What `validate` runs now.** Before judging a row, `ObjectQL.validate` runs the write's own doors, by the same functions the write calls: the declared-field door (the refusal above), the computed-field strip, and the caller-write strips, under the write's `isSystem` gate (on `insert` mode the runtime-owned strip and the static `readonly` strip with its re-default; on `update` mode the static `readonly` strip, where a supplied `id` is the address the write binds and is never judged). What the write would drop is reported through a new optional `onFieldsDropped` listener on `validate`'s options, in the same events the write emits. One consequence for verdicts: a reference field declared static `readonly` is now stripped in the preview as it is on the write, so a validation rule that reads through it answers the same on both.
+  
+  **Unchanged.** A `summary` field keeps its column: a caller-supplied roll-up value is still stored as sent and overwritten by the next write of a child record. The REST layer's own handling of a missing column (schema drift) is unchanged.
+- 75519e1: fix(automation): for a flow name a managed package ships, every startup step arms the package's flow, and a stored flow of that name is reported as shadowed (#20913)
+  
+  Clause-②: no
+  
+  A startup arms flows in two steps: the boot pull from the metadata registry, then a second bind at `kernel:ready` from the metadata protocol's flow list. The second step registered every flow the list held, with no precedence at all. So for a name a managed package ships, a stored flow of the same name could be armed after the boot pull had armed the package's flow. The stored definition then ran, while `getShadowedFlows()` and the startup warnings said the package's flow was armed, and named both contenders as the package.
+  
+  - Both startup steps, and the re-bind on `metadata:reloaded`, now resolve same-named flows through one precedence decision: `resolveFlowPrecedence`, with the engine's reader over the package loader's set.
+  - Within a name a managed package ships, the package's flow is armed and a stored flow of that name is shadowed. A managed package's flow is sealed (ADR-0126 §2): it is customized by cloning it under a new name or by switching it off. This replaces the earlier direction, in which a flow authored in the deployment won over the packaged flow of the same name.
+  - The shadowing record and the startup warnings name the stored flow as a runtime-authored row, not as the package. The collision warning says which rule armed the flow.
+  - Names no managed package ships are unchanged: flows authored in the deployment keep the order they were listed in, and two packages shipping one name still resolve by package id.
+  
+  **If you call `resolveFlowPrecedence` yourself:** within a name the reader says a package ships, the packaged contender now wins over a contender authored in the deployment.
+- Updated dependencies [e5c7d07]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [fa0a4b6]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [05a7547]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [3572916]
+- Updated dependencies [3fbf3ca]
+- Updated dependencies [24d521e]
+- Updated dependencies [f4ce10c]
+- Updated dependencies [b785c3b]
+- Updated dependencies [2473e26]
+- Updated dependencies [3a89d45]
+- Updated dependencies [f379f57]
+- Updated dependencies [889139c]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [7510663]
+- Updated dependencies [a6866da]
+- Updated dependencies [1a75e39]
+- Updated dependencies [cd901d7]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [89801cd]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [cd6d8a5]
+- Updated dependencies [ace770d]
+- Updated dependencies [ed54768]
+- Updated dependencies [99786f9]
+- Updated dependencies [5757463]
+- Updated dependencies [63bfe69]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [b9087d7]
+- Updated dependencies [f10d802]
+- Updated dependencies [856321f]
+- Updated dependencies [6b004c0]
+- Updated dependencies [93e9e42]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [ceee88f]
+- Updated dependencies [e18fea6]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [dcd3309]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [26437ae]
+- Updated dependencies [05be352]
+- Updated dependencies [d1633f3]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [58a77db]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [a11faee]
+- Updated dependencies [2c1cef3]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [097ef80]
+- Updated dependencies [70dae53]
+- Updated dependencies [665cab3]
+- Updated dependencies [682873d]
+- Updated dependencies [1bd14c9]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [df1feae]
+- Updated dependencies [336e191]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [24c554d]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [d2bc644]
+- Updated dependencies [cfa9315]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+- Updated dependencies [00f045d]
+  - @objectstack/spec@17.6.0
+  - @objectstack/platform-objects@17.6.0
+  - @objectstack/core@17.6.0
+  - @objectstack/metadata-core@17.6.0
+  - @objectstack/formula@17.6.0
+  - @objectstack/types@17.6.0
+
 ## 17.5.0
 
 ### Minor Changes

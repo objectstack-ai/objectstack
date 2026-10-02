@@ -1,5 +1,216 @@
 # @objectstack/client
 
+## 17.6.0
+
+### Minor Changes
+
+- 12fbb2f: fix(cli)!: `os environments create` no longer takes `--clone-from`, and the client's `environments.create` request no longer declares `clone_from_environment_id` (#21028)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata changes shape and nothing an author wrote in a stack is renamed or removed, so `objectstack migrate meta` has nothing to rewrite. What goes is a CLI flag and one optional key on an SDK request type, both of which the control plane ignored. -->
+  
+  **BREAKING for scripts that pass `--clone-from`, and for TypeScript callers that pass `clone_from_environment_id`.**
+  
+  **What changed.** `os environments create --clone-from <id>` used to be accepted. It
+  sent `clone_from_environment_id` on the create request, and the control plane never
+  read that key: its create schema does not declare it, and an undeclared key is
+  stripped unread. So the command answered success and created an EMPTY environment,
+  with nothing saying the clone had not happened. Cloning an environment is not
+  implemented, so the flag is gone, and so is the key on the request type.
+  
+  - `os environments create --clone-from <id>` (also spelled `--clone-from=<id>`) is
+    now refused by the argument parser (`Nonexistent flag: --clone-from`, exit 2) before
+    any request is made. Before, it created an empty environment and exited 0.
+  - A create without the flag is unchanged: the request body never carried the key.
+  - `@objectstack/client`: `client.environments.create({ … })` no longer types
+    `clone_from_environment_id`, so a call that passes it fails to compile, naming the
+    key. At runtime the request was never different, because the server dropped it.
+  
+  **The one-line fix.** Remove `--clone-from <id>` from the command, or
+  `clone_from_environment_id` from the object you pass to `client.environments.create`.
+  The environment it creates is the same empty one the old call created.
+  
+  **What is not affected.** Every other flag of `os environments create`, and every
+  other field of `client.environments.create`. Starter content is still installed into
+  a new environment afterwards, from the App Marketplace (`os package install`).
+- d6d6e87: feat(spec,client)!: `ActionSchema` gains `outcomeMessages` — success copy per closed handler `outcome`, interpolating `${result.*}` — and `client.environments.delete` no longer guarantees `message` on its archive answer (#21095)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/client/src/index.ts#ObjectStackClient) the one narrowing in this changeset is the declared RETURN type of `ObjectStackClient.environments.delete`, a published SDK method of an exported class: its archive answer's `message` becomes optional, beside a new optional `outcome`. That class is not a Zod schema, not a spec contract, not an object definition and not referenced by one, so `objectstack migrate meta` has nothing to rewrite, and the compiler at the consumer's own read is the channel that reaches every affected consumer. The spec half is a widening only (a new optional key, refused solely where it would be inert), so no stored metadata changes meaning and no ADR-0087 entry is owed for it. The other categories are closed on facts: all three packages publish (not `unpublished`); no ADR-0087 id covers a client return type and this diff adds none (not `registered` / `already-registered`); and the diff touches `packages/spec`, which `type-surface-only` refuses. -->
+  
+  **BREAKING for TypeScript readers of `client.environments.delete`'s archive answer**: `message` is now `message?: string`. Code that assigns it to a `string` stops compiling at that read. Nothing else in the SDK changes, and the request is unchanged.
+  
+  **`ActionSchema.outcomeMessages`** (`@objectstack/spec/ui`). A server-executing action can succeed in more than one way: an environment delete archives, finds the environment already archived, defers a purge, or destroys it. One static `successMessage` cannot say which of these happened. The handler now reports a closed `outcome` fact in its success payload, and the action declares the copy for each outcome:
+  
+  ```ts
+  outcomeMessages: {
+    archived: 'Environment ${result.environmentId} archived.',
+    already_archived: 'Environment ${result.environmentId} was already archived.',
+  }
+  ```
+  
+  - Keys are snake_case outcome names; values are `I18nLabel`s. A key that is not snake_case is refused at its own path (`invalid_key`).
+  - The key is valid on `type: 'api'` and `type: 'script'` actions only, the two types with a success payload that can carry an `outcome`. It is refused with a prescription on `url` / `modal` / `flow` / `form`, beside `resultDialog` (which suppresses the success toast), and beside `operation: 'update'` (no handler, so no outcome).
+  - `successMessage` and each outcome message may interpolate `${result.*}`, the server-response scope `onSuccess.navigate` already declares. This is not a new dialect.
+  - The console picks `outcomeMessages[result.outcome]`, falls back to `successMessage`, and then to its default text. The console does not read it yet. Until it does, the key is accepted, validated, translated and extracted, and the liveness ledger grades it `planned`, so `os lint` tells an author who writes it that it is not shown yet.
+  
+  **Translation.** `TranslationData` carries the copy beside `successMessage`: `objects.OBJECT._actions.ACTION.outcomeMessages.OUTCOME` and `globalActions.ACTION.outcomeMessages.OUTCOME`. Outcome keys there are snake_case too. `translateAction` overlays them per outcome (object-scoped first, then global) and only for outcomes the action declares. `os i18n extract` emits one key per declared outcome.
+  
+  **`client.environments.delete`** (`@objectstack/client`). The control plane is replacing its English `message` with the closed `outcome` fact: the server returns facts, and the console composes the message in the user's locale. The archive answer declares `outcome?: 'archived' | 'already_archived' | 'purge_deferred'`, and the teardown answer declares `outcome?: 'destroyed'`. Both `outcome` and `message` are optional, because a 200 may carry either one or both depending on which control-plane release answers. To learn what happened, read `deleted` and `purgeDeferred`, which every answer still carries, or `outcome` when it is present.
+
+### Patch Changes
+
+- c8111a5: docs(client): `automation.toggle` says it switches packaged flows only, and names a customer flow's switch (#20726)
+  
+  `client.automation.toggle` had no docblock of its own: its one line had drifted above an unrelated member. It now says that it switches packaged flows only, and that a flow authored in the deployment is refused with 409 `RESOURCE_CONFLICT`. Such a flow's switch is its `status`, sent with the complete definition through `automation.update`. This is prose only: the method's signature and behaviour are unchanged.
+- e4e5222: Provenance comments in `@objectstack/client` were re-anchored
+  
+  Comment and docblock lines under `src/` that cited tracker numbers which no
+  longer resolve on GitHub now cite the commit in this repository's history that
+  decided the matter, and say in their own words what was decided. Comments
+  only: no request, route, error code, type, export or runtime behaviour changes.
+- Updated dependencies [e5c7d07]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [05a7547]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [3fbf3ca]
+- Updated dependencies [24d521e]
+- Updated dependencies [b785c3b]
+- Updated dependencies [2473e26]
+- Updated dependencies [3a89d45]
+- Updated dependencies [f379f57]
+- Updated dependencies [889139c]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [7510663]
+- Updated dependencies [a6866da]
+- Updated dependencies [1a75e39]
+- Updated dependencies [cd901d7]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [89801cd]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [ace770d]
+- Updated dependencies [ed54768]
+- Updated dependencies [99786f9]
+- Updated dependencies [63bfe69]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [f10d802]
+- Updated dependencies [856321f]
+- Updated dependencies [6b004c0]
+- Updated dependencies [93e9e42]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [ceee88f]
+- Updated dependencies [e18fea6]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [dcd3309]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [26437ae]
+- Updated dependencies [d1633f3]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [58a77db]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [a11faee]
+- Updated dependencies [2c1cef3]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [097ef80]
+- Updated dependencies [70dae53]
+- Updated dependencies [665cab3]
+- Updated dependencies [682873d]
+- Updated dependencies [1bd14c9]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [df1feae]
+- Updated dependencies [336e191]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [24c554d]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [d2bc644]
+- Updated dependencies [cfa9315]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+  - @objectstack/spec@17.6.0
+  - @objectstack/core@17.6.0
+
 ## 17.5.0
 
 ### Minor Changes

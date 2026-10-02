@@ -1,5 +1,649 @@
 # @objectstack/rest
 
+## 17.6.0
+
+### Minor Changes
+
+- e5c7d07: feat(rest): `GET /api/v1/data/:object/export?template=true` answers an xlsx import template for the object (#18386)
+  
+  Clause-②: yes (widening)
+  
+  The export door takes one more query parameter, `template`. `template=true`
+  answers an `.xlsx` workbook with no data rows; `template=false` answers the export.
+  Without a `template` parameter the export is exactly as before, byte for byte.
+  
+  - **Columns.** Every field of the object except
+    those marked `system` or `readonly`, and `formula`, `summary` and
+    `autonumber` fields, in the order the object declares them. A `hidden` field
+    that can be written is a column. The seven columns the platform adds to every
+    object (`organization_id`, `created_at`, `created_by`, `updated_at`,
+    `updated_by`, `owner_id`, `owning_business_unit_id`) are never template
+    columns. A field the caller's field-level security does not let them edit is
+    left out. If the security service cannot say which fields the caller can edit,
+    the columns are narrowed by the fields the caller can read instead. The
+    instructions sheet then says so, and the `X-Export-Template-Projection`
+    response header reads `readable` instead of `writable` (`none` when no
+    field-level security applies). An explicit `?fields=` list is used as sent.
+  - **First sheet.** The header row, with ` *` after each field that is required
+    and has no default value, and one example row to replace or delete. Select,
+    radio and boolean columns carry a dropdown.
+  - **Second sheet.** One row per column: the field's API name, its type, whether
+    it is required, and the values the import accepts for it.
+  - **Language.** The sheets are in Chinese for a `zh` request locale
+    (`?locale=` or `Accept-Language`) and in English otherwise.
+  
+  The same two permission checks as the export apply: an object that does not
+  expose export answers `405`, and a caller without the export permission answers
+  `403`. `template` with a value other than `true` or `false`, a `format` other
+  than `xlsx`, or any of `limit`, `page`, `filter`, `search`, `searchFields`,
+  `orderby` or `header` beside `template=true`, answers `400 VALIDATION_ERROR`.
+- eb4b17c: fix(rest): `POST /api/v1/data/:object/import` reads a `date`, `datetime` or `time` cell only in ISO 8601, the export's own `YYYY-MM-DD HH:mm:ss` or a year-first date (`2026/7/15`), on a calendar day that exists, and keeps a `date`'s year at four digits (#20534)
+  
+  Clause-②: no (narrowing)
+  
+  **BREAKING for callers of the import door.** A text cell for a `date`,
+  `datetime` or `time` field is now read only in one of these spellings, after
+  trimming:
+  
+  - `YYYY-MM-DD`;
+  - `YYYY-MM-DDTHH:MM[:SS[.fraction]]`, then `Z`, a `+HH:MM` / `-HH:MM` /
+    `+HHMM` offset, or nothing (a wall clock, read in the importing user's
+    business timezone, as before);
+  - `YYYY-MM-DD HH:MM[:SS[.fraction]]` with no offset, which is what the export
+    writes for a `datetime` cell;
+  - a year-first date, `YYYY/M/D` or `YYYY-M-D` (a four-digit year, a one- or
+    two-digit month and day, the same separator twice), optionally followed by
+    one space and `H:MM` or `H:MM:SS` with no offset, read exactly as the
+    export shape is;
+  - for a `time` field, also a bare `HH:MM` / `HH:MM:SS`.
+  
+  The day must exist. Every other cell is that row's `invalid_date` error, with
+  the importer's existing sentence ("is not a valid date" / "datetime" /
+  "time"). The reader used to hand such a cell to the JavaScript date parser,
+  which read it in the SERVER PROCESS's timezone and month-first, and rolled an
+  impossible day into the next month, so the import reported success and stored
+  a different value. For each shape, change the cell FROM the refused spelling
+  TO an admitted one:
+  
+  - **An impossible day.** FROM `2026-02-30`, `2026-02-29`, `2026-04-31` in any
+    spelling (a `datetime` `2026-02-30` was stored as 2 March, and so was a
+    `date` written `2026-02-30T10:00:00Z`) TO the day you mean. Nothing is
+    rolled over.
+  - **A locale or prose date.** FROM `07/15/2026`, `07/15/2026 10:00`,
+    `07/08/2026`, `15 July 2026`, `Jul 15 2026 10:00` (stored hours apart on a
+    New York and a Shanghai server, a `date` a day apart, and `07/08/2026` read
+    as 8 July) TO `2026-07-15`, `2026-07-15 10:00`, `2026-07-08` or
+    `2026-08-07`. No timezone and no field order is guessed. Converting a
+    spreadsheet column to ISO (in Excel, the cell format `yyyy-mm-dd` or
+    `yyyy-mm-dd hh:mm:ss`) before export is the fix.
+  - **A year-first date outside its one form.** FROM a mixed separator
+    (`2026/7-15`) TO `2026/7/15` or `2026-07-15`. FROM a `T` or a zone on the
+    year-first form (`2026/7/15T9:00`, `2026/7/15 9:00Z`) TO `2026/7/15 9:00`
+    (a wall clock in the business timezone) or the ISO `2026-07-15T09:00:00Z`.
+    FROM a fraction of a second (`2026/07/15 10:00:00.123`) TO
+    `2026-07-15 10:00:00.123`. A two-digit year (`26/7/15`) is refused, as it
+    was.
+  - **A zone after a space, or lower-case `t` / `z`.** FROM
+    `2026-07-15 10:00Z`, `2026-07-15 10:00:00+08:00`, `2026-07-15t10:00:00z` TO
+    `2026-07-15T10:00Z`, `2026-07-15T10:00:00+08:00`, `2026-07-15T10:00:00Z`,
+    the spellings the create and update doors take.
+  - **A zone-naive `24:00`.** FROM `2026-07-15 24:00` or `2026/7/15 24:00` (read
+    in the server's zone) TO `2026-07-16 00:00` or `2026/7/16 0:00`.
+    `2026-07-15T24:00:00Z`, which names its instant, reads as before.
+  - **A number, reduced or expanded forms.** FROM a JSON number such as `2026`
+    or an Excel serial, `2026`, `2026-07`, `+002026-07-15` TO `2026-01-01`,
+    `2026-07-01`, `2026-07-15`.
+  
+  **Kept: year-first dates.** `2026/7/15`, `2026/07/15`, `2026-7-15`,
+  `2026/7/15 9:00` and `2026/08/01 06:00:00`, Excel's default short date in
+  zh-CN and ja-JP, stay admitted. They are now held to the same rules as every
+  other cell: the day must exist (`2026/2/30` is refused, never rolled into
+  March), the hour runs 0 to 23, and the day is stored in its padded ISO form
+  (`2026/7/15` is stored as `2026-07-15`). A year-first date with no clock
+  given to a `time` field reads as `00:00:00`, as an ISO day does; it used to
+  read the server's zone (`04:00:00` on a New York server).
+  
+  **The year keeps four digits.** A `date` cell for a year from 0001 to 0999
+  (`0500-01-01`) used to leave the reader as `500-01-01`, which the write door
+  refuses, so the import refused a day the create door takes. It is stored as
+  written now. A bare day read into a `datetime` field in years 0001 to 0099
+  (`0050-01-01`) used to be stored in the 1900s (`1950-01-01T00:00:00.000Z`); it
+  is stored in its own year now.
+  
+  **What is not affected.** Every ISO 8601 cell and every export-shape cell on
+  a real day reads exactly as before, including a zone-naive cell read in the
+  business timezone and an offset-bearing cell honoured as written. An xlsx
+  cell that Excel stores as a date is unaffected: it reaches the reader as the
+  export shape. The dry run answers the same verdicts as the real write. A
+  refused cell fails only its own row, and the rest of the batch imports as
+  before. The same narrowing applies to the exported `coerceRow` helper.
+  
+  **If you are refused.** The row's result carries `code: 'invalid_date'` and
+  quotes the cell, so the file can be corrected and re-imported.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is removed, renamed or reshaped: no spec key, no export, no stored row. The import door's cell reader accepts fewer spellings of a date inside an imported file, which is data, not metadata, so `objectstack migrate meta` has nothing to reach. The row's invalid_date error quotes the refused cell, and the repair is to write the date in ISO 8601 or as a year-first date. -->
+- 22e584c: fix(rest)!: `POST /api/v1/data/:object/import` reads a `time` cell by `@objectstack/core`'s one `time` rule, the rule the write door asks, so the `10:00:00.250` that `/export` writes for a `time` with milliseconds re-imports as itself instead of failing its row as `invalid_date`, and a cell the write door refuses is refused with the write door's code, `invalid_time` (#20722)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of an import CELL value at the `/import` reader's time arm, and the field code that refusal reports: no authorable key, spelling or stored shape of metadata moves, and no schema, type or export changes; `packages/spec` is untouched. The code a refused `time` cell reports moves between two existing members of the closed `FieldErrorCode` catalog (ADR-0114), so nothing is minted or retired, and nothing branches on a field code. An import file is caller input, not stored metadata, and a row already stored keeps whatever it holds, so there is nothing a ledger entry could rewrite. The other categories are closed on facts: `@objectstack/rest` publishes (not `unpublished`); no ADR-0087 id covers an import cell check (not `registered` / `already-registered`); and the change is runtime behaviour, not a TypeScript declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what `/import` accepts in a `time` cell. An ISO 8601 instant whose UTC year has no four-digit spelling (`"9999-12-31T23:00:00-02:00"`, which is UTC year 10000) was stored as its UTC time of day (`01:00:00`). It now fails its row with `invalid_time`, as the write door has refused the same value since #20671. A refused `time` cell's row code also moves from `invalid_date` to `invalid_time`, the code the write door gives for the same value. It ships as `minor` under the launch-window convention for accept-set narrowings (`check-changeset-no-major` refuses `major` until GA; the breaking-ness is carried by this banner and the ADR-0087 disposition above).
+  
+  The import's `time` reader was a private pattern with no fractional part. A `time` stored with milliseconds (`10:00:00.250`, which the write door accepts and `/export` writes as it is stored) failed its row on re-import with `Clock: "10:00:00.250" is not a valid time`, on every backend, so an export did not re-import. The reader now asks the same rule the write door asks of a written `time`: `isUninterpretableTemporalComparand('time', …)` for the verdict and `temporalStorageForm(…, 'time')` for the stored value. A cell is admitted exactly when the write door admits the same value, and stored as the same wall clock.
+  
+  Through the route, the process in America/New_York, on memory, SQLite and PostgreSQL 16 (at `Asia/Shanghai`), before and after:
+  
+  | `time` cell | before | now |
+  |:--|:--|:--|
+  | `10:00:00.250`, `23:59:59.999` (what `/export` writes) | row failed, `invalid_date` | stored as written |
+  | `10:00:00.5`, `10:00:00.000` | row failed, `invalid_date` | `10:00:00.500`, `10:00:00` |
+  | `2026-07-15T10:00:00.250Z`, `2026-07-15 10:00:00.250` | stored `10:00:00`, the fraction dropped | `10:00:00.250`, as the write door stores it |
+  | `9999-12-31T23:00:00-02:00` (an instant in UTC year 10000) | stored `01:00:00` | row failed, `invalid_time`, as the write door refuses it |
+  | `10:00Z`, `10:00+08:00`, `07/15/2026 10:00`, `25:00` | row failed, `invalid_date` | row failed, `invalid_time` |
+  | `10:00`, `10:00:00`, `2026-07-15T18:00:00+08:00` | `10:00:00` | unchanged |
+  | `2026/7/15 9:00` (the year-first form) | `09:00:00` | unchanged |
+  
+  A zone-naive `2026-07-15 24:00` in a `time` cell, refused before, is now read as `00:00:00`: core's rule reads it so, and the write door admits it. A `date` or `datetime` cell keeps `invalid_date`, and the row's sentence is unchanged for every kind. A time of day with a `Z` or an offset stays refused: a `time` carries no zone. The year-first date-time (`2026/7/15 9:00`) is still read as its wall clock; it is the one reading the import has that the write door has not. The dry run reports the same verdicts.
+  
+  **Who is affected.** A caller of `POST /api/v1/data/:object/import`, including the dry run, whose file carries such an instant in a `time` column now gets that row refused. A client that matched the row report's `code` for a refused `time` cell now reads `invalid_time`. Rows already stored are not rewritten.
+  
+  This supersedes the note in the `@objectstack/objectql` entry for #20671 that the server import turns a `time` cell into `HH:MM:SS`: the import now keeps a non-zero fraction (`HH:MM:SS.fff`).
+- bafb8c9: fix(rest)!: a public form's lookup picker searches and sorts by the first display field the caller may query, so a picker whose first display field is masked for its caller serves its rows instead of answering 403 (#21062)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a change of which display field the public lookup picker (`GET /forms/:slug/lookup/:field`) searches and sorts by: the first display field the caller may query, by the security service's answer, where it used to be the first display field. No authorable key, spelling, export or stored shape moves: `@objectstack/rest` exports nothing new and nothing less, `FormFieldPublicPickerSchema` keeps parsing every value it parsed, and no stored row is read or rewritten. A picker's `displayFields` keep their meaning as the projected fields. The other categories are closed on facts: the package publishes (not `unpublished`); no ADR-0087 id covers which field a picker keys on (not `already-registered`); and the change is route behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this widens what the public lookup picker serves and narrows it in one composition. The narrowing: with a security service that lacks `ISecurityService.getQueryableFields`, or that answers no answer for the object, the picker passes over every display field whose declaration carries a `maskingRule`, for every caller, including a caller the rule is lifted for. So its search and order move to the next display field that declares no rule, and a picker whose display fields all declare a rule is refused `403 PERMISSION_DENIED` without the engine being asked, where it used to be served. The security service this repository ships implements the method, so a deployment using it is not narrowed. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **What changed.** The public lookup picker (`GET /forms/:slug/lookup/:field`)
+  matches the visitor's search and orders its rows by one key. That key used to
+  be the first entry of `publicPicker.displayFields`. It is now the first entry
+  the caller may query on, as the security service answers it
+  (`ISecurityService.getQueryableFields`). A field whose masking rule applies to
+  a caller is served to that caller masked, and the engine refuses to search or
+  sort on it with `403 PERMISSION_DENIED`. A picker whose first display field
+  declares such a rule therefore answered `403` to every caller the rule applies
+  to, on every request. It now serves its rows, sorted and searched on the next
+  display field the caller may query. The masked field is still returned in each
+  row, masked, as before.
+  
+  **When no display field is queryable** for the caller, the picker answers
+  `403 PERMISSION_DENIED` with the engine's refusal for those fields, without
+  running a query.
+  
+  **Unchanged.** A picker with no masked display field, and a caller the masking
+  rule is lifted for, keep the first display field as the key, with the security
+  service this repository ships. A deployment with no security service keeps the
+  first display field.
+  
+  **What to do.** Nothing. To choose the field a picker searches when its first
+  display field is masked for some of its callers, list a field those callers may
+  query among `displayFields`: the first such entry is the one searched and
+  sorted on. A picker whose only display fields are masked for its callers is
+  refused, so give it one they may query.
+  
+  **What to do after upgrading, if your security service predates `getQueryableFields`.**
+  Implement `getQueryableFields` on it: it answers which fields a caller may filter,
+  sort, group or aggregate by, and the picker then keys on the first display field
+  in that answer. Until it does, give each picker at least one display field that
+  declares no `maskingRule`, or the picker is refused for every caller.
+- 3dc33b2: **BREAKING** — an anonymous public form no longer offers record search. The form field's `publicPicker` block (`view.form.sections[].fields[].publicPicker`: `displayFields`, `maxResults`, `filter`, `object`) is removed, and the anonymous lookup route `GET /api/v1/forms/:slug/lookup/:field` is deleted. A public form's `lookup`, `master_detail` and `user` fields are now always left off its anonymous rendering, whatever the form declares.
+  
+  Clause-②: yes (narrowing)
+  
+  Retired immediately (ADR-0087 D2), with no alias window: the maintainer's ruling reverses the earlier one that had declared the key. Mainstream web-to-lead forms do not let an anonymous visitor search records either, and no example, template, plugin or first-party UI declared or called the picker.
+  
+  ## FROM → TO
+  
+  | you wrote (17.5 and earlier) | write instead |
+  | --- | --- |
+  | `{ field: 'account', publicPicker: { displayFields: ['name'], maxResults: 10 } }` on a public form | delete the `publicPicker` block — the field is left off the anonymous rendering anyway |
+  | a public form whose visitors chose from a short, fixed list of records | a `select` field with static `options` listing the choices |
+  | a public form whose visitors had to pick an existing record | the same form behind sign-in (an internal form), where the lookup field searches with the signed-in user's own access |
+  | a client calling `GET /api/v1/forms/:slug/lookup/:field` | nothing to call: the path is no longer registered and answers what any unregistered path answers (`404 ENDPOINT_NOT_FOUND`) |
+  
+  **The one-line fix:** delete the `publicPicker` block; an anonymous public form no longer offers record search. Use a `select` field with static `options`, or put the form behind sign-in.
+  
+  **What an author who still writes it sees.** `tsc` fails at the authoring site (`FormFieldInput` types the key `never`), and the parse — `defineView()`, `defineStack({ views })`, `os validate`, `PUT /api/v1/meta/view/:name` — refuses it at `…sections[N].fields[N].publicPicker` with the prescription:
+  
+  > `view.form.sections[].fields[].publicPicker` was removed in @objectstack/spec 17.6.0 (ADR-0087 D2) — an anonymous public form no longer offers record search: lookup, `master_detail` and `user` fields are always left off the anonymous rendering, and the anonymous record-search route (`GET /forms/:slug/lookup/:field`) no longer exists. Delete the key (the whole `publicPicker` block). To let a visitor choose from a fixed list, use a `select` field with static `options`; to let them pick an existing record, put the form behind sign-in. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.
+  
+  **What a REST client sees.** The two error codes only that route produced, `LOOKUP_NOT_PUBLIC` and `LOOKUP_TARGET_MISSING`, leave the error-code ledger with it. `GET /api/v1/forms/:slug` and `POST /api/v1/forms/:slug/submit` are unchanged apart from the unconditional strip above.
+  
+  ## The retirement kit
+  
+  - **A `retiredKey()` tombstone on the form field**, so the parse carries the prescription instead of a bare unknown-key verdict. The block's own schema and its two types go with it: `FormFieldPublicPickerSchema`, `FormFieldPublicPicker` and `FormFieldPublicPickerParsed` are no longer exported, and `ui/FormFieldPublicPicker` is no longer published as a JSON Schema.
+  - **The D2 conversion `form-field-public-picker-removed`** (protocol 18, retired from the load path) deletes the key from every form field of every form payload — `sections[]`, `groups[]`, top-level `fields[]` and nested rows. Its D3 record is the semantic entry `form-field-public-picker-retired`, which asks the author how a visitor should now choose.
+  - **`@objectstack/rest`:** the lookup route and its filter-lowering helper are deleted, and the resolve route's strip of lookup / `master_detail` / `user` fields no longer has an opt-in.
+  - **`@objectstack/lint`:** the preset-comparand rule no longer reads a picker's `filter` (its claiming reader for that position went with the key).
+  
+  ## What an operator with a STORED form sees
+  
+  A `sys_metadata` view row saved before this release may still carry the key. Nothing breaks at read: the conversion replays on rehydration and strips it, so the view is served canonical and parses, and the field stays off the anonymous rendering either way. `os migrate meta --stored` lists those rows, and `--apply` rewrites them.
+  
+  <!-- adr-0087: registered form-field-public-picker-removed, form-field-public-picker-retired -->
+
+### Patch Changes
+
+- 6f1f1c1: fix(rest): the import template (`GET /api/v1/data/:object/export?template=true`) puts ` *` on a column only when the import refuses a row that leaves it blank
+  
+  Clause-②: no
+  
+  - A required field whose option list marks an option `default: true` no longer gets ` *` in the header, and the instructions sheet lists it as not required. A blank cell in that column is imported as the marked option.
+  - A required field that declares `defaultValue: null` now gets ` *`, unless one of its options is marked `default: true`: the import treats `null` as no default and refuses the blank. A required field whose default is `''`, or `[]` on a multi-valued field, now gets ` *` too: the required check refuses that default.
+  - A required `system`, `readonly` or `autonumber` field named in `?fields=` no longer gets ` *`: the import does not refuse a blank in it.
+  - Each dropdown's error title, which is the column header, is cut to 32 characters, the longest title Excel's data-validation dialog takes.
+- 67c1b11: fix(rest): `GET /api/v1/data/:object/export` writes a `date` or `datetime` cell with a four-digit year, so an export of a year from 0001 to 0999 re-imports (#20602)
+  
+  Clause-②: no
+  
+  A `date` of `0500-01-01` exported as `500-01-01`, in CSV, xlsx and JSON alike,
+  and so did the day of a `datetime` cell whose business-timezone day fell before
+  year 1000: the instant `1000-01-01T02:00:00.000Z` exported in America/New_York
+  as `999-12-31 21:03:58`. `POST /api/v1/data/:object/import` reads a four-digit
+  year only, so re-importing the platform's own file refused that row as
+  `invalid_date`. The export now spells every `date` and `datetime` cell's day
+  with the storage rule the write doors use (`temporalStorageForm` from
+  `@objectstack/core`): `0500-01-01` and `0999-12-31 21:03:58`, which the import
+  reads back as the same day and the same instant.
+  
+  **What is not affected.** Every cell whose day falls in the years 1000 to 9999
+  exports byte for byte as before, in every business timezone and with none. The
+  clock of a `datetime` cell is unchanged. A `datetime` stored before year 1000,
+  which the write doors now refuse, exports with a padded year as well, and the
+  import refuses it as `invalid_date`, as the write doors do. A year outside 0001
+  to 9999 stays unpadded, and a `datetime` whose business-timezone day falls in
+  such a year now spells that year as the storage rule does (`0-12-31`, not the
+  era year `1-12-31`); the import refuses both spellings, as before.
+- 72f8c38: fix(rest): `GET` / `POST /security/explain` answers a refusal the security service classified with that refusal's own status and code, instead of `500 EXPLAIN_FAILED` (#20603)
+  
+  Clause-②: no
+  
+  The explain service can refuse a request with an ADR-0112 envelope: a `code` and a 4xx `status`. The measured case is a row-level policy that the record matcher cannot evaluate. The service then answers `INVALID_FILTER` / 400, the same answer the find it explains gives for that filter. This happens for a record-grained explanation (`recordId`), for an object-level explanation, and for a `recordId` that no row carries.
+  
+  The route's error handler recognised only `PERMISSION_DENIED` (403) and `OBJECT_NOT_FOUND` (404). Every other throw answered `500` with `error.code: 'EXPLAIN_FAILED'`. So through HTTP the explain call reported a server fault, while the find it explains reported the caller's error. A client reading that 500 retries or reports an outage, where the platform means "this policy cannot be evaluated".
+  
+  The route now asks the same classification the `/data` door uses. A throw that declares a 4xx `status` (or `statusCode`) and a `code` answers with that status and that code in the nested envelope, `{ success: false, error: { code, message } }`. The message is bounded the way `/data` bounds a refusal's message.
+  
+  Unchanged:
+  
+  - A throw that is not classified still answers `500 EXPLAIN_FAILED`. That covers a plain `Error`, a declared 5xx, and a `code` with no `status`.
+  - The `403 PERMISSION_DENIED` and `404 OBJECT_NOT_FOUND` answers.
+  - A successful explanation's body.
+- 165c1d4: fix(rest): an import row names the column the engine refused, and a missing database column is no longer called an unknown field (#20701)
+  
+  **`POST /api/v1/data/:object/import` — a failed row names its column.** A row the
+  engine refuses with `INVALID_FIELD` (a column that names no field of the object)
+  now carries `field` with that column, on the dry run and on the commit alike. It
+  used to carry only `code: 'INVALID_FIELD'`, while `POST /api/v1/data/:object`
+  named the field for the same key. The row reads the error's own `field` when no
+  field-level finding names one; a field-level finding still wins. A unique
+  conflict row now names its column too, when the database said which column it
+  was, as the `409` does.
+  
+  **A missing database column says what the database said.** When the database
+  reports that a table has no column for a field, the `400 INVALID_FIELD` answer
+  now reads "The database table of object 'X' has no column for field 'f'. If the
+  object declares 'f', its database schema has drifted from the metadata: run
+  'os migrate' to reconcile." It used to read "Unknown field 'f'", which was false
+  for a field the object declares: the engine refuses an undeclared key itself,
+  before the database is reached, and keeps its own "Unknown field" wording for
+  that case. `code`, `status`, `field` and `object` are unchanged.
+- d7b9817: fix(rest): an import row for a NOT NULL refusal or a unique conflict answers what the create door answers (#20701)
+  
+  **`POST /api/v1/data/:object/import` and the async import job — a NOT NULL
+  refusal.** When the database refuses a row because a NOT NULL column has no
+  value (for example a field declared `storage: { notNull: true }` and not
+  `required`, which the engine's own check lets through), the committed row
+  now fails with `code: 'required'`, `field` set to the field, and the sentence
+  `POST /api/v1/data/:object` gives for it ("f is required"). It used to fail with
+  the database's own code (`SQLITE_CONSTRAINT_NOTNULL` on SQLite) and no `field`.
+  The create door answers `400 VALIDATION_FAILED` with a `required` finding for
+  the field; the row reports that finding the way it reports a `required` field
+  the engine refuses itself, so no database dialect's code reaches the row.
+  
+  **A unique conflict.** A committed row that repeats a unique value keeps
+  `code: 'UNIQUE_VIOLATION'` and its `field`, and now carries the create door's
+  sentence, "A record with this f already exists", in place of the engine's longer
+  sentence (which the create door returns as `developerMessage`).
+  
+  The async job's rows, read from `GET /api/v1/data/import/jobs/:jobId/results`,
+  change the same way. The row takes these answers from the same mapper as the
+  create door, as it already does for a missing database column. No key is added
+  to the row. The dry run still previews such rows as `ok`, because it checks the
+  metadata and does not judge `storage.notNull` or uniqueness.
+- f80e2a6: fix(rest): an import row for a missing database column answers what the create door answers (#20701)
+  
+  **`POST /api/v1/data/:object/import` and the async import job.** When an object
+  declares a field whose database column is missing (the schema has drifted from
+  the metadata), a committed row that writes that field now fails with
+  `code: 'INVALID_FIELD'`, `field` set to the field, and the sentence
+  `POST /api/v1/data/:object` gives for the same key: "The database table of
+  object 'X' has no column for field 'f'. If the object declares 'f', its database
+  schema has drifted from the metadata: run 'os migrate' to reconcile." It used to
+  fail with the database's own code and text (for example `SQLITE_ERROR` and
+  `table X has no column named f`) and no `field`. The async job's rows, read from
+  `GET /api/v1/data/import/jobs/:jobId/results`, change the same way.
+  
+  The row now classifies a write error through the same mapper as the create door,
+  and takes that answer when it is `INVALID_FIELD`. The dry run still cannot see a missing column,
+  because it checks the metadata and not the table, so it previews such a row as
+  `ok`.
+- 7afdc5c: fix(rest): an org's published edit to a packaged dashboard or view is what the `/meta` item and list reads serve, in every locale, instead of the packaged translation of the string it replaced
+  
+  An organization may edit a packaged dashboard or view in place and publish the edit. The metadata protocol's reads returned the edit, and `?layers=true` reported it as effective, but `GET /api/v1/meta/dashboard/:name`, `GET /api/v1/meta/dashboard`, `GET /api/v1/meta/view/:name` and `GET /api/v1/meta/view` served the bundle's translation of the string the package shipped. For example, a widget retitled `Total Users (edited)` on the platform's `system_overview` dashboard was served as `Total Users` to an `en` reader and as `用户总数` to a `zh-CN` reader.
+  
+  The translators in `@objectstack/spec/system` already let an edited string win over the bundle when they are handed the item as the package shipped it, and the metadata protocol already answers that item (`getPackagedDashboardBase`, `getPackagedViewBase`). The `/meta` reads handed it over for objects only. They now hand it over for dashboards and views too. The change is in the translation step that both `/meta` transports share, the REST server's routes and the runtime's HTTP dispatcher. A view is looked up by its full `<object>.<viewKey>` name.
+  
+  What a reader sees now:
+  
+  - An edited string is served as written, in every locale.
+  - A widget or view the org left alone is still translated.
+  - Resetting the overlay brings back the shipped string and its translation.
+  - A dashboard or view with no org edit is served exactly as before.
+  
+  This fixes what the metadata reads serve, not yet what the console draws. The console built from objectui `db11afd4967c`, this repository's pin when the change was made, looks a dashboard's widget titles and a view's label up in the bundle again in the browser, so it still draws the packaged translation over an edit the server now serves: measured, the `system_overview` board shows `Total Users` / `用户总数` and a `zh-CN` view tab shows `进行中`.
+  
+  Nothing to migrate: no key, export or route changed.
+- f115b1f: REST refusals, warnings and the served OpenAPI text no longer cite tracker numbers; each one states the decision behind it in words
+  
+  Clause-②: no
+  
+  A few strings `@objectstack/rest` sends to callers and operators pointed at an issue-tracker number for the reason behind them. The number goes; where the sentence did not already say what was decided, it now does.
+  
+  - `POST /data/:object/import` with a named mapping that declares a `javascript` transform: the `UNSUPPORTED_TRANSFORM` message now says the import path does not execute it (there is no server-side sandbox), so the import is refused rather than run with that transform skipped.
+  - `GET /openapi.json`: the built-in section's response description says the section is built from the routes this server actually mounts and that payload schemas are deliberately not invented; the request-body description says the document leaves the route-specific shape undescribed rather than invent one.
+  - The boot warning for a config that still sets the retired `api.requireAuth` drops its citation; it already says the key was removed and anonymous access to object data is always denied.
+  - `/discovery`'s `capabilities.transactionalBatch.description` cites ADR-0034 alone.
+  
+  Text only: no status, error code, field, route or control flow moves. A client that matches the old message text (for example the tracker-number suffix the `UNSUPPORTED_TRANSFORM` message used to end with) needs the new spelling.
+- f6ccca4: fix(objectql,rest): a `date` or `datetime` value refused for its year says so — "must be a date in the years 0001 to 9999" / "must be a datetime whose UTC year falls in the years 1000 to 9999" — instead of "must be a valid date (ISO-8601)", which was false for a value such as `0500-07-15T10:00:00Z` (#20846)
+  
+  Clause-②: yes (widening) — one new export on `@objectstack/core`'s root, `SUPPORTED_TEMPORAL_YEARS`. No value's verdict moves and no wire key moves: the field code stays `invalid_date` and its `constraint` stays `{ type }`.
+  
+  `POST` / `PATCH /api/v1/data/:object` and each row of `POST /api/v1/data/:object/import`
+  refuse a `date` outside the years 0001 to 9999 and a `datetime` whose UTC year falls
+  outside 1000 to 9999. When the value itself is readable — an ISO 8601 string such as
+  `0500-07-15T10:00:00Z` or `+010000-01-01`, or a `Date` — the refusal's message now
+  names the kind's years. An author who read "not valid ISO" rewrote the spelling, and no
+  spelling of that year is admitted.
+  
+  - `@objectstack/spec`: the validation message catalog gains `invalid_date_range` and
+    `invalid_datetime_range` in `en`, `zh-CN`, `ja-JP` and `es-ES`. They are two more
+    sentences of the `invalid_date` code, never a wire value. The years are the template
+    parameters `{{firstYear}}` / `{{lastYear}}`. A deployment that overrides a message
+    under `validation.field.invalid_date` or `validation.field.invalid_datetime` does not
+    cover these values. To override their text, define
+    `validation.field.invalid_date_range` / `validation.field.invalid_datetime_range`.
+  - `@objectstack/core`: `SUPPORTED_TEMPORAL_YEARS` (`{ date: { first: 1, last: 9999 },
+    datetime: { first: 1000, last: 9999 } }`, frozen) is the range
+    `isOutsideTemporalYearRange` judges by. It is exported so a refusal names the range
+    from the source the doors use, never a copy of its numbers.
+  - `@objectstack/objectql` and `@objectstack/rest`: the record validator and the import's
+    cell reader choose the range sentence for such a value. An import cell with more than
+    four year digits (`+010000-01-01`) is refused by the import's reader. It used to read
+    "is not a valid date" and now gets the same range sentence as the write door.
+  
+  **What is not affected.** Which values are refused is unchanged, and so is the refusal's
+  code (`invalid_date`) and `constraint`. A value that is not readable keeps its sentence:
+  "must be a valid date (ISO-8601)" at the write door, `"…" is not a valid date` at the import.
+  So does a number, which is never a written `date` or `datetime`.
+- 8f78495: fix(rest): the import template (`GET /api/v1/data/:object/export?template=true`) is gated by the import door's permissions, not the export's
+  
+  Clause-②: no
+  
+  The template carries no records — only the columns the caller may write, one
+  example row and an instructions sheet — so it answers to whoever may import, and
+  the export permission (`allowExport`) neither admits nor refuses it:
+  
+  - A caller with the create permission on the object gets the template, with or
+    without `allowExport`.
+  - A caller without the create permission gets `403 PERMISSION_DENIED`, with or
+    without `allowExport`.
+  - An object whose `enable.apiMethods` exposes neither `create` nor `update`
+    answers `405 OBJECT_API_METHOD_NOT_ALLOWED`, as `POST /api/v1/data/:object/import`
+    does. An object that exposes `create` without `list` serves the template.
+  - Without `template=true` the export is unchanged: the same two export checks
+    and the same bytes.
+  
+  To let a role download the template, grant it create on the object.
+- 8368f1c: refactor(rest): the import runner, coercion, mapping apply, field-meta map and error classification moved to `@objectstack/core` / `@objectstack/types`; `rest` re-exports them (#20919)
+  
+  `runImport`, `coerceRow`, `buildFieldMetaMap` and their types (from the package
+  index), and `mapDataError` with its sibling classification exports, are now
+  re-exported from their new homes — byte-identical code, the same names, the same
+  behaviour at both import routes and at `plugin-auth`'s identity import. Nothing to
+  change for consumers.
+- e161ad3: fix(rest): the `hint` on a NOT NULL refusal leads with the remedy for a column that requires a value, and names schema drift only as a condition, so an author who declared `storage: { notNull: true }` is no longer sent to `os migrate` (#20963)
+  
+  Clause-②: no
+  
+  A field that declares `storage: { notNull: true }` without `required` is a column
+  the database keeps NOT NULL on purpose (ADR-0113). A write with no value for it,
+  through `POST /api/v1/data/:object` or `PATCH /api/v1/data/:object/:id`, is
+  refused by the database and answers `400 VALIDATION_FAILED` with a `required`
+  finding for the field. That answer was right. Its `hint` said the field is
+  optional in the metadata and "the physical schema has drifted from metadata",
+  and told the caller to run `os migrate`, which changes nothing for a column
+  declared NOT NULL.
+  
+  The `hint` now reads: "The database column for 'FIELD' requires a value: provide
+  it, or declare the field `required` in the object metadata. If the object
+  declares neither `required` nor `storage: { notNull: true }` for 'FIELD', the
+  physical schema has drifted from metadata instead: run 'os migrate' to reconcile
+  (or reset the dev database)." The first sentence holds for every NOT NULL
+  refusal. The second names the drift case under the condition that makes it drift.
+  
+  **What is not affected.** The status, `code`, `error`, `fields` and `object` of
+  the answer are unchanged, and no key is added. The import row is untouched: it
+  does not carry a `hint`. Nothing reads the field map to tell the two cases
+  apart, so the `hint` stays advice for the author to read against the object's
+  declaration.
+- 514001a: fix(rest,runtime): the published-snapshot read of a flow name a managed package ships answers the package's flow, as the layered read does (#21002)
+  
+  Clause-②: yes (widening)
+  
+  `flow` is in ADR-0126's Regime C: a managed package's flow is sealed, and there is no overlay read path for it. Since the previous half of #21002, the layered read, `GET /api/v1/meta/flow/:name/layers`, reports the package's flow as the effective layer for a name a managed package ships, and a stored flow of that name as a separate layer that does not take effect. The published-snapshot read, `GET /api/v1/meta/:type/:name/published`, and its runtime-dispatcher twin read that same layered answer, but served its stored layer whenever one was present. So for such a name they still answered `200` with the stored flow, not the package's.
+  
+  Both published-snapshot doors now serve the layered read's effective layer when that read put the package's flow over a stored flow, which is the package's flow. They ask the metadata protocol's own check for that decision rather than repeating it. In every other case they answer exactly as before: a flow name no managed package ships, and every other metadata type, `object` included, still answer the stored layer when one is present, and an item with no stored layer still falls through to the code/package snapshot. The stored flow is not deleted, rewritten or refused.
+  
+  **The widening.** `@objectstack/metadata-protocol` makes one existing method public: `ObjectStackProtocolImplementation.isShippedFlowName(type, name)`. It answers whether `name` is a flow name a managed package ships. It was private to the class, so a door in another package could not ask it any other way. Its answer is unchanged, and the layered read, the by-name read and the flow list keep calling it.
+- 7a606a9: fix(rest,runtime): reading `datasource` and `external_catalog` metadata through `/api/v1/meta` requires `manage_platform_settings`, the capability each type's own door already requires (#21087)
+  
+  Clause-②: no
+  
+  - A `GET` or `HEAD` of `/api/v1/meta/datasource` or `/api/v1/meta/external_catalog` (and their plural spellings) is now admitted only for a caller who holds `manage_platform_settings`. That is the capability the datasource admin door (`GET /api/v1/datasources`, `GET /api/v1/datasources/:name`) and the federation read door (`GET /api/v1/datasources/:name/external/tables`) already require for the same data. Every read route under the type is judged alike: the list, the item read and each of its query switches, `/published`, `/layers`, `/history`, `/audit`, `/diff` and `/references`. `/history`, `/audit` and `/diff` still also require an authoring capability, as before.
+  - A caller without the capability gets `403` with `error.code` `PERMISSION_DENIED`, and a message that names the capability. The answer is the same whether or not the named item exists, and nothing is read from the metadata store first.
+  - Holders of `manage_platform_settings` are served exactly as before. Platform administrators hold it through `admin_full_access`. Every other metadata type, and every write route, is unchanged.
+  - Both transports answer the same way: `RestServer`, and the runtime dispatcher's `/meta` domain that a host mounting only the `/api/v1/*` catch-all is served by.
+  - If you read either type with a caller that holds only an authoring capability (`manage_metadata`, `studio.access` or `setup.access`), grant `manage_platform_settings` to that caller, or read through a caller that already has it.
+- f3b16fc: Raise the published dependency floors to the 2026-10 production dependency group. No API changes. A consumer install resolves these ranges:
+  
+  Clause-②: no
+  
+  - `zod` `^4.6.1` → `^4.6.5`: `@objectstack/spec`, `@objectstack/core`, `@objectstack/objectql`, `@objectstack/rest`, `@objectstack/runtime`, `@objectstack/cli`, `@objectstack/mcp`, `@objectstack/metadata`, `@objectstack/metadata-core`, `@objectstack/metadata-protocol`, `@objectstack/driver-turso`.
+  - `@libsql/client` `^0.17.3` → `^0.18.0`: `@objectstack/driver-turso`. Every behaviour the driver documents was re-measured on 0.18.0 and holds unchanged. That covers the URL scheme routing, the `URL_INVALID` and `URL_SCHEME_NOT_SUPPORTED` refusals, the WebSocket transport having no `fetch` or timeout seam, `syncUrl` being read only by the embedded-replica client, and the `?authToken=` precedence on `url` and `syncUrl`. The driver's refusal messages now name 0.18.0 as the measured version. 0.18.0 changes only the local `file:` client, which now pools connections. The driver creates that client only for an embedded replica, and calls only `sync()` on it.
+  - `@modelcontextprotocol/sdk` `^1.30.0` → `^1.30.1`: `@objectstack/connector-mcp`, `@objectstack/mcp`.
+  - `chalk` `^6.0.0` → `^6.0.1`: `@objectstack/cli`, `create-objectstack`. `yaml` `^2.9.0` → `^2.9.1` and `tsx` `^4.23.12` → `^4.23.15`: `@objectstack/cli`.
+  - `mongodb` `^7.5.0` → `^7.6.0`: `@objectstack/driver-mongodb`.
+  - `sql.js` `^1.14.1` → `^1.14.2`: `@objectstack/driver-sqlite-wasm`.
+  - `@noble/hashes` `^2.3.0` → `^2.4.0` and `jose` `^6.2.8` → `^6.2.12`: `@objectstack/plugin-auth`. The better-auth family stays at exactly `1.7.3`.
+  - `hono` `^4.13.5` → `^4.13.9`: `@objectstack/plugin-hono-server`.
+  - `pinyin-pro` `^3.29.1` → `^3.29.4`: `@objectstack/plugin-pinyin-search`.
+  - `@noble/ciphers` `^2.3.0` → `^2.4.0`: `@objectstack/service-settings`.
+- 454bbb6: fix(rest,runtime): writing `datasource` metadata through `/api/v1/meta` requires `manage_platform_settings`, the capability the datasource admin door already requires (#21124)
+  
+  Clause-②: no
+  
+  - A write of a `datasource` definition through `/api/v1/meta` (and its plural spelling) is now admitted only for a caller who holds `manage_platform_settings`. That is the capability the datasource admin door (`POST /api/v1/datasources`, `PATCH` and `DELETE /api/v1/datasources/:name`) already requires for the same create, update and remove. Every write verb is judged alike: the save (`PUT /meta/datasource/:name`, a draft save included), the reset (`DELETE`), `/publish` and `/rollback`.
+  - A caller without the capability gets `403` with `error.code` `PERMISSION_DENIED`, and a message that names the capability. Nothing is written. The answer is the same whether or not the named item exists.
+  - The write doors' own authoring admission is unchanged and still applies, so a datasource write needs `manage_platform_settings` and `manage_metadata` both. Platform administrators hold both through `admin_full_access`. Every other metadata type, and every read route, is unchanged. `external_catalog` writes are unchanged: that type's own write door requires `manage_metadata`.
+  - Both transports answer the same way: `RestServer`, and the runtime dispatcher's `/meta` domain that a host mounting only the `/api/v1/*` catch-all is served by.
+  - If you write datasource definitions through `/api/v1/meta` with a caller that holds only an authoring capability (`manage_metadata`, `studio.access` or `setup.access`), grant `manage_platform_settings` to that caller, or write through the datasource admin door with a caller that already holds it.
+- 04b202e: Provenance comments in `@objectstack/rest` were re-anchored
+  
+  Comment and docblock lines under `src/` that cited tracker numbers which no
+  longer resolve on GitHub now cite the commit in this repository's history that
+  decided the matter, and say in their own words what was decided. Comments
+  only: no route, error code, refusal text, type, export or runtime behaviour
+  changes.
+- Updated dependencies [e5c7d07]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [fa0a4b6]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [05a7547]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [3572916]
+- Updated dependencies [3fbf3ca]
+- Updated dependencies [24d521e]
+- Updated dependencies [f4ce10c]
+- Updated dependencies [b785c3b]
+- Updated dependencies [2473e26]
+- Updated dependencies [3a89d45]
+- Updated dependencies [f379f57]
+- Updated dependencies [889139c]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [7510663]
+- Updated dependencies [820d3f4]
+- Updated dependencies [697845d]
+- Updated dependencies [a6866da]
+- Updated dependencies [1a75e39]
+- Updated dependencies [cd901d7]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [89801cd]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [cd6d8a5]
+- Updated dependencies [ace770d]
+- Updated dependencies [ed54768]
+- Updated dependencies [99786f9]
+- Updated dependencies [5757463]
+- Updated dependencies [63bfe69]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [b9087d7]
+- Updated dependencies [f10d802]
+- Updated dependencies [856321f]
+- Updated dependencies [6b004c0]
+- Updated dependencies [93e9e42]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [ceee88f]
+- Updated dependencies [e18fea6]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [dcd3309]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [26437ae]
+- Updated dependencies [d1633f3]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [58a77db]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [a11faee]
+- Updated dependencies [2c1cef3]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [097ef80]
+- Updated dependencies [70dae53]
+- Updated dependencies [665cab3]
+- Updated dependencies [682873d]
+- Updated dependencies [1bd14c9]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [df1feae]
+- Updated dependencies [336e191]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [24c554d]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [d2bc644]
+- Updated dependencies [cfa9315]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+- Updated dependencies [00f045d]
+  - @objectstack/spec@17.6.0
+  - @objectstack/platform-objects@17.6.0
+  - @objectstack/core@17.6.0
+  - @objectstack/metadata-core@17.6.0
+  - @objectstack/observability@17.6.0
+  - @objectstack/service-package@17.6.0
+  - @objectstack/types@17.6.0
+
 ## 17.5.0
 
 ### Minor Changes

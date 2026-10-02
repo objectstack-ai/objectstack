@@ -1,5 +1,1068 @@
 # @objectstack/cli
 
+## 17.6.0
+
+### Minor Changes
+
+- 9b402db: fix(cli)!: a project with no `sdui.manifest.json` of its own has its `kind: 'html'` pages checked against the manifest `@objectstack/console` ships, so `div` and every other undeclared tag or prop is refused (#19922)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered ui-html-page-div-refused) The semantic ledger entry for this narrowing landed on main before this change, in its own pull request, so this diff adds none. `objectstack migrate meta --from 17` lists it among the manual changes, with `box` as the replacement for `div`. -->
+  
+  **BREAKING for `kind: 'html'` pages in projects without their own manifest.**
+  
+  **What changed.** `objectstack validate`, `objectstack compile` / `build` and
+  `objectstack lint` check the `source` of a `kind: 'html'` page against an SDUI
+  component manifest. (`dev` and `start` run `compile` before they boot when
+  `dist/objectstack.json` is missing or `--compile` is passed, and `dev`'s default
+  watch mode reruns it when a watched file changes.) They look first for the
+  `sdui.manifest.json` in the directory the command runs in, then for the copy
+  `@objectstack/console` ships as `dist/sdui.manifest.json`. The second lookup asked for that file by a subpath
+  the console package does not export, so it always failed, and a project with no
+  manifest of its own had its html pages checked at parse level only: syntax and
+  structure, never which components and props they use. The lookup now reaches the
+  shipped copy, and those pages get full component and prop validation. A tag or
+  prop the manifest does not declare is refused (`jsx-forbidden-tag`,
+  `jsx-unknown-component`, `jsx-unknown-prop`), naming the page and the tag, and
+  the command exits 1.
+  
+  **What was refused before, and what is new.** The console has refused a `div` on
+  a `kind: 'html'` page since `@objectstack/console` 17.5.0: when the page renders,
+  its in-browser html compile answers `forbidden-tag`, naming `box`. These commands
+  now give that answer while you author. What they refuse that nothing refused
+  before is every other tag the manifest does not declare. The console's html
+  compile accepts every component its registry knows that is not deprecated there,
+  while the published manifest declares only the public component contract and the
+  html tier's intrinsic tags. So a page using, for example, `avatar` or `checkbox`
+  renders in the console and is refused here.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `<div>` … `</div>` in a `kind: 'html'` page | `<box>` … `</box>`, which takes the same `className` and children |
+  | any other tag or prop the command names | a component and prop the manifest declares |
+  
+  **What is not affected.** A project that keeps its own `sdui.manifest.json` is
+  checked against that file, as before. `kind: 'react'` pages and pages authored
+  as regions are not read by this gate. With no manifest reachable at all, the
+  pages are still checked at parse level, and the notice that says so is
+  unchanged.
+  
+  **A damaged install is refused, not skipped.** A shipped copy that is present
+  but cannot be read or parsed stops the command with exit 1, naming the file,
+  with the remedy: reinstall `@objectstack/console`.
+  
+  **A correction to the 17.5.0 note on this manifest.** The `@objectstack/console`
+  17.5.0 patch entry `28ce612`, the one that says the prebuilt Console dist now
+  ships `dist/sdui.manifest.json`, ends with a paragraph that this release changes,
+  sentence by sentence:
+  
+  - "For now the file is only present in the tarball." No longer true: the CLI
+    reads it, as described above.
+  - "This package's `exports` map exposes `./package.json` and nothing else, so
+    resolving `@objectstack/console/dist/sdui.manifest.json` through `exports`
+    fails with `ERR_PACKAGE_PATH_NOT_EXPORTED`." Still true: the `exports` map is
+    unchanged.
+  - "Anything that resolves through `exports` cannot read the file yet." Still
+    true. To read the file, resolve `@objectstack/console/package.json` and join
+    `dist/sdui.manifest.json` to its directory.
+  - "That includes the CLI's JSX-page manifest fallback, which catches the error
+    and keeps parse-level validation, as before." True of the 17.5.0 CLI, false
+    from this release: the fallback now reads the file that way, so a project
+    without its own manifest is checked against the shipped copy.
+- 6981abf: fix(cli)!: `objectstack validate`, `objectstack build` and `objectstack lint` read the project's `sdui.manifest.json` beside the config they were given, not in the directory they were run from (#20166)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata changes shape and nothing an author wrote is renamed or removed, so `objectstack migrate meta` has nothing to rewrite. What moves is which manifest file judges a run whose config path names another directory. -->
+  
+  **BREAKING for runs given a config path in another directory.**
+  
+  **What changed.** These commands check the `source` of each `kind: 'html'` page
+  against an SDUI component manifest: the project's own `sdui.manifest.json` first,
+  then the copy `@objectstack/console` ships. They located everything else about a
+  project from the directory of its config, but looked for the project's own
+  manifest in the directory the command was run from. So
+  `objectstack validate path/to/app/objectstack.config.ts`, run from anywhere else,
+  never read `path/to/app/sdui.manifest.json`, and a manifest that happened to sit in
+  the directory it was run from judged a project it does not belong to. They now read
+  the manifest beside the config.
+  
+  ## Which manifest each run reads
+  
+  | the run | the project manifest it read | the project manifest it reads now |
+  |:--|:--|:--|
+  | `objectstack validate` / `build` / `lint` with no config path, in the project's directory | `./sdui.manifest.json` | `./sdui.manifest.json` (unchanged) |
+  | the same commands given `path/to/app/objectstack.config.ts`, run from another directory | that other directory's `sdui.manifest.json` | `path/to/app/sdui.manifest.json` |
+  
+  When the project carries no manifest of its own, both rows then fall back to the
+  copy `@objectstack/console` ships, as before.
+  
+  **Which runs change, and which way.** Only runs whose config path names a directory
+  other than the one they run in. For those, the verdict can move in both directions:
+  
+  - A page the project's own manifest does not declare is now refused
+    (`jsx-forbidden-tag`, `jsx-unknown-component`, `jsx-unknown-prop`, exit 1), where
+    the other directory's manifest, or the console's copy, used to admit it.
+  - A project manifest that is present but not usable is now refused (exit 1), naming
+    that file, where the run used to read some other file.
+  - A project with no manifest of its own is now checked against the console's copy,
+    where the other directory's manifest used to decide.
+  - In the other direction, a page the other directory's manifest refused, and that
+    the project's own manifest (or the console's copy) declares, is now admitted.
+  
+  If such a run now fails, the manifest that belongs to the project is the one to
+  keep beside its config.
+  
+  **What is not affected.** A run in the project's own directory, with or without a
+  config path, reads the same file as before. `objectstack init`'s check of a freshly
+  generated scaffold keeps reading the directory it was run from.
+  
+  **A correction to this release's console-fallback entry.** That entry says these
+  commands "look first for the `sdui.manifest.json` in the directory the command runs
+  in". From this release they look first beside the config the command was given,
+  which is the same directory whenever the command runs in the project.
+- b531c7b: `os serve` hands the runtime metadata save door the deployment's SDUI component manifest, and the save door compiles an html page's `source` against it: an unknown component or a `requires` that disagrees with the source is refused with a `422`, and `requires` is stamped from the compiled source (ADR-0080 §5).
+  
+  Clause-②: yes (narrowing — on a host that registers a manifest, the runtime metadata save door newly refuses an html page whose source uses a component the manifest does not declare, or whose `requires` disagrees with its source; the new exported `SDUI_MANIFEST_SERVICE` widens `@objectstack/metadata-protocol`)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable changes spelling or type: `packages/spec` is untouched, and `page.source` and `page.requires` keep their declared shapes. What changes is that the runtime metadata write door, on a host that registers the deployment's SDUI component manifest, now refuses two authored shapes at publish: an html page whose source uses a component the manifest does not declare, and one whose `requires` disagrees with the namespaces its source uses. `objectstack migrate meta` could not rewrite either even in principle: which component a page meant, and which plugin should provide it, is the author's decision. Rows at rest are not judged or rewritten. -->
+  
+  **BREAKING** — an accept-set narrowing on the runtime metadata save door, shipped
+  as `minor` under the launch-window convention (`check-changeset-no-major` refuses
+  `major` until GA; breaking-ness is carried by this banner and the ADR-0087
+  disposition above, not by the level). On a server that has a manifest, a
+  `PUT /api/v1/meta/page/NAME` (and the draft publish) of a `kind: 'html'` page used
+  to store the source unjudged; it now answers `422 INVALID_METADATA` when the source
+  uses a component the deployment's console does not provide, naming the component in
+  each issue's `where` and `message`, or when a hand-written `requires` lists a
+  namespace the source does not use, omits one it does, or names one no component in
+  the manifest carries. **One-line fix:** use a component the manifest declares (or
+  install the plugin that provides it in the console the deployment serves), and omit
+  `requires` — it is derived from the source.
+  
+  **The channel.** `@objectstack/metadata-protocol` exports `SDUI_MANIFEST_SERVICE`
+  (`'sdui-manifest'`), a plain service key. `os serve` resolves the manifest once at
+  boot through the same resolver `os validate` uses — the project's own
+  `sdui.manifest.json` beside the served config, then the copy `@objectstack/console`
+  ships — and registers it under that key. The save door reads the key on every
+  publish, so a host that registers or replaces it later is seen by the next save.
+  
+  **The compile.** The save door runs `@objectstack/sdui-parser`'s `compile()`, the
+  compiler behind `os validate`'s JSX page gate, against the registered manifest. Its
+  diagnostics carry the same rule ids the CLI reports (`jsx-forbidden-tag`,
+  `jsx-unknown-component`, …); errors refuse the publish, warnings ride the response's
+  `advisories`. A disagreeing `requires` is refused under
+  `page-requires-disagrees-with-source`. A page that compiles is stored with the
+  `requires` its source yields, on a draft save too; a draft that does not compile, or
+  whose `requires` disagrees, is stored as written (drafts are not gated) and its
+  publish refuses it.
+  
+  **Without a manifest nothing changes.** A host that resolves no manifest registers
+  nothing and prints one boot line — `Page source and \`requires\` not validated at
+  save`, naming every place looked — and the save door stores html pages exactly as
+  before. A registered value with no `components` map is warned about once and never
+  compiled against.
+  
+  Measured before the refusal shipped: the three html pages in this repository
+  (`examples/app-showcase`: `showcase_capability_map`, `showcase_command_center_jsx`,
+  `showcase_start_here`) all compile against the pinned console's manifest with no
+  diagnostic and yield `requires: ['ui']`; none authors `requires`.
+- 7a1faf1: **`objectstack validate` and `objectstack build` now report the ADR-0087 conversions `defineStack` applied, and `objectstack validate --strict` fails on them.**
+  
+  `defineStack` rewrites a deprecated metadata spelling to its canonical shape when the config loads, in either mode, and prints one `defineStack: PATH: 'OLD' → 'NEW' (converted at load; conversion 'ID', retires in protocol N)` line on stderr. The two commands received that already-converted stack, so their own conversion pass found nothing to convert: `--json` answered `conversions: []` for every `defineStack` config, and `objectstack validate --strict` exited 0 on a spelling that stops loading in a named protocol major. A CI job gating on either could not see the retirement coming.
+  
+  - `@objectstack/spec`: `defineStack` (both modes) records every conversion notice it applied on the stack it returns, beside the provenance mark and stamped in the same act. The record is non-enumerable and frozen, so the schema, `Object.keys` and `JSON.stringify` never see it and no compiled artifact changes. `composeStacks` records its inputs' records in input order, counting the same built stack passed twice once. **New export:** `stackConversionsOf(value)` returns the `ConversionNotice[]` a producer recorded, the same element the commands' `conversions` field publishes, and `[]` for a value no producer returned. Like the mark, the record does not survive a spread or JSON copy.
+  - `@objectstack/cli`: the config loader reads the record off the default export before it merges named exports into it (that merge is a spread, which drops the record as it drops the mark). `objectstack validate` and `objectstack build` add it to their `conversions` list right after the config loads. Their own conversion pass still runs, and still reports what it converts on a key merged in from a named export of the config module, which `defineStack` never saw. The `--json` envelope keeps its shape (`valid` / `success`, `errors`, `warnings`, `conversions`): `conversions` now lists each conversion once.
+  
+  **What a CI job sees:** `objectstack validate --strict` and `objectstack validate --json --strict` now exit 1 for a config whose only advisory is a live conversion, which is what `--strict` ("treat warnings as errors") documents. Without `--strict` the exit stays 0. The fix is the one the notice names: author the canonical spelling it prints, for example `subtitle` instead of `description` on a `page:header` component. The text face lists the conversion in its warning block. The stderr line from `defineStack` is unchanged and still printed once per conversion.
+  
+  Clause-②: yes (widening) — one new export, `stackConversionsOf`, on the spec package root. Nothing `objectstack build`, or `objectstack validate` without `--strict`, accepted before is refused. `--strict` now applies its documented meaning to the conversions a `defineStack` config carries. It does not add a new rule.
+- 2821e9f: feat(cli)!: `objectstack validate` and `objectstack build` refuse a `picklistExtensions` entry whose `extend` names no picklist the stack declares (#20825)
+  
+  Clause-②: no (narrowing — `objectstack validate` / `objectstack build` newly refuse a `picklistExtensions[].extend` that names no picklist the stack declares; nothing is accepted that was refused before)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable changes spelling or type: `packages/spec` is untouched, and `picklistExtensions[].extend` stays the snake_case name it was. What changes is that two authoring commands now refuse one authored shape, an extension whose `extend` names no picklist in the stack. `objectstack migrate meta` could not rewrite that shape even in principle, because which list the author meant is not in the metadata. Nothing here judges a stored row. -->
+  
+  **BREAKING** — an accept-set narrowing on two authoring commands, shipped as
+  `minor` under the launch-window convention. A stack with a `picklistExtensions`
+  entry whose `extend` names no picklist the stack declares — `extend: 'industy'`
+  beside a `picklists: [{ name: 'industry', … }]` — used to pass `objectstack
+  validate` and `objectstack build` (which wrote the artifact). Both now exit 1 and
+  name the extension and the list it names (`picklist-reference-unknown`, the rule a
+  field's dangling `picklist` already gets).
+  **One-line fix:** correct `extend` to the picklist the entry adds options to, declare
+  the list it names (`picklists: [{ name, label, options }]`, or a `*.picklist.ts` file
+  the stack imports), or remove the entry.
+  
+  **Which extensions are judged.** The ones the load path registers: the top-level
+  `picklistExtensions` of a one-package stack, or each `packages[]` entry's own. An
+  `extend` resolves against every picklist the stack declares, including one a sibling
+  package in the same artifact owns.
+  
+  **A list from a package outside the stack is reported, not refused.** When the
+  package declaring the extension lists a `manifest.dependencies` entry the stack does
+  not carry, the list may live there, and these commands cannot read it. That
+  extension is an `info` notice (`picklist-reference-unverified`) in `warnings` and on
+  the console, naming the extension, the list and the dependencies — never a failure,
+  not even under `--strict`.
+- b84b240: feat(cli)!: `objectstack validate` and `objectstack build` refuse a field whose `picklist` names no picklist the stack declares, and lint R8 counts `picklist` as an options source (#20825)
+  
+  Clause-②: no (narrowing — `objectstack validate` / `objectstack build` newly refuse a field `picklist` that names no picklist the stack declares; the R8 change removes a false-positive warning and widens no accept set of its own)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable changes spelling or type: `packages/spec` is untouched, and `Field.picklist` stays the snake_case name it was. What changes is that two authoring commands now refuse one authored shape, a field whose `picklist` names no picklist in the stack. `objectstack migrate meta` could not rewrite that shape even in principle, because which list the author meant is not in the metadata. Nothing here judges a stored row. -->
+  
+  **BREAKING** — an accept-set narrowing on two authoring commands, shipped as
+  `minor` under the launch-window convention. A stack with a select field whose
+  `picklist` names no picklist the stack declares — `picklist: 'industy'` beside a
+  `picklists: [{ name: 'industry', … }]` — used to pass `objectstack validate` and
+  `objectstack build` (which wrote the artifact). Both now exit 1 and name the field
+  and the list it names (`picklist-reference-unknown`).
+  **One-line fix:** correct `picklist` to a list the stack declares, or declare the
+  list it names (`picklists: [{ name, label, options }]`, or a `*.picklist.ts` file the
+  stack imports).
+  
+  **Which references are judged.** The ones the load path registers: the top-level
+  `objects` and `objectExtensions` of a one-package stack, or each `packages[]`
+  entry's own. A reference resolves against every picklist the stack declares,
+  including one a sibling package in the same artifact owns.
+  
+  **A list from a package outside the stack is reported, not refused.** When the
+  package declaring the field lists a `manifest.dependencies` entry the stack does not
+  carry, the list may live there, and these commands cannot read it. That reference is
+  an `info` notice (`picklist-reference-unverified`) in `warnings` and on the console,
+  naming the field, the list and the dependencies — never a failure, not even under
+  `--strict`.
+  
+  **Lint R8 (`field/select-missing-options`)** no longer reports a select, multiselect
+  or radio field that names a `picklist`: the picklist is its options source. The
+  warning it used to give pointed at `options`, which a field naming a `picklist`
+  cannot add — the field schema refuses the two together. A select with neither still
+  warns, and its fix now names both sources as alternatives.
+- 12fbb2f: fix(cli)!: `os environments create` no longer takes `--clone-from`, and the client's `environments.create` request no longer declares `clone_from_environment_id` (#21028)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata changes shape and nothing an author wrote in a stack is renamed or removed, so `objectstack migrate meta` has nothing to rewrite. What goes is a CLI flag and one optional key on an SDK request type, both of which the control plane ignored. -->
+  
+  **BREAKING for scripts that pass `--clone-from`, and for TypeScript callers that pass `clone_from_environment_id`.**
+  
+  **What changed.** `os environments create --clone-from <id>` used to be accepted. It
+  sent `clone_from_environment_id` on the create request, and the control plane never
+  read that key: its create schema does not declare it, and an undeclared key is
+  stripped unread. So the command answered success and created an EMPTY environment,
+  with nothing saying the clone had not happened. Cloning an environment is not
+  implemented, so the flag is gone, and so is the key on the request type.
+  
+  - `os environments create --clone-from <id>` (also spelled `--clone-from=<id>`) is
+    now refused by the argument parser (`Nonexistent flag: --clone-from`, exit 2) before
+    any request is made. Before, it created an empty environment and exited 0.
+  - A create without the flag is unchanged: the request body never carried the key.
+  - `@objectstack/client`: `client.environments.create({ … })` no longer types
+    `clone_from_environment_id`, so a call that passes it fails to compile, naming the
+    key. At runtime the request was never different, because the server dropped it.
+  
+  **The one-line fix.** Remove `--clone-from <id>` from the command, or
+  `clone_from_environment_id` from the object you pass to `client.environments.create`.
+  The environment it creates is the same empty one the old call created.
+  
+  **What is not affected.** Every other flag of `os environments create`, and every
+  other field of `client.environments.create`. Starter content is still installed into
+  a new environment afterwards, from the App Marketplace (`os package install`).
+- 336e191: feat(spec,cli): shared seam for projecting stored metadata bodies, and the audit rewrite command
+  
+  Clause-②: no
+  
+  `@objectstack/spec/kernel` gains the family-wide primitives for the
+  stored-metadata-body security invariant, beside the per-type redactor registry
+  they build on: `STORED_METADATA_BODY_OBJECTS` / `isStoredMetadataBodyObject`,
+  the `STORED_METADATA_BODY_COLUMN` / `STORED_METADATA_TYPE_COLUMN` names, and
+  `redactStoredMetadataBody` / `redactStoredMetadataRow` / `redactStoredMetadataRows`.
+  These project a stored row's body through the one `getMetadataTypeRedactor`
+  definition, so every surface that serves, copies or evaluates such a body shares
+  one rule rather than a copy per package. Additive — no existing export changes.
+  
+  `@objectstack/cli` gains `os migrate audit-metadata-bodies`, the one-off rewrite
+  of at-rest metadata-body copies in `sys_audit_log` / `sys_activity` (dry run by
+  default, `--apply` to write, idempotent).
+
+### Patch Changes
+
+- addbbf0: feat(spec): the `picklist` metadata kind — a shared option list that select fields reference by name (#19518)
+  
+  Clause-②: yes (widening)
+  
+  - **The kind.** `PicklistSchema` — `{ name, label, description?, options }`, where `options` is the field option shape (`SelectOptionSchema`) reused as is. Authored in a package as `*.picklist.ts` (`definePicklist`) or `defineStack({ picklists })`. It is a registered kind (`MetadataTypeSchema`, `DEFAULT_METADATA_TYPE_REGISTRY`, `getMetadataTypeSchema('picklist')`) that loads before `object`. It is package-owned, so a runtime create or a per-organization overlay is refused.
+  - **The reference.** `Field.select({ picklist: 'industry' })` adds a `picklist` key to `FieldSchema`. It is valid on the option types only (select, radio, multiselect, checkboxes, tags). A field that declares both `picklist` and `options` is refused at `options`, with a prescription. The functional-completeness predicate counts a `picklist` reference as the field's option source.
+  - **The served shape.** `PicklistServedFieldSchema` declares what a client reads for a picklist-bound field: the resolved `options` next to the `picklist` that names the list. The runtime resolves the reference onto that served field; see the picklist runtime entry of this release.
+  - **Extensions.** `defineStack({ picklistExtensions: [{ extend, options }] })` adds options to a picklist that another package owns. It can only add; removing or renaming a value stays with the owning package.
+  - **Translation.** `TranslationData` gains `picklists.<name>.{ label?, options: { value: label } }`. `translatePicklist` translates a served picklist item. `translateObject` gives a picklist-bound field the list's option labels, and a field-level `options` entry still wins over them.
+  - **Studio type label.** `@objectstack/platform-objects` carries the `picklist` type's label and description in its metadata-forms translation bundles (en, zh-CN, ja-JP, es-ES).
+  - **Extraction.** `os i18n extract` walks `picklists.NAME.{label, options.VALUE}`, including an extension's options under the list it extends, and `os lint` reports an untranslated option under its own rule, `i18n/missing-picklist`.
+  - **SQL driver.** The SQL driver classifies the `picklist` field key as presentation, so it adds no column.
+- ed6f734: **`objectstack lint --json` now reports the ADR-0087 conversions `defineStack` applied, as `objectstack validate` and `objectstack build` already do.**
+  
+  `defineStack` rewrites a deprecated metadata spelling to its canonical shape when the config loads and prints one `defineStack: PATH: 'OLD' → 'NEW' (converted at load; conversion 'ID', retires in protocol N)` line on stderr. `objectstack lint` filled its `conversions` list only from its own conversion pass over the loaded config, which a `defineStack` default export hands over already converted. So `--json` answered `conversions: []` for a config carrying a retiring spelling, such as `description` on a `page:header` component, and the notice reached stderr alone.
+  
+  `objectstack lint` now adds the conversions the stack producer recorded on the default export to that list right after the config loads, and its own pass still reports what the producer never saw: an unbuilt default export, or a key merged in from a named export of the config module. Each conversion is listed once. The text face prints the same notices in its warning block.
+  
+  What `objectstack lint` accepts does not change: it still lints an unbuilt default export (a plain object literal), whose conversions come from its own pass as before. The exit code, `passed`, `issues` and the counts are unchanged, because a conversion notice is not a lint finding.
+  
+  Clause-②: no
+- 87847a2: **When a `defineStack` or `composeStacks` call converts a deprecated spelling and then refuses the config, `objectstack validate --json`, `objectstack build --json` and `objectstack lint --json` now report both the refusal and the ADR-0087 conversions it applied.**
+  
+  `defineStack` rewrites a deprecated metadata spelling to its canonical shape when the config loads, such as `description` on a `page:header` component (canonical `subtitle`). When the same call then refused the config, for example on an unknown `requires` token (`STACK_CAPABILITY_UNKNOWN`), each of the three commands exited 1 with the refusal's `error` and `code` and with `conversions: []`. The conversion reached stderr only, as a warn-once line.
+  
+  The refusal now carries the conversions the producer applied before it refused (`stackConversionsOf(error)` in `@objectstack/spec`), and each command adds them to the `conversions` list of its failure payload, beside the refusal. Each conversion is listed once. A refusal whose source needed no conversion, and any other failure at load, still answers `conversions: []`.
+  
+  Nothing is accepted or refused differently: the exit code, `error`, `code` and every other key of each payload are unchanged, and no key is added. The text face is unchanged.
+  
+  Clause-②: no
+- dfe5a08: A docblock line in `@objectstack/cli`'s `bin/run.js` no longer cites a tracker number
+  
+  The docblock above `bin/run.js`'s `process.stderr` `error` listener ended a
+  sentence with a tracker number that no longer resolves on GitHub. The number is
+  gone and the sentence stays: `files` names only `dist`, but npm packs a `bin`
+  target regardless, which is the measured fact the number was pointing at. The
+  file ships because of that same packing rule, which is why this is a release
+  note at all. Comment only: no command, flag, exit code, error code, export or
+  runtime behaviour changes.
+- 5ad8488: Provenance comments in `@objectstack/cli`'s `bin/run.js` were re-anchored
+  
+  Three docblock lines above `bin/run.js`'s `process.stderr` `error` listener
+  cited a tracker number that no longer resolves on GitHub. They now cite the
+  commit in this repository's history that made a failed stderr write non-fatal
+  on the dev shim. The file ships because npm packs a `bin` target regardless of
+  `files`, which is why this is a release note at all. Comment only: no command,
+  flag, exit code, error code, export or runtime behaviour changes.
+- 6073bb9: fix(cli): `os migrate meta --from N` prints the manual change that judges an applied edit beside that edit, marked review
+  
+  Clause-②: no
+  
+  Some applied mechanical edits are not the end of the job. A default flip such as
+  `flow-decision-mode-inclusive-explicit` writes `mode: 'inclusive'` onto a decision so
+  the flow keeps its old behaviour, and the manual change that judges it says the right
+  edit is usually none: delete the key where the branch conditions partition. That
+  judgment used to print hundreds of lines below the edit, among every other manual
+  change of the major.
+  
+  A manual change can now declare which conversions' edits it judges. In the
+  `Applied N mechanical change(s):` group, each run of edits by such a conversion is
+  followed by one line:
+  
+      ↳ review the N edits above against the manual change [protocol M] surface → replacement
+  
+  The line copies the headline the manual change prints in its own group, so its `why`
+  and `verify` lines are found there under the same text. Two pairs are declared today:
+  `flow-decision-mode-inclusive-explicit` with the decision-mode entry, and
+  `time-default-utc-suffix-dropped` with the time-default entry. Only declared links
+  pair; a manual change that merely mentions a conversion in its prose does not.
+  
+  Nothing else moves. The `N manual change(s) require your judgment:` group still lists
+  every manual change, byte for byte, with the same count. An edit no manual change
+  judges prints exactly as before. `--json`, `--out`, the exit code and the loader's
+  stderr are unchanged, and `--stored` is not affected.
+- 3b47a69: fix(cli): `os migrate meta --from N` prints the schema verdict and the refusals first, then the applied mechanical edits, then the manual changes
+  
+  Clause-②: no
+  
+  `os migrate meta --from N` prints every semantic entry of every protocol major the
+  chain crosses, whatever the stack uses: a `--from 17` run prints 242 manual changes.
+  Those used to come before the schema verdict, which was the last line of the report
+  and said "resolve the manual changes above". The refusals that keep the migrated
+  stack from parsing were not listed at all. The only refusal list was the one printed
+  while the config loaded, and that list names the stack as authored, including the
+  keys the chain goes on to convert.
+  
+  The human-readable report now prints three groups, each opened by one header line
+  that counts it:
+  
+  1. the verdict: `Migrated stack is schema-valid`, or
+     `Migrated stack does not yet pass schema validation — N refusals left after the chain`
+     followed by one `✗ path: message` line per refusal of the migrated stack;
+  2. `Applied N mechanical change(s):`;
+  3. `N manual change(s) require your judgment:`.
+  
+  No manual change is dropped, merged or reworded. Every applied edit and every
+  manual change prints byte for byte as before, in the same order within its group.
+  The data-migration advice is still the last thing printed. A range that holds no
+  migration step also leads with the verdict, which now lists the source's refusals,
+  and the note naming the range to use follows it.
+  
+  `--json` is unchanged: same keys, same values, same array order. The exit code is
+  unchanged too: a run whose migrated stack does not parse still exits 0.
+- bae3859: Upgrade note for a lockfile-preserving upgrade, and the changes 17.5.0 shipped without release notes (#20622)
+  
+  Clause-②: no
+  
+  **Upgrading with a scanner.** The raised dependency floors (`hono ^4.13.5` in `@objectstack/plugin-hono-server`) cover the `hono` that objectstack loads. A lockfile-preserving upgrade can keep an older `hono` copy under `@modelcontextprotocol/sdk` (reached through `@objectstack/cli` → `@objectstack/mcp`). objectstack never loads that copy: `@objectstack/mcp` imports only the SDK's `server/mcp`, `server/stdio`, `server/webStandardStreamableHttp` and `types` modules, none of which imports `hono`. A scanner still reports it. Run `pnpm update hono` (or your package manager's equivalent) to move it to the patched line.
+  
+  **Shipped in 17.5.0 without notes.** The changesets below were in the tree 17.5.0 was published from, but its version commit did not consume them, so they shipped inside 17.5.0 without release notes. Their notes appear in this release for the first time. Breaking entries come first.
+  
+  Breaking:
+  
+  - #20458 feat(spec)!: retire the inner name on cube measures and dimensions — the record key is the member's name
+  - #20504 fix(spec,driver-turso)!: refuse a forced mode replica with no syncUrl at authoring and at construction
+  - #20567 feat(spec)!: RealtimeEventType names the emitted data.record.* / data.records.* vocabulary (carries two changesets)
+  
+  Also shipped:
+  
+  - #20568 fix(spec): os migrate meta guidance for fourteen more migration-entry families states each lesson in words, not tracker numbers (stage 7)
+  - #20572 refactor(spec): step 18 rationale as key-sorted fragments, conversionIds derived, so two retirements merge clean
+  - #20576 docs(spec): re-anchor the dead tracker citations in ui/ and two freed sites to the commits that decided them (stage 5)
+  - #20577 fix(spec,objectql): name the aggregated column at `having`, PostgreSQL only at `where`
+  - #20579 fix(spec,cli): os validate / os build read the ADR-0087 conversions defineStack applied — --json conversions and --strict see the producer's record
+  - #20582 feat(sdui-parser): the manifest marks the html tier's intrinsic tags `tier: 'html'`, ported from objectui's lockstep copy
+  - #20584 fix(plugin-security): an organization-less permission-set read resolves organization-less rows only
+  - #20585 fix(service-automation,metadata-protocol,metadata,runtime): withhold a flow's inbound-hook secret from every served definition, and keep it on a round trip
+  - #20591 fix(spec): nextUtcCalendarDay and utcInstantMs read years 0001..0099 as written, not as 1900..1999
+  - #20598 fix(plugin-security): security/explain answers enforcement's refusal for a row-level policy comparing two fields of no shared comparison class
+  - #20605 fix(plugin-audit): describe sys_comment reactions and mentions by the shape they store
+  - #20606 docs(spec): re-anchor the dead tracker citations in the packages/spec/src remainder to the commits and ADRs that decided them (stage 6)
+- fbec216: fix(cli): `os migrate meta` takes the migration chain from `@objectstack/spec/migrations` (#20646)
+  
+  `@objectstack/spec` moved the ADR-0087 migration chain and change-manifest names (`applyMetaMigrations`, `composeSpecChanges`, `MigrationFloorError`, `MIGRATION_MAJORS`, `MIGRATION_SUPPORT_FLOOR`, …) off the package root into the new `@objectstack/spec/migrations` entry, so the command now imports them from there. It replays the same chain and prints the same guidance; nothing a user types or reads changes.
+- c90f9fb: fix(cli): `os dev --no-watch` turns watch mode off, and `os dev` fails when its PACKAGE argument selects no workspace package
+  
+  Clause-②: no
+  
+  `os dev` watches `objectstack.config.ts` and `src/` by default, and it already
+  had a branch for running without that watcher. No argument reached it:
+  
+  - `os dev --no-watch` was refused as a nonexistent flag (exit 2).
+  - `os dev --watch=false` is not a form the CLI reads for a boolean flag. It
+    parsed as `--watch` plus the PACKAGE argument `false`, so the command switched
+    to monorepo mode, ran `pnpm --filter false dev`, printed "No projects found",
+    and exited 0 with nothing started.
+  
+  What changes:
+  
+  - `os dev --no-watch` boots the environment with the watch-and-rebuild loop off.
+    Plain `os dev` keeps it on, as before.
+  - In monorepo mode, a PACKAGE argument that selects no workspace package now
+    exits 1, and the failure line names the value. The command passes
+    `--fail-if-no-match` to pnpm, so pnpm decides whether the filter matched, for
+    every filter form it accepts. `os dev --watch=false` is one such run: it now
+    fails instead of reporting success. Write `--no-watch` instead.
+  - `os dev --no-watch` in monorepo mode (a PACKAGE argument, or a workspace root
+    with no `objectstack.config.ts`) exits 1 and names the flag. In that mode each
+    package's own `dev` script decides whether it watches, so the CLI cannot turn
+    watching off. Run it in the project directory, or pass `--artifact`.
+  
+  Monorepo mode now needs pnpm 8.13.1 or later, the release that added
+  `--fail-if-no-match`.
+- d2b188f: fix(cli): `os migrate meta` converts an object built with `ObjectSchema.create(…)` instead of stopping at load when the object carries a retired key
+  
+  Clause-②: no
+  
+  `os migrate meta` reads a config the current schema refuses, so it can rewrite the
+  retired keys in it. It did that for artifacts built with a `define*` helper and for
+  plain object literals. It did not do it for artifacts built with a factory such as
+  `ObjectSchema.create(…)`, which validates when it is called. An object like this:
+  
+  ```ts
+  ObjectSchema.create({
+    name: 'ticket',
+    fields: { title: { type: 'text' } },
+    tenancy: { enabled: true, organizationField: 'organization_id' },
+  })
+  ```
+  
+  stopped `os migrate meta --from 17` at load with exit 1 and a raw JSON array of
+  validation issues. The message in that array told the author to run
+  `os migrate meta --from 17`.
+  
+  The command now loads it, applies the conversion (here
+  `object-tenancy-organization-field-removed`), and reports `schemaValid` for the
+  migrated stack, exactly as it does for the same object written as a plain literal.
+  This covers the five factories in `@objectstack/spec` that validate when called:
+  `ObjectSchema.create` (`@objectstack/spec/data`) and `App.create`,
+  `Dashboard.create`, `Report.create` and `Action.create` (`@objectstack/spec/ui`).
+  The other `create` factories spec exports return their argument unchanged and
+  never refused anything, so nothing changes for them.
+  
+  A schema problem the migration cannot fix is still reported: it is listed among
+  the refusals under the verdict, and `schemaValid` is `false`. A check that only
+  the factory makes when it is called, such as `ObjectSchema.create` refusing a
+  `managedBy: 'system-data'` object that grants no create, edit or delete, is not
+  part of the stack schema. It is reported on the stderr line described below and
+  does not change `schemaValid`, the same as `defineStack`'s own call-time checks.
+  `os validate` still refuses it.
+  
+  While the config loads, `os migrate meta` prints one stderr line for each
+  artifact the current schema refused. A raw validation error on that line is now
+  printed as a block, for example `ObjectSchema.create validation failed (1 issue):`
+  followed by one `✗ path: message` line per issue, instead of a raw JSON array.
+  This also applies to `define*` helpers that throw a raw validation error, such
+  as `defineAgent`.
+  
+  Nothing else changes. `os validate`, `os build` and every other command still
+  refuse the retired key at load, with the same message. `ObjectSchema.create` and
+  the other factories stay strict everywhere outside `os migrate meta`. The keys
+  of the `--json` payload are unchanged, and a run whose migrated stack does not
+  parse still exits 0.
+- b9087d7: CLI help, warnings and refusals no longer cite tracker numbers; each one states the decision behind it in words
+  
+  Clause-②: no
+  
+  Several lines the CLI prints sent the reader to an issue-tracker number for the reason behind them. The number goes; where the sentence did not already say what was decided, it now does.
+  
+  - `os build` / `os validate`: the provider preflight step now reads "Checking that every required capability has a provider installable in this edition...", and the undeclared-key header reads "Undeclared authoring keys (N) — dropped at load; reported here, never refused".
+  - `os doctor`: the retired `referenceFilters` row now says the key was removed from FieldSchema as a key no runtime read; the `NODE_ENV` and config-load rows drop their citations.
+  - `os serve`: the no-auth refusal says anonymous data access is always denied with no setting that turns that off; the organizations remedies drop their citations.
+  - `os meta resync`, `os db clean` and the `os migrate duplicates` / `multi-value-columns` / `recorded-by` / `summary-nulls` descriptions, the `os dev --restart` flag help, the `os storage orphans` closing line and the storage-driver refusals each say what was decided instead of citing it.
+  - `os serve`'s unknown-hostname 404 page spells its three short grey colours in six hex digits; they render the same.
+  - `@objectstack/types`: the host importer's undeclared-package message says the fallback resolves from the caller once `fallbackImport` is passed, and drops the citation beside "Being merely REACHABLE is not enough".
+  
+  Text only: no exit code, error code, flag, field or control flow moves. A script that matches the old CLI text (for example the "Checking capability providers" step line) needs the new spelling.
+- 32d3b3c: fix(cli): `os plugin publish` sends `visibility` only when `--visibility` is passed, so re-publishing no longer moves a `marketplace` plugin to `private`
+  
+  The `--visibility` flag of `os plugin publish` defaulted to `private`, and the CLI always
+  sent it in the package upsert (`POST /api/v1/cloud/packages`). That upsert is also the
+  re-publish path, and the control plane updates an existing package's visibility whenever
+  the request carries one. So re-publishing a new version of a `marketplace` plugin without
+  repeating `--visibility marketplace` silently set it to `private`. `os package publish`
+  already works this way; both commands now behave the same.
+  
+  The flag no longer has a default, and an omitted flag is an omitted key:
+  
+  - **Re-publish without the flag:** the package keeps its current visibility.
+  - **First publish without the flag:** the control plane applies its own default (`org` on
+    ObjectStack Cloud), the default `PackageSchema.visibility` declares. Before this change
+    `os plugin publish` sent `private` here; pass `--visibility private` to keep that.
+  - **With the flag:** unchanged. `--visibility private|org|marketplace` is sent and applied.
+  
+  The publish summary gains a `Visibility` line showing the control plane's answer. When the
+  control plane does not report it and no flag was given, the line says
+  `not reported by the control plane`. The "Re-run with --submit" hint now follows that
+  answer too, so it also fires when a `marketplace` plugin is re-published without the flag.
+- def279a: fix(cli): `os package publish` sends `visibility` only when `--visibility` is passed, so re-publishing no longer moves a `marketplace` package to `org`
+  
+  Clause-②: no
+  
+  The `--visibility` flag defaulted to `org`, and the CLI always sent it in the package
+  upsert (`POST /api/v1/cloud/packages`). That upsert is also the re-publish path, and
+  the control plane updates an existing package's visibility whenever the request carries
+  one. So re-publishing a new version of a `marketplace` package without repeating
+  `--visibility marketplace` silently set it to `org` and took it out of the marketplace.
+  
+  The flag no longer has a default, and an omitted flag is an omitted key:
+  
+  - **Re-publish without the flag:** the package keeps its current visibility.
+  - **First publish without the flag:** the control plane applies its own default
+    (`org` on ObjectStack Cloud), so a new package gets the same visibility as before.
+  - **With the flag:** unchanged. `--visibility private|org|marketplace` is sent and
+    applied, as before.
+  
+  The publish summary's `Visibility` line shows the control plane's answer. When the
+  control plane does not report it and no flag was given, the line says
+  `not reported by the control plane`. The "visibility is marketplace but the version is
+  still draft" hint now follows that answer too, so it also fires when a `marketplace`
+  package is re-published without the flag. The `--submit` help text now states its
+  precondition as the package's visibility being `marketplace` (already stored, or set
+  with `--visibility marketplace`), since the flag is no longer sent on every publish.
+- f20f669: fix(cli): `os migrate plan` / `apply` no longer run the app's `onEnable` or a host plugin's post-declaration hooks during their boot
+  
+  Clause-②: yes (widening)
+  
+  The two schema commands boot the host's stack to read what it declares. That boot ran the
+  config's `onEnable`, and every `kernel:bootstrapped` / `kernel:listening` hook a host plugin
+  registered from `init()`. A hook that reads a table the plan does not declare then failed on
+  every plan. On `examples/app-crm`, whose `onEnable` binds positions to permission sets, each
+  plan printed six `[sql-driver] DATABASE_ERROR` lines and six `position binding lookup failed`
+  warnings, on a database `apply` had just migrated as well as on an absent one.
+  
+  The boot now composes host code for its declarations only:
+  
+  - `AppPlugin` takes a new `skipOnEnable` option. When it is set, `start()` does not run the
+    bundle's `onEnable`, logs that it withheld it, and reports it through `onEnableWithheld`. The
+    migrate commands set it on the app they compose from `objectstack.config.ts`.
+  - A host plugin's `init()` gets a context that does not register `kernel:bootstrapped` or
+    `kernel:listening` hooks. The kernel contract defines those phases as work after registration
+    ends: reconcile/backfill, and opening listeners. `kernel:ready` hooks still run, and the
+    write guard still refuses their row writes. `kernel:shutdown` hooks and data hooks register
+    as before.
+  - The plan's notes, and the `--json` payload's `composition.notes`, carry one line naming what
+    was not run.
+  
+  The plan itself is unchanged: the same tables, the same pending DDL, the same drift. `apply`
+  still flushes the DDL the operator confirms and still runs the coverage pass. The platform's own
+  plugins are untouched, so the value-shape gate announcement still prints.
+  
+  `@objectstack/runtime` widens its public surface, additively: `AppPlugin`, exported from the
+  package root, gains the optional constructor option `skipOnEnable` (default `false`) and the
+  read-only getter `onEnableWithheld`. A composition that does not pass the option gets exactly
+  the behaviour it had, `onEnable` included.
+- f3b16fc: Raise the published dependency floors to the 2026-10 production dependency group. No API changes. A consumer install resolves these ranges:
+  
+  Clause-②: no
+  
+  - `zod` `^4.6.1` → `^4.6.5`: `@objectstack/spec`, `@objectstack/core`, `@objectstack/objectql`, `@objectstack/rest`, `@objectstack/runtime`, `@objectstack/cli`, `@objectstack/mcp`, `@objectstack/metadata`, `@objectstack/metadata-core`, `@objectstack/metadata-protocol`, `@objectstack/driver-turso`.
+  - `@libsql/client` `^0.17.3` → `^0.18.0`: `@objectstack/driver-turso`. Every behaviour the driver documents was re-measured on 0.18.0 and holds unchanged. That covers the URL scheme routing, the `URL_INVALID` and `URL_SCHEME_NOT_SUPPORTED` refusals, the WebSocket transport having no `fetch` or timeout seam, `syncUrl` being read only by the embedded-replica client, and the `?authToken=` precedence on `url` and `syncUrl`. The driver's refusal messages now name 0.18.0 as the measured version. 0.18.0 changes only the local `file:` client, which now pools connections. The driver creates that client only for an embedded replica, and calls only `sync()` on it.
+  - `@modelcontextprotocol/sdk` `^1.30.0` → `^1.30.1`: `@objectstack/connector-mcp`, `@objectstack/mcp`.
+  - `chalk` `^6.0.0` → `^6.0.1`: `@objectstack/cli`, `create-objectstack`. `yaml` `^2.9.0` → `^2.9.1` and `tsx` `^4.23.12` → `^4.23.15`: `@objectstack/cli`.
+  - `mongodb` `^7.5.0` → `^7.6.0`: `@objectstack/driver-mongodb`.
+  - `sql.js` `^1.14.1` → `^1.14.2`: `@objectstack/driver-sqlite-wasm`.
+  - `@noble/hashes` `^2.3.0` → `^2.4.0` and `jose` `^6.2.8` → `^6.2.12`: `@objectstack/plugin-auth`. The better-auth family stays at exactly `1.7.3`.
+  - `hono` `^4.13.5` → `^4.13.9`: `@objectstack/plugin-hono-server`.
+  - `pinyin-pro` `^3.29.1` → `^3.29.4`: `@objectstack/plugin-pinyin-search`.
+  - `@noble/ciphers` `^2.3.0` → `^2.4.0`: `@objectstack/service-settings`.
+- d6d6e87: feat(spec,client)!: `ActionSchema` gains `outcomeMessages` — success copy per closed handler `outcome`, interpolating `${result.*}` — and `client.environments.delete` no longer guarantees `message` on its archive answer (#21095)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/client/src/index.ts#ObjectStackClient) the one narrowing in this changeset is the declared RETURN type of `ObjectStackClient.environments.delete`, a published SDK method of an exported class: its archive answer's `message` becomes optional, beside a new optional `outcome`. That class is not a Zod schema, not a spec contract, not an object definition and not referenced by one, so `objectstack migrate meta` has nothing to rewrite, and the compiler at the consumer's own read is the channel that reaches every affected consumer. The spec half is a widening only (a new optional key, refused solely where it would be inert), so no stored metadata changes meaning and no ADR-0087 entry is owed for it. The other categories are closed on facts: all three packages publish (not `unpublished`); no ADR-0087 id covers a client return type and this diff adds none (not `registered` / `already-registered`); and the diff touches `packages/spec`, which `type-surface-only` refuses. -->
+  
+  **BREAKING for TypeScript readers of `client.environments.delete`'s archive answer**: `message` is now `message?: string`. Code that assigns it to a `string` stops compiling at that read. Nothing else in the SDK changes, and the request is unchanged.
+  
+  **`ActionSchema.outcomeMessages`** (`@objectstack/spec/ui`). A server-executing action can succeed in more than one way: an environment delete archives, finds the environment already archived, defers a purge, or destroys it. One static `successMessage` cannot say which of these happened. The handler now reports a closed `outcome` fact in its success payload, and the action declares the copy for each outcome:
+  
+  ```ts
+  outcomeMessages: {
+    archived: 'Environment ${result.environmentId} archived.',
+    already_archived: 'Environment ${result.environmentId} was already archived.',
+  }
+  ```
+  
+  - Keys are snake_case outcome names; values are `I18nLabel`s. A key that is not snake_case is refused at its own path (`invalid_key`).
+  - The key is valid on `type: 'api'` and `type: 'script'` actions only, the two types with a success payload that can carry an `outcome`. It is refused with a prescription on `url` / `modal` / `flow` / `form`, beside `resultDialog` (which suppresses the success toast), and beside `operation: 'update'` (no handler, so no outcome).
+  - `successMessage` and each outcome message may interpolate `${result.*}`, the server-response scope `onSuccess.navigate` already declares. This is not a new dialect.
+  - The console picks `outcomeMessages[result.outcome]`, falls back to `successMessage`, and then to its default text. The console does not read it yet. Until it does, the key is accepted, validated, translated and extracted, and the liveness ledger grades it `planned`, so `os lint` tells an author who writes it that it is not shown yet.
+  
+  **Translation.** `TranslationData` carries the copy beside `successMessage`: `objects.OBJECT._actions.ACTION.outcomeMessages.OUTCOME` and `globalActions.ACTION.outcomeMessages.OUTCOME`. Outcome keys there are snake_case too. `translateAction` overlays them per outcome (object-scoped first, then global) and only for outcomes the action declares. `os i18n extract` emits one key per declared outcome.
+  
+  **`client.environments.delete`** (`@objectstack/client`). The control plane is replacing its English `message` with the closed `outcome` fact: the server returns facts, and the console composes the message in the user's locale. The archive answer declares `outcome?: 'archived' | 'already_archived' | 'purge_deferred'`, and the teardown answer declares `outcome?: 'destroyed'`. Both `outcome` and `message` are optional, because a 200 may carry either one or both depending on which control-plane release answers. To learn what happened, read `deleted` and `purgeDeferred`, which every answer still carries, or `outcome` when it is present.
+- 7164587: fix(cli): `os start` forwards SIGTERM and SIGINT to its `serve` child and takes the child down when it exits
+  
+  Clause-②: no
+  
+  `os start` runs the server as a separate `serve` child process. It used to
+  listen for that child's exit and nothing else. A SIGTERM or SIGINT sent to the
+  `start` process alone (a plain `kill`, `docker stop`, a systemd stop, a CI step)
+  ended `start` and left `serve` running with no parent. The port stayed bound,
+  `/health` kept answering 200, and the next start on that port collided with it.
+  
+  `os start` now supervises its child the way `os dev` already does, through the
+  same mechanism:
+  
+  - SIGTERM or SIGINT to `start` is forwarded to the child. `start` waits for the
+    child to shut down, then exits with the child's exit code, which is 0 after a
+    graceful shutdown. It used to die on the signal at once (shell status 143 for
+    SIGTERM, 130 for SIGINT) while the child kept running.
+  - Whatever else ends `start`, the child is sent SIGTERM on the way out.
+  - A child that exits on its own still ends `start` with the child's exit code,
+    as before.
+  
+  One visible side effect, the same one `os dev` already has: Ctrl-C at a terminal
+  signals `start` and the child together, so the child now receives SIGINT twice
+  and logs one `Shutdown already in progress, ignoring SIGINT` warning. The
+  terminal prompt also returns only after the server has stopped, not before.
+  
+  No flag, port, environment variable, banner line or `os dev` behaviour changes.
+- e2ed61a: `@objectstack/cli` moves to the `@oclif/core` 5 line: its `@oclif/core` dependency goes from `^4.13.3` to `^5.1.2`. The Command classes the package exports (`CompileCommand`, `ValidateCommand`, `ServeCommand` and the rest) now build on `@oclif/core` 5, so code that extends one of them or runs it beside its own oclif setup should use `@oclif/core` 5 as well.
+  
+  Node.js 22 or later is required. Every `@oclif/core` 5 release declares `engines.node` `>=22.0.0`, the same floor this package already declared.
+  
+  The `os` commands, flags and output are unchanged. On 5.1.2 every help page renders byte-for-byte as it did on 4.13.3. The published entry also answers `--version`, `--help`, an unknown command, an unknown flag and a refused `--port` with the same exit codes and the same bytes.
+- 6bff748: Provenance comments in `@objectstack/cli` were re-anchored
+  
+  Comment and docblock lines under `src/` that cited tracker numbers which no
+  longer resolve on GitHub now cite the commit in this repository's history that
+  decided the matter, and say in their own words what was decided. Two strings
+  move with them: the `os i18n extract --source-hashes` help text now says what
+  the provenance companion records instead of citing a number, and the header
+  that flag writes into each `<locale>.source-hashes.generated.ts` cites the
+  commit that introduced the companion. No command, flag, exit code, error code,
+  type, export or runtime behaviour changes.
+- 315888d: feat(spec): one list of page-component slot positions, derived from the component rows and read by every page walk — `page:card`'s `footer` is now walked by all three (#20940)
+  
+  The platform has three walks that descend into a page component's `properties` bag, and each kept its own list of where child components hang: the ADR-0087 conversion walker (`children`, `body`, `footer`, `items[].children`), `@objectstack/lint`'s `walkPageComponents` (the same four) and the exported `walkAddressedPageComponents` (`children`, `items[].children`). So a node in a card's `footer` — a declared, rendered slot ("Card footer components (slot)") — was judged by `os lint` and skipped by every consumer of the exported walk: `translatePage` left its copy untranslated, `os i18n extract` offered no key for it, and objectui's validator passed it unjudged.
+  
+  **`@objectstack/spec` — new exports `pageComponentSlotPositions()` and `PageComponentSlotPosition` (`@objectstack/spec/ui`).** The component rows now mark each composition slot at its declaration, and `pageComponentSlotPositions()` derives the one list from `ComponentPropsMap`: `children`, `footer` and the panel position `items[].children`, plus the tombstoned `body` flagged `retired: true`. The marker changes nothing about the schema it marks — the parse, the JSON Schema and the authorable surface are unchanged. The list is derived on first call and memoized, never at import. `minor` because the package's public surface grows by these two exports.
+  
+  **`walkAddressedPageComponents` descends `properties.footer`.** It reads the list's authorable entries, in the list's order (`children`, `footer`, then `items[].children`); signature and return shape are unchanged. What follows from it:
+  
+  - `translatePage` translates the copy of a component in a card footer through `pages.<name>.components.<id>`, like any other nested component.
+  - `os i18n extract` offers those keys, and `os i18n check` counts them, for a stack whose card footers hold components with an `id` and copy.
+  - objectui's validator, which judges the nodes this walk visits, now judges a card footer's nodes.
+  
+  `page:card.body` stays undescended, as #5775 ruled: it is not an authorable spelling.
+  
+  **The conversion walker reads every entry, the retired one included.** Its reach does not change: it descends `children`, `body`, `footer` and `items[].children`, as before. Stored documents still carry `body`, the renderers still draw it, and a conversion that runs before `page-card-body-to-children` meets the sub-tree there. Within one component the visit order is now `children`, `body`, `footer`, then the panels. That order is observable only as the order of the notices for a component that carries both a direct slot and panels.
+  
+  **`@objectstack/lint` — `walkPageComponents` reads the list's authorable entries.** It walks `footer` as before, and it stops walking the retired `body` spelling. The walk matches by shape, so this drops a `body` array on any component, not only on `page:card`. #5775 (maintainer ruling 2026-08-06, direction A) made `children` the one composition key. The renderers keep reading `body` only as a back-compat fallback for stored documents. On `page:card` the tombstone's rename prescription still refuses `body`, and so does the thin containers' guidance; the sub-tree is judged once it sits under `children`. So the rules built on this walk no longer report findings about nodes under any component's `body` array. The conversion walker keeps reaching them for stored documents.
+  
+  **`@objectstack/cli`:** no code change. `os i18n extract` and `os i18n check` pick up the `footer` component keys through the shared walk. The extractor's object-section pass stops reading `record:details` sections under a retired `body`, through lint's walk.
+  
+  **Why no ADR-0087 ledger entry.** Nothing an author writes moves: no spec key is retired or renamed, no stored `sys_metadata` shape changes, and no conversion or migration id is touched. `objectstack migrate meta` has nothing to act on.
+- Updated dependencies [b616c0a]
+- Updated dependencies [e5c7d07]
+- Updated dependencies [e5c7d07]
+- Updated dependencies [e5c7d07]
+- Updated dependencies [6f1f1c1]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [a093ce3]
+- Updated dependencies [fa0a4b6]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [05a7547]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [b531c7b]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [7001918]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [df67985]
+- Updated dependencies [42d78b9]
+- Updated dependencies [3572916]
+- Updated dependencies [fe463b4]
+- Updated dependencies [5a23096]
+- Updated dependencies [a94f3ba]
+- Updated dependencies [3fbf3ca]
+- Updated dependencies [eb4b17c]
+- Updated dependencies [24d521e]
+- Updated dependencies [19fc8d6]
+- Updated dependencies [f4ce10c]
+- Updated dependencies [b785c3b]
+- Updated dependencies [97005ae]
+- Updated dependencies [2473e26]
+- Updated dependencies [3a89d45]
+- Updated dependencies [c96beb2]
+- Updated dependencies [e651556]
+- Updated dependencies [6e3aa75]
+- Updated dependencies [ba4648d]
+- Updated dependencies [f379f57]
+- Updated dependencies [889139c]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [3f45b6c]
+- Updated dependencies [14f80e2]
+- Updated dependencies [7510663]
+- Updated dependencies [820d3f4]
+- Updated dependencies [a7d9768]
+- Updated dependencies [4bf4e7e]
+- Updated dependencies [cbaf04c]
+- Updated dependencies [4dfff17]
+- Updated dependencies [4d04b6b]
+- Updated dependencies [cba417a]
+- Updated dependencies [9a4b2bb]
+- Updated dependencies [b80ab57]
+- Updated dependencies [d282087]
+- Updated dependencies [73155fe]
+- Updated dependencies [0e9ad74]
+- Updated dependencies [697845d]
+- Updated dependencies [bbe03f4]
+- Updated dependencies [9b384f6]
+- Updated dependencies [8acdae9]
+- Updated dependencies [91e8fa1]
+- Updated dependencies [f29c83d]
+- Updated dependencies [c6b37cd]
+- Updated dependencies [a6866da]
+- Updated dependencies [1a75e39]
+- Updated dependencies [67c1b11]
+- Updated dependencies [72f8c38]
+- Updated dependencies [cd901d7]
+- Updated dependencies [31ed067]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [89801cd]
+- Updated dependencies [1ab9892]
+- Updated dependencies [10c36cc]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [cd6d8a5]
+- Updated dependencies [ace770d]
+- Updated dependencies [7184436]
+- Updated dependencies [ed54768]
+- Updated dependencies [d3f88fa]
+- Updated dependencies [99786f9]
+- Updated dependencies [5757463]
+- Updated dependencies [63bfe69]
+- Updated dependencies [96e7244]
+- Updated dependencies [defc7f7]
+- Updated dependencies [36d043b]
+- Updated dependencies [679f95e]
+- Updated dependencies [4b45afa]
+- Updated dependencies [1940afd]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [165c1d4]
+- Updated dependencies [d7b9817]
+- Updated dependencies [f80e2a6]
+- Updated dependencies [22e584c]
+- Updated dependencies [0d9349f]
+- Updated dependencies [c8111a5]
+- Updated dependencies [c8111a5]
+- Updated dependencies [c8111a5]
+- Updated dependencies [c8111a5]
+- Updated dependencies [7afdc5c]
+- Updated dependencies [9ad6544]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [e47355b]
+- Updated dependencies [b9087d7]
+- Updated dependencies [f115b1f]
+- Updated dependencies [7c5a311]
+- Updated dependencies [49d2a24]
+- Updated dependencies [f10d802]
+- Updated dependencies [856321f]
+- Updated dependencies [76bd58f]
+- Updated dependencies [810d42b]
+- Updated dependencies [6b004c0]
+- Updated dependencies [93e9e42]
+- Updated dependencies [157baa7]
+- Updated dependencies [ca5408c]
+- Updated dependencies [ca5408c]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [00a92e1]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [793fb83]
+- Updated dependencies [793fb83]
+- Updated dependencies [4d0b9cd]
+- Updated dependencies [cf0346e]
+- Updated dependencies [8fec76a]
+- Updated dependencies [53ed3d1]
+- Updated dependencies [ceee88f]
+- Updated dependencies [8460592]
+- Updated dependencies [e18fea6]
+- Updated dependencies [b84b240]
+- Updated dependencies [f750119]
+- Updated dependencies [6f57888]
+- Updated dependencies [660a9b2]
+- Updated dependencies [dcd3309]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [95fed33]
+- Updated dependencies [26437ae]
+- Updated dependencies [33b6e8b]
+- Updated dependencies [cb4c31d]
+- Updated dependencies [b1aee33]
+- Updated dependencies [27bf358]
+- Updated dependencies [525b813]
+- Updated dependencies [05be352]
+- Updated dependencies [250dec8]
+- Updated dependencies [d67b942]
+- Updated dependencies [f8178ff]
+- Updated dependencies [8d329f0]
+- Updated dependencies [d1633f3]
+- Updated dependencies [5e470f8]
+- Updated dependencies [5e470f8]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [8f78495]
+- Updated dependencies [a3dc817]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [0c5a71b]
+- Updated dependencies [bb2eccf]
+- Updated dependencies [75519e1]
+- Updated dependencies [75519e1]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [1571aed]
+- Updated dependencies [5dbeb7d]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [657b6b7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [3693a1b]
+- Updated dependencies [de8cd58]
+- Updated dependencies [5f6b63a]
+- Updated dependencies [83480c6]
+- Updated dependencies [83480c6]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [25f2e64]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [e161ad3]
+- Updated dependencies [2f2fa11]
+- Updated dependencies [ae1e950]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [c35436c]
+- Updated dependencies [9b81314]
+- Updated dependencies [58a77db]
+- Updated dependencies [a9d36d5]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [94990a2]
+- Updated dependencies [514001a]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [a11faee]
+- Updated dependencies [2c1cef3]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [12fbb2f]
+- Updated dependencies [097ef80]
+- Updated dependencies [39ab294]
+- Updated dependencies [70dae53]
+- Updated dependencies [f20f669]
+- Updated dependencies [c6954d6]
+- Updated dependencies [d34aa58]
+- Updated dependencies [2bddb19]
+- Updated dependencies [bafb8c9]
+- Updated dependencies [9c8b65a]
+- Updated dependencies [665cab3]
+- Updated dependencies [665cab3]
+- Updated dependencies [45ce12a]
+- Updated dependencies [682873d]
+- Updated dependencies [1bd14c9]
+- Updated dependencies [432c8ab]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [2488b98]
+- Updated dependencies [cfad7de]
+- Updated dependencies [7a606a9]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [327391c]
+- Updated dependencies [df1feae]
+- Updated dependencies [ef96c9e]
+- Updated dependencies [e35c40a]
+- Updated dependencies [336e191]
+- Updated dependencies [336e191]
+- Updated dependencies [454bbb6]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [3a7b6eb]
+- Updated dependencies [ce8a6d2]
+- Updated dependencies [24c554d]
+- Updated dependencies [f0cc16e]
+- Updated dependencies [1ecb871]
+- Updated dependencies [fbcc05f]
+- Updated dependencies [0b12b9e]
+- Updated dependencies [c6b6889]
+- Updated dependencies [ebdb6f2]
+- Updated dependencies [55012df]
+- Updated dependencies [30c530e]
+- Updated dependencies [ce4e205]
+- Updated dependencies [862f12c]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [3ddd3d0]
+- Updated dependencies [c7396f1]
+- Updated dependencies [ee42f00]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [be5a83c]
+- Updated dependencies [4727fcb]
+- Updated dependencies [d2bc644]
+- Updated dependencies [7923c8e]
+- Updated dependencies [2791138]
+- Updated dependencies [95b91cc]
+- Updated dependencies [cfa9315]
+- Updated dependencies [e4e5222]
+- Updated dependencies [f927864]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [61455de]
+- Updated dependencies [aa23e2c]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [01e78dc]
+- Updated dependencies [1741c5d]
+- Updated dependencies [04b202e]
+- Updated dependencies [a186aea]
+- Updated dependencies [422db78]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+- Updated dependencies [00f045d]
+  - @objectstack/lint@17.6.0
+  - @objectstack/rest@17.6.0
+  - @objectstack/plugin-security@17.6.0
+  - @objectstack/spec@17.6.0
+  - @objectstack/platform-objects@17.6.0
+  - @objectstack/driver-sql@17.6.0
+  - @objectstack/objectql@17.6.0
+  - @objectstack/metadata@17.6.0
+  - @objectstack/metadata-protocol@17.6.0
+  - @objectstack/console@17.6.0
+  - @objectstack/plugin-audit@17.6.0
+  - @objectstack/core@17.6.0
+  - @objectstack/service-analytics@17.6.0
+  - @objectstack/service-realtime@17.6.0
+  - @objectstack/service-automation@17.6.0
+  - @objectstack/driver-turso@17.6.0
+  - @objectstack/driver-memory@17.6.0
+  - @objectstack/metadata-core@17.6.0
+  - @objectstack/runtime@17.6.0
+  - @objectstack/driver-mongodb@17.6.0
+  - @objectstack/formula@17.6.0
+  - @objectstack/observability@17.6.0
+  - @objectstack/plugin-approvals@17.6.0
+  - @objectstack/plugin-auth@17.6.0
+  - @objectstack/plugin-email@17.6.0
+  - @objectstack/plugin-sharing@17.6.0
+  - @objectstack/service-datasource@17.6.0
+  - @objectstack/service-package@17.6.0
+  - @objectstack/service-settings@17.6.0
+  - @objectstack/service-storage@17.6.0
+  - @objectstack/trigger-record-change@17.6.0
+  - @objectstack/trigger-schedule@17.6.0
+  - @objectstack/service-messaging@17.6.0
+  - @objectstack/plugin-webhooks@17.6.0
+  - @objectstack/client@17.6.0
+  - @objectstack/types@17.6.0
+  - @objectstack/verify@17.6.0
+  - @objectstack/plugin-hono-server@17.6.0
+  - @objectstack/driver-sqlite-wasm@17.6.0
+  - create-objectstack@17.6.0
+  - @objectstack/mcp@17.6.0
+  - @objectstack/plugin-pinyin-search@17.6.0
+  - @objectstack/cloud-connection@17.6.0
+  - @objectstack/account@17.6.0
+  - @objectstack/setup@17.6.0
+  - @objectstack/service-cache@17.6.0
+  - @objectstack/service-job@17.6.0
+  - @objectstack/service-queue@17.6.0
+  - @objectstack/service-sms@17.6.0
+  - @objectstack/trigger-api@17.6.0
+
 ## 17.5.0
 
 ### Minor Changes

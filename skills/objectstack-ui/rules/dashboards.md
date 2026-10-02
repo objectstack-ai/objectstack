@@ -258,8 +258,8 @@ compareTo: { kind: 'previousYear', dimension: 'close_date' }     // several — 
 * **Cartesian charts** (`line` / `area` / `bar` / `horizontal-bar` /
   `scatter`) — the comparison series is appended after the primary series
   with `variant: 'comparison'`, muted per family (dashed `'4 4'` on
-  line/area only; reduced opacity on all). Override per-series with
-  `series.dashArray` / `series.opacity`.
+  line/area only; reduced opacity on all). That muting is the renderer's
+  default; `chartConfig.colors` is the one palette channel that remains.
 * **Pie / donut / funnel** — `compareTo` is silently ignored; there is no
   meaningful "two-period" composition for part-of-whole charts.
 * **Requirements** — a comparison needs a **dated window** to shift. When the

@@ -1,5 +1,500 @@
 # @objectstack/plugin-security
 
+## 17.6.0
+
+### Minor Changes
+
+- e5c7d07: The `security` service implements `getWritableFields(object, context)` (#18386). It uses the same permission sets, field grants, `requiredPermissions` check and on-behalf-of delegator intersection as the write gate. A field is in the answer exactly when a write naming it passes the field-level-security check. `getReadableFields` now shares that derivation, and its answers are unchanged.
+- de8cd58: fix(plugin-security)!: a field the caller may not read is refused as a cross-field comparand exactly as it is refused as a filter key (#20932)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a QUERY at the security layer's field predicate guard: a query that names a field the caller's field-level permissions hide as a cross-field comparand now answers the 403 PERMISSION_DENIED the same field already answers as a filter key. No authorable key, spelling, export or stored metadata shape moves: FieldReferenceSchema, every filter shape and every object definition parse as before, and @objectstack/plugin-security exports nothing new and nothing less (collectConditionFields, collectQueryFields and assertReadableQueryFields keep their signatures). There is nothing for objectstack migrate meta to rewrite, since what changes is which caller may run a query, not what any metadata says. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers a permission verdict and this diff adds none (not registered / already-registered); and the change is runtime behaviour, not a declaration (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING for queries that compare a column against a field the caller may not read.**
+  
+  **What changed.** The security layer refuses a query that filters, sorts, groups or aggregates by a field the caller's field-level permissions hide, with `403 PERMISSION_DENIED`: which rows answer would disclose the value that the field mask withholds from the result. A cross-field comparand (`FieldReferenceSchema`, "compare against another column of the same row") reads the field it names in the same way, and it is now collected into the same set and judged by the same rule. A hidden field named as a comparand, in any position the filter grammar admits for one, in `where`, `having` or a per-aggregation `filter`, answers the same `403 PERMISSION_DENIED`, in the same words, as the same field written as a filter key. This covers `engine.find`, `findOne`, `count`, `aggregate` and the bulk `update` / `delete` predicate, and every route that reaches them. Before, such a comparison was answered.
+  
+  **What is not affected.** A comparand naming a field the caller may read answers as before. A system context, and a caller with no permission sets, are unaffected. Row-level policies may still compare against fields the caller cannot read, because they are applied after the guard. A comparand the filter grammar refuses is still refused; when it names a hidden field, that refusal may now be the `403` rather than `400 INVALID_FILTER`, as it already was for a hidden filter key.
+  
+  **If a query stopped answering for some users,** it compares against a field those users may not read. Grant that field's read permission to the users who need it, or compare against a field they can read.
+- 83480c6: The `security` service implements `getQueryableFields(object, context)` (#20935). A field is in the answer exactly when a query naming it as a filter, a sort key, a group key or an aggregate input passes the engine's field guards: the answer is read from the one field map the predicate guard and the aggregate-input guard now share (permission sets, field grants, the `requiredPermissions` check, the on-behalf-of delegator intersection, and every field whose masking rule applies to the caller). The two guards refuse exactly what they refused before.
+- a9d36d5: fix(plugin-security)!: a field whose masking rule applies is served masked to a caller who resolves no permission set, and that caller may not filter, sort, group or aggregate on it (#20995)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing an author wrote is rewritten or changes meaning: every maskingRule already declared that it applies to every non-system caller who does not hold all of the field's requiredPermissions, and this change makes the runtime honour that declaration for the one caller class it skipped. No stored metadata, schema key or published type moves. -->
+  
+  **BREAKING for callers who resolve no permission set.**
+  
+  **What changed.** A field that declares `maskingRule` is masked for every
+  non-system caller unless the caller holds all of the field's
+  `requiredPermissions`. A caller who carries a principal but resolves no
+  permission set holds no capability, so the rule applies to it, but the runtime
+  served that caller the stored value and let it filter, sort, group and
+  aggregate on the field. That caller is now served the masked value. A filter,
+  sort key, group key or aggregate that names the field is refused with
+  `403 PERMISSION_DENIED`, as it already was for any other masked caller. A write
+  that sends the masked placeholder back is refused with `400 VALIDATION_ERROR`, so
+  a client that saves the record it was served cannot overwrite the stored value
+  with its mask.
+  
+  The published field answers agree with what is served.
+  `ISecurityService.getQueryableFields` no longer lists such a field for this
+  caller, so a door that compiles its own query refuses it the same way.
+  `getReadableFields` still lists it, because a masked field is a served column.
+  
+  **Who this reaches.** A caller who resolves no permission set but carries a
+  position, a named permission set or a user id. A caller with none of the three
+  is handed through untouched, as before, and the field projections say so. A
+  system context is unaffected.
+  
+  **One more refusal, by the same rule.** If the object's security posture cannot
+  be read, this caller's request is now refused, as every other caller's already
+  is. The masking rules come from that posture, so they cannot be known without
+  it.
+  
+  **What to do.** Nothing, unless such a caller needs the stored value. A field's
+  `requiredPermissions` are the gate that lifts its mask, so give the caller a
+  permission set that holds all of them, or drop the `maskingRule`. A query that
+  must sort or search on the field needs the same.
+- 9c8b65a: fix(plugin-security)!: the record an anonymous public-form submit echoes back passes the result masker, so a field whose masking rule applies is echoed masked (#21062)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing an author wrote is rewritten or changes meaning: every maskingRule already declared that it applies to every non-system caller who does not hold all of the field's requiredPermissions, and an anonymous form submitter is such a caller. The runtime now honours that declaration on the one door that skipped the masker. No stored metadata, schema key or published type moves. -->
+  
+  **BREAKING for the anonymous public-form submit's response.**
+  
+  **What changed.** A public form's submission is authorized by the ADR-0056
+  declaration-derived grant, which admits the create and the read-back on the
+  form's declared object and passes before any permission set is resolved. The
+  grant handed the operation to the engine and returned before the result masker
+  ran, so the record echoed in the `201` body carried every field whose
+  `maskingRule` applies as stored: the field the form collects, and a field
+  filled from its `defaultValue` that the form never shows.
+  
+  The grant now hands what it returns to the same result masker the data plane
+  uses, for the caller it stands in for: the permission sets resolved for the
+  grant's context (the deployment's guest set when it registers one, otherwise
+  none) and the object posture those sets read. A field whose masking rule
+  applies is echoed masked. A field the caller's sets mark unreadable, or whose
+  `requiredPermissions` they do not hold, is masked the way the data plane masks
+  it for that caller. The read-backs the grant admits are masked the same way.
+  
+  **What did not change.** The grant admits exactly what it admitted: the create
+  and the read-back on the form's declared object, and nothing else. The
+  server-managed fields are still stripped from the submitted row. The stored row
+  is unchanged; only the echo is masked.
+  
+  **One more refusal, by the same rule.** If the caller's permission sets or the
+  object's security posture cannot be read, the submission is now refused with
+  `403 PERMISSION_DENIED` before anything is written, as every other caller's
+  request already is. The masking rules come from that posture, so the echo
+  cannot be masked without it.
+  
+  **What to do.** Nothing, unless a client reads a masked field's stored value
+  back out of the submit response. The response now carries the masked value, as
+  every other non-system read does. A field's `requiredPermissions` are the gate
+  that lifts its mask, so a deployment whose guest set holds all of them is
+  echoed the stored value; otherwise drop the `maskingRule`.
+- 665cab3: fix(plugin-security)!: a field that declares `requiredPermissions` is not served to a caller who resolves no permission set, and that caller may not query on it or write it (#21063)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing an author wrote is rewritten or changes meaning: every field-level requiredPermissions already declared mask on read and deny on write for a caller who does not hold all of it, and this change makes the runtime honour that declaration for the one caller class it skipped. No stored metadata, schema key or published type moves. -->
+  
+  **BREAKING for callers who resolve no permission set.**
+  
+  **What changed.** A field that declares `requiredPermissions` is masked on read
+  and denied on write unless the caller holds all of them (ADR-0066 D3). A caller
+  who carries a principal but resolves no permission set holds no capability, so
+  the gate applies to it, but the runtime served that caller the stored value,
+  let it filter, sort, group and aggregate on the field, and accepted a write
+  that named it. The explain engine already reported the field hidden for that
+  caller. Now the field is not served to it (a field that also declares a
+  `maskingRule` is served masked, as before). A filter, sort key, group key or
+  aggregate that names the field is refused with `403 PERMISSION_DENIED`, and so
+  is a write payload that names it, as for any other caller who lacks the
+  capability.
+  
+  The published field answers agree with what is served and refused.
+  `ISecurityService.getReadableFields`, `getQueryableFields` and
+  `getWritableFields` no longer list such a field for this caller, and neither
+  does `getMetadataReadableFields` when the deployment's fallback set resolves to
+  nothing. The write preview answers such a payload as the write path does.
+  
+  **Who this reaches.** A caller who resolves no permission set but carries a
+  position, a named permission set or a user id. A caller with none of the three
+  is handed through untouched, as before, and the field projections say so. A
+  caller who resolves at least one permission set is unaffected, and so is a
+  system context. Whether this caller may read or write the object at all is
+  unchanged.
+  
+  **What to do.** Nothing, unless such a caller needs the field. A field's
+  `requiredPermissions` name the capabilities that open it, so give the caller a
+  permission set that holds all of them, or drop the requirement from the field.
+- 62b90d7: fix(plugin-security,spec)!: a non-system caller that carries a principal and resolves no permission set gets the deny baseline at object admission and at the row scope, and the security contract says so (#21079)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key, export, published type, stored shape or wire shape is removed or renamed, so objectstack migrate meta has nothing to rewrite. What moves is which callers object admission and the row scope accept: a caller that carries a principal and resolves no permission set is now refused, and the remedy is a grant decision (a permission set the deployment declares and assigns), not a rewrite of anything an author already wrote. -->
+  
+  **BREAKING for callers who resolve no permission set.** Shipped as `minor` under the launch-window convention.
+  
+  **What changed.** ADR-0056 D2 gives an unauthenticated principal the deny baseline, not "no checks", and ADR-0090 D9 gives a guest the `guest` position and nothing else. A non-system caller that carries a principal (a position, a named permission set or a user id) but resolves no permission set was instead admitted to every object no set grants, for reads and writes, and read with the record-sharing predicate as its only row scope. Now an empty set list grants nothing:
+  
+  - **Object admission refuses it.** Every engine operation (find, findOne, count, aggregate, insert, update, delete) is refused with `403 PERMISSION_DENIED`, the same refusal any caller gets for an object its sets do not grant. `ISecurityService.canReadObject` and `canExport`, and the write preview's admission, answer `false` for it.
+  - **Its row scope is the deny filter.** `ISecurityService.getReadFilter` answers the filter that matches zero rows for it, as it already did on a resolution failure.
+  - **The second principal of a delegated request is held to the same answer.** An agent acting on behalf of a delegator who resolves no permission set was already refused by the engine; `canReadObject`, `canExport` and the write preview now refuse it too.
+  
+  The field answers for this caller (`getReadableFields`, `getQueryableFields`, `getWritableFields`, `getMetadataReadableFields`) are unchanged: they are field-level answers, and the contract now says that object admission is not part of them. The `ISecurityService` docblocks in `@objectstack/spec/contracts` that stated the old zero-set admission (`canReadObject`, `canExport`, the metadata-plane field projection) and the deny cases of `getReadFilter` narrow to match. No method, parameter or return type changes.
+  
+  **Who this reaches.**
+  
+  - An unauthenticated request carried as the guest envelope, on a deployment that grants anonymous callers no permission set.
+  - A context that names only permission sets the deployment does not register.
+  - A signed-in user on an embedder that switches the baseline off (`fallbackPermissionSet: null`) and grants that user nothing.
+  
+  A context that carries no principal at all (no position, no named set, no user id) is handed through as before; ADR-0096 stages it separately. A caller who resolves at least one permission set is decided by its sets, as before, and so is a system context. The public form submit is unaffected: its declaration-derived grant admits the create and its read-back ahead of object admission. Signed-in users of a stock `objectstack serve` deployment are unaffected: it applies the member baseline to every one of them, so none resolves an empty list.
+  
+  **Migration.** A caller that resolves no permission set is refused object admission and reads nothing. An app-declared anonymous endpoint (`authRequired: false`) can no longer read or write objects until the `guest` anchor's bindings are resolved for anonymous callers (#21158). An embedder that sets `fallbackPermissionSet: null` must grant its signed-in users a set explicitly.
+  
+  **For implementers of `ISecurityService`.** Answer `canReadObject`, `canExport` and the object-admission half of a write `false`, and `getReadFilter` with your deny filter, for a non-system caller that carries a principal and resolves no permission set; admit only the principal-less context.
+- d2bc644: fix(plugin-security): a row-level `check` judges a lone scalar written to a declared multi-valued field as the one-member list it is stored as, so the write and the read the same policy scopes give one answer for one row (#21238)
+  
+  Clause-②: yes (widening)
+  
+  The write door stores a lone scalar sent to a multi-valued field (`tags`, `multiselect`, `checkboxes`, or a `select` / `lookup` / `user` / `file` / `image` flagged `multiple: true`) as a one-member list: `tags: 'x'` is stored as `["x"]`. The row-level write `check` judged the value as sent on the insert and on a by-id update, because both images are formed before the write door runs. Measured through `ObjectQL.insert` with `SecurityPlugin` on two SQLite driver families, as a member resolving a permission set, with the same predicate as `using` and `check`:
+  
+  | `check` | written | write, before | stored | read |
+  |---|---|---|---|---|
+  | `record.tags.contains('x')` | `'x'` | 403 | `["x"]` | shown |
+  | `!record.tags.contains('x')` | `'x'` | admitted | `["x"]` | hidden |
+  | `record.tags.contains('x')`, a by-id update | `'x'` | 403 | `["x"]` | shown |
+  
+  Now the image's value on every field the object declares multi-valued goes through the same rule the write door stores it by, before the check is judged. The first and third rows are admitted. The second is refused: a policy that forbids a member from tagging a row `x` can no longer be passed by sending `'x'` instead of `['x']`. A lone scalar now gets exactly the verdict its stored list gets, on the insert, a by-id update and a predicate update. That includes a policy that compares such a field with a scalar comparison (`==`, `!=`, `in`, an ordering), which the read refuses with `INVALID_FILTER` / 400: there `'x'` used to get the opposite of the verdict `['x']` got, and now gets the same one.
+  
+  Unchanged: a field the object does not declare multi-valued is judged as written; a list, `null`, a blank string and an object are judged as written, as the write door leaves them; the check's comparands are left as written, since `contains` takes one member; and refusals keep their code and status (`PERMISSION_DENIED` / 403).
+  
+  **`@objectstack/core`** (one new root export, so `minor`; this export is the widening the `Clause-②: yes (widening)` line declares): `multiValueStorageForm(value)`, the rule itself. It wraps a string, a number or a boolean into a one-member list and returns every other value as the same value. `@objectstack/objectql`'s `normalizeMultiValueFields` now calls it, with no change in what the write door stores (`patch`). `@objectstack/plugin-security` is `minor` because the set of writes its check admits widens (the first and third rows above); that is a security-floor behaviour change, not the declared widening.
+- cfa9315: feat(spec, objectql, plugin-security): one shared filter lowering, run once at the engine and RLS seams (ADR-0053 D-D1, amended)
+  
+  Clause-②: yes
+  
+  `@objectstack/spec/data` exports `lowerFilterCondition(filter, options?)` and its `FilterLoweringOptions` type. It is not exported from the package root entry. It is a pure `FilterCondition → FilterCondition` rewrite that applies three rules once:
+  
+  - `$between` becomes `$gte` its minimum and `$lte` its maximum.
+  - A `$lte` whose comparand is a bare `YYYY-MM-DD` day becomes `$lt` the next day, in the calendar-string domain. On the last supported day (`9999-12-31`) a lone `$lte` becomes `{ $null: false }`, and a `$between` keeps only its minimum.
+  - The NULL-polarity guards the drivers already compile. A `$ne` of a value, a `$nin` or a `$notContains` holds for a row with no value. Every leaf of a `$not` operand is made total.
+  
+  The rewrite is copy-on-write, idempotent and never refuses. A node it rewrites keeps its filter-subtree provenance mark. With `options.isDatetimeColumn` (a typed seam), the first two rules change only a declared `datetime` column. Without it they apply to every column.
+  
+  As ADR-0053 D-D1 (amended 2026-09-30) requires, the seams now run it once, after the comparand doors and after filter-token resolution:
+  
+  - **`@objectstack/objectql`** runs it on every filter position, typed by the object's declared fields. That covers `where` on `find`, `findOne`, `count`, `update` and `delete`, and `aggregate`'s `where`, `aggregations[i].filter` and `having`. `having` is typed by the aggregated row's columns, so `max` of a `datetime` field counts as a `datetime`. Drivers receive the lowered filter. A date macro such as `{today}` is resolved before the lowering reads it.
+  - **`@objectstack/plugin-security`** runs it on every compiled RLS policy filter (`using` and `check`), right after the two comparand faces. `SecurityPlugin` now hands the compile seam the object's declared `datetime` columns (`RlsFieldGuard.datetime`). A guard without that set treats no column as `datetime`.
+  
+  Row answers stay the same on every driver. Each driver keeps its own copy of these rules, and every copy gives the same answer on lowered input. One result changes. The engine evaluates `aggregate`'s `aggregations[i].filter` and `having` itself, and that evaluator now treats a row or group with no value the way every driver's `where` already does. It no longer counts such a row in a `$between` on a `datetime` column. It now keeps such a row under a `$not` over an ordering such as `$lt`.
+  
+  Nothing is removed or renamed, and there is nothing to migrate.
+
+### Patch Changes
+
+- 7001918: fix(plugin-security): `security/explain` answers with enforcement's refusal for a row-level policy that compares two fields of no shared comparison class, instead of a record verdict (#20431)
+  
+  Clause-②: no
+  
+  A row-level policy can compare two fields that share no comparison class: text against a number, or any field against a file field, a formula field, or a field that holds a list or an object. The platform defines no answer for such a comparison. The SQL driver refuses to compile it, so every find the policy scopes answers `INVALID_FILTER` / 400. A by-id update or delete fails closed at its row-level gate, because that gate's pre-image read is the same refused read.
+  
+  The explain engine's record attribution judged the same predicate in-process, without the object's declared columns. So it compared the two raw values, and it reported `record.visible` as `true` or `false` depending on how those values happened to compare. For one ordering of a pair, it reported the record visible where enforcement refuses the read.
+  
+  The record matcher now receives the object's declared columns, as the RLS write check already does, and it refuses the comparison the way the driver does. A record-grained explanation (`recordId`) under such a policy is now refused with the matcher's envelope: `INVALID_FILTER` / 400, the same envelope the find answers with. No record verdict is reported. The message names the policy and both fields with their declared types. This is the answer explain already gives to the matcher's other `INVALID_FILTER` refusals, including a field-to-field comparison against a field that holds a list. Both orderings of one pair now get this one answer.
+  
+  Unchanged:
+  
+  - Enforcement admits and refuses exactly what it did before.
+  - A comparison between two fields of one class keeps its record verdict.
+  - A schema that cannot be read hands over no columns, so the matcher judges values only, as before.
+  - An object-level explanation (no `recordId`), which runs no record matcher.
+- 6e3aa75: A permission-set resolution with no active organization now reads the organization-less permission sets only. A permission set scoped to an organization applies only while that organization is active. This is the rule `resolveUserAuthzGrants` already applies to grant rows.
+  
+  Clause-②: no
+  
+  Before, the by-name `sys_permission_set` read carried no organization when the caller had none active. Every organization's row of each requested name came back, and the first one won. The names requested include the principal's positions. So a permission set another organization had authored under the name of a built-in role could reach an organization-less principal's resolved sets and effective object map. The same read could also resolve another organization's same-named copy of a set the principal holds through a global grant.
+  
+  - **Unchanged:** a principal with an active organization resolves exactly as before. That read was already scoped to the organization and the organization-less rows, and it still prefers the organization's own row. Global grants still apply everywhere. A global position folded onto a global permission set of the same name still resolves with no organization active, and so does a global user grant. Permission sets declared in metadata or bootstrap resolve as before, because they never reach this read.
+  - **If a principal relied on it:** make the organization active, or grant the permission set globally (no organization) when it is meant to apply everywhere.
+- 889139c: fix(plugin-security): `security/explain` resolves the user it explains in the organization enforcement resolves them in, so a member whose membership in the caller's organization has ended is no longer explained holding that organization's grants (#20580)
+  
+  When an administrator explains another user, the explanation is computed in the administrator's own organization. Enforcement does one more thing for that same user first: under a walled tenancy posture (`isolated` or `group`), it drops an organization claim that no current membership backs, and the user resolves with no active organization, so only their global grants apply. The explainer skipped that check. For a user whose membership in the administrator's organization had ended, the explanation listed that organization's grants, and the verdicts they decide, while enforcement applied none of them.
+  
+  The explainer now asks the same check before it resolves the user, and resolves them where it says. `@objectstack/core` exports that check as `vetOrganizationClaim(claimedOrganizationId, accessibleOrgIds, tenancyPosture)`. It returns the claimed organization while a current membership backs it or while no wall is enforced, and `undefined` once the claim is dropped. `resolveAuthzContext` asks the same function for a session's claim, so the two cannot disagree. This is a new export with no behaviour change to `resolveAuthzContext`.
+  
+  Unchanged:
+  
+  - Enforcement admits and refuses exactly what it did before.
+  - A current member's explanation.
+  - The `single` posture, where no claim is dropped on either side.
+  - Explaining yourself, and a caller with no active organization.
+- 9a4b2bb: Provenance comments in `plugin-security` were re-anchored
+  
+  Comment and docblock lines under `src/` that cited tracker numbers which no
+  longer resolve on GitHub now cite the record in this repository that decided
+  the matter (an ADR where one exists, otherwise the commit in this repository's
+  history), and say in their own words what was decided. Comments only: no type,
+  schema, export, log or refusal text, or runtime behaviour changes.
+- cd901d7: fix(plugin-security): `security/explain` answers enforcement's refusal at the object level too, and explains another user in the organization they are resolved in (#20604)
+  
+  Clause-②: no
+  
+  Two answers of `POST /api/v1/security/explain` disagreed with what the same principal's own request gets from enforcement.
+  
+  **A row-level policy that compares two fields of no shared comparison class** (text against a number, or any field against a file field, a formula field, or a field that holds a list or an object). The SQL driver refuses to compile such a read, so the find answers `INVALID_FILTER` / 400. A by-id update or delete fails closed at its row-level gate, and an insert whose check judges the policy is refused with `INVALID_FILTER` / 400. An object-level explanation (no `recordId`) still answered `allowed: true`, the `rls` layer `narrows`, and the predicate as `readFilter`, for every operation. A `recordId` that no row carries was answered `visible: false` with no deciding layer. Both are now refused with the envelope a record-grained explanation already gives: `INVALID_FILTER` / 400, with the message that names the policy and both fields. A request that the capability gate or the CRUD grant denies is still explained as denied there.
+  
+  **Another user explained by an administrator.** The explanation now carries the organization the user is resolved in, as enforcement's context for that user does. Before, a current member of the administrator's organization was explained with no organization. Under `isolated`, that member was reported denied on a tenant object their own find reads. Under every posture, a permission set that their organization authored (a `sys_permission_set` row scoped to that organization) was missing from the explanation and from the verdicts it decides.
+  
+  `@objectstack/core`: the API-key arm of `resolveAuthzContext` asks `vetOrganizationClaim` for its membership rule, as the session arm does. This is a refactor with no behaviour change. A key whose owner is no longer a member of its organization is still refused.
+  
+  Unchanged:
+  
+  - Enforcement admits and refuses exactly what it did before.
+  - A comparison between two fields of one class keeps its verdicts, at the object level and per record.
+  - Explaining yourself.
+  - A removed member's explanation (no organization, as enforcement resolves them).
+- 7184436: fix(plugin-webhooks,plugin-audit,plugin-security): the ja-JP, es-ES and zh-CN object help, descriptions and labels that contradicted their current English source are re-translated (#20653)
+  
+  Clause-②: no
+  
+  A translated object leaf that a translator wrote by hand is kept as written
+  when its English source changes later, so some leaves went on saying what the
+  old source said. On a ja-JP, es-ES or zh-CN console the `sys_webhook` record
+  page told an admin that `definition_json` carries the full headers / auth /
+  retry / payload configuration, where the English help says credentials are not
+  stored there: the signing secret and the custom headers live in the encrypted
+  `signing_secret` and `headers_secret` fields.
+  
+  Eighteen leaves (six paths, in all three locales) whose meaning contradicted
+  the current English now match it:
+  
+  - `@objectstack/plugin-webhooks`: the `sys_webhook.definition_json` help (no
+    credentials in the JSON) and the `sys_webhook` description (dispatched by the
+    webhook auto-enqueuer onto the shared HTTP outbox, not executed by an HTTP
+    connector plugin; declared through `defineStack({ webhooks })` too);
+  - `@objectstack/plugin-audit`: the `sys_activity.environment_id` label and help
+    (Environment, not Project), and the `sys_audit_log.user_id` label (User: the
+    object's separate `actor` field is the actor);
+  - `@objectstack/plugin-security`: the `sys_position` description (positions
+    distribute capability, not definitions for RBAC access control).
+  
+  Leaves whose English source only gained detail, was reworded, or was
+  title-cased (the `@objectstack/plugin-approvals` status and action options)
+  are unchanged. Values only: no key is added or removed, and no provenance
+  table changes.
+- ceee88f: fix(driver-sql, driver-turso, plugin-security, spec)!: `SqlDriver` and `TursoDriver` compile the filter they are handed — their copies of the whole-day bound and of the NULL-safe `$not` rewrite are deleted, and the RLS compile seam lowers type-blind when it cannot read the declared types (ADR-0053 D-D1 items 5, 7 and 9, #20822)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered driver-sql-calendar-day-methods-removed -->
+  
+  **BREAKING**: `SqlDriver` in `@objectstack/driver-sql` loses three `protected` methods: `calendarDayExclusiveUpperBound`, `calendarDayUpperBoundRewrite` and `calendarDayBetweenRewrite`. They were the driver's copy of the whole-day bound, which the shared lowering now applies once, at the seams, before a driver sees the filter. A subclass of `SqlDriver` that calls one of them, or overrides one with the `override` modifier, no longer compiles (TS2339, TS4113). That includes a subclass of `SqliteWasmDriver` or `TursoDriver`, which extend `SqlDriver`. A subclass that re-declares one without `override` still compiles, but the driver never calls it, so the rule it carried stops applying. It ships as `minor` under the launch-window convention. The class's public methods are unchanged.
+  
+  FROM → TO: a `SqlDriver` subclass that called `this.calendarDayUpperBoundRewrite(table, field, op, value)`, `this.calendarDayBetweenRewrite(table, field, value)` or `this.calendarDayExclusiveUpperBound(table, field, value)`, or overrode one of them, lowers the filter with `lowerFilterCondition` from `@objectstack/spec/data` instead, before the driver compiles it: `lowerFilterCondition(where, { isDatetimeColumn })`, where `isDatetimeColumn` answers which columns get the whole-day bound.
+  
+  **Supersedes two sentences of this release's shared-lowering entry** (`lowerFilterCondition`, #5930), which this change makes false:
+  
+  - "A guard without that set treats no column as `datetime`." Now: when the RLS compile seam has no field guard, or one without a `datetime` set, it cannot read which columns are `datetime`, so it applies the whole-day rule to every column (the `@objectstack/plugin-security` entry below).
+  - "Each driver keeps its own copy of these rules, and every copy gives the same answer on lowered input." Now: `SqlDriver`, `SqliteWasmDriver` and `TursoDriver` keep no copy of the whole-day bound or of the NULL-safe `$not` rewrite. A read through the engine or the RLS compile seam gets the lowered answer, and a call on the driver itself gets the comparison it wrote (the `@objectstack/driver-sql` and `@objectstack/driver-turso` entries below).
+  
+  - **`@objectstack/plugin-security` — an RLS policy compiled with no field guard is lowered type-blind.** The RLS compile seam runs the shared `lowerFilterCondition` on every compiled `using` and `check` filter. When the security plugin could not resolve the object's declared fields (no field guard), or a caller of `RLSCompiler.compileFilter` passes a guard without a `datetime` set, the seam cannot read which columns are `datetime`, and it now applies the whole-day rule to every column (a bare-day upper bound becomes `$lt` the next day), as ADR-0053 D-D1 item 7 rules for a seam that cannot read the type. It used to read no column as `datetime`, which left the bound to each driver's own copy of the rule. Visible on a `using` policy such as `record.signed_on <= '2026-01-05'` on such an object: every row of that day is kept on every driver, including `InMemoryDriver`, which had compared it as written since its own copy was deleted. A guard with a `datetime` set is unchanged, and so are the NULL-polarity guards.
+  - **`@objectstack/driver-sql` — `SqlDriver` keeps no copy of the rules the seams apply.** Deleted: the whole-day rewrite of a bare-day `$lte` and of a `$between` maximum on a `datetime` column, on the plain and the legacy-normalised column paths, including the last supported day (the protected methods `calendarDayExclusiveUpperBound`, `calendarDayUpperBoundRewrite` and `calendarDayBetweenRewrite` are removed from the class); and the NULL-safe rewrite of a `$not` operand (`nullSafeNegationOperand` and its polarity tables, module-private). A read through the engine or the RLS compile seam is unchanged: the seam hands the driver a filter the shared lowering has already rewritten, and the deleted copies gave the same answer on that input. A caller that passes no seam — `find`, `findOne`, `count`, `aggregate`, `distinct`, `updateMany`, `deleteMany` or `findWithWindowFunctions` called on the driver itself — now gets the comparison it wrote: a bare-day `$lte` compares against that day's midnight, a `$between` is inclusive at both ends, `$lte '9999-12-31'` compares against that midnight, and a `$not` is SQL's three-valued negation, so a row whose compared column is NULL is not returned by it. `$ne`, `$nin` and `$notContains` keep their NULL-safe form, which this emitter spells for the operator itself. The refusal of an `undefined` comparand (`INVALID_FILTER` / 400) is kept: without it some positions would answer instead of refusing. To keep the seam's reading on a direct call, lower the filter first: `driver.find(object, { where: lowerFilterCondition(where, { isDatetimeColumn }) })`, with `lowerFilterCondition` from `@objectstack/spec/data`. A subclass that called or overrode one of the three removed methods: see **BREAKING** above.
+  - **`@objectstack/driver-sqlite-wasm` — `SqliteWasmDriver` inherits the `SqlDriver` change above**, with the same answers on a seamed read and on a direct call.
+  - **`@objectstack/driver-turso` — both faces of `TursoDriver` compile the filter they are handed.** Local and replica mode inherit the `SqlDriver` change. Remote mode: `toRemoteFilter` no longer widens a bare-day `$lte` or a `$between` maximum (it still splits a two-bound `$between` into the `$gte` / `$lte` pair the remote transport compiles, both ends inclusive, and still converts each comparand to storage form), and `RemoteTransport` no longer rewrites a `$not` operand (its copy of the polarity tables is deleted). The two faces still answer every filter alike, on a seamed read and on a direct call. The remote transport keeps its refusal of an `undefined` comparand, worded as `driver-sql`'s, so both faces refuse it in one sentence. The same one line keeps the seam's reading on a direct call.
+  - **`@objectstack/spec` — the ADR-0087 ledger records the removal.** The protocol-18 step of `MIGRATIONS_BY_MAJOR` gains the semantic entry `driver-sql-calendar-day-methods-removed`, which names the three removed methods with their replacement and acceptance criteria. Every upgrade channel that projects protocol 18 carries it. `spec-changes.json` and the generated upgrade guide stop at the current protocol, 17, so neither changes in this release. A subclass that re-declares one of the methods without `override` still compiles and is never called, so the ledger, not the compiler, is the notice that reaches it.
+- 05be352: fix(formula,plugin-security): the refusal of a field-to-field comparison across comparison classes now leads with its remedy, so the remedy reaches REST callers (#20869)
+  
+  Clause-②: no
+  
+  A row-level policy that compares two fields of no shared comparison class (text against a number, or any field against a file field, a formula field, or a field that holds a list or an object) is refused with `INVALID_FILTER` / 400. The REST door keeps a 4xx message under 500 characters by cutting it to its first 499 characters plus an ellipsis. Both messages for this refusal put the remedy last, so the remedy was always cut off, and a caller read the diagnosis but never the fix:
+  
+  - The record matcher's message (`@objectstack/formula`, raised by the RLS write check on an insert or update through `/data`) was 972 characters, with the remedy starting at character 825.
+  - The explain engine's message (`@objectstack/plugin-security`, answered by `GET` / `POST /api/v1/security/explain`) put the remedy after the policy names and the diagnostic. Those have no length limit, so the message was 601 characters with a short policy name and longer with longer names.
+  
+  Both messages now start with the remedy. It is the same sentence as before and has only moved:
+  
+  - The record matcher's message is 494 characters and reaches the wire whole. In order it says: the remedy; that the two columns share no class, and which classes exist; why the comparison is refused; and why the columns are not named. It still names no column, operator or policy; the server log names them.
+  - The explain engine's message starts with the remedy, then names the policy and both columns, then gives the reason. Whatever the names' length, the remedy sits in the first 125 characters. With long names the REST door may cut the reason at the end.
+  
+  Unchanged: the error code (`INVALID_FILTER`), the status (400), which comparisons are refused, the refusal a find answers with (driver-sql's read refusal, 383 characters, which already reached the wire whole), and every other refusal.
+- ef96c9e: fix(plugin-security): a row-level `check` judges a `date`, `datetime` or `time` column as the row will be stored, so the write and the read the same policy scopes give one answer for one row (#21109)
+  
+  Clause-②: no
+  
+  The write check evaluates the compiled `check` filter in-process against the write's post-image. That image held each value as the caller or a hook wrote it, while the read compares the value the driver stored, in its column's storage form, against a comparand put into the same form. On a temporal column the two forms differ, so one row could get two answers. Measured through `ObjectQL.insert` with `SecurityPlugin` on SQLite, as a member resolving a permission set, with the same predicate as `using` and `check`:
+  
+  | `check` | written | write, before | stored | read |
+  |---|---|---|---|---|
+  | `record.due_on == '2026-01-05'` | `'2026-01-05T15:00:00Z'`, or a `Date` on that day | 403 | `2026-01-05` | shown |
+  | `record.start_time == '09:00'` | `'09:00:00'` | 403 | `09:00:00` | shown |
+  | `record.due_at == '2026-01-05T10:00:00Z'` | `'2026-01-05T18:00:00+08:00'` | 403 | `2026-01-05T10:00:00.000Z` | shown |
+  | `record.due_on > '2026-01-05'` | `'2026-01-05T15:00:00Z'` | admitted | `2026-01-05` | hidden |
+  
+  Now, before the check is judged, every column the object declares `date`, `datetime` or `time` is put into `@objectstack/core`'s `temporalStorageForm`, the rule the drivers write and compare those columns by. That applies to the post-image's value and to the check's value comparands on the column (`$eq`, `$ne`, the orderings, `$in`, `$nin`, `$between`). The first three rows above are now admitted. The last is now refused, which is the read/write agreement this change buys: the read never showed that row, so a write that stores a day the predicate excludes is no longer admitted on the strength of the time of day it was sent with. Every insert, by-id update and predicate update takes the same step.
+  
+  Unchanged: a column the object does not declare temporal is judged as written, whatever its value looks like; an object whose schema cannot be loaded is judged as before; a value the storage rule cannot read is judged as written; and refusals keep their code and status (`PERMISSION_DENIED` / 403).
+- Updated dependencies [e5c7d07]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [fa0a4b6]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [05a7547]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [3572916]
+- Updated dependencies [3fbf3ca]
+- Updated dependencies [24d521e]
+- Updated dependencies [f4ce10c]
+- Updated dependencies [b785c3b]
+- Updated dependencies [2473e26]
+- Updated dependencies [3a89d45]
+- Updated dependencies [f379f57]
+- Updated dependencies [889139c]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [7510663]
+- Updated dependencies [a6866da]
+- Updated dependencies [1a75e39]
+- Updated dependencies [cd901d7]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [89801cd]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [cd6d8a5]
+- Updated dependencies [ace770d]
+- Updated dependencies [ed54768]
+- Updated dependencies [99786f9]
+- Updated dependencies [5757463]
+- Updated dependencies [63bfe69]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [b9087d7]
+- Updated dependencies [f10d802]
+- Updated dependencies [856321f]
+- Updated dependencies [6b004c0]
+- Updated dependencies [93e9e42]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [ceee88f]
+- Updated dependencies [e18fea6]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [dcd3309]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [26437ae]
+- Updated dependencies [05be352]
+- Updated dependencies [d1633f3]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [58a77db]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [a11faee]
+- Updated dependencies [2c1cef3]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [097ef80]
+- Updated dependencies [70dae53]
+- Updated dependencies [665cab3]
+- Updated dependencies [682873d]
+- Updated dependencies [1bd14c9]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [df1feae]
+- Updated dependencies [336e191]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [24c554d]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [d2bc644]
+- Updated dependencies [cfa9315]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+- Updated dependencies [00f045d]
+  - @objectstack/spec@17.6.0
+  - @objectstack/platform-objects@17.6.0
+  - @objectstack/core@17.6.0
+  - @objectstack/metadata-core@17.6.0
+  - @objectstack/formula@17.6.0
+  - @objectstack/types@17.6.0
+
 ## 17.5.0
 
 ### Minor Changes

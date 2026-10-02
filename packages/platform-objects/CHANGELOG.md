@@ -1,5 +1,288 @@
 # @objectstack/platform-objects
 
+## 17.6.0
+
+### Minor Changes
+
+- cd6d8a5: fix(objectql,platform-objects,metadata-protocol)!: the platform's `sys_migration` primary-key lookups go through `findOne`, so an existing deployment no longer prints "Paged read of 'sys_migration' is NOT deterministic" on every boot and every `os migrate plan` (#20648)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/platform-objects/src/system/migration-flag.ts#MigrationFlagEngine, packages/metadata-protocol/src/migrations/seed-tenancy-backfill.ts#SeedTenancyLedger) two duck-typed engine interfaces, each the parameter type of a published helper, whose one read method moves from `find` to `findOne`. Neither is a Zod schema, a `packages/spec` declaration or an object definition, neither is a projection of a schema, and no metadata surface references either, so `objectstack migrate meta` has nothing to rewrite. The body carries no migration prescription. The only party affected is the TypeScript author of a hand-written stand-in, and that author's fix is carried by the compiler at their own call site, which names the missing `findOne`. The other categories are closed on facts: both packages publish (not `unpublished`); no ADR-0087 id covers an engine interface's method set, and this diff adds none (not `registered` / `already-registered`); and both interfaces were concretely typed at the merge base, not erased (not `type-surface-only`). This category, not the broader `no-migration-prescription`, because the positive reading it verifies is available here: the named symbols have no metadata surface. -->
+  
+  The deployment ledger is read one row at a time, by primary key. Five readers
+  spelled that read as `find(sys_migration, { where: { id }, limit: 1 })`: the
+  engine's migration-gate read (`readMigrationFlagVerified`, behind
+  `haveFileColumnsMoved`, `isFileReferencesMigrationVerified` and
+  `isValueShapesMigrationVerified`), the engine's deviation marker and
+  creation-attestation revocation, `readDataMigrationFlag` in
+  `@objectstack/platform-objects/system`, and the seed-tenancy repair's receipt.
+  The SQL driver cannot tell that read from page one of a walk. The engine's gate
+  read runs at boot before the schema pass registers `sys_migration` with the
+  driver, and on a table the driver has not registered an unsorted paged read
+  warns that its pages may repeat or skip rows. Measured on a SQLite database
+  created by 17.4.0: every 17.5.0 boot and every `os migrate plan` printed that
+  warning once, for a lookup that cannot return two rows. All five readers now use
+  `findOne`, the single-row route the driver already exempts. The driver's check is
+  unchanged: an unsorted `limit` read on a table the driver did not create still
+  warns.
+  
+  **BREAKING**: this narrows what two published engine interfaces accept. The
+  first is `MigrationFlagEngine` in `@objectstack/platform-objects/system`. It is
+  the parameter type of `readDataMigrationFlag`, `isDataMigrationVerified`,
+  `mayActIrreversibly`, `recordDataMigrationRun`, `recordFileColumnMove` and
+  `attestFreshDatastore`, and part of `FilesToReferencesEngine` in
+  `@objectstack/service-storage`. The second is `SeedTenancyLedger` in
+  `@objectstack/metadata-protocol`, the type of a `SeedTenancySeam`'s `ledger`.
+  Each now requires `findOne` where it required `find`, so a hand-written stand-in
+  that provides only `find` no longer satisfies either type. It ships as `minor`
+  under the launch-window convention for accept-set narrowings. The ObjectQL engine
+  has both methods, so a host that passes the engine needs no change.
+  
+  **Your fix:** a stand-in that implemented `find` for these helpers implements
+  `findOne(object, options)` instead, answering the row whose `where.id` matches,
+  or `null`.
+  
+  At run time, a stand-in that still provides only `find` fails the read.
+  `readDataMigrationFlag` then answers `null`, the same answer as a missing row, so
+  the gates it feeds stay closed. `resolveSeedTenancySeam` now attaches a `ledger`
+  only for a host that has `getObject`, `findOne`, `insert` and `update`. For a
+  find-only host the seam's `ledger` is `undefined`, and when the seed-tenancy
+  repair applies, it says at `warn` that it could not record its receipt.
+
+### Patch Changes
+
+- addbbf0: feat(spec): the `picklist` metadata kind — a shared option list that select fields reference by name (#19518)
+  
+  Clause-②: yes (widening)
+  
+  - **The kind.** `PicklistSchema` — `{ name, label, description?, options }`, where `options` is the field option shape (`SelectOptionSchema`) reused as is. Authored in a package as `*.picklist.ts` (`definePicklist`) or `defineStack({ picklists })`. It is a registered kind (`MetadataTypeSchema`, `DEFAULT_METADATA_TYPE_REGISTRY`, `getMetadataTypeSchema('picklist')`) that loads before `object`. It is package-owned, so a runtime create or a per-organization overlay is refused.
+  - **The reference.** `Field.select({ picklist: 'industry' })` adds a `picklist` key to `FieldSchema`. It is valid on the option types only (select, radio, multiselect, checkboxes, tags). A field that declares both `picklist` and `options` is refused at `options`, with a prescription. The functional-completeness predicate counts a `picklist` reference as the field's option source.
+  - **The served shape.** `PicklistServedFieldSchema` declares what a client reads for a picklist-bound field: the resolved `options` next to the `picklist` that names the list. The runtime resolves the reference onto that served field; see the picklist runtime entry of this release.
+  - **Extensions.** `defineStack({ picklistExtensions: [{ extend, options }] })` adds options to a picklist that another package owns. It can only add; removing or renaming a value stays with the owning package.
+  - **Translation.** `TranslationData` gains `picklists.<name>.{ label?, options: { value: label } }`. `translatePicklist` translates a served picklist item. `translateObject` gives a picklist-bound field the list's option labels, and a field-level `options` entry still wins over them.
+  - **Studio type label.** `@objectstack/platform-objects` carries the `picklist` type's label and description in its metadata-forms translation bundles (en, zh-CN, ja-JP, es-ES).
+  - **Extraction.** `os i18n extract` walks `picklists.NAME.{label, options.VALUE}`, including an extension's options under the list it extends, and `os lint` reports an untranslated option under its own rule, `i18n/missing-picklist`.
+  - **SQL driver.** The SQL driver classifies the `picklist` field key as presentation, so it adds no column.
+- fa0a4b6: fix(platform-objects,plugin-audit): Setup and Studio navigation entries for the console's Audit Log and Integrations & APIs pages (#20142)
+  
+  The console retired its System Hub card wall and its Developer Hub, which had been the only in-app links to several pages, and registered each page under a component-registry key instead. Framework navigation reaches a console page only through a `type: 'component'` item that names such a key, and no item named them, so each page was reachable only by a typed URL. Two entries now name the pages whose capability ships in the open framework:
+  
+  | Entry | App / group | `componentRef` | Contributed by | Gate |
+  | --- | --- | --- | --- | --- |
+  | `nav_audit_log_browser` ("Audit Log Browser") | Setup / Diagnostics, directly under Audit Logs | `audit:log` | `@objectstack/plugin-audit` | none: it lives and dies with the plugin that owns `sys_audit_log` |
+  | `nav_integrations` ("Integrations & APIs") | Studio / Developer, after Public Forms | `developer:integrations` | `@objectstack/platform-objects` | none beyond Studio's own `studio.access` |
+  
+  **Two audit entries, on purpose.** The existing Audit Logs entry (the `sys_audit_log` object view) stays. It carries the named list views, search, and the actor and tenant rendered as resolved lookups. The new page adds one filterable table whose detail drawer pretty-prints a change's before and after JSON, where the record page shows `old_value` / `new_value` as raw text. Neither surface replaces the other.
+  
+  **No entry for the console's AI Approvals page (`ai:approvals`) here.** Under ADR-0029 D7, each capability plugin contributes its own navigation entries into a Setup slot, and the Setup shell does not enumerate capability objects. The AI pending-action queue belongs to the AI capability, whose provider (`@objectstack/service-ai`) ships in Cloud/Enterprise, not in the open framework. Its entry is therefore that capability's to contribute.
+  
+  The keys are the ones the console registers at the objectui commit this release's console is built from. Labels ship in all four locales (en, zh-CN, ja-JP, es-ES), with their source hashes recorded. Nothing is removed or renamed, and there is nothing to migrate.
+- 3fbf3ca: Refusals, log lines and field help in core, the in-memory and MongoDB drivers, formula, metadata, metadata-core, objectql and platform-objects no longer cite tracker numbers; each states the reason in words
+  
+  Clause-②: no
+  
+  Many messages these packages show to authors, administrators and operators ended with an issue-tracker
+  number where the reason belonged. The number goes, and where the sentence did not already say what was
+  decided, it now does. Where an ADR stood beside the number, the ADR stays.
+  
+  - Refusals and prescriptions: the retired health-check keys, the `IMetadataService.register` refusals
+    (the contract refuses loudly and names the mismatch, never coerces a value into storability), the
+    kernel's plugin-ordering errors (registration order is not a contract), the in-memory and MongoDB
+    filter and aggregation refusals, formula's empty field constraint, the retired `artifact-api`
+    source, and the by-id update and delete refusals. The MongoDB retired-aggregate refusal now says the
+    function left `AggregationFunction` because no SQL backend compiled it; its undeclared-aggregate
+    refusal says the builder used to sum an unrecognised name before this refusal existed.
+  - The `findOne` no-predicate refusal loses its citation in `objectql` and in `metadata-core`'s
+    `engineFindOnePredicateRefusalMessage` together, so the two still read byte for byte the same.
+  - The in-memory and MongoDB drivers' multi-tenancy refusals (`MEMORY_MULTI_TENANT_UNSUPPORTED`,
+    `MONGODB_MULTI_TENANT_UNSUPPORTED`) no longer end with a `Tracking:` line linking a tracker card;
+    the sentence above it already says the driver refuses rather than run or answer unisolated.
+  - Field help and protection text: the `sys_account` token help (and its es-ES, ja-JP and zh-CN
+    translations), the `sys_email` headers help and the SCIM credential store's protection reason.
+  - Log lines: the superseded-registration warning, the authz cache posture line, the endpoint matcher's
+    excluded-item error, the metadata history and loader-read failure errors, and the fresh-datastore
+    attestation info lines.
+  
+  Text only: no error code, field name, status or behaviour changes.
+- f4ce10c: fix(platform-objects): the ja-JP, es-ES and zh-CN object help, descriptions and labels that contradicted their current English source are re-translated (#20539)
+  
+  Clause-②: no
+  
+  A translated object leaf that a translator wrote by hand is kept as written
+  when its English source changes later, so some leaves went on saying what the
+  old source said. On a ja-JP, es-ES or zh-CN console the `sys_two_factor` record
+  page described `backup_codes` as JSON-serialized, where the English help says
+  the codes are one opaque ciphertext and not readable JSON.
+  
+  Nineteen leaves whose meaning contradicted the current English now match it:
+  
+  - all three locales: `sys_two_factor.backup_codes` help (an opaque ciphertext,
+    not JSON), the `sys_notification` description (one notification event per
+    `emit()`, not a per-user inbox entry), the `sys_job_run` description (job run
+    history, not an audit trail), and the `sys_metadata.environment_id` label
+    (Environment, not Project);
+  - es-ES only: seven `sys_business_unit` / `sys_business_unit_member` labels and
+    help texts that still named the business unit a department.
+  
+  Leaves whose English source only gained detail or was reworded, without
+  retracting what the translation says, are unchanged. Values only: no key is
+  added or removed, and no provenance table changes.
+- 5757463: fix(platform-objects): the ja-JP, es-ES and zh-CN metadata-form descriptions, help texts and labels that contradicted their current English source are re-translated (#20666)
+  
+  Clause-②: no
+  
+  A translated metadata-form leaf that a translator wrote by hand is kept as
+  written when its English source changes later, so some leaves went on saying
+  what the old source said. On a ja-JP or es-ES console the permission-set form's
+  Tab & Row-Level Security section still offered custom context variables, and
+  the agent form's Capabilities section still offered tools; `en` dropped both
+  when the keys were removed.
+  
+  Twelve leaves whose meaning contradicted the current English now match it:
+  
+  - all three locales: the agent form's Capabilities section (skills and
+    knowledge sources, no tools), the permission-set form's Tab & Row-Level
+    Security section (tab visibility and RLS policies: ja-JP and es-ES no longer
+    offer custom context variables, and zh-CN no longer names the section after
+    sharing rules), and the report form's `blocks` help (dataset-bound
+    sub-reports, not a join of several objects);
+  - ja-JP and es-ES: the email-template form's Identity section (the template is
+    resolved by its `name` through `IEmailService.sendTemplate`, not by an `id`,
+    and the section carries no content type);
+  - zh-CN: the report form's Joined blocks section label, which named the section
+    after related objects.
+  
+  Leaves whose English source only gained detail or was reworded, without
+  retracting what the translation says, are unchanged. Values only: no key is
+  added or removed, and no provenance table changes.
+- 31c3996: Clause-②: no
+  
+  The field form offers `useGrouping` on `number` fields: one plain boolean row beside `scale`, gated to `number` as `scale` is, whose control copies the field form's `allowCreate` row (the same `z.boolean().optional()` node, no default). The key was declared by `FieldSchema` and graded `live` by the liveness ledger once the console's number display began to answer an authored value first, but no form offered it, so an author's only door was the Source tab. The help text follows the key's own description: unset lets the renderer decide, off never groups (a year or an ID), on always groups. It also says that an untouched switch writes nothing, so it reads off even where the renderer groups.
+  
+  ⛔ **No schema accept set moves and no export changes.** What changes is the **form payload** `getMetaTypes()` serves and the translation keys `os i18n extract` walks, hence the regenerated `platform-objects` metadata-form bundles, whose two new leaves are authored in `zh-CN`, `ja-JP` and `es-ES` rather than left as extractor fills.
+- Updated dependencies [e5c7d07]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [3572916]
+- Updated dependencies [3fbf3ca]
+- Updated dependencies [24d521e]
+- Updated dependencies [3a89d45]
+- Updated dependencies [f379f57]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [7510663]
+- Updated dependencies [1a75e39]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [ace770d]
+- Updated dependencies [ed54768]
+- Updated dependencies [99786f9]
+- Updated dependencies [63bfe69]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [f10d802]
+- Updated dependencies [93e9e42]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [ceee88f]
+- Updated dependencies [e18fea6]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [26437ae]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [70dae53]
+- Updated dependencies [665cab3]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [df1feae]
+- Updated dependencies [336e191]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [24c554d]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [cfa9315]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+  - @objectstack/spec@17.6.0
+  - @objectstack/metadata-core@17.6.0
+
 ## 17.5.0
 
 ### Minor Changes

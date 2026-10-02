@@ -1,5 +1,267 @@
 # @objectstack/metadata
 
+## 17.6.0
+
+### Patch Changes
+
+- 88b484e: feat(objectql): the runtime resolves a field's `picklist` onto its served options, validates writes against the resolved list, and merges `picklistExtensions` additively
+  
+  Clause-②: no
+  
+  - **Load.** `defineStack({ picklists })` and `defineStack({ picklistExtensions })` now register, from a manifest and from a nested plugin, through the same registration seam as every other collection. The compiled-artifact door registers `picklists` as `picklist` items, so `GET /meta/picklist` serves them on an artifact boot.
+  - **Merge.** A picklist's options are its own, followed by the options every `picklistExtensions` entry adds. A value the list already carries is refused with `422 INVALID_METADATA`, which names both declarations, whichever of the two registered first. The later declaration never replaces the earlier one. A package that registers again replaces its own extension. Uninstalling a package removes the values it added.
+  - **Serve.** A field with `picklist: 'NAME'` is served with the resolved options written onto it and `picklist` kept (`PicklistServedFieldSchema`), on every object read, including objects stored in `sys_metadata`. The list's translations (`picklists.NAME.options.VALUE`) relabel those options per request locale. An option marked `default: true` in the list fills an omitted field on insert, as an inline option does, and the import template reads it the same way.
+  - **Unknown name.** A packaged field that names a picklist no loaded package declares fails the boot at `kernel:ready` with `INVALID_METADATA`, and so does a `picklistExtensions` entry that extends such a list. The error names every such field or extension and the package that declared it. After boot, an artifact registered through the `manifest` service is checked before any of it registers. A field whose list does not resolve is served with no options and accepts no value.
+  - **Write validation.** The write door judges a picklist-bound field against the resolved options, and its refusal names the picklist. The wire code stays `invalid_option`. The validation message catalog gains three message keys for this (`invalid_option_picklist`, `invalid_option_value_picklist`, `invalid_option_picklist_unresolved`) in en, zh-CN, ja-JP and es-ES. They change the message text only, never the wire.
+  - **Writing the served body back.** The served body carries `picklist` and `options` together. Writing it back through the metadata door is still refused, with the prescription to drop `options`, as `FieldSchema` declares. Nothing strips it on the write side.
+  - **Ledger.** `field.picklist`, the `picklist` kind's rows and `translation.picklists` are `live`. `field.picklist` no longer carries `authorWarn`, so `os lint` / `os validate` stop warning an author who writes it.
+- 3fbf3ca: Refusals, log lines and field help in core, the in-memory and MongoDB drivers, formula, metadata, metadata-core, objectql and platform-objects no longer cite tracker numbers; each states the reason in words
+  
+  Clause-②: no
+  
+  Many messages these packages show to authors, administrators and operators ended with an issue-tracker
+  number where the reason belonged. The number goes, and where the sentence did not already say what was
+  decided, it now does. Where an ADR stood beside the number, the ADR stays.
+  
+  - Refusals and prescriptions: the retired health-check keys, the `IMetadataService.register` refusals
+    (the contract refuses loudly and names the mismatch, never coerces a value into storability), the
+    kernel's plugin-ordering errors (registration order is not a contract), the in-memory and MongoDB
+    filter and aggregation refusals, formula's empty field constraint, the retired `artifact-api`
+    source, and the by-id update and delete refusals. The MongoDB retired-aggregate refusal now says the
+    function left `AggregationFunction` because no SQL backend compiled it; its undeclared-aggregate
+    refusal says the builder used to sum an unrecognised name before this refusal existed.
+  - The `findOne` no-predicate refusal loses its citation in `objectql` and in `metadata-core`'s
+    `engineFindOnePredicateRefusalMessage` together, so the two still read byte for byte the same.
+  - The in-memory and MongoDB drivers' multi-tenancy refusals (`MEMORY_MULTI_TENANT_UNSUPPORTED`,
+    `MONGODB_MULTI_TENANT_UNSUPPORTED`) no longer end with a `Tracking:` line linking a tracker card;
+    the sentence above it already says the driver refuses rather than run or answer unisolated.
+  - Field help and protection text: the `sys_account` token help (and its es-ES, ja-JP and zh-CN
+    translations), the `sys_email` headers help and the SCIM credential store's protection reason.
+  - Log lines: the superseded-registration warning, the authz cache posture line, the endpoint matcher's
+    excluded-item error, the metadata history and loader-read failure errors, and the fresh-datastore
+    attestation info lines.
+  
+  Text only: no error code, field name, status or behaviour changes.
+- c96beb2: fix(security): a flow's inbound-hook secret is withheld from every served flow definition, and a read → edit → republish round trip keeps it (#20552)
+  
+  Clause-②: yes (widening)
+  
+  **The widening.** `@objectstack/metadata-protocol` gains one public method,
+  `ObjectStackProtocolImplementation.getMetaItemsForExecution`. It returns the stored
+  bodies without the serving decorations, for in-process binders that execute what they
+  read. No door that answers a caller may use it.
+  
+  An `api` flow's start node carries its inbound hook's HMAC secret (`config.secret`,
+  ADR-0041), the one credential that hook has. Every read that served the flow's
+  definition served the secret with it, to any authenticated caller. It is now
+  withheld from what is SERVED, and from nothing the engine executes.
+  
+  **What no longer carries the secret.** The automation domain's flow-definition read
+  and the flow its `POST` / `PUT` / clone doors answer with; and on the metadata plane,
+  every read of a flow — item, list, layered, draft preview, published snapshot, diff,
+  audit — plus a package export. The key is removed, not masked: a mask is a non-blank
+  string the registration gate would accept as the secret.
+  
+  **Consequence for a reader.** A client that read the secret back from a definition
+  no longer can. A package exported from one deployment and imported into another
+  arrives without it, and its `api` flows are refused at registration until a secret is
+  set on the start node again.
+  
+  **The round trip.** A save that carries the projected form — no `secret` where the
+  read served none — keeps the stored secret, on both authoring surfaces (the metadata
+  plane's save door and the automation domain's `PUT` / `POST`). Only an explicit value
+  replaces it, so a rotation is written as before. The start node is matched by its
+  `id`, not its position, so an edit that reorders `nodes` keeps it too. The first save of an item that has no stored row yet, such as a code-authored flow or datasource, takes the value from the code layer the read served, for every type with a registered redactor.
+  
+  - `@objectstack/service-automation` owns the projection (`redactFlowCredentials`) and
+    registers it as the `flow` read-path redactor at plugin `init`. The engine keeps
+    binding with the stored secret: it now reads flows from the protocol's execution
+    face, because the served face no longer holds the credential its hooks verify
+    against.
+  - `@objectstack/metadata-protocol` gains `getMetaItemsForExecution` on
+    `ObjectStackProtocolImplementation` — the same flattened list `getMetaItems`
+    serves, without the serving decorations (no `_diagnostics`, no credential
+    redaction). It is for in-process engines that execute what they read; every door
+    that answers a caller keeps serving `getMetaItems`. `carryForwardRedactedValues`
+    now follows a redacted path through an array by the element's `id`.
+  - `@objectstack/metadata`'s `getPublished` applies the type's registered read-path
+    redactor to the body it returns. It was the one metadata read exit that served a
+    stored body without it.
+- 8460592: fix: the whole-day bound on a bare `YYYY-MM-DD` upper bound is applied at the seams only — `DatabaseLoader.queryHistory` in driver mode becomes one, the engine seam lowers type-blind for an object with no field map, and `InMemoryDriver` drops its own copy (ADR-0053 D-D1 items 5 and 7, #20822)
+  
+  Clause-②: no
+  
+  - **`@objectstack/metadata` — `DatabaseLoader.queryHistory` in driver mode lowers its own filter.** With a raw `IDataDriver` (`MetadataManager.setDatabaseDriver`) the history filter reaches the driver without passing any seam. The loader now runs the shared `lowerFilterCondition` (`@objectstack/spec/data`) on it, typed by the history object it syncs: `until: 'YYYY-MM-DD'` reads `recorded_at < next day`, so every version recorded on that day is kept on every driver, and an instant `until` is kept as written. Engine mode is unchanged (the engine's own `where` seam lowers it). Before this, the whole day was kept only by each driver's own copy of the rule; with `@objectstack/driver-memory`'s copy deleted below, `until` = today would have gone from every version of the day to none.
+  - **`@objectstack/objectql` — an object with no field map is lowered type-blind.** The engine's `where` seam (on `find`, `findOne`, `count`, `update`, `delete` and `aggregate`'s `where` / `aggregations[i].filter`) reads the object's declared field map and rewrites a declared `datetime` column only. For an object the registry does not hold there is no declaration to read, and the seam now applies the whole-day rules to every column (a bare-day `$lte` becomes `$lt` the next day, a `$between` splits), as ADR-0053 D-D1 item 7 rules for a seam that cannot read the declared type. It used to leave such an object to each driver's own copy. Visible on `SqlDriver`: a bare-day `$lte` on a non-`datetime` column of an unregistered object that holds ISO instant text now keeps the whole day; a `datetime` or `date` column answers as before. An object with a field map is unchanged.
+  - **`@objectstack/driver-memory` — `InMemoryDriver` compiles the comparison it is handed.** Its four copies of the whole-day rule are deleted (the `$lte` and `$between` arms of the filter translator, the `<=` and `between` arms of the AST-node translator). A read through the engine hands it a `where` the engine's seam has already lowered, so on that path a declared `datetime` column keeps the whole named day, and a declared `date` column answers as before. A row-level security `using` filter is not lowered by the engine's seam: the security middleware ANDs it into the query's `where` after that seam has run, and only the RLS compile seam lowers it, rewriting just the columns its field guard declares `datetime`. Two answers converge on what `SqlDriver` already returns (ADR-0053 D-D1 item 7's scope): on a registered object, a bare-day `$lte` / `$between` on a declared `text` column holding ISO instant text, or on a column the object does not declare, is now compared as written, where this driver used to widen it to the whole day. One path narrows outside those two: an RLS `using` policy with a bare-day upper bound, on an object whose declared fields the security plugin cannot resolve, is compiled with no field guard, so the RLS compile seam reads no column as `datetime` and the bound reaches this driver as written, where this driver used to widen it to the whole day; that holds until #20822 group 2 makes the RLS compile seam type-blind when it has no guard. A direct `find()` that passed no seam gets the comparison it wrote (item 5); lower the filter with `lowerFilterCondition` first to keep the whole-day reading.
+- f3b16fc: Raise the published dependency floors to the 2026-10 production dependency group. No API changes. A consumer install resolves these ranges:
+  
+  Clause-②: no
+  
+  - `zod` `^4.6.1` → `^4.6.5`: `@objectstack/spec`, `@objectstack/core`, `@objectstack/objectql`, `@objectstack/rest`, `@objectstack/runtime`, `@objectstack/cli`, `@objectstack/mcp`, `@objectstack/metadata`, `@objectstack/metadata-core`, `@objectstack/metadata-protocol`, `@objectstack/driver-turso`.
+  - `@libsql/client` `^0.17.3` → `^0.18.0`: `@objectstack/driver-turso`. Every behaviour the driver documents was re-measured on 0.18.0 and holds unchanged. That covers the URL scheme routing, the `URL_INVALID` and `URL_SCHEME_NOT_SUPPORTED` refusals, the WebSocket transport having no `fetch` or timeout seam, `syncUrl` being read only by the embedded-replica client, and the `?authToken=` precedence on `url` and `syncUrl`. The driver's refusal messages now name 0.18.0 as the measured version. 0.18.0 changes only the local `file:` client, which now pools connections. The driver creates that client only for an embedded replica, and calls only `sync()` on it.
+  - `@modelcontextprotocol/sdk` `^1.30.0` → `^1.30.1`: `@objectstack/connector-mcp`, `@objectstack/mcp`.
+  - `chalk` `^6.0.0` → `^6.0.1`: `@objectstack/cli`, `create-objectstack`. `yaml` `^2.9.0` → `^2.9.1` and `tsx` `^4.23.12` → `^4.23.15`: `@objectstack/cli`.
+  - `mongodb` `^7.5.0` → `^7.6.0`: `@objectstack/driver-mongodb`.
+  - `sql.js` `^1.14.1` → `^1.14.2`: `@objectstack/driver-sqlite-wasm`.
+  - `@noble/hashes` `^2.3.0` → `^2.4.0` and `jose` `^6.2.8` → `^6.2.12`: `@objectstack/plugin-auth`. The better-auth family stays at exactly `1.7.3`.
+  - `hono` `^4.13.5` → `^4.13.9`: `@objectstack/plugin-hono-server`.
+  - `pinyin-pro` `^3.29.1` → `^3.29.4`: `@objectstack/plugin-pinyin-search`.
+  - `@noble/ciphers` `^2.3.0` → `^2.4.0`: `@objectstack/service-settings`.
+- 61455de: `@objectstack/metadata` declares `js-yaml` `^5.4.1` (was `^5.2.3`), clearing GHSA-r3ph-w7gj-g6xm, which affects js-yaml releases before 5.4.1. The lockfile now resolves 5.4.2. `js-yaml` is the YAML parser behind the metadata loader, and it was this package's only importer of it.
+  
+  Clause-②: no
+  
+  No exported symbol, option key or accept/reject verdict of ours moves; the published surface is unchanged and grades `patch`. The change is a dependency-range floor, so a fresh install can no longer resolve a vulnerable 5.x copy.
+  
+  `osv-scanner.toml` keeps zero exemptions and is untouched.
+- Updated dependencies [e5c7d07]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [05a7547]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [3572916]
+- Updated dependencies [3fbf3ca]
+- Updated dependencies [24d521e]
+- Updated dependencies [b785c3b]
+- Updated dependencies [2473e26]
+- Updated dependencies [3a89d45]
+- Updated dependencies [f379f57]
+- Updated dependencies [889139c]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [7510663]
+- Updated dependencies [a6866da]
+- Updated dependencies [1a75e39]
+- Updated dependencies [cd901d7]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [89801cd]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [ace770d]
+- Updated dependencies [ed54768]
+- Updated dependencies [99786f9]
+- Updated dependencies [63bfe69]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [b9087d7]
+- Updated dependencies [f10d802]
+- Updated dependencies [856321f]
+- Updated dependencies [6b004c0]
+- Updated dependencies [93e9e42]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [ceee88f]
+- Updated dependencies [e18fea6]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [dcd3309]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [26437ae]
+- Updated dependencies [d1633f3]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [58a77db]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [a11faee]
+- Updated dependencies [2c1cef3]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [097ef80]
+- Updated dependencies [70dae53]
+- Updated dependencies [665cab3]
+- Updated dependencies [682873d]
+- Updated dependencies [1bd14c9]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [df1feae]
+- Updated dependencies [336e191]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [24c554d]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [d2bc644]
+- Updated dependencies [cfa9315]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+- Updated dependencies [00f045d]
+  - @objectstack/spec@17.6.0
+  - @objectstack/core@17.6.0
+  - @objectstack/metadata-core@17.6.0
+  - @objectstack/types@17.6.0
+  - @objectstack/metadata-fs@17.6.0
+
 ## 17.5.0
 
 ### Minor Changes

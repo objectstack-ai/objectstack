@@ -1,5 +1,194 @@
 # @objectstack/driver-sqlite-wasm
 
+## 17.6.0
+
+### Patch Changes
+
+- ceee88f: fix(driver-sql, driver-turso, plugin-security, spec)!: `SqlDriver` and `TursoDriver` compile the filter they are handed — their copies of the whole-day bound and of the NULL-safe `$not` rewrite are deleted, and the RLS compile seam lowers type-blind when it cannot read the declared types (ADR-0053 D-D1 items 5, 7 and 9, #20822)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered driver-sql-calendar-day-methods-removed -->
+  
+  **BREAKING**: `SqlDriver` in `@objectstack/driver-sql` loses three `protected` methods: `calendarDayExclusiveUpperBound`, `calendarDayUpperBoundRewrite` and `calendarDayBetweenRewrite`. They were the driver's copy of the whole-day bound, which the shared lowering now applies once, at the seams, before a driver sees the filter. A subclass of `SqlDriver` that calls one of them, or overrides one with the `override` modifier, no longer compiles (TS2339, TS4113). That includes a subclass of `SqliteWasmDriver` or `TursoDriver`, which extend `SqlDriver`. A subclass that re-declares one without `override` still compiles, but the driver never calls it, so the rule it carried stops applying. It ships as `minor` under the launch-window convention. The class's public methods are unchanged.
+  
+  FROM → TO: a `SqlDriver` subclass that called `this.calendarDayUpperBoundRewrite(table, field, op, value)`, `this.calendarDayBetweenRewrite(table, field, value)` or `this.calendarDayExclusiveUpperBound(table, field, value)`, or overrode one of them, lowers the filter with `lowerFilterCondition` from `@objectstack/spec/data` instead, before the driver compiles it: `lowerFilterCondition(where, { isDatetimeColumn })`, where `isDatetimeColumn` answers which columns get the whole-day bound.
+  
+  **Supersedes two sentences of this release's shared-lowering entry** (`lowerFilterCondition`, #5930), which this change makes false:
+  
+  - "A guard without that set treats no column as `datetime`." Now: when the RLS compile seam has no field guard, or one without a `datetime` set, it cannot read which columns are `datetime`, so it applies the whole-day rule to every column (the `@objectstack/plugin-security` entry below).
+  - "Each driver keeps its own copy of these rules, and every copy gives the same answer on lowered input." Now: `SqlDriver`, `SqliteWasmDriver` and `TursoDriver` keep no copy of the whole-day bound or of the NULL-safe `$not` rewrite. A read through the engine or the RLS compile seam gets the lowered answer, and a call on the driver itself gets the comparison it wrote (the `@objectstack/driver-sql` and `@objectstack/driver-turso` entries below).
+  
+  - **`@objectstack/plugin-security` — an RLS policy compiled with no field guard is lowered type-blind.** The RLS compile seam runs the shared `lowerFilterCondition` on every compiled `using` and `check` filter. When the security plugin could not resolve the object's declared fields (no field guard), or a caller of `RLSCompiler.compileFilter` passes a guard without a `datetime` set, the seam cannot read which columns are `datetime`, and it now applies the whole-day rule to every column (a bare-day upper bound becomes `$lt` the next day), as ADR-0053 D-D1 item 7 rules for a seam that cannot read the type. It used to read no column as `datetime`, which left the bound to each driver's own copy of the rule. Visible on a `using` policy such as `record.signed_on <= '2026-01-05'` on such an object: every row of that day is kept on every driver, including `InMemoryDriver`, which had compared it as written since its own copy was deleted. A guard with a `datetime` set is unchanged, and so are the NULL-polarity guards.
+  - **`@objectstack/driver-sql` — `SqlDriver` keeps no copy of the rules the seams apply.** Deleted: the whole-day rewrite of a bare-day `$lte` and of a `$between` maximum on a `datetime` column, on the plain and the legacy-normalised column paths, including the last supported day (the protected methods `calendarDayExclusiveUpperBound`, `calendarDayUpperBoundRewrite` and `calendarDayBetweenRewrite` are removed from the class); and the NULL-safe rewrite of a `$not` operand (`nullSafeNegationOperand` and its polarity tables, module-private). A read through the engine or the RLS compile seam is unchanged: the seam hands the driver a filter the shared lowering has already rewritten, and the deleted copies gave the same answer on that input. A caller that passes no seam — `find`, `findOne`, `count`, `aggregate`, `distinct`, `updateMany`, `deleteMany` or `findWithWindowFunctions` called on the driver itself — now gets the comparison it wrote: a bare-day `$lte` compares against that day's midnight, a `$between` is inclusive at both ends, `$lte '9999-12-31'` compares against that midnight, and a `$not` is SQL's three-valued negation, so a row whose compared column is NULL is not returned by it. `$ne`, `$nin` and `$notContains` keep their NULL-safe form, which this emitter spells for the operator itself. The refusal of an `undefined` comparand (`INVALID_FILTER` / 400) is kept: without it some positions would answer instead of refusing. To keep the seam's reading on a direct call, lower the filter first: `driver.find(object, { where: lowerFilterCondition(where, { isDatetimeColumn }) })`, with `lowerFilterCondition` from `@objectstack/spec/data`. A subclass that called or overrode one of the three removed methods: see **BREAKING** above.
+  - **`@objectstack/driver-sqlite-wasm` — `SqliteWasmDriver` inherits the `SqlDriver` change above**, with the same answers on a seamed read and on a direct call.
+  - **`@objectstack/driver-turso` — both faces of `TursoDriver` compile the filter they are handed.** Local and replica mode inherit the `SqlDriver` change. Remote mode: `toRemoteFilter` no longer widens a bare-day `$lte` or a `$between` maximum (it still splits a two-bound `$between` into the `$gte` / `$lte` pair the remote transport compiles, both ends inclusive, and still converts each comparand to storage form), and `RemoteTransport` no longer rewrites a `$not` operand (its copy of the polarity tables is deleted). The two faces still answer every filter alike, on a seamed read and on a direct call. The remote transport keeps its refusal of an `undefined` comparand, worded as `driver-sql`'s, so both faces refuse it in one sentence. The same one line keeps the seam's reading on a direct call.
+  - **`@objectstack/spec` — the ADR-0087 ledger records the removal.** The protocol-18 step of `MIGRATIONS_BY_MAJOR` gains the semantic entry `driver-sql-calendar-day-methods-removed`, which names the three removed methods with their replacement and acceptance criteria. Every upgrade channel that projects protocol 18 carries it. `spec-changes.json` and the generated upgrade guide stop at the current protocol, 17, so neither changes in this release. A subclass that re-declares one of the methods without `override` still compiles and is never called, so the ledger, not the compiler, is the notice that reaches it.
+- f3b16fc: Raise the published dependency floors to the 2026-10 production dependency group. No API changes. A consumer install resolves these ranges:
+  
+  Clause-②: no
+  
+  - `zod` `^4.6.1` → `^4.6.5`: `@objectstack/spec`, `@objectstack/core`, `@objectstack/objectql`, `@objectstack/rest`, `@objectstack/runtime`, `@objectstack/cli`, `@objectstack/mcp`, `@objectstack/metadata`, `@objectstack/metadata-core`, `@objectstack/metadata-protocol`, `@objectstack/driver-turso`.
+  - `@libsql/client` `^0.17.3` → `^0.18.0`: `@objectstack/driver-turso`. Every behaviour the driver documents was re-measured on 0.18.0 and holds unchanged. That covers the URL scheme routing, the `URL_INVALID` and `URL_SCHEME_NOT_SUPPORTED` refusals, the WebSocket transport having no `fetch` or timeout seam, `syncUrl` being read only by the embedded-replica client, and the `?authToken=` precedence on `url` and `syncUrl`. The driver's refusal messages now name 0.18.0 as the measured version. 0.18.0 changes only the local `file:` client, which now pools connections. The driver creates that client only for an embedded replica, and calls only `sync()` on it.
+  - `@modelcontextprotocol/sdk` `^1.30.0` → `^1.30.1`: `@objectstack/connector-mcp`, `@objectstack/mcp`.
+  - `chalk` `^6.0.0` → `^6.0.1`: `@objectstack/cli`, `create-objectstack`. `yaml` `^2.9.0` → `^2.9.1` and `tsx` `^4.23.12` → `^4.23.15`: `@objectstack/cli`.
+  - `mongodb` `^7.5.0` → `^7.6.0`: `@objectstack/driver-mongodb`.
+  - `sql.js` `^1.14.1` → `^1.14.2`: `@objectstack/driver-sqlite-wasm`.
+  - `@noble/hashes` `^2.3.0` → `^2.4.0` and `jose` `^6.2.8` → `^6.2.12`: `@objectstack/plugin-auth`. The better-auth family stays at exactly `1.7.3`.
+  - `hono` `^4.13.5` → `^4.13.9`: `@objectstack/plugin-hono-server`.
+  - `pinyin-pro` `^3.29.1` → `^3.29.4`: `@objectstack/plugin-pinyin-search`.
+  - `@noble/ciphers` `^2.3.0` → `^2.4.0`: `@objectstack/service-settings`.
+- Updated dependencies [e5c7d07]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [05a7547]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [df67985]
+- Updated dependencies [42d78b9]
+- Updated dependencies [3fbf3ca]
+- Updated dependencies [24d521e]
+- Updated dependencies [b785c3b]
+- Updated dependencies [2473e26]
+- Updated dependencies [3a89d45]
+- Updated dependencies [f379f57]
+- Updated dependencies [889139c]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [7510663]
+- Updated dependencies [a6866da]
+- Updated dependencies [1a75e39]
+- Updated dependencies [cd901d7]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [89801cd]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [ace770d]
+- Updated dependencies [ed54768]
+- Updated dependencies [99786f9]
+- Updated dependencies [63bfe69]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [f10d802]
+- Updated dependencies [856321f]
+- Updated dependencies [810d42b]
+- Updated dependencies [6b004c0]
+- Updated dependencies [93e9e42]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [cf0346e]
+- Updated dependencies [ceee88f]
+- Updated dependencies [e18fea6]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [dcd3309]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [26437ae]
+- Updated dependencies [d1633f3]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [58a77db]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [a11faee]
+- Updated dependencies [2c1cef3]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [097ef80]
+- Updated dependencies [70dae53]
+- Updated dependencies [665cab3]
+- Updated dependencies [682873d]
+- Updated dependencies [1bd14c9]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [df1feae]
+- Updated dependencies [e35c40a]
+- Updated dependencies [336e191]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [24c554d]
+- Updated dependencies [c6b6889]
+- Updated dependencies [ebdb6f2]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [be5a83c]
+- Updated dependencies [d2bc644]
+- Updated dependencies [7923c8e]
+- Updated dependencies [95b91cc]
+- Updated dependencies [cfa9315]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+  - @objectstack/spec@17.6.0
+  - @objectstack/driver-sql@17.6.0
+  - @objectstack/core@17.6.0
+
 ## 17.5.0
 
 ### Minor Changes

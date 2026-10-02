@@ -1,5 +1,963 @@
 # Changelog — @objectstack/service-analytics
 
+## 17.6.0
+
+### Minor Changes
+
+- c8dd8dd: An authored analytics cube's measure `format` and time-dimension `granularities` now take effect on the analytics query doors, the way a compiled dataset's always have (#20282).
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered analytics-cube-single-granularity-default-enforced -->
+  
+  **BREAKING**: this narrows what `POST /api/v1/analytics/query` and `POST /api/v1/analytics/sql` answer for one class of request. When an authored cube's time dimension declares exactly one granularity, a query that groups by that dimension without stating a granularity is now bucketed at the declared one. The raw-SQL path declines every bucketed query, so such a query now runs on the engine aggregate path, which answers `400 INVALID_FIELD` for every member it cannot evaluate: a custom-SQL measure (a measure of type `number`, `string` or `boolean` whose `sql` is an expression); and, on a cube whose members resolve through its `joins`, a measure or a `where` field over a joined object, a `timeDimensions` entry over a joined object (bucketed or a `dateRange` window, so grouping by a one-granularity time dimension over a joined object is refused too), a dimension that traverses more than one relationship, and an `avg` or `count_distinct` measure beside any dimension over a joined object. The raw-SQL path answers every one of these, with one group per distinct timestamp; each is now refused, exactly as it already was when the caller stated that granularity by hand. On a host that overrides `queryCapabilities` to offer raw SQL with no engine aggregate bridge (the plugin's default wires both), no strategy remains for a bucketed query, so every newly bucketed query, a plain `count` included, now answers "No strategy can handle query" instead of grouping raw timestamps. The remedy: run such a query without grouping by that dimension, or, if the dimension is not meant to have one default bucket, declare the granularities it offers as a list of two or more (or omit the key); on a raw-SQL-only host, add the engine aggregate bridge. It ships as `minor` under the launch-window convention; the widening half is two authored keys taking effect.
+  
+  Until this change both keys were read on the compiled-dataset path only. One cube shape has three producers — cubes authored with `defineCube()` / `defineStack({ analyticsCubes })`, cubes the dataset compiler mints, and cubes inferred for an ad-hoc query — and only a compiled dataset's cube reached the two readers:
+  
+  - **`measures.<metric>.format`** reached a caller as `fields[].format` only because the dataset door copies it from the DATASET measure. An authored cube has no dataset, so `POST /api/v1/analytics/query` described its measure columns with `name` and `type` alone. Now every measure column a query names carries the `format` its cube measure declares, whichever strategy answered, and a column that declares none carries no `format` key at all. `GET /api/v1/analytics/meta` is unchanged: its projection stays `name`, `type` and `title`, and a client reads `format` off the query result's `fields[]`, as the Data API page already says. The value is relayed verbatim; the vocabulary `fields[].format` documents is a numeral pattern such as `"$0,0.00"` or `"0.0%"`.
+  - **`dimensions.<dimension>.granularities`** was the default bucket only for a compiled dataset, which the dataset executor filled in before querying. An authored cube's time dimension grouped raw timestamps whatever it declared. Now `query()` and the `generateSql()` dry run read it the same way, through the one rule both paths share: a single-entry list is the dimension's default bucket for a query that groups by it; a granularity the query states always wins, and one the list does not name is not refused (the dataset path compares against no list either); a list of two or more states no default; and a `timeDimensions` entry that carries only a `dateRange` for a dimension the query does not group stays a filter.
+  
+  What to expect after upgrading:
+  
+  - **A cube measure that declares `format`** now carries it on `POST /api/v1/analytics/query` results. A client that formats amounts from `fields[].format` starts formatting that column.
+  - **A cube time dimension that declares one granularity** (`granularities: ['month']`) is now bucketed by it when a query groups by it without stating one: one row per month where there was one row per timestamp. Name another granularity in the query's `timeDimensions` to bucket differently.
+  - **A cube time dimension that declares several, or none**, behaves exactly as before.
+  - **Compiled datasets** (`POST /api/v1/analytics/dataset/query`) answer exactly as before: the value read off their cube is the one the dataset door already used.
+  
+  In `@objectstack/spec`, `MetricSchema.format` and `DimensionSchema.granularities` now carry descriptions that state what the analytics service does with them (the metric's example values move from the names "currency" / "percent" to numeral patterns, the vocabulary the `fields[].format` slot documents), and the liveness ledger rows `analytics_cube.measures.format` and `analytics_cube.dimensions.granularities` move from `dead` to `live`, citing the new readers.
+- 03cdb9a: `GET /api/v1/analytics/meta` now publishes an analytics cube's `description`, each measure's and dimension's `description`, and each measure's `format`, when the cube definition declares them (#20282).
+  
+  Clause-②: yes (widening)
+  
+  - `CubeMeta` (`@objectstack/spec/contracts`) gains an optional `description` on the cube and on each measure and dimension, and an optional `format` on each measure. `AnalyticsMetadataResponseSchema` declares the same members. A definition that declares none of them is published exactly as before.
+  - `AnalyticsService.getMeta` copies what the definition declares and fills in nothing. A cube compiled from a dataset carries each dataset measure's `format` and no `description`.
+  - The liveness ledger rows `analytics_cube.description`, `measures.description` and `dimensions.description` move from `dead` to `live`.
+  
+  This supersedes one sentence of this release's note on an authored cube's measure `format` and `granularities`: it says `GET /api/v1/analytics/meta` is unchanged and keeps `name`, `type` and `title`. With this change `/meta` also publishes each measure's declared `format`. A client that formats a result column still reads `format` off the query result's `fields[]`.
+- 00a92e1: fix(service-analytics)!: a cube or dataset dimension on a structured-JSON field is refused with `INVALID_FIELD` / 400 at the analytics door, before any SQL is built
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a grouping TARGET at the analytics door: a `dimensions` entry, or a bucketed `timeDimensions` entry, whose column is a declared json, composite, repeater, record, location, address or vector field. No authorable key, spelling, export or stored shape moves (the door module is internal; `@objectstack/service-analytics` exports nothing new and nothing less, and `CubeSchema`, `DatasetSchema` and the analytics query body keep parsing every member), and no stored row is read or rewritten. The grouping had no shared meaning to preserve (one group per serialized document on SQLite, a 500 on PostgreSQL), and which scalar part of the document a caller meant to group on is not something a ledger entry can rewrite. The other categories are closed on facts: the package publishes (not `unpublished`); no ADR-0087 id covers a grouping target (not `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what the analytics query doors accept as a dimension. A cube dimension, or a dataset dimension, whose column is a declared field of the structured-JSON class (`json`, `composite`, `repeater`, `record`, `location`, `address`, `vector`) is refused before either strategy builds a statement, when it groups the result: a `dimensions` entry, or a `timeDimensions` entry with a `granularity`. The column is judged where it is declared: on the cube's object, or, for a dotted path such as a dataset dimension over `account.hq`, on the object the cube's declared join for that path names. It holds on `POST /api/v1/analytics/query`, on its dry run `POST /api/v1/analytics/sql`, and on `POST /api/v1/analytics/dataset/query`, on every driver. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **What an author sees now.** `400 INVALID_FIELD`, naming the member as the request wrote it (the cube dimension, or the dataset dimension), the column it groups by, the object and the column's declared type, saying the query was not run, and naming the route: group by a field that stores one scalar value, storing the part of the document you group on in a field of its own. The thrown error carries `member`, `param` (`dimensions` or `timeDimensions`), `cube`, `field` and `object`.
+  
+  **Why a refusal.** A JSON document is no group key the SQL dialects share. Measured through `POST /api/v1/analytics/query` over three rows with a different document each, on the service `AnalyticsServicePlugin` composes over a real engine: SQLite answered 200 with one group per serialized document, and PostgreSQL 16 answered 500 `DATABASE_ERROR`. A dataset dimension over a joined object's `json` field answered the same two ways through `POST /api/v1/analytics/dataset/query`. The native-SQL strategy compiled the `GROUP BY` itself, so the engine's own refusal of a structured-JSON `groupBy` never saw the query; the engine-aggregate strategy did reach that refusal, but named the engine's `groupBy[0]` position rather than the member the caller wrote. The class is `@objectstack/spec/data`'s `STRUCTURED_JSON_TYPES`, the one the engine's refusal reads. No producer groups by such a field: no cube or dataset dimension in the example apps names one.
+  
+  **Who is affected.** A dashboard, report or caller that grouped an analytics query by a structured-JSON field on SQLite and read one group per serialized document as real groups. On PostgreSQL the same query was already a 500.
+  
+  **Unchanged.** A dimension on any other type; a `timeDimensions` entry with no `granularity`, which bounds a range and groups nothing; measures (this door judges only the members that group); a dotted dimension path the cube declares no join for, whose object is not a declaration; a member naming a column the object does not have, which keeps its existing `INVALID_FIELD` answer first; and a host that wires no `sourceFieldMeta`, where the column's type cannot be read.
+- 793fb83: The analytics seams now run the one shared filter lowering (`lowerFilterCondition`, `@objectstack/spec/data`) that ADR-0053 D-D1, as amended, places at every seam that runs the shared comparand doors: after the doors and after filter-token resolution, so each face compiles one lowered condition — the `$between` split, the whole-day upper bound on a bare `YYYY-MM-DD`, the last supported day, and the NULL-polarity guards.
+  
+  Clause-②: yes
+  
+  **The read scope (`compileScopedFilterToSql`).** The scope is lowered at the compiler's entry, right after its placeholders resolve. It reads each column's declared type from the `declaredValueShape` option both of its consumers already pass, so the whole-day rule rewrites a declared `datetime` column and nothing else; with no declarations handed in, no column is read as `datetime`. Corrected answers, each now the rows `SqlDriver.find` returns for the same filter:
+  
+  - a bare-day `$lte` on a declared `datetime` column kept only the rows before that day and dropped the day itself. Rows at 10:00Z on 07-27, 07-28 and 07-29 under `{ signed_at: { $lte: '2026-07-28' } }` answered 07-27 alone; they now answer 07-27 and 07-28, compiled as `< '2026-07-29'`. This is the NativeSQL statement's read scope and the `/analytics/sql` echo's.
+  - a bare-day `$between` on a declared `datetime` column answered no row for a one-day range, and now answers that day's rows.
+  - a `{today}` (or any date-macro) upper bound is widened as the day it resolves to.
+  
+  An RLS `using` bound already reached the read scope lowered by the RLS compile seam, and answers as before. A declared `date` column compiles byte-identical to before.
+  
+  **The analytics `where` and draft-preview door.** The condition the door admits is lowered before either face reads it. The `where` → tree face (both strategies) reads each member's declared column type through the host's declared-type hook: a bare-day `$lte` on a `datetime` member now reaches the engine as `$lt` the next day, and the `/analytics/sql` echo prints that half-open bound — the statement the engine runs, where it used to print `<=` the named day. Rows are unchanged on every strategy. A nested-relation filter (`{ account: { region: 'NA' } }`) is spelled as the dotted member it has always compiled to before the lowering reads it, so a guard it adds under `$not` names that member.
+  
+  The draft preview (`queryDataset` with `previewDrafts`) now evaluates `$null` — the one operator the lowering emits that it did not — so a drafted chart filtered on `{ field: { $null: true } }` is answered instead of refused `INVALID_FILTER` / 400; `$exists` and `$empty` stay refused. Corrected answers: a row with no value now satisfies `$ne`, `$nin` and the negation of an equality even when the comparand is the text `"null"` or `"undefined"`, which this face used to compare as text against the missing value — the answer every data driver gives. Its bare-day bounds answer as before.
+  
+  Compiled SQL for `$ne`, `$nin`, `$notContains` and a `$not` operand now carries the lowering's NULL guard around each face's own copy of it: the same rows, a longer statement, until those copies are deleted.
+- 8d329f0: fix(service-analytics)!: the nested-relation filter `{ relation: { field: value } }` gets the engine's answer on every analytics face — the related object read as the caller, capped
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a change of what the analytics query doors answer for one filter form, the nested-relation condition `{ relation: { field: value } }`: it is now answered by the data engine, which reads the related object as the caller and refuses past its cap, where the analytics layer used to join the related table itself. No authorable key, spelling, export or stored shape moves: `@objectstack/service-analytics` exports nothing new and nothing less, `FilterCondition`, `CubeSchema`, `DatasetSchema` and the analytics query body keep parsing every value they parsed, and no stored row is read or rewritten. What a stored dashboard or dataset filter carrying the form now gets is the engine's own answer for the same filter on `find()`, so there is no older meaning to preserve or rewrite. The other categories are closed on facts: the package publishes (not `unpublished`); no ADR-0087 id covers a filter's analytics semantics (not `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what the analytics query doors answer for the nested-relation filter form — a plain object with no `$` key beneath a field, `{ owner: { region: 'NA' } }` — on the native-SQL path, and widens it everywhere else. It holds on `POST /api/v1/analytics/query`, on `POST /api/v1/analytics/dataset/query`, and on their dry run `POST /api/v1/analytics/sql`, on every SQL driver. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **What an author sees now.** The same answer `find()` gives for the same filter. The data engine reads the related object with the condition as the caller — that object's row scope and field permissions apply — and matches the relation against the ids it returns: `$in` on a single-valued relation, any member on a multi-valued one. It is the one rule, in the engine; the analytics layer holds no copy of it.
+  
+  - A condition on a field of the related object the caller cannot read is refused with `403 PERMISSION_DENIED`, naming the field — never answered.
+  - A condition matching more than 1,000 related records is refused with `400 INVALID_FILTER`, naming the two-step route — never run over a cut-off list.
+  - At a measure's own `filter` the form is refused with `400 INVALID_FILTER`, as the engine refuses it at an aggregation's own `filter`: put the condition in the query's `where`.
+  - `POST /api/v1/analytics/sql` refuses a `where` carrying the form with `400 INVALID_FILTER`: no statement it could print reproduces a read of the related object as the caller. The query itself is answered by `POST /api/v1/analytics/query`.
+  
+  **Why.** Measured on the base before the field-level gate (#20917) and the relationship-path admission (#20933) landed, over one fixture with the real security layer (a related field the caller may not read, a related row scope, 1,001 matching related records). The native-SQL strategy flattened the form to a dotted member and joined the related table: through a dataset that `include`d the relationship it answered rows for a condition on a field the caller cannot read, answered a match past the engine's cap, and counted a measure filter carrying the form; without the declared join it named a table that does not exist (500), and a multi-valued relation was refused. The engine-aggregate strategy refused the form as a cross-object filter (400). The engine serves the form since the nested-relation filter landed in `where`.
+  
+  **How.** The native-SQL strategy declines a query in which the form appears in the `where`, the dataset's own `filter` or a requested measure's `filter`, so the query runs on the engine-aggregate path, which hands the form to the engine as written.
+  
+  **A read scope carrying the form.** Unchanged in outcome: where a read scope is compiled to SQL (`compileScopedFilterToSql`, on the native-SQL path and in both SQL echoes) it is still refused fail-closed with `500 READ_SCOPE_COMPILE_FAILED`, the policy withheld — that compile holds no data engine to read the related object with. Its words now name the route that serves the form. On the engine-aggregate path the scope reaches the engine as written, and the engine serves it as the caller, as before.
+  
+  **Who is affected.** A dashboard, dataset or caller that wrote the nested form in an analytics filter on a SQL driver and read the joined answer: a condition on a related field the caller may not read, a match past 1,000 related records, a measure filter carrying the form, or a query that needs the native-SQL strategy for another part (a cross-object measure, a multi-hop dimension), which the engine-aggregate path refuses in its own words.
+  
+  **Unchanged.** The dotted cube member (`{ 'owner.region': 'NA' }`), a traversal through the cube's declared join; an empty object beneath a field (`{ owner: {} }`), still refused as a field constraint with no operator; every filter without the form.
+- bb2eccf: fix(service-analytics)!: a grouped dimension on a multi-value field and a `count_distinct` measure over a JSON-stored field are refused with `INVALID_FIELD` / 400 at the analytics door, before any SQL is built; a dataset `count_distinct` measure over a field declared `multiple: true` is refused at compile time
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/services/service-analytics/src/dataset-compiler.ts#DatasetCompileOptions) a published options interface of `compileDataset`, whose one probe member is renamed and now answers the field's declaration instead of its type. It is not a Zod schema, a `packages/spec` declaration or an object definition, it is not a projection of a schema, and no metadata surface references it, so `objectstack migrate meta` has nothing to rewrite; the TypeScript host that passed the old member is told by its compiler at its own call site. The other halves refuse a QUERY shape at the analytics door (a grouping or distinct-count target) and one aggregate x declaration pair at the dataset compile door: no authorable key, spelling or stored row moves (`CubeSchema`, `DatasetSchema` and the analytics query body keep parsing every member), and which scalar a caller meant to group on or count is not something a ledger entry can rewrite. The other categories are closed on facts: the package publishes (not `unpublished`); no ADR-0087 id covers an analytics grouping or distinct-count target or this interface, and this diff adds none (not `registered` / `already-registered`); and the interface was concretely typed at the merge base, not erased (not `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what the analytics query doors accept, in two positions, and what the dataset compiler accepts, in one. It holds on `POST /api/v1/analytics/query`, on its dry run `POST /api/v1/analytics/sql` and on `POST /api/v1/analytics/dataset/query`, on every driver and on both strategies. It ships as `minor` under the launch-window convention for accept-set narrowings.
+  
+  - A cube or dataset dimension whose column is a **multi-value** field, when it groups the result (a `dimensions` entry, or a `timeDimensions` entry with a `granularity`): an inherently multi option type (`multiselect`, `checkboxes`, `tags`), or a `select`, `radio`, `lookup`, `user`, `file` or `image` field declared `multiple: true`. The same types without the flag are served.
+  - A `measures` entry that resolves to a `count_distinct` measure whose column is **JSON-stored**: a structured-JSON type (`json`, `composite`, `repeater`, `record`, `location`, `address`, `vector`), an inherently multi option type, or a multi-capable field declared `multiple: true`. An authored cube measure, a suffix-inferred one (`tags_count_distinct`) and a compiled dataset's are judged alike; a `count` measure is not judged.
+  - A dataset measure that pairs `count_distinct` with a base-object field declared `multiple: true` is refused `400 DATASET_INVALID` when the dataset compiles, at registration and on the request door, beside the type row that already refused `tags`.
+  
+  The column is judged where it is declared: on the cube's object, or, for a dotted path, on the object the cube's declared join names.
+  
+  **What an author sees now.** `400 INVALID_FIELD`, naming the member as the request wrote it, the column, the object, the declaration (`select with multiple: true`), saying the query was not run, and naming the route. For a multi-value field the route is a record query on the declaring object filtered by one member with `$contains`, one query per member. For a structured-JSON field it is to store the scalar part in a field of its own. The thrown error carries `member`, `param` (`dimensions`, `timeDimensions` or `measures`), `cube`, `field` and `object`. The dataset compile refusal names the measure, the field and its declaration with `multiple: true`.
+  
+  **Why a refusal.** The engine's aggregate door already refuses both shapes, and the native-SQL strategy compiled its own statement and never reached it. Measured through this service as `AnalyticsServicePlugin` composes it over a real engine: a dimension on a `tags`, `multiselect` or `multiple: true` select answered 200 with one group per serialized array on SQLite and 500 `DATABASE_ERROR` on PostgreSQL 16; an inferred `count_distinct` over a `json`, `tags` or `multiple: true` select field answered 2, 3 and 2 on SQLite and 500 on PostgreSQL; a dataset `count_distinct` over the `multiple: true` select registered, then answered 2 on SQLite and 500 on PostgreSQL. The engine-aggregate strategy answered 400 for every one of these, under the engine's position (`groupBy[0]`, `aggregations[0].field`) rather than the member the caller wrote. The predicates are `@objectstack/spec/data`'s, the ones the engine's doors read: `isMultiValueField`, and the aggregate × field-type table's `count_distinct` row.
+  
+  **Your fix (a host calling `compileDataset` directly).** `DatasetCompileOptions` no longer has `declaredFieldType`. Pass `declaredValueShape` instead: the same read of the field's metadata, answering `{ type, multiple }` (the type, and `multiple === true`) rather than the type alone, or `undefined` when nothing answers. A host that passes neither compiles exactly as before, with no aggregate × field-type refusal at all. `AnalyticsService` and `AnalyticsServicePlugin` wire it themselves from `sourceFieldMeta`.
+  
+  **Who is affected.** A dashboard, report or caller that grouped by a multi-value field, or counted a JSON-stored field distinct, through the native-SQL strategy on SQLite and read the serialized arrays or the text-compared count as real answers. On PostgreSQL the same queries were already a 500. A dataset that pairs `count_distinct` with a `multiple: true` field no longer registers.
+  
+  **Unchanged.** A dimension or `count_distinct` on a scalar-stored field, a single-value `select` or `lookup` included; `count` over any field; a member naming a column the object does not have, which keeps its existing `INVALID_FIELD` answer first; a dotted path the cube declares no join for; a measure whose `sql` is an expression; and a host that wires no `sourceFieldMeta`, where the declaration cannot be read.
+- 1571aed: fix(service-analytics)!: every analytics face answers the engine's field-level read refusal, whichever strategy serves the cube: a field the caller may not read is judged before either strategy runs (#20917)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key, export or stored shape is removed or renamed. The change refuses analytics queries that read a field the caller's field-level permissions hide, which the engine already refuses on the data API and on the ObjectQL strategy, so there is nothing for `objectstack migrate meta` to rewrite. The one public-surface addition is a new optional service hook. -->
+  
+  **BREAKING for analytics queries that read a field the caller may not read: on a SQL deployment, and on `POST /api/v1/analytics/sql` whichever strategy serves the cube.**
+  
+  **What changed.** `POST /api/v1/analytics/query`, `POST /api/v1/analytics/sql`
+  and `POST /api/v1/analytics/dataset/query` now judge every field a query reads
+  against the caller's field-level read permissions before a strategy is chosen:
+  dimensions, measures, time dimensions, filter members, order keys, members
+  joined through a relationship, and a dataset's own and its requested measures'
+  filters. A member of an authored cube is judged by the field it resolves to,
+  not by its name in the cube. A field the caller may not read answers
+  `403 PERMISSION_DENIED`, in the words the engine uses for the same field. The
+  native-SQL strategy, the one a SQL driver serves first, answered such queries;
+  the ObjectQL strategy already refused them on `POST /api/v1/analytics/query`
+  and `POST /api/v1/analytics/dataset/query`, as the data API did, but printed
+  the statement on `POST /api/v1/analytics/sql`.
+  
+  **What is not affected.** A query that reads only fields the caller may read
+  answers as before. A system context, and a caller with no permission sets, are
+  unaffected, as on the data API. A host read scope (row-level policy) may still
+  name fields the caller cannot read. A deployment with no security service applies
+  no field-level check, as on the data API. A member of an authored cube whose `sql`
+  is an expression is not attributed to a field.
+  
+  **New hook.** `AnalyticsServiceConfig.getReadableFields(object, context)` supplies
+  the reader. `AnalyticsServicePlugin` wires it to the `security` service's
+  `getReadableFields`; a host that constructs `AnalyticsService` itself passes its
+  own, and without one no field-level check applies.
+  
+  **If a widget stopped answering for some users,** it reads a field those users
+  may not read. Grant that field's read permission to the users who need it, or
+  build the widget on fields they can read.
+- 5dbeb7d: fix(service-analytics): on the engine-aggregate path, a `$not`, `$notContains` or null test over a multi-valued lookup now gets the engine's rows instead of `400 INVALID_FILTER` (#20918)
+  
+  Clause-②: yes
+  
+  **What changed.** `POST /api/v1/analytics/query` and `POST /api/v1/analytics/dataset/query`, when served by the engine-aggregate strategy (a query with a granularity, or a host with no raw SQL), used to refuse these filters on a SQL driver when the field is a multi-valued lookup (or any other JSON-stored multi-value field). The engine's `find()` and the native-SQL strategy answered them:
+  
+  - `{ $not: { owners: { $contains: 'u1' } } }`, and any `$not` whose operand tests such a field;
+  - `{ owners: { $notContains: 'u1' } }`;
+  - `{ owners: { $null: false } }`, `{ owners: { $exists: true } }`, `{ owners: { $null: true } }`, and the same tests in a dataset measure's own `filter`.
+  
+  Each now answers the rows the native-SQL strategy answers. Where `engine.find()` serves the same filter, those are its rows too.
+  
+  **Why.** The analytics `where` door adds a NULL test beside each leaf of a `$not` operand, so that a row holding no value is still answered by the negation. It adds a NULL alternative to the negative-polarity operators too. The engine-aggregate strategy passed both tests to the engine as `{ $ne: null }` and the bare `{ field: null }`. `driver-sql` refuses both spellings over a JSON column, so the whole filter was refused. They now reach the engine as `{ $null: false }` and `{ $null: true }`. The engine's own filter lowering writes the same tests in those spellings for every driver, and `driver-sql` applies them on a JSON column.
+  
+  **Unchanged.** Every filter on a single-valued field gets the same rows as before. The native-SQL strategy and the `POST /api/v1/analytics/sql` echo are unchanged: they compile their own SQL. A read scope is unchanged too.
+  
+  **One difference from the engine remains.** `{ owners: { $ne: null } }` and the bare `{ owners: null }` are null tests at the analytics door. Both strategies now answer them, the native strategy as before. `engine.find()` refuses them, because `driver-sql` reads `$ne` and the bare equality as value comparisons on a JSON column. `{ $null: false }` / `{ $null: true }` is the spelling both read the same way.
+- 5f6b63a: fix(service-analytics)!: an object an analytics query reads through a relationship path is admitted and row-scoped exactly as a declared join to it is, on both strategies (#20933)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key, export or stored shape is removed or renamed. The change refuses, or row-scopes, what the native-SQL strategy read from an object reached through an undeclared relationship path, the way a declared join to the same object already was; there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  **BREAKING for analytics queries that read a related object through a relationship path the cube does not declare: on a SQL deployment, and on `POST /api/v1/analytics/sql` whichever strategy serves the cube.**
+  
+  **What changed.** The analytics door admits and row-scopes one object set
+  before either strategy runs. It held the cube's base object and the joins the
+  cube declares (`joins`, or a dataset's `include`). An object reached through a
+  relationship path the cube does not declare was not in it, although both
+  strategies read that object: a dotted member of an inferred cube, an authored
+  member whose `sql` walks a relationship the cube's `joins` does not list, or a
+  dotted member the query names itself. Every such object is now in the set, so
+  `POST /api/v1/analytics/query`, `POST /api/v1/analytics/sql` and
+  `POST /api/v1/analytics/dataset/query` treat it exactly as a declared join:
+  
+  - a related object the caller may not read answers `403 PERMISSION_DENIED`,
+    naming that object, before any statement runs;
+  - the caller's row scope on the related object is applied, so related rows
+    outside it are not read. On the native-SQL strategy a base row whose related
+    record is outside the scope drops out of the answer, as it already did for a
+    declared join; the ObjectQL strategy still groups such rows as restricted;
+  - a related-object scope the native-SQL strategy cannot compile routes the
+    query to the ObjectQL strategy, as it already did for a declared join.
+  
+  Each hop of a multi-hop path is judged on its own object, resolved the way the
+  field-level gate resolves it: the join the cube keys by the path, or else the
+  relationship name itself.
+  
+  **What is not affected.** A query through a related object the caller may read
+  answers as before, within the caller's row scope. A system context, and a
+  caller with no permission sets, are unaffected, as on the data API. A
+  deployment with no security service applies no object-level check, as on the
+  data API.
+  
+  **Refusals that change form.** On the ObjectQL strategy a related object the
+  caller may not read was already refused on `POST /api/v1/analytics/query` and
+  `POST /api/v1/analytics/dataset/query`, though `POST /api/v1/analytics/sql`
+  printed the statement; on those two doors it now answers the analytics door's
+  refusal rather than the engine's, the same one a declared join gets. A filter,
+  a time window or a two-hop path through such an object moves from
+  `400 INVALID_FIELD` to that `403`. A relationship path whose relationship name
+  is not itself an object name was never served by either strategy; for a caller
+  the object-level check applies to, it now answers `403 PERMISSION_DENIED`
+  naming that relationship.
+  
+  **If a widget stopped answering for some users,** it reads a related object
+  those users may not read. Grant read access on that object to the users who
+  need it, or build the widget on objects they can read.
+- 83480c6: fix(service-analytics)!: a field the caller is served masked is refused as a group key, an aggregate input, a filter or a sort key on every analytics face, whichever strategy serves the cube (#20935)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key, export or stored shape is removed or renamed. The change refuses analytics queries that group, aggregate, filter or sort by a field the caller may only see masked, which the engine already refuses on the data API and on the ObjectQL strategy, so there is nothing for `objectstack migrate meta` to rewrite. The one public-surface addition is a new optional service hook. -->
+  
+  **BREAKING for analytics queries on a SQL deployment that group, aggregate, filter or sort by a field the caller may only see masked.**
+  
+  **What changed.** The field-level gate on `POST /api/v1/analytics/query`,
+  `POST /api/v1/analytics/sql` and `POST /api/v1/analytics/dataset/query` judged
+  each member by the caller's readable fields. A field whose `maskingRule` applies
+  to the caller is readable (its values are served masked), so the gate admitted
+  it, and the native-SQL strategy then grouped or filtered by the stored value.
+  The gate now also asks which fields the caller may query on, and refuses a
+  member naming a masked field with `403 PERMISSION_DENIED`, in the words the
+  engine uses for the same field. The ObjectQL strategy and the data API already
+  refused these queries.
+  
+  **What is not affected.** A caller who holds the capability that lifts a
+  field's masking rule queries the field as before. A system context is
+  unaffected. A query that names no masked field answers as before.
+  
+  **New hook.** `AnalyticsServiceConfig.getQueryableFields(object, context)`
+  supplies the answer. `AnalyticsServicePlugin` wires it to the `security`
+  service's `getQueryableFields`. When that service predates the method, or
+  answers "no answer", the plugin treats every field that declares a
+  `maskingRule` as not queryable, for every caller. A host that
+  constructs `AnalyticsService` itself with `getReadableFields` and without
+  `getQueryableFields` is warned once at construction.
+  
+  **If a widget stopped answering for some users,** it groups or filters by a
+  field those users see masked. Give the users who need it the capability the
+  field's `requiredPermissions` names, or build the widget on fields they can query.
+- 9b81314: fix(service-analytics)!: a relationship-path hop the cube declares no join for reads the object its lookup field declares, so an inferred cube's dotted path through a lookup named differently from its target is answered
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a change of which OBJECT the analytics doors read at a relationship-path hop the cube declares no join for: the object the lookup field declares as its `reference`, where it used to be an object named after the field. No authorable key, spelling, export or stored shape moves: `@objectstack/service-analytics` exports nothing new and nothing less, `CubeSchema`, `DatasetSchema` and the analytics query body keep parsing every value they parsed, and no stored row is read or rewritten. A cube that declares its join keeps it. The other categories are closed on facts: the package publishes (not `unpublished`); no ADR-0087 id covers which object a hop reads (not `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this widens what the analytics query doors answer for a dotted relationship path the cube declares no join for — an inferred cube's dotted member (`owner.region`), or an authored member whose `sql` walks a relationship its `joins` does not list — and narrows it in one case, named below. It holds on `POST /api/v1/analytics/query` and on its dry run `POST /api/v1/analytics/sql`, on both strategies and every SQL driver. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **What an author sees now.** Each hop of the path reads the object its lookup field declares as its target, the way a join the cube declares already did. With a lookup `owner` that references a person object:
+  
+  - the caller may read the person object: `dimensions: ['owner.region']` is answered with the person rows' regions on both strategies, and `where: { 'owner.region': 'NA' }` is answered on the native-SQL strategy with what the nested form `{ owner: { region: 'NA' } }` answers. The engine-aggregate strategy keeps refusing a filter on a related value with its own `400 INVALID_FIELD`, as it does through a declared join;
+  - the caller may not read the person object: `403 PERMISSION_DENIED` naming the person object, before any statement runs;
+  - the field-level gate judges `region` on the person object, and the caller's row scope on the person object is applied where the related value is read (the join on the native-SQL strategy, the related read on the engine-aggregate one).
+  
+  A lookup to the cube's own object (a self-reference such as `parent`) is read the same way. A lookup named after its target answers exactly as before.
+  
+  **Why.** An inferred cube declares no join, so a hop fell back to an object named after the lookup field. For a lookup named differently from its target that is no object: a caller who may read both objects was refused `403` "reading "owner" is not permitted", and a caller the object check passes reached a statement over a table named `owner` (`500`).
+  
+  **The narrowing.** A lookup whose name is ALSO the name of another object — a field `account` referencing `crm_account` while an object `account` exists — used to be read from that other object: joined by the ids of the records the field points to, admitted and scoped as that other object. It now reads its declared target. So that path answers from the target's rows, and a caller who may not read the target is refused `403 PERMISSION_DENIED` naming it, where the query used to be answered.
+  
+  **Unchanged.** A cube that declares a join for the path keeps reading the join's object. A host that wires no `relationshipResolver` (`AnalyticsServicePlugin` always wires it, from the data engine's object schema), or a relationship field it cannot answer for, keeps reading the object named after the field. A dataset's `include` compiles to declared joins, so a path it declares is unchanged.
+- 58a77db: fix(service-analytics)!: the analytics read scope and the native `where` answer `$contains` / `$notContains` on a multi-valued or JSON-stored field by membership, with the one construct `driver-sql` emits, now exported from `@objectstack/core` (#20987)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a correction of which rows two analytics SQL faces answer for one operator on one declared field class: the read scope `compileScopedFilterToSql` compiles from a row policy, and the native strategy's rendering of a query's `where`. No authorable key, spelling, export or stored shape of metadata moves; `packages/spec` is untouched, and the contract sentence the faces now meet (`FILTER_OPERATORS.$contains`) is the one already declared. A policy or filter that was written stays written as it was, and what it now selects is what the data door already selected for it, so there is nothing a ledger entry could rewrite. The new refusal on a datasource whose SQL dialect the host cannot name is a refusal of a query, not of stored metadata. The other categories are closed on facts: the packages publish (not `unpublished`); no ADR-0087 id covers a filter operator's reading (not `registered` / `already-registered`); and the change is runtime behaviour plus one additive export, not a declaration change (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what the analytics doors answer for one class of read. A row policy (the read scope the analytics plugin compiles from the security service, or a host's own `getReadScope`) whose `$contains` or `$notContains` names a field declared multi-valued (`multiple: true` on a multi-capable type, or a multi-option type) or JSON-stored now selects the rows holding the comparand as an ELEMENT of the stored list. It used to select every row whose stored JSON text contained the comparand as a substring, so on SQLite a policy could admit rows outside it, and on PostgreSQL every query under such a policy answered `500` (MySQL was not measured). An analytics count under such a policy now equals what the same caller reads through the data door. On a datasource whose SQL dialect the analytics host cannot name, such a policy now refuses the query (`READ_SCOPE_COMPILE_FAILED` / `500`) instead of falling back to the substring reading. It ships as `minor` under the launch-window convention.
+  
+  **The `where`.** `POST /api/v1/analytics/query`, the dataset door and `/analytics/sql` on the native strategy render the same membership test for a `$contains` / `$notContains` in a query's `where` (or a dataset's `runtimeFilter`) on such a field: on PostgreSQL the query answers rows where it answered `500`, and on SQLite the count stops over-counting (`$contains`) and under-counting (`$notContains`). On a datasource whose dialect the host cannot name, the operator on such a field is refused `INVALID_FILTER` / `400`. The ObjectQL strategy already answered membership and is unchanged.
+  
+  **Unchanged.** On a scalar text field `$contains` stays the substring test, on every face. `$notContains` keeps its NULL rule: a row with no value satisfies it. A host that wires no field metadata keeps the substring reading, because it cannot tell a JSON column from a text one; the analytics plugin wires it from the data engine.
+  
+  **New export.** `@objectstack/core` exports `jsonMembershipPredicate(dialect, emitters, value)` and `jsonMembershipCandidates(value)`, with the `JsonMembershipDialect` and `JsonMembershipEmitters` types: the per-dialect membership construct (#17590) moved from `@objectstack/driver-sql`, where it was module-private, and made placeholder-agnostic. `@objectstack/driver-sql` imports it and emits byte-identical statements and bindings.
+  
+  **What to do after upgrading.** Nothing, unless a policy or a dashboard filter relied on the substring reading of a multi-valued or JSON-stored field: such a filter now selects members only, as the data door always did. A host whose analytics `sqlDialect` hook answers nothing for a SQL datasource should answer `'sqlite'`, `'postgres'` or `'mysql'`, or the operator on such a field is refused.
+- 39ab294: fix(service-analytics)!: the cube door asks the aggregate × field-type table for every measure, so a configured or suffix-inferred cube measure whose aggregate the table refuses for its column's declared type answers `INVALID_FIELD` / 400 on every driver and both strategies, and a `min` / `max` over a temporal column is described `time` in `fields[]`
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered dataset-measure-selecting-aggregate-field-type-refused, dataset-measure-aggregate-field-type-refused) the pairs this change refuses are exactly the pairs AGGREGATE_FIELD_TYPE_COMPATIBILITY already refuses, and the table is not edited: every refused min / max pair is registered under protocol major 18 by the first id and every refused sum / avg pair by the second, each with its routes (count, a sort for a first or last record, or a numeric / temporal field for a quantity stored as text). This change adds a query-time reader of the same table at the analytics cube door; it refuses a query shape, not a stored one, and no authorable key, export or stored row moves: CubeSchema and the analytics query body keep parsing every member. -->
+  
+  **BREAKING**: this narrows what `POST /api/v1/analytics/query` and its dry run `POST /api/v1/analytics/sql` accept, on every driver and on both strategies. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  FROM → TO, for a `measures` entry that resolves to a cube measure over a column of the cube's own object (an authored cube measure, or a suffix-inferred one such as `note_max`):
+  
+  - `min` / `max` over a type outside the numeric, temporal and boolean classes (the string family such as `text`, `email` and `url`; `select`, `radio`, `lookup`, `user`; `autonumber`; the JSON-stored, file and `formula` types): FROM, on the native-SQL strategy, `200` with the column's own value (a string such as `"y"`) under `fields[] { type: 'number' }`, on SQLite and PostgreSQL alike; on the ObjectQL strategy the engine's door already answered `400 INVALID_FIELD` after the strategy began. TO `400 INVALID_FIELD` before either strategy reads anything.
+  - `sum` / `avg` over a type outside the numeric and boolean classes (`sum` also refuses `percent`): FROM `200` with a plausible `0` on SQLite and `500 DATABASE_ERROR` on PostgreSQL (the ObjectQL strategy refused `avg` at the engine and passed `sum` to the driver, which answered the same `0` / `500`). TO `400 INVALID_FIELD`.
+  - `min` / `max` over a `date`, `datetime` or `time` column: FROM `fields[] { type: 'number' }` beside the instant. TO `fields[] { type: 'time' }`, the `DimensionType` word a temporal dimension column already carries, by the same rule the dataset door applies (`measureResultType`).
+  
+  **What an author sees now.** `400 INVALID_FIELD`, naming the measure as the request wrote it, the cube, the column, the object and its declared type, saying the query was not run, and naming the types the aggregate accepts, read off `AGGREGATE_FIELD_TYPE_COMPATIBILITY`. The thrown error carries `member`, `param` (`measures`), `cube`, `field` and `object`.
+  
+  **Why a refusal.** The dataset door (`POST /api/v1/analytics/dataset/query`) refuses every one of these pairs at compile by the same table (`DATASET_INVALID`), and the engine's aggregate door refuses most of them on the ObjectQL strategy; the native-SQL strategy compiled its own statement and asked nothing. Measured through the real dispatcher route on SQLite and PostgreSQL 16: a configured cube's `max` over a `text` column answered `"y"` under a column described `number` on the native strategy and `400` on the ObjectQL strategy, and `sum` over the same column answered `0` on SQLite and `500` on PostgreSQL. One cube, one query, an answer chosen by the driver.
+  
+  **What to write instead.** Aggregate a field of a type the aggregate accepts. A question that was counting in disguise is `count` (or `count_distinct` over a scalar-stored field). A first or last record by a text value is a sort on a list, not an aggregate. A quantity stored as text belongs in a numeric field of its own, aggregated there.
+  
+  **Who is affected.** A dashboard, report or caller that asked `min` / `max` / `sum` / `avg` of such a column through `/analytics/query` on the native-SQL strategy and read the answer as a real one. No example app and no shipped cube authors such a pair. A reader that branched on `fields[].type === 'number'` for a temporal `min` / `max` column now sees `time`.
+  
+  **Unchanged.** Every pair the table accepts, a `max` over a `boolean` column included (its column keeps `number`: the rule declines the boolean class); `count` over any column; `count_distinct`, which keeps its own door and words; a measure over a relationship path (`account.name`), which this door does not judge; a column the host's field metadata cannot resolve, or a type outside `FieldType`; a measure whose `sql` is `*`; an expression metric type (`number` / `string` / `boolean`); and a host that wires no `sourceFieldMeta`, where the declaration cannot be read. The dataset door keeps its own `DATASET_INVALID` answer at compile.
+- cb45469: fix(service-analytics)!: the analytics native-SQL strategy declines an object an engine middleware is registered for, so the engine serves it and that object's read gates apply; the engine answers which objects carry one (`IObjectQLEngine.hasObjectMiddleware`) (#21080)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a correction of which analytics strategy serves a query that reads an object the data engine holds a per-object middleware for, decided at request time. No authorable key, spelling, value domain or stored metadata shape moves: every dataset, cube and dashboard parses as before, nothing stored is rewritten, and the only declaration change is ADDITIVE (one optional member on IObjectQLEngine, one public method on ObjectQL, one optional member on AnalyticsServiceConfig), so there is nothing for an author to convert and nothing for `objectstack migrate meta` to reach. The queries newly refused are refused at request time by the ObjectQL strategy's existing envelope, not by a schema. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id covers strategy routing and this diff adds none (not registered / already-registered); and the change is runtime behaviour plus additive declarations, not a removal from a published interface (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: this narrows what the analytics doors serve for one class of query. It ships as `minor` under the launch-window convention for narrowings.
+  
+  **What changes.** On a SQL driver, `NativeSQLStrategy` compiled a query to SQL and ran it through the driver's raw-SQL seam, so no engine operation ran and no engine middleware did. It applied the security service's object admission and read filter and nothing else, so the read gates that live in the engine as per-object middlewares did not apply there: a caller admitted to such an object at object level read grouped results and counts over every row, rows about parent records that caller cannot read included. It now declines a query that reads (as its base object, a declared join, or through a relationship path) an object the data engine holds a middleware registered for. The ObjectQL strategy serves it through the engine with the caller's context, so the engine's middlewares run, and the analytics answer for that caller equals the data door's. On the stock composition the objects that move off the native path are `sys_comment`, `sys_activity` and `sys_attachment` (read gates), `sys_approval_request` (the snapshot redaction), and `sys_user_position` and `sys_permission_set` (write-side middlewares, which move as a side effect: a middleware does not declare its operation). No shipped dataset or dashboard reads any of them.
+  
+  **What is newly refused.** A query on such an object that the ObjectQL strategy cannot serve is refused with that strategy's existing `400`, where the native strategy used to serve it: for example a dimension reached through a relationship path combined with a measure that cannot be recombined across it (`avg`, `count_distinct`). Correctness wins over the fast path for a gated object.
+  
+  **It fails closed.** `AnalyticsServicePlugin` asks the data engine. An engine without `hasObjectMiddleware`, or no engine, cannot say, and the strategy declines then too: every query on such a host is served by the ObjectQL strategy, and the plugin says so once at `warn`. A host that constructs `AnalyticsService` with `executeRawSql` and without the new `hasObjectMiddleware` config member keeps the native path for every object and is told so once at construction.
+  
+  **New, additive.** `IObjectQLEngine.hasObjectMiddleware?(objectName): boolean` (`@objectstack/spec`), `ObjectQL.hasObjectMiddleware(objectName)` (`@objectstack/objectql`): whether a `registerMiddleware(fn, { object })` names the object; a global registration (no `object`, or `'*'`) is keyed to none and is not counted. `AnalyticsServiceConfig.hasObjectMiddleware` (`@objectstack/service-analytics`), which the plugin fills from the data engine.
+  
+  **Unchanged.** Objects no middleware names keep the native path. The middleware chain, `registerMiddleware` and every gate are unchanged.
+  
+  **What to do after upgrading.** Nothing on the stock composition. A host whose `"data"` service is not ObjectQL should implement `hasObjectMiddleware` to keep the native path for ungated objects. A host that builds `AnalyticsService` itself with `executeRawSql` should pass `hasObjectMiddleware` from its engine.
+- 336e191: fix(security)!: stored metadata bodies are projected or refused at the audit, analytics, realtime and data-door filter/sort exits too
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) further read/copy/evaluate exits for a stored metadata body (sys_metadata / sys_metadata_history), each routed through the one shared redactor or refused: the audit/activity write-time copy is projected, a data-door filter or sort on the body column is refused (the sibling of the already-registered-as-not-required groupBy refusal), an analytics query member on the body column is refused, and a data.record.* realtime event body is projected. No authorable key, spelling, export or stored shape moves, and no stored row is read differently by any metadata consumer; the published surfaces gain and lose nothing. The other categories are closed on facts: the packages publish (not `unpublished`); no ADR-0087 id covers a filter/sort target, an analytics member or an event body (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what three doors accept or serve for the two stored-metadata tables — the generic data door refuses a filter or sort on the body column, the analytics door refuses it as a dimension / measure / filter / sort member, and the realtime event and the audit/activity copy now carry the body as its type's read projection instead of the stored bytes. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **What changes.**
+  
+  - **Audit / activity copy (`@objectstack/plugin-audit`).** The audit writer copies a `sys_metadata` / `sys_metadata_history` row into `sys_audit_log.new_value` / `old_value` and `sys_activity.metadata`. That copy now projects the body through the shared redactor, so stored credential material is withheld from the second store too. A new `os migrate audit-metadata-bodies` command rewrites the copies already at rest (dry run by default, `--apply` to write, idempotent).
+  - **Analytics (`@objectstack/service-analytics`).** A query naming the stored body column of these objects as a dimension, measure, filter or sort is refused with `400 INVALID_FIELD`, before any strategy runs — the posture analytics already takes for a member it will not evaluate.
+  - **Realtime (`@objectstack/objectql`).** A `data.record.*` event projects its `after` / `changes` body through the same redactor, so a subscriber to these objects' events receives no stored credential.
+  - **Data door filter / sort (`@objectstack/metadata-protocol`).** A filter or sort on the body column is refused with `400 INVALID_FIELD`, the same family and shape as the existing groupBy refusal.
+  
+  **What stays answerable.** Every scalar column of these objects — `type`, `name`, `scope`, `state`, timestamps — is still grouped, filtered, sorted, counted and served; only the body column is affected. Every other object is unchanged.
+- 3a7b6eb: fix(service-analytics)!: a cube measure whose `sql` is a relationship path (`account.name`) is judged by the aggregate × field-type table, described in `fields[]` and presented on the native-SQL strategy by the declaration on the object the path's last hop reaches, as a measure over the cube's own column already was
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered dataset-measure-selecting-aggregate-field-type-refused, dataset-measure-aggregate-field-type-refused) the pairs this change refuses are exactly the pairs AGGREGATE_FIELD_TYPE_COMPATIBILITY already refuses, and the table is not edited: every refused min / max pair is registered under protocol major 18 by the first id and every refused sum / avg pair by the second, each with its routes. This change makes the cube door read a relationship-path column's declaration on the object the path reaches, where it already read a base-object column's; it refuses a query shape, not a stored one, and no authorable key, export or stored row moves. -->
+  
+  **BREAKING**: this narrows what `POST /api/v1/analytics/query` and its dry run `POST /api/v1/analytics/sql` accept on the native-SQL strategy, on every driver. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  The column a relationship path names is located by the one hop resolver both strategies join and read it through: the cube's declared join at that path, else the relationship field's declared `reference`.
+  
+  FROM → TO, for a `measures` entry that resolves to a cube measure over a relationship path (an authored cube measure, or a compiled dataset's measure over an `include`d relationship):
+  
+  - `min` / `max` / `sum` / `avg` over a related field of a type the table refuses for that aggregate (the string family such as `text`, `select`, `lookup`; the JSON-stored, file and `formula` types; and the rest the table lists): FROM, on the native-SQL strategy, `200` with the related column's own value (a string such as `"zeta"`) under `fields[] { type: 'number' }` on SQLite and PostgreSQL, and for `sum` a plausible `0` on SQLite and `500 DATABASE_ERROR` on PostgreSQL; the ObjectQL strategy refused it as a cross-object measure. TO `400 INVALID_FIELD` on both strategies, before either reads anything — the refusal a base-object column of the same type already got.
+  - `min` / `max` over a related numeric field on PostgreSQL: FROM the exact-decimal string (`"250.000000000000000000000000000000"`) under `fields[] number`. TO the number `250`.
+  - `min` / `max` over a related `date`, `datetime` or `time` field: FROM `fields[] { type: 'number' }` beside the instant. TO `fields[] { type: 'time' }`.
+  
+  **What an author sees now.** `400 INVALID_FIELD`, naming the measure as the request wrote it, the cube, the path, the related object and the type it declares, saying the query was not run, and naming the types the aggregate accepts. The thrown error carries `member`, `param` (`measures`), `cube`, `field` (the path, `account.name`) and `object` (the related object that declares the column).
+  
+  **What to write instead.** Aggregate a related field of a type the aggregate accepts, or `count` the rows. A first or last related record by a text value is a sort on a list, not an aggregate.
+  
+  **Who is affected.** A dashboard, report or caller that asked `min` / `max` / `sum` / `avg` of such a related column through the native-SQL strategy and read the answer as a real one. No example app and no shipped cube or dataset authors such a pair. A dataset whose measure aggregates such a related field is now refused when its query runs (`INVALID_FIELD`), where its compile check, which reads the base object's declaration, still lets it through.
+  
+  **Unchanged.** Every pair the table accepts; a measure over the cube's own column; `count`, and `count_distinct`, which keeps its own door; a related column the host's field metadata cannot describe; an expression `sql` or `*`; a host that wires no `sourceFieldMeta`; and the ObjectQL strategy's refusal of a related-field measure the table accepts (`max` over a related `number`), a capability limit of the engine aggregate — run that query on a native-SQL driver.
+- ce4e205: fix(service-analytics)!: a dataset's own `field` text that is not a column reference is refused at the analytics dataset door, inline or saved
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a dataset's own dimension or measure `field` text that is not a column reference (a field, a relationship path ending in one, or `*`) is refused at the analytics dataset door — whichever branch supplied the dataset, an inline `body.dataset` or a saved `body.datasetName` — before the dataset is compiled and before any strategy runs, for every caller and whether or not a security service is wired, through the field-read gate's existing judge and envelope (`PERMISSION_DENIED` / 403). No authorable key, spelling, export or stored shape moves, and no stored row is read differently by any metadata consumer; the published surface gains and loses nothing. The other categories are closed on facts: the package publishes (not `unpublished`); no ADR-0087 id covers a dataset `field` (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). A dataset names a column instead of writing an expression, which is ADR-0021's author surface already ("zero raw expressions"), so there is no FROM → TO mapping to carry. -->
+  
+  **BREAKING**: this narrows what the analytics dataset door accepts. A dataset whose dimension or measure `field` is not a column reference is now refused with `403 PERMISSION_DENIED` instead of being evaluated — an inline dataset and a saved dataset queried by name alike, since both reach the same door. No shipped dataset carries a non-column `field`. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  **What changes.** The service compiles a dataset into a cube whose members read as declared, so a dimension or measure whose `field` was a raw expression resolved to a declared cube member and was left to the field-level read gate, which stands down with no security service and on an object its reader answers `undefined` for; in those tiers the expression reached the native statement as written. The dataset's own `field` text is now judged at the dataset door, before compile and before any strategy runs, through the field-read gate's existing judge (`PERMISSION_DENIED` / 403, naming the member and never the expression text), for every caller, admin included, and with or without a security service. There is no new error code and no new admission module.
+  
+  **What stays answerable.** Every dataset whose fields are columns or relationship paths is unchanged, inline or saved. A saved dataset whose `field` is an expression is refused the same way as an inline one; refusing such a `field` when it is authored belongs to the dataset schema's own retirement of expression fields, not to this door. The dataset's own filter, the selection's runtime filter and cube-query members are lowered into the compiled query and already judged on the query path, so they are unchanged.
+- 4727fcb: fix(service-analytics)!: a grouped dimension or a `count_distinct` measure over a JSON-stored column reached through a relationship path the cube declares no join for is refused with `INVALID_FIELD` / 400 at the analytics door, as the same member over a declared join already was
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a refusal of a grouping or distinct-count TARGET at the analytics door, extended from a relationship path the cube declares a join for to one it does not: the door now locates the column on the object the one hop resolver names (the declared join, else the relationship field's declared reference), the object both strategies already join and read. No authorable key, spelling, export or stored shape moves (`assertNoStructuredJsonDimension` is internal to the package; `CubeSchema`, `DatasetSchema` and the analytics query body keep parsing every member), and no stored row is read or rewritten. The grouping and the distinct count had no shared meaning to preserve (one group or one distinct value per serialized document on SQLite, a 500 on PostgreSQL), and which scalar part a caller meant is not something a ledger entry can rewrite. The other categories are closed on facts: the package publishes (not `unpublished`); no ADR-0087 id covers an analytics grouping or distinct-count target, and this diff adds none (not `registered` / `already-registered`); and the change is runtime behaviour, not a declaration (not `runtime-interface-only` / `type-surface-only`). -->
+  
+  **BREAKING**: this narrows what `POST /api/v1/analytics/query` and its dry run `POST /api/v1/analytics/sql` accept, on both strategies and every driver. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  The column of a dotted path is now located by the one hop resolver both strategies join and read it through: the cube's declared join at that path, else the relationship field's declared `reference`, else the relationship's own name for a host that cannot answer. Before, the door read the cube's declared joins alone and stood down on a path the cube declares no join for. This reverses one clause of the earlier entries for this door in the same release, which listed such a path as unchanged.
+  
+  **Before and after**, measured on a configured cube over an object whose lookup the cube declares no join for — `owner`, declaring `reference` a person object — and a member over that lookup. An ad-hoc query's inferred cube declares no join at all, and a dotted dimension on it (`owner.prefs`) now gets the same refusal:
+  
+  - A `dimensions` entry, or a `timeDimensions` entry with a `granularity`, over a structured-JSON field (`owner.prefs`, `json`) or a multi-value field (`owner.labels`, `tags`; or a field declared `multiple: true`). Before, on the native-SQL strategy: `200` with one group per serialized value on SQLite and `500 DATABASE_ERROR` on PostgreSQL; the ObjectQL strategy answered `400 INVALID_FIELD` from the engine under its own position (`groupBy[1]`), a name the request never wrote. Now: `400 INVALID_FIELD` from this door on both strategies, before either reads anything.
+  - A `count_distinct` measure over the same columns. Before, on the native-SQL strategy: `200` with a count of serialized values on SQLite and `500` on PostgreSQL; the ObjectQL strategy refused it as a cross-object measure. Now: the same `400 INVALID_FIELD` from this door.
+  
+  **What an author sees now.** The refusal the same member over a declared join already got: `400 INVALID_FIELD`, naming the member as the request wrote it, the cube, the path, the object the lookup declares as its target and the column's declared type, saying the query was not run, and naming the route. The thrown error carries `member`, `param` (`dimensions`, `timeDimensions` or `measures`), `cube`, `field` (the path, `owner.prefs`) and `object` (the target object).
+  
+  **What to write instead.** Group by, or count distinct, a related field that stores one scalar value. For a multi-value field, run a record query on the target object filtered by one member with `$contains`, one query per member.
+  
+  **Who is affected.** A dashboard, report or caller that grouped or counted distinct such a related column through a lookup the cube declares no join for, on SQLite, and read the serialized values as real groups or a real count. On PostgreSQL the same queries were already a 500. No example app and no shipped cube or dataset authors such a member.
+  
+  **Unchanged.** Every member over a declared join; a scalar related column (`owner.email`), which is served on both strategies; a related column whose object the host's field metadata does not describe; an expression `sql`; a host that wires no `sourceFieldMeta`; and a dataset dimension over an `include`d relationship, whose join the dataset compiler declares.
+
+### Patch Changes
+
+- 92fe081: **BREAKING** — the inner `name` on an analytics cube's measures and dimensions (`MetricSchema.name`, `DimensionSchema.name`) is now refused at parse: nothing ever read it. The record key a member is declared under IS its name — the analytics API publishes it as `<cube>.<key>` and a query names it that way. Delete the inner `name`; to rename a member, rename its key.
+  
+  Clause-②: no (narrowing)
+  
+  `measures` and `dimensions` are records, and the key was always the member's identity: `GET /api/v1/analytics/meta` publishes every member as `${cube.name}.${key}` (in `@objectstack/service-analytics` and in `@objectstack/driver-memory`), and both SQL strategies and the in-memory driver resolve a member by indexing the bag with that key. Measured before removal, with a lit control: zero reads of a member's inner `name` in non-test source, against four reads of the neighbouring `measure.label` / `dimension.label` in the same two `getMeta` projections. So the inner `name` was a REQUIRED second copy of the identity that nothing read — and one that disagreed with its key was silently ignored (this repository's own in-memory driver fixtures authored `totalAmount: { name: 'total_amount', … }` and queried `orders.totalAmount`).
+  
+  **Removed rather than enforced** (ADR-0049 enforce-or-remove; the triage verdict on the card, by the maintainer's criterion for declared-but-unenforced families): Cube.dev and LookML key a member by its declared name, with no second inner name that can disagree — and here the record key already delivered it.
+  
+  ## FROM → TO
+  
+  | you wrote (17.4 and earlier) | write instead |
+  | --- | --- |
+  | `measures: { total_amount: { name: 'total_amount', label: 'Total', type: 'sum', sql: 'amount' } }` | `measures: { total_amount: { label: 'Total', type: 'sum', sql: 'amount' } }` |
+  | `dimensions: { status: { name: 'status', label: 'Status', type: 'string', sql: 'status' } }` | `dimensions: { status: { label: 'Status', type: 'string', sql: 'status' } }` |
+  | an inner `name` that DIFFERS from its key, e.g. `totalAmount: { name: 'total_amount', … }` | nothing changes at runtime — `orders.totalAmount` was already the name every query used. Delete the inner `name`, or, if `total_amount` is the name you meant, re-key the member and update every query, dashboard and report that names `orders.totalAmount` |
+  
+  **The one-line fix:** delete `name` from every metric and dimension; the key it is declared under is its name.
+  
+  **What an author who still writes it sees.** `tsc` fails at the authoring site (`Metric` / `Dimension` type the key `never`), and the parse — `defineCube()`, `defineStack({ analyticsCubes })`, `PUT /api/v1/meta/analytics_cube/:name` — refuses it at `measures.<key>.name` / `dimensions.<key>.name` with the prescription:
+  
+  > `measures.<metric>.name` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it never had an effect: the record key is the metric's name. … Delete the key. To rename a metric, rename its key in `measures` — and every query, dashboard and report that names `<cube>.<key>`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.
+  
+  `os migrate meta --from 17` lists the mechanical edits for existing sources; apply them by hand.
+  
+  ## The retirement kit
+  
+  - **`retiredKey()` tombstones, not a bare deletion** — even though both member shapes are `strictObject`s (the `action.aria` posture). A bare delete would still be loud, but only as a generic unrecognized-key report that cannot carry the prescription; the tombstone types the key `never` for `tsc` and raises the upgrade text at parse. The keys therefore stay in the walked shape: both liveness rows stay `dead` with a `REMOVED` note, and the authorable-surface baseline marks `data/Metric:name` and `data/Dimension:name` `[RETIRED]`.
+  - **The D2 conversion `cube-member-inner-name-removed`** (protocol 18, retired from the load path) deletes the inner `name` from every metric and dimension of every `analyticsCubes[]` entry. It is owed because the key was REQUIRED, so every stored or built cube carries it. It strips a disagreeing value too — the key already won everywhere, so no query or discovery answer changes — and its notice prints both spellings (`from: name "total_amount"`, `to: (removed; the record key "totalAmount" is the name)`). Its D3 record is the semantic entry `cube-member-inner-name-retired`, which asks the author of a disagreeing name which spelling they meant.
+  - **The producers stop writing it** (`@objectstack/service-analytics`): the dataset compiler (`compileDataset`), `CubeRegistry.inferFromObject` and the ad-hoc query mint no longer put an inner `name` on the members of the cubes they build. The members are filed under the same keys as before, so `/analytics/meta`, `/analytics/query` and `/analytics/sql` answer exactly as they did. The package README's cube example is corrected.
+  - **The `measures` / `dimensions` descriptions now say it**: "keyed by metric name: the record key IS the metric's name, published and queried as `<cube>.<key>`".
+  
+  ## Reach, measured
+  
+  - This repository, non-test: the showcase cube (`examples/app-showcase`, 8 members), the published `objectstack-ui` skill's `defineCube` example (6), the `service-analytics` README (3), and the three internal cube mints above — every one wrote the inner `name` EQUAL to its key, and all are corrected here. Test fixtures: about 300 member literals and map-built members across 84 test and fixture files in eight packages, all EQUAL to their key except 21 in `driver-memory`, which disagreed (camelCase key, snake_case inner name) and were already queried by key.
+  - Out-of-repo authors: NOT MEASURED.
+  
+  ## What an operator with a STORED cube sees
+  
+  A `sys_metadata` `analytics_cube` row or a built artifact written before this release carries the inner `name` on every member. Nothing breaks at read: the conversion replays on rehydration and at the artifact door and strips it, so the cube is served canonical and parses. `os migrate meta --stored --apply` rewrites the rows.
+  
+  <!-- adr-0087: registered cube-member-inner-name-removed, cube-member-inner-name-retired -->
+- f1e921a: feat(spec)!: `$empty` joins `FILTER_OPERATORS`, and the view operators `is_empty` / `is_not_empty` lower to it (#20446)
+  
+  A stored 「is empty」 / 「is not empty」 — `['field', 'is_empty', …]`, `isempty`, `is_not_empty`, `isnotempty`, in a view rule, a sharing rule or any filter array — now lowers to `{ field: { $empty: true | false } }` instead of `$null`. `$empty` is answered by the field's DECLARED type: a text-like field is empty when it is null or `''`, a multi-value field (multiselect, checkboxes, tags, or a select / radio / lookup / user / file / image with `multiple: true`) when it is null or `[]`, and every other type only when it is null. So an 「is empty」 rule on a text field now also finds `''`, and on a multi-value field also finds `[]`, which the `$null` lowering missed. `is_not_empty` is its exact complement. `$empty` is in `FILTER_OPERATORS` (and `ALL_OPERATORS`) now, and `canonicalAstOperator` folds the empty pair onto `is_empty` / `is_not_empty` rather than onto `is_null` / `is_not_null`. On `@objectstack/driver-memory`, a QueryAST comparison node (`{ type: 'comparison', operator: 'is_empty' }`) is answered by the same declared-type arm.
+  
+  **BREAKING**: two things accepted before are refused now, each loudly and with its fix.
+  
+  - **A `{ $empty: … }` object written as a field value** (a `where` pasted into an insert or update payload) is refused with `VALIDATION_FAILED` (`invalid_type`, "$empty is a filter operator, not a value"). Before, a text-like field stored it as data.
+    FROM `update('task', { title: { $empty: true } })` → TO write the value itself (`{ title: '' }`, `{ title: null }`); a filter belongs in `where`.
+  - **`is_empty` / `is_not_empty` where no face holds the column's declared type** is refused with `INVALID_FILTER` / 400 (`READ_SCOPE_COMPILE_FAILED` / 500 on an analytics read scope). The `$null` lowering answered these. The compositions:
+    - the built-in `id`, which no object declares. FROM `['id', 'is_empty', true]` → TO `['id', 'is_null', true]` / `is_not_null`;
+    - a federated (external) object on a driver that does not implement `registerExternalObject` (driver-memory, driver-mongodb). The boot already reports such an object as NOT bound to its remote table, naming it, and its reads answered from a table named after the object. FROM `is_empty` on such an object → TO bind it on a driver that implements federation (driver-sql and its heirs, driver-turso);
+    - an `AnalyticsService` constructed without `sourceFieldMeta`. FROM such a host → TO pass `sourceFieldMeta` (the package README shows it), or filter with `is_null` / `is_not_null`;
+    - a multi-value column on a SQL dialect `driver-sql` does not model (a knex client other than SQLite, PostgreSQL or MySQL). FROM `['tags', 'is_empty', true]` there → TO `['tags', 'is_null', true]` / `is_not_null`.
+  
+  Stored sharing rules and views that use 「is empty」 are not rewritten; they are re-read under the new meaning. Production rules that use 「is empty」 on a text or multi-value field were not measured; each finds more rows (the `''` / `[]` ones) from this release.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered filter-is-empty-lowers-to-empty-operator -->
+- b785c3b: fix: `sum` / `avg` answer the same double on every face the platform owns, added with one compensated fold that `@objectstack/core` now exports as `compensatedSum` (#20544)
+  
+  Clause-②: yes
+  
+  **New export.** `@objectstack/core` exports `compensatedSum(nums)`: the sum of
+  `nums`, added in order with Kahan-Babuska-Neumaier compensation, which is the
+  summation SQLite (3.43 and later) uses for its own `sum` and `avg`. It moved
+  here from `@objectstack/objectql`'s rows path (`in-memory-aggregation.ts`),
+  which now imports it instead of keeping a private copy.
+  
+  **What changed.** Three folds still added a group's values naively, and now call
+  the same function:
+  
+  - `@objectstack/driver-memory`'s `aggregate()` and `find()` with aggregations,
+    the path `engine.aggregate` takes on an in-memory datasource;
+  - `@objectstack/driver-memory`'s analytics face (`MemoryAnalyticsService`),
+    whose `sum` / `avg` measures are now a `$group` `$accumulator` in place of
+    mingo's `$sum` / `$avg`;
+  - `@objectstack/service-analytics`' draft preview.
+  
+  Over a `number` column holding `0.1`, `0.2` and `0.3`, each of them answered
+  `0.6000000000000001` / `0.20000000000000004`. They now answer `0.6` /
+  `0.19999999999999998`, as SQLite and the engine's rows path do. Over
+  `1e16, 1, -1e16` they answered `0` and now answer `1`. On driver-memory,
+  `engine.aggregate` gave two answers depending on its path: `having { s: { $eq:
+  0.6 } }` kept the group on the rows path and dropped it on the native path. It
+  now keeps it on both.
+  
+  **What did not move.** Two addends, integers whose running total stays within
+  2^53, and a non-finite total give the same answer as before. Which values count
+  as addends did not change either: booleans as 1 / 0, and nulls and non-numeric
+  strings left out, as each face already had it. `count`, `min` and `max` are
+  untouched. The analytics face's pipeline dump (`result.sql`) now renders the
+  accumulator's functions by name, so a `sum` measure and an `avg` measure still
+  dump differently.
+  
+  **Residual.** PostgreSQL and MySQL add their doubles natively without
+  compensation, and the platform does not wrap that arithmetic. So over three or
+  more fractions their native path can still differ from these faces in the last
+  place. An exact `$eq` on a fractional sum compares doubles; compare with a range.
+- d282087: Provenance comments in `service-analytics` were re-anchored
+  
+  Comment and docblock lines under `src/` that cited tracker numbers which no
+  longer resolve on GitHub now cite the commit in this repository's history that
+  decided the matter, and say in their own words what was decided. Comments
+  only: no type, schema, export, log or refusal text, or runtime behaviour changes.
+- a6866da: fix(core): a date or time in the years 0001..0099 is read as written, not as 1900..1999, wherever a UTC instant is built from year / month / day / time parts
+  
+  `Date.UTC(year, …)` and `new Date(year, …)` read a year from 0 to 99 as 1900 + year. Core built its instants from parts that way, so every day of the years 0001..0099 (inside the supported range 0001..9999) landed in the 1900s at the sites below, with no error.
+  
+  - `@objectstack/core`: **new export** `wallClockToUtcMs(parts)`, the epoch milliseconds of a `WallClockParts` read as UTC. It is `Date.UTC` without the two-digit-year remap: `month` is 1-12, omitted time components are 0, and every component rolls over past its end as `Date.UTC` rolls it (`month: 13` is next January, `day: 0` the previous month's last day, `hour: 24` the next midnight). A `NaN` component gives `NaN`. Every site below now builds through it:
+    - `zonedWallClockToUtcMs` and `zonedDateStartToUtcMs`, the wall clock and the zone-offset read. The offset read also takes the zone's era, so a wall clock early on 0001-01-01 in a zone west of UTC, whose offset probe lands in year 0, reads right.
+    - `bucketKeyToCalendarRange` (`0050` spans 0050-01-01..0051-01-01, not 1950..1951; `0050-01-01` as a `day` key is no longer `null`) and `bucketDateKey`'s ISO week (0050-01-01 is in week 52 of 0049, not of 1949).
+    - The date macros: `{1976_years_ago}` resolves to `0050-09-30`, not `1950-09-30`. A macro that lands in 0001..0999 is now spelled with a four-digit year, as the `date` storage form spells it (`0055-06-15`, not `55-06-15`, which names no day).
+  - `@objectstack/service-analytics`: the preview evaluator's `week` key and the `compareTo` bucket alignment build their days through `wallClockToUtcMs`.
+  - `@objectstack/trigger-schedule`: a time-relative window's day bounds build through `wallClockToUtcMs`.
+  
+  What an author sees: `POST /api/v1/data/:object/import` stores the `datetime` cell `0050-01-01 10:00` as `0050-01-01T10:00:00.000Z`, and in `Asia/Shanghai` as `0050-01-01T01:54:17.000Z` (the zone's local mean time for that year). Before, it stored `1950-01-01T10:00:00.000Z` and `1950-01-01T02:00:00.000Z` and reported the row `ok`. Measured through the import route and read back through `POST /api/v1/data/:object/query` on SQLite and PostgreSQL 16; the `2026-07-15 10:00` control is stored the same before and after. Every year from 0100 on builds exactly as before.
+- 1a75e39: fix(spec,drivers): a `datetime` filter `$lte '9999-12-31'`, or a `$between` whose maximum is that day, includes the whole last supported day on every backend (#20600)
+  
+  Clause-②: yes (widening) — three new exports on `@objectstack/spec` (`data`) and `@objectstack/core`: the constant `UNBOUNDED_ABOVE`, its type `UnboundedAbove` and the guard `isUnboundedAbove`; `nextUtcCalendarDay` answers the constant for one input that used to answer a string. Nothing any door accepted before is refused, and nothing is removed or renamed.
+  
+  **BREAKING for TypeScript and JavaScript callers of `nextUtcCalendarDay`** (`@objectstack/spec/data`, re-exported by `@objectstack/core`): its return type gains a member and its answer for one input changes from a string to a symbol, landing in the launch window as `minor` (the lockstep convention: the bump level is not the carrier, this banner and the disposition below are). No filter an author writes and no stored row changes meaning except that a whole-day upper bound on `9999-12-31` now includes that day.
+  
+  `9999-12-31` is the last day of the supported years (0001..9999). A bare-day upper bound on a `datetime` field — `$lte`, a `$between` maximum, an analytics `dateRange` end — means that whole day, and is compiled as "before the next day's midnight". That day has no next day with a `YYYY-MM-DD` spelling: `nextUtcCalendarDay('9999-12-31')` answered the five-digit `'10000-01-01'`, which sorts below `'2026-…'` as text. So on SQLite, where a `datetime` column is ISO text, `$lte '9999-12-31'` and `$between ['2026-01-01', '9999-12-31']` answered no rows; PostgreSQL parsed the bound as an instant and answered them. The memory and mongo drivers, the analytics strategies and the draft preview built their bound from the same answer, and `formula`'s RLS `check` evaluator compared a `'2026-…'` value against it and denied the write.
+  
+  Every supported value is at most the last millisecond of `9999-12-31`, so that day's whole-day bound bounds nothing. `nextUtcCalendarDay('9999-12-31')` now answers `UNBOUNDED_ABOVE`, a symbol that is neither `null` ("not a calendar day", which would compile the day's midnight and miss the rest of it) nor a string, and every backend compiles no upper bound for it:
+  
+  - `$lte` / `<=` on that day asks only that the value is not null: `IS NOT NULL` on the SQL drivers and the analytics echo, `$ne: null` on the memory and mongo drivers.
+  - A `$between` / `between` whose maximum is that day, and an explicit analytics `dateRange` ending on it, keep only their minimum.
+  - The type-blind `formula` `check` evaluator and the draft preview admit every value that denotes an instant, and compare any other value as written.
+  - `$gte`, `$gt`, `$lt` and `$eq` on that day are unchanged: they anchor to its midnight, as on every other day. `9999-12-30` and every earlier day compile the same bound as before.
+  
+  Measured through `POST /api/v1/data/:object/query`, rows at `2026-07-15T14:00Z`, `9999-12-30T10:00Z`, `9999-12-31T00:00Z`, `T10:00Z` and `T23:59:59.999Z`: on SQLite, `$lte '9999-12-31'` and `$between ['2026-01-01', '9999-12-31']` answered none of them and now answer all five; `$between ['9999-12-31', '9999-12-31']` answered none and now answers the three on that day. PostgreSQL 16 answers the same before and after. `$lte '9999-12-30'` answers the first two rows on both, before and after.
+  
+  **If your code stops compiling.** `nextUtcCalendarDay` now returns `string | UnboundedAbove | null`, where `UnboundedAbove` is a `symbol` with a structural brand. TypeScript refuses that member in a template literal (TS2731), a relational comparison (TS2469) and a `string` parameter (TS2345), so code that used the answer as a day string no longer compiles until it handles the last day. Test the answer with `isUnboundedAbove(answer)` (or `typeof answer === 'symbol'`) first: on its false branch the answer is `string | null` as before, and on its true branch there is no upper bound to compile. `answer === UNBOUNDED_ABOVE` compares correctly but does not narrow, because the branded type is not a unit type. The type is structural on purpose: `@objectstack/spec` ships `./data` as `index.d.mts` and `index.d.ts`, and a `unique symbol` would be two unrelated types in a program that meets both.
+  
+  **If your JavaScript code handled the answer as text.** For `'9999-12-31'` it is now a registered symbol (`Symbol.for('objectstack.calendarDay.unboundedAbove')`), not `'10000-01-01'`: a template literal or a relational comparison on it throws a `TypeError`, and better-sqlite3 and `pg` refuse to bind it. Every other input answers exactly as before.
+  
+  The shared temporal conformance kit (`TEMPORAL_ROWS` / `TEMPORAL_CASES` in `@objectstack/spec/data`) gains the row `z_last` (`9999-12-31T10:00:00.000Z`) and five last-day cases, so every backend it drives is held to this answer; three existing `$gte` / `$gt` cases now also expect `z_last`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing an author writes moves — no spec key, no stored row and no accept set changes, so `objectstack migrate meta` has nothing to reach — and what moves is one published function's return type and its answer for one input, whose channel is the caller's compiler and the banner above. -->
+- 10c36cc: fix(service-analytics): every dataset answer names its base object as `object` (#20644)
+  
+  Clause-②: no
+  
+  **What was wrong.** `queryDataset` set `object`, the dataset's base object, only
+  while it built drill-through metadata, which it builds only when a drillable
+  dimension is selected and at least one row came back. A dimension-less (KPI)
+  answer, a zero-row answer and the degraded answer for an unavailable backing
+  object carried no `object`, and neither did a draft preview (`previewDrafts`),
+  grouped or not. `POST /api/v1/analytics/dataset/query` relays the service answer
+  as it is, so a consumer that refreshes on that object's record changes had
+  nothing to subscribe to for those answers.
+  
+  **What changed.** Every `queryDataset` answer carries `object`, the dataset's
+  `object` by machine name, whatever dimensions are selected and whether or not
+  rows came back, as `AnalyticsResult.object` in `@objectstack/spec` declares. A
+  grouped answer is unchanged: `object` sits beside the same drill-through keys
+  as before. A cube `query` answer still carries no `object`.
+- 856321f: A date-bucket key spells its year with four digits at every granularity, as the SQL drivers' bucket expressions do, so the in-memory and pushed-down paths key a day in 0001..0999 alike and a drill-down from such a key finds its range.
+  
+  A `date` value names a year from 0001 to 9999, so these keys are reachable through a `date` field and through a stored `datetime` row. For 0050-06-15, `strftime('%Y-%m')` on SQLite and `to_char(…, 'YYYY-MM')` on PostgreSQL answer `0050-06`, while `bucketDateKey` answered `50-06`: the same `groupBy` keyed the same rows differently depending on which path ran it.
+  
+  - **`@objectstack/core` `bucketDateKey`** pads the year to four digits: `0050`, `0050-Q2`, `0050-06`, `0050-06-15`, and the ISO week key `0050-W24` (early January 0050 is `0049-W52`, its ISO week-year). The engine's in-memory `groupBy` and the memory cube face delegate to it, so both now answer the drivers' key. A year from 1000 to 9999 is spelled as before.
+  - **`@objectstack/core` `bucketKeyToCalendarRange`** reads exactly what `bucketDateKey` writes. Its week arm checked a key against the unpadded label, so a padded key such as `0050-W01` answered `null`; it now answers `{ start: '0050-01-03', end: '0050-01-10' }`. An unpadded key (`50-06`, `49-W52`) is not a bucket key and still answers `null`.
+  - **`@objectstack/service-analytics`** mints the `compareTo` alignment key through `bucketDateKey` instead of spelling it locally, so a comparison row in 0001..0999 merges onto its bucket (`0050-06`) instead of being appended under `50-06`.
+- 975b248: fix(objectql,spec)!: a `groupBy` on a multi-value field and a `count_distinct` on a JSON-stored field are refused with `INVALID_FIELD` / 400 at the engine's `aggregate`, on every driver, and the aggregate × field-type table stops accepting `count_distinct` over the JSON-stored types
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered dataset-measure-aggregate-field-type-refused) the one metadata-facing half of this change is a row of AGGREGATE_FIELD_TYPE_COMPATIBILITY narrowing, and that family's hand-migration is already registered under protocol major 18 by this id: "an aggregate the field's type accepts, per AGGREGATE_FIELD_TYPE_COMPATIBILITY", with every refused pair of the table refused at the compile door. The non-temporal sum / avg narrowing rode the same id the same way; this diff amends that entry's surface and acceptance prose to name the count_distinct rider, and corrects the min / max entry's route that called count_distinct valid over every type. The engine-door halves refuse a query shape, not a stored one: no authorable key, export or stored row moves. -->
+  
+  **BREAKING** (`@objectstack/objectql`): this narrows what `aggregate` accepts, in two positions, on every driver and for every caller that reaches the engine (the REST query door, a flow or hook, and the analytics strategy that lowers a cube query onto `engine.aggregate`). Shipped as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  - A `groupBy` entry that names a **multi-value** field: an inherently-multi option type (`multiselect`, `checkboxes`, `tags`), or a `select`, `lookup`, `user`, `file` or `image` field declared `multiple: true`. Both entry spellings are judged, the field name and the `{ field }` object.
+  - A `count_distinct` aggregation over a **JSON-stored** field: a structured-JSON type (`json`, `composite`, `repeater`, `record`, `location`, `address`, `vector`), an inherently-multi option type, or a multi-capable field declared `multiple: true`.
+  
+  **BREAKING** (`@objectstack/spec`): `AGGREGATE_FIELD_TYPE_COMPATIBILITY.count_distinct` no longer lists the ten JSON-stored types (the structured-JSON seven and `multiselect`, `checkboxes`, `tags`), so `isAggregateCompatibleWithFieldType('count_distinct', type)` answers `false` for them. Every reader of the table refuses those pairs now: the dataset-measure lint rule (`measure-aggregate-field-type-refused`, run by `os validate` and at a runtime dataset save), the analytics dataset compile leg (`400 DATASET_INVALID`), and the engine door above. The `count` row is unchanged.
+  
+  **What an author sees now.** `400 INVALID_FIELD`, naming the position (`groupBy[0]`, `groupBy[0].field`, or `aggregations[0].field`), the field and its declaration, saying the query was not run, and naming the route inside the first 500 characters the REST door keeps. For a multi-value field the route is to filter by one member: `where` with `$contains` on the field, one query per member. For a structured-JSON field it is to store the part you count in a field of its own, or to count rows with `count`. The thrown error carries `field`, `fields`, `object` and `param` (`groupBy` or `aggregations`).
+  
+  **Why a refusal.** Every SQL driver stores these values in a JSON column, and the drivers share no meaning for one as a group key or a distinct key. Measured through `POST /api/v1/data/:object/query` over three rows: grouping by any of the eight multi-value declarations answered one group per array on the in-memory driver, one group per serialized array on SQLite, and 500 `DATABASE_ERROR` on PostgreSQL 16. `count_distinct` over any structured-JSON or multi-value field answered 3 on the in-memory driver (equal values counted apart), 2 on SQLite (serialized text compared), and 500 on PostgreSQL (no equality operator for `json`). No example app and no published stack groups by a multi-value field or counts one distinct, so no meaning is defined for either here.
+  
+  **What to write instead.** A dataset measure or a query that counted a JSON-stored field distinct: use `count` over it, or store the scalar part you meant to count in a field of its own and `count_distinct` that field. A grouping by a multi-value field: filter by each member with `$contains` and count.
+  
+  **Who is affected.** A caller that grouped by a multi-value field, or counted a JSON-stored field distinct, on the in-memory driver or on SQLite and read the answer as a real one; on PostgreSQL both were already a 500. A dataset whose measure pairs `count_distinct` with a JSON-stored field is refused by the lint rule and the compile leg.
+  
+  **Unchanged.** (Two shapes the structured-JSON `groupBy` entry of this same release lists as unchanged are narrowed here: a `multiple: true` select as a group key, and `count_distinct` over a structured-JSON field. This entry is the later word on both.) A `groupBy` or `count_distinct` on a scalar-stored field, a single-value `select` or `lookup` included; `count` over any field; the `having`, filter and sort positions; and an undeclared name, which the REST door answers `INVALID_FIELD` as unknown before the engine is reached.
+  
+  `@objectstack/lint`: the dataset-measure refusal's hint no longer says `count_distinct` accepts every type.
+  
+  `@objectstack/service-analytics`: the dataset compile leg's refusal of a `count_distinct` measure over a JSON-stored field says why it diverges (the drivers compare the values for equality three ways) and prescribes `count`, or a scalar field for the part being counted; its other refusals no longer say `count_distinct` accepts every type.
+- 525b813: A dataset's date dimension reads the bucket key `@objectstack/core`'s `bucketDateKey` writes, with its year in four digits, and a draft preview keys a row the way the same dataset does once published.
+  
+  - **Dimension labels (`queryDataset`).** A date dimension's grouped key is labelled as written. The year key `0050` was labelled `1970` (read as epoch seconds, because the year check admitted only 1000..9999), and a month or day key lost its padding (`0050-06` became `50-06`, `0050-06-15` became `50-06-15`). A raw date value is relabelled with the year in four digits too. A year from 1000 to 9999 is labelled as before.
+  - **Draft preview (`queryDataset` with `previewDrafts`).** Drafted seed rows are keyed by `bucketDateKey` itself, the key the published path's grouping writes. For 0050-06-15 the preview answered `50`, `50-Q2`, `50-06` and `50-06-15`; it now answers `0050`, `0050-Q2`, `0050-06` and `0050-06-15`. A `week` bucket is now the ISO week label (`2026-W25`), no longer the Monday's date (`2026-06-15`), so a weekly `compareTo` in the preview merges each comparison row onto its week, as the published path does. An epoch-milliseconds value is bucketed by its instant (it was the empty bucket), and a `Date` in 0001..0999 by its own year (a `Date` in 0050 keyed `1950`).
+- d1633f3: fix: the analytics native-SQL path answers a measure its response declares `number` as a number on every dialect, presented by the one rule `driver-sql`'s `aggregate()` applies, which `@objectstack/core` now exports as `AGGREGATE_ANSWER_KIND` and `presentAsNumber` (#20889)
+  
+  Clause-②: yes (widening)
+  
+  **New exports.** `@objectstack/core` exports two names, moved here unchanged
+  from `@objectstack/driver-sql`, which now imports them instead of keeping them
+  private:
+  
+  - `AGGREGATE_ANSWER_KIND`: what each declared aggregate function answers.
+    `count`, `count_distinct`, `sum` and `avg` answer `'number'`; `min` and `max`
+    answer `'column'`, a value of the aggregated column.
+  - `presentAsNumber(value)`: the `'number'` presentation. A string `Number()`
+    reads as a number becomes that number. Any other value is returned as given:
+    a number, `null`, a boolean, empty or blank text, or text that reads as NaN.
+  
+  **What changed.** On PostgreSQL, `POST /api/v1/analytics/query` and
+  `POST /api/v1/analytics/dataset/query` answered through `NativeSQLStrategy`
+  returned count, count_distinct, sum, avg, and min / max over a numeric column
+  as strings, such as `count: "2"` and
+  `sum: "500.000000000000000000000000000000"`, while `fields[]` declared
+  `number`. A dataset's `row_count` did the same, and a measure-scoped count
+  mixed `"1"` with the number `0` in one column. SQLite answered numbers. The
+  strategy now presents each measure column by its declared aggregate function,
+  through the same table and presenter as `SqlDriver.aggregate()`. `min` / `max`
+  are presented only when their column is declared numeric, so `max` over a text
+  column, every dimension, and expression measures keep the value the database
+  returned.
+  
+  **Precision.** The answer is one JS number, the policy `driver-sql`'s
+  `aggregate()` already applies. A total that needs more digits than a double
+  holds, such as `9007199254740993`, answers the nearest double
+  (`9007199254740992`), which is also what SQLite and the engine path answer.
+  
+  **What did not move.** `@objectstack/driver-sql`'s behaviour is unchanged: its
+  `aggregate()` reads the same table, and its read presenter calls the same
+  function. The answers on SQLite are byte-identical. The arithmetic of the
+  analytics native statement did not change either. On PostgreSQL its `sum` and
+  `avg` still add exact decimals, so `0.1 + 0.2` answers `0.3` where the engine
+  path answers `0.30000000000000004`.
+- 5d5e679: feat(spec)!: an analytics cube member's `sql` is a column reference — a SQL expression there is refused at parse, and a derived value is declared on an ADR-0021 dataset (#20943)
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING** — shipped as `minor` under the launch-window convention
+  (`check-changeset-no-major` refuses `major` until GA; breaking-ness is carried by
+  this banner, the `(narrowing)` arm above and the ADR-0087 disposition below,
+  never by the level).
+  
+  `MetricSchema.sql` and `DimensionSchema.sql` — the `sql` of every member in an
+  analytics cube's `measures` and `dimensions` — admit a column reference only: a
+  field of the cube's object (`amount`), a relationship path of bare identifiers
+  ending in one (`account.amount`, `account.owner.region`), or `'*'` for a count.
+  Any other value — a `CASE WHEN …`, an aggregate or a ratio of aggregates, a quoted
+  or `$`-prefixed spelling, an empty string — is refused at parse with a
+  prescription. This is ADR-0021's "zero raw SQL / zero raw expressions" carried
+  from the dataset layer to the cube members it compiles to (maintainer ruling D on
+  the card): an expression names no single field, so no platform check can judge
+  which fields it reads, and the two analytics strategies never agreed on it — the
+  raw-SQL path ran it verbatim and the ObjectQL path refused it. The rule is a
+  `pattern` in the published JSON Schema too, so a document validated against
+  `json-schema/**` is judged as the parse judges it.
+  
+  ## FROM → TO
+  
+  A derived value moves to an ADR-0021 dataset over the same object. A conditional
+  count or sum is a dataset measure with its own structured `filter`; a ratio, sum,
+  difference or product of measures is `derived: { op, of: [...] }` over measures
+  named in the same dataset.
+  
+  ```
+  FROM  defineCube({ name: 'delivery', sql: 'task', measures: {
+          done_rate: { label: 'Done Rate (%)', type: 'number',
+                       sql: "SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) * 100.0 / COUNT(*)" },
+        } })
+        -> parsed; the expression ran verbatim on one strategy and was refused on the other
+  TO    -> ZodError at measures.done_rate.sql (invalid_format): `measures.<metric>.sql` is a
+           column reference: a field of the cube's object (`amount`), a relationship path ending
+           in one (`account.amount`), or `'*'` for a count. A SQL expression there was retired …
+  
+        defineDataset({ name: 'task_metrics', label: 'Task Metrics', object: 'task',
+          dimensions: [/* … */],
+          measures: [
+            { name: 'task_count', aggregate: 'count' },
+            { name: 'done_count', aggregate: 'count', filter: { status: 'done' } },
+            { name: 'done_rate', derived: { op: 'ratio', of: ['done_count', 'task_count'] }, format: '0.0%' },
+          ] })
+  ```
+  
+  **Mind the scale.** A `derived` ratio is a 0–1 fraction. An expression that
+  multiplied by 100 returned percentage points; pair the ratio with a `%` numeral
+  pattern (the server marks a ratio column's percent scale as a fraction) and
+  re-check any consumer that read the old number raw.
+  
+  **A dimension that bucketed a column with a CASE expression** has no expression
+  form in the cube layer or the dataset layer: group by the column itself, or keep
+  the bucket as a field of the object and name that field.
+  
+  **The one-line fix:** parse each cube; every refusal at `…sql` is one member to
+  move — replace it with the column it aggregates, or move the derived value to a
+  dataset measure as above, and point the dashboards, reports and queries that named
+  `<cube>.<member>` at the dataset measure.
+  
+  **What an author who still writes it sees.** `CubeSchema`, `defineCube()`,
+  `defineStack({ analyticsCubes })` (`STACK_SCHEMA_INVALID` / 422) and the
+  `analytics_cube` write door refuse the member at its `sql` path with the
+  prescription. `tsc` does not: the key's type is still `string`.
+  
+  ## The retirement kit
+  
+  - **Schema.** `MetricSchema.sql` / `DimensionSchema.sql` carry the pattern and
+    their prescriptions (`data/analytics.zod.ts`). A column reference parses
+    byte-identically to before. The retired metric `filters` guidance and the
+    analytics query's `filters` guidance no longer offer "fold the condition into
+    the metric's own `sql` expression" as a live channel; the `metric-filters-removed`
+    conversion summary and its D3 entry and step-18 rationale fragment say the same.
+  - **ADR-0087.** The D3 entry `cube-member-sql-expression-retired`, with its
+    step-18 rationale fragment. No D2 conversion — an expression has no mechanical
+    rewrite into a dataset — and no `RETIRED_KEYS_BY_MAJOR` row: no key left the
+    shape, so the authorable-surface, api-surface and JSON-schema manifest
+    ratchets are unchanged.
+  - **Liveness.** The `analytics_cube` ledger rows `measures.sql` and
+    `dimensions.sql` stay `live`, re-verified, with the narrowing recorded.
+  - **Docs.** The `data/analytics` reference page is regenerated.
+  - **Example.** The showcase cube's `done_rate` expression member moves to the
+    `showcase_task_metrics` dataset as `done_count` (a count filtered on
+    `status: 'done'`) and `done_rate` (`ratio` over `done_count` and `task_count`,
+    format `0.0%`).
+  - **`@objectstack/service-analytics`** (README only): its query-body section no
+    longer tells a reader to fold a per-metric condition into the metric's own
+    `sql` expression. The runtime is unchanged: its expression branches remain for
+    a cube that reaches the service without meeting the parse, and their deletion
+    is a separate change.
+  
+  ## Reach, measured
+  
+  - This repository: one authored expression member (the showcase `done_rate`),
+    moved here. Test fixtures in `@objectstack/service-analytics` that build
+    expression members WITHOUT the parse keep exercising the runtime's expression
+    branches, unchanged.
+  - Out-of-repo authored cubes: NOT MEASURED.
+  
+  <!-- adr-0087: registered cube-member-sql-expression-retired -->
+- ae1e950: fix(service-analytics): the analytics field-level read gate refuses a cube member whose `sql` names no field, instead of letting the query run (#20965)
+  
+  Clause-②: no
+  
+  **What changed.** Where the analytics field-level read gate judges a cube's
+  object (a security service is registered and gives a field answer for that
+  object), a query that names a cube member whose `sql` is neither a column
+  reference (a field of the cube's object, or a relationship path ending in one)
+  nor `'*'` is now refused `403 PERMISSION_DENIED` on
+  `POST /api/v1/analytics/query` and `POST /api/v1/analytics/sql`, before either
+  strategy runs. Whatever
+  the caller may read, the member is refused. That covers an expression member
+  of a cube that reached the service without the spec's parse (the cube
+  registry never parses: `analyticsCubes` and `AnalyticsServicePlugin({ cubes })`
+  arrive as written), a declared member with no `sql` string, and a member the
+  query names itself that is not a column reference. The gate used to stand down
+  on such a member, because it names no field, and the native-SQL strategy then
+  compiled it into its statement as written: a read of fields no permission
+  verdict was reached for. The refusal names the member and the object, and
+  never the member's `sql`.
+  
+  **What is not affected.** A member that is a column reference is judged by the
+  field it resolves to, as before. A `count` over `'*'` names no field and is
+  served. A deployment with no security service, and an object the security
+  service gives no field answer for, apply no field-level check, as before. The
+  spec's parse already refuses an expression member, so a cube that parses is
+  unaffected.
+  
+  **If a widget stopped answering,** its cube carries an expression member from
+  before the parse refused one. Re-author the member as a column reference, or
+  declare the derived value on an ADR-0021 dataset: a conditional count or sum
+  is a dataset measure with its own `filter`, and a ratio of measures is
+  `derived: { op: 'ratio', of: [...] }`.
+- 097ef80: fix: the analytics native-SQL path aggregates with the engine's own aggregate policies, so one query answers one number whichever strategy serves it: `sum` / `avg` accumulate in double, a PostgreSQL boolean aggregand is cast, and an all-NULL `sum` answers `0`. The operand policies move from `@objectstack/driver-sql` to `@objectstack/core` (#21042)
+  
+  Clause-②: yes (widening)
+  
+  **New exports.** `@objectstack/core` exports the aggregate operand policies, moved here from `@objectstack/driver-sql`, where they were module-private. The driver now imports them and emits byte-identical statements.
+  
+  - `AGGREGATE_ACCUMULATION`: what each declared aggregate function accumulates in on PostgreSQL and MySQL. `avg` accumulates in double; `sum` accumulates in double over a fractional column; the counts, `min` and `max` take the column as stored.
+  - `aggregandColumnClass(shape)`: the one column-class predicate those policies read, over a column's declared `{ type, multiple }`. It answers `'fractional'`, `'integral'`, `'boolean'`, or `undefined` for every other column, a multi-valued one included. The type `AggregandColumnClass` names the three classes.
+  - `POSTGRES_BOOLEAN_AGGREGAND_CAST`: the functions whose boolean aggregand is cast to `int` on PostgreSQL. These are `sum`, `avg`, `min` and `max`; the two counts are never cast.
+  - `doubleAccumulationOperand(operand, dialect)`: the column's text, parsed as a double, spelled for `'postgres'` or `'mysql'`.
+  - `aggregandOperandSql(func, columnClass, dialect, operand)`: the operand an aggregate wraps, with the cast inside the double operand. The type `AggregandSqlDialect` names its dialects (`'sqlite'`, `'postgres'`, `'mysql'`, `'unknown'`).
+  
+  **What changed.** `POST /api/v1/analytics/query` and `POST /api/v1/analytics/dataset/query` served by `NativeSQLStrategy` (the default on a SQL driver) skipped three policies `SqlDriver.aggregate()` applies. So the ObjectQL strategy and `engine.aggregate` answered differently for the same query. Measured on SQLite and PostgreSQL 16.13:
+  
+  - On PostgreSQL, `sum` / `avg` over an exact-decimal column, and `avg` over an integer one, added exact decimals. For example, `0.1 + 0.2` answered `0.3` and `11 / 9` answered `1.222222222222222`, where the engine answers `0.30000000000000004` and `1.2222222222222223`. The native statement now accumulates in double, as the driver does.
+  - On PostgreSQL, `sum` / `avg` / `min` / `max` over a boolean field answered `500` (`function sum(boolean) does not exist`). The native statement now casts the boolean aggregand to `int`, as the driver does, and answers the numbers the engine answers.
+  - On every dialect, a group whose aggregand is NULL in every row, and a measure-scoped `sum` that admits no row, answered `sum` `null` at the cube door. The strategy now folds a `null` answer to `emptyGroupValueFor` (`@objectstack/spec`) for every measure, so that `sum` answers `0`. `avg`, `min` and `max` over nothing stay `null`. The dataset door already answered `0`.
+  
+  This is no narrowing: each answer moves to the value the platform already declared for the same query.
+  
+  **What did not move.** `@objectstack/driver-sql`'s statements and answers are unchanged: a move-proof test compiles each aggregate function over each column class on SQLite, PostgreSQL and MySQL, and the statements equal the ones captured before the move. SQLite's native statement is unchanged, because neither operand policy applies there. A host that relays no field declarations to the analytics service, or names no SQL dialect, gets today's native arithmetic.
+- 0b12b9e: Clause-②: no
+  
+  Security: refuse a caller-named analytics member that is neither a declared cube member nor a column reference at the query door, in every tier — including a deployment with no security service and an object the field-level read gate does not judge — so caller-supplied member text can no longer reach a native statement unjudged. The refusal reuses the existing field-read gate's envelope (`PERMISSION_DENIED` / 403); no new error code, and the declared-cube paths are unchanged.
+- 2791138: fix(service-analytics): on the native-SQL strategy, a base-table column is qualified with its table whenever the statement joins a related object, not only when the cube declares a join
+  
+  Clause-②: no
+  
+  A cube that declares no join still joins a lookup's declared `reference` when a query names a relationship path through it (`owner.email`). The native-SQL strategy qualified base-table columns only for a cube that declares a join, so it wrote them bare beside the joined object. When that object declares a column of the same name, the database refused the statement as ambiguous, and `POST /api/v1/analytics/query` answered `500 DATABASE_ERROR` on SQLite and on PostgreSQL. The ObjectQL strategy answered `200` for the same query.
+  
+  **Before and after**, measured on a configured cube over a `deal` object that declares no join, whose lookup `owner` points at a person object that also declares `note`, `amount`, `closed_on` and `id`:
+  
+  - Dimensions `note` and `owner.email`, with or without a `where` on `note` and an `order` by it: `500` → `200`, one group per (deal note, owner email).
+  - A `sum` over `amount`, a `timeDimensions` window on `closed_on`, or a `where` on `id`, each grouped by `owner.email`: `500` → `200`.
+  - An ad-hoc query over the object, whose inferred cube never declares a join: the same.
+  
+  The strategy now reads what the statement actually joins, from the one relationship-path resolver, and qualifies every base column in the select list, the grouping, the filters, the measures and the time windows. A statement that joins nothing keeps bare columns. That is now also true on a cube that declares a join when the query uses none of it: the statement it shows on `POST /api/v1/analytics/sql` reads `note` where it read `"deal"."note"`, and the answer is the same.
+  
+  **Unchanged.** The ObjectQL strategy; every query on a cube that declares the join it uses; every statement that joins nothing on a cube that declares no join; the refusals.
+- Updated dependencies [e5c7d07]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [05a7547]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [3fbf3ca]
+- Updated dependencies [24d521e]
+- Updated dependencies [b785c3b]
+- Updated dependencies [2473e26]
+- Updated dependencies [3a89d45]
+- Updated dependencies [f379f57]
+- Updated dependencies [889139c]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [7510663]
+- Updated dependencies [a6866da]
+- Updated dependencies [1a75e39]
+- Updated dependencies [cd901d7]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [89801cd]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [ace770d]
+- Updated dependencies [ed54768]
+- Updated dependencies [99786f9]
+- Updated dependencies [63bfe69]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [b9087d7]
+- Updated dependencies [f10d802]
+- Updated dependencies [856321f]
+- Updated dependencies [6b004c0]
+- Updated dependencies [93e9e42]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [ceee88f]
+- Updated dependencies [e18fea6]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [dcd3309]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [26437ae]
+- Updated dependencies [d1633f3]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [58a77db]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [a11faee]
+- Updated dependencies [2c1cef3]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [097ef80]
+- Updated dependencies [70dae53]
+- Updated dependencies [665cab3]
+- Updated dependencies [682873d]
+- Updated dependencies [1bd14c9]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [df1feae]
+- Updated dependencies [336e191]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [24c554d]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [d2bc644]
+- Updated dependencies [cfa9315]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+- Updated dependencies [00f045d]
+  - @objectstack/spec@17.6.0
+  - @objectstack/core@17.6.0
+  - @objectstack/types@17.6.0
+
 ## 17.5.0
 
 ### Minor Changes
