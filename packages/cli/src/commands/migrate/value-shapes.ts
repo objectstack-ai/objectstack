@@ -13,6 +13,7 @@ import {
   createTimer,
   emitJson,
   errorCodeFields,
+  isExitSignal,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
@@ -245,6 +246,14 @@ export default class MigrateValueShapes extends Command {
         this.exit(1);
       }
     } catch (error: any) {
+      // [#21391] `this.exit(1)` above is how a failed gate leaves, and it
+      // throws oclif's ExitError: rethrown, never re-reported. Caught here, it
+      // printed a second `--json` document (`{"error":"EEXIT: 1"}`) after the
+      // scan's own — the shape `summary-nulls` and `files-to-references`
+      // already guard against. A scan with unreadable objects fails the gate,
+      // and the read-only scan of a database without the app's tables has
+      // nothing else.
+      if (isExitSignal(error)) throw error;
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
       printError(error.message || String(error));
       this.exit(1);
