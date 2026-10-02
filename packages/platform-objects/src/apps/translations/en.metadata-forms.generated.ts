@@ -2394,11 +2394,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       planning: {
         label: "Planning",
-        helpText: "Autonomous reasoning configuration (strategy, max iterations, replan)"
+        helpText: "Autonomous reasoning configuration: the maximum number of reasoning iterations before the agent stops (1–100, default 10)."
       },
       memory: {
         label: "Memory",
-        helpText: "Memory management (short-term, long-term, reflection)"
+        helpText: "Long-term memory: distilled notes kept per user, recalled before each conversation and written by a reflection every reflectionInterval delivered interactions. When long-term memory is enabled, maxEntries and reflectionInterval are required. Enforced by the cloud AI runtime."
       },
       lifecycle: {
         label: "Lifecycle",

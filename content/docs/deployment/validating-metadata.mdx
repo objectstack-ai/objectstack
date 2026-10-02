@@ -232,6 +232,18 @@ above declared `multiple: true`), is refused
 Group by a field that stores one value instead. Like the measure check, it
 stays silent when the field's type cannot be resolved.
 
+Both checks also judge the members of an analytics cube (`analyticsCubes`),
+because an authored cube is queried through the same analytics door. A cube
+dimension whose `sql` column is declared with a structured-JSON type or as a
+multi-value field is refused (`dimension-json-stored-field-refused`) at
+`analyticsCubes[N].dimensions.<key>.sql`, and so is a `count_distinct` measure
+over such a column (`measure-aggregate-field-type-refused`, at
+`analyticsCubes[N].measures.<key>.type`). The column is read where the door
+reads it: on the object the cube's `sql` names, or, for a relationship path,
+on the object the last hop reaches — the join the cube declares for that hop,
+else the lookup's `reference`. A cube's other measure types and the row
+wildcard `'*'` are not judged by this check.
+
 ### 7. Navigation exposing objects nobody can read
 
 Navigation and permissions are separate metadata, each valid on its own — so an

@@ -30,7 +30,6 @@ describe('computeViewReferenceDiagnostics (ADR-0047)', () => {
         fields: [{ field: 'industry' }, { field: 'is_active' }],
         tabs: [{ name: 't', filter: [{ field: 'status', operator: 'equals', value: 'x' }] }],
       },
-      tabs: [{ name: 'a', filter: [{ field: 'industry', operator: 'equals', value: 'technology' }] }],
       filterableFields: ['status'],
       kanban: { groupByField: 'status', columns: ['name'] },
     }, objectDef);
@@ -48,12 +47,12 @@ describe('computeViewReferenceDiagnostics (ADR-0047)', () => {
     });
   });
 
-  it('flags tab filter rules pointing at unknown fields', () => {
+  it('flags user-filter tab preset rules pointing at unknown fields', () => {
     const result = computeViewReferenceDiagnostics({
-      tabs: [{ name: 'bad', filter: [{ field: 'ghost', operator: 'equals', value: 1 }] }],
+      userFilters: { element: 'tabs', tabs: [{ name: 'bad', filter: [{ field: 'ghost', operator: 'equals', value: 1 }] }] },
     }, objectDef);
     expect(result.valid).toBe(false);
-    expect(result.errors?.[0].path).toBe('tabs.0.filter.0.field');
+    expect(result.errors?.[0].path).toBe('userFilters.tabs.0.filter.0.field');
   });
 
   it('flags kanban groupBy on a non-select-like field', () => {
