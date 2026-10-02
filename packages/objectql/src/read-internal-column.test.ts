@@ -41,10 +41,29 @@ function makeDriver() {
     return t;
   };
   const copy = <T,>(r: T): T => JSON.parse(JSON.stringify(r));
+  // Equality and `$in` on any field, `$and` nested; other operators are refused
+  // loudly rather than silently widened to "every row".
   const matches = (row: Record<string, unknown>, where: any): boolean => {
-    const id = where?.id;
-    if (typeof id === 'string') return row.id === id;
-    if (id && Array.isArray(id.$in)) return id.$in.includes(row.id);
+    if (!where || typeof where !== 'object') return true;
+    for (const [key, cond] of Object.entries<any>(where)) {
+      if (key === '$and' && Array.isArray(cond)) {
+        if (!cond.every((sub) => matches(row, sub))) return false;
+        continue;
+      }
+      if (key.startsWith('$')) throw new Error(`fake driver: unsupported operator ${key}`);
+      if (cond && typeof cond === 'object' && !Array.isArray(cond)) {
+        if ('$in' in cond) {
+          if (!(cond.$in as unknown[]).includes(row[key])) return false;
+          continue;
+        }
+        if ('$eq' in cond) {
+          if ((row[key] ?? null) !== (cond.$eq ?? null)) return false;
+          continue;
+        }
+        throw new Error(`fake driver: unsupported condition on ${key}`);
+      }
+      if ((row[key] ?? null) !== (cond ?? null)) return false;
+    }
     return true;
   };
   return {
