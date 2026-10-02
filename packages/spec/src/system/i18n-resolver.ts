@@ -29,10 +29,19 @@
  * and `translateObject` reads the same keys for the views an object document
  * embeds in its `listViews`, by their record key.
  *
- * For object-less actions (no `objectName`), helpers fall back to:
+ * An action's copy lives at ONE address, chosen by the action's own
+ * `objectName` — never by the object a caller renders it under. A bound action
+ * reads only its `objects.<object>._actions.<action_name>` keys above. An
+ * object-less action (no `objectName`) reads only:
  *
  *   globalActions.<action_name>.label / .description / .confirmText /
- *     .successMessage / .outcomeMessages.<outcome> / .params.<param_name>.*
+ *     .successMessage / .outcomeMessages.<outcome> / .params.<param_name>.* /
+ *     .resultDialog.*
+ *
+ * That is the declaration `TranslationDataSchema.globalActions` makes: global
+ * translations are for object-less actions. A `globalActions` entry that names
+ * a bound action is never read, and `os validate` refuses it with the
+ * object-scoped key to write instead. See {@link actionTranslationNode}.
  *
  * Lookup order: requested locale → each entry of `fallbackChain` → literal
  * `label` from the metadata — except that a request for the deployment's
@@ -546,6 +555,36 @@ function lookupTabLabel(
   return undefined;
 }
 
+/**
+ * The ONE translation node an action resolves through, in one locale's data.
+ * Every action lookup below reads its leaf off this node, so they cannot
+ * disagree about the address.
+ *
+ * The address is keyed on the action's OWN `objectName`:
+ *
+ *  - a bound action reads only `objects.<objectName>._actions.<name>`;
+ *  - an object-less action reads only `globalActions.<name>`.
+ *
+ * A bound action never falls back to `globalActions`. The declaration
+ * `TranslationDataSchema.globalActions` scopes that group to object-less
+ * actions, and the translation linter refuses a `globalActions` key that names
+ * a bound action, at error level, as never read. A fallback here would make
+ * that refused key work at runtime.
+ *
+ * An object document's inline action carries no `objectName`, and is bound to
+ * the object that declares it. {@link translateObject} scopes it to that object
+ * before it reaches here.
+ */
+function actionTranslationNode(
+  data: TranslationData | undefined,
+  action: ActionLike,
+): NonNullable<TranslationData['globalActions']>[string] | undefined {
+  if (!data) return undefined;
+  return action.objectName
+    ? data.objects?.[action.objectName]?._actions?.[action.name]
+    : data.globalActions?.[action.name];
+}
+
 function lookupActionField(
   bundle: TranslationBundle | undefined,
   action: ActionLike,
@@ -554,14 +593,8 @@ function lookupActionField(
 ): string | undefined {
   if (!bundle) return undefined;
   for (const code of localeChain(opts)) {
-    const data = pickData(bundle, code);
-    if (!data) continue;
-    const fromObject = action.objectName
-      ? data.objects?.[action.objectName]?._actions?.[action.name]?.[field]
-      : undefined;
-    if (typeof fromObject === 'string' && fromObject.length > 0) return fromObject;
-    const fromGlobal = data.globalActions?.[action.name]?.[field];
-    if (typeof fromGlobal === 'string' && fromGlobal.length > 0) return fromGlobal;
+    const candidate = actionTranslationNode(pickData(bundle, code), action)?.[field];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
   }
   return undefined;
 }
@@ -596,20 +629,15 @@ export function resolveActionConfirm(
 
 /**
  * Look up the translated `resultDialog` node for an action in a single
- * locale's data (object-scoped first, then global). The node's `fields`
- * record is keyed by the LITERAL result-field path (`"user.email"`), so it
- * is indexed directly — never split on `.`.
+ * locale's data, at the action's one address ({@link actionTranslationNode}).
+ * The node's `fields` record is keyed by the LITERAL result-field path
+ * (`"user.email"`), so it is indexed directly — never split on `.`.
  */
 function lookupActionResultDialogNode(
   data: TranslationData | undefined,
   action: ActionLike,
 ): { title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> } | undefined {
-  if (!data) return undefined;
-  const fromObject = action.objectName
-    ? data.objects?.[action.objectName]?._actions?.[action.name]?.resultDialog
-    : undefined;
-  if (fromObject) return fromObject;
-  return data.globalActions?.[action.name]?.resultDialog;
+  return actionTranslationNode(data, action)?.resultDialog;
 }
 
 function lookupActionResultDialogText(
@@ -688,11 +716,13 @@ export function resolveActionSuccess(
  * map's keys are the closed set of `outcome` facts the handler reports, so a
  * bundle cannot add an outcome — a translated entry for an undeclared key is
  * never selected by anything and is not copied in. Each declared key resolves
- * the way {@link lookupActionField} resolves `successMessage`: object-scoped
- * `objects.<object>._actions.<action>.outcomeMessages.<outcome>` first, then
- * `globalActions.<action>.outcomeMessages.<outcome>`, per locale in the chain,
- * falling back to the authored copy. The `${result.*}` tokens in a message
- * are the renderer's to interpolate — a translation carries them verbatim.
+ * the way {@link lookupActionField} resolves `successMessage`: at the action's
+ * one address ({@link actionTranslationNode}), so
+ * `objects.<object>._actions.<action>.outcomeMessages.<outcome>` for a bound
+ * action and `globalActions.<action>.outcomeMessages.<outcome>` for an
+ * object-less one, per locale in the chain, falling back to the authored copy.
+ * The `${result.*}` tokens in a message are the renderer's to interpolate — a
+ * translation carries them verbatim.
  */
 function resolveActionOutcomeMessages(
   bundle: TranslationBundle | undefined,
@@ -706,14 +736,7 @@ function resolveActionOutcomeMessages(
   let out: Record<string, string> | undefined;
   for (const outcome of Object.keys(declared)) {
     for (const code of chain) {
-      const data = pickData(bundle, code);
-      if (!data) continue;
-      const fromObject = action.objectName
-        ? data.objects?.[action.objectName]?._actions?.[action.name]?.outcomeMessages?.[outcome]
-        : undefined;
-      const candidate = typeof fromObject === 'string' && fromObject.length > 0
-        ? fromObject
-        : data.globalActions?.[action.name]?.outcomeMessages?.[outcome];
+      const candidate = actionTranslationNode(pickData(bundle, code), action)?.outcomeMessages?.[outcome];
       if (typeof candidate === 'string' && candidate.length > 0) {
         out ??= { ...declared };
         out[outcome] = candidate;
@@ -726,8 +749,8 @@ function resolveActionOutcomeMessages(
 
 /**
  * The `params.<param>` translation node for one action, in one locale's data —
- * object-scoped first, then `globalActions`, the same split
- * {@link lookupActionField} walks.
+ * at the action's one address ({@link actionTranslationNode}), the same
+ * address {@link lookupActionField} reads.
  */
 function lookupActionParamNode(
   data: TranslationData | undefined,
@@ -736,12 +759,7 @@ function lookupActionParamNode(
 ): NonNullable<
   NonNullable<NonNullable<NonNullable<TranslationData['objects']>[string]['_actions']>[string]['params']>
 >[string] | undefined {
-  if (!data) return undefined;
-  const fromObject = action.objectName
-    ? data.objects?.[action.objectName]?._actions?.[action.name]?.params?.[paramName]
-    : undefined;
-  if (fromObject) return fromObject;
-  return data.globalActions?.[action.name]?.params?.[paramName];
+  return actionTranslationNode(data, action)?.params?.[paramName];
 }
 
 /**
