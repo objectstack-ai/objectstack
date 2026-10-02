@@ -32,6 +32,7 @@ import { strictUnknownKeyError } from '../shared/suggestions.zod';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { aiJsonSchemaSlot } from '../shared/ai-json-schema-slot';
 import { ACTION_TARGET_ALIASES } from './action-target-aliases';
 
 /**
@@ -792,8 +793,18 @@ export const ActionAiSchema = strictObject({
    * downstream tool chaining (one action's output feeds another's input) and
    * is summarised into the tool description so the model knows what it gets
    * back. Optional — when omitted the return value is treated as freeform.
+   *
+   * The cloud AI runtime compiles this schema before the action runs, and its
+   * schema reader refuses an untyped subschema that carries a type-scoped
+   * keyword (`properties`, `items`, `pattern`, `minimum`, …). The slot refuses
+   * the same schemas here, at the subschema's path, through the one factory
+   * `agent.structuredOutput.schema` shares (`shared/ai-json-schema-slot.ts`).
    */
-  outputSchema: z.record(z.string(), z.unknown()).optional().describe('JSON Schema for the action return value.'),
+  outputSchema: aiJsonSchemaSlot('ai.outputSchema').optional().describe(
+    'JSON Schema for the action return value. An untyped subschema that carries a type-scoped '
+    + 'keyword (properties, items, pattern, minimum, …) is refused at its path, because the AI '
+    + 'runtime\'s schema reader does not check it; declare its "type".',
+  ),
 
   /**
    * Override confirmation for AI calls. When unset, the bridge defaults to

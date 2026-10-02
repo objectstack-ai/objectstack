@@ -219,22 +219,29 @@ const WIDGET_HISTORY =
  *
  * The bag stays open (`passthrough`), but an undeclared key in it is NOT a
  * renderer setting. `dataset` is required, so every widget renders through
- * objectui's dataset-bound path (`DatasetWidget`), and that path reads exactly
- * the five keys declared below plus `description`, the metric sub-caption.
- * Any other key parses and reaches no renderer. The #20960 census measured
- * that at objectui `main` `5262f7dd` over every key this repo's examples wrote
- * here (`format`, `currency`, `color`, `suffix`, `showLegend`, `horizontal`,
- * `showDataLabels`): none is read on that path — only the legacy inline arm,
- * which a widget carrying a `dataset` never reaches, spreads the bag into
- * component props — so each was removed from its producer rather than
- * declared. `description` is the opposite case, read but unwritten: no
- * authored source writes it (only `translateDashboard` overlays it, from a
- * `subCaption` bundle entry — `system/i18n-resolver.ts`), and objectui#11228
- * ruled it out with the inline dialect, so it stays undeclared and dropping
- * the read is objectui's follow-up. ⛔ A key is declared here only with both
- * a writer and a read site on the dataset-bound path, and it then joins
- * `CONSUMED_WIDGET_OPTION_KEYS` in `@objectstack/sdui-parser`
- * (`check:widget-option-census`).
+ * objectui's dataset-bound path (`DatasetWidget`), and that path is meant to
+ * read exactly the five keys declared below. Any other key parses and reaches
+ * no renderer. The #20960 census measured that at objectui `main` `5262f7dd`
+ * over every key this repo's examples wrote here (`format`, `currency`,
+ * `color`, `suffix`, `showLegend`, `horizontal`, `showDataLabels`): none is
+ * read on that path — only the legacy inline arm, which a widget carrying a
+ * `dataset` never reaches, spreads the bag into component props — so each was
+ * removed from its producer rather than declared.
+ *
+ * `description` — the metric sub-caption — is RETIRED, not left undeclared:
+ * no authored source ever wrote it, its only writer was `translateDashboard`'s
+ * overlay of a `subCaption` bundle entry, and ruling C on objectui#11389
+ * (reversing #5428 item 4) retired it at both ends, objectstack first
+ * (#21257). The overlay is gone, `subCaption` is a tombstone on the widget
+ * translation node (`system/translation.zod.ts`), and objectui#11389 drops the
+ * renderer's read. A widget keeps ONE authored description,
+ * `widget.description`, rendered as the card-header subtitle; a caption under a
+ * metric's value, if a named user ever needs one, returns as a declared
+ * widget-level key outside `options`, never as `options.description`.
+ *
+ * ⛔ A key is declared here only with both a writer and a read site on the
+ * dataset-bound path, and it then joins `CONSUMED_WIDGET_OPTION_KEYS` in
+ * `@objectstack/sdui-parser` (`check:widget-option-census`).
  *
  * Presentation has declared homes instead: a number's face is the dataset
  * MEASURE's `format` + `currency`, a tile's accent is the widget's

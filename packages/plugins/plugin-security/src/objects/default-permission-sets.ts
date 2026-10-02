@@ -15,6 +15,7 @@ import {
   MCP_AGENT_PERMISSION_SET_WRITE,
   MCP_AGENT_PERMISSION_SET_RESTRICTED,
 } from '@objectstack/spec/ai';
+import { SysUser } from '@objectstack/platform-objects/identity';
 
 /**
  * Identity tables managed by the better-auth plugin (see
@@ -244,6 +245,73 @@ const privateCredentialRowScope = () => [
   { name: 'sys_jwks_none', object: 'sys_jwks', operation: 'select', using: 'id == null' },
 ];
 
+/** The identity object whose `Admin` field group the sets below withhold or keep. */
+const IDENTITY_OBJECT = 'sys_user';
+/** The field group the identity object's declaration marks as admin-review data. */
+const IDENTITY_ADMIN_FIELD_GROUP = 'Admin';
+
+/**
+ * [#21237] The identity object's `Admin`-group field names, READ OFF ITS
+ * DECLARATION (`@objectstack/platform-objects`' `SysUser`) — never a list kept
+ * here. A field the declaration adds to the group is withheld from org peers
+ * the moment it is declared; one it moves out of the group stops being
+ * withheld the same way. Sorted, so the seeded set rows are stable.
+ */
+function identityAdminGroupFields(): string[] {
+  return Object.entries((SysUser.fields ?? {}) as Record<string, { group?: string }>)
+    .filter(([, field]) => field?.group === IDENTITY_ADMIN_FIELD_GROUP)
+    .map(([name]) => name)
+    .sort();
+}
+
+/**
+ * [#21237] Field-level security for the identity object's `Admin` group — the
+ * permission-set contract's existing `fields` mechanism, enforced by the
+ * security plugin's field masker (results), its predicate guard (filters and
+ * sorts) and the activity / ledger field redaction that reads the same served
+ * projection. ⛔ No second masking rule, and no field attribute.
+ *
+ * Why BOTH spellings exist, and the admin one is not decoration: `member_default`
+ * is the additive `everyone` baseline (ADR-0090 D5), so EVERY authenticated
+ * human resolves it — org admins and platform admins included — and field
+ * permissions merge most-permissively (`PermissionEvaluator.getFieldPermissions`).
+ * A withholding entry in the baseline therefore withholds from everyone who
+ * holds no set naming the field readable. The admin sets carry the keeping
+ * entry (`readable: true`, `editable: true` — exactly the state of a field no
+ * set names, so an admin's reads and writes are unchanged; the identity write
+ * guard, ADR-0092 D2, stays the column authority for writes).
+ *
+ *   - `withhold` → `member_default`, `viewer_readonly`: the shipped non-admin
+ *     sets that open identity-object read to an org peer
+ *     (`sys_user_org_members`). Repeated on `viewer_readonly` rather than
+ *     inherited, for the reason `scimProjectionRowScope` gives: where no
+ *     platform baseline is composed, a set naming nothing leaves the field
+ *     served.
+ *   - `keep` → `admin_full_access`, `organization_admin` (and so its derived
+ *     no-bypass variant).
+ *
+ * ⚠️ Field-level security applies to EVERY row, the reader's own included, and
+ * to filters as well as results: a member's query that filters or sorts on a
+ * withheld field is refused (the predicate guard's filter-oracle rule), and a
+ * member's user-context write naming one is refused by the field-level write
+ * gate. Every reader of these fields on a member's OWN row reads through system
+ * or auth context (the auth manager's gates and stamps, the better-auth
+ * adapter, the authorization resolver's `ai_seat` synthesis), which no
+ * permission set reaches. The deactivation flag is declared OUTSIDE the group
+ * on purpose (#21237): it is directory status that every user picker filters
+ * on, so withholding it would refuse each member's picker query. A fresh
+ * object per set, like `denyWritesOnManagedObjects()`.
+ */
+const identityAdminFieldSecurity = (
+  posture: 'withhold' | 'keep',
+): Record<string, { readable: boolean; editable: boolean }> =>
+  Object.fromEntries(
+    identityAdminGroupFields().map((field) => [
+      `${IDENTITY_OBJECT}.${field}`,
+      posture === 'keep' ? { readable: true, editable: true } : { readable: false, editable: false },
+    ]),
+  );
+
 /**
  * Default permission sets seeded by the platform.
  *
@@ -283,6 +351,9 @@ const baseDefaultPermissionSets: PermissionSet[] = [
     // ⛔ no `allowExport` on the wildcard, and do not restore a narrower one).
     // Behaviour-neutrality is pinned by `default-permission-sets.test.ts`.
     ...ADMIN_FULL_ACCESS_CAPABILITIES,
+    // [#21237] Keeps the identity object's `Admin` group, which `member_default`
+    // (resolved by this holder too) withholds — see `identityAdminFieldSecurity`.
+    fields: identityAdminFieldSecurity('keep'),
   }),
   // ── Organization Administrator ──────────────────────────────────────
   //
@@ -358,6 +429,10 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       sys_user_position: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
     },
     systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
+    // [#21237] Keeps the identity object's `Admin` group for an org admin, who
+    // resolves `member_default` too; the derived no-bypass variant carries it
+    // over. See `identityAdminFieldSecurity`.
+    fields: identityAdminFieldSecurity('keep'),
     rowLevelSecurity: [
       // [ADR-0095 D1] The wildcard `tenant_isolation` policy RETIRED here — the
       // tenant wall is now Layer 0 (`tenant-layer.ts`), AND-composed ahead of and
@@ -710,6 +785,11 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       sys_inbox_message: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
       sys_notification_receipt: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
     },
+    // [#21237] The identity object's `Admin` group is admin-review data, not a
+    // staff directory: `sys_user_org_members` below opens every org peer's row,
+    // and this withholds the group on it. Read `identityAdminFieldSecurity`
+    // before touching it — the admin sets carry the keeping half.
+    fields: identityAdminFieldSecurity('withhold'),
     rowLevelSecurity: [
       // [ADR-0095 D1] The wildcard `tenant_isolation` policy RETIRED here — the
       // tenant wall is now Layer 0 (`tenant-layer.ts`). Its old OR-merge with the
@@ -1103,6 +1183,10 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // future relaxations might widen the wildcard.
       ...denyWritesOnManagedObjects(),
     },
+    // [#21237] Repeated here rather than inherited from `member_default`: this
+    // set opens the org-peer identity read on its own (`sys_user_org_members`
+    // below). See `identityAdminFieldSecurity`.
+    fields: identityAdminFieldSecurity('withhold'),
     rowLevelSecurity: [
       // [ADR-0095 D1] The wildcard `tenant_isolation` policy RETIRED here — the
       // tenant wall is now Layer 0 (`tenant-layer.ts`). The `_self` carve-outs

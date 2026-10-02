@@ -208,14 +208,14 @@ describe('direction 3 — the information is PRESERVED as a comment (load-bearin
     expect(draft.source).toContain('// Remote primary key: remote_order_id');
   });
 
-  it('does NOT overclaim completeness — #10997 is unfixed and in another lane', async () => {
+  it('does NOT overclaim completeness — a driver can under-report a composite key', async () => {
     const draft = await svc().generateObjectDraft('warehouse', 'order_lines', {
       primaryKey: ['order_id', 'line_no'],
     });
     // The caveat, not merely "some comment exists": a reader who trusts this
     // list as the complete key can be wrong today, through no fault of this
     // generator, and the file has to say so.
-    expect(draft.source).toContain('#10997');
+    expect(draft.source).toContain("a driver's introspection can report only the first column");
     expect(draft.source).toContain('lower bound');
   });
 
@@ -226,7 +226,7 @@ describe('direction 3 — the information is PRESERVED as a comment (load-bearin
     // A bare column list would read as an oversight to the next person to touch
     // this generator — exactly the shape that put the key on the field in the
     // first place.
-    expect(draft.source).toContain('#11000');
+    expect(draft.source).toContain('not part of the field schema');
     expect(draft.source).toContain('no authorable key');
   });
 

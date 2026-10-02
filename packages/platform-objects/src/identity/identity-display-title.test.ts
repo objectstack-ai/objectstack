@@ -131,7 +131,8 @@ const FORMULA_CASES: Case[] = [
   {
     schema: SysVerification as unknown as Schema,
     row: { id: 'ver_1Jb9', identifier: 'ada@example.com', value: 'tok_redacted' },
-    title: 'Verification for ada@example.com',
+    // [#21197] A fixed label: both columns this row carries are `internal`.
+    title: 'Verification',
   },
 ];
 
@@ -156,6 +157,22 @@ describe('[#20059] identity objects resolve a real record title under ADR-0079 o
       expect(title).not.toBe(c.row.id);
       expect(String(title)).not.toContain(String(c.row.id));
     });
+  });
+
+  it('[#21197] sys_verification: neither the title nor the highlights name an internal column', () => {
+    // The read path evaluates formulas BEFORE it omits `internal` fields, so a
+    // title built from one re-serves it through `display_title`.
+    const schema = SysVerification as unknown as Schema & { highlightFields?: string[] };
+    const internal = Object.entries(schema.fields)
+      .filter(([, def]) => (def as { internal?: unknown }).internal === true)
+      .map(([name]) => name)
+      .sort();
+    expect(internal).toEqual(['identifier', 'value']);
+    const row = { id: 'ver_7Rk2', identifier: 'credential-shaped-identifier', value: 'credential-shaped-value' };
+    const title = String(evaluateDisplayTitle(schema, row));
+    for (const name of internal) expect(title).not.toContain(String(row[name as 'identifier' | 'value']));
+    for (const name of internal) expect(renderTitleFormat(schema.titleFormat, row)).not.toContain(String(row[name as 'identifier' | 'value']));
+    for (const name of internal) expect(schema.highlightFields ?? []).not.toContain(name);
   });
 
   it('sys_member: a row without a role is titled by its user alone', () => {
