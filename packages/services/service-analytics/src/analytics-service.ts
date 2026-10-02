@@ -108,6 +108,7 @@ import { invalidMemberError } from './dataset-refusal.js';
 // [#20807] A grouped dimension on a structured-JSON field is refused in
 // `ensureCube`, ahead of both strategies, naming the member the caller wrote.
 import { assertNoStructuredJsonDimension } from './structured-json-dimension-door.js';
+import { assertOrderKeysSelected } from './order-key-door.js';
 // [#16206] The `sqlDialect` hook's DECLARED accept set, and the predicate that
 // says whether a host answered outside it. Both live next to the membership set
 // the compilers read, so the contract has one definition and this file states
@@ -2212,6 +2213,10 @@ export class AnalyticsService implements IAnalyticsService {
     // names no declared member — in every tier, before a strategy compiles it.
     // After `ensureCube` so a non-existent cube/object still answers 404 first.
     this.assertCallerMembersResolvable(query, authorCube, context);
+    // [#21267] An `order` key must name a member this query selects — one
+    // refusal ahead of strategy selection, so both faces answer alike
+    // (`order-key-door.ts`).
+    assertOrderKeysSelected(query);
     const ctx = await this.callCtx(query, context, tokenCtx, scope);
     let skip: Set<AnalyticsStrategy> | undefined;
     for (;;) {
@@ -3018,6 +3023,9 @@ export class AnalyticsService implements IAnalyticsService {
     const authorCube = scope.getCube(query.cube!);
     this.ensureCube(query, scope);
     this.assertCallerMembersResolvable(query, authorCube, context);
+    // [#21267] Same order-key door as `query()`: the dry run must not hand back
+    // an `ORDER BY` naming a column the statement does not select.
+    assertOrderKeysSelected(query);
     const ctx = await this.callCtx(query, context, tokenCtx, scope);
     const strategy = this.resolveStrategy(query, ctx);
     this.logger.debug(`[Analytics] generateSql on cube "${query.cube}" → ${strategy.name}`);
