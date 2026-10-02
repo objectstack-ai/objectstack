@@ -5496,6 +5496,21 @@ export class SqlDriver implements IDataDriver {
   protected dateFields: Record<string, Set<string>> = {};
   protected datetimeFields: Record<string, Set<string>> = {};
   /**
+   * [#21259] The builtin audit timestamps ({@link AUDIT_TIMESTAMP_COLUMNS}) a
+   * MANAGED object does not declare — the columns this driver provisions on
+   * every table it builds ({@link createAuditTimestampColumn}) that no
+   * declaration types. `formatInput` writes them in the `Field.datetime` form,
+   * the type their column was created with.
+   *
+   * Most objects declare both, because the engine's registry injects them as
+   * `Field.datetime`; a `managedBy: 'better-auth'` or `systemFields: false`
+   * object gets nothing injected, and the engine's audit hook stamps both
+   * anyway. A declared column keeps its declaration, whatever its type.
+   * Installed by {@link registerManagedObjectMetadata} only: an external object
+   * (ADR-0015) maps a remote table whose columns this driver did not create.
+   */
+  protected undeclaredAuditTimestampFields: Record<string, readonly string[]> = {};
+  /**
    * SQLite `Field.datetime` columns proven to hold ONLY canonical UTC text —
    * either backfilled by {@link backfillCanonicalDatetimes} or created empty in
    * this process. Read by {@link needsLegacyDatetimeRepair} to drop the repair
@@ -12050,6 +12065,11 @@ export class SqlDriver implements IDataDriver {
     // #2186: remember the authoritative metadata field set for this table so
     // drift detection / `os migrate` can diff the physical schema against it.
     this.managedObjectFields.set(tableName, obj.fields ?? {});
+    // [#21259] Recomputed on every registration, so a re-registration that now
+    // declares a column stops treating it as undeclared.
+    this.undeclaredAuditTimestampFields[tableName] = AUDIT_TIMESTAMP_COLUMNS.filter(
+      (col) => !Object.prototype.hasOwnProperty.call(obj.fields ?? {}, col),
+    );
     // Always overwrite — a metadata change that REMOVES `indexes` must clear
     // the previous entry, or drift detection keeps expecting an index nobody
     // declares any more (and never reports it as orphaned).
@@ -20016,6 +20036,28 @@ export class SqlDriver implements IDataDriver {
         if (v == null) continue;
         // `NOW()` was already replaced with an ISO instant above; anything else
         // that is not interpretable as a time passes through untouched.
+        const normalized = this.storageDatetimeValue(v);
+        if (normalized !== v) {
+          if (!copied) { copy = { ...copy }; copied = true; }
+          copy[field] = normalized;
+        }
+      }
+    }
+
+    // [#21259] The same rule for a builtin audit timestamp the object does NOT
+    // declare (see {@link undeclaredAuditTimestampFields}). Its column is the
+    // `DATETIME(3)` / `timestamptz` / canonical-text column this driver created,
+    // and the engine's audit hook stamps it as `toISOString()` text, which
+    // MySQL refuses as a datetime literal. Measured on live MySQL 8.0.46: every
+    // insert into `sys_jwks` (declares `created_at` only) and `sys_member` was
+    // refused on `updated_at`, so no JWT signing key was ever stored. On SQLite
+    // and Postgres the hook's text is already the canonical form and is bound
+    // unchanged; a `Date` lands as that same text instead of an epoch INTEGER.
+    const undeclaredAudit = this.undeclaredAuditTimestampFields[object];
+    if (undeclaredAudit && undeclaredAudit.length > 0 && copy && typeof copy === 'object') {
+      for (const field of undeclaredAudit) {
+        const v = copy[field];
+        if (v == null) continue;
         const normalized = this.storageDatetimeValue(v);
         if (normalized !== v) {
           if (!copied) { copy = { ...copy }; copied = true; }

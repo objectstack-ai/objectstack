@@ -44,7 +44,7 @@
  * Nothing else about it moved: the same redacted `message`/`stack` reach the
  * same `error` key of the same meta bag (`ObjectQL.writeFailureLogMeta`).
  *
- * ## [#8823] …but "the tail names identifiers" is not true of every dialect
+ * ## [commit 4dfa369a9] …but "the tail names identifiers" is not true of every dialect
  *
  * The paragraph above was written with a premise attached: that whatever the
  * database prints after the separator names IDENTIFIERS — a column, a table, a
@@ -60,7 +60,7 @@
  * ```
  *
  * Three keep an identifier; the second keeps a caller's value. Measured through
- * this function, not predicted — and re-measured byte-identical after #9030
+ * this function, not predicted — and re-measured byte-identical after commit 27a567dd8
  * taught the shared leak predicate this phrasing, which moves the VERDICT but
  * not the cut.
  *
@@ -81,7 +81,7 @@
  *
  * ## [#9160] The list is now MEASURED, and there is a way to notice a gap
  *
- * #8823 left one entry and no instrument: nothing measured whether a diagnostic
+ * Commit 4dfa369a9 left one entry and no instrument: nothing measured whether a diagnostic
  * a driver produced carried a value, so the next entry needed the same accident
  * that found the first. `sql-driver-diagnostic-value-probe.test.ts` is that
  * instrument. It plants a canary value, raises each candidate family against
@@ -108,7 +108,7 @@
  * ```
  *
  * ¹ on `error.message`. Both put the caller's row on `error.detail`, which
- * `ObjectLogger.write` does not serialize — the coincidence #8823 recorded, and
+ * `ObjectLogger.write` does not serialize — the coincidence commit 4dfa369a9 recorded, and
  * it is still only a coincidence. **The three Postgres families marked VALUE put
  * the caller's value on `message`, the field that IS serialized**, so nothing
  * covers them but the entries below. That was the open question #9160 asked and
@@ -140,7 +140,7 @@
  * ```
  * pg 22P02/22007  value runs to end of message   → head-anchored cut (below)
  * mysql 1292      value runs to end of message   → head-anchored cut (below)
- * pg 22003        value "…" is out of range …    → `tail`, the #8823 mechanism
+ * pg 22003        value "…" is out of range …    → `tail`, the commit 4dfa369a9 mechanism
  * ```
  *
  * `22003` was assumed unreachable on the reasoning that its value slot holds a
@@ -266,11 +266,11 @@ const STATEMENT_SEPARATOR = ' - ';
 /** What replaces a statement that carried nothing but values. */
 const REDACTED_STATEMENT = '[statement and bound values redacted]';
 
-/** [#8823] What replaces one caller value inlined in the database's own diagnostic. */
+/** [commit 4dfa369a9] What replaces one caller value inlined in the database's own diagnostic. */
 const REDACTED_VALUE = '[value redacted]';
 
 /**
- * [#8823] MySQL/MariaDB `ER_DUP_ENTRY` (1062), whole: the template's own head,
+ * [commit 4dfa369a9] MySQL/MariaDB `ER_DUP_ENTRY` (1062), whole: the template's own head,
  * the conflicting VALUE, and the `for key <index>` tail that anchors it.
  *
  * `Duplicate entry '%-.192s' for key '%-.192s'` — the first slot is whatever the
@@ -295,7 +295,7 @@ const REDACTED_VALUE = '[value redacted]';
 const DUPLICATE_ENTRY = /(duplicate entry\s+)["'`][\s\S]*["'`](\s+for key\s+["'`][^"'`]+["'`])/gi;
 
 /**
- * [#8823] The same template with its head already gone — what the statement cut
+ * [commit 4dfa369a9] The same template with its head already gone — what the statement cut
  * leaves behind when the conflicting VALUE itself contained ` - `.
  *
  * Measured: `insert into … values ('2026 - Q3 plan') - Duplicate entry '2026 -
@@ -352,7 +352,7 @@ const MYSQL_INCORRECT_VALUE_TAIL = /'(\s+for column\s+'[^']*'\s+at row\s+\d+)/gi
  * invalid input syntax for type timestamp with time zone: "CANARY-notadate"
  * ```
  *
- * **This is the family the #8823 note was waiting for.** Postgres' unique
+ * **This is the family the commit 4dfa369a9 note was waiting for.** Postgres' unique
  * violation is saved only because its value sits on `error.detail`, which
  * `ObjectLogger.write` does not serialize — recorded there as "coincidence, not
  * a defence". Here the value is on `error.message`, the field that IS
@@ -405,7 +405,7 @@ const PG_VALUE_OUT_OF_RANGE = /(value\s+)"[\s\S]*"(\s+is out of range for type [
  *   logged:  Q3" is out of range for type integer          ← `Q3` is caller data
  * ```
  *
- * This family keeps its right anchor, so it takes the #8823 recovery and NOT a
+ * This family keeps its right anchor, so it takes the commit 4dfa369a9 recovery and NOT a
  * `head`: everything before ` is out of range for type` is value residue by
  * construction and is dropped whole. ⛔ It must not be given a `head` — its
  * diagnostic continues past the value, which is exactly the shape the head
@@ -678,7 +678,7 @@ export function redactStatementFromMessage(message: string): string {
   if (!message || !looksLikeInternalErrorLeak(message)) return message;
   const cut = statementCut(message);
   // No statement to cut — but a dialect may still have inlined a value in the
-  // diagnostic itself, and since #9030 taught the shared predicate this
+  // diagnostic itself, and since commit 27a567dd8 taught the shared predicate this
   // phrasing, a BARE `Duplicate entry …` now reaches this line instead of
   // being turned away above.
   if (cut === -1) return redactDiagnosticValues(message);
@@ -716,7 +716,7 @@ function statementCut(message: string): number {
 }
 
 /**
- * [#8823] Drop the caller values a dialect inlines into its OWN diagnostic,
+ * [commit 4dfa369a9] Drop the caller values a dialect inlines into its OWN diagnostic,
  * keeping every identifier around them.
  *
  * Runs on the tail the statement cut already produced, never on the whole

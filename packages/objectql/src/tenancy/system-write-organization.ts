@@ -69,7 +69,7 @@
  *    isPlatformObjectOutOfTenantAuditScope}, `platform-object-tenancy.ts`).
  *
  *    ⚠️ This exclusion used to be the whole `sys_` / `cloud_` / `ai_`
- *    NAMESPACE, on #8672's reasoning that "an org-less row is defensible for
+ *    NAMESPACE, on the reasoning commit ff08691e6 recorded, that "an org-less row is defensible for
  *    `sys_permission_set`". The maintainer WITHDREW the wholesale form on
  *    2026-08-31 (#13491, 联案 #13497): that reasoning inherits **per object**,
  *    and the same namespace also holds objects whose org-less rows are a

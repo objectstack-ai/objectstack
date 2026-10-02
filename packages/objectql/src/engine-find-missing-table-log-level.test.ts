@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #13273 — a `find` that failed because the table was never created is not the
+ * Commit 3a86a65e7 — a `find` that failed because the table was never created is not the
  * same fact as a `find` that FAILED, and the two must not share a log level.
  *
  * ## What was measured, and where

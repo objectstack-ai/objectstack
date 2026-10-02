@@ -46,7 +46,7 @@
  * for all of them, and a single refusal can carry findings from several
  * classes at once). `ENVELOPE PRESENCE` then asserts the envelope itself, in
  * one place. Repaired the same way as #14367 (`registerObject`'s bare `Error`)
- * and #14474 (`NamespaceConflictError`), one door over.
+ * and commit df657d9df (`NamespaceConflictError`), one door over.
  *
  * ⛔ If `ENVELOPE PRESENCE` below goes red, the envelope has been REMOVED or
  * its code renamed — a regression, not a cleanup. Restore it rather than

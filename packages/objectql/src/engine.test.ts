@@ -411,7 +411,7 @@ describe('ObjectQL Engine', () => {
         beforeEach(async () => {
             engine.registerDriver(mockDriver, true);
             await engine.init();
-            // [#13657] `stamped` is declared because this suite's own
+            // [commit b003cf2e8] `stamped` is declared because this suite's own
             // `beforeInsert` hook writes it, and the post-hook door now judges
             // the hook's output against this map. The subject — one dispatch
             // per row, single-record context shape — is untouched.

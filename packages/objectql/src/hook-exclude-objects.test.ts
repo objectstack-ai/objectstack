@@ -35,7 +35,7 @@
  *  3. the two refused EXCLUSION shapes (`''`/`['']`, `'*'`), following #4281's
  *     ruling on empty hook targets, plus the `[]` that is deliberately accepted
  *     on that face;
- *  3b. [#6573] the refused ALLOW shapes — `''`, `[]`, `['']` — and the scope
+ *  3b. [commit 708431313] the refused ALLOW shapes — `''`, `[]`, `['']` — and the scope
  *     whose two faces cancel out. #4281 closed these on the metadata path only;
  *     `registerHook` is the code path it never reached. Refused at the door,
  *     with `hookMatchesObject`'s reading left deliberately unchanged;
@@ -217,7 +217,7 @@ describe('[#5928] refused exclusion faces (#4281 / ADR-0078 lineage)', () => {
 });
 
 /*
- * ── [#6573] The allow face gets #4281's door too ────────────────────────────
+ * ── [commit 708431313] The allow face gets #4281's door too ────────────────────────────
  *
  * #4281 ("an empty target is not *no* target") was closed in two places, both
  * on the METADATA path: `HookSchema.object`'s refine in `packages/spec`, and
@@ -413,7 +413,7 @@ describe('[#5928] property: hasHooksFor is never tighter than triggerHooks', () 
     { object: '*', excludeObjects: ['account', 'sys_job'] },
     { object: ['account', 'contact'], excludeObjects: 'contact' },
     // `{ object: ['account','contact'], excludeObjects: ['account','contact'] }`
-    // used to sit here. #6573 refuses a fully-cancelled scope at registration,
+    // used to sit here. Commit 708431313 refuses a fully-cancelled scope at registration,
     // so it can no longer be registered at all — and a scope that cannot exist
     // cannot violate the gate/dispatch property. Its refusal is pinned below.
     { object: 'account', excludeObjects: 'lead' },
@@ -498,14 +498,14 @@ describe('[#5928] hookMatchesObject — the one shared rule', () => {
   });
 
   it("keeps the truthiness read of `object: ''` — #6573 closed the door, not the matcher", () => {
-    // #5928 pinned this reading as preserved-not-endorsed and filed #6573.
-    // #6573's ruling: refuse `''` at REGISTRATION, and leave this read alone —
+    // #5928 pinned this reading as preserved-not-endorsed and filed the card commit 708431313 closed.
+    // The decision commit 708431313 records: refuse `''` at REGISTRATION, and leave this read alone —
     // flipping it would silently convert a fires-on-everything hook into a
     // fires-on-nothing one, the same defect pointing the other way. So the
     // matcher still answers "global" for a hand-built entry...
     expect(hookMatchesObject({ object: '' }, 'account')).toBe(true);
     // ...and no live entry can carry `''`, because registration refuses it.
-    // (The refusal itself is pinned in the #6573 block below.)
+    // (The refusal itself is pinned in the commit 708431313 block below.)
     const engine = makeEngine();
     expect(() => register(engine, 'blank', { object: '' })).toThrow();
   });

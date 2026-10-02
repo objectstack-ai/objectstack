@@ -114,7 +114,7 @@ const DISPATCH_ORDER = {
  *
  * ⚠️ Its exclusion below is `unclassified`, not `global`. Until the 2026-08-31
  * ruling this file read it as "platform namespace ⇒ deliberately org-less
- * (#8672)"; that wholesale reading was withdrawn, and what these cases now pin
+ * (…)"; that wholesale reading was withdrawn, and what these cases now pin
  * is that an UNADJUDICATED object's behaviour did not move — which is what
  * bounds the reclassification's blast radius to the admitted list. The admitted
  * and `global` sides are pinned in `tenancy-by-object-classification.test.ts`.
@@ -344,7 +344,7 @@ describe('#8844 the exclusions — populations the refusal must not touch', () =
     'a platform-namespace object stays org-less on the %s posture',
     async (posture) => {
       // ⚠️ [#13491] Reads as an UNCLASSIFIED verdict now, not a namespace one.
-      // #8672 measured this primitive on `sys_permission_set` and filed it as an
+      // The card commit ff08691e6 cites measured this primitive on `sys_permission_set` and filed it as an
       // observation because an org-less row is defensible there. The #8844
       // ruling confirms that reasoning holds for platform objects and does NOT
       // generalize to application objects — which is exactly the boundary here.

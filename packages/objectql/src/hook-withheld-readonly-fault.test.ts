@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#17219] The composer's contract, at the seam rather than through a driver.
+ * [commit 706ad0fcc] The composer's contract, at the seam rather than through a driver.
  *
  * The three DECLINE conditions carry as much weight as the accept case, and for
  * the reason the card is about: a diagnostic that fires on the wrong error is

@@ -14,7 +14,7 @@
  * three implementations at once: it depends on `@objectstack/metadata`
  * (`MetadataManager`) and `@objectstack/core` (`createMemoryMetadata`) and owns
  * `MetadataFacade`. That is the same argument
- * `metadata-service-getobject-equivalence.test.ts` (#6745) already makes for
+ * `metadata-service-getobject-equivalence.test.ts` (commit 7a5ef0008) already makes for
  * living here, and it is why `packages/spec` cannot host this half.
  *
  * ## The four subjects, and why four for three implementations
@@ -38,7 +38,7 @@
  * full verbatim ruling text and the row-2 convergence rationale (the
  * direction is `check:meta-type-normalized`'s: normalize once at the entry,
  * decide on the normalized value — the gate's header carries
- * #3984/#5881/#6241).
+ * #3984, #5881 and the third bypass, fixed in commit 83a3b1f2e).
  *
  * The shared table states the same ruling as `expected` answers — `refused`
  * rows carry the ADR-0112 envelope contract, the plural row is `readable`
@@ -65,7 +65,7 @@
  * drifted off a decided contract, and the fix belongs in the implementation;
  * update the pin only in the PR that changes the ruling.
  *
- * Refs #7223, #7378, #6725, PR #7211, #6745.
+ * Refs #7223, #7378; commits 1507ba356 (the facade split fix, PR #7211), 7a5ef0008 (the getObject pin).
  */
 
 import { describe, it, expect } from 'vitest';

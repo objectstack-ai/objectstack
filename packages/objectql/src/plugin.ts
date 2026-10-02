@@ -1540,7 +1540,7 @@ export class ObjectQLPlugin implements Plugin {
    * hides all of it behind a dialect-local bind-safety net, which is why the
    * SQLite/Turso suites never saw it.
    *
-   * The split is the same ruling #7737/#10629 made for federated objects —
+   * The split is the same ruling #7737 made for federated objects (commit 199ec4712) —
    * that flag is about DDL, and a binding that is DDL-free must not ride on it
    * — applied to the managed ones.
    */
@@ -2634,14 +2634,14 @@ export class ObjectQLPlugin implements Plugin {
       if (meta && typeof loadMany === 'function') {
         loadStandaloneActions = () => loadMany.call(meta, 'action');
       }
-      // [#14423] The KEYED plural read, preferred over `loadMany` — see
+      // [commit a56baa2bd] The KEYED plural read, preferred over `loadMany` — see
       // `collectEngineActionDeclarations`. A plane that predates it (or a test
       // double) simply does not offer it and the unkeyed read above stands.
       const loadManyKeyed = meta?.loadManyKeyed;
       if (meta && typeof loadManyKeyed === 'function') {
         loadStandaloneActionsKeyed = () => loadManyKeyed.call(meta, 'action');
       }
-      // [#14423] The router's THIRD rung, injected the same way its second one
+      // [commit a56baa2bd] The router's THIRD rung, injected the same way its second one
       // is. `resolveRouteActionDeclaration` prefers `loadDiagnosed` and falls
       // back to `load`; this mirrors that branch and unwraps, so the audit
       // receives a declaration-or-nothing exactly like `lookupRegistryAction`.

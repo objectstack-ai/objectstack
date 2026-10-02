@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// #13657 — the declared-field door's POST-HOOK half.
+// Commit b003cf2e8 — the declared-field door's POST-HOOK half.
 //
 // #8682 / #8738 put the door in and PR #8737 moved it AHEAD of the `before*`
 // hooks and ahead of statement construction, so that no work (above all, no

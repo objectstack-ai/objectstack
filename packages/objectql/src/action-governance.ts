@@ -45,7 +45,7 @@
  * undeclared only when EVERY source the router resolves through answered
  * nothing for it.
  *
- * [#14423] EXISTENCE is settled now too, on both halves of the D5 bijection
+ * [commit a56baa2bd] EXISTENCE is settled now too, on both halves of the D5 bijection
  * and in both of the ways the two sides could disagree:
  *
  *  - IDENTITY — the metadata plane is read KEYED
@@ -264,7 +264,7 @@ export function reconcileActionRegistrations(
 /**
  * One declaration the engine can dispatch against.
  *
- * ## [#14423] `storeKey` — the identity a body is not required to carry
+ * ## [commit a56baa2bd] `storeKey` — the identity a body is not required to carry
  *
  * `action` is the declaration BODY, exactly as its source hands it over.
  * `storeKey` is the key the metadata plane holds that body under, present
@@ -317,7 +317,7 @@ export interface GovernanceLogger {
  * with the object-embedded copy winning, mirroring the execution layer's
  * artifact-wins rule.
  *
- * ## [#14423] Two spellings for the metadata source, and why the keyed one wins
+ * ## [commit a56baa2bd] Two spellings for the metadata source, and why the keyed one wins
  *
  * `loadStandaloneActionsKeyed` reads the plane under the identity the STORE
  * holds each row by (`MetadataManager.loadManyKeyed`); `loadStandaloneActions`
@@ -336,7 +336,7 @@ export interface GovernanceLogger {
  * So when the keyed source is present it REPLACES the unkeyed one — they read
  * the same population, and reading both would only re-admit the guess. The
  * unkeyed parameter stays for callers that have no keyed read to offer; it is
- * the pre-#14423 behaviour verbatim, nameless rows dropped and all.
+ * the behaviour before commit a56baa2bd, verbatim, nameless rows dropped and all.
  */
 export async function collectEngineActionDeclarations(
     objects: any[],
@@ -394,7 +394,7 @@ export async function collectEngineActionDeclarations(
 
 /**
  * The router's BY-NAME rungs, applied to the handlers the declaration set did
- * not cover — `registry.getItem('action', <key>)` (rung 2) and, since #14423,
+ * not cover — `registry.getItem('action', <key>)` (rung 2) and, since commit a56baa2bd,
  * `meta.loadDiagnosed('action', <key>)` / `meta.load(…)` (rung 3) — each
  * accepted on the router's own ownership test.
  *
@@ -403,7 +403,7 @@ export async function collectEngineActionDeclarations(
  * The router never enumerates either source: it asks for ONE name. Mirroring
  * it means asking for one name. And enumeration is not a substitute here even
  * where it exists — a plural read and a by-name read of the same plane can
- * disagree, which is the whole subject of #14423: one loader fault is
+ * disagree, which is the whole subject of the card commit a56baa2bd closed: one loader fault is
  * swallowed by the plural read and served by the by-name read, so a handler
  * whose declaration lives on the faulted loader reads "undeclared" from the
  * enumeration alone. The keyed enumeration closes the IDENTITY half of that
@@ -474,7 +474,7 @@ function fingerprint(r: ReturnType<typeof reconcileActionRegistrations>): string
  * (`metadata:reloaded` re-runs this; a re-sync that changed nothing should
  * not repeat the same warning).
  *
- * ## [#14423] Both halves of the bijection read what the router reads
+ * ## [commit a56baa2bd] Both halves of the bijection read what the router reads
  *
  * The two findings used to stand on different sources, which is how the audit
  * could contradict the router about whether a declaration exists:
@@ -522,7 +522,7 @@ export async function runActionGovernanceInventory(args: {
      */
     loadStandaloneActions?: () => Promise<any[]>;
     /**
-     * [#14423] The metadata plane's `action` rows KEYED by the store's own key
+     * [commit a56baa2bd] The metadata plane's `action` rows KEYED by the store's own key
      * (`meta.loadManyKeyed('action')`). This is the source the declaration
      * half of the bijection is defined on, so that the audit and the router
      * share ONE identity — the store key (#14205) — instead of the audit
@@ -538,7 +538,7 @@ export async function runActionGovernanceInventory(args: {
      */
     lookupRegistryAction?: (actionName: string) => unknown;
     /**
-     * [#14423] The router's rung 3, injected the same way:
+     * [commit a56baa2bd] The router's rung 3, injected the same way:
      * `meta.loadDiagnosed('action', name)?.data`, falling back to
      * `meta.load('action', name)` — the caller unwraps, so this returns the
      * declaration or nothing, exactly like {@link lookupRegistryAction}.
