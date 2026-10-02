@@ -89,6 +89,8 @@ interface Cell {
   readonly uniqueCode: string;
   /** The database's own words for it, which must survive the cut. */
   readonly diagnostic: string;
+  /** The forced index's key: MySQL stores `name` as TEXT, which takes a prefix length. */
+  readonly nameKey: string;
   /** Prepare the cell's namespace; returns the driver config to run in it. */
   readonly provision: () => Promise<Record<string, unknown>>;
   readonly teardown: () => Promise<void>;
@@ -113,6 +115,7 @@ const CELLS: readonly Cell[] = [
     env: null,
     url: 'sqlite',
     uniqueCode: 'SQLITE_CONSTRAINT_UNIQUE',
+    nameKey: 'name',
     diagnostic: 'UNIQUE constraint failed: sys_user.name',
     provision: async () => ({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }),
     teardown: async () => {},
@@ -122,6 +125,7 @@ const CELLS: readonly Cell[] = [
     env: 'OS_TEST_POSTGRES_URL',
     url: PG_URL,
     uniqueCode: '23505',
+    nameKey: 'name',
     diagnostic: 'duplicate key value violates unique constraint',
     provision: async () => {
       const admin = adminDriver({ client: 'pg', connection: PG_URL });
@@ -147,6 +151,7 @@ const CELLS: readonly Cell[] = [
     env: 'OS_TEST_MYSQL_URL',
     url: MYSQL_URL,
     uniqueCode: 'ER_DUP_ENTRY',
+    nameKey: 'name(191)',
     diagnostic: 'Duplicate entry [value redacted] for key',
     provision: async () => {
       const admin = adminDriver({ client: 'mysql2', connection: MYSQL_URL });
@@ -241,7 +246,7 @@ for (const cell of CELLS) {
         // The seeded holder of the sentinel, then the constraint the two writes
         // below will meet in the DATABASE — not in any check of ours.
         await engine.insert('sys_user', { id: 'usr_holder', email: 'holder@corp.example', name: S }, SYSTEM);
-        await driver.getKnex().raw('create unique index sys_user_name_forced_unique on sys_user (name)');
+        await driver.getKnex().raw(`create unique index sys_user_name_forced_unique on sys_user (${cell.nameKey})`);
         await engine.insert(
           'sys_permission_set',
           { id: 'ps_member_default', name: 'member_default', label: 'member_default', active: true },
