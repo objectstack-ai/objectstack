@@ -45,7 +45,8 @@ const TEST_KEY = 'served-content-hash-test-key';
 const keyedDigest = async (plain: string): Promise<string> =>
     `hmac-sha256:${createHmac('sha256', TEST_KEY).update(plain, 'utf8').digest('hex')}`;
 
-const SHA256 = /sha256:[0-9a-f]{64}/;
+/** An unkeyed content hash — the keyed form's `hmac-sha256:` prefix is not one. */
+const SHA256 = /(?<!hmac-)sha256:[0-9a-f]{64}/;
 const KEYED = /^hmac-sha256:[0-9a-f]{64}$/;
 
 interface Row {

@@ -192,6 +192,16 @@ import {
     storedMetadataBodyGroupingRefusal,
     storedMetadataBodyPredicateRefusal,
     storedMetadataBodyProjection,
+    // [#21207] The stored content hash of the same rows: served keyed, never
+    // evaluated — see `STORED_METADATA_HASH_COLUMNS`.
+    isStoredMetadataBodyObject,
+    servedContentHash,
+    serveStoredMetadataHashColumnRows,
+    serveStoredMetadataHashColumns,
+    STORED_METADATA_UNSEARCHABLE_COLUMNS,
+    storedMetadataHashEvaluateRefusal,
+    storedMetadataSearchRefusal,
+    type StoredHashDigest,
 } from './metadata-redaction.js';
 import type {
     StoredFlowCanonicalization,
@@ -2600,6 +2610,32 @@ function carryCatalogedErrorCode(target: Error, source: unknown): void {
 function declaresClientRefusal(err: unknown): boolean {
     const status = (err as { status?: unknown } | null | undefined)?.status;
     return typeof status === 'number' && status >= 400 && status < 500;
+}
+
+/**
+ * [#21207] A caller's version token that names no current stored head, found by
+ * the protocol's own KEYED comparison before the repository is asked (see
+ * {@link ObjectStackProtocolImplementation.storedParentForToken}).
+ *
+ * A `ConflictError`, so each door's existing conflict branch — the 409
+ * `METADATA_CONFLICT` and its decision-audit row — handles it unchanged; told
+ * apart from the repository's own race conflict because its `expectedParent`
+ * is the CALLER's token rather than a stored hash, and `unverifiable` marks the
+ * deployment with no crypto provider, where no token can be checked at all.
+ * The message is replaced: the base class prints both values, and one of them
+ * is the stored hash.
+ */
+class InboundVersionConflictError extends ConflictError {
+    constructor(
+        ref: { org: string; type: string; name: string },
+        token: string,
+        currentStored: string | null,
+        readonly unverifiable: boolean,
+    ) {
+        super(ref as ConstructorParameters<typeof ConflictError>[0], token, currentStored);
+        this.message = `Conflict on ${ref.type}/${ref.name}: the version token sent `
+            + (unverifiable ? 'cannot be checked (no crypto provider is registered)' : 'is not the current version');
+    }
 }
 
 /**
@@ -11057,6 +11093,62 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#21207] A `search` on a stored-metadata table never scans its body or
+     * content-hash columns ({@link STORED_METADATA_UNSEARCHABLE_COLUMNS}).
+     *
+     * A search is a substring filter the engine evaluates over every column it
+     * scans, and with no `searchableFields` declared it scans every text-like
+     * column — the stored body and both stored hashes among them. Over those
+     * it is the verifier the filter refusals close: a guessed hash, or a guessed
+     * prefix of withheld credential material, returns the row exactly when it
+     * is right. So an explicit field list naming one is refused
+     * (`INVALID_FIELD` / 400, the evaluate refusals' envelope), and a search
+     * that names none is handed to the engine with the object's searchable set
+     * minus those columns — the engine intersects an override with that set and
+     * never widens it. Runs after {@link assertSearchFieldsAreSearchable}, so a
+     * name that is not searchable at all keeps its own answer.
+     */
+    private narrowStoredMetadataSearch(
+        object: string,
+        options: Record<string, any>,
+        wireSpelling: Record<string, string>,
+    ): void {
+        if (!isStoredMetadataBodyObject(object)) return;
+        const objectForm = options.search !== null && typeof options.search === 'object';
+        const [explicit, param] = options.searchFields != null
+            ? [options.searchFields, wireSpelling.searchFields ?? 'searchFields']
+            : objectForm && options.search.fields != null
+                ? [options.search.fields, wireSpelling.search ?? 'search']
+                : [undefined, ''];
+        const names: string[] = typeof explicit === 'string'
+            ? explicit.split(',').map((s: string) => s.trim()).filter(Boolean)
+            : Array.isArray(explicit) ? explicit.filter((f: unknown): f is string => typeof f === 'string') : [];
+        if (names.length > 0) {
+            const refusal = storedMetadataSearchRefusal(object, names, param);
+            if (refusal) throw refusal;
+            return;
+        }
+        if (options.search == null) return;
+        const gate = this.resolveQueryFields(object);
+        // No field map: the engine has none to expand a search over either.
+        if (!gate) return;
+        const { allowed } = resolveSearchFieldResolution({
+            fields: gate.fields,
+            searchableFields: gate.schema?.searchableFields,
+            displayField: gate.schema?.nameField ?? gate.schema?.displayNameField,
+        });
+        const narrowed = allowed.filter((field) => !STORED_METADATA_UNSEARCHABLE_COLUMNS.includes(field));
+        if (narrowed.length === 0) {
+            // An empty override is ABSENT to the engine, which would then scan
+            // the whole default set — these columns included. Refuse instead.
+            const refusal = storedMetadataSearchRefusal(object, allowed, wireSpelling.search ?? 'search');
+            if (refusal) throw refusal;
+            return;
+        }
+        options.searchFields = narrowed;
+    }
+
+    /**
      * [#4254] GROUP-BY axis. A grouping target the object does not have is
      * refused (`400 INVALID_FIELD`); a grouping target the spec cannot read is
      * refused as a shape (`400 INVALID_QUERY`).
@@ -11584,6 +11676,9 @@ export class ObjectStackProtocolImplementation implements
                 request.object, (options.search as any).fields, wireSpelling.search ?? 'search',
             );
         }
+        // [#21207] …and on a stored-metadata table a search never scans the body
+        // or content-hash columns: refused when named, narrowed away otherwise.
+        this.narrowStoredMetadataSearch(request.object, options, wireSpelling);
 
         // Boolean fields
         for (const key of ['distinct', 'count']) {
@@ -11709,13 +11804,22 @@ export class ObjectStackProtocolImplementation implements
             ? (options.aggregations as ReadonlyArray<{ filter?: unknown }>).flatMap((a) =>
                   collectFilterFieldKeys(a?.filter))
             : [];
-        const bodyPredicateRefusal = storedMetadataBodyPredicateRefusal(request.object, {
-            filterFields: [...collectFilterFieldKeys(options.where), ...aggregationFilterFields],
-            sortFields: Array.isArray(options.orderBy)
-                ? (options.orderBy as ReadonlyArray<{ field?: unknown }>).map((e) => e?.field)
-                : [],
-        });
+        const filterFields = [...collectFilterFieldKeys(options.where), ...aggregationFilterFields];
+        const sortFields = Array.isArray(options.orderBy)
+            ? (options.orderBy as ReadonlyArray<{ field?: unknown }>).map((e) => e?.field)
+            : [];
+        const bodyPredicateRefusal = storedMetadataBodyPredicateRefusal(request.object, { filterFields, sortFields });
         if (bodyPredicateRefusal) throw bodyPredicateRefusal;
+        // [#21207] The same three shapes on the stored CONTENT-HASH columns
+        // (maintainer ruling A on the second execution fork): a group key would
+        // serve the stored hash, a filter on it is an online verifier, a sort
+        // orders by it. Refused in the body column's envelope, before the engine.
+        const hashEvaluateRefusal = storedMetadataHashEvaluateRefusal(request.object, {
+            groupBy: options.groupBy,
+            filterFields,
+            sortFields,
+        });
+        if (hashEvaluateRefusal) throw hashEvaluateRefusal;
 
         // Route to engine.aggregate() when the query has GROUP BY / aggregations.
         // engine.find() does not do in-memory aggregation fallback, so without
@@ -11813,10 +11917,18 @@ export class ObjectStackProtocolImplementation implements
         // projection named only the body, and taken back off before serving.
         const bodyProjection = storedMetadataBodyProjection(request.object, options.fields);
         if (bodyProjection.addedType) options.fields = bodyProjection.fields;
-        const records = redactStoredMetadataRows(
+        // [#21207] …and its stored CONTENT HASH (`checksum`, `previous_checksum`)
+        // is served in keyed form — never the stored value, which beside the
+        // projected body confirms a guess at the withheld material offline —
+        // and omitted when no crypto provider is registered.
+        const records = await serveStoredMetadataHashColumnRows(
             request.object,
-            await this.engine.find(request.object, options),
-            { dropType: bodyProjection.addedType },
+            redactStoredMetadataRows(
+                request.object,
+                await this.engine.find(request.object, options),
+                { dropType: bodyProjection.addedType },
+            ),
+            this.storedHashDigest(),
         );
         // Pagination metadata. When a `limit` is present the response is a single
         // page, so `records.length` is the page size — NOT the match total. Run a
@@ -11941,7 +12053,13 @@ export class ObjectStackProtocolImplementation implements
             return {
                 object: request.object,
                 id: request.id,
-                record: redactStoredMetadataRow(request.object, result, { dropType: bodyProjection.addedType }),
+                // [#21207] Same served form as the list path: the content-hash
+                // columns keyed, or omitted with no crypto provider.
+                record: await serveStoredMetadataHashColumns(
+                    request.object,
+                    redactStoredMetadataRow(request.object, result, { dropType: bodyProjection.addedType }),
+                    this.storedHashDigest(),
+                ),
             };
         }
         throw recordNotFoundError(request.object, request.id);
@@ -15579,6 +15697,103 @@ export class ObjectStackProtocolImplementation implements
         await this.recordMetadataAudit(ObjectStackProtocolImplementation.optimisticConflictAuditEntry(args));
     }
 
+    // -----------------------------------------------------------------------
+    // [#21207] The stored content hash, as the `/meta` doors serve and take it
+    // -----------------------------------------------------------------------
+    //
+    // Maintainer ruling B on #21207: the stored content hash of a metadata body
+    // stays the canonical SHA-256 at rest — the repository contract, its
+    // producers and the parent links are untouched — but no door hands it out.
+    // It is a hash over the WHOLE stored body, withheld credential material
+    // included, so beside the projected body it confirms a guess at that
+    // material offline. Every door that serves it serves the crypto provider's
+    // keyed digest of it; every door that takes a version token back compares
+    // the token in that same form and hands the STORED value to the repository;
+    // with no provider registered nothing is served and every token is refused.
+
+    /**
+     * The registered crypto provider's keyed digest, read from the engine at
+     * the moment of use — a host registers the provider AFTER the kernel starts,
+     * so a value read once at construction would answer "none" for good.
+     * `undefined` when none is registered (or the host engine has no such
+     * accessor, which is the same fact): the doors then withhold and refuse.
+     */
+    private storedHashDigest(): StoredHashDigest | undefined {
+        const accessor = this.engine?.getKeyedDigest;
+        return typeof accessor === 'function' ? accessor.call(this.engine) : undefined;
+    }
+
+    /**
+     * A write receipt's `version` — the version token a caller sends back as
+     * `If-Match` — for a write whose stored content hash is `stored`: its keyed
+     * digest. With no crypto provider the deployment issues no token, and the
+     * receipt's required `version` carries the empty string: a value that names
+     * nothing and that every inbound comparison refuses.
+     */
+    private async receiptVersion(stored: string): Promise<string> {
+        return (await servedContentHash(stored, this.storedHashDigest())) ?? '';
+    }
+
+    /**
+     * Resolve a caller's version token to the STORED head it names, for a write
+     * whose current stored head is `currentStored`: the token must equal the
+     * keyed digest of that head, and the stored value is what the repository's
+     * own optimistic lock then compares. `null` keeps its meaning ("expect no
+     * row") and carries no hash. Anything else — the raw stored hash a pre-keying
+     * client still holds, a stale token, a token sent to a deployment with no
+     * crypto provider — is an {@link InboundVersionConflictError}, which the
+     * door's conflict branch answers 409.
+     */
+    private async storedParentForToken(
+        ref: { org: string; type: string; name: string },
+        token: string | null,
+        currentStored: string | null,
+    ): Promise<string | null> {
+        if (token === null) return null;
+        const digest = this.storedHashDigest();
+        if (!digest) throw new InboundVersionConflictError(ref, token, currentStored, true);
+        if (currentStored !== null && (await digest(currentStored)) === token) return currentStored;
+        throw new InboundVersionConflictError(ref, token, currentStored, false);
+    }
+
+    /**
+     * The 409 `METADATA_CONFLICT` a door answers for a `ConflictError`, whose
+     * text and attributes carry the SERVED (keyed) form of a stored hash or
+     * none at all — never a stored hash. `subject` names the item, `prefix` is
+     * the door's own first sentence.
+     *
+     *  - a repository race (the stored head moved between the door's read and
+     *    its write): `Expected parent X but current is Y`, both keyed;
+     *  - a caller's token naming no current head: the keyed current head;
+     *  - no crypto provider: no value, and the remedy.
+     *
+     * A side with no served form is `[withheld]`; an absent side is `null`.
+     */
+    private async metadataConflictRefusal(err: ConflictError, subject: string, prefix: string): Promise<Error> {
+        const conflict: any = new Error(subject);
+        conflict.code = 'METADATA_CONFLICT';
+        conflict.status = 409;
+        if (err instanceof InboundVersionConflictError && err.unverifiable) {
+            conflict.message = `${subject}: the version token sent cannot be checked, so the write was not run. `
+                + 'This deployment registers no crypto provider, so it issues no version tokens and compares none. '
+                + 'Send the write without a version token (no If-Match) to write unconditionally, or register a '
+                + 'crypto provider (engine.setCryptoProvider) so version tokens are issued and checked.';
+            return conflict;
+        }
+        const digest = this.storedHashDigest();
+        const show = (served: string | null | undefined) => (served === undefined ? '[withheld]' : served ?? 'null');
+        const current = await servedContentHash(err.actualHead, digest);
+        if (current !== undefined) conflict.actualHead = current;
+        if (err instanceof InboundVersionConflictError) {
+            conflict.message = `${prefix} The version token sent is not the current version (current is ${show(current)}).`;
+            return conflict;
+        }
+        const expected = await servedContentHash(err.expectedParent, digest);
+        if (expected !== undefined) conflict.expectedParent = expected;
+        conflict.message = `${prefix} Expected parent ${show(expected)} but current is ${show(current)}.`;
+        return conflict;
+    }
+
     /**
      * [#8594] The same row as a VALUE, for the site that must not write it
      * where the conflict is caught — see {@link lockWriteRefusal} for the full
@@ -15608,7 +15823,15 @@ export class ObjectStackProtocolImplementation implements
             ...(args.actor ? { actor: args.actor } : {}),
             source: args.source,
             ...(args.requestId ? { requestId: args.requestId } : {}),
-            note: `expected parent ${args.expectedParent ?? 'null'} but current is ${args.actualHead ?? 'null'}`,
+            // [#21207] Fork three, ruling A: a COPY never carries the stored
+            // content hash — not raw (an offline verifier, at rest and served to
+            // every audit reader), and not keyed either (a copy has no use for a
+            // version token, and a keyed value would die with the key). The
+            // note keeps its sentence and says which side was absent; a value
+            // is `[withheld]`. `os migrate audit-metadata-bodies` rewrites the
+            // notes written before this to exactly this text.
+            note: `expected parent ${args.expectedParent == null ? 'null' : '[withheld]'} `
+                + `but current is ${args.actualHead == null ? 'null' : '[withheld]'}`,
         };
     }
 
@@ -16800,7 +17023,13 @@ export class ObjectStackProtocolImplementation implements
         }
     }
 
-    async saveMetaItem(request: { type: string, name: string, item?: any, organizationId?: string, parentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string, writeFace?: MetadataWriteFace }) {
+    // [#21207] `parentVersion` is a CALLER's version token — the keyed form a
+    // receipt served — and is compared in that form (`storedParentForToken`).
+    // `storedParentVersion` is the in-process twin for a caller that read the
+    // STORED content hash itself (`migrateStoredMetadata`): it reaches the
+    // repository as given. ⛔ No transport sets it — every door builds its
+    // request field by field from named inputs, never by spreading a body.
+    async saveMetaItem(request: { type: string, name: string, item?: any, organizationId?: string, parentVersion?: string | null, storedParentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string, writeFace?: MetadataWriteFace }) {
         // [commit fd6bdf89f] The ADR-0112 envelope this refusal always owed. Every OTHER
         // refusal in this method declares `code` AND `status`
         // (`NOT_OVERRIDABLE`/403, `NOT_CREATABLE`/403, `ITEM_LOCKED`/403,
@@ -17672,8 +17901,9 @@ export class ObjectStackProtocolImplementation implements
             org: orgId ?? 'env',
         } as Parameters<typeof repo.put>[0];
         let parentVersion: string | null;
-        if (request.parentVersion !== undefined) {
-            parentVersion = request.parentVersion;
+        if (request.storedParentVersion !== undefined) {
+            // [#21207] An in-process caller that read the stored hash itself.
+            parentVersion = request.storedParentVersion;
         } else {
             // Parent is scoped to the lifecycle we're about to write:
             // a draft's parent is the current draft hash (or null
@@ -17685,7 +17915,22 @@ export class ObjectStackProtocolImplementation implements
                 state: mode === 'draft' ? 'draft' : 'active',
                 packageId: request.packageId ?? null,
             });
-            parentVersion = current?.hash ?? null;
+            const currentStored = current?.hash ?? null;
+            if (request.parentVersion === undefined) {
+                parentVersion = currentStored;
+            } else {
+                // [#21207] A caller's version token names the stored head only
+                // in keyed form; the repository's own lock then runs on the
+                // stored value. A token naming no current head — the raw
+                // stored hash included — is answered here, in this door's own
+                // conflict envelope and with its own audit row.
+                try {
+                    parentVersion = await this.storedParentForToken(ref, request.parentVersion, currentStored);
+                } catch (err: unknown) {
+                    if (err instanceof ConflictError) throw await this.saveConflict(err, request, orgId, writeSource);
+                    throw err;
+                }
+            }
         }
         // [#8154] THE WRITE-PATH INVERSE of the read exits' credential
         // redaction — the half without which this card's fix is a DATA-LOSS
@@ -17795,7 +18040,9 @@ export class ObjectStackProtocolImplementation implements
             });
             return {
                 success: true,
-                version: result.version,
+                // [#21207] The version token: the keyed form of the stored
+                // content hash, never the stored value (see `receiptVersion`).
+                version: await this.receiptVersion(result.version),
                 seq: result.seq,
                 ...(projectionApplied ? { projectionApplied } : {}),
                 // [#4717] #4463 D3's advisory half, finally on the response.
@@ -17855,29 +18102,40 @@ export class ObjectStackProtocolImplementation implements
                         : `Saved ${singularTypeForRepo} '${request.name}' (env-wide, state=${mode === 'draft' ? 'draft' : 'active'}) [seq=${result.seq}]`),
             };
         } catch (err: any) {
-            if (err instanceof ConflictError) {
-                const conflict = new Error(
-                    `${request.type}/${request.name} has been modified since you loaded it. `
-                    + `Expected parent ${err.expectedParent ?? 'null'} but current is ${err.actualHead ?? 'null'}.`,
-                );
-                (conflict as any).code = 'METADATA_CONFLICT';
-                (conflict as any).status = 409;
-                (conflict as any).expectedParent = err.expectedParent;
-                (conflict as any).actualHead = err.actualHead;
-                await this.recordOptimisticConflictAudit({
-                    type: request.type,
-                    name: request.name,
-                    organizationId: orgId,
-                    operation: 'save',
-                    ...(request.actor ? { actor: request.actor } : {}),
-                    source: writeSource,
-                    expectedParent: err.expectedParent,
-                    actualHead: err.actualHead,
-                });
-                throw conflict;
-            }
+            if (err instanceof ConflictError) throw await this.saveConflict(err, request, orgId, writeSource);
             throw err;
         }
+    }
+
+    /**
+     * The save door's 409 for a `ConflictError` — the repository's race, or a
+     * caller's token the keyed comparison refused — plus its decision-audit row.
+     * One builder for both, so the two cannot answer in different words.
+     * [#21207] The text and attributes carry keyed values or none
+     * ({@link metadataConflictRefusal}); the audit row carries no hash at all.
+     */
+    private async saveConflict(
+        err: ConflictError,
+        request: { type: string; name: string; actor?: string },
+        orgId: string | null,
+        writeSource: string,
+    ): Promise<Error> {
+        const conflict = await this.metadataConflictRefusal(
+            err,
+            `${request.type}/${request.name}`,
+            `${request.type}/${request.name} has been modified since you loaded it.`,
+        );
+        await this.recordOptimisticConflictAudit({
+            type: request.type,
+            name: request.name,
+            organizationId: orgId,
+            operation: 'save',
+            ...(request.actor ? { actor: request.actor } : {}),
+            source: writeSource,
+            expectedParent: err.expectedParent,
+            actualHead: err.actualHead,
+        });
+        return conflict;
     }
 
     /**
@@ -18316,7 +18574,10 @@ export class ObjectStackProtocolImplementation implements
                     name: base.name,
                     item,
                     mode: state === 'draft' ? 'draft' : 'publish',
-                    parentVersion: row.checksum ?? null,
+                    // [#21207] The STORED hash this pass read itself — the
+                    // in-process spelling, never compared in keyed form (a
+                    // deployment with no crypto provider still migrates).
+                    storedParentVersion: row.checksum ?? null,
                     packageId,
                     force: true,
                     source: 'migrate-stored',
@@ -18432,7 +18693,18 @@ export class ObjectStackProtocolImplementation implements
         const opts: { sinceSeq?: number; limit?: number } = {};
         if (request.sinceSeq !== undefined) opts.sinceSeq = request.sinceSeq;
         if (request.limit !== undefined) opts.limit = request.limit;
-        for await (const ev of repo.history(ref, opts)) events.push(ev);
+        // [#21207] Each event's hash and parent hash are served in keyed form —
+        // the same value the write receipts hand out, so an event still names
+        // the token a caller holds — and `null` with no crypto provider (a
+        // delete event's own `null` is kept either way).
+        const digest = this.storedHashDigest();
+        for await (const ev of repo.history(ref, opts)) {
+            events.push({
+                ...ev,
+                hash: (await servedContentHash(ev.hash, digest)) ?? null,
+                parentHash: (await servedContentHash(ev.parentHash, digest)) ?? null,
+            });
+        }
         return { events };
     }
 
@@ -18704,7 +18976,8 @@ export class ObjectStackProtocolImplementation implements
             advisories?: RuntimeAuthoringIssue[];
         } = {
             success: true,
-            version: result.version,
+            // [#21207] Keyed, never the stored content hash (`receiptVersion`).
+            version: await this.receiptVersion(result.version),
             seq: result.seq,
             message: `Published draft — type=${request.type}, name=${request.name} [seq=${result.seq}]`,
             // [#9176] Omitted-when-empty, never `advisories: []` — a clean
@@ -18962,14 +19235,12 @@ export class ObjectStackProtocolImplementation implements
             return { singularType, orgId, advisories: runtimeAdvisories, result };
         } catch (err: any) {
             if (err instanceof ConflictError) {
-                const conflict: any = new Error(
-                    `${request.type}/${request.name} published row advanced while you held the draft. `
-                    + `Expected parent ${err.expectedParent ?? 'null'} but current is ${err.actualHead ?? 'null'}.`,
+                // [#21207] Keyed values or none in the text and attributes.
+                const conflict = await this.metadataConflictRefusal(
+                    err,
+                    `${request.type}/${request.name}`,
+                    `${request.type}/${request.name} published row advanced while you held the draft.`,
                 );
-                conflict.code = 'METADATA_CONFLICT';
-                conflict.status = 409;
-                conflict.expectedParent = err.expectedParent;
-                conflict.actualHead = err.actualHead;
                 // [#8594] Attached, not written — same reason as the lock gate
                 // above. The repository's own transaction has already unwound by
                 // the time this `catch` runs, but the BATCH caller's has not.
@@ -20232,7 +20503,10 @@ export class ObjectStackProtocolImplementation implements
             // element's bytes are unchanged, and absence means "nothing to
             // report", never "the gate did not run".
             published.push({
-                type: p.d.type, name: p.d.name, version: p.version,
+                // [#21207] Each element's version token is keyed, like the
+                // single-item doors' (`receiptVersion`); `p.version` stays the
+                // stored hash for everything internal.
+                type: p.d.type, name: p.d.name, version: await this.receiptVersion(p.version),
                 ...(p.advisories.length > 0 ? { advisories: p.advisories } : {}),
             });
             try {
@@ -22502,21 +22776,20 @@ export class ObjectStackProtocolImplementation implements
             });
             return {
                 success: true,
-                version: result.version,
+                // [#21207] Keyed, never the stored content hash (`receiptVersion`).
+                version: await this.receiptVersion(result.version),
                 seq: result.seq,
                 restoredFromVersion: request.toVersion,
                 message: `Reverted to version ${request.toVersion} — type=${request.type}, name=${request.name} [seq=${result.seq}]`,
             };
         } catch (err: any) {
             if (err instanceof ConflictError) {
-                const conflict: any = new Error(
-                    `${request.type}/${request.name} advanced during rollback. `
-                    + `Expected parent ${err.expectedParent ?? 'null'} but current is ${err.actualHead ?? 'null'}.`,
+                // [#21207] Keyed values or none in the text and attributes.
+                const conflict = await this.metadataConflictRefusal(
+                    err,
+                    `${request.type}/${request.name}`,
+                    `${request.type}/${request.name} advanced during rollback.`,
                 );
-                conflict.code = 'METADATA_CONFLICT';
-                conflict.status = 409;
-                conflict.expectedParent = err.expectedParent;
-                conflict.actualHead = err.actualHead;
                 await this.recordOptimisticConflictAudit({
                     type: request.type,
                     name: request.name,
@@ -23029,8 +23302,13 @@ export class ObjectStackProtocolImplementation implements
                 // Last-write-wins parent resolution unless the caller pinned
                 // an explicit version (Studio's "Reset" button is unpinned;
                 // a future "delete vN" flow can pass parentVersion).
-                const parentVersion: string = request.parentVersion !== undefined
-                    ? (request.parentVersion ?? current.hash)
+                // [#21207] A pinned version is a caller's token, compared in
+                // keyed form against the current stored head
+                // (`storedParentForToken`); the repository's lock then runs on
+                // the stored value. A token naming no current head throws a
+                // `ConflictError`, answered by the conflict branch below.
+                const parentVersion: string = typeof request.parentVersion === 'string'
+                    ? ((await this.storedParentForToken(ref, request.parentVersion, current.hash)) ?? current.hash)
                     : current.hash;
 
                 const result = await repo.delete(ref, {
@@ -23131,14 +23409,12 @@ export class ObjectStackProtocolImplementation implements
                 };
             } catch (err: any) {
                 if (err instanceof ConflictError) {
-                    const conflict = new Error(
-                        `${request.type}/${request.name} has been modified since you loaded it. `
-                        + `Expected parent ${err.expectedParent ?? 'null'} but current is ${err.actualHead ?? 'null'}.`,
+                    // [#21207] Keyed values or none in the text and attributes.
+                    const conflict = await this.metadataConflictRefusal(
+                        err,
+                        `${request.type}/${request.name}`,
+                        `${request.type}/${request.name} has been modified since you loaded it.`,
                     );
-                    (conflict as any).code = 'METADATA_CONFLICT';
-                    (conflict as any).status = 409;
-                    (conflict as any).expectedParent = err.expectedParent;
-                    (conflict as any).actualHead = err.actualHead;
                     await this.recordOptimisticConflictAudit({
                         type: request.type,
                         name: request.name,
