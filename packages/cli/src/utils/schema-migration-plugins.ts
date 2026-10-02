@@ -1255,7 +1255,8 @@ const NOTHING_COMPOSED: SchemaMigrationComposition = Object.freeze({
  *   host already brought).
  * @param skipSeedData mirrors the boot's own setting onto a config-derived
  *   `AppPlugin`, so the config path and the artifact path suppress the inline
- *   seed identically.
+ *   seed identically. `bootSchemaStack` passes `true` on every boot (#21391):
+ *   no one-shot CLI boot runs the seed loader.
  */
 export async function buildSchemaMigrationPlugins(opts: {
   basePlugins: readonly unknown[];

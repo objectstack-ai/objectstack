@@ -14,6 +14,8 @@ import {
   printStep,
   createTimer,
   emitJson,
+  errorCodeFields,
+  isExitSignal,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import type {
@@ -211,6 +213,11 @@ export default class SecretOrphans extends Command {
         // attribution set is theirs, and without it nothing is attributable and
         // nothing is deletable (the safe direction, reported as a note).
         extraPlugins: [new PlatformObjectsPlugin(), new SettingsServicePlugin({ registerRoutes: false })],
+        // [#21391] The report boots READ-ONLY, the boot `os migrate plan`
+        // takes: `deferSchemaDdl` holds schema DDL back on every SQL
+        // datasource, and `readOnlyProbe` keeps a missing sqlite file from
+        // being created. `--delete` keeps the plain boot: it deletes rows.
+        ...(flags.delete ? {} : { deferSchemaDdl: true, readOnlyProbe: true }),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -427,6 +434,17 @@ export default class SecretOrphans extends Command {
       for (const f of failed) printError(`  ${f.id}: ${f.message}`);
       printInfo(`Keep ${exportPath} until you are certain the sweep was correct — it is the only record.`);
       if (failed.length > 0) this.exit(1);
+    } catch (error) {
+      // [#21391] A read the scan could not make is a refusal, and under
+      // `--json` a refusal is still one JSON document. The report boots
+      // read-only, so a database that lacks a table it reads (`sys_secret` on
+      // one never booted with the platform objects) is refused here, where
+      // the plain boot used to create the table and report nothing.
+      if (isExitSignal(error)) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      if (json) { await emitJson({ error: 'scan_failed', message, ...errorCodeFields(error) }, 1, { compact: true }); return; }
+      printError(message);
+      this.exit(1);
     } finally {
       await stack.shutdown();
     }

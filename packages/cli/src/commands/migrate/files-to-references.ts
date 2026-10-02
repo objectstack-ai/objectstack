@@ -211,10 +211,15 @@ export default class MigrateFilesToReferences extends Command {
 
     let stack;
     try {
+      // [#21391] The dry run boots READ-ONLY, the boot `os migrate plan`
+      // takes: `deferSchemaDdl` holds schema DDL back on every SQL datasource,
+      // and `readOnlyProbe` keeps a missing sqlite file from being created.
+      // `--apply` keeps the plain boot: the tables must exist before it writes.
       stack = await bootSchemaStack({
         jsonOutput: flags.json,
         databaseUrl: flags['database-url'],
         extraPlugins: await buildDataMigrationPlugins({ storage: true }),
+        ...(apply ? {} : { deferSchemaDdl: true, readOnlyProbe: true }),
       });
     } catch (error: any) {
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }

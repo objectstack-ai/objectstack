@@ -194,10 +194,11 @@ export const StandaloneStackConfigSchema = z.object({
      */
     dev: z.boolean().optional(),
     /**
-     * Suppress the artifact's inline boot seed (#3917). Set by one-shot
-     * commands that boot the stack only to READ metadata — `os migrate plan` /
-     * `os migrate apply` — so the boot cannot write demo rows into the
-     * operator's live database before they have confirmed anything.
+     * Suppress the artifact's inline boot seed (#3917). Set by every one-shot
+     * CLI boot (`bootSchemaStack`, #21391), apply and delete modes included,
+     * so the boot cannot write demo rows into the operator's live database.
+     * The seed's upserts rewrite every seeded row on each boot, and no command
+     * the operator ran asked for that. Seeding stays with the serving boots.
      */
     skipSeedData: z.boolean().optional(),
     /**
@@ -230,7 +231,7 @@ export const StandaloneStackConfigSchema = z.object({
      *
      * Set `false` for a boot that must not repair anything behind the
      * operator's back. `bootSchemaStack` (the CLI's ONE one-shot boot funnel)
-     * passes `false` for every `os migrate *` / `os meta *` command: those are
+     * passes `false` for every command it boots: those are mostly
      * dry-run-by-default report commands, and a repair that fires under them
      * destroys the very evidence they were run to collect
      * (`packages/cli/src/commands/migrate/duplicates.integration.test.ts`
@@ -239,6 +240,26 @@ export const StandaloneStackConfigSchema = z.object({
      * boot an operator starts in order to RUN the install.
      */
     runPlatformMigrations: z.boolean().optional(),
+    /**
+     * [#21391] Does this boot ARM the ADR-0057 lifecycle sweep (rotation,
+     * retention reaping, archiving, and the #4551 reference audit that rides
+     * the same clock)?
+     *
+     * Defaults to `true`: a serving boot owns its data's lifecycle, and the
+     * sweep is how a declared retention is enforced at all.
+     *
+     * Set `false` for a boot that exits before the sweep's first run is due.
+     * `bootSchemaStack` (the CLI's one-shot boot funnel) passes `false` for
+     * every `os migrate *` / `os meta *` / `os secret *` / `os storage *`
+     * command. Before this key, the guarantee that such a boot never swept was
+     * a timing fact: the first sweep waits `DEFAULT_LIFECYCLE_INITIAL_DELAY_MS`
+     * on an unref'd timer, so the one-shot was expected to exit first. With
+     * `false` the sweep is never armed (`ObjectQLPlugin`'s `lifecycle.enabled`),
+     * which makes it a structural fact. `enabled` is the service's master
+     * switch, so an explicit `sweep()` on such a boot is inert too: it returns
+     * an empty report and reads nothing.
+     */
+    armLifecycleSweep: z.boolean().optional(),
 });
 
 export type StandaloneStackConfig = z.input<typeof StandaloneStackConfigSchema>;
@@ -789,6 +810,9 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
             environmentId,
             runPlatformMigrations: cfg.runPlatformMigrations ?? true,
             hydrateMetadataFromDb: true,
+            // [#21391] Only a `false` is passed through, so a serving boot
+            // hands the plugin exactly the options it always did.
+            ...(cfg.armLifecycleSweep === false ? { lifecycle: { enabled: false } } : {}),
         }),
     ];
     if (artifactBundle) {

@@ -29,6 +29,13 @@ import { AGGREGATE_ANSWER_KIND, presentAsNumber } from '@objectstack/core';
 // IN, the boolean-aggregand cast, and the one column-class predicate both read
 // — defined once in core too, for the same two faces.
 import { aggregandColumnClass, aggregandOperandSql, type AggregandColumnClass } from '@objectstack/core';
+// [#21385] The ONE driver-fault redaction the engine also calls (maintainer
+// ruling of 2026-10-02, letter A: one cutter for every log face). Each refusal
+// line below writes the dialect's text through it, so the line keeps its code,
+// its class of fault and the dialect's own diagnostic while the statement and
+// the values bound or inlined into it are cut. It lives in `@objectstack/types`,
+// the lowest package every face of the family reaches.
+import { redactStatementFromMessage } from '@objectstack/types';
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES, isMultiValueField } from '@objectstack/spec/data';
 // [#16318] The per-field-type physical representation of the NUMERIC family.
 // `os generate migration` reads the SAME table, in both of its formats — that
@@ -193,6 +200,14 @@ const PRE_DDL_QUESTION_SCOPE = new AsyncLocalStorage<true>();
  * Default ID length for auto-generated IDs.
  */
 const DEFAULT_ID_LENGTH = 16;
+
+/**
+ * [#21385] What every refusal line in this file knows about the dialect text it
+ * logs: a statement THIS driver sent raised it, so a statement may lead that
+ * text whatever word it opens with. The shared cut then runs without asking the
+ * leak predicate, exactly as it does at the engine's raw-statement door.
+ */
+const OWN_STATEMENT_FAULT = { statementSent: true } as const;
 
 // ── Raw index DDL the driver executes on the framework's behalf (#4884) ──────
 /** An SQL identifier in any dialect's quoting, or bare. */
@@ -1061,8 +1076,8 @@ function backendStatementFaultError(object: string, cause: unknown, targetedTabl
   const err = new Error(
     `The database refused to run this query for object '${object}'. The driver could not ` +
       'attribute the failure to any part of the request, so no verdict about the query is ' +
-      "claimed here. The backend's own diagnostic and the compiled statement were written " +
-      'to the server log for an operator to read.',
+      "claimed here. The backend's own diagnostic was written to the server log for an " +
+      'operator to read, with the compiled statement and its bound values cut.',
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.DATABASE_ERROR;
   err.status = 500;
@@ -1114,7 +1129,8 @@ function backendStatementFaultError(object: string, cause: unknown, targetedTabl
  * NON-ENUMERABLE — readable by cause-following predicates
  * (`isMissingTableError` still classifies a missing table on this path
  * through it), invisible to `JSON.stringify` and `{ ...err }` — and the driver
- * writes it to the server log before composing. ⛔ No `DRIVER_TARGETED_TABLE`
+ * writes its diagnostic to the server log before composing, with the statement
+ * and its bound values cut (#21385). ⛔ No `DRIVER_TARGETED_TABLE`
  * is declared here: a raw statement may reference any number of tables, and
  * naming one would make a missing JOINED table read as the caller's own — the
  * misclassification #13438 exists to prevent.
@@ -1126,8 +1142,8 @@ function rawStatementFaultError(cause: unknown): Error {
   const err = new Error(
     'The database refused to run a raw statement. The driver could not attribute the failure ' +
       'to any part of the request, so no verdict about the statement is claimed here. The ' +
-      "backend's own diagnostic and the statement were written to the server log for an " +
-      'operator to read.',
+      "backend's own diagnostic was written to the server log for an operator to read, with " +
+      'the statement and its bound values cut.',
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.DATABASE_ERROR;
   err.status = 500;
@@ -10056,12 +10072,19 @@ export class SqlDriver implements IDataDriver {
    * resolve, writing the dialect's own message to the SERVER LOG on the way.
    *
    * Logging is the half that keeps this a redaction rather than a deletion. The
-   * dialect message is genuinely useful — it carries the compiled statement —
-   * and `count()`'s old raw throw was the only place an operator ever saw it.
-   * It also carries the caller's bound literals inlined, which is why it may
-   * not travel to the caller (#7929's line, applied to the one refusal on this
-   * path that is raised from a dialect error rather than composed from the
-   * filter AST). So: statement to the log, column name to the caller.
+   * dialect message is genuinely useful, and `count()`'s old raw throw was the
+   * only place an operator ever saw it. It also carries the caller's bound
+   * literals inlined, which is why it may not travel to the caller (#7929's
+   * line, applied to the one refusal on this path that is raised from a
+   * dialect error rather than composed from the filter AST). So: diagnostic to
+   * the log, column name to the caller.
+   *
+   * [#21385, maintainer ruling 2026-10-02] …and the log line is cut too. A
+   * server log leaves the data's trust boundary, so the line writes the
+   * dialect's text through the shared driver-fault redaction
+   * (`@objectstack/types`): the code, the column and the dialect's own
+   * diagnostic stay; the compiled statement and the literals inlined into it
+   * do not.
    *
    * Returns the error rather than throwing it, the same shape
    * {@link SqlDriver.resolveWithheldFilterRefusal} uses, so each call site
@@ -10084,8 +10107,8 @@ export class SqlDriver implements IDataDriver {
     this.logger.warn(
       `[sql-driver] INVALID_FILTER — a WHERE column could not be resolved on '${object}'` +
         (column === null ? '' : ` ('${column}')`) +
-        '. The dialect message below is kept server-side because it inlines the statement ' +
-        `bound literals: ${typeof detail === 'string' ? detail : String(error)}`,
+        '. The dialect diagnostic, with the statement and its bound literals cut: ' +
+        redactStatementFromMessage(typeof detail === 'string' ? detail : String(error), OWN_STATEMENT_FAULT),
     );
     const disclosed =
       column !== null &&
@@ -10149,7 +10172,13 @@ export class SqlDriver implements IDataDriver {
 
     const detail = (error as { message?: unknown } | null | undefined)?.message;
     const code = (error as { code?: unknown } | null | undefined)?.code;
-    const dialectText = typeof detail === 'string' ? detail : String(error);
+    // [#21385] Cut ONCE, here, so every line below writes the same text: the
+    // warn line the ruling names and the two debug lines that demote it inside
+    // a scope. A server log leaves the data's trust boundary at any level.
+    const dialectText = redactStatementFromMessage(
+      typeof detail === 'string' ? detail : String(error),
+      OWN_STATEMENT_FAULT,
+    );
     // [#13438] The table the statement was compiled against, resolved the way
     // {@link SqlDriver.getBuilder} resolves it — a federated object's
     // `external.remoteName`, otherwise the object's own name — because every
@@ -10212,8 +10241,7 @@ export class SqlDriver implements IDataDriver {
     this.logger.warn(
       `[sql-driver] DATABASE_ERROR — the backend refused a read on '${object}'` +
         (typeof code === 'string' && code.length > 0 ? ` (${code})` : '') +
-        '. The dialect message below is kept server-side: it carries the compiled statement, ' +
-        'and on the dialects that inline them the bound literals too: ' +
+        '. The dialect diagnostic, with the compiled statement and its bound literals cut: ' +
         dialectText,
     );
     return envelope;
@@ -10259,8 +10287,13 @@ export class SqlDriver implements IDataDriver {
   /**
    * [#16019] The terminal of the raw path — compose
    * {@link rawStatementFaultError} for a backend refusal nothing declared,
-   * writing the statement and the dialect's own message to the SERVER LOG on
-   * the way.
+   * writing the dialect's own message to the SERVER LOG on the way.
+   *
+   * [#21385, maintainer ruling 2026-10-02] That line once wrote the statement
+   * as well, and the dialect's message whole: both carry the values the
+   * statement bound or spelled inline. It now writes the dialect's text
+   * through the shared driver-fault redaction (`@objectstack/types`) and drops
+   * the sent statement, keeping the code and the dialect's own diagnostic.
    *
    * The same "is it already ours" gate {@link SqlDriver.backendStatementFault}
    * applies, asked over the DECLARED status and ⛔ never over an error class: a
@@ -10278,13 +10311,14 @@ export class SqlDriver implements IDataDriver {
 
     const detail = (error as { message?: unknown } | null | undefined)?.message;
     const code = (error as { code?: unknown } | null | undefined)?.code;
+    // [#21385] ⛔ `command` is not written. It is the text the caller sent, and a
+    // raw statement may spell its values inline as well as bind them; the
+    // dialect's text leads with the same statement, compiled, and is cut below.
     this.logger.warn(
       '[sql-driver] DATABASE_ERROR — the backend refused a raw statement' +
         (typeof code === 'string' && code.length > 0 ? ` (${code})` : '') +
-        '. The statement and the dialect message below are kept server-side: the message ' +
-        'carries the compiled statement, and on the dialects that inline them the bound ' +
-        `literals too. statement: ${command}; dialect: ` +
-        `${typeof detail === 'string' ? detail : String(error)}`,
+        '. The dialect diagnostic, with the statement and its bound literals cut: ' +
+        redactStatementFromMessage(typeof detail === 'string' ? detail : String(error), OWN_STATEMENT_FAULT),
     );
     return rawStatementFaultError(error);
   }
@@ -10913,10 +10947,11 @@ export class SqlDriver implements IDataDriver {
   /**
    * [#11541] Compose the refusal for a `groupBy` / aggregation column the
    * backend could not resolve, writing the dialect's own message to the
-   * SERVER LOG on the way — the same statement-to-log, name-to-caller split
+   * SERVER LOG on the way — the same diagnostic-to-log, name-to-caller split
    * {@link SqlDriver.unresolvableFilterColumnRefusal} performs for the WHERE
    * (#7929: the dialect text inlines the statement's bound literals on two of
-   * the three dialects, so it may not travel to the caller).
+   * the three dialects, so it may not travel to the caller). [#21385] The log
+   * line takes the same cut as the WHERE's: no statement, no bound literal.
    *
    * # `INVALID_FIELD` / 400 — the ingress door's own answer, not a new choice
    *
@@ -10957,9 +10992,9 @@ export class SqlDriver implements IDataDriver {
     const detail = (error as { message?: unknown } | null | undefined)?.message;
     this.logger.warn(
       `[sql-driver] INVALID_FIELD — a groupBy/aggregation column could not be resolved on ` +
-        `'${object}' ('${column}'). The dialect message below is kept server-side because it ` +
-        `inlines the statement bound literals: ` +
-        `${typeof detail === 'string' ? detail : String(error)}`,
+        `'${object}' ('${column}'). The dialect diagnostic, with the statement and its bound ` +
+        'literals cut: ' +
+        redactStatementFromMessage(typeof detail === 'string' ? detail : String(error), OWN_STATEMENT_FAULT),
     );
     const clause =
       namedBy.inGroupBy && namedBy.inAggregations
@@ -11205,10 +11240,11 @@ export class SqlDriver implements IDataDriver {
   /**
    * [commit 9ccc4179e] Compose the refusal for the LISTED field of a distinct read whose
    * column the backend could not resolve, writing the dialect's own message to
-   * the SERVER LOG on the way — the same statement-to-log, name-to-caller split
+   * the SERVER LOG on the way — the same diagnostic-to-log, name-to-caller split
    * {@link SqlDriver.unresolvableFilterColumnRefusal} performs for the WHERE
    * (#7929: the dialect text inlines the statement's bound literals on two of
-   * the three dialects, so it may not travel to the caller).
+   * the three dialects, so it may not travel to the caller). [#21385] The log
+   * line takes the same cut as the WHERE's: no statement, no bound literal.
    *
    * # `INVALID_FIELD` / 400 — read off the repo, not chosen
    *
@@ -11250,9 +11286,9 @@ export class SqlDriver implements IDataDriver {
     // (`pnpm check:doc-authoring`).
     this.logger.warn(
       `[sql-driver] INVALID_FIELD — the listed distinct column could not be resolved on ` +
-        `'${object}' ('${column}'). The dialect message below is kept server-side because it ` +
-        `inlines the statement bound literals: ` +
-        `${typeof detail === 'string' ? detail : String(error)}`,
+        `'${object}' ('${column}'). The dialect diagnostic, with the statement and its bound ` +
+        'literals cut: ' +
+        redactStatementFromMessage(typeof detail === 'string' ? detail : String(error), OWN_STATEMENT_FAULT),
     );
     const err = new Error(
       `This query lists the distinct values of '${column}', a column that object '${object}' ` +

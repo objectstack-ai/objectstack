@@ -137,23 +137,31 @@
  *
  * ## [#21082] The cube leg — `analyticsCubes` members, under the same two ids
  *
- * An authored cube (`defineStack({ analyticsCubes })`) reaches the SAME door
- * the dataset compiles to: `structured-json-dimension-door.ts` judges every
- * cube's grouped members and `count_distinct` measures, whether the cube was
- * authored or compiled from a dataset. Until this leg no rule in this package
- * walked `analyticsCubes`, so a cube dimension over a `json` field passed
- * `os validate` and met its first refusal at query time. The leg refuses the
- * three shapes that door refuses, with the verdicts this file already holds —
- * ⛔ no second account of either:
+ * An authored cube (`defineStack({ analyticsCubes })`) reaches the SAME doors
+ * the dataset compiles to, whether the cube was authored or compiled from a
+ * dataset: `structured-json-dimension-door.ts` judges every cube's grouped
+ * members and `count_distinct` measures, and [#21419]
+ * `cube-measure-field-type-door.ts` (#21044) judges every other measure whose
+ * `type` is a row of the table. Until this leg no rule in this package walked
+ * `analyticsCubes`, so a cube dimension over a `json` field, or a `sum` over a
+ * `text` one, passed `os validate` and met its first refusal at query time.
+ * The leg refuses what those doors refuse, with the verdicts this file already
+ * holds — ⛔ no second account of either:
  *
  *   - a dimension whose column is structured-JSON or multi-value —
  *     {@link groupKeyClassOf}, under `dimension-json-stored-field-refused`;
- *   - a `count_distinct` measure whose column is JSON-stored —
- *     {@link acceptsDeclaration}, under `measure-aggregate-field-type-refused`.
- *
- * The door's other cube judgment (#21044, `cube-measure-field-type-door.ts`:
- * `sum` / `avg` / `min` / `max` against the table) is not this leg's; a cube
- * measure of any other `type` is left unjudged here.
+ *   - [#21419] a measure whose `type` is a row of the table and whose column's
+ *     declaration that row does not accept — {@link acceptsDeclaration}, the
+ *     dataset measure's own verdict, under `measure-aggregate-field-type-refused`.
+ *     That is every row, as on a dataset: `count_distinct` over a JSON-stored
+ *     column (the `structured-json-dimension-door.ts` half), `sum` / `avg` /
+ *     `min` / `max` over a type its row refuses (the
+ *     `cube-measure-field-type-door.ts` half, which reads the TYPE alone — the
+ *     `multiple` flag moves only `count_distinct`, see above), and never
+ *     `count`, which reads no value and accepts every type. A `type` outside
+ *     the table's vocabulary — the expression metric types `number` /
+ *     `string` / `boolean` — is skip 5, as on a dataset, and neither door
+ *     judges it.
  *
  * How a cube names its column is read the way the door reads it
  * (`analytics-service.ts`, `hop-object.ts`):
@@ -174,7 +182,8 @@
  *     skipped, on a dimension and a measure alike (whether `'*'` belongs on
  *     either is a question of its own, not this leg's).
  *
- * The same skips 1, 3 and 4 hold, plus a member that writes no `sql`.
+ * The same skips 1, 3 and 4 hold, plus a member that writes no `sql`; and on
+ * a measure, skip 5 and a measure that writes no `type`.
  *
  * Both legs ride the one registry entry: gating, on all three commands. At the
  * runtime write door that entry is dispatched for a `dataset` write, whose
@@ -532,11 +541,13 @@ function cubeMemberFindings(cube: AnyRec, cubePath: string, graph: ObjectGraph):
   }
 
   for (const { rec: measure, path } of collectionEntries(cube.measures, `${cubePath}.measures`)) {
-    // Only `count_distinct` is this leg's: it is the cube measure the door's
-    // JSON-stored judgment covers. Every other `type` is skipped, judged or not
-    // elsewhere — see the module note.
+    // [#21419] Every row of the table is this leg's, as on a dataset: the
+    // `type` IS the aggregate, judged by the one verdict — see the module note.
+    // A measure that writes no `type` has nothing to judge; a non-string there
+    // is the schema's refusal to give, not this rule's.
     const aggregate = strName(measure.type);
-    if (aggregate !== 'count_distinct') continue;
+    if (!aggregate) continue;
+    // ── Skip 5: the `type` is outside the table's vocabulary (`number` / `string` / `boolean`) ──
     const accepted = ACCEPTED_TYPES_BY_AGGREGATE.get(aggregate);
     if (!accepted) continue;
     const sql = strName(measure.sql);
@@ -570,8 +581,9 @@ function cubeMemberFindings(cube: AnyRec, cubePath: string, graph: ObjectGraph):
 /**
  * Refuse every dataset measure whose `aggregate` the field's declaration
  * cannot carry, and every dataset dimension whose field is JSON-stored; then
- * [#21082] every cube dimension whose `sql` column is JSON-stored, and every
- * cube `count_distinct` measure whose column is. Returns findings (empty =
+ * [#21082] every cube dimension whose `sql` column is JSON-stored, and
+ * [#21419] every cube measure whose `type` the column's declaration cannot
+ * carry. Returns findings (empty =
  * clean): each dataset's dimensions before its measures, then each cube's.
  * Pure `(stack) => Finding[]` (ADR-0019): no I/O, and safe on both the
  * schema-parsed stack and the raw config the `os lint` path carries.

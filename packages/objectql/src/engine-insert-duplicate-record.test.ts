@@ -49,7 +49,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
 import { ObjectQL, ScopedContext } from './engine';
 import { DuplicateRecordError, DUPLICATE_RECORD_CODE } from './duplicate-record-error';
-import { redactPropagatedDriverFault } from './driver-fault-redaction';
+import { redactPropagatedDriverFault } from '@objectstack/types';
 import { SchemaRegistry } from './registry';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 

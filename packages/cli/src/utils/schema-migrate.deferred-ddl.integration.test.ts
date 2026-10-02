@@ -22,6 +22,11 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import { bootSchemaStack } from './schema-migrate.js';
 import { composeForDeclarations } from './schema-migration-plugins.js';
 
+// [#10126] Pay the first transform of this dist-resolved workspace dep at
+// MODULE LOAD: the second-datasource cases reach it through a dynamic
+// `import()` inside a clocked `it()` body (`scripts/check-test-source-alias.mjs`).
+import '@objectstack/service-datasource';
+
 const ARTIFACT = {
   // #8687: manifest fields under `manifest:` — the flat spelling is refused.
   manifest: { id: 'com.example.defer-smoke', name: 'Defer Smoke', version: '0.0.0', type: 'app' },
@@ -222,6 +227,120 @@ describe('bootSchemaStack({ deferSchemaDdl }) — the boot writes nothing (#3917
         `Immediate DDL was called 1 time(s) during the declaration boot (dropTable() on defer_widget via ${via})`,
       );
       expect(notes).not.toContain('a plan writes nothing');
+    } finally {
+      await stack.shutdown();
+    }
+  }, 60_000);
+});
+
+/**
+ * [#21391] The deferral covers EVERY SQL datasource the boot connects, not only
+ * the default one.
+ *
+ * `DeferSchemaDdlPlugin` used to arm the first `driver.*` SQL service it found,
+ * which is the default datasource. A second SQL datasource reaches the engine
+ * through `engine.registerDriver` alone (`DatasourceConnectionService.connect()`,
+ * driven by `AppPlugin.start()` for the datasources an artifact declares), and
+ * the connect then calls `syncObjectSchema` for the objects bound to it. That
+ * is boot schema sync on a database the operator pointed nothing at, in a
+ * dry run. This is the declared-datasource path, booted for real: the shared
+ * connection service, the real driver factory, a second SQLite file.
+ */
+describe('bootSchemaStack({ deferSchemaDdl }) — every SQL datasource the boot connects (#21391)', () => {
+  let dir: string;
+  let dbFile: string;
+  let secondFile: string;
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeEach(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'os-defer-ds-'));
+    mkdirSync(join(dir, 'dist'), { recursive: true });
+    mkdirSync(join(dir, 'data'), { recursive: true });
+    dbFile = join(dir, 'data', 'app.db');
+    secondFile = join(dir, 'data', 'second.db');
+    writeFileSync(join(dir, 'dist', 'objectstack.json'), JSON.stringify({
+      manifest: { id: 'com.example.defer-second-ds', name: 'Defer Second Datasource', version: '0.0.0', type: 'app' },
+      objects: [
+        { name: 'defer_home', fields: { label: { type: 'text' } } },
+        // Bound to the second datasource: its connect syncs this object.
+        { name: 'defer_remote', datasource: 'second', fields: { label: { type: 'text' } } },
+      ],
+      datasources: [
+        { name: 'second', driver: 'sqlite', schemaMode: 'managed', origin: 'code', config: { filename: secondFile }, active: true },
+      ],
+    }));
+
+    // The second database exists and holds one table of its own, so "the boot
+    // changed nothing there" is a comparison, not the absence of a file.
+    const seed = new SqlDriver({ client: 'better-sqlite3', connection: { filename: secondFile }, useNullAsDefault: true });
+    await (seed as any).knex.schema.createTable('remote_marker', (t: any) => { t.string('id').primary(); });
+    await (seed as any).knex.destroy();
+
+    savedEnv.OS_ARTIFACT_PATH = process.env.OS_ARTIFACT_PATH;
+    savedEnv.NODE_ENV = process.env.NODE_ENV;
+    process.env.OS_ARTIFACT_PATH = join(dir, 'dist', 'objectstack.json');
+    process.env.NODE_ENV = 'production';
+  });
+
+  afterEach(() => {
+    process.env.OS_ARTIFACT_PATH = savedEnv.OS_ARTIFACT_PATH;
+    process.env.NODE_ENV = savedEnv.NODE_ENV;
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  async function tablesOf(file: string): Promise<string[]> {
+    const d = new SqlDriver({ client: 'better-sqlite3', connection: { filename: file }, useNullAsDefault: true });
+    const k = (d as any).knex;
+    try {
+      const rows = await k.raw("SELECT name FROM sqlite_master WHERE type = 'table'");
+      return (rows as Array<{ name: string }>).map((r) => r.name).filter((n) => !n.startsWith('sqlite_')).sort();
+    } finally {
+      await k.destroy();
+    }
+  }
+
+  /** The shared connection service, wired the way `os serve` wires it, with the real factory. */
+  async function datasourceAdmin(): Promise<unknown> {
+    const { DatasourceAdminServicePlugin, createDefaultDatasourceDriverFactory } = await import('@objectstack/service-datasource');
+    return new DatasourceAdminServicePlugin({ driverFactory: createDefaultDatasourceDriverFactory() });
+  }
+
+  it('a deferred boot creates nothing on the second datasource, and reports its work with the default\'s', async () => {
+    const stack = await bootSchemaStack({
+      jsonOutput: false,
+      databaseUrl: `file:${dbFile}`,
+      deferSchemaDdl: true,
+      projectRoot: dir,
+      extraPlugins: [await datasourceAdmin()],
+    });
+    try {
+      // Non-vacuity: the second datasource really connected and owns the object.
+      const engine = stack.kernel.getService('objectql');
+      expect(engine.getDriverForObject('defer_remote')?.name).toBe('second');
+
+      expect(await tablesOf(secondFile)).toEqual(['remote_marker']);
+      expect(await tablesOf(dbFile)).not.toContain('defer_home');
+      const pending = stack.pendingSchemaWork.map((p) => `${p.table}:${p.kind}`);
+      expect(pending).toContain('defer_home:create_table');
+      expect(pending).toContain('defer_remote:create_table');
+    } finally {
+      await stack.shutdown();
+    }
+  }, 60_000);
+
+  it('flushSchemaDdl performs the second datasource\'s work too', async () => {
+    const stack = await bootSchemaStack({
+      jsonOutput: false,
+      databaseUrl: `file:${dbFile}`,
+      deferSchemaDdl: true,
+      projectRoot: dir,
+      extraPlugins: [await datasourceAdmin()],
+    });
+    try {
+      const performed = (await stack.flushSchemaDdl()).map((p) => `${p.table}:${p.kind}`);
+      expect(performed).toContain('defer_remote:create_table');
+      expect(await tablesOf(secondFile)).toEqual(['defer_remote', 'remote_marker']);
+      expect(await tablesOf(dbFile)).toContain('defer_home');
     } finally {
       await stack.shutdown();
     }

@@ -3,7 +3,7 @@
 import type { Lifecycle } from '@objectstack/spec/data';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import { isMissingTableError } from '@objectstack/metadata/errors';
-import { redactPropagatedDriverFault } from '../driver-fault-redaction.js';
+import { redactPropagatedDriverFault } from '@objectstack/types';
 import { parseLifecycleDuration } from './duration.js';
 import type {
   DanglingReferenceAuditOptions,
