@@ -324,8 +324,9 @@ async function rest(path, { method = 'GET', body = null, redirect = 'follow' } =
  * Returns `{ exitCode, from, to, lines, transport, relay }` — plus, on a
  * success, `pendingRedirect` (true while the old URL still serves the card)
  * and `confirmedBy`: `target` (read back there) or `relay-annotation` (the
- * run's annotation, the target answering 403); never throws on a status. `deps.sleep` and `deps.now` serve the
- * read-back's bounded re-read alone (`TRANSFER_READ_BACK_DELAYS_MS`).
+ * run's annotation, the target answering 403); never throws on a status.
+ * `deps.sleep` and `deps.now` serve the read-back's bounded re-read alone
+ * (`TRANSFER_READ_BACK_DELAYS_MS`).
  */
 export async function transferIssue(plan, deps = {}) {
   const lines = [];
