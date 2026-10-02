@@ -67,15 +67,17 @@ export type CompareTo = DatasetCompareTo;
  *     that query never selects, and forwarding `LIMIT` truncates it before the
  *     merge, so rows silently vanish from the grid. A derived measure has no SQL
  *     column at all, yet is a perfectly reasonable sort key.
- *  2. **Coverage.** Only `NativeSQLStrategy` honours `order`/`limit`; the
- *     ObjectQL aggregate path has nowhere to put them (`EngineAggregateOptions`
- *     has no ordering grammar), and date-bucketed queries are *forced* down that
- *     path because native SQL declines granularity. Sorting here makes ordering
- *     work identically on every driver and strategy.
+ *  2. **One comparator.** Sorting the assembled grid here orders it the same way
+ *     whichever strategy served each sub-query. (Each strategy also honours a
+ *     query's own `order`/`limit`/`offset` — `NativeSQLStrategy` in SQL, the
+ *     ObjectQL face over the aggregated rows with this module's
+ *     {@link applyOrdering} and {@link applyWindow}, #21316.)
  *
- * The single-query case still pushes `order`/`limit`/`offset` DOWN into the SQL
- * (see `canPushDownWindow`) so the database does the work and the echoed `sql`
- * shows it; the post-pass is then a no-op re-sort of already-sorted rows.
+ * The single-query case still pushes `order`/`limit`/`offset` DOWN into the
+ * query (see `canPushDownWindow`) so the strategy does the work and the echoed
+ * `sql` shows it; the post-pass then re-sorts already-sorted rows and does NOT
+ * window them again — the strategy already did, and re-slicing a page applies
+ * its `offset` a second time.
  *
  * **What the sort key IS for a label-bearing dimension (#3680).** An order key
  * naming a `select` or `lookup`/`master_detail` dimension sorts by the DISPLAY
@@ -1204,11 +1206,16 @@ export class DatasetExecutor {
 
     // Order + window the assembled grid (#3588). Every column the caller may
     // sort by exists by now — merged measure-scoped values, `__compare`
-    // columns, and derived measures included. When the window was already
-    // pushed into SQL this re-sorts an already-sorted grid (a no-op) and
-    // re-slices an already-sliced one; when it could not be (the ObjectQL
-    // aggregate path has no ordering grammar, and date-bucketed queries are
-    // forced down it), this is what makes `sortBy` work at all.
+    // columns, and derived measures included. When the window could not be
+    // pushed down (a multi-query grid, a derived or label-bearing order key),
+    // this is the only place it is applied.
+    //
+    // [#21316] When it WAS pushed down, the strategy that served the one query
+    // already ordered and windowed it — the native face in SQL, the ObjectQL
+    // face over its aggregated rows — so this re-sorts an already-sorted grid
+    // and windows nothing. Re-slicing an already-sliced page applies `offset`
+    // twice: `limit 2, offset 1` over five groups answered ONE row, the third,
+    // instead of the second and third.
     //
     // #3680 — for label-bearing order keys, substitute the display label as
     // the SORT KEY, resolved over the grid's distinct values BEFORE the window
@@ -1224,7 +1231,7 @@ export class DatasetExecutor {
       if (labels && labels.size > 0) (sortKeys ??= {})[key] = labels;
     }
     result.rows = applyOrdering(result.rows, order, sortKeys);
-    result.rows = applyWindow(result.rows, selection.limit, selection.offset);
+    if (!canPushDownWindow) result.rows = applyWindow(result.rows, selection.limit, selection.offset);
 
     return result;
   }

@@ -631,6 +631,94 @@ describe('translateAction — description + params (the declared-and-linted keys
   });
 });
 
+/**
+ * An action's copy is keyed on the action's OWN `objectName`. A bound action
+ * reads only `objects.<objectName>._actions.<name>`. An object-less action
+ * reads only `globalActions.<name>`, the group `TranslationDataSchema.globalActions`
+ * declares for object-less actions. A bound action never falls back to
+ * `globalActions`: the translation linter refuses that key as never read, and a
+ * fallback here would make the refused key work at runtime.
+ *
+ * Every row reads all four action lookups off one translated document: the
+ * field lookup (label / description / confirmText / successMessage), the
+ * resultDialog node, the outcome messages and the param node.
+ */
+describe('translateAction — the copy address is keyed on the action\'s own objectName', () => {
+  // One translated node; each row places it at one address.
+  const COPY = {
+    label: '关闭工单',
+    description: '关闭该工单。',
+    confirmText: '确认关闭？',
+    successMessage: '工单已关闭。',
+    outcomeMessages: { closed: '已关闭。' },
+    resultDialog: { title: '工单已关闭' },
+    params: { reason: { label: '原因' } },
+  };
+  // Parsed by the bundle schema, so each row's bundle is one an author can write.
+  const bundleOf = (data: Record<string, unknown>): TranslationBundle => ({
+    'zh-CN': TranslationDataSchema.parse(data),
+  });
+  const GLOBAL_ONLY = bundleOf({ globalActions: { close_case: COPY } });
+  const OWNER_SCOPED = bundleOf({ objects: { support_case: { _actions: { close_case: COPY } } } });
+  const OTHER_OBJECT = bundleOf({ objects: { support_queue: { _actions: { close_case: COPY } } } });
+
+  const OBJECT_LESS = {
+    name: 'close_case',
+    label: 'Close case',
+    description: 'Close this case.',
+    confirmText: 'Close it?',
+    successMessage: 'Case closed.',
+    outcomeMessages: { closed: 'Closed.' },
+    resultDialog: { title: 'Case closed' },
+    params: [{ name: 'reason', label: 'Reason' }],
+  };
+  const BOUND = { ...OBJECT_LESS, objectName: 'support_case' };
+
+  /** What each of the four lookups wrote onto the translated document. */
+  const read = (out: typeof OBJECT_LESS) => ({
+    field: [out.label, out.description, out.confirmText, out.successMessage],
+    resultDialog: out.resultDialog?.title,
+    outcomeMessages: out.outcomeMessages?.closed,
+    params: out.params?.[0]?.label,
+  });
+  const SOURCE_TEXT = read(OBJECT_LESS);
+  const COPY_TEXT = {
+    field: [COPY.label, COPY.description, COPY.confirmText, COPY.successMessage],
+    resultDialog: COPY.resultDialog.title,
+    outcomeMessages: COPY.outcomeMessages.closed,
+    params: COPY.params.reason.label,
+  };
+  const zh = { locale: 'zh-CN', fallbackChain: [] };
+
+  it('a bound action with copy only under globalActions keeps its source text', () => {
+    expect(read(translateAction(BOUND, GLOBAL_ONLY, zh))).toEqual(SOURCE_TEXT);
+    expect(resolveActionLabel(GLOBAL_ONLY, BOUND, zh)).toBe('Close case');
+  });
+
+  it('the same action resolves copy under its own objects.<objectName>._actions', () => {
+    expect(read(translateAction(BOUND, OWNER_SCOPED, zh))).toEqual(COPY_TEXT);
+  });
+
+  it('copy under another object is not read', () => {
+    expect(read(translateAction(BOUND, OTHER_OBJECT, zh))).toEqual(SOURCE_TEXT);
+  });
+
+  it('an object-less action resolves its globalActions copy', () => {
+    expect(read(translateAction(OBJECT_LESS, GLOBAL_ONLY, zh))).toEqual(COPY_TEXT);
+  });
+
+  it('an object-less action does not read an object\'s _actions', () => {
+    expect(read(translateAction(OBJECT_LESS, OWNER_SCOPED, zh))).toEqual(SOURCE_TEXT);
+  });
+
+  it('an inline action is bound to the object that declares it, so globalActions is not read for it', () => {
+    const inlineOn = (bundle: TranslationBundle) =>
+      translateMetadataDocument('object', { name: 'support_case', actions: [OBJECT_LESS] }, bundle, zh).actions[0];
+    expect(read(inlineOn(GLOBAL_ONLY))).toEqual(SOURCE_TEXT);
+    expect(read(inlineOn(OWNER_SCOPED))).toEqual(COPY_TEXT);
+  });
+});
+
 describe('translateMetadataDocument', () => {
   it('translates a view document', () => {
     const view = {
