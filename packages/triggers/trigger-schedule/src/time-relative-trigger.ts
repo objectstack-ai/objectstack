@@ -328,7 +328,7 @@ export class TimeRelativeTrigger implements FlowTrigger {
         const policy = readScheduledWorkPolicy(this.scheduledWorkPolicy);
         if (!policy.enabled) {
             this.stop(binding.flowName);
-            refuseScheduledWorkDisabled(this.logger, 'time-relative', binding.flowName);
+            refuseScheduledWorkDisabled(this.logger, 'time-relative', binding.flowName, policy);
         }
 
         const raw = (binding.config as Record<string, unknown> | undefined)?.timeRelative;

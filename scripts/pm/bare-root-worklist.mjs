@@ -392,6 +392,17 @@ const POPULATION_PROPERTY = /^(?:[a-z][A-Za-z0-9]*Roots?|[a-z][A-Za-z0-9]*Dirs?|
  * drift this docblock permits; pairing any one of those numerators with another
  * reading's denominator is the defect it forbids, and the spread is why.
  *
+ * ⭐ A TWENTY-FIRST row was re-decided on 2026-10-01 (#21011), and from the
+ * OTHER side of the 2026-08-26 split: `check:i18n-coverage EXAMPLES_DIR
+ * examples` was one of the fifteen that became SPELLABLE-UNDECLARED for want of
+ * a recorded consumer, and #21011 is that consumer, measured on a real diff the
+ * derivation was silent for and CI failed. Moving it to DECLARED-NARROWER is the
+ * criterion that ruling drew, not a new licence. What did change is the
+ * SPELLING, and that is why the row is re-measured whole rather than re-labelled:
+ * the old one named the config FILENAME the constant filters for, but the gate
+ * reads the import graph `os lint` bundles from each config, so the recorded set
+ * is now that graph's two shapes, measured with the bundler itself on one tree.
+ *
  * ⭐ ATTRIBUTION was added on 2026-09-19 (#15926), and it is a widening of a
  * PIN rather than a re-decision on any row: no verdict is added, changed or
  * withdrawn, and the 46/13/14 census is the one it was measured at. The
@@ -508,11 +519,6 @@ const SPELLINGS = new Map([
     holds: (s) => s[0] === 'packages' && s.length >= 3
       && s[s.length - 1] === 'i18n-extract.config.ts' && s[s.length - 2] === 'scripts',
   }],
-  ['example app configs', {
-    segments: ['examples', '*', 'objectstack.config.ts'],
-    claim: 'the named app config in each immediate child of the examples root',
-    holds: (s) => s.length === 3 && s[0] === 'examples' && s[2] === 'objectstack.config.ts',
-  }],
   ['published skill files', {
     segments: ['skills', '*', '**'],
     claim: 'every file inside a published skill directory, at any depth',
@@ -556,6 +562,21 @@ const SPELLINGS = new Map([
     claim: 'every `.ts`, `.tsx` or `.mts` file at any depth under the packages root',
     holds: (s) => s[0] === 'packages' && s.length >= 2
       && ['.ts', '.tsx', '.mts'].some((ext) => s[s.length - 1].endsWith(ext)),
+  }],
+  ['example app configs and their source trees', {
+    // What `os lint` loads when check:i18n-coverage hands it a config: the
+    // config, and the relative import graph its bundler follows from it, which
+    // on this tree never leaves that example's own `src/` (the gate's
+    // --self-test holds that). The config hint alone was this entry until
+    // #21011 and named the FILTER, not the read.
+    segments: [
+      ['examples', '*', 'objectstack.config.ts'],
+      ['examples', '*', 'src', '**'],
+    ],
+    claim: 'the app config in each immediate child of the examples root, or any file at any depth '
+      + "under that child's src directory",
+    holds: (s) => s[0] === 'examples'
+      && ((s.length === 3 && s[2] === 'objectstack.config.ts') || (s.length >= 4 && s[2] === 'src')),
   }],
   ['examples TypeScript source', {
     segments: ['examples', '**', '*.ts'],
@@ -860,6 +881,31 @@ const TRIAGE = new Map([
       + 'any other extension satisfies neither hint, so no arbitrary file at the top of the root '
       + 'is reached — which is what this verdict says and is correct, not outstanding debt',
   }],
+  ['scripts/check-i18n-coverage.mjs EXAMPLES_DIR examples', {
+    verdict: 'DECLARED-NARROWER',
+    spelling: 'example app configs and their source trees',
+    why: 'RE-DECIDED 2026-10-01 (#21011) from SPELLABLE-UNDECLARED, which deferred the declaration '
+      + 'because no consumer had asked for this gate to be nameable. #21011 is that consumer, and '
+      + 'it is MEASURED: PR #20998 edited showcase source files, the derivation for its diff '
+      + 'named 116 families and not this one, and CI then failed it here (app-showcase 414 -> '
+      + '416 untranslated). So the row takes the DECLARED-NARROWER half of the 2026-08-26 split, '
+      + 'the criterion that ruling drew, and no wider authorisation is claimed. ⛔ The recorded '
+      + 'spelling is NOT the old one: it named the FILTER the constant applies, one config per '
+      + 'child directory, while the gate READS what os lint bundles from each config. '
+      + 'RE-MEASURED at commit 30c530e5, every term on one tree: esbuild with the CLI '
+      + 'bundle-require externals reaches 153 tracked files from the 4 configs, each the config or '
+      + 'a file under its own example src/. The gate declares that as two hints beside '
+      + 'EXAMPLES_DIR under the ROOT_DIR_WATCH_HINTS idiom; they cover 170 of the 256 tracked '
+      + 'files under the bare root — all 153 (complete) plus 17 no config imports (11 src/docs '
+      + 'pages os lint reads but never counts as i18n, 2 tests and 3 strays under src/, one '
+      + 'config-less example src/), 90% — where the bare-root spelling would be 153 of 256, 60%, '
+      + 'naming the gate for every test suite and README. The recorded set is SET-EQUAL to the '
+      + 'gate array at this root, and the gate own --self-test holds the other side: the '
+      + 'derivation reads both hints off its source, and no relative import in a config or '
+      + 'under its src/ leaves that src/. The row STAYS in the sweep because the bare root is '
+      + 'still not covered — no arbitrary file at the top of examples/ is reached — which is what '
+      + 'this verdict says and is correct, not outstanding debt',
+  }],
   // ── Refused: the population is the whole root, and the root is saturated ──
   ['scripts/check-skill-identifier-liveness.mjs IMPL_ROOTS packages', {
     verdict: 'REFUSE-WIDE',
@@ -1049,14 +1095,6 @@ const TRIAGE = new Map([
   // rested on. What is recorded now is the measured spelling and the reason the
   // declaration is deferred, which is a different claim from "no honest
   // declaration exists" and the only one these rows can still make.
-  ['scripts/check-i18n-coverage.mjs EXAMPLES_DIR examples', {
-    verdict: 'SPELLABLE-UNDECLARED',
-    spelling: 'example app configs',
-    why: 'one named config file per child directory — 3 of 241 tracked files under the root '
-      + '(1.2%), re-measured 2026-08-26. The recorded spelling is live and reaches 3 of 3, 100% '
-      + 'precise and complete. Deferred: no consumer has asked for this gate to be nameable, and '
-      + 'the i18n family it belongs to would want one declaration per gate rather than one here',
-  }],
   ['scripts/check-i18n-coverage.mjs PACKAGES_DIR packages', {
     verdict: 'SPELLABLE-UNDECLARED',
     spelling: 'i18n extract configs',

@@ -93,8 +93,11 @@ several kernels in one process can give each kernel its own policy: pass the
 same `scheduledWorkPolicy` (a `ScheduledWorkPolicy` value or a resolver) to
 `AutomationServicePlugin`, `ScheduleTriggerPlugin` and
 `TimeRelativeTriggerPlugin`. Without it, the deployment switch decides, as
-before. A flow the policy leaves unarmed is reported with the same
-policy reason as a deployment-disabled one.
+before. A flow the policy leaves unarmed is reported the way a
+deployment-disabled one is, never as a binding failure. The reason is the
+policy's `hostDisabledReason` when the host sets one, so a host that turns one
+kernel off for its own reason (a plan, say) can say so. Without it, the reason
+is the deployment's sentence, which names `OS_AUTOMATION_SCHEDULED_WORK_ENABLED`.
 
 ## Error isolation
 

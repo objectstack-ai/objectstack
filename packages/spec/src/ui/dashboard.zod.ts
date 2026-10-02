@@ -242,8 +242,13 @@ const WIDGET_HISTORY =
  *
  * What the declared keys below buy is a real contract for the four that are
  * NOT presentation-only: they change the SQL the dataset query compiles to, so
- * a typo (`sortDirection`, `granularity`) is now an author-time type error
- * instead of an option that reads as if it works and silently does nothing.
+ * a wrong VALUE for one (`sortOrder: 'sideways'`) is an author-time type error
+ * and a parse error. A misspelled KEY is neither: the bag is open, so
+ * `sortDirection` or `granularity` compiles and parses like any other extra
+ * and changes nothing. What names it is the `unconsumed-widget-option`
+ * warning `os validate`, `os build` and `os lint` raise for a key the
+ * dataset-bound path does not read — a warning, so none of the three fails on
+ * it.
  *
  * The dashboard/report renderer lowers these into the `DatasetSelection` it
  * posts (`dateGranularity`, `order`, `limit`); see the field docs on
