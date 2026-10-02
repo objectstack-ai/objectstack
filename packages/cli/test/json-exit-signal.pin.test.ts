@@ -25,9 +25,10 @@
  *
  * ## Why an ENUMERATION, and how a new command enters it
  *
- * The idiom already sat in 21 command files; four more lacked it. A pin naming
- * those four goes green while the next command repeats the shape. So the
- * population is DISCOVERED, not listed:
+ * The idiom already sat in 17 command files; four more (`migrate recorded-by`,
+ * `resume`, `account-issuer`, `apply`) lacked it. A pin naming those four goes
+ * green while the next command repeats the shape. So the population is
+ * DISCOVERED, not listed:
  *
  *   1. the files oclif's command table is built from — `package.json`
  *      `oclif.commands` (strategy `pattern`, `./dist/commands`, `**\/*.js`),
@@ -381,13 +382,14 @@ const FLOW = new Map(
 /**
  * Floors, not counts of today: the population and the `this.exit`-in-`try`
  * sites this landed over (45 JSON-capable commands: 31 `--json`, 14
- * `--format json`; 104 sites). A discovery or analyzer that silently stops
- * finding anything returns zero, and zero passes every per-member assertion —
- * these are what notice. Raise them when the tree grows; a drop below them is
- * a broken detector, not a smaller CLI.
+ * `--format json`; 99 sites, 21 of them `os build`'s through `compile.ts`). A
+ * discovery or analyzer that silently stops finding anything returns zero, and
+ * zero passes every per-member assertion — these are what notice. A drop below
+ * them is a broken detector or a deliberate removal; say which when you lower
+ * one.
  */
 const POPULATION_FLOOR = 45;
-const SITE_FLOOR = 104;
+const SITE_FLOOR = 99;
 
 // ---------------------------------------------------------------------------
 // 1. The analyzer, against fixtures — it must be able to fail
