@@ -51,13 +51,16 @@
  *
  * The transfer is confirmed when the card answers from the target with the
  * title the pre-read saw. The card is found by its number when one is in
- * hand — the number the `transferIssue` answer carried (direct), else the
- * number the old URL's 301 names — and otherwise (the relay, whose run prints
- * the number only to a job log a seat container cannot read) by that title
- * among the target's cards updated since the transfer was sent; two such
- * cards are not a confirmation. `GET /repos/{source}/issues/{n}` WITHOUT
- * following redirects is read first, and its answer is printed beside the
- * verdict, never instead of it:
+ * hand — the number the `transferIssue` answer carried: directly (direct), or
+ * as the relay run's ANNOTATION reports it (`fleet-write/dispatch.mjs`, "The
+ * run's annotations": the executor's copy of that same answer, read from the
+ * job's check run because a seat container reads neither its log nor its
+ * summary) — else the number the old URL's 301 names, and otherwise by that
+ * title among the target's cards updated since the transfer was sent; two
+ * such cards are not a confirmation. So under the relay the order is the
+ * annotation, then the 301, then the title. `GET /repos/{source}/issues/{n}`
+ * WITHOUT following redirects is read first, and its answer is printed beside
+ * the verdict, never instead of it:
  *
  *   - a 301 naming the card corroborates it; one naming another card, or
  *     another repository, is the board disagreeing;
@@ -77,9 +80,15 @@
  * target still lacks the card AND the old URL, read again, still serves it
  * from the source. A target that cannot be read at all — a cloud session
  * reads only the repositories attached to it, and answers 403 for the rest —
- * ends the wait at once, UNCONFIRMED. Labels with no same-named label on the
- * target are dropped by the platform (the relay never asks it to create
- * them); the read-back prints what stayed.
+ * ends the wait at once, UNCONFIRMED; with ONE exception: when the number came
+ * from the relay run's annotation and the target answers 403 (not a rate
+ * limit), the annotation IS the platform's answer to the mutation, so the
+ * transfer is confirmed by it — exit 0, `confirmed_by: relay-annotation`, the
+ * target URL the annotation carries, and the old URL's reading printed as
+ * corroboration (a pending redirect too). A 404 or another title on the
+ * target keeps its exit 4 / 6 whatever named the number. Labels with no
+ * same-named label on the target are dropped by the platform (the relay
+ * never asks it to create them); the read-back prints what stayed.
  *
  * ## When the platform refuses — fail closed, name the remedy
  *
@@ -97,7 +106,9 @@
  *
  *   0   transferred, and confirmed on the target: the card answers there with
  *       the title the pre-read saw, at the URL printed — whether the old URL
- *       already redirects or is still a pending redirect.
+ *       already redirects or is still a pending redirect. Or, under the relay
+ *       in a session the target answers 403: confirmed by the run's annotation
+ *       (`confirmed_by: relay-annotation`), the old URL printed beside it.
  *   2   usage, or a refusal above. Nothing was transferred.
  *   3   PREREQUISITE NOT MET — no token, the platform unreachable, the
  *       credential rate-limit exhausted, or no route. Nothing was transferred.
@@ -120,7 +131,7 @@ import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../invoked-as.mjs';
 import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan, resolveSweepRepo } from './check-half-states.mjs';
-import { EXIT_UNCONFIRMED, READ_BACK_SLACK_MS, exitForResult, fallbackText, packRequest, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
+import { EXIT_UNCONFIRMED, READ_BACK_SLACK_MS, exitForResult, fallbackText, matchRunAnnotations, packRequest, parseRelayAnnotation, relayAnnotationMessage, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
 import { repoOfIssue, requestLanded } from './fleet-write/execute.mjs';
 import { OPS, TARGET_OWNER, TARGET_REPO_SHAPE, TRANSFER_TARGETS, transferRemedy } from './fleet-write/ops.mjs';
 import { refusalText as relayRefusalText, validateStroke } from './fleet-write/validate.mjs';
@@ -200,6 +211,11 @@ export function dryRunText(plan) {
     `  mutation  : ${OPS.transfer.requests(plan.action)[0].graphql.mutation} (labels the target lacks are dropped, never created)`,
     `  relay     : ONE fleet-write action ${JSON.stringify(plan.action)}; its token reaches ${plan.repo} and ${plan.to}`,
   ].join('\n');
+}
+
+/** What `--json` prints for a result that names a card. Pure. */
+export function jsonLine(result) {
+  return { from: result.from, to: result.to, transport: result.transport ?? null, relay_run: result.relay?.run?.url ?? null, pending_redirect: result.pendingRedirect ?? null, confirmed_by: result.confirmedBy ?? null, exit: result.exitCode };
 }
 
 /** The exit a transport verdict maps to. `null` means "carry on". */
@@ -305,10 +321,12 @@ async function rest(path, { method = 'GET', body = null, redirect = 'follow' } =
 
 /**
  * Transfer the card the plan names, read it back, and say what happened.
- * Returns `{ exitCode, from, to, lines, transport, relay }` — plus
- * `pendingRedirect` on a success, true while the old URL still serves the
- * card; never throws on a status. `deps.sleep` and `deps.now` serve the
- * read-back's bounded re-read alone (`TRANSFER_READ_BACK_DELAYS_MS`).
+ * Returns `{ exitCode, from, to, lines, transport, relay }` — plus, on a
+ * success, `pendingRedirect` (true while the old URL still serves the card)
+ * and `confirmedBy`: `target` (read back there) or `relay-annotation` (the
+ * run's annotation, the target answering 403); never throws on a status.
+ * `deps.sleep` and `deps.now` serve the read-back's bounded re-read alone
+ * (`TRANSFER_READ_BACK_DELAYS_MS`).
  */
 export async function transferIssue(plan, deps = {}) {
   const lines = [];
@@ -351,6 +369,8 @@ export async function transferIssue(plan, deps = {}) {
   // ── the transfer ──────────────────────────────────────────────────────────
   const sentAt = (deps.now ?? Date.now)();
   let claimed = null;
+  // The relay run's annotation for this transfer — the platform's own transferIssue answer, as the executor read it.
+  let annotated = null;
   if (route.transport === 'dispatch') {
     const packed = packRequest({ repo: plan.repo, session: route.session, actions: [plan.action] });
     if (!packed.ok) {
@@ -361,6 +381,14 @@ export async function transferIssue(plan, deps = {}) {
     if (sent.ok) {
       ctx.relay = sent;
       lines.push(`  issue-transfer: the relay run ${sent.run?.url ?? sent.run?.id ?? ''} completed — reading the card back.`);
+      // The annotation first (header): `sendFleetWrite` matched it to this stroke's one action and to the target.
+      annotated = (sent.annotations?.rows ?? []).find((a) => a.op === plan.action.op && a.action === 1) ?? null;
+      if (annotated) {
+        claimed = annotated.number;
+        lines.push(`  issue-transfer: the relay run's annotation names ${annotated.repo}#${annotated.number} ${annotated.url} — the platform's own transferIssue answer; the card is read there first.`);
+      } else {
+        lines.push("  issue-transfer: no annotation on the relay run names this transfer — the number comes from the old URL's 301, else the title finds the card.");
+      }
     } else if (route.requested === 'auto' && sent.state === 'no-run') {
       lines.push(`  ${fallbackText(sent, 'issue-transfer')}`);
     } else if (sent.state === 'no-run' || sent.state === 'timeout') {
@@ -432,7 +460,7 @@ export async function transferIssue(plan, deps = {}) {
       return done(EXIT_BOARD_DISAGREES, { to: { repo: old.repo, number: old.number, url: null } });
     }
     if (claimed !== null && claimed !== old.number) {
-      lines.push(`✗ issue-transfer: the board disagrees — the mutation answered #${claimed}, the old URL redirects to #${old.number}.`);
+      lines.push(`✗ issue-transfer: the board disagrees — ${annotated ? "the relay run's annotation names" : 'the mutation answered'} #${claimed}, the old URL redirects to #${old.number}.`);
       return done(EXIT_BOARD_DISAGREES, { to: { repo: plan.to, number: old.number, url: null } });
     }
     number = old.number;
@@ -463,7 +491,17 @@ export async function transferIssue(plan, deps = {}) {
     found = await look();
     if (found.state === 'answered') lines.push(`  issue-transfer: ${plan.to}#${found.card.number ?? number} found on re-read ${i + 1}, ${waited} ms after the first read.`);
   }
-  const known = number !== null ? { to: { repo: plan.to, number, url: null } } : {};
+  const known = number !== null ? { to: { repo: plan.to, number, url: annotated && annotated.number === number ? annotated.url : null } } : {};
+  // The one exception to "unreadable is UNCONFIRMED" (header): the number is the relay run's annotation — the platform's
+  // answer to the mutation — and the target refused THIS session (403, not an exhausted rate limit).
+  if (found.state === 'unread' && annotated && annotated.number === number && found.r.status === 403 && found.r.rateRemaining !== 0) {
+    lines.push(`✓ issue-transfer: ${plan.repo}#${plan.issue} → ${plan.to}#${number} ${annotated.url}`);
+    lines.push(
+      `  confirmed_by: relay-annotation — the relay run ${ctx.relay?.run?.url ?? ctx.relay?.run?.id ?? ''} reported #${number} ${annotated.url} from the platform's transferIssue answer; ` +
+        `the target was not read back: ${found.r.call} answered HTTP 403 to this session${said(found.r)}; ${oldAccount(old)}.`,
+    );
+    return done(EXIT_OK, { to: { repo: plan.to, number, url: annotated.url }, pendingRedirect: pendingAt(old), confirmedBy: 'relay-annotation' });
+  }
   if (found.state === 'unread') {
     return unconfirmed(`the target could not be read — ${found.r.call} answered HTTP ${found.r.status}${said(found.r)}; ${oldAccount(old)}`, known);
   }
@@ -499,9 +537,10 @@ export async function transferIssue(plan, deps = {}) {
   lines.push(
     `  read-back: #${cardNumber} answers from ${plan.to} with the same title${number === null ? ' (found by that title: no number was in hand)' : ''}; ${oldAccount(old)}` +
       `; labels kept: ${labelsAfter.join(', ') || '(none)'}` +
-      `${dropped.length ? `; dropped (no same-named label on the target): ${dropped.join(', ')}` : ''}.`,
+      `${dropped.length ? `; dropped (no same-named label on the target): ${dropped.join(', ')}` : ''}` +
+      `${annotated && annotated.number === cardNumber ? "; its number came from the relay run's annotation" : ''}.`,
   );
-  return done(EXIT_OK, { to, pendingRedirect: pending });
+  return done(EXIT_OK, { to, pendingRedirect: pending, confirmedBy: 'target' });
 }
 
 // ---------------------------------------------------------------------------
@@ -516,10 +555,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the read-back: the old URL answers 301 to the new card, which answers from the target with the same title': 9,
   'the relay transport: ONE dispatch carrying ONE transfer, the new number read from the redirect, a failed run names the remedy and is never fallen back from': 8,
   'the target decides: a card the target answers is a transfer even while the old URL still serves it (a pending redirect: exit 0, the target URL); exit 4 only when the target still lacks it after the bounded re-read AND the old URL is unchanged; an unreadable or ambiguous target is UNCONFIRMED; the transfer is never re-sent': 16,
+  "the relay annotation: the number the relay run's annotation carries is read first — the card confirmed on the target with no title search; a target that answers this session 403 is still exit 0, confirmed_by relay-annotation, the old URL its corroboration; a 404, another title or another number keeps exit 4 / 6; absent, the 301 and the title as before": 12,
   'dry-run: no request leaves, and the plan is printed': 3,
   'the wiring: both halves around the one write verb, on the roster': 4,
 });
-const SELF_TEST_BATTERY_FLOOR = 8;
+const SELF_TEST_BATTERY_FLOOR = 9;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -851,6 +891,79 @@ export async function selfTest() {
       t('relay: the target still lacks the card after the window, but the old URL now answers 301 — UNCONFIRMED (6), not exit 4: the source is no longer unchanged', [turn.exitCode, turn.text.includes('did not move'), turn.text.includes('answers 301 naming no card')], [EXIT_UNCONFIRMED, false, true], turn.text);
     }
 
+    // ── the relay annotation ────────────────────────────────────────────────
+    battery("the relay annotation: the number the relay run's annotation carries is read first — the card confirmed on the target with no title search; a target that answers this session 403 is still exit 0, confirmed_by relay-annotation, the old URL its corroboration; a 404, another title or another number keeps exit 4 / 6; absent, the 301 and the title as before");
+    {
+      const DELAYS = TRANSFER_READ_BACK_DELAYS_MS;
+      const calls = (r, call) => r.seen.filter((x) => x.call === call).length;
+      const T31 = `GET /repos/${UI}/issues/31`;
+      const LIST = `GET /repos/${UI}/issues`;
+      const URL31 = `https://github.test/${UI}/issues/31`;
+      const GATE = 'GitHub access to this repository is not enabled for this session. Use add_repo to request access.';
+      // A relay run that reports the transfer through its annotation — spelled and parsed by the relay's own pair,
+      // matched to the stroke by the relay's own matcher, exactly as `sendFleetWrite` hands it on.
+      const annotatedRun = (b, number = 31, { moves = true } = {}) => async (payload) => {
+        if (moves) b.state.moved = true;
+        const parsed = [parseRelayAnnotation(relayAnnotationMessage({ action: 1, op: 'transfer', number, url: `https://github.test/${UI}/issues/${number}` }))];
+        const { rows, ignored } = matchRunAnnotations(payload, parsed);
+        return { state: 'success', ok: true, status: 204, verdict: 'ok', requestId: payload.request_id, startMs: 1, ceilingMs: 2, run: RUN, detail: '', annotations: { state: 'read', rows, ignored, why: '' } };
+      };
+      const relayed = (b, send) => drive(b, { route: dispatchRoute(), send: send ?? annotatedRun(b) });
+
+      const b1 = board();
+      const one = await relayed(b1);
+      t(
+        "the annotation's number is read first: #31 read once on the target, ZERO title searches, no wait — exit 0, confirmed by the target",
+        [one.exitCode, one.to, one.confirmedBy, calls(one, T31), calls(one, LIST), one.sleeps, posts(one.seen).length],
+        [EXIT_OK, { repo: UI, number: 31, url: URL31 }, 'target', 1, 0, [], 0],
+        one.text,
+      );
+      t('…the transcript names the annotation, and the read-back line says where the number came from', [one.text.includes(`the relay run's annotation names ${UI}#31 ${URL31}`), one.text.includes("its number came from the relay run's annotation")], [true, true], one.text);
+      const b2 = board();
+      const pending = await relayed(lagOld(b2), annotatedRun(b2));
+      t('an old URL still answering 200 from the source beside it: exit 0, a PENDING REDIRECT, still no title search', [pending.exitCode, pending.pendingRedirect, pending.text.includes('PENDING REDIRECT'), calls(pending, LIST)], [EXIT_OK, true, true, 0], pending.text);
+
+      // ⭐ The PM ruling's exit: a session that cannot read the target.
+      const gate = (b) => withAnswers(lagOld(b), { [T31]: () => ({ status: 403, json: { message: GATE } }), [LIST]: () => ({ status: 403, json: { message: GATE } }) });
+      const b3 = board();
+      const gated = await relayed(gate(b3), annotatedRun(b3));
+      t(
+        "⭐ the target answers this session 403: exit 0, confirmed_by relay-annotation, the target URL the annotation carries — not re-read, no title search",
+        [gated.exitCode, gated.confirmedBy, gated.to, gated.sleeps, calls(gated, T31), calls(gated, LIST)],
+        [EXIT_OK, 'relay-annotation', { repo: UI, number: 31, url: URL31 }, [], 1, 0],
+        gated.text,
+      );
+      t(
+        "…printing `confirmed_by: relay-annotation`, the platform's 403 sentence, and the old URL as corroboration (here a PENDING REDIRECT)",
+        [gated.text.includes('confirmed_by: relay-annotation'), gated.text.includes(GATE), gated.text.includes('PENDING REDIRECT'), gated.pendingRedirect, gated.text.includes(`✓ issue-transfer: ${SRC}#7 → ${UI}#31 ${URL31}`)],
+        [true, true, true, true, true],
+        gated.text,
+      );
+      t('…and --json carries the confirmation: confirmed_by relay-annotation, the target URL, the pending redirect', [jsonLine(gated).confirmed_by, jsonLine(gated).to, jsonLine(gated).pending_redirect, jsonLine(one).confirmed_by], ['relay-annotation', { repo: UI, number: 31, url: URL31 }, true, 'target']);
+      const b4 = board();
+      const bare = await relayed(gate(b4), outcome('success', b4, { annotations: { state: 'read', rows: [], ignored: [], why: '' } }));
+      t('the control: the same 403 with NO annotation stays UNCONFIRMED (6) — the exception is the annotation\'s alone', [bare.exitCode, bare.confirmedBy ?? null, bare.text.includes('no annotation on the relay run names this transfer')], [EXIT_UNCONFIRMED, null, true], bare.text);
+      const b5 = board();
+      const limited = await relayed(withAnswers(lagOld(b5), { [T31]: () => ({ status: 403, headers: { 'x-ratelimit-remaining': '0' }, json: { message: 'API rate limit exceeded' } }) }), annotatedRun(b5));
+      t('a 403 that is an EXHAUSTED rate limit is not that exception: UNCONFIRMED (6), carrying the annotated number and url', [limited.exitCode, limited.to], [EXIT_UNCONFIRMED, { repo: UI, number: 31, url: URL31 }], limited.text);
+
+      // A 404, another title, another number: the board's own exits stand, whatever named the number.
+      const b6 = board();
+      const absent = await relayed(withAnswers(b6, { [T31]: () => ({ status: 404, json: { message: 'Not Found' } }) }), annotatedRun(b6, 31, { moves: false }));
+      t("the target never holds the annotated #31 and the old URL still serves the card: exit 4 after exactly the window, ONE dispatch, no POST", [absent.exitCode, absent.sleeps, calls(absent, T31), posts(absent.seen).length, absent.text.includes('the card did not move')], [EXIT_BOARD_DISAGREES, [...DELAYS], DELAYS.length + 1, 0, true], absent.text);
+      const b7 = board();
+      const retitled = await relayed(withAnswers(b7, { [T31]: () => ({ status: 200, json: card(UI, 31, { title: 'something else' }) }) }), annotatedRun(b7));
+      t('the annotated #31 answering under another title is exit 4', [retitled.exitCode, retitled.text.includes('titled "something else"')], [EXIT_BOARD_DISAGREES, true], retitled.text);
+      const b8 = board();
+      const other = await relayed(b8, annotatedRun(b8, 30));
+      t("an annotation naming #30 while the old URL redirects to #31 is exit 4, both numbers printed", [other.exitCode, other.text.includes("the relay run's annotation names #30, the old URL redirects to #31")], [EXIT_BOARD_DISAGREES, true], other.text);
+
+      // Absent: the order the header names — the 301, then the title.
+      const b9 = board();
+      const fallback = await relayed(b9, outcome('success', b9, { annotations: { state: 'unread', rows: [], ignored: [], why: 'GET /jobs -> HTTP 403' } }));
+      t("no annotation: the old URL's 301 supplies #31 and the card is read there, exit 0 confirmed by the target", [fallback.exitCode, fallback.to?.number, calls(fallback, T31), calls(fallback, LIST), fallback.confirmedBy], [EXIT_OK, 31, 1, 0, 'target'], fallback.text);
+    }
+
     // ── dry-run ─────────────────────────────────────────────────────────────
     battery('dry-run: no request leaves, and the plan is printed');
     {
@@ -910,7 +1023,8 @@ export async function selfTest() {
     `✓ issue-transfer self-test: ${cases.length} cases pass across ${declared.length} batteries — one card to a governed target judged by the relay's own validator, ` +
       'a pull request or an already-moved card refused before any write, one paced mutation or one dispatch, a read-back that confirms on the TARGET — an old URL ' +
       'still answering 200 read as a pending redirect, exit 4 only when a bounded re-read still finds no card AND the old URL is unchanged, the transfer never ' +
-      're-sent — a failed run that names the installation remedy and is never fallen back from, and both halves of the throttle around the one write.',
+      're-sent — the relay run\'s annotation read first for the number (a target that answers 403 confirmed by it, confirmed_by relay-annotation), ' +
+      'a failed run that names the installation remedy and is never fallen back from, and both halves of the throttle around the one write.',
   );
   selfTestReachedVerdict = true;
   return 0;
@@ -982,7 +1096,7 @@ export async function main(argv) {
   if (rearmed !== null) return rearmed;
   const result = await transferIssue(plan);
   for (const line of result.lines) console.error(line);
-  if (opts.json && result.to) console.log(JSON.stringify({ from: result.from, to: result.to, transport: result.transport ?? null, relay_run: result.relay?.run?.url ?? null, pending_redirect: result.pendingRedirect ?? null, exit: result.exitCode }));
+  if (opts.json && result.to) console.log(JSON.stringify(jsonLine(result)));
   return result.exitCode;
 }
 

@@ -570,7 +570,7 @@ to end other sessions.`,
   variables: EMAIL_CHANGE_NOTICE_VARIABLES,
   active: true,
   isSystem: true,
-  description: 'Sent to the PREVIOUS address when a change-email request is accepted (#8019). Notification only — never gates the change.',
+  description: 'Sent to the PREVIOUS address when a change-email request is accepted, so a hijacked session cannot move the account identity unannounced. Notification only — never gates the change.',
 };
 
 export const AUTH_EMAIL_CHANGE_NOTICE_TEMPLATE_ZH_CN: EmailTemplate = {
@@ -598,7 +598,7 @@ export const AUTH_EMAIL_CHANGE_NOTICE_TEMPLATE_ZH_CN: EmailTemplate = {
 
 如果这不是您本人的操作，您的账号可能已被入侵。请立即联系您的 {{appName}} 管理员
 或支持团队，并修改密码以结束其他会话。`,
-  description: '在接受变更邮箱请求时发送至原邮箱地址（#8019）。仅为通知，绝不阻断变更流程。',
+  description: '在接受变更邮箱请求时发送至原邮箱地址，使被劫持的会话无法在原邮箱不知情的情况下转移账号身份。仅为通知，绝不阻断变更流程。',
 };
 
 export const AUTH_EMAIL_CHANGE_NOTICE_TEMPLATE_JA_JP: EmailTemplate = {
@@ -627,7 +627,7 @@ export const AUTH_EMAIL_CHANGE_NOTICE_TEMPLATE_JA_JP: EmailTemplate = {
 心当たりがない場合、アカウントが不正利用されている可能性があります。直ちに
 {{appName}} の管理者またはサポートへご連絡のうえ、パスワードを変更して他の
 セッションを終了してください。`,
-  description: '変更メールの要求が受理された際に変更前のアドレスへ送信されます（#8019）。通知のみで、変更を妨げることはありません。',
+  description: '変更メールの要求が受理された際に変更前のアドレスへ送信され、乗っ取られたセッションが元のアドレスに知られないままアカウントの識別情報を移せないようにします。通知のみで、変更を妨げることはありません。',
 };
 
 export const AUTH_EMAIL_CHANGE_NOTICE_TEMPLATE_ES_ES: EmailTemplate = {
@@ -657,7 +657,7 @@ aprobación.
 Si no has solicitado este cambio, tu cuenta podría estar comprometida. Ponte en
 contacto de inmediato con el administrador o el equipo de soporte de {{appName}}
 y cambia tu contraseña para cerrar las demás sesiones.`,
-  description: 'Se envía a la dirección ANTERIOR cuando se acepta una solicitud de cambio de correo (#8019). Solo notificación; nunca bloquea el cambio.',
+  description: 'Se envía a la dirección ANTERIOR cuando se acepta una solicitud de cambio de correo, para que una sesión secuestrada no pueda trasladar la identidad de la cuenta sin aviso. Solo notificación; nunca bloquea el cambio.',
 };
 
 /**

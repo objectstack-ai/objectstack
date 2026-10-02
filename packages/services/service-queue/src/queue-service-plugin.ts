@@ -157,9 +157,10 @@ export class QueueServicePlugin implements Plugin {
       // A floor the service refused is a wiring bug in THIS plugin, not a
       // degraded deployment — but it must not stop the queue from coming up.
       ctx.logger.error(
-        'QueueServicePlugin: the lifecycle service rejected the sys_job_queue retention floor. A `lifecycle` '
-        + 'settings override may now shorten sys_job_queue.retention below the idempotency window, in which case '
-        + 'publish would silently re-accept duplicates (#5195). Fix the floor registration, or keep '
+        'QueueServicePlugin: the lifecycle service rejected the sys_job_queue retention floor, and that floor is '
+        + 'what makes it refuse an override below the idempotency window. A `lifecycle` settings override may now '
+        + 'shorten sys_job_queue.retention below that window, in which case publish would silently re-accept '
+        + 'duplicates. Fix the floor registration, or keep '
         + 'lifecycle.retention_overrides.sys_job_queue unset.',
         err as any,
       );

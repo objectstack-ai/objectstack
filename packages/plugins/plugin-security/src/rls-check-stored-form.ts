@@ -84,7 +84,58 @@
  * The comparands are left as written, because the read pairs none with the
  * wrap: `$contains` / `$notContains` take one MEMBER, and every scalar
  * comparison on such a column is refused by the read
- * (`JSON_COLUMN_INCOMPATIBLE_OPERATORS`), never compared with a list.
+ * (`JSON_COLUMN_INCOMPATIBLE_OPERATORS`), never compared with a list — and,
+ * since [#21254], by this step too (next section).
+ *
+ * ## [#21254] An operator the read refuses on a JSON-stored column is refused here too
+ *
+ * `@objectstack/core`'s `JSON_COLUMN_INCOMPATIBLE_OPERATORS` is the set of
+ * operators no face answers on a column the object declares JSON-stored (a
+ * structured-JSON type, or a multi-valued field): the scalar comparisons, the
+ * orderings and the text operators other than the membership pair. The read a
+ * policy scopes is compiled by the driver, which refuses them with
+ * `INVALID_FILTER` / 400; the engine's per-aggregation `filter` and
+ * `driver-memory`'s filter gate refuse the same set on the same declared
+ * fields. The write check judged them instead, in JS, against the stored
+ * list. Measured through `ObjectQL.insert` + `SecurityPlugin` + two SQL driver
+ * families as a member resolving a permission set, `using` and `check` the
+ * same predicate, `tags` declared `tags`:
+ *
+ * | `check` | written | write, before | stored | read under the same predicate |
+ * |---|---|---|---|---|
+ * | `record.tags != 'x'` | `['x']` or `'x'` | admitted | `["x"]` | 400 |
+ * | `!(record.tags in ['x'])` | `['x']` | admitted | `["x"]` | 400 |
+ * | `record.tags == 'x'` | `['x']` | 403 | — | 400 |
+ * | `record.tags in ['x']` | `['x']` | 403 | — | 400 |
+ * | `record.tags > 'a'` | `['x']` | 400, the evaluator's list-under-ordering refusal | — | 400 |
+ *
+ * The first two are the exclusion family's fail-OPEN: a list never equals a
+ * scalar, so "not equal" held for the very row the policy names, and a policy
+ * whose read is refused admitted that write. So this step refuses what the
+ * read refuses, by one rule ({@link findJsonColumnCheckRefusal}): an operator
+ * in that set, or implicit equality, aimed at a column the object declares
+ * JSON-stored, whatever the comparand, at any depth under `$and` / `$or` /
+ * `$not` — the traversal objectql's per-aggregation gate takes. The set and
+ * the words are core's (`jsonColumnOperatorRefusalText`), imported, never
+ * copied; the error constructor is this face's, as each face keeps its own,
+ * with the read's envelope, `INVALID_FILTER` / 400. All five rows above now
+ * get it, so the write and the read give one answer for one policy. The three
+ * that refused before still admit nothing; their answer is now the read's.
+ *
+ * It reads the declaration, never the record: the verdict is reached once,
+ * from the parts and the declared columns, and every image the judge is handed
+ * gets it before any is evaluated, so a policy is refused for every row or for
+ * none. What still answers on such a column is unchanged: the membership pair
+ * `$contains` / `$notContains`, and the presence predicates `$null`,
+ * `$exists`, `$empty`. A column declared neither way, and an object whose
+ * schema cannot be loaded, are judged as before.
+ *
+ * The message names neither the field nor the operator (the policy is an
+ * administrator's, and the caller is usually not its author) and says the full
+ * diagnostic is in the server log. The write gate makes that true: the
+ * diagnostic travels on the error, off the wire
+ * ({@link jsonColumnCheckRefusalCarriedBy}), and the gate logs it beside the
+ * policy's name.
  *
  * ## What it does not carry
  *
@@ -97,16 +148,25 @@
  * rule declares.
  */
 
-import { multiValueStorageForm, temporalStorageForm, type TemporalComparandKind } from '@objectstack/core';
+import {
+  JSON_COLUMN_INCOMPATIBLE_OPERATORS,
+  jsonColumnOperatorRefusalText,
+  multiValueStorageForm,
+  temporalStorageForm,
+  type TemporalComparandKind,
+} from '@objectstack/core';
 import { matchesFilterCondition, type MatchesFilterOptions } from '@objectstack/formula';
+import { StandardErrorCode } from '@objectstack/spec/api';
 import {
   CALENDAR_DATE_TYPES,
   CLOCK_TIME_TYPES,
   INSTANT_TYPES,
+  STRUCTURED_JSON_TYPES,
   filterSubtreeProvenanceOf,
   isMultiValueField,
   markFilterSubtreeProvenance,
 } from '@objectstack/spec/data';
+import { compiledPolicyNameOf } from './rls-compiler.js';
 
 /** The declared temporal columns of one object, by name, each with its storage rule's kind. */
 export type DeclaredTemporalColumns = ReadonlyMap<string, TemporalComparandKind>;
@@ -161,6 +221,156 @@ export function declaredMultiValueColumns(columns: MatchesFilterOptions | undefi
     if (isMultiValueField({ type: decl.type, multiple: decl.multiple === true })) out.add(name);
   }
   return out;
+}
+
+/** [#21254] The declared JSON-stored columns of one object, by name. */
+export type DeclaredJsonStoredColumns = ReadonlySet<string>;
+
+/**
+ * [#21254] The columns `columns` declares JSON-stored: the declared
+ * multi-valued columns ({@link declaredMultiValueColumns}) and the columns of a
+ * structured-JSON type (the spec's `STRUCTURED_JSON_TYPES`). These are the two
+ * halves every face of core's JSON-column refusal reads, and the population
+ * `matchesFilterCondition` already asks `$contains` membership of, over the
+ * same declaration. Empty when the object hands over no declaration.
+ */
+export function declaredJsonStoredColumns(columns: MatchesFilterOptions | undefined): DeclaredJsonStoredColumns {
+  const out = new Set<string>();
+  const multiValue = declaredMultiValueColumns(columns);
+  for (const [name, decl] of Object.entries(columns?.fields ?? {})) {
+    if (multiValue.has(name) || STRUCTURED_JSON_TYPES.has(decl.type)) out.add(name);
+  }
+  return out;
+}
+
+/** [#21254] One operator the read refuses, as {@link findJsonColumnCheckRefusal} found it. */
+export interface JsonColumnCheckRefusal {
+  /** The declared JSON-stored column the operator is aimed at. */
+  readonly field: string;
+  /** The operator as written in the compiled check; `=` for implicit equality. */
+  readonly operator: string;
+  /** Where it sits: `check[<part>]`, then the path through the compiled filter. */
+  readonly path: string;
+  /** The policy the offending node was compiled from, when the compiler marked one. */
+  readonly policy: string | undefined;
+  /** What the caller is told: core's message, which names neither the field nor the operator. */
+  readonly message: string;
+  /**
+   * Core's full diagnostic, the field and the operator named. SERVER-SIDE ONLY:
+   * the policy is an administrator's, so it goes to a log, never into an error
+   * message (see {@link jsonColumnCheckRefusalCarriedBy}).
+   */
+  readonly diagnostic: string;
+}
+
+/**
+ * [#21254] A column condition that is IMPLICIT equality: a comparand rather
+ * than an operator map (a primitive, `null`, a `Date` or an array). The split
+ * objectql's per-aggregation gate makes on the same shapes.
+ */
+function isImplicitEquality(condition: unknown): boolean {
+  return typeof condition !== 'object'
+    || condition === null
+    || condition instanceof Date
+    || Array.isArray(condition);
+}
+
+/**
+ * [#21254] The first operator in `parts` that the read refuses on a declared
+ * JSON-stored column, or `null` when there is none: an operator in
+ * `@objectstack/core`'s `JSON_COLUMN_INCOMPATIBLE_OPERATORS`, or implicit
+ * equality, whatever the comparand (`null` and a `{ $field }` operand
+ * included), at any depth under `$and` / `$or` / `$not`. Pure: it reads the
+ * parts and the declaration, never a record.
+ *
+ * The traversal is objectql's per-aggregation gate's
+ * (`assertAggregationFilterSparesJsonStoredFields`): any other `$` key is not
+ * a column and is left to the evaluator, and so is a column the declaration
+ * does not name JSON-stored. The words are core's
+ * (`jsonColumnOperatorRefusalText`); the bare spelling's operator is `=`.
+ */
+export function findJsonColumnCheckRefusal(
+  parts: readonly Record<string, unknown>[],
+  jsonStored: DeclaredJsonStoredColumns,
+): JsonColumnCheckRefusal | null {
+  if (jsonStored.size === 0) return null;
+  const refusal = (
+    field: string,
+    operator: string,
+    bare: boolean,
+    path: string,
+    policy: string | undefined,
+  ): JsonColumnCheckRefusal => {
+    const { message, diagnostic } = jsonColumnOperatorRefusalText(field, operator, bare);
+    return { field, operator, path, policy, message, diagnostic };
+  };
+  const walk = (cond: unknown, path: string, policy: string | undefined): JsonColumnCheckRefusal | null => {
+    if (!cond || typeof cond !== 'object') return null;
+    const owner = compiledPolicyNameOf(cond) ?? policy;
+    for (const [key, value] of Object.entries(cond)) {
+      const here = `${path}.${key}`;
+      if (key === '$and' || key === '$or') {
+        const branches = Array.isArray(value) ? value : [value];
+        for (let i = 0; i < branches.length; i++) {
+          const found = walk(branches[i], `${here}[${i}]`, owner);
+          if (found) return found;
+        }
+        continue;
+      }
+      if (key === '$not') {
+        const found = walk(value, here, owner);
+        if (found) return found;
+        continue;
+      }
+      if (key.startsWith('$') || !jsonStored.has(key)) continue;
+      if (isImplicitEquality(value)) return refusal(key, '=', true, here, owner);
+      for (const op of Object.keys(value as Record<string, unknown>)) {
+        if (JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op)) return refusal(key, op, false, `${here}.${op}`, owner);
+      }
+    }
+    return null;
+  };
+  for (let i = 0; i < parts.length; i++) {
+    const found = walk(parts[i], `check[${i}]`, undefined);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * [#21254] The refusal carried on the error, under a SYMBOL key, for the
+ * reason `@objectstack/formula`'s comparison-class refusal carries its own
+ * that way: `JSON.stringify`, a spread, `Object.keys` and the structured-clone
+ * boundary all skip it, so no error mapper can put the field and the operator
+ * back on the wire. `Symbol.for` so a duplicated copy of this package resolves
+ * the same key.
+ */
+const JSON_COLUMN_CHECK_REFUSAL = Symbol.for('objectstack.plugin-security.jsonColumnCheckRefusal');
+
+/**
+ * [#21254] The write check's refusal: core's message, with the envelope the
+ * read gives the same policy, `INVALID_FILTER` / 400 (and `httpStatus`, the
+ * same number under ADR-0112 D5's spelling, as the engine's own filter
+ * refusals carry it).
+ */
+function jsonColumnCheckRefusalError(refusal: JsonColumnCheckRefusal): Error {
+  const err = new Error(refusal.message) as Error & { code?: string; status?: number; httpStatus?: number };
+  err.code = StandardErrorCode.enum.INVALID_FILTER;
+  err.status = 400;
+  err.httpStatus = 400;
+  Object.defineProperty(err, JSON_COLUMN_CHECK_REFUSAL, { value: refusal, enumerable: false });
+  return err;
+}
+
+/**
+ * [#21254] The JSON-column refusal an error carries, or `null` for any other
+ * error: the read half of the judge's refusal, for the write gate, which logs
+ * the diagnostic server-side beside the policy's name.
+ */
+export function jsonColumnCheckRefusalCarriedBy(err: unknown): JsonColumnCheckRefusal | null {
+  if (err === null || (typeof err !== 'object' && typeof err !== 'function')) return null;
+  const refusal = (err as Record<symbol, unknown>)[JSON_COLUMN_CHECK_REFUSAL];
+  return refusal && typeof refusal === 'object' ? (refusal as JsonColumnCheckRefusal) : null;
 }
 
 /** A plain object: a filter node, an operator map or a `{ $field }` reference — never a comparand value. */
@@ -301,6 +511,12 @@ export function storedFormImage(
  * A refusal the evaluator raises propagates unchanged. The parts the caller
  * attributes it to are its own: the rewritten parts are used for evaluation
  * only.
+ *
+ * [#21254] One refusal is this step's own: an operator the read refuses on a
+ * declared JSON-stored column ({@link findJsonColumnCheckRefusal}). It is
+ * found once, here, on the parts as compiled (they carry the policy marks),
+ * and thrown for every image before any is evaluated, so the verdict is the
+ * declaration's and never a record's.
  */
 export function storedFormCheckJudge(
   parts: readonly Record<string, unknown>[],
@@ -308,10 +524,12 @@ export function storedFormCheckJudge(
 ): (image: Record<string, unknown>) => boolean {
   const temporal = declaredTemporalColumns(columns);
   const multiValue = declaredMultiValueColumns(columns);
+  const refusal = findJsonColumnCheckRefusal(parts, declaredJsonStoredColumns(columns));
   // The comparands are put into the temporal form only: on a multi-valued
   // column the read pairs no comparand with the wrap (see the module note).
   const storedParts = parts.map((part) => storedFormCheckFilter(part, temporal));
   return (image) => {
+    if (refusal) throw jsonColumnCheckRefusalError(refusal);
     const stored = storedFormImage(image, temporal, multiValue);
     return storedParts.every((part) => matchesFilterCondition(stored, part as never, columns));
   };

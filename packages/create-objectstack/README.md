@@ -85,7 +85,8 @@ my-app/
     ├── flows/index.ts           # already wired into objectstack.config.ts
     ├── dashboards/index.ts
     ├── apps/index.ts
-    └── skills/index.ts
+    ├── skills/index.ts
+    └── picklists/index.ts
 ```
 
 Next steps inside the project:

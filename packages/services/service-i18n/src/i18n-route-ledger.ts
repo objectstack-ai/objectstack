@@ -95,7 +95,7 @@ export interface I18nRouteLedgerEntry {
 export const I18N_ROUTE_LEDGER: readonly I18nRouteLedgerEntry[] = [
   { route: 'GET /api/v1/i18n/locales', family: 'i18n', disposition: 'sdk', client: 'i18n.getLocales' },
   { route: 'GET /api/v1/i18n/translations/:locale', family: 'i18n', disposition: 'sdk', client: 'i18n.getTranslations',
-    note: 'was a wire-level 404 — the client sent /translations?locale=xx, a shape no server mounts (the dispatcher domain body accepts it, but nothing routes a bare /translations to that body). Since #3636 the client sends the path form the spec declares.' },
+    note: 'was a wire-level 404 — the client sent /translations?locale=xx, a shape no server mounts (the dispatcher domain body accepts it, but nothing routes a bare /translations to that body). The client now sends the path form the spec declares.' },
   { route: 'GET /api/v1/i18n/labels/:object/:locale', family: 'i18n', disposition: 'sdk', client: 'i18n.getFieldLabels',
-    note: 'ditto — the client sent /labels/:object?locale=xx against a two-path-param mount (#3636).' },
+    note: 'ditto — the client sent /labels/:object?locale=xx against a two-path-param mount; it now sends both the object and the locale in the path.' },
 ];

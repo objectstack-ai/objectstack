@@ -5,7 +5,7 @@ import type {
   CryptoHandle,
   ICryptoProvider,
 } from '@objectstack/spec/contracts';
-import { createHash, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
+import { createHash, createHmac, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -74,6 +74,32 @@ import { dirname, join } from 'node:path';
  * ciphertext rewrapped from a different (ns, key) tuple fails decryption —
  * guards against operators accidentally copying rows between namespaces.
  *
+ * ## Keyed digest
+ * `keyedDigest(plain)` is `hmac-sha256:` + hex(HMAC-SHA-256(macKey, plain)),
+ * where `macKey` is DERIVED from the same 32-byte data key the AES path uses —
+ * whichever source resolved it above — so it needs no secret of its own:
+ *
+ *   macKey = HMAC-SHA-256(dataKey, KEYED_DIGEST_KDF_INFO || 0x01)
+ *
+ * That is RFC 5869 HKDF-Expand for one 32-byte block, with the data key as the
+ * pseudorandom key (§3.3 lets a uniformly random key skip the Extract step).
+ * The data key is never used as the MAC key directly: one key, one purpose. The
+ * AES-GCM key stays a pure encryption key, the MAC key is a separate value
+ * nobody can turn back into it, and the versioned label makes a future change
+ * of construction a deliberate, visible one rather than a silent drift. The
+ * derivation is deterministic, so every process and node that resolves the
+ * same data key computes the same digest.
+ *
+ * Only `createHmac` is used (no `hkdfSync`), so the WebContainer runtime that
+ * cannot run AES-GCM through `node:crypto` is not handed a second primitive it
+ * may lack.
+ *
+ * A provider whose data key is not 32 bytes — reachable only through an
+ * explicit `opts.key`, because every env and file source is length-checked —
+ * holds no usable key material. `keyedDigest` rejects with
+ * {@link KeyedDigestKeyUnavailableError} there; ⛔ it never falls back to an
+ * unkeyed hash, nor to an HMAC under an empty key, which anyone can compute.
+ *
  * ## WebContainer (StackBlitz) note
  * `node:crypto.createCipheriv('aes-256-gcm', …)` is not implemented in
  * WebContainer. When we detect that runtime, we swap to a pure-JS AES-GCM
@@ -93,6 +119,40 @@ const DEV_KEY_LEGACY_ENV = 'OBJECTSTACK_DEV_CRYPTO_KEY';
  * leaves it unset and keeps the fail-loud guarantee. See `commands/start.ts`.
  */
 const AUTOKEY_ENV = 'OS_CRYPTO_AUTOKEY';
+
+/** The data key's only legal length: AES-256 needs exactly 32 bytes. */
+const DATA_KEY_BYTES = 32;
+
+/**
+ * HKDF-Expand `info` label for the keyed-digest MAC key. Versioned: changing
+ * it changes every keyed digest this provider has ever handed out, so a new
+ * construction takes a new label, never an edit of this one.
+ */
+const KEYED_DIGEST_KDF_INFO = 'objectstack/crypto-provider/keyed-digest/v1';
+
+/** HKDF-Expand's first-block input: `info || 0x01` (RFC 5869 §2.3, T(1)). */
+const KEYED_DIGEST_KDF_INPUT = Buffer.concat([Buffer.from(KEYED_DIGEST_KDF_INFO, 'utf8'), Buffer.from([0x01])]);
+
+/** Output prefix the `ICryptoProvider.keyedDigest` contract fixes. */
+const KEYED_DIGEST_PREFIX = 'hmac-sha256:';
+
+/**
+ * Rejection of {@link LocalCryptoProvider.keyedDigest} when the provider holds
+ * no usable key material. The refusal is the guarantee: a keyed digest
+ * computed without a key would be an unkeyed digest wearing a keyed name.
+ */
+export class KeyedDigestKeyUnavailableError extends Error {
+  constructor(readonly keyLength: number) {
+    super(
+      `[LocalCryptoProvider] Refusing to compute a keyed digest: the provider holds no usable key ` +
+        `material (a ${keyLength}-byte data key; exactly ${DATA_KEY_BYTES} bytes are required). ` +
+        `A digest computed without a key can be recomputed by anyone holding the input. ` +
+        `Fix: construct the provider with a ${DATA_KEY_BYTES}-byte key, or let it resolve ` +
+        `${SECRET_KEY_ENV} from the environment.`,
+    );
+    this.name = 'KeyedDigestKeyUnavailableError';
+  }
+}
 
 type EnvMap = Record<string, string | undefined>;
 
@@ -423,6 +483,12 @@ const loadNobleGcm = (): Promise<GcmFactory | undefined> => {
 
 export class LocalCryptoProvider implements ICryptoProvider {
   private readonly key: Buffer;
+  /**
+   * The keyed-digest MAC key, derived from {@link key} (see "Keyed digest"
+   * above). `undefined` exactly when the data key is not usable key material,
+   * which is what makes `keyedDigest` refuse.
+   */
+  private readonly macKey: Buffer | undefined;
   private readonly useNoble: boolean;
   /** Where the active data key came from. Exposed for diagnostics/tests. */
   readonly keySource: KeySource;
@@ -431,6 +497,10 @@ export class LocalCryptoProvider implements ICryptoProvider {
     const resolved = resolveDataKey(opts);
     this.key = resolved.key;
     this.keySource = resolved.source;
+    this.macKey =
+      resolved.key.length === DATA_KEY_BYTES
+        ? createHmac('sha256', resolved.key).update(KEYED_DIGEST_KDF_INPUT).digest()
+        : undefined;
     this.useNoble = isWebContainerRuntime();
   }
 
@@ -499,6 +569,11 @@ export class LocalCryptoProvider implements ICryptoProvider {
 
   digest(plain: string): string {
     return 'sha256:' + createHash('sha256').update(plain, 'utf8').digest('hex');
+  }
+
+  async keyedDigest(plain: string): Promise<string> {
+    if (!this.macKey) throw new KeyedDigestKeyUnavailableError(this.key.length);
+    return KEYED_DIGEST_PREFIX + createHmac('sha256', this.macKey).update(plain, 'utf8').digest('hex');
   }
 
   private encryptNode(plainBytes: Buffer, iv: Buffer, aad: Buffer): string {

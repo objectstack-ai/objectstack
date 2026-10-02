@@ -48,10 +48,13 @@ import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/type
  *    already declare (`DELETE_RESTRICTED`, `CONCURRENT_UPDATE`), so REST's
  *    declared-status passthrough answers 409 instead of the sanitised 500 an
  *    undeclared status would have earned.
- *  - **`cause`** — the driver's own error, WHOLE and unmodified. Nothing is
- *    copied out of it into the message: `isUniqueViolationError` and
- *    `uniqueViolationColumn` both walk a `cause` chain, so every existing
- *    consumer of the raw error keeps its answer by asking the envelope.
+ *  - **`cause`** — the driver's own error. Nothing is copied out of it into
+ *    the message: `isUniqueViolationError` and `uniqueViolationColumn` both
+ *    walk a `cause` chain, so every existing consumer of the raw error keeps
+ *    its answer by asking the envelope. [#21274] It is whole when built here;
+ *    where the envelope leaves the engine its `cause` is cut like any driver
+ *    error (`redactPropagatedDriverFault`): the class, the codes and the
+ *    database's diagnostic stay, the bound statement and values do not.
  *  - **`field`** — the conflicting column, and ONLY when
  *    {@link uniqueViolationColumn} determinably named one. An index name is
  *    never reported as a column (MySQL's `for key 'idx_email_unique'`,

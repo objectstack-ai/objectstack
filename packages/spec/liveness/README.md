@@ -75,7 +75,7 @@ registry to fold it back onto — the override *is* its governance.
 | `live` | Has a runtime consumer. Cite it in `evidence`, preferably anchored to the consuming symbol — `file#symbol` — with `file:line` as an optional convenience; for another repo's path, prefix the realm — `objectui: packages/app-shell/…` (see below). |
 | `experimental` / `planned` | Declared, intentionally not enforced yet. Also read from a spec `.describe()` marker like `[EXPERIMENTAL — not enforced]`. |
 | `dead` | Parsed, no consumer **anywhere the census looked**. Tracked for **enforce-or-remove** (ADR-0049). A key that is dead here but enforced in a sibling repo is NOT `dead` — it is `live-elsewhere`, below. |
-| `live-elsewhere` | Dead here by measurement, **genuinely enforced in a sibling repo** (#13483). Not deletable, and deliberately unable to satisfy `live`'s local-evidence rules; carries its own gate-executable criteria — see the section below. Ledger-entry-only (no `.describe()` marker). |
+| `live-elsewhere` | Dead here by measurement, **genuinely enforced in a sibling repo** (#13483). Not deletable. The template is `manifest.runtime`, "ENFORCED AT THE CLOUD PUBLISH GATE, NOT ENFORCED AT LOAD" — its load side belongs to this repo's loader. A key whose consumer is the closed cloud runtime is `live` with a `cloud`-attributed pointer instead (`agent.json`'s `_note`). Carries its own gate-executable criteria — see the section below. Ledger-entry-only (no `.describe()` marker). |
 
 Resolution per property: **ledger entry → spec `.describe()` marker → UNCLASSIFIED**.
 Framework provenance/lock fields (`_lock*`, `_provenance`, `_packageId/Version`,
@@ -280,10 +280,17 @@ The measured template is `manifest.runtime`: two CLI echo lines here, and the
 cloud marketplace publish gate hard-rejecting (HTTP 422) an unverified
 publisher requesting the `node` tier (#12400). `dead` lies about that key — read
 alone it licenses deleting the marketplace's trust-gate input, which the
-maintainer ruling of 2026-08-30 (executed by commit a9ee98992) explicitly ruled out — and `live` is
-refused by this gate, whose repo-local evidence must resolve against this
-checkout. Until #13483 the truth lived in a qualifying sentence inside the
-row's `note`; prose is the weakest protection this ledger knows.
+maintainer ruling of 2026-08-30 (executed by commit a9ee98992) explicitly ruled out — and `live`
+overstates it, because the key's load side belongs to this repo's loader, and the row's own
+note records it "ENFORCED AT THE CLOUD PUBLISH GATE, NOT ENFORCED AT LOAD". The gate itself
+does not refuse `live` on cloud-only evidence: a cloud-attributed pointer is counted and
+never resolved, because failing on one "would make the gate unsatisfiable for every
+property whose consumer is the renderer or the closed cloud runtime" (the boundary pin in
+`scripts/liveness/check-liveness.test.ts`). So a key consumed only by the closed AI runtime
+stays `live` — `agent.json`'s `_note`: "These props are `live` because that cloud runtime
+consumes them; the OPEN framework edition does not". Until #13483 the truth lived in a
+qualifying sentence inside the row's `note`; prose is the weakest protection this ledger
+knows.
 
 The gate cannot resolve another repo's file (deliberate — see the realm-marker
 boundary above), so a `live-elsewhere` row is held to criteria the gate CAN

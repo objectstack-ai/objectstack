@@ -167,7 +167,7 @@ export class SmsServicePlugin implements Plugin {
         resolveCache,
         logger: ctx.logger,
         logPrefix: '[sms]',
-        subject: 'daily SMS send quota (#2814)',
+        subject: 'daily SMS send quota',
         degradedImpact:
           'The ceiling is still enforced, but PER NODE: an N-node deployment can spend up to N× the ' +
           'configured number of PAID SMS per day, which is exactly the total-cost hole this gate exists to close',

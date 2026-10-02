@@ -167,7 +167,8 @@ import { isMissingTableError } from '@objectstack/metadata/errors';
 import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
 import { DuplicateRecordError, envelopeUniqueViolation } from './duplicate-record-error.js';
 // [#8682] The write-path loggers' redaction — bound values never reach the log.
-import { redactBoundStatement } from './driver-fault-redaction.js';
+// [#21274] …and its boundary face — nor the error that leaves the engine.
+import { redactBoundStatement, redactPropagatedDriverFault } from './driver-fault-redaction.js';
 // [#8844] The runtime half of #8686's ruling: a system-context write on a
 // tenant-scoped object resolves the install's organization the way a session
 // write does, or is refused rather than filed under the `__global__`
@@ -5162,7 +5163,19 @@ export class ObjectQL implements IObjectQLEngine {
         const mw = applicable[index++];
         await mw.fn(ctx, next);
       } else {
-        ctx.result = await executor();
+        try {
+          ctx.result = await executor();
+        } catch (e) {
+          // [#21274] The engine BOUNDARY for every operation this seam runs
+          // (find, findOne, count, aggregate, insert, update, delete): a driver
+          // error leaves the engine with its bound statement and the caller's
+          // values cut, from `message`, `stack`, the driver's own
+          // statement-bearing properties and `cause` — the class and the codes
+          // kept. Innermost, so a middleware that logs what it caught gets
+          // the cut too. The executors' own log lines ran before this, from
+          // the raw error, and are unchanged. See `redactPropagatedDriverFault`.
+          throw redactPropagatedDriverFault(e);
+        }
       }
     };
 
@@ -9027,11 +9040,17 @@ export class ObjectQL implements IObjectQLEngine {
       );
     }
     const driver = this.getDriver(object);
-    const found = await driver.find(
-      object,
-      { where: { id: recordId } },
-      this.privilegedReadDriverOptions(object),
-    );
+    let found: unknown;
+    try {
+      found = await driver.find(
+        object,
+        { where: { id: recordId } },
+        this.privilegedReadDriverOptions(object),
+      );
+    } catch (e) {
+      // [#21274] A boundary outside the middleware seam: the record id is bound.
+      throw redactPropagatedDriverFault(e);
+    }
     const row: any = Array.isArray(found) ? found[0] : found;
     if (!row) return null;
     return this.resolveSecret(row[field], opts);
@@ -9114,14 +9133,20 @@ export class ObjectQL implements IObjectQLEngine {
     const out = new Map<string, unknown>();
     if (recordIds.length === 0) return out;
     const driver = this.getDriver(object);
-    const found = await driver.find(
-      object,
-      {
-        where: { id: { $in: [...recordIds] } },
-        fields: ['id', field],
-      },
-      this.privilegedReadDriverOptions(object),
-    );
+    let found: unknown;
+    try {
+      found = await driver.find(
+        object,
+        {
+          where: { id: { $in: [...recordIds] } },
+          fields: ['id', field],
+        },
+        this.privilegedReadDriverOptions(object),
+      );
+    } catch (e) {
+      // [#21274] A boundary outside the middleware seam: the record ids are bound.
+      throw redactPropagatedDriverFault(e);
+    }
     for (const row of Array.isArray(found) ? found : [found]) {
       if (!row || typeof row !== 'object') continue;
       const id = (row as Record<string, unknown>).id;
@@ -13638,9 +13663,10 @@ export class ObjectQL implements IObjectQLEngine {
         // driver's inlined statement and its bound values are cut, from BOTH
         // `message` and `stack` (the logger serializes exactly those two, and
         // the stack re-opened with the statement a second time). What the
-        // database itself said, including the failing column, is kept; the
-        // error rethrown below is untouched, so the caller's answer does not
-        // move. See `redactBoundStatement`.
+        // database itself said, including the failing column, is kept. See
+        // `redactBoundStatement`. [#21274] The error rethrown below is cut too,
+        // but one frame out, where it leaves the engine (`executeWithMiddleware`),
+        // so this line is still computed from the raw error and is unchanged.
         //
         // [#14095] …and the line still carries what the DATABASE said, even now
         // that the door hands the CALLER an envelope instead. The platform
@@ -15423,7 +15449,8 @@ export class ObjectQL implements IObjectQLEngine {
           // envelope: the platform logger serializes `message` and `stack`
           // only, so logging the envelope would silently drop the failing
           // column and the driver's own frames. The log takes the `cause`;
-          // `e` is what is rethrown one line down, unchanged.
+          // `e` is what is rethrown one line down. [#21274] It is cut where it
+          // leaves the engine (`executeWithMiddleware`), after this line ran.
           //
           // [#17052] The insert door's twin here too: the level is `warn`,
           // because `throw e` on the next line IS the answer to the caller.
@@ -17586,7 +17613,14 @@ export class ObjectQL implements IObjectQLEngine {
           }
       }
 
-      return driver.execute(rawCommand, params, options);
+      // [#21274] A boundary outside the middleware seam: the raw command's
+      // bound `params` are the caller's values, and the driver's refusal
+      // carries the dialect error on its `cause`.
+      try {
+          return await driver.execute(rawCommand, params, options);
+      } catch (e) {
+          throw redactPropagatedDriverFault(e);
+      }
   }
 
   /**
@@ -17700,7 +17734,11 @@ export class ObjectQL implements IObjectQLEngine {
       } catch {
         // swallow rollback failures so the original error surfaces
       }
-      throw err;
+      // [#21274] A boundary outside the middleware seam: a commit failure, or
+      // a callback that reached the driver through the transaction handle.
+      // An error that already crossed an engine boundary inside the callback
+      // comes back as the same reference.
+      throw redactPropagatedDriverFault(err);
     }
   }
 
@@ -18594,7 +18632,8 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
     } catch (error) {
       if (driver.rollback) await driver.rollback(trx);
       else if (driver.rollbackTransaction) await driver.rollbackTransaction(trx);
-      throw error;
+      // [#21274] The engine surface's twin (`ObjectQL.transaction`).
+      throw redactPropagatedDriverFault(error);
     }
   }
 

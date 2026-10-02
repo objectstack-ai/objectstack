@@ -34,7 +34,7 @@ AI tool definition. [READ-ONLY PROJECTION — not an execution entry point] Auth
 | **label** | `string` | ✅ | Tool display name |
 | **description** | `string` | ✅ | Tool description for LLM function calling |
 | **parameters** | `Record<string, any>` | ✅ | JSON Schema for tool parameters |
-| **outputSchema** | `Record<string, any>` | optional | [EXPERIMENTAL — not enforced] JSON Schema for tool output. Keys are folded into the tool description only; outputs are not validated. |
+| **outputSchema** | `Record<string, any>` | optional | [EXPERIMENTAL — not enforced] JSON Schema for tool output; nothing reads it on a tool record — declare it as `ai.outputSchema` on the action, where the cloud AI runtime validates the action result against it. |
 | **objectName** | `string` | optional | Target object name (snake_case) |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this tool. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |

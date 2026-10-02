@@ -346,7 +346,11 @@ describe('#14389 §2 — a real insert conflict, real engine on real better-sqli
         expect(env.code).toBe('DUPLICATE_RECORD');
         expect(env.status).toBe(409);
         expect(env.field).toBe('email');
-        expect(String(env.cause?.message)).toContain(VALUE); // the leak the boundary must withhold
+        // [#21274] The value no longer reaches this boundary at all: the engine cuts
+        // it from the propagated `cause` where the error leaves the engine, keeping
+        // the database's diagnostic (which is all this arm's `field` needs).
+        expect(String(env.cause?.message)).not.toContain(VALUE);
+        expect(String(env.cause?.message)).toContain('UNIQUE constraint failed: duly_note.email');
 
         const r = mapDataError(env, 'duly_note');
         expect(r.status).toBe(409);
