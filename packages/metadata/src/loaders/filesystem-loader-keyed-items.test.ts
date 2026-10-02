@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #14341 — `FilesystemLoader.loadManyKeyed()`: a file-held item is keyed by the
+ * Commit 2e471e362 — `FilesystemLoader.loadManyKeyed()`: a file-held item is keyed by the
  * name this loader can actually RESOLVE for it, and by nothing else.
  *
  * ---------------------------------------------------------------------------
@@ -15,7 +15,7 @@
  * while `listDiagnosed()` called the short answer complete.
  *
  * ---------------------------------------------------------------------------
- * The rule this pins (PM ruling on #14341, 2026-09-02 — option D)
+ * The rule this pins (PM ruling of 2026-09-02 — option D, landed as commit 2e471e362)
  * ---------------------------------------------------------------------------
  * An item is keyed by this loader's own name-to-path derivation (the basename
  * minus extension, the same derivation `list()` reports) ONLY where that
@@ -39,7 +39,7 @@
  * ---------------------------------------------------------------------------
  * `RECORD:` cases pin behaviour this ruling deliberately LEAVES ALONE — the
  * nested nameless file is still dropped. They exist so the derivation repair
- * (#14486: one shared name-to-path function for `list()`, `findFile()` and
+ * (the card commit 4b4d5a331 took in part: one shared name-to-path function for `list()`, `findFile()` and
  * `loadManyKeyed()`) inverts them deliberately, with the change visible in a
  * diff, instead of silently.
  *
@@ -177,7 +177,7 @@ describe('#14341 FilesystemLoader.loadManyKeyed() keys by the resolvable name', 
 
   it('RECORD: a nested NAMELESS file is still dropped — the honest drop, #14486', async () => {
     // Not a repair this ruling makes: there is no name for it that any other
-    // door reports. #14486 (one shared name-to-path derivation) is where this
+    // door reports. The card commit 4b4d5a331 took in part (one shared name-to-path derivation) is where this
     // inverts, deliberately.
     const keyed = await loader().loadManyKeyed(TYPE);
 

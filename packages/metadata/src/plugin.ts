@@ -128,7 +128,7 @@ const ARTIFACT_FIELD_TO_TYPE: Record<string, string> = {
     dashboards: 'dashboard',
     reports: 'report',
     actions: 'action',
-    // `themes: 'theme'` removed at #10485 (ADR-0049): the carrier key is
+    // `themes: 'theme'` removed by commit 35ad101bc (ADR-0049): the carrier key is
     // retired, so a parsed artifact can no longer carry the field — and the
     // ingest half of the dead pipeline (items stored, read by nothing) goes
     // with the authoring half rather than surviving it as drift.
@@ -564,7 +564,7 @@ export class MetadataPlugin implements Plugin {
         //    external watch-recompile pipeline POSTs to the same endpoint
         //    after rebuilding the artifact, and we reload it here before
         //    broadcasting.
-        // [#12140] PRODUCTION BOOTS DO NOT GET THIS DOOR, and that is now
+        // [commit f4e7ae5c7] PRODUCTION BOOTS DO NOT GET THIS DOOR, and that is now
         // enforced rather than predicted. This comment used to read
         // "production deployments simply won't have a CLI POSTing to this
         // endpoint and won't surface the route to clients" — a claim about who
@@ -913,7 +913,7 @@ export class MetadataPlugin implements Plugin {
         // operator is never shown a rule their artifact has no instance of.
         // ⚠️ The two lists are the SAME list today: a field bound the
         // `current_user` family at objectui#6010 and a section did at
-        // objectui#6110 + #6111, so the per-surface split is currently empty
+        // objectui#6110 + objectui#6111, so the per-surface split is currently empty
         // (`@objectstack/metadata-core`, `BOUND_FORM_VIEW_PREDICATE_ROOTS`,
         // carries the mechanism and the two times this claim went stale). The
         // arms stay per surface because the QUESTION is per surface — two
