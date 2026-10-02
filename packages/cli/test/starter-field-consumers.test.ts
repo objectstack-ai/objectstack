@@ -29,9 +29,10 @@
  * Each starter object places the fields it declares in a keyed field group:
  * `fieldGroups` on the object and `group` on each field (ADR-0085 §5). The
  * rule credits a field the synthesized layout places in a KEYED section as
- * displayed (`packages/lint/src/validate-field-consumers.ts`, "The synthesized
- * layout"), because that section is what the form, detail and drawer surfaces
- * draw. The rule itself is unchanged: a starter is a stack like any other.
+ * displayed (`@objectstack/lint`'s `validate-field-consumers` module header,
+ * "The synthesized layout"), because that section is what the form, detail
+ * and drawer surfaces draw. The rule itself is unchanged: a starter is a
+ * stack like any other.
  *
  * ## Every non-title field is its own control
  *
