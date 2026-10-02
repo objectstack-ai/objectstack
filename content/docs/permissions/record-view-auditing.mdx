@@ -211,8 +211,9 @@ system context a read returns a view row only when the caller can read the
 record it names, so neither the list view nor a query serves a view of a record
 the reader cannot open, or of a record that has since been deleted, unless the
 reader holds the `view_all_audit_log` capability. Its holder is served every
-ledger row its grant on `sys_audit_log` reaches, with each snapshot still
-narrowed by field-level security. Platform administrators hold it by default;
+ledger row its grant on `sys_audit_log` reaches (under a walled tenancy
+posture, its own organization's rows), with each snapshot still narrowed by
+field-level security. Platform administrators hold it by default;
 anyone else holds it only through a permission set whose `systemPermissions`
 grant it. Those rows stay stored, and a system-context read still returns them.
 Rows carry the

@@ -40,13 +40,13 @@ describe('ADMIN_FULL_ACCESS_CAPABILITIES (#11965, Choice 6A)', () => {
     expect(parsed.objects['*'].allowExport).not.toBe(true);
   });
 
-  it('[#21260] carries the compliance ledger’s audit capability, declared platform-scoped', () => {
+  it('[#21260] carries the compliance ledger’s audit capability, declared org-scoped', () => {
     // Ruling B on #21175: platform administrators hold it by default, through
     // this grant (and the config-derived envelope core builds from this same
     // list). The other shipped sets withhold it, pinned on the seeded sets in
     // plugin-security's `default-permission-sets.test.ts`.
     expect(ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions).toContain('view_all_audit_log');
-    expect(PLATFORM_CAPABILITIES.find((c) => c.name === 'view_all_audit_log')?.scope).toBe('platform');
+    expect(PLATFORM_CAPABILITIES.find((c) => c.name === 'view_all_audit_log')?.scope).toBe('org');
   });
 
   it('every granted system permission is a declared built-in capability (ADR-0066 registry)', () => {

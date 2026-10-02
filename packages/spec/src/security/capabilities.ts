@@ -85,9 +85,13 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
   // read seams and field-level security still apply. The activity stream's
   // gate does not honour it. Held by default by platform administrators
   // (`ADMIN_FULL_ACCESS_CAPABILITIES`); every other position only by explicit
-  // grant. `platform`: the ledger carries no organization column, so the
-  // rows it unlocks are not bounded by the holder's organization.
-  { name: 'view_all_audit_log', label: 'View All Audit Log', description: 'Read every compliance-ledger (sys_audit_log) row the ledger grant reaches, past the parent-record read gate: rows about deleted records, ended sessions and records the holder cannot open. Field-level security still narrows each row’s before/after snapshots.', scope: 'platform' },
+  // grant. `org`, measured rather than assumed: the ledger carries the
+  // registry-provisioned `organization_id`, its writers stamp the record's
+  // organization, and under a wall-enforcing tenancy posture the tenant wall
+  // still bounds a holder to its own organization's rows (only the
+  // parent-record gate is lifted). A platform administrator reaches every
+  // organization through its own wall bypass, not through this capability.
+  { name: 'view_all_audit_log', label: 'View All Audit Log', description: 'Read every compliance-ledger (sys_audit_log) row the ledger grant reaches in the caller’s organization, past the parent-record read gate: rows about deleted records, ended sessions and records the holder cannot open. Field-level security still narrows each row’s before/after snapshots.', scope: 'org' },
 ];
 
 /** Set of built-in capability names, for fast membership checks (lint, gating). */

@@ -150,6 +150,9 @@ describe('[#21260] the ledger audit capability exempts its holder from the paren
     expect(res.status).toBe(200);
     return Number(((await res.json()) as any).total);
   };
+  /** The ledger rows at rest about the fixture object, read now (the armed checks write one more). */
+  const totalAtRest = (): Promise<number> =>
+    ql.count(LEDGER, { where: { object_name: OBJ } }, { context: { ...SYS } });
   const heldCapabilities = async (who: keyof typeof token): Promise<string[]> => {
     const auth = await stack.kernel.getServiceAsync<any>('auth');
     const api = auth?.api ?? (typeof auth?.getApi === 'function' ? await auth.getApi() : undefined);
@@ -233,7 +236,7 @@ describe('[#21260] the ledger audit capability exempts its holder from the paren
         { context: { ...SYS } },
       );
     }
-    bulkAtRest = await ql.count(LEDGER, { where: { object_name: OBJ } }, { context: { ...SYS } });
+    bulkAtRest = await totalAtRest();
 
     await assertArmed([
       armedWhen({
@@ -243,7 +246,7 @@ describe('[#21260] the ledger audit capability exempts its holder from the paren
           declared: PLATFORM_CAPABILITIES.find((c) => c.name === CAP)?.scope ?? 'undeclared',
           adminGrant: (ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions ?? []).includes(CAP),
         }),
-        armed: (o) => o.declared === 'platform' && o.adminGrant,
+        armed: (o) => o.declared === 'org' && o.adminGrant,
         describe: (o) => JSON.stringify(o),
       }),
       armedWhen({
@@ -327,7 +330,7 @@ describe('[#21260] the ledger audit capability exempts its holder from the paren
   });
 
   it('holder: a broad read past the pre-scan bound is served whole', async () => {
-    expect(await servedTotal('holder', { object_name: OBJ })).toBe(bulkAtRest);
+    expect(await servedTotal('holder', { object_name: OBJ })).toBe(await totalAtRest());
   });
 
   it('holder: the activity stream’s gate is not exempted', async () => {
@@ -356,6 +359,95 @@ describe('[#21260] the ledger audit capability exempts its holder from the paren
     expect(JSON.stringify(rows)).toContain(VALUE.withheld);
     expect(await servedById('admin', rowIds.signOut)).toBe(200);
     expect(await servedById('admin', rowIds.endedSignIn)).toBe(200);
-    expect(await servedTotal('admin', { object_name: OBJ })).toBe(bulkAtRest);
+    expect(await servedTotal('admin', { object_name: OBJ })).toBe(await totalAtRest());
+  });
+});
+
+// ── The declared scope, measured: a holder is bounded by its organization ────
+//
+// `PLATFORM_CAPABILITIES` declares the capability `scope: 'org'`. That is a
+// statement about the runtime: the capability lifts the parent-record gate
+// only, so under a wall-enforcing tenancy posture the tenant wall still bounds
+// a holder to its own organization's ledger rows. A real `isolated` boot, two
+// organizations each created by its owner, each writing and deleting one
+// record; the owner of the first holds the capability.
+
+describe('[#21260] the ledger audit capability is bounded by its holder’s organization (scope: org)', () => {
+  let stack: VerifyStack;
+  let ql: any;
+  const tok: Record<'admin' | 'a' | 'b', string> = { admin: '', a: '', b: '' };
+  const org: Record<'a' | 'b', string> = { a: '', b: '' };
+  const gone: Record<'a' | 'b', string> = { a: '', b: '' };
+  const capOnly = PermissionSetSchema.parse({
+    name: 'alc_org_auditor', label: 'ALC org auditor', objects: { [LEDGER]: read }, systemPermissions: [CAP],
+  });
+
+  const servedAbout = async (who: keyof typeof tok, recordId: string) => {
+    const res = await stack.apiAs(tok[who], 'GET', `/data/${LEDGER}?$filter=${filterOf({ object_name: OBJ, record_id: recordId })}`);
+    expect(res.status).toBe(200);
+    return rowsOf(await res.json()).length;
+  };
+
+  beforeAll(async () => {
+    stack = await bootStack(fixtureStack as unknown as Parameters<typeof bootStack>[0], {
+      security: new SecurityPlugin({ defaultPermissionSets: [...securityDefaultPermissionSets, capOnly] }),
+      extraPlugins: [new AuditPlugin()],
+      multiTenant: 'posture-only',
+    });
+    ql = await stack.kernel.getServiceAsync('objectql');
+    tok.admin = await stack.signIn();
+    for (const who of ['a', 'b'] as const) {
+      tok[who] = await stack.signUp(`alc-org-${who}@verify.test`);
+      const created = await stack.apiAs(tok[who], 'POST', '/auth/organization/create', { name: `ALC ${who}`, slug: `alc-org-${who}` });
+      expect(created.status).toBe(200);
+      org[who] = String(((await created.json()) as any).id);
+      expect((await stack.apiAs(tok[who], 'POST', '/auth/organization/set-active', { organizationSlug: `alc-org-${who}` })).status).toBe(200);
+    }
+    const userA = await ql.findOne('sys_user', { where: { email: 'alc-org-a@verify.test' }, context: { ...SYS } });
+    const set = await ql.findOne('sys_permission_set', { where: { name: capOnly.name }, context: { ...SYS } });
+    await ql.insert('sys_user_permission_set', { user_id: userA.id, permission_set_id: set.id }, { context: { ...SYS } });
+    for (const who of ['a', 'b'] as const) {
+      const res = await stack.apiAs(tok[who], 'POST', `/data/${OBJ}`, { name: `gone ${who}` });
+      expect(res.status).toBeLessThan(300);
+      const j = (await res.json()) as any;
+      gone[who] = String(j.id ?? j.record?.id);
+      expect((await stack.apiAs(tok[who], 'DELETE', `/data/${OBJ}/${gone[who]}`)).status).toBeLessThan(300);
+    }
+
+    await assertArmed([
+      armedWhen({
+        control: 'a real walled posture, two distinct organizations, and each deleted record’s rows stamped with its own organization',
+        disarmedBy: 'a single-tenant boot, or rows in one organization, would make the bound below a statement about one tenant',
+        observe: async () => {
+          const tenancy = await stack.kernel.getServiceAsync<any>('tenancy');
+          const orgOf = async (id: string) =>
+            [...new Set((await ql.find(LEDGER, { where: { object_name: OBJ, record_id: id }, context: { ...SYS } }))
+              .map((r: Row) => r.organization_id))];
+          return { posture: tenancy?.posture, active: tenancy?.isolationActive, a: await orgOf(gone.a), b: await orgOf(gone.b) };
+        },
+        armed: (o) => o.posture === 'isolated' && o.active === true && org.a !== org.b &&
+          o.a.length === 1 && o.a[0] === org.a && o.b.length === 1 && o.b[0] === org.b,
+        describe: (o) => JSON.stringify(o),
+      }),
+    ]);
+  }, 240_000);
+
+  afterAll(async () => {
+    await stack?.stop();
+  });
+
+  it('holder: is served its own organization’s deleted-record rows, and not another organization’s', async () => {
+    expect(await servedAbout('a', gone.a)).toBe(2);
+    expect(await servedAbout('a', gone.b)).toBe(0);
+  });
+
+  it('non-holder: is served neither', async () => {
+    expect(await servedAbout('b', gone.b)).toBe(0);
+    expect(await servedAbout('b', gone.a)).toBe(0);
+  });
+
+  it('platform administrator: is served both, through its own wall bypass', async () => {
+    expect(await servedAbout('admin', gone.a)).toBe(2);
+    expect(await servedAbout('admin', gone.b)).toBe(2);
   });
 });

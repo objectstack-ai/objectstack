@@ -226,8 +226,8 @@ describe('[#21260] the ledger audit capability', () => {
   ];
   const holder = { userId: 'u1', systemPermissions: ['setup.access', LEDGER_AUDIT_CAPABILITY] };
 
-  it('is the capability the platform declares, platform-scoped, and grants platform administrators by default', () => {
-    expect(PLATFORM_CAPABILITIES.find((c) => c.name === LEDGER_AUDIT_CAPABILITY)?.scope).toBe('platform');
+  it('is the capability the platform declares, org-scoped, and grants platform administrators by default', () => {
+    expect(PLATFORM_CAPABILITIES.find((c) => c.name === LEDGER_AUDIT_CAPABILITY)?.scope).toBe('org');
     expect(ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions).toContain(LEDGER_AUDIT_CAPABILITY);
   });
 
