@@ -377,7 +377,8 @@ const StrictNavItem = z.object({
   // renderer resolves to the target's CURRENT label on every render; a written
   // string is rendered verbatim and never follows a rename. A describe that
   // does not say which choice inherits steers the model to write a label on
-  // every entry. The nav label-rule pin below fails if the two drift.
+  // every entry. The nav `label` rule pin in `solution-blueprint.test.ts`
+  // (beside the `viewName` key-parity pin) fails if the two drift.
   label: z.string().nullable()
     .describe('Nav entry label, or null. null ⇒ the entry inherits the CURRENT label of what it opens at render time (a renamed target shows its new name); a string ⇒ rendered verbatim, so never copy the target\'s label in as a default. Write a label ONLY when the entry must read differently from what it opens; otherwise null.'),
   icon: z.string().nullable().describe('Lucide icon name, or null'),
