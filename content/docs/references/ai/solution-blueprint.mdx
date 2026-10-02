@@ -45,7 +45,7 @@ const result = BlueprintAppSchema.parse(data);
 | **name** | `string` | ✅ | App machine name (snake_case) |
 | **label** | `string` | optional | App display label |
 | **icon** | `string` | optional | Lucide icon for the App Launcher |
-| **nav** | `{ type: Enum<'object' \| 'dashboard'>; target: string; label?: string; icon?: string; … }[]` | optional | Navigation entries; omit to auto-surface every created object and dashboard |
+| **nav** | `{ type?: Enum<'object' \| 'dashboard'>; target: string; label?: string; icon?: string; … }[]` | optional | Navigation entries; omit to auto-surface every created object and dashboard |
 
 ### Nested Shape: `BlueprintApp.nav[number]`
 
@@ -298,7 +298,7 @@ const result = BlueprintAppSchema.parse(data);
 | **assumptions** | `string[]` | optional (default: `[]`) | Design assumptions made from the underspecified goal |
 | **questions** | `string[]` | optional | At most 1-2 structure-deciding questions to confirm before building |
 | **objects** | `{ name: string; label?: string; description?: string; fields: object[]; … }[]` | ✅ | Objects (tables) to create |
-| **views** | `{ object: string; name: string; label?: string; type: Enum<'list' \| 'form' \| 'kanban' \| 'calendar' \| 'gallery' \| 'gantt'>; … }[]` | optional | Views to create |
+| **views** | `{ object: string; name: string; label?: string; type?: Enum<'list' \| 'form' \| 'kanban' \| 'calendar' \| 'gallery' \| 'gantt'>; … }[]` | optional | Views to create |
 | **dashboards** | `{ name: string; label?: string; widgets?: object[] }[]` | optional | Dashboards to create |
 | **app** | `{ name: string; label?: string; icon?: string; nav?: object[] }` | optional | The navigation shell (app) that surfaces the created objects/dashboards to end users |
 | **seedData** | `{ object: string; records: Record<string, any>[] }[]` | optional | Suggested seed data (reported, not auto-applied in Phase C) |
@@ -340,7 +340,7 @@ const result = BlueprintAppSchema.parse(data);
 | **name** | `string` | ✅ | App machine name (snake_case) |
 | **label** | `string` | optional | App display label |
 | **icon** | `string` | optional | Lucide icon for the App Launcher |
-| **nav** | `{ type: Enum<'object' \| 'dashboard'>; target: string; label?: string; icon?: string; … }[]` | optional | Navigation entries; omit to auto-surface every created object and dashboard |
+| **nav** | `{ type?: Enum<'object' \| 'dashboard'>; target: string; label?: string; icon?: string; … }[]` | optional | Navigation entries; omit to auto-surface every created object and dashboard |
 
 ### Nested Shape: `SolutionBlueprint.seedData[number]`
 

@@ -42,7 +42,7 @@ Deploy bundle containing all metadata for deployment
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **manifest** | `{ version: string; checksum?: string; objects: string[]; views: string[]; … }` | ✅ | Deployment manifest |
+| **manifest** | `{ version: string; checksum?: string; objects?: string[]; views?: string[]; … }` | ✅ | Deployment manifest |
 | **objects** | `Record<string, any>[]` | optional (default: `[]`) | Object definitions |
 | **views** | `Record<string, any>[]` | optional (default: `[]`) | View definitions |
 | **flows** | `Record<string, any>[]` | optional (default: `[]`) | Flow definitions |
@@ -73,7 +73,7 @@ Schema diff between current and desired state
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **changes** | `{ entityType: Enum<'object' \| 'field' \| 'index' \| 'view' \| 'flow' \| 'permission'>; entityName: string; parentEntity?: string; changeType: Enum<'added' \| 'modified' \| 'removed'>; … }[]` | optional (default: `[]`) | List of schema changes |
-| **summary** | `{ added: integer; modified: integer; removed: integer }` | ✅ | Change summary counts |
+| **summary** | `{ added?: integer; modified?: integer; removed?: integer }` | ✅ | Change summary counts |
 | **hasBreakingChanges** | `boolean` | optional (default: `false`) | Whether diff contains breaking changes |
 
 ### Nested Shape: `DeployDiff.changes[number]`
@@ -187,7 +187,7 @@ Ordered migration plan
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **statements** | `{ sql: string; reversible: boolean; rollbackSql?: string; order: integer }[]` | optional (default: `[]`) | Ordered DDL statements |
+| **statements** | `{ sql: string; reversible?: boolean; rollbackSql?: string; order: integer }[]` | optional (default: `[]`) | Ordered DDL statements |
 | **dialect** | `string` | ✅ | Target SQL dialect |
 | **reversible** | `boolean` | optional (default: `true`) | Whether the plan can be fully rolled back |
 | **estimatedDurationMs** | `integer` | optional | Estimated execution time in milliseconds |

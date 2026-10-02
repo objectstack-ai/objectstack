@@ -156,8 +156,8 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **emailPassword** | `{ enabled: boolean; disableSignUp?: boolean; requireEmailVerification?: boolean }` | ✅ | Email/password authentication config |
-| **socialProviders** | `{ id: string; name: string; enabled: boolean; type: Enum<'social' \| 'oidc'> }[]` | ✅ | Available social/OAuth providers |
-| **features** | `{ twoFactor: boolean; organization: boolean; ssoEnforced?: boolean; phoneNumber?: boolean; … }` | ✅ | Enabled authentication features |
+| **socialProviders** | `{ id: string; name: string; enabled: boolean; type?: Enum<'social' \| 'oidc'> }[]` | ✅ | Available social/OAuth providers |
+| **features** | `{ twoFactor?: boolean; organization?: boolean; ssoEnforced?: boolean; phoneNumber?: boolean; … }` | ✅ | Enabled authentication features |
 
 ### Nested Shape: `GetAuthConfigResponse.emailPassword`
 

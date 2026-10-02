@@ -48,7 +48,7 @@ const result = AIModelConfigSchema.parse(data);
 | **avatar** | `string` | optional |  |
 | **role** | `string` | ✅ | The persona/role (e.g. "Senior Support Engineer") |
 | **instructions** | `string` | ✅ | System Prompt / Prime Directives |
-| **model** | `{ provider: Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'local'>; model: string; temperature: number; maxTokens?: number; … }` | optional |  |
+| **model** | `{ provider?: Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'local'>; model: string; temperature?: number; maxTokens?: number; … }` | optional |  |
 | **lifecycle** | `{ id: string; description?: string; contextSchema?: Record<string, any>; initial: string; … }` | optional | [EXPERIMENTAL — not enforced] State machine defining the agent conversation flow and constraints. Parsed but no runtime consumer yet. |
 | **surface** | `Enum<'ask' \| 'build'>` | optional (default: `"ask"`) | Product surface this agent binds ('ask' \| 'build') — ADR-0063 §1 |
 | **skills** | `string[]` | optional | Skill names to attach (Agent→Skill→Tool architecture) |
@@ -57,10 +57,10 @@ const result = AIModelConfigSchema.parse(data);
 | **active** | `boolean` | optional (default: `true`) |  |
 | **access** | `string[]` | optional | Who can chat with this agent |
 | **permissions** | `string[]` | optional | Required permission-set capabilities |
-| **planning** | `{ maxIterations: integer }` | optional | Autonomous reasoning and planning configuration |
+| **planning** | `{ maxIterations?: integer }` | optional | Autonomous reasoning and planning configuration |
 | **memory** | `{ longTerm?: object; reflectionInterval?: integer }` | optional | Agent memory (long-term notes recalled before each conversation and written by periodic reflection), enforced by the cloud AI runtime; the open framework edition does not run agents. |
 | **guardrails** | `{ maxTokensPerInvocation?: integer; maxExecutionTimeSec?: integer; blockedTopics?: string[] }` | optional | Safety guardrails for the agent (token budget, time limit, blocked topics), enforced per user turn by the cloud AI runtime; the open framework edition does not run agents. |
-| **structuredOutput** | `{ format: Enum<'json_object' \| 'json_schema'>; schema?: Record<string, any>; strict: boolean; retryOnValidationFailure: boolean; … }` | optional | Structured output contract for the agent's final answer (JSON format, schema, retries, fallback format, transform steps), enforced on every final answer by the cloud AI runtime; the open framework edition does not run agents. |
+| **structuredOutput** | `{ format: Enum<'json_object' \| 'json_schema'>; schema?: Record<string, any>; strict?: boolean; retryOnValidationFailure?: boolean; … }` | optional | Structured output contract for the agent's final answer (JSON format, schema, retries, fallback format, transform steps), enforced on every final answer by the cloud AI runtime; the open framework edition does not run agents. |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this agent. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -88,7 +88,7 @@ const result = AIModelConfigSchema.parse(data);
 | **description** | `string` | optional |  |
 | **contextSchema** | `Record<string, any>` | optional | Zod Schema for the machine context/memory |
 | **initial** | `string` | ✅ | Initial State ID |
-| **states** | `Record<string, { type: Enum<'atomic' \| 'compound' \| 'parallel' \| 'final' \| 'history'>; entry?: (string \| object)[]; exit?: (string \| object)[]; on?: Record<string, string \| object \| object[]>; … }>` | ✅ | State Nodes |
+| **states** | `Record<string, { type?: Enum<'atomic' \| 'compound' \| 'parallel' \| 'final' \| 'history'>; entry?: (string \| object)[]; exit?: (string \| object)[]; on?: Record<string, string \| object \| object[]>; … }>` | ✅ | State Nodes |
 | **on** | `Record<string, string \| { target?: string; cond?: string \| object; actions?: (string \| object)[]; description?: string } \| { target?: string; cond?: string \| object; actions?: (string \| object)[]; description?: string }[]>` | optional |  |
 
 ### Nested Shape: `Agent.planning`
@@ -101,7 +101,7 @@ const result = AIModelConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **longTerm** | `{ enabled: boolean; maxEntries?: integer }` | optional | Long-term memory: distilled notes kept per user and agent and recalled before each conversation |
+| **longTerm** | `{ enabled?: boolean; maxEntries?: integer }` | optional | Long-term memory: distilled notes kept per user and agent and recalled before each conversation |
 | **reflectionInterval** | `integer` | optional | Reflect every N delivered interactions: each reflection writes one distilled note to long-term memory. Required when longTerm.enabled is true, and refused without it |
 
 ### Nested Shape: `Agent.guardrails`

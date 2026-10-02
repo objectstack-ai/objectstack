@@ -150,7 +150,7 @@ const result = AuthProvider.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **session** | `{ id: string; expiresAt: string; token?: string; ipAddress?: string; … }` | ✅ | Active Session Info |
-| **user** | `{ id: string; email: string; emailVerified: boolean; name: string; … }` | ✅ | Current User Details |
+| **user** | `{ id: string; email: string; emailVerified?: boolean; name: string; … }` | ✅ | Current User Details |
 | **token** | `string` | optional | Bearer token if not using cookies |
 
 
@@ -187,7 +187,7 @@ const result = AuthProvider.parse(data);
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ id: string; email: string; emailVerified: boolean; name: string; … }` | ✅ |  |
+| **data** | `{ id: string; email: string; emailVerified?: boolean; name: string; … }` | ✅ |  |
 
 ### Nested Shape: `UserProfileResponse.error`
 

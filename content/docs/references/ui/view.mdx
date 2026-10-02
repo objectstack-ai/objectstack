@@ -613,7 +613,7 @@ Record grouping configuration — SERVER-SIDE: the set of groups and every numbe
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **fields** | `{ field: string; order: Enum<'asc' \| 'desc'>; collapsed: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
+| **fields** | `{ field: string; order?: Enum<'asc' \| 'desc'>; collapsed?: boolean }[]` | ✅ | Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field); the same order as the group header query's `groupBy` |
 
 ### Nested Shape: `GroupingConfig.fields[number]`
 
@@ -716,7 +716,7 @@ List chart view configuration
 | **type** | `string` | optional | Renderer type override (e.g., "currency", "date") |
 | **pinned** | `Enum<'left' \| 'right'>` | optional | Pin/freeze column to left or right side |
 | **summary** | `Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| 'percent_empty' \| 'percent_filled' \| 'sum' \| 'avg' \| 'min' \| 'max'> \| { type: Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| …>; field?: string }` | optional | Footer aggregation for this column — the function alone, or `{ type, field }` to aggregate another field |
-| **prefix** | `{ field: string; type: Enum<'badge' \| 'text'> }` | optional | Field rendered inline before this cell value |
+| **prefix** | `{ field: string; type?: Enum<'badge' \| 'text'> }` | optional | Field rendered inline before this cell value |
 | **link** | `boolean` | optional | Functions as the primary navigation link (triggers View navigation) |
 | **action** | `string` | optional | Registered Action ID to execute when clicked |
 
@@ -1942,8 +1942,8 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **provider** | `'api'` | ✅ |  |
-| **read** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
-| **write** | `{ url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
+| **read** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for fetching data |
+| **write** | `{ url: string; method?: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'>; headers?: Record<string, string>; params?: Record<string, any>; … }` | optional | Configuration for submitting data (for forms/editable tables) |
 
 ### Nested Shape: `ViewData[provider='api'].read`
 

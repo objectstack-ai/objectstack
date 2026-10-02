@@ -54,9 +54,9 @@ const result = ModelCapabilitySchema.parse(data);
 | **name** | `string` | ✅ | Model display name |
 | **version** | `string` | ✅ | Model version (e.g., "gpt-4-turbo-2024-04-09") |
 | **provider** | `Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'google' \| 'cohere' \| 'huggingface' \| 'local' \| 'custom'>` | ✅ |  |
-| **capabilities** | `{ textGeneration: boolean; textEmbedding: boolean; imageGeneration: boolean; imageUnderstanding: boolean; … }` | ✅ |  |
+| **capabilities** | `{ textGeneration?: boolean; textEmbedding?: boolean; imageGeneration?: boolean; imageUnderstanding?: boolean; … }` | ✅ |  |
 | **limits** | `{ maxTokens: integer; contextWindow: integer; maxOutputTokens?: integer; rateLimit?: object }` | ✅ |  |
-| **pricing** | `{ currency: string; inputCostPer1kTokens?: number; outputCostPer1kTokens?: number; embeddingCostPer1kTokens?: number }` | optional |  |
+| **pricing** | `{ currency?: string; inputCostPer1kTokens?: number; outputCostPer1kTokens?: number; embeddingCostPer1kTokens?: number }` | optional |  |
 | **endpoint** | `string` | optional | Custom API endpoint |
 | **apiKey** | `string` | optional | API key (Warning: Prefer secretRef) |
 | **secretRef** | `string` | optional | Reference to stored secret (e.g. system:openai_api_key) |
@@ -202,7 +202,7 @@ const result = ModelCapabilitySchema.parse(data);
 | **status** | `Enum<'active' \| 'deprecated' \| 'experimental' \| 'disabled'>` | optional (default: `"active"`) |  |
 | **priority** | `integer` | optional (default: `0`) | Priority for model selection |
 | **fallbackModels** | `string[]` | optional | Fallback model IDs |
-| **healthCheck** | `{ enabled: boolean; intervalSeconds: integer; lastChecked?: string; status: Enum<'healthy' \| 'unhealthy' \| 'unknown'> }` | optional |  |
+| **healthCheck** | `{ enabled?: boolean; intervalSeconds?: integer; lastChecked?: string; status?: Enum<'healthy' \| 'unhealthy' \| 'unknown'> }` | optional |  |
 
 ### Nested Shape: `ModelRegistryEntry.model`
 
@@ -212,9 +212,9 @@ const result = ModelCapabilitySchema.parse(data);
 | **name** | `string` | ✅ | Model display name |
 | **version** | `string` | ✅ | Model version (e.g., "gpt-4-turbo-2024-04-09") |
 | **provider** | `Enum<'openai' \| 'azure_openai' \| 'anthropic' \| 'google' \| 'cohere' \| 'huggingface' \| 'local' \| 'custom'>` | ✅ |  |
-| **capabilities** | `{ textGeneration: boolean; textEmbedding: boolean; imageGeneration: boolean; imageUnderstanding: boolean; … }` | ✅ |  |
+| **capabilities** | `{ textGeneration?: boolean; textEmbedding?: boolean; imageGeneration?: boolean; imageUnderstanding?: boolean; … }` | ✅ |  |
 | **limits** | `{ maxTokens: integer; contextWindow: integer; maxOutputTokens?: integer; rateLimit?: object }` | ✅ |  |
-| **pricing** | `{ currency: string; inputCostPer1kTokens?: number; outputCostPer1kTokens?: number; embeddingCostPer1kTokens?: number }` | optional |  |
+| **pricing** | `{ currency?: string; inputCostPer1kTokens?: number; outputCostPer1kTokens?: number; embeddingCostPer1kTokens?: number }` | optional |  |
 | **endpoint** | `string` | optional | Custom API endpoint |
 | **apiKey** | `string` | optional | API key (Warning: Prefer secretRef) |
 | **secretRef** | `string` | optional | Reference to stored secret (e.g. system:openai_api_key) |

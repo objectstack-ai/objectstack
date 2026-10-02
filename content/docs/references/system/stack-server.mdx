@@ -107,7 +107,7 @@ const result = ServerRateLimitConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **rateLimit** | `{ enabled: boolean; windowMs: integer; maxRequests: integer }` | optional | Global inbound rate limit. When `enabled`, every inbound request consumes from a token bucket derived from this budget (capacity = `maxRequests`, refill = `maxRequests / (windowMs / 1000)` tokens per second); an empty bucket answers 429 with a `Retry-After` header. The bucket is keyed by the RESOLVED PRINCIPAL, falling back to the caller IP for anonymous traffic — so one abusive session cannot exhaust another user's budget, and credential-stuffing traffic (which has no principal yet) is still metered per source. See `server.trustProxy` for how that IP is determined. |
+| **rateLimit** | `{ enabled?: boolean; windowMs?: integer; maxRequests?: integer }` | optional | Global inbound rate limit. When `enabled`, every inbound request consumes from a token bucket derived from this budget (capacity = `maxRequests`, refill = `maxRequests / (windowMs / 1000)` tokens per second); an empty bucket answers 429 with a `Retry-After` header. The bucket is keyed by the RESOLVED PRINCIPAL, falling back to the caller IP for anonymous traffic — so one abusive session cannot exhaust another user's budget, and credential-stuffing traffic (which has no principal yet) is still metered per source. See `server.trustProxy` for how that IP is determined. |
 
 
 ---
@@ -118,7 +118,7 @@ const result = ServerRateLimitConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **rateLimit** | `{ enabled: boolean; windowMs: integer; maxRequests: integer }` | optional | Global inbound rate limit. When `enabled`, every inbound request consumes from a token bucket derived from this budget (capacity = `maxRequests`, refill = `maxRequests / (windowMs / 1000)` tokens per second); an empty bucket answers 429 with a `Retry-After` header. The bucket is keyed by the RESOLVED PRINCIPAL, falling back to the caller IP for anonymous traffic — so one abusive session cannot exhaust another user's budget, and credential-stuffing traffic (which has no principal yet) is still metered per source. See `server.trustProxy` for how that IP is determined. |
+| **rateLimit** | `{ enabled?: boolean; windowMs?: integer; maxRequests?: integer }` | optional | Global inbound rate limit. When `enabled`, every inbound request consumes from a token bucket derived from this budget (capacity = `maxRequests`, refill = `maxRequests / (windowMs / 1000)` tokens per second); an empty bucket answers 429 with a `Retry-After` header. The bucket is keyed by the RESOLVED PRINCIPAL, falling back to the caller IP for anonymous traffic — so one abusive session cannot exhaust another user's budget, and credential-stuffing traffic (which has no principal yet) is still metered per source. See `server.trustProxy` for how that IP is determined. |
 
 ### Nested Shape: `StackServerSecurity.rateLimit`
 

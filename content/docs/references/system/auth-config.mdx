@@ -70,17 +70,17 @@ Advanced / low-level Better-Auth options
 | **uiBasePath** | `string` | optional (default: `"/_console"`) | Basename where the auth UI (Console) is mounted (default `/_console`) |
 | **databaseUrl** | `string` | optional | Database connection string |
 | **providers** | `{ id: string; clientId: string; clientSecret: string; scope?: string[] }[]` | optional |  |
-| **plugins** | `{ organization: boolean; twoFactor: boolean; passkeys: boolean; passwordRejectBreached: boolean; … }` | optional |  |
-| **session** | `{ expiresIn: number; updateAge: number }` | optional |  |
+| **plugins** | `{ organization?: boolean; twoFactor?: boolean; passkeys?: boolean; passwordRejectBreached?: boolean; … }` | optional |  |
+| **session** | `{ expiresIn?: number; updateAge?: number }` | optional |  |
 | **trustedOrigins** | `string[]` | optional | Trusted origins for CSRF protection. Supports wildcards (e.g. "https://*.example.com"). The baseUrl origin is always trusted implicitly. |
-| **socialProviders** | `Record<string, { clientId: string; clientSecret: string; enabled: boolean; scope?: string[] } & Record<string, any>>` | optional | Social/OAuth provider map forwarded to better-auth socialProviders. Keys are provider ids (google, github, apple, …). |
+| **socialProviders** | `Record<string, { clientId: string; clientSecret: string; enabled?: boolean; scope?: string[] } & Record<string, any>>` | optional | Social/OAuth provider map forwarded to better-auth socialProviders. Keys are provider ids (google, github, apple, …). |
 | **oidcProviders** | `{ providerId: string; name?: string; discoveryUrl?: string; issuer?: string; … }[]` | optional | List of OIDC/OAuth2 providers for enterprise SSO. Product or enterprise packages can pass this directly or contribute it through auth:configure. |
-| **emailAndPassword** | `{ enabled: boolean; disableSignUp?: boolean; requireEmailVerification?: boolean; minPasswordLength?: number; … }` | optional | Email and password authentication options forwarded to better-auth |
+| **emailAndPassword** | `{ enabled?: boolean; disableSignUp?: boolean; requireEmailVerification?: boolean; minPasswordLength?: number; … }` | optional | Email and password authentication options forwarded to better-auth |
 | **emailVerification** | `{ sendOnSignUp?: boolean; sendOnSignIn?: boolean; autoSignInAfterVerification?: boolean; expiresIn?: number }` | optional | Email verification options forwarded to better-auth |
-| **audience** | `{ posture: Enum<'invite_only' \| 'email_domain' \| 'open'>; allowedEmailDomains?: string[]; selfRegistrationPermissionSet?: string }` | optional | Audience posture: who may self-register into this environment (invite_only — the default — \| email_domain \| open). See AudienceConfigSchema. |
+| **audience** | `{ posture?: Enum<'invite_only' \| 'email_domain' \| 'open'>; allowedEmailDomains?: string[]; selfRegistrationPermissionSet?: string }` | optional | Audience posture: who may self-register into this environment (invite_only — the default — \| email_domain \| open). See AudienceConfigSchema. |
 | **advanced** | `{ crossSubDomainCookies?: object; useSecureCookies?: boolean; disableCSRFCheck?: boolean; cookiePrefix?: string }` | optional | Advanced / low-level Better-Auth options |
 | **ssoOnlyMode** | `boolean` | optional | SSO-only login: hide the local password form + self-registration (the break-glass password endpoint stays enabled) |
-| **mutualTls** | `{ enabled: boolean; clientCertRequired: boolean; trustedCAs: string[]; crlUrl?: string; … }` | optional | Mutual TLS (mTLS) configuration |
+| **mutualTls** | `{ enabled?: boolean; clientCertRequired?: boolean; trustedCAs: string[]; crlUrl?: string; … }` | optional | Mutual TLS (mTLS) configuration |
 
 ### Nested Shape: `AuthConfig.providers[number]`
 
@@ -334,7 +334,7 @@ List of OIDC/OAuth2 providers for enterprise SSO. Product or enterprise packages
 
 Social/OAuth provider map forwarded to better-auth socialProviders. Keys are provider ids (google, github, apple, …).
 
-**Type:** `Record<string, { clientId: string; clientSecret: string; enabled: boolean; scope?: string[] } & Record<string, any>>`
+**Type:** `Record<string, { clientId: string; clientSecret: string; enabled?: boolean; scope?: string[] } & Record<string, any>>`
 
 
 ---

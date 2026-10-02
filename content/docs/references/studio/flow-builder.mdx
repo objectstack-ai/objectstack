@@ -57,8 +57,8 @@ Studio Flow Builder configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **snap** | `{ enabled: boolean; gridSize: integer; showGrid: boolean }` | optional (default: `{"enabled":true,"gridSize":16,"showGrid":true}`) | Canvas snap-to-grid settings |
-| **zoom** | `{ min: number; max: number; default: number; step: number }` | optional (default: `{"min":0.25,"max":3,"default":1,"step":0.1}`) | Canvas zoom settings |
+| **snap** | `{ enabled?: boolean; gridSize?: integer; showGrid?: boolean }` | optional (default: `{"enabled":true,"gridSize":16,"showGrid":true}`) | Canvas snap-to-grid settings |
+| **zoom** | `{ min?: number; max?: number; default?: number; step?: number }` | optional (default: `{"min":0.25,"max":3,"default":1,"step":0.1}`) | Canvas zoom settings |
 | **layoutAlgorithm** | `Enum<'dagre' \| 'elk' \| 'force' \| 'manual'>` | optional (default: `"dagre"`) | Default auto-layout algorithm |
 | **layoutDirection** | `Enum<'TB' \| 'BT' \| 'LR' \| 'RL'>` | optional (default: `"TB"`) | Default auto-layout direction |
 | **nodeDescriptors** | `{ action: string; shape: Enum<'rounded_rect' \| 'circle' \| 'diamond' \| 'parallelogram' \| 'hexagon' \| …>; icon: string; defaultLabel: string; … }[]` | optional | Custom node render descriptors (merged with built-in defaults) |

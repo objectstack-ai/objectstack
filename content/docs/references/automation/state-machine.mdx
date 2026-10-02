@@ -142,7 +142,7 @@ Type: `string`
 | **description** | `string` | optional |  |
 | **contextSchema** | `Record<string, any>` | optional | Zod Schema for the machine context/memory |
 | **initial** | `string` | ✅ | Initial State ID |
-| **states** | `Record<string, { type: Enum<'atomic' \| 'compound' \| 'parallel' \| 'final' \| 'history'>; entry?: (string \| object)[]; exit?: (string \| object)[]; on?: Record<string, string \| object \| object[]>; … }>` | ✅ | State Nodes |
+| **states** | `Record<string, { type?: Enum<'atomic' \| 'compound' \| 'parallel' \| 'final' \| 'history'>; entry?: (string \| object)[]; exit?: (string \| object)[]; on?: Record<string, string \| object \| object[]>; … }>` | ✅ | State Nodes |
 | **on** | `Record<string, string \| { target?: string; cond?: string \| object; actions?: (string \| object)[]; description?: string } \| { target?: string; cond?: string \| object; actions?: (string \| object)[]; description?: string }[]>` | optional |  |
 
 ### Nested Shape: `StateMachine.states[string]`
@@ -155,7 +155,7 @@ Type: `string`
 | **on** | `Record<string, string \| { target?: string; cond?: string \| object; actions?: (string \| object)[]; description?: string } \| { target?: string; cond?: string \| object; actions?: (string \| object)[]; description?: string }[]>` | optional | Map of Event Type -> Transition Definition |
 | **always** | `{ target?: string; cond?: string \| object; actions?: (string \| object)[]; description?: string }[]` | optional |  |
 | **initial** | `string` | optional | Initial child state (if compound) |
-| **states** | `Record<string, { type: Enum<'atomic' \| 'compound' \| 'parallel' \| 'final' \| 'history'>; entry?: (string \| object)[]; exit?: (string \| object)[]; on?: Record<string, string \| object \| object[]>; … }>` | optional |  |
+| **states** | `Record<string, { type?: Enum<'atomic' \| 'compound' \| 'parallel' \| 'final' \| 'history'>; entry?: (string \| object)[]; exit?: (string \| object)[]; on?: Record<string, string \| object \| object[]>; … }>` | optional |  |
 | **meta** | `{ label?: string; description?: string; color?: string; aiInstructions?: string }` | optional |  |
 
 ### Nested Shape: `StateMachine.on[string][option 2]`

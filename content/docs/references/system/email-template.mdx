@@ -49,7 +49,7 @@ const result = EmailTemplateDefinitionSchema.parse(data);
 | **subject** | `string` | ✅ | Subject template |
 | **bodyHtml** | `string` | ✅ | HTML body template |
 | **bodyText** | `string` | optional | Plain-text body template (auto-derived from HTML when omitted) |
-| **variables** | `{ name: string; type: Enum<'string' \| 'number' \| 'boolean' \| 'date' \| 'url' \| 'user' \| 'record'>; required: boolean; description?: string }[]` | optional (default: `[]`) |  |
+| **variables** | `{ name: string; type?: Enum<'string' \| 'number' \| 'boolean' \| 'date' \| 'url' \| 'user' \| 'record'>; required?: boolean; description?: string }[]` | optional (default: `[]`) |  |
 | **fromOverride** | `{ name?: string; address: string }` | optional |  |
 | **replyTo** | `string` | optional |  |
 | **active** | `boolean` | optional (default: `true`) |  |

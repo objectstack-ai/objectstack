@@ -147,7 +147,7 @@ Install from marketplace request
 | **licenseKey** | `string` | optional | License key for paid packages |
 | **settings** | `Record<string, any>` | optional | User-provided settings at install time |
 | **enableOnInstall** | `boolean` | optional | Whether to enable immediately after install — the marketplace channel's own install option, not the platform install-door key (api/PackageInstallRequest); `true` asks the channel to enable, `false` not to, and ABSENT leaves the package's current lifecycle state alone |
-| **artifactRef** | `{ url: string; sha256: string; size: integer; format: Enum<'tgz' \| 'zip'>; … }` | optional | Artifact reference for direct installation |
+| **artifactRef** | `{ url: string; sha256: string; size: integer; format?: Enum<'tgz' \| 'zip'>; … }` | optional | Artifact reference for direct installation |
 | **tenantId** | `string` | optional | Tenant identifier |
 
 ### Nested Shape: `MarketplaceInstallRequest.artifactRef`
@@ -207,7 +207,7 @@ Public-facing package listing on the marketplace
 | **latestVersion** | `string` | ✅ | Latest published version |
 | **minPlatformVersion** | `string` | optional | Minimum ObjectStack platform version |
 | **versions** | `{ version: string; releaseDate: string; releaseNotes?: string; minPlatformVersion?: string; … }[]` | optional | Published versions |
-| **stats** | `{ totalInstalls: integer; activeInstalls: integer; averageRating?: number; totalRatings: integer; … }` | optional | Aggregate marketplace statistics |
+| **stats** | `{ totalInstalls?: integer; activeInstalls?: integer; averageRating?: number; totalRatings?: integer; … }` | optional | Aggregate marketplace statistics |
 | **publishedAt** | `string` | optional | First published timestamp |
 | **updatedAt** | `string` | optional | Last updated timestamp |
 | **translations** | `Record<string, { displayName?: string; description?: string; readme?: string; tagline?: string; … }>` | optional | Locale-keyed overrides for name / tagline / description / screenshot captions |
@@ -221,7 +221,7 @@ Public-facing package listing on the marketplace
 | **releaseNotes** | `string` | optional | Release notes |
 | **minPlatformVersion** | `string` | optional | Minimum platform version |
 | **deprecated** | `boolean` | optional (default: `false`) | Whether this version is deprecated |
-| **artifact** | `{ url: string; sha256: string; size: integer; format: Enum<'tgz' \| 'zip'>; … }` | optional | Downloadable artifact for this version |
+| **artifact** | `{ url: string; sha256: string; size: integer; format?: Enum<'tgz' \| 'zip'>; … }` | optional | Downloadable artifact for this version |
 
 ### Nested Shape: `MarketplaceListing.stats`
 
@@ -278,7 +278,7 @@ Marketplace search response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **items** | `{ id: string; packageId: string; packageType: Enum<'app'>; publisherId: string; … }[]` | ✅ | Search result listings |
+| **items** | `{ id: string; packageId: string; packageType?: Enum<'app'>; publisherId: string; … }[]` | ✅ | Search result listings |
 | **total** | `integer` | ✅ | Total matching results |
 | **page** | `integer` | ✅ | Current page number |
 | **pageSize** | `integer` | ✅ | Items per page |
@@ -310,7 +310,7 @@ Public-facing package listing on the marketplace
 | **latestVersion** | `string` | ✅ | Latest published version |
 | **minPlatformVersion** | `string` | optional | Minimum ObjectStack platform version |
 | **versions** | `{ version: string; releaseDate: string; releaseNotes?: string; minPlatformVersion?: string; … }[]` | optional | Published versions |
-| **stats** | `{ totalInstalls: integer; activeInstalls: integer; averageRating?: number; totalRatings: integer; … }` | optional | Aggregate marketplace statistics |
+| **stats** | `{ totalInstalls?: integer; activeInstalls?: integer; averageRating?: number; totalRatings?: integer; … }` | optional | Aggregate marketplace statistics |
 | **publishedAt** | `string` | optional | First published timestamp |
 | **updatedAt** | `string` | optional | Last updated timestamp |
 | **translations** | `Record<string, { displayName?: string; description?: string; readme?: string; tagline?: string; … }>` | optional | Locale-keyed overrides for name / tagline / description / screenshot captions |
