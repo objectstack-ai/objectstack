@@ -1623,20 +1623,26 @@ export const RecordActivityProps = strictObject({
    * makes the refusal name them instead of the generic unrecognized-key line.
    *
    * The same object is `record:chatter` / `record:discussion`'s `feed`, so the
-   * entries answer there too. That renderer reads its feed off the host's
-   * discussion context and reads neither `feed.items` nor `feed.loading`
-   * (`renderers/record-chatter.tsx`, same pin), so "omit it" is the right
-   * answer on both mounts.
+   * entries answer there too. That renderer reads its rows and its loading
+   * flag off the host's discussion context, reads neither `feed.items` nor
+   * `feed.loading`, and never self-fetches (`renderers/record-chatter.tsx`,
+   * same pin). `guidance` is one flat table keyed by key name — it cannot be
+   * scoped to a mount — so each entry says who reads the key on EACH mount,
+   * and every clause is true wherever the refusal is raised.
    */
   guidance: {
-    items: '`items` is the HOST\'s data channel, not authorable surface: a host that composes this '
-      + 'block in code passes the feed it already owns through it, and the renderer presents that '
-      + 'feed in place of its own sources. Hand-authored items would ship a static snapshot of the '
-      + 'feed that never updates. Omit it — with no host items the block presents the record '
-      + 'page\'s discussion feed, or self-fetches the record\'s own `sys_activity` rows.',
-    loading: '`loading` is the host\'s fetch state for its `items` feed, not authorable surface: the '
-      + 'host flag wins over the block\'s own, so authored `true` pins the loading state on forever. '
-      + 'Omit it with `items` — the block manages its own loading state.',
+    items: '`items` is not authorable surface. On a standalone `record:activity` it is the HOST\'s '
+      + 'data channel: a host composing that block in code passes the feed it already owns, and the '
+      + 'renderer presents it in place of its own sources; hand-authored items would ship a static '
+      + 'snapshot of the feed that never updates. On a `record:chatter` / `record:discussion` `feed` '
+      + 'nothing reads it. Omit it: the block presents the record page\'s discussion feed, and a '
+      + 'standalone `record:activity` with no discussion context self-fetches the record\'s own '
+      + '`sys_activity` rows.',
+    loading: '`loading` is not authorable surface. On a standalone `record:activity` it is the host\'s '
+      + 'fetch state for its `items` feed and wins over the block\'s other loading sources, so '
+      + 'authored `true` pins the loading state on forever. On a `record:chatter` / '
+      + '`record:discussion` `feed` nothing reads it. Omit it with `items`: each block takes its '
+      + 'loading state from its own source.',
   },
 }, {
   /**
