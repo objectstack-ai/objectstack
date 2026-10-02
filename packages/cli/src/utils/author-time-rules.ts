@@ -53,8 +53,10 @@
  * What holds THIS copy of the wiring to the doors' is behaviour, not source:
  * `test/verify-author-time-stage.test.ts` runs `os validate --json` and
  * `os verify --json` over one stack and requires the same gating findings,
- * and `author-time-rules.test.ts` beside this file pins the union fold and the
- * per-package pass on a stack whose definitions live only in `packages[]`.
+ * and `author-time-rules.test.ts` beside this file pins the union fold on a
+ * stack whose definitions live only in `packages[]` and the per-package pass
+ * on a two-package artifact — the two seams a single-package stack cannot
+ * tell apart.
  */
 
 import type { ZodError } from 'zod';
@@ -82,7 +84,7 @@ import { artifactPackages, runPerPackageAuthoringRules } from './artifact-packag
  * data-model sweep. `'build'` and `'validate'` run the identical rule list over
  * a parsed stack. This stage prepares its tiers the way `os validate` does, and
  * the ruling asks for the findings `os validate` reports, so it asks that door.
- * Exported so the pin asserts the coupling instead of restating the string.
+ * Exported so `os verify` and the pins read the door from one place.
  */
 export const VERIFY_RULE_COMMAND: AuthoringCommand = 'validate';
 
