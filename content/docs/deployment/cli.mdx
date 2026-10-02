@@ -577,6 +577,54 @@ named afterwards: the export carries the cipher material, is written owner-only,
 read back and checked before any row is removed. Keep it until you are certain.
 </Callout>
 
+#### `os secret rewrap`
+
+Re-wraps the `sys_secret` ciphertext sealed before secrets were bound to the producer
+that wrote them, so it carries the current binding (ADR-0128). Each row is re-sealed
+under the scope of the producer whose holder references it: a setting, an object's
+`secret` field, or a datasource credential. **A dry run by default: without `--apply`
+it writes nothing.** It is never run for you; nothing on any boot or upgrade path
+invokes it.
+
+```bash
+os secret rewrap --no-declared-datasources            # dry run (writes nothing)
+os secret rewrap --json --no-declared-datasources     # the same, machine-readable
+os secret rewrap --declared-datasources ./datasources.json
+os secret rewrap --apply --no-declared-datasources    # write the re-wrapped rows
+```
+
+**Options:**
+- `--apply` — write the re-wrapped rows (default off)
+- `--declared-datasources <path>` — JSON file (an array, or `{"datasources": [...]}`) of the datasource artefacts this host declares in code
+- `--no-declared-datasources` — state that this host declares none
+- `-y, --yes` — skip the confirmation prompt
+- `--database-url <url>`, `--json`
+
+Run it with the data key the deployment seals with (`OS_SECRET_KEY`, or the persisted
+key file). It never mints a key, and with none it refuses before opening any row.
+
+What a run guarantees:
+
+- **The scope comes from the holder, never from a guess.** A row that nothing
+  references, a row whose holders belong to different producers, and every row while a
+  holder family could not be read are **left as they are** and counted. Like
+  `os secret orphans`, it reads all three holder families, and a host that says nothing
+  about its code-declared datasources leaves that family a gap. `--apply` then refuses
+  and names the family.
+- **Resumable.** A row already sealed under the current binding is skipped as done. A run
+  that stopped part-way finishes the rest when re-run, and a finished run writes nothing.
+- **Safe against a live deployment.** Each row is written in one statement, and only if
+  it still holds the ciphertext the run read. A row a producer changed during the run is
+  not overwritten. It is counted, and a re-run picks it up.
+- **Fails closed.** A row that does not open, or whose re-seal does not open to the same
+  value under the same scope, is not written. The run finishes the rest and exits 1.
+
+The dry run opens, re-seals and verifies every attributed row in memory, so its counts
+are the ones `--apply` would produce. Output is classes and counts only: re-wrap,
+done, left (orphan, conflicting scope, union incomplete), refused (unreadable, unknown
+derivation, verify failed) and, under `--apply`, not written (changed during the run,
+write failed). It never prints a value, a ciphertext or a row id.
+
 ### Build & Validate
 
 | Command | Description |
