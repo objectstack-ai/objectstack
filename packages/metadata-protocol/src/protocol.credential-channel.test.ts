@@ -39,6 +39,14 @@ const DRAFT = 'pin-protocol-secret-draft-77e2';
 
 type Row = Record<string, unknown>;
 
+/** Exact-equality WHERE matching; an operator this stand-in does not implement is refused, never read as a field. */
+function matchesWhere(row: Row, where: Record<string, unknown> = {}): boolean {
+    return Object.entries(where).every(([k, v]) => {
+        if (k.startsWith('$')) throw new Error(`fake engine: unsupported operator ${k}`);
+        return v === undefined || row[k] === v;
+    });
+}
+
 /** Rows AND history rows, exact-equality predicates, the producer's own write-verb dispatch. */
 function makeEngine() {
     const rows: Row[] = [];
@@ -47,16 +55,11 @@ function makeEngine() {
     const others: Row[] = [];
     let next = 1;
     const tableOf = (t: string) => (t === 'sys_metadata_history' ? historyRows : t === 'sys_metadata' ? rows : null);
-    const matches = (row: Row, where: Record<string, unknown> = {}) =>
-        Object.entries(where).every(([k, v]) => {
-            if (k.startsWith('$')) throw new Error(`fake engine: unsupported operator ${k}`);
-            return v === undefined || row[k] === v;
-        });
+    const matches = matchesWhere;
     const engine: any = {
         async find(t: string, opts: { where?: Record<string, unknown>; limit?: number } = {}) {
             const table = t === 'sys_metadata_history' ? historyRows : t === 'sys_metadata' ? rows : others;
-            const hits = table.filter((r) =>
-                Object.entries(opts.where ?? {}).every(([k, v]) => v === undefined || r[k] === v));
+            const hits = table.filter((r) => matchesWhere(r, opts.where));
             return typeof opts?.limit === 'number' ? hits.slice(0, opts.limit) : hits;
         },
         async findOne(t: string, opts: { where: Record<string, unknown> }) {
