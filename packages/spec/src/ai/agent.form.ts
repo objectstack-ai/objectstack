@@ -39,8 +39,8 @@ export const agentForm = defineForm({
       fields: [
         { field: 'instructions', required: true, widget: 'textarea', helpText: 'System prompt — tell the agent how to behave and what it can do' },
         { field: 'model', type: 'composite', helpText: 'AI model configuration (provider, model name, temperature, etc.)' },
-        { field: 'planning', type: 'composite', helpText: 'Autonomous reasoning configuration (strategy, max iterations, replan)' },
-        { field: 'memory', type: 'composite', helpText: 'Memory management (short-term, long-term, reflection)' },
+        { field: 'planning', type: 'composite', helpText: 'Autonomous reasoning configuration: the maximum number of reasoning iterations before the agent stops (1–100, default 10).' },
+        { field: 'memory', type: 'composite', helpText: 'Long-term memory: distilled notes kept per user, recalled before each conversation and written by a reflection every reflectionInterval delivered interactions. When long-term memory is enabled, maxEntries and reflectionInterval are required. Enforced by the cloud AI runtime.' },
         { field: 'lifecycle', type: 'composite', helpText: 'State machine defining conversation flow' },
         { field: 'structuredOutput', type: 'composite', helpText: "Output contract for the agent's final answer: JSON format, the JSON Schema it is checked against, retries, fallback format and transform steps. Enforced by the cloud AI runtime." },
       ],

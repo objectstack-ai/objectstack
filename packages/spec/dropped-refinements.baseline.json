@@ -3,13 +3,14 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 217,
-    "droppedRefinementSites": 647,
+    "droppedRefinementSites": 652,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
   "entries": {
     "ai/Agent": {
       "sites": [
+        "memory",
         "structuredOutput.schema"
       ]
     },
@@ -63,6 +64,7 @@
         "manifest.actions.element.in",
         "manifest.actions.element.in.ai.outputSchema",
         "manifest.actions.element.in.params.element.in",
+        "manifest.agents.element.memory",
         "manifest.agents.element.structuredOutput.schema",
         "manifest.analyticsCubes.element.measures.valueType",
         "manifest.connectors.element.out",
@@ -170,6 +172,7 @@
         "data.options[1].manifest.actions.element.in",
         "data.options[1].manifest.actions.element.in.ai.outputSchema",
         "data.options[1].manifest.actions.element.in.params.element.in",
+        "data.options[1].manifest.agents.element.memory",
         "data.options[1].manifest.agents.element.structuredOutput.schema",
         "data.options[1].manifest.analyticsCubes.element.measures.valueType",
         "data.options[1].manifest.connectors.element.out",
@@ -262,6 +265,7 @@
         "options[1].manifest.actions.element.in",
         "options[1].manifest.actions.element.in.ai.outputSchema",
         "options[1].manifest.actions.element.in.params.element.in",
+        "options[1].manifest.agents.element.memory",
         "options[1].manifest.agents.element.structuredOutput.schema",
         "options[1].manifest.analyticsCubes.element.measures.valueType",
         "options[1].manifest.connectors.element.out",
@@ -314,6 +318,7 @@
         "data.packages.element.options[1].manifest.actions.element.in",
         "data.packages.element.options[1].manifest.actions.element.in.ai.outputSchema",
         "data.packages.element.options[1].manifest.actions.element.in.params.element.in",
+        "data.packages.element.options[1].manifest.agents.element.memory",
         "data.packages.element.options[1].manifest.agents.element.structuredOutput.schema",
         "data.packages.element.options[1].manifest.analyticsCubes.element.measures.valueType",
         "data.packages.element.options[1].manifest.connectors.element.out",

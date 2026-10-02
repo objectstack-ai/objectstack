@@ -181,6 +181,84 @@ export type StructuredOutputConfig = z.input<typeof StructuredOutputConfigSchema
 /** Post-parse shape of {@link StructuredOutputConfig} — defaults applied, transforms run (ADR-0122). */
 export type StructuredOutputConfigParsed = z.infer<typeof StructuredOutputConfigSchema>;
 
+// ── The agent memory contract (ADR-0049 enforce-or-remove) ──────────────────
+//
+// Ruling record 5950198150 (letter A′, #20274): the `agent.memory` contract
+// states exactly what the runtime honours. The one runtime that executes
+// agents, cloud's AI service, enforces long-term memory from `enabled`,
+// `maxEntries` and `reflectionInterval`, and refused before an agent's first
+// turn (`AI_AGENT_MEMORY_UNSUPPORTED`) the declarations this spec still
+// accepted: an enabled `longTerm` missing either number, a `reflectionInterval`
+// without an enabled `longTerm`, and a `store` other than its own database
+// store — `vector`, the old default, included. Authoring now refuses the same
+// declarations, by name, with these prescriptions. Module-private and written
+// with `//`, never `/** */`: prose the schema's refusals consume, not
+// documented surface.
+const LONG_TERM_STORE_RETIRED =
+  '`agent.memory.longTerm.store` was removed in @objectstack/spec 17.7.0 (ADR-0049 '
+  + 'enforce-or-remove) — the memory store is platform infrastructure, not agent metadata: the '
+  + 'cloud AI runtime keeps long-term memory notes in its own database store, and refused the '
+  + '`vector` store (the old default) and `redis` before an agent\'s first turn. Delete the key; '
+  + 'long-term memory is configured by `enabled`, `maxEntries` and '
+  + '`agent.memory.reflectionInterval`, and where the notes are kept is the platform\'s choice. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+const LONG_TERM_STORE_SPELLING_RETIRED =
+  'there is no storage-backend key on long-term memory — where the notes are kept is the '
+  + 'platform\'s choice, not agent metadata (`agent.memory.longTerm.store` was removed in '
+  + '@objectstack/spec 17.7.0, ADR-0049 enforce-or-remove). Delete the key.';
+
+const MAX_ENTRIES_REQUIRED =
+  '`agent.memory.longTerm.maxEntries` is required when `agent.memory.longTerm.enabled` is '
+  + 'true — it is how many distilled notes are kept for each user (the newest are recalled before '
+  + 'the first round, and older ones are evicted), and the spec declares no default for it. Declare '
+  + 'it as an integer of at least 1, or delete `longTerm` and `reflectionInterval` if the agent '
+  + 'needs no long-term memory.';
+
+const REFLECTION_INTERVAL_REQUIRED =
+  '`agent.memory.reflectionInterval` is required when `agent.memory.longTerm.enabled` is true — '
+  + 'it is how many delivered interactions pass between reflections, and a reflection is what '
+  + 'writes a note to long-term memory, so without it nothing is ever remembered; the spec '
+  + 'declares no default for it. Declare it as an integer of at least 1, or delete `longTerm` if '
+  + 'the agent needs no long-term memory.';
+
+const REFLECTION_INTERVAL_WITHOUT_LONG_TERM =
+  '`agent.memory.reflectionInterval` requires `agent.memory.longTerm.enabled: true` — a '
+  + 'reflection writes a note to long-term memory, and this agent has none enabled, so the '
+  + 'interval would do nothing. Enable long-term memory (`longTerm: { enabled: true, maxEntries: N }`) '
+  + 'or delete `reflectionInterval`.';
+
+/**
+ * The three refusals of the agent memory contract, each a `custom` issue at
+ * the path of the key it names (the house refinement shape —
+ * `ai/skill.zod.ts`'s `checkSkillTriggerConditionValueShape`).
+ *
+ * A refinement on `memory`, not on `longTerm`, because `reflectionInterval` is
+ * `longTerm`'s sibling. No default is declared for either number: the runtime
+ * adds none, and a spec default would be a number with no measured basis that
+ * a later release could only remove by breaking it. It runs only on a body the
+ * shape already accepted — an unknown key, a wrong type or the `store`
+ * tombstone aborts first — so an author meets one complaint at a time.
+ */
+function checkAgentMemoryContract(
+  memory: { longTerm?: { enabled?: boolean; maxEntries?: number }; reflectionInterval?: number },
+  ctx: z.RefinementCtx,
+): void {
+  const enabled = memory.longTerm?.enabled === true;
+  if (enabled) {
+    if (memory.longTerm?.maxEntries === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['longTerm', 'maxEntries'], message: MAX_ENTRIES_REQUIRED });
+    }
+    if (memory.reflectionInterval === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['reflectionInterval'], message: REFLECTION_INTERVAL_REQUIRED });
+    }
+    return;
+  }
+  if (memory.reflectionInterval !== undefined) {
+    ctx.addIssue({ code: 'custom', path: ['reflectionInterval'], message: REFLECTION_INTERVAL_WITHOUT_LONG_TERM });
+  }
+}
+
 /**
  * AI Agent Schema
  * Definition of an autonomous agent specialized for a domain.
@@ -379,28 +457,70 @@ export const AgentSchema = lazySchema(() => strictObject({
     // cloud#339). It declared a working-memory window that NOTHING in the
     // runtime consumed — a config that lies. Cross-turn grounding is done by
     // tools reading live state, and the context budget is governed elsewhere
-    // (the per-request token guardrail), not by this field. `longTerm` /
-    // `reflectionInterval` are kept as forward-looking, off-by-default config.
+    // (the per-request token guardrail), not by this field.
+    //
+    // `longTerm` / `reflectionInterval` are ENFORCED, by the cloud AI runtime
+    // (its `compileAgentMemory` reader, #20274): the newest `maxEntries`
+    // distilled notes for the user and agent are recalled before the first
+    // round, every `reflectionInterval` delivered interactions one reflection
+    // writes a note, and notes beyond `maxEntries` are evicted. The contract
+    // states exactly that and nothing more (ADR-0049, ruling record
+    // 5950198150, letter A′): both numbers are REQUIRED once `longTerm.enabled`
+    // is true, with no default declared — see `checkAgentMemoryContract` — and
+    // the storage backend is not agent metadata: `longTerm.store` is
+    // tombstoned below.
 
-    /** Long-term (persistent) memory configuration */
+    /** Long-term memory: distilled notes kept per user and agent. */
     longTerm: strictObject({
       surface: 'this long-term memory configuration',
       history: AGENT_HISTORY,
-      aliases: { backend: 'store', storage: 'store', provider: 'store', limit: 'maxEntries', maxItems: 'maxEntries', active: 'enabled' },
+      aliases: { limit: 'maxEntries', maxItems: 'maxEntries', active: 'enabled' },
+      // `backend` / `storage` / `provider` used to be aliases steering onto
+      // `store`. An alias may not target a tombstone (an author told to write
+      // the key guaranteed to be refused next), so the three spellings carry
+      // the same answer as the tombstone instead.
+      guidance: {
+        backend: LONG_TERM_STORE_SPELLING_RETIRED,
+        storage: LONG_TERM_STORE_SPELLING_RETIRED,
+        provider: LONG_TERM_STORE_SPELLING_RETIRED,
+      },
     }, {
-      /** Whether long-term memory is enabled */
-      enabled: z.boolean().default(false).describe('Enable long-term memory persistence'),
+      /** Whether long-term memory is enabled. When true, `maxEntries` and `memory.reflectionInterval` are required. */
+      enabled: z.boolean().default(false).describe(
+        'Enable long-term memory. When true, maxEntries and memory.reflectionInterval are required',
+      ),
 
-      /** Storage backend for long-term memory */
-      store: z.enum(['vector', 'database', 'redis']).default('vector').describe('Long-term memory storage backend'),
+      /**
+       * REMOVED — the storage backend. The memory store is platform
+       * infrastructure, not agent metadata: the cloud AI runtime keeps the
+       * notes in its own database store and refused the `vector` default and
+       * `redis` before an agent's first turn. The ADR-0087 conversion
+       * `agent-memory-long-term-store-removed` deletes the key from existing
+       * sources and stored rows.
+       */
+      store: retiredKey(LONG_TERM_STORE_RETIRED),
 
-      /** Maximum number of persisted memory entries */
-      maxEntries: z.number().int().min(1).optional().describe('Max entries in long-term memory'),
-    }).optional().describe('Long-term / persistent memory'),
+      /**
+       * How many distilled notes are kept and recalled for each user: the
+       * newest `maxEntries` are recalled before the first round, and notes
+       * beyond it are evicted. Required when `enabled` is true.
+       */
+      maxEntries: z.number().int().min(1).optional().describe(
+        'How many distilled notes are kept per user: the newest N are recalled before the first round, and notes beyond N are evicted. Required when enabled is true',
+      ),
+    }).optional().describe('Long-term memory: distilled notes kept per user and agent and recalled before each conversation'),
 
-    /** Reflection interval — how often the agent reflects on past actions */
-    reflectionInterval: z.number().int().min(1).optional().describe('Reflect every N interactions to improve behavior'),
-  }).optional().describe('[EXPERIMENTAL — not enforced] Agent memory management. Parsed but no runtime consumer yet.'),
+    /**
+     * How many delivered interactions pass between reflections. Each
+     * reflection writes one distilled note to long-term memory. Required when
+     * `longTerm.enabled` is true, and refused without it.
+     */
+    reflectionInterval: z.number().int().min(1).optional().describe(
+      'Reflect every N delivered interactions: each reflection writes one distilled note to long-term memory. Required when longTerm.enabled is true, and refused without it',
+    ),
+  }).superRefine(checkAgentMemoryContract).optional().describe(
+    'Agent memory (long-term notes recalled before each conversation and written by periodic reflection), enforced by the cloud AI runtime; the open framework edition does not run agents.',
+  ),
 
   /** Guardrails */
   guardrails: strictObject({

@@ -2394,11 +2394,11 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       planning: {
         label: "Planificación",
-        helpText: "Configuración de razonamiento autónomo (strategy, max iterations, replan)"
+        helpText: "Configuración de razonamiento autónomo: el número máximo de iteraciones de razonamiento antes de que el agente se detenga (1–100, 10 por defecto)."
       },
       memory: {
         label: "Memoria",
-        helpText: "Gestión de memoria (short-term, long-term, reflection)"
+        helpText: "Memoria a largo plazo: notas destiladas que se guardan por usuario, se recuperan antes de cada conversación y las escribe una reflexión cada reflectionInterval interacciones entregadas. Cuando la memoria a largo plazo está habilitada, maxEntries y reflectionInterval son obligatorios. Lo aplica el runtime de IA en la nube."
       },
       lifecycle: {
         label: "Ciclo de vida",
