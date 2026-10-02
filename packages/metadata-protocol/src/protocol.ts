@@ -14528,9 +14528,10 @@ export class ObjectStackProtocolImplementation implements
      * The doors resolve the form in `tenancy.defaultOrgId()`'s organization
      * (`registerFormEndpoints` in `@objectstack/rest`). Where that is not the
      * write's organization (every walled posture, degraded or not, answers
-     * `null`; so does a composition with no tenancy service), the doors read
-     * the env-wide definition, so the write is refused and the author is
-     * pointed at the env-wide save, which every door honours.
+     * `null`), the doors read the env-wide definition, so the write is refused
+     * and the author is pointed at the env-wide save, which every door
+     * honours. A composition with no tenancy service has no posture to judge
+     * (and no session to carry an organization over HTTP), so it is left as is.
      *
      * Judged on the anonymous slug set alone ({@link anonymousFormIntakeSlugs}):
      * an organization-scoped edit that leaves it as the env-wide definition has
@@ -14549,9 +14550,8 @@ export class ObjectStackProtocolImplementation implements
         const tenancy = this.getServicesRegistry?.().get('tenancy') as
             | { defaultOrgId?: () => Promise<string | null> }
             | undefined;
-        const doorOrganization = typeof tenancy?.defaultOrgId === 'function'
-            ? await tenancy.defaultOrgId()
-            : null;
+        if (typeof tenancy?.defaultOrgId !== 'function') return null;
+        const doorOrganization = await tenancy.defaultOrgId();
         if (doorOrganization === args.organizationId) return null;
         const proposed = anonymousFormIntakeSlugs(args.body);
         const served = anonymousFormIntakeSlugs(

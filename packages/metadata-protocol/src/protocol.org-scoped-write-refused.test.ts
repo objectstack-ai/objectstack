@@ -579,11 +579,10 @@ describe('org-scoped anonymous form intake changes the anonymous doors cannot se
         config: { sharing: sharing(allowAnonymous) },
     });
 
-    /** `defaultOrgId` answers what the anonymous doors resolve; `undefined` = no tenancy service. */
-    function makeTenancyProtocol(defaultOrgId: string | null | undefined) {
+    /** `defaultOrgId` answers what the anonymous doors resolve. */
+    function makeTenancyProtocol(defaultOrgId: string | null) {
         const { engine, rows } = makeStubEngine();
-        const services = new Map<string, unknown>();
-        if (defaultOrgId !== undefined) services.set('tenancy', { defaultOrgId: async () => defaultOrgId });
+        const services = new Map<string, unknown>([['tenancy', { defaultOrgId: async () => defaultOrgId }]]);
         const protocol = new ObjectStackProtocolImplementation(engine, () => services, 'env_prod') as any;
         return { protocol, rows };
     }
@@ -636,15 +635,6 @@ describe('org-scoped anonymous form intake changes the anonymous doors cannot se
             protocol.publishMetaItem({ type: 'view', name: 'task.intake_form', organizationId: 'org_a' }),
         ).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
         expect(orgRows(rows).filter((r) => r.org === 'org_a' && r.state === 'active')).toEqual([]);
-    });
-
-    it('no tenancy service: the doors read env-wide, so the org-scoped withdrawal is refused', async () => {
-        const { protocol } = makeTenancyProtocol(undefined);
-        await publishEnvWide(protocol);
-
-        await expect(protocol.saveMetaItem({
-            type: 'view', name: 'task.intake_form', item: FORM_VIEW(false), organizationId: 'org_a',
-        })).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
     });
 
     it('control (walled): an org-scoped edit that leaves the anonymous intake alone still saves', async () => {
