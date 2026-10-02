@@ -39,10 +39,13 @@
  * Measured, not reasoned: the fixture is row-for-row the one in
  * `driver-sql`'s `sql-driver-not-null-safe.test.ts`, and every id set below is
  * the answer that file and the two JS-backend pins
- * (`formula/src/matches-filter-not-null-safe.test.ts`,
- * `driver-memory/src/memory-matcher-not-null-safe.test.ts`) assert for the same
+ * (`formula/src/matches-filter-not-null-safe.test.ts` and
+ * `driver-memory/src/memory-driver-document-not.test.ts`) assert for the same
  * filter — all three suites were run against this fixture while writing these
- * cases. Moving an expectation here re-opens the divergence #5146 closed.
+ * cases, the `driver-memory` one as `memory-matcher-not-null-safe.test.ts`,
+ * whose cells `memory-driver-document-not.test.ts` holds since commit
+ * `8fec76a2b` deleted it with the reference matcher. Moving an expectation here
+ * re-opens the divergence #5146 closed.
  *
  * `sql.js` (pure WASM) is the engine, for the reason spelled out at the top of
  * `read-scope-sql-conformance.test.ts`: a native binding cannot be relied on to

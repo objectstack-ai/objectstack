@@ -28,8 +28,9 @@
  *    `FilterCondition` consumer and fails closed on an operator it cannot
  *    compile, so it THREW on the filter this strategy produced.
  * 3. **The row set depends on which driver answers.** A backend that evaluates
- *    `$regex` as a real regex (driver-memory's `memory-matcher.ts`:
- *    `new RegExp(target, condition.$options || '')`, `catch { return false }`)
+ *    `$regex` as a real regex (driver-memory's `memory-matcher.ts` was one:
+ *    `new RegExp(target, condition.$options || '')`, `catch { return false }`,
+ *    until #4706 retired `$regex` and commit `8fec76a2b` retired the matcher)
  *    reads `a.b` as "a, any character, b" and reads `50% (+)` as a SyntaxError →
  *    zero rows, in silence. `driver-sql` compiles the same `$regex` to a
  *    substring LIKE. One dashboard, two row sets.
@@ -100,13 +101,15 @@ const query = (where: unknown): AnalyticsQuery =>
 
 /**
  * An engine face that evaluates the four LIKE operators the way
- * `driver-memory`'s `memory-matcher.ts` does, `$regex` arm included.
+ * `driver-memory`'s `memory-matcher.ts` did, `$regex` arm included (#4706
+ * retired `$regex`, and commit `8fec76a2b` retired that matcher).
  *
  * Mirrored rather than imported: `service-analytics` does not depend on any
- * driver (see its `package.json`), and the point is not "driver-memory is
- * broken" — driver-memory's `$regex` arm is deliberate and serves a real
- * producer (plugin-auth's ObjectQL adapter, see `filter-refusal.ts`'s
- * `SUPPORTED_FIELD_OPERATORS` note). The point is that a filter carrying
+ * driver (see its `package.json`), and the point was never "driver-memory is
+ * broken" — driver-memory's `$regex` arm was deliberate while it served a real
+ * producer (plugin-auth's ObjectQL adapter; the `[#5702]` note over
+ * `filter-refusal.ts`'s `SUPPORTED_FIELD_OPERATORS` records that producer's move
+ * to `$contains`). The point is that a filter carrying
  * `$regex` MEANS something different on a regex-evaluating face than the
  * substring the analytics author wrote, and this strategy has no business
  * choosing between those readings on the author's behalf.
@@ -115,8 +118,9 @@ function matchesLikeFamily(row: (typeof FIXTURE)[number], cond: Record<string, u
   const value = row.stage;
   for (const [op, target] of Object.entries(cond)) {
     switch (op) {
-      // `memory-matcher.ts`: `new RegExp(target, condition.$options || '')`,
-      // `catch (e) { return false; }` — an uncompilable pattern is zero rows.
+      // As the retired `memory-matcher.ts` did: `new RegExp(target,
+      // condition.$options || '')`, `catch (e) { return false; }` — an
+      // uncompilable pattern is zero rows.
       case '$regex':
         try {
           if (!new RegExp(String(target)).test(String(value))) return false;
@@ -302,7 +306,7 @@ describe('[#5557] `contains` reaches the engine as `$contains`, comparand taken 
   describe('on a face that evaluates `$regex` as a real regex', () => {
     /**
      * Row ids the ObjectQL path returns when the engine reads the LIKE family
-     * the way `memory-matcher.ts` does.
+     * the way the retired `memory-matcher.ts` did.
      */
     const ids = async (where: unknown): Promise<string[]> => {
       const ctx = {

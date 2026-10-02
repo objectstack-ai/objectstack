@@ -447,7 +447,9 @@
  * Row-result cover: `filter-operator-coverage.test.ts` for the operator
  * vocabulary, `native-sql-filter-logic-conformance.test.ts`, which runs the
  * SHARED combinator table (`FILTER_LOGIC_CASES`, #3774) that the SQL compiler,
- * the in-memory matcher, `formula` and `read-scope-sql` are already held to,
+ * `driver-memory`'s query path (its in-memory reference matcher, which ran the
+ * table too, was retired by commit `8fec76a2b`), `formula` and `read-scope-sql`
+ * are already held to,
  * `filter-normalizer-not-null-safe.test.ts` for the two squares that table
  * deliberately does not carry (NULL handling, boolean identities),
  * `filter-array-lowering.test.ts` for the array door (#5334),

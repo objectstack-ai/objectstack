@@ -124,8 +124,9 @@
  * agree, and the SQL family's `NOT IN` answer is unconditional), and the
  * maintainer ruled the divergence constructively unreachable rather than
  * reconciled — ⛔ no cross-backend alignment; #5299 stays declined, and the
- * matcher's own answers for these shapes are sealed behind this refusal, not
- * repaired. "Equals X or has no value" has an explicit spelling —
+ * matcher's own answers for these shapes were sealed behind this refusal, never
+ * repaired, until commit `8fec76a2b` retired the matcher itself. "Equals X or
+ * has no value" has an explicit spelling —
  * `$or: [{$in: […]}, {$null: true}]` — and the refusal text prescribes it.
  * #5041's question (ISO date strings as legitimate `$between` bounds) and
  * #5234's (object members on the `driver-sql` face) stand untouched.
@@ -139,10 +140,11 @@
  * had recorded it in writing as one "no ruling covers", and `driver-memory`'s
  * two faces answered it differently — the live path reads two absences as
  * EQUAL (so `$gte: null` admits the no-value row and `$gt: null` does not),
- * the reference matcher compares through JS coercion (`5 > null` is
+ * the reference matcher compared through JS coercion (`5 > null` is
  * `5 > 0`). Ruled 2026-09-01 (option A): refused at this door, same envelope,
- * so the divergent cells are constructively unreachable — ⛔ the matcher is
- * not repaired (dead code once refused), ⛔ no ordering-vs-null semantics is
+ * so the divergent cells are constructively unreachable — ⛔ the matcher was
+ * not repaired (dead code once refused; commit `8fec76a2b` has since retired
+ * it), ⛔ no ordering-vs-null semantics is
  * defined anywhere (the live path's reading needs a strictness rule, "two
  * absences compare equal", that no ruling states), ⛔ no cross-backend
  * alignment. `null` is not ordered; the refusal text prescribes the ruled

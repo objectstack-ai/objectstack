@@ -37,7 +37,7 @@
  * - every comparand of the value comparisons on that column (`$eq`, `$ne`, the
  *   four orderings, `$in`, `$nin`, `$between`, and implicit equality), because
  *   the read compares the stored value against the comparand in that form
- *   (`driver-sql`'s `coerceFilterValue`, `driver-memory`'s matcher, objectql's
+ *   (`driver-sql`'s `coerceFilterValue`, `driver-memory`'s query path, objectql's
  *   `having` walker all pair the two). Putting only the image into the form
  *   would refuse a write the read shows whenever a policy spells its comparand
  *   another way: `record.start_time == '09:00'` against a stored `'09:00:00'`.

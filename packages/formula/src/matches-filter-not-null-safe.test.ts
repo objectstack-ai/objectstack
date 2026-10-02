@@ -14,8 +14,10 @@
  *
  * These cases are therefore a PIN on the reference behaviour, mirrored id-for-id
  * by `driver-sql`'s `sql-driver-not-null-safe.test.ts` and `driver-memory`'s
- * `memory-matcher-not-null-safe.test.ts`. Moving an expectation here silently
- * re-opens the divergence.
+ * `memory-driver-document-not.test.ts` (its query path; it holds the cells of
+ * `memory-matcher-not-null-safe.test.ts`, deleted with the reference matcher in
+ * commit `8fec76a2b`). Moving an expectation here silently re-opens the
+ * divergence.
  *
  * `cel-to-filter.ts` is why this matters in practice: a CEL `!expr` in a
  * permission rule lowers to exactly these `$not` shapes.
@@ -116,8 +118,10 @@ describe('[#5146] matchesFilterCondition — $not over records with no value', (
 
     it('$not of $notContains does NOT match them — the mirror case', () => {
       // A value-less field satisfies `$notContains` here, so the negation
-      // rejects it. `driver-sql` follows this answer; `driver-memory`'s
-      // REFERENCE matcher answers the opposite for a null-valued field.
+      // rejects it. `driver-sql` follows this answer, and so does
+      // `driver-memory`'s query path (`memory-driver-document-not.test.ts`).
+      // Its REFERENCE matcher answered the opposite for a null-valued field
+      // until PR #13356, and commit `8fec76a2b` has since retired it.
       //
       // ⚠️ [#5299, 2026-08-10] A ruling that morning would have reversed this
       // direction; it was WITHDRAWN the same day and include re-affirmed. See

@@ -726,7 +726,9 @@ function evalOp(
     /**
      * [#6520] `$contains`' case-INSENSITIVE twin, folding ASCII case and nothing
      * else — `asciiCaseInsensitiveContains` is the spec's shared definition, the
-     * same one `driver-memory`'s matcher and objectql's `having` call.
+     * same one objectql's `having` calls. `driver-memory`'s reference matcher
+     * called it too until commit `8fec76a2b` retired it; `driver-memory`'s
+     * query path folds through its pattern twin, `asciiCaseInsensitiveRegexSource`.
      *
      * NOT `actual.toLowerCase().includes(v.toLowerCase())`, which is the obvious
      * line and the wrong one: it folds the whole Unicode range, so an RLS
