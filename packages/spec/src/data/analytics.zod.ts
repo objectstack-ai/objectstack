@@ -33,8 +33,9 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 // `AnalyticsService` on both strategies before this retirement, with a column
 // `sql`: the raw-SQL path emitted the column UNAGGREGATED
 // (`SELECT status AS "status", amount AS "m" … GROUP BY status` — a bare
-// column in a grouped statement, which PostgreSQL refuses and SQLite answers
-// with an arbitrary row's value), and the ObjectQL path refused the measure.
+// column in a grouped statement, by SQL's own rules an error on PostgreSQL and
+// an arbitrary row's value on SQLite), and the ObjectQL path refused the
+// measure.
 //
 // A VALUE-level retirement (`enumWithRetiredValues`, shared/retired-key.ts):
 // the members left the enum, so `tsc` refuses them, and the parse answers each
