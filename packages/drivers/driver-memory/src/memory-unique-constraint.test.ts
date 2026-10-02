@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#13197] `driver-memory` enforces field-level `unique` — a colliding write is
+ * [commit 56c093c4d] `driver-memory` enforces field-level `unique` — a colliding write is
  * REFUSED, not landed.
  *
  * The card's motivating instance is an autonumber allocated out-of-process:
@@ -105,7 +105,7 @@ describe('[#13197] the motivating instance: a duplicate autonumber is REFUSED, n
     // `isUniqueViolationError` says the rejection was a conflict. A refusal it
     // does not recognise propagates with the counter still warm and the next
     // insert collides too — #5495's PROBE3 storm, i.e. a silent duplicate
-    // traded for a non-converging insert loop. #13197 added the platform's own
+    // traded for a non-converging insert loop. Commit 56c093c4d added the platform's own
     // `UNIQUE_VIOLATION` code to that predicate's `codes` channel for exactly
     // this edge; if this assertion goes red, the trade is no longer honest.
     await driver.create('doc', { id: '1', doc_no: 'D-0005' });

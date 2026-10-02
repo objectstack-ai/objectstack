@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#11065] `avg` and `sum` over a BOOLEAN column answer the SQL number here too.
+ * [commit 20950404c] `avg` and `sum` over a BOOLEAN column answer the SQL number here too.
  *
  * ## The measurement this file pins
  *
@@ -248,7 +248,7 @@ describe('[#11065] InMemoryDriver data face — a boolean aggregand is worth 1 o
  *
  * It reaches the numbers by a different route — a mingo `$group` expression
  * rather than JavaScript — and mingo's `$avg` ignores a non-numeric value
- * exactly as MongoDB's does, so before #11065 this face had the identical
+ * exactly as MongoDB's does, so before commit 20950404c this face had the identical
  * divergence on its own account: `{avg: null, sum: 0}` over the same five rows.
  * Aligning the data face alone would have left it free to keep that answer,
  * which is the same mistake #6814 recorded on `count_distinct`.

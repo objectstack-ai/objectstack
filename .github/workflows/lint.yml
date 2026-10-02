@@ -563,12 +563,14 @@ jobs:
       # agent typed the command by hand.
       #
       # ⛔ NOT a hole in `check:self-test-wired`, whose green is correct by its
-      # own definition: its population is the scripts CI RUNS, and this file is a
-      # MODULE no workflow can invoke, so it sat in that gate's remainder by
-      # construction. The blast radius and the population rule point in opposite
-      # directions here: the file with the largest inheritance surface in the
-      # farm is the one shape the wiring gate cannot see. Naming it in this step
-      # is what moves it INTO that population (161 -> 162 scripts CI runs that
+      # own definition: its population is the scripts CI RUNS plus, since
+      # #21351, the scripts a root `package.json` alias self-tests, and this
+      # file is a MODULE no workflow can invoke and no alias names, so it sat in
+      # that gate's remainder by construction. The blast radius and the
+      # population rule point in opposite directions here: the file with the
+      # largest inheritance surface in the farm is the one shape the wiring gate
+      # cannot see. Naming it in this step is what moves it INTO that population
+      # (161 -> 162 scripts CI runs that
       # ship a `--self-test`), and it is the smaller of the two remedies — the
       # other being to widen the gate to a transitive closure, which #14007
       # explicitly does not ask for. ⛔ It is also not a licence to sweep the
@@ -1545,11 +1547,12 @@ jobs:
       # just as green, and a wrong transfer is a write against a shared board,
       # not a report.
       #
-      # ⛔ `check:self-test-wired` does not hold this step. No other workflow
-      # names this script, and that gate's population is the scripts a
-      # workflow names, so deleting this step drops the script back out of it
-      # with every gate still green — the same hole the stale-`finding` sweep
-      # step below records, which only the step itself closes.
+      # `check:self-test-wired` holds this step through the declared alias. No
+      # other workflow names this script, but since #21351 that gate's
+      # population includes every root `package.json` alias whose expansion
+      # carries `--self-test`, so deleting this step reds it with
+      # `[alias-self-test-not-run] pnpm check:pm-issue-transfer`. The
+      # stale-`finding` sweep step below is held the same way.
       - name: Issue-transfer door self-test
         run: pnpm check:pm-issue-transfer
 
@@ -1584,9 +1587,12 @@ jobs:
       #
       # Until this step existed the instrument was UNFIRED: the tool shipped a
       # 91-case `--self-test` that nothing in CI ran, which is the second half
-      # of the pair `check:self-test-wired` exists for (a script is IN its
-      # population only once a workflow names it, so an unwired tool's self-test
-      # is not a hole the gate can see — it is a hole only this step closes).
+      # of the pair `check:self-test-wired` exists for. A script was then IN
+      # that gate's population only once a workflow named it, so the unwired
+      # self-test was a hole only this step could close. Since #21351 the gate
+      # also reads every root `package.json` alias whose expansion carries
+      # `--self-test`, so it holds this step through `check:pm-stale-finding`:
+      # deleting the step reds `[alias-self-test-not-run]`.
       #
       # What the self-test instruments is the set of rules a clean tree cannot
       # exercise: the screen's ungraded verdict, which is the ONE thing the

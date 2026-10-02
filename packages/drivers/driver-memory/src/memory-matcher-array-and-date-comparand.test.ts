@@ -34,7 +34,7 @@
  * comparand door judges comparands. It was recorded, not repaired, and the
  * numbers below were the record.
  *
- * [#16838] **That third behaviour has since been repaired, and this file's last
+ * [commit b90aff81f] **That third behaviour has since been repaired, and this file's last
  * block moves with it — deliberately, not by accident.** The pin did its job:
  * it stated in one place what the VALUE side answered, so the change that moved
  * it had to come and say so here rather than sliding through as a side effect
@@ -190,8 +190,8 @@ describe('[#16810] an ARRAY comparand is refused, in the ADR-0112 envelope', () 
 
 describe('[#16810/#16838] the value side is NOT the comparand side — still two cells, both now answered', () => {
   it('a scalar comparand against a stored array is MEMBERSHIP, and is not refused', async () => {
-    // [#16838] The three lines this block pinned as UNCHANGED under #16810,
-    // with the two that #16838 moved and the one it did not:
+    // [commit b90aff81f] The three lines this block pinned as UNCHANGED under #16810,
+    // with the two that commit b90aff81f moved and the one it did not:
     //
     //   before → after
     //   `{tags:'a'}`   vs `['a','b']`  false → true   the missing membership reading

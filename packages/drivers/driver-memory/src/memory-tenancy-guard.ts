@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * In-Memory Driver — multi-tenancy refusal guard (#6915 boot seams + #16589
+ * In-Memory Driver — multi-tenancy refusal guard (#6915 boot seams + commit 555a89cbd's
  * per-call seam, mirroring #3724).
  *
  * This driver implements **no row-level tenant isolation**: it never SCOPES by
@@ -38,11 +38,11 @@
  *   2. An object declares `tenancy.enabled: true` (metadata-level signal) →
  *      {@link assertObjectsNotTenantScoped}, called from `syncSchema`.
  *   3. The engine hands this driver a tenant scope for one call —
- *      `DriverOptions.tenantId` / `tenantIds` (request-level signal, #16589) →
+ *      `DriverOptions.tenantId` / `tenantIds` (request-level signal, commit 555a89cbd) →
  *      {@link assertCallNotTenantScoped}, called from every driver door that
  *      accepts a `DriverOptions`.
  *
- * ## Why a THIRD seam — the gap seams 1 and 2 cannot see (#16589)
+ * ## Why a THIRD seam — the gap seams 1 and 2 cannot see (commit 555a89cbd)
  *
  * Seams 1 and 2 read the two STATIC signals: the deployment posture and the
  * object's own metadata. The engine's decision to scope is neither. It is
@@ -78,7 +78,7 @@
  *
  * ## ⚠️ Every isolation measurement previously taken on this driver is VOID
  *
- * Before #16589 a suite asserting "tenant A cannot see tenant B's rows" passed
+ * Before commit 555a89cbd a suite asserting "tenant A cannot see tenant B's rows" passed
  * here trivially — not because isolation worked, but because both tenants' rows
  * came back to every caller and the assertion was written against a single
  * tenant's fixture. Any isolation property measured on `driver-memory` before
@@ -122,7 +122,7 @@ export const MULTI_TENANT_UNSUPPORTED_CODE = 'MEMORY_MULTI_TENANT_UNSUPPORTED';
  * runtime plugin loader, tests) can recognise it without string-matching the
  * message or relying on cross-realm `instanceof`.
  *
- * ONE error family covers both, deliberately (#16589): the cause is identical —
+ * ONE error family covers both, deliberately (commit 555a89cbd): the cause is identical —
  * this driver has no row-level tenant isolation — so a host that already
  * recognises the boot refusal recognises the per-call one with no new code and
  * no second code to learn. `seam` varies only the WORDING, never the `code`.
@@ -171,7 +171,7 @@ export interface TenancyAwareSchema {
  * scoping is driven by the deployment posture (checked separately by
  * {@link assertSingleTenantPosture}).
  *
- * ## ⚠️ Superseded reasoning — kept because it was load-bearing (#16589)
+ * ## ⚠️ Superseded reasoning — kept because it was load-bearing (commit 555a89cbd)
  *
  * This docstring used to close with a second clause, which was **false**:
  *
@@ -257,7 +257,7 @@ export function assertObjectsNotTenantScoped(
 /**
  * Refuse a single driver call that arrives carrying the engine's tenant scope.
  *
- * This is seam 3 (#16589). It judges the scope the engine **actually handed
+ * This is seam 3 (commit 555a89cbd). It judges the scope the engine **actually handed
  * over** — `DriverOptions.tenantId` / `tenantIds` — rather than re-deriving the
  * engine's predicate from object metadata. That distinction is the whole point:
  * the engine's own reasons for scoping (an `ExecutionContext` tenant, the
@@ -268,7 +268,7 @@ export function assertObjectsNotTenantScoped(
  *
  * Three cases follow from that, and they are what makes the refusal narrow:
  * - object omits `tenancy` + a caller with an active organization → the engine
- *   sends `tenantId` → **refused** (this is the #16589 defect);
+ *   sends `tenantId` → **refused** (this is the defect commit 555a89cbd fixed);
  * - object declares `tenancy.enabled: false` → the engine sends no `tenantId`
  *   (ADR-0066, `isTenancyDisabled`) → served unchanged;
  * - no organization context at all → no `tenantId` → served unchanged, which is

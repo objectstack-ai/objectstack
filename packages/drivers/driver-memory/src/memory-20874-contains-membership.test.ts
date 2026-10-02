@@ -60,7 +60,7 @@ import { MemoryAnalyticsService } from './memory-analytics.js';
 
 const byId = (a: string, b: string) => a.localeCompare(b);
 
-/** `driver-sql`'s #17590 fixture, plus its #20874 `owners` column. */
+/** `driver-sql`'s commit e04a0aff2 fixture, plus its #20874 `owners` column. */
 const MEMBERSHIP = {
   object: 'mem20874_membership',
   fields: {
@@ -107,7 +107,7 @@ const SHAPES = {
 type Fixture = typeof MEMBERSHIP | typeof SHAPES;
 type Case = readonly [name: string, where: FilterCondition, expected: readonly string[]];
 
-/** Fixture one — `driver-sql`'s #17590 assertions, verbatim, and #20874's. */
+/** Fixture one — `driver-sql`'s commit e04a0aff2 assertions, verbatim, and #20874's. */
 const MEMBERSHIP_CASES: readonly Case[] = [
   ['tags: the member row, never the substring row', { tags_: { $contains: 'red' } }, ['1']],
   ['tags: a whole member', { tags_: { $contains: 'redwood' } }, ['2']],
