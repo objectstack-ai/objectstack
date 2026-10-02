@@ -20560,6 +20560,20 @@ export class ObjectStackProtocolImplementation implements
      * platform storage is never dropped. Drafts are removed before active rows
      * so each object's table is torn down once. Per-item failures are collected
      * without aborting the rest.
+     *
+     * [#21276] The steps, in order. Nothing durable happens before step 3, so
+     * a refusal at any of steps 1–3 leaves everything as it was:
+     *  1. the tenant-scope refusals (`TENANT_SCOPE_REQUIRED`) — pure;
+     *  2. the `sys_metadata` read — a read; a failure is thrown;
+     *  3. the `sys_packages` delete through the `package` service — the FIRST
+     *     durable step; a refusal, returned or thrown, is thrown as this verb's
+     *     failure (see {@link packagePersistFailureError});
+     *  4. the per-item `sys_metadata` deletes and table teardown — each refusal
+     *     is collected in `failed[]`;
+     *  5. the registry withdrawal — a refusal (another package extends an
+     *     object this one owns, ADR-0029) is logged, and the package leaves at
+     *     the next restart, since its stored row is already gone;
+     *  6. the uninstall cleanups — each refusal is reported in `cleanups[]`.
      */
     async deletePackage(request: DeletePackageRequest): Promise<DeletePackageResponse> {
         // [#7780] A cross-tenant uninstall must be DECLARED, never inferred from
@@ -20709,6 +20723,51 @@ export class ObjectStackProtocolImplementation implements
             throw metadataReadFailureError(e);
         }
 
+        // [#21276] THE STORE DELETE COMES FIRST, and its refusal is this verb's
+        // refusal. Triage's ruling: refuse before withdrawing, not undo. Every
+        // step above this one only reads; every step below it — the per-item
+        // `sys_metadata` deletes and table teardown, the registry withdrawal,
+        // the uninstall cleanups — runs only after the store has deleted the
+        // package's row.
+        //
+        // #2532's reason for deleting the row at all still holds:
+        // `PackageServicePlugin.start()` hydrates `sys_packages` back into the
+        // registry at boot, so a row left behind brings the package back on the
+        // next restart. This delete used to run AFTER the metadata deletes and
+        // inside a `catch` that turned both of the service's failure channels
+        // into a `console.warn` ("sys_packages cleanup skipped"): a returned
+        // `{ success: false }` was never read, and a thrown failure was only
+        // logged. So a refused delete answered success over a package whose
+        // metadata, tables and grants were already gone, and the next boot
+        // brought it back. Measured at `DELETE /api/v1/packages/:id` on SQLite,
+        // with a trigger refusing the delete: 200, then 404 in the same process,
+        // then 200 after a restart.
+        //
+        // Both channels (`PackageDeleteResult`, `service-package`) answer
+        // through {@link packagePersistFailureError}, the error install and
+        // edit throw for a refused store write (#21243): a declared 4xx leaves
+        // as the producer answered it; anything else is a 500 that quotes
+        // nothing, with the original on `cause`.
+        //
+        // ⛔ No undo: nothing durable has happened yet, so there is nothing to
+        // put back. Without a `package` service there is no stored row to
+        // delete (the install's in-memory-only path), and this step is skipped.
+        const packageStore = this.getServicesRegistry?.()?.get('package') as
+            | { delete?: (id: string) => Promise<unknown> }
+            | undefined;
+        if (typeof packageStore?.delete === 'function') {
+            let refusal: { cause: unknown } | undefined;
+            try {
+                const out = await packageStore.delete(request.packageId);
+                if (typeof out === 'object' && out !== null && (out as { success?: unknown }).success === false) {
+                    refusal = { cause: out };
+                }
+            } catch (cause) {
+                refusal = { cause };
+            }
+            if (refusal) throw packagePersistFailureError(refusal.cause, request.packageId, 'delete');
+        }
+
         const dropStorage = request.keepData !== true;
         // Delete drafts before active so an object's table is dropped once (on
         // the active delete), not pre-empted by a draft delete.
@@ -20771,21 +20830,6 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
-        // #2532 counterpart: also drop the durable `sys_packages` record —
-        // service-package hydrates that table back into the registry at boot,
-        // so leaving the row behind would RESURRECT an uninstalled package on
-        // the next restart. Best-effort, same posture as install persistence.
-        try {
-            const pkgSvc = this.getServicesRegistry?.()?.get('package') as
-                | { delete?: (id: string) => Promise<unknown> }
-                | undefined;
-            if (pkgSvc?.delete) await pkgSvc.delete(request.packageId);
-        } catch (e) {
-            console.warn(
-                `[protocol.deletePackage] sys_packages cleanup skipped for '${request.packageId}': ${(e as Error)?.message}`,
-            );
-        }
-
         // [#2747] Unregister from the in-memory SchemaRegistry too, so the
         // running kernel stops serving the package without waiting for a
         // restart. Best-effort: the HTTP dispatcher already unregisters
@@ -20793,6 +20837,13 @@ export class ObjectStackProtocolImplementation implements
         // with live extenders refuses unregistration — that failure is
         // logged, not fatal (the durable row is gone, so the next boot is
         // clean either way).
+        //
+        // [#21276] This refusal can still come AFTER the store delete above,
+        // and it stays here. `SchemaRegistry` has no verb that answers "would
+        // this uninstall be refused?" without performing it; a copy of its
+        // extender predicate here would be a second place that must agree with
+        // the first; and performing the uninstall first would withdraw the
+        // package before the store decides.
         try {
             (this.engine as any)?.registry?.uninstallPackage?.(request.packageId);
         } catch (e) {
@@ -24678,10 +24729,16 @@ async function persistPackageManifest(
 
 /**
  * [#21243] The sentence a caller reads when a package write was refused by the
- * store and undone. It quotes nothing but the caller's own package id — the
- * driver's words stay on `cause` and in the server log.
+ * store and undone — or [#21276], for an uninstall, refused by the store before
+ * anything else was removed. It quotes nothing but the caller's own package
+ * id — the driver's words stay on `cause` and in the server log.
  */
-function packagePersistFailureMessage(packageId: string, verb: 'install' | 'update'): string {
+function packagePersistFailureMessage(packageId: string, verb: 'install' | 'update' | 'delete'): string {
+    if (verb === 'delete') {
+        return `Package '${packageId}' was not uninstalled: the package registry could not delete its stored record, `
+            + 'and a package whose record is kept comes back on the next restart, so its metadata, data and grants '
+            + 'were left in place. The reason is in the server log.';
+    }
     return verb === 'install'
         ? `Package '${packageId}' was not installed: the package registry could not store it, so it would `
             + 'not survive a restart, and nothing was registered. The reason is in the server log.'
@@ -24691,7 +24748,8 @@ function packagePersistFailureMessage(packageId: string, verb: 'install' | 'upda
 
 /**
  * [#21243] The error a package install or edit answers when its
- * `sys_packages` write failed. The vocabulary is this file's own, reused:
+ * `sys_packages` write failed — and [#21276] an uninstall, when its
+ * `sys_packages` delete did. The vocabulary is this file's own, reused:
  *
  *  - **A declared 4xx is a refusal** and leaves untouched — the producer's own
  *    status, code and sentence (the #8016 rule every package door applies,
@@ -24706,7 +24764,7 @@ function packagePersistFailureMessage(packageId: string, verb: 'install' | 'upda
  *    `500 DATABASE_ERROR`; a returned `driverFault` declares nothing, so the
  *    door derives `INTERNAL_ERROR` from the 500. No code is minted.
  */
-function packagePersistFailureError(cause: unknown, packageId: string, verb: 'install' | 'update'): Error {
+function packagePersistFailureError(cause: unknown, packageId: string, verb: 'install' | 'update' | 'delete'): Error {
     const { declaredStatus } = resolveThrownHttpError(cause);
     if (declaredStatus !== undefined && declaredStatus >= 400 && declaredStatus < 500) return cause as Error;
     const err = new Error(packagePersistFailureMessage(packageId, verb)) as Error & {
