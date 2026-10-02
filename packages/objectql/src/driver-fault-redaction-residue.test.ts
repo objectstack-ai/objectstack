@@ -34,6 +34,7 @@ import { describe, it, expect } from 'vitest';
 import { inspect, types as utilTypes } from 'node:util';
 import { isMissingTableError, looksLikeInternalErrorLeak, mapDataError } from '@objectstack/types';
 import { ObjectQL } from './engine.js';
+import { assertEngineDeleteDispatch } from './engine-delete-dispatch.js';
 import { redactPropagatedDriverFault } from './driver-fault-redaction.js';
 import { LifecycleService, type LifecycleObjectLike } from './lifecycle/lifecycle-service.js';
 
@@ -442,7 +443,10 @@ function sweepWith(fault: { upsert?: () => Error; bulkDelete?: () => Error }) {
   };
   const engine: any = {
     registry: { getAllObjects: () => [AUDIT_OBJ] },
-    async delete() { return { deletedCount: 0 }; },
+    async delete(_object: string, options?: Record<string, unknown>) {
+      assertEngineDeleteDispatch(options);
+      return { deletedCount: 0 };
+    },
     getDriverForObject: () => hot,
     datasource: (name: string) => (name === 'archive' ? cold : undefined),
   };

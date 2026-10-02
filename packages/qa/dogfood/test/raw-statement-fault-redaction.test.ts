@@ -36,7 +36,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspect } from 'node:util';
-import { ObjectQL, LifecycleService, type LifecycleObjectLike } from '@objectstack/objectql';
+import { ObjectQL, LifecycleService, assertEngineDeleteDispatch, type LifecycleObjectLike } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 
 /** The caller's value. Synthetic; asserted ABSENT from every carrier. */
@@ -289,7 +289,10 @@ describe('[#21345] a cold store refusing the Archiver\'s copy reaches neither th
     const warnings: string[] = [];
     const engine = {
       registry: { getAllObjects: () => [ARCHIVED] },
-      async delete() { return { deletedCount: 0 }; },
+      async delete(_object: string, options?: Record<string, unknown>) {
+        assertEngineDeleteDispatch(options);
+        return { deletedCount: 0 };
+      },
       getDriverForObject: () => hot,
       datasource: (name: string) => {
         if (name !== 'archive') throw new Error(`[ObjectQL] Datasource '${name}' not found`);
