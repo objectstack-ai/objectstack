@@ -211,6 +211,11 @@ export default class SecretOrphans extends Command {
         // attribution set is theirs, and without it nothing is attributable and
         // nothing is deletable (the safe direction, reported as a note).
         extraPlugins: [new PlatformObjectsPlugin(), new SettingsServicePlugin({ registerRoutes: false })],
+        // [#21391] The report boots READ-ONLY, the boot `os migrate plan`
+        // takes: `deferSchemaDdl` holds schema DDL back on every SQL
+        // datasource, and `readOnlyProbe` keeps a missing sqlite file from
+        // being created. `--delete` keeps the plain boot: it deletes rows.
+        ...(flags.delete ? {} : { deferSchemaDdl: true, readOnlyProbe: true }),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
