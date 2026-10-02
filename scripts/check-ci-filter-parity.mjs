@@ -145,6 +145,38 @@
  * every declared guard is still in the list and not hashed. Pure string again,
  * for the reason above: no matcher, so no third recognizer.
  *
+ * ## The third subject: Build Core and the build inputs turbo.json declares (#21202)
+ *
+ * `core:` schedules Build Core, and Build Core runs `pnpm build`. turbo.json
+ * declares which files outside the packages move a build's hash: itself, its
+ * `globalDependencies` (inputs of every task, builds included), and each
+ * `$TURBO_ROOT$/...` input of a `build` / `<package>#build` task. A diff
+ * confined to one of those moves the hashes it reaches; if no `core` entry
+ * matches it, Build Core does not start, and the merge queue is the first
+ * place that build runs. PR #21199 showed it on itself: a turbo.json-only diff,
+ * Build Core skipped.
+ *
+ * `judgeBuildInputs` DERIVES the required set rather than holding a copy of
+ * it, so this file is not a second list of the declarations either: the
+ * build-task inputs and `globalDependencies` come out of turbo.json, and the
+ * builds Build Core does not run come out of the root manifest's `build`
+ * script (`--filter=!<package>`), which is what the job's `run: pnpm build`
+ * expands to. Every misreading of that script can only drop an exclusion,
+ * which REQUIRES more of `core` -- a loud red, never a silent gap. The only
+ * constant is turbo.json itself, which is the config being read.
+ *
+ * Findings: a declared build input no `core` entry covers (same pure-string
+ * rule as above), and the reverse direction, a `core` entry under `scripts/`
+ * that covers no declared build input -- `scripts/` is in `core` only because
+ * builds read files in it, so such an entry starts the core pipeline on a diff
+ * no build reads. Refusals: no `build-core` job, its `if:` no longer naming
+ * `core`, no `run: pnpm build` step, turbo.json or the root manifest unreadable
+ * or not JSON, no `tasks` map, no build task, and a `build` script that is not
+ * `turbo run build ...`.
+ *
+ * Known bound: a package-level turbo.json (none is tracked today) would add
+ * build inputs this subject does not read.
+ *
  * ## Wiring
  *
  * Invoked from `.github/workflows/lint.yml` as `node scripts/...` directly, both
@@ -194,11 +226,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '(6) the real tree': 10,
   '(7) WIRING: the gate and its self-test really run in CI': 2,
   '(8) the `console` selection and the dist key it must move': 20,
+  '(9) Build Core and the build inputs turbo.json declares': 33,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 8;
+const SELF_TEST_BATTERY_FLOOR = 9;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1327,18 +1360,155 @@ export async function selfTest() {
     'a key whose hashFiles arguments are not quoted paths => REFUSAL: the gate cannot say what it hashes',
   );
 
+  // A scratch root carrying the given ci.yml beside the REAL turbo.json and
+  // root manifest, so the only drift `main()` can see is the one injected: a
+  // root missing either file would red the build-input subject on its own and
+  // satisfy a "returns 1" assertion for the wrong reason.
+  const inScratchTree = (ciSource, fn) => {
+    const scratch = mkdtempSync(join(tmpdir(), 'ci-filter-parity-'));
+    try {
+      mkdirSync(join(scratch, '.github', 'workflows'), { recursive: true });
+      writeFileSync(join(scratch, CI_WORKFLOW), ciSource);
+      for (const rel of [TURBO_CONFIG, ROOT_MANIFEST]) writeFileSync(join(scratch, rel), readFileSync(join(REPO_ROOT, rel), 'utf8'));
+      return fn(scratch);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  };
+
   // The report path, over the real ci.yml with one drift injected: the spec's
   // tsup entry list dropped from the filter while the key still hashes it.
   const drifted = realSource.replace("              - 'packages/spec/tsup.config.ts'\n", '');
   assert(drifted !== realSource, 'the report-path fixture found its anchor in the checked-in ci.yml');
-  const scratch = mkdtempSync(join(tmpdir(), 'ci-filter-parity-'));
-  try {
-    mkdirSync(join(scratch, '.github', 'workflows'), { recursive: true });
-    writeFileSync(join(scratch, CI_WORKFLOW), drifted);
-    assert(quietly(() => main(scratch)) === 1, 'main() returns 1 over a ci.yml whose console filter lost a hashed path -- the report path, not only `judgeConsole`');
-  } finally {
-    rmSync(scratch, { recursive: true, force: true });
+  assert(
+    inScratchTree(drifted, (root) => quietly(() => main(root))) === 1,
+    'main() returns 1 over a ci.yml whose console filter lost a hashed path -- the report path, not only `judgeConsole`',
+  );
+
+  // ── (9) Build Core and the build inputs turbo.json declares (#21202) ────
+  battery('(9) Build Core and the build inputs turbo.json declares');
+  const BUILD_IF = "${{ !cancelled() && needs.filter.outputs.core != 'false' }}";
+  const buildWorkflow = ({ core, condition = BUILD_IF, run = 'pnpm build' } = {}) => {
+    const list = (xs) => xs.map((e) => `              - '${e}'`).join('\n');
+    return [
+      'name: CI',
+      'jobs:',
+      '  filter:',
+      '    steps:',
+      '      - uses: dorny/paths-filter@v4',
+      '        id: changes',
+      '        with:',
+      '          filters: |',
+      '            core:',
+      list(core ?? ['packages/**', 'tsconfig.json', 'turbo.json', 'tsup.config.ts', 'scripts/a.mjs', 'scripts/b.mjs']),
+      '  build-core:',
+      `    if: ${JSON.stringify(condition)}`,
+      '    steps:',
+      `      - run: ${run}`,
+    ].join('\n');
+  };
+  const turboFixture = ({ globalDependencies = ['tsconfig.json', 'tsup.config.ts'], tasks } = {}) =>
+    JSON.stringify({
+      globalDependencies,
+      tasks: tasks ?? {
+        build: { inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/scripts/a.mjs'] },
+        '@objectstack/probe#build': {
+          inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/scripts/a.mjs', '$TURBO_ROOT$/scripts/b.mjs', '$TURBO_ROOT$/packages/cli/src/x.ts'],
+        },
+        '@objectstack/docs#build': { inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/content/**'] },
+        test: { inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/docker/**'] },
+      },
+    });
+  const manifestFixture = (build = 'turbo run build --filter=!@objectstack/docs') => JSON.stringify({ scripts: { build } });
+  const judgeBuild = ({ workflow, turbo, manifest } = {}) =>
+    judgeBuildInputs(workflow ?? buildWorkflow(), turbo === undefined ? turboFixture() : turbo, manifest === undefined ? manifestFixture() : manifest);
+  const uncoveredPaths = (v) => (v.uncovered ?? []).map((r) => r.path);
+  const findingsOfBuild = (v) => [...(v.uncovered ?? ['(no verdict)']).map((r) => r.path ?? r), ...(v.stale ?? ['(no verdict)'])];
+
+  const buildClean = judgeBuild();
+  assert(!buildClean.refusal && findingsOfBuild(buildClean).length === 0, `positive control: the default synthetic tree is clean -- ${buildClean.refusal ?? findingsOfBuild(buildClean).join(', ')}`);
+  assert(
+    buildClean.covered?.find((r) => r.path === 'packages/cli/src/x.ts')?.via === 'packages/**',
+    '-- a root input under a package root is covered by that subtree entry, with no literal of its own',
+  );
+  assert(
+    !(buildClean.inputs ?? []).some((r) => r.path === 'docker/**'),
+    '-- a TEST task\'s root input is not a build input: `crosspkg` is that population\'s scheduler, not `core`',
+  );
+  assert(
+    (buildClean.excludedTasks ?? []).join(',') === '@objectstack/docs#build' && !(buildClean.inputs ?? []).some((r) => r.path === 'content/**'),
+    '-- a build the root `build` script excludes is left out, and its root input with it',
+  );
+
+  // THE HOLE, the one the card reads: a build input `core:` does not cover.
+  const droppedInput = judgeBuild({ workflow: buildWorkflow({ core: ['packages/**', 'tsconfig.json', 'turbo.json', 'tsup.config.ts', 'scripts/a.mjs'] }) });
+  assert(uncoveredPaths(droppedInput).join(',') === 'scripts/b.mjs', 'THE HOLE: a build input dropped from `core:` is reported uncovered, by path');
+  assert(
+    (droppedInput.uncovered?.[0]?.from ?? []).join(',') === '@objectstack/probe#build',
+    '-- naming the build task that declared it',
+  );
+  const droppedTurbo = judgeBuild({ workflow: buildWorkflow({ core: ['packages/**', 'tsconfig.json', 'tsup.config.ts', 'scripts/a.mjs', 'scripts/b.mjs'] }) });
+  assert(uncoveredPaths(droppedTurbo).join(',') === 'turbo.json', 'turbo.json itself missing from `core:` is reported -- it moves every task hash');
+  const droppedGlobal = judgeBuild({ workflow: buildWorkflow({ core: ['packages/**', 'tsconfig.json', 'turbo.json', 'scripts/a.mjs', 'scripts/b.mjs'] }) });
+  assert(uncoveredPaths(droppedGlobal).join(',') === 'tsup.config.ts', 'a `globalDependencies` entry missing from `core:` is reported -- the set is derived, not listed here');
+  const newInput = judgeBuild({
+    turbo: turboFixture({
+      tasks: { build: { inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/scripts/a.mjs', '$TURBO_ROOT$/scripts/b.mjs', '$TURBO_ROOT$/tools/gen.mjs'] } },
+    }),
+  });
+  assert(uncoveredPaths(newInput).join(',') === 'tools/gen.mjs', 'a build input turbo.json gains under a NEW root reds until `core:` covers it');
+  const negated = judgeBuild({
+    turbo: turboFixture({ tasks: { build: { inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/scripts/a.mjs', '$TURBO_ROOT$/scripts/b.mjs', '!$TURBO_ROOT$/scripts/c.mjs'] } } }),
+  });
+  assert(uncoveredPaths(negated).length === 0, 'a NEGATED root input is not required -- a negation can only narrow a hash');
+  const docsBuilt = judgeBuild({ manifest: manifestFixture('turbo run build') });
+  assert(
+    uncoveredPaths(docsBuilt).join(',') === 'content/**',
+    'the root `build` script no longer excluding a package puts that build\'s root inputs back in the required set -- the exclusion is read, not declared',
+  );
+  const staleEntry = judgeBuild({ workflow: buildWorkflow({ core: ['packages/**', 'package.json', 'tsconfig.json', 'turbo.json', 'tsup.config.ts', 'scripts/a.mjs', 'scripts/b.mjs', 'scripts/old.mjs'] }) });
+  assert((staleEntry.stale ?? []).join(',') === 'scripts/old.mjs', 'a `scripts/` entry in `core:` covering no declared build input is reported stale');
+  assert(!(staleEntry.stale ?? []).includes('package.json'), '-- while an entry outside `scripts/` is not this subject\'s to judge');
+  assert(buildExclusions('turbo run build --filter !@objectstack/docs').excluded?.has('@objectstack/docs'), 'the spaced `--filter !<pkg>` spelling is read as an exclusion too');
+
+  // Refusals: never a clean zero over a subject that was not read.
+  const buildRefusal = (opts) => judgeBuild(opts).refusal ?? '';
+  assert(/no \`build-core\` job/.test(judgeBuildInputs(fixtureWorkflow(), turboFixture(), manifestFixture()).refusal ?? ''), 'no Build Core job => REFUSAL');
+  assert(/no longer names \`core\`/.test(buildRefusal({ workflow: buildWorkflow({ condition: '${{ !cancelled() }}' }) })), 'Build Core dropping `core` from its `if:` => REFUSAL');
+  assert(/no \`run: pnpm build\` step/.test(buildRefusal({ workflow: buildWorkflow({ run: 'pnpm turbo run build' }) })), 'Build Core no longer running `pnpm build` => REFUSAL');
+  assert(/turbo.json could not be read\./.test(buildRefusal({ turbo: null })), 'an unreadable turbo.json => REFUSAL');
+  assert(/could not be read as JSON/.test(buildRefusal({ turbo: '{ tasks: ' })), 'a turbo.json that is not JSON => REFUSAL');
+  assert(/no \`tasks\` map/.test(buildRefusal({ turbo: '{}' })), 'a turbo.json with no tasks map => REFUSAL');
+  assert(/no \`build\` task/.test(buildRefusal({ turbo: turboFixture({ tasks: { test: { inputs: [] } } }) })), 'a turbo.json with no build task => REFUSAL');
+  assert(/package.json could not be read\./.test(buildRefusal({ manifest: null })), 'an unreadable root manifest => REFUSAL');
+  assert(/not \`turbo run build/.test(buildRefusal({ manifest: JSON.stringify({ scripts: {} }) })), 'a root manifest with no `build` script => REFUSAL');
+  assert(/not \`turbo run build/.test(buildRefusal({ manifest: manifestFixture('tsup') })), 'a root `build` script that is not `turbo run build` => REFUSAL');
+
+  // The real tree.
+  const realBuild = judgeBuildInputs(realSource, readFileSync(join(REPO_ROOT, TURBO_CONFIG), 'utf8'), readFileSync(join(REPO_ROOT, ROOT_MANIFEST), 'utf8'));
+  assert(!realBuild.refusal && findingsOfBuild(realBuild).length === 0, `the checked-in core filter covers every build input turbo.json declares -- ${realBuild.refusal ?? findingsOfBuild(realBuild).join(', ')}`);
+  for (const path of [TURBO_CONFIG, 'tsup.config.ts', 'scripts/tsup-drop-sources-content.mjs']) {
+    assert(
+      (realBuild.covered ?? []).some((r) => r.path === path && r.kind === 'literal'),
+      `a head touching only ${path} schedules Build Core, through its own literal \`core\` entry`,
+    );
   }
+  const notABuildInput = 'scripts/check-ci-filter-parity.mjs';
+  assert(
+    existsSync(join(REPO_ROOT, notABuildInput)) &&
+      !(realBuild.inputs ?? []).some((r) => r.path === notABuildInput) &&
+      !coverageVerdict(notABuildInput, realBuild.entries ?? []).covered,
+    `the control: ${notABuildInput}, a tracked script no build declares, does NOT schedule Build Core -- \`core\` names files, not \`scripts/**\``,
+  );
+  const droppedReal = realSource.replace("              - 'scripts/invoked-as.mjs'\n", '');
+  assert(droppedReal !== realSource, 'the real-tree drop found its anchor in the checked-in ci.yml');
+  assert(
+    uncoveredPaths(judgeBuildInputs(droppedReal, readFileSync(join(REPO_ROOT, TURBO_CONFIG), 'utf8'), readFileSync(join(REPO_ROOT, ROOT_MANIFEST), 'utf8'))).join(',') ===
+      'scripts/invoked-as.mjs',
+    'the checked-in ci.yml with one build input dropped from `core:` reports exactly that input',
+  );
+  assert(inScratchTree(realSource, (root) => quietly(() => main(root))) === 0, 'main() returns 0 over the scratch copy of the real tree -- the scratch root is complete');
+  assert(inScratchTree(droppedReal, (root) => quietly(() => main(root))) === 1, '-- and 1 with that one build input dropped: the report path, not only `judgeBuildInputs`');
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
@@ -1399,7 +1569,11 @@ export async function selfTest() {
       `pre-#10015 rollback uncovering the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one plus #14561's one plus #14824's three plus #15818's two plus #18650's one, ` +
       `the CI wiring read out of lint.yml, and the \`console\` selection: the spec's entry layout selecting Console Pin ` +
       `Gate and moving its dist key while a spec source file does neither, each way the filter and the key can drift ` +
-      `observed red, and the report path red over the checked-in ci.yml with one hashed path dropped from the filter.`,
+      `observed red, and the report path red over the checked-in ci.yml with one hashed path dropped from the filter; ` +
+      `and Build Core's build inputs: a build input dropped from \`core\` observed red by path and declaring task, ` +
+      `turbo.json itself, a globalDependencies entry and a new-root input each required, test-task and negated inputs ` +
+      `and the excluded docs build left out until the build script stops excluding it, a stale \`scripts/\` entry, ` +
+      `ten refusals, and the checked-in tree green with one input dropped observed red through the report path.`,
   );
   selfTestReachedVerdict = true;
   return 0;
