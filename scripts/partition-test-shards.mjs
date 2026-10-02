@@ -224,11 +224,37 @@ export const MAX_MEASURED_OVER_PREDICTED = 1.5;
 // holding each package's WHOLE cost, and the division by n happens here. That
 // is what keeps a refresh comparable across a change to this map, and it is why
 // measure-test-shard-timings.mjs has to reassemble a package's slices before it
-// records one -- see `sliceOfCliArguments` there. A change to this map also
-// retires the summaries written under the old one: the generator refuses an
-// `OS_TEST_SHARD` slice the map can no longer emit rather than read it as a
-// whole package, so a refresh after a change measures runs made after it.
+// records one -- see `sliceOfCliArguments` there. A change to this map is also
+// a change to what that generator can DECODE, which is why the map it replaced
+// is kept below.
 export const FILE_SHARDED_PACKAGES = Object.freeze({});
+
+// THE MAP AS IT STOOD BEFORE ITS LAST CHANGE, read only by the generator's
+// slice-digest matcher (measure-test-shard-timings.mjs `sliceOfEnvironment`).
+//
+// A run summary records a slice only as the sha256 of its `OS_TEST_SHARD`
+// value, and the matcher decodes that digest against the slices the
+// partitioner can emit, refusing the whole summary when nothing matches. So a
+// run made BEFORE a change to the map above -- slices the map no longer emits
+// -- is refused, and while every retained run predates the change, the
+// refresh lane can measure nothing at all. That is not hypothetical: on the
+// change that emptied the map, the lane's pull_request rehearsal (run
+// 37074888579) refused all ten eligible hourly runs on main and regenerated
+// nothing.
+//
+// With the outgoing map here, a pre-change slice decodes EXACTLY -- by hash
+// equality, against this closed map, never by guessing a count -- and is then
+// summed within its run like any slice, so a run that cannot assemble the
+// package still contributes nothing (`skippedIncompleteSlices`). A digest
+// matching neither map is refused as before.
+//
+// Set it to the OUTGOING map in the same PR that changes FILE_SHARDED_PACKAGES.
+// Its only readers are run summaries, which ci.yml keeps for one day
+// (`retention-days: 1` on `test-core-run-summary-*`), so a day after that PR
+// lands no retained summary predates the change and this map decodes nothing.
+export const PREVIOUS_FILE_SHARDED_PACKAGES = Object.freeze({
+  '@objectstack/cli': 2,
+});
 
 // The item grammar. A shard item is a package (`@objectstack/cli`) or a SLICE
 // of one (`@objectstack/cli 1/2`), and this pair of functions is the only place
