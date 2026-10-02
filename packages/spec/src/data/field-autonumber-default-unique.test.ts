@@ -41,10 +41,11 @@ import {
 } from './field.zod';
 import { ObjectSchema } from './object.zod';
 
-/** Minimal valid authored input per field type (relationship types need a target). */
+/** Minimal valid authored input per field type (relationship types need a target, single-choice types an option). */
 function minimalField(type: string): Record<string, unknown> {
   const input: Record<string, unknown> = { type };
   if (type === 'lookup' || type === 'master_detail' || type === 'tree') input.reference = 'account';
+  if (type === 'select' || type === 'radio') input.options = [{ label: 'Open', value: 'open' }];
   if (type === 'summary') input.summaryOperations = { object: 'line', field: 'amount', function: 'sum' };
   if (type === 'formula') input.expression = '1 + 1';
   return input;

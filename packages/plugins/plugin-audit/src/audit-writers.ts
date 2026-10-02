@@ -856,14 +856,24 @@ function renderMilestoneSummary(
  * ⛔ Deliberately NOT re-exported from the package barrel: the sharing is
  * internal to `@objectstack/plugin-audit` and the published surface is
  * unchanged by it.
+ *
+ * [#21262] `table` is the table whose insert was REFUSED, for a writer that
+ * writes more than one (`persistAuditTrailRow` writes the ledger row, then its
+ * `sys_activity` mirror). That writer's `error` line names the table and the
+ * row it lost, and every repeat folded under the key is described by that one
+ * line — so the key holds everything the line asserts. Without the table, a
+ * refusal by the OTHER table (same object, same code) would fold into a line
+ * naming the wrong table and the wrong lost row. Still bounded at boot: the
+ * writer's table set is closed. A single-table writer omits it, and its key is
+ * byte-identical to what it was.
  */
-export function auditFailureCauseKey(object: string, err: unknown): string {
+export function auditFailureCauseKey(object: string, err: unknown, table?: string): string {
   const code = (err as { code?: unknown } | null | undefined)?.code;
   const bounded = typeof code === 'string' || typeof code === 'number' ? String(code) : '(no code)';
   // JSON rather than a separator character: an object name and a driver code
   // are both opaque here, and a key that can collide is a key that silences a
   // real second cause.
-  return JSON.stringify([object, bounded]);
+  return JSON.stringify(table === undefined ? [object, bounded] : [object, table, bounded]);
 }
 
 /**
@@ -880,6 +890,84 @@ export function auditFailureCauseKey(object: string, err: unknown): string {
 export function auditFailureCauseSummary(err: unknown, detail: string): string {
   const code = (err as { code?: unknown } | null | undefined)?.code;
   return typeof code === 'string' || typeof code === 'number' ? `${String(code)}: ${detail}` : detail;
+}
+
+/**
+ * The two tables `persistAuditTrailRow` writes, in the order it writes them:
+ * the ledger row that records who did it, then its `sys_activity` mirror.
+ */
+type AuditTrailTable = 'sys_audit_log' | 'sys_activity';
+
+/**
+ * [#21262] Which insert `persistAuditTrailRow` had in flight. It starts on the
+ * ledger row and the writer advances it before the activity row, so after a
+ * throw it names the table whose insert was REFUSED. The WRITER is the
+ * authority on that, not the error: a SQLSTATE such as `42P01` with no phrase
+ * naming a relation is a missing-table verdict for any table name, and a
+ * constraint or tenancy refusal need not name a table at all.
+ */
+interface AuditTrailWriteProgress {
+  writing: AuditTrailTable;
+}
+
+/**
+ * [#21262] The FIRST LINE the operator reads when an audit-trail insert is
+ * refused: the table, the row that is lost, the counting unit, and the fix for
+ * the cause the evidence supports.
+ *
+ * Measured before this existed (MySQL `ER_NO_SUCH_TABLE`, the `sys_activity`
+ * table never created): every `sys_audit_log` row LANDED, and the line said
+ * the opposite — "only the `sys_audit_log` row … never landed" — then sent the
+ * operator to the telemetry-datasource split for a table whose DDL had been
+ * refused at boot. And it said "reported ONCE" while printing once per audited
+ * object, four times in that boot.
+ *
+ * ⛔ Operator text only. It quotes the driver's own message and code, and names
+ * the object and the table — never a value from the audited row.
+ */
+function auditWriteFailureLine(f: {
+  object: string;
+  /** `auditFailureCauseSummary(err, detail)` — the driver's code and message. */
+  summary: string;
+  refusedTable: AuditTrailTable;
+  /** A `sys_activity` row was due AFTER the refused ledger row, so it was never written either. */
+  activityRowLost: boolean;
+  /** The ledger table the error says does not exist, when it says so. */
+  missingTable: AuditTrailTable | undefined;
+}): string {
+  const consequence =
+    f.refusedTable === 'sys_audit_log'
+      ? `Audit write FAILED on \`sys_audit_log\` (${f.summary}) — the compliance trail is now INCOMPLETE. ` +
+        'The audited write itself SUCCEEDED and is on disk, so the API returned success and nothing downstream ' +
+        'looks broken; but the `sys_audit_log` row that records who did it never landed' +
+        (f.activityRowLost
+          ? ', and neither did its `sys_activity` timeline row, which is written only after it'
+          : '') +
+        ', and nothing retries it. '
+      : `Audit write FAILED on \`sys_activity\` (${f.summary}) — the activity timeline is now INCOMPLETE. ` +
+        'The audited write itself SUCCEEDED and is on disk, and so did its `sys_audit_log` row that records who ' +
+        'did it, so the API returned success and the compliance ledger is whole; only the `sys_activity` row — ' +
+        "the entry the record's activity timeline and the recent-activity feed show — never landed, and nothing " +
+        'retries it. ';
+  const once =
+    `Every later audited write of '${f.object}' that \`${f.refusedTable}\` refuses with this same code loses ` +
+    `its \`${f.refusedTable}\` row the same way. This line is printed ONCE per audited object, refused table ` +
+    'and error code: the same fault on another audited object prints its own line, and so does a different ' +
+    'code. Raise the log level to `debug` to see every repeat. ';
+  const fix =
+    f.missingTable !== undefined
+      ? `Fix: \`${f.missingTable}\` does not exist on the connection this write reached, and this line cannot ` +
+        'tell which of two causes that is, so check them in this order. (1) Schema sync never created it: the ' +
+        `boot log then carries \`Schema sync FAILED for object '${f.missingTable}'\` with the driver's refusal ` +
+        'of its DDL; fix that error and restart, and the table is created (a deployment that runs ' +
+        '`OS_SKIP_SCHEMA_SYNC` creates it out-of-band instead). (2) Otherwise it was created on a DIFFERENT ' +
+        'datasource than the one this write reached: its ADR-0057 §3.6 lifecycle class routes it to the ' +
+        'dedicated `telemetry` datasource whenever one is registered (`os dev` provisions one by default as a ' +
+        'SIBLING SQLite file) — see framework#5226. Set `OS_TELEMETRY_DB=0` to keep every lifecycle-classed ' +
+        'object on the primary datasource.'
+      : 'Fix: resolve the driver fault quoted at the head of this line on the connection this write ran ' +
+        'on — every audited write that hits it loses its row until it is resolved.';
+  return consequence + once + fix;
 }
 
 /**
@@ -907,15 +995,24 @@ export function installAuditWriters(
    * (`scripts/check-durability-degradation-log-level.mjs`) in the same PR, per
    * the AGENTS.md rule — so a future edit cannot quietly walk the level back
    * down to `warn`.
+   *
+   * [#21262] `progress` is how the caller learns WHICH insert was refused: the
+   * writer advances it before the activity row, so after a throw it still names
+   * the table whose insert threw. ⛔ Not caught here — the failure must keep
+   * reaching the caller's `catch`, which is the site the gate holds at `error`.
    */
   const persistAuditTrailRow = async (
     api: any,
     auditRow: Record<string, any>,
     activityRow: Record<string, any> | undefined,
+    progress: AuditTrailWriteProgress,
   ): Promise<void> => {
     const sys = api.sudo();
     await sys.object('sys_audit_log').create(auditRow);
-    if (activityRow) await sys.object('sys_activity').create(activityRow);
+    if (activityRow) {
+      progress.writing = 'sys_activity';
+      await sys.object('sys_activity').create(activityRow);
+    }
   };
 
   /**
@@ -940,15 +1037,28 @@ export function installAuditWriters(
    * ⛔ The key is deliberately built from the error's `code`, NEVER its
    * message — see {@link auditFailureCauseKey} for why that is what keeps this
    * bounded, and why "log every failure at `error`" remains the wrong answer.
+   *
+   * [#21262] The counting unit is the audited OBJECT, the refused TABLE and the
+   * code. The object is #15166's granularity, kept: its own pin holds two
+   * objects failing the same way to two lines. The table joins because the
+   * line now names it (see {@link auditFailureCauseKey}). One missing table
+   * therefore prints once per audited object that writes through it, and the
+   * line says exactly that rather than "reported ONCE".
    */
   const reportedAuditFailureCauses = new Set<string>();
-  const reportAuditWriteFailure = (object: string, action: string, err: unknown): void => {
+  const reportAuditWriteFailure = (
+    object: string,
+    action: string,
+    err: unknown,
+    refusal: { table: AuditTrailTable; activityRowLost: boolean },
+  ): void => {
     const detail = String((err as any)?.message ?? err);
     const logger = (engine as any).logger;
+    const table = refusal.table;
     try {
-      const cause = auditFailureCauseKey(object, err);
+      const cause = auditFailureCauseKey(object, err, table);
       if (reportedAuditFailureCauses.has(cause)) {
-        logger?.debug?.('Audit write failed (already reported)', { object, action, err: detail, cause });
+        logger?.debug?.('Audit write failed (already reported)', { object, action, table, err: detail, cause });
         return;
       }
       reportedAuditFailureCauses.add(cause);
@@ -963,36 +1073,46 @@ export function installAuditWriters(
       // sentence named the telemetry-datasource split unconditionally, so the
       // measured `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` refusal sent its
       // operator to check a datasource that was working perfectly. The remedy
-      // below is the remedy for a MISSING TABLE, so it is printed for that
-      // cause and, for any other, replaced by the driver's own verdict.
+      // for a MISSING TABLE is printed for that cause and, for any other,
+      // replaced by the driver's own verdict.
       //
       // ⛔ Not deleted, and not weakened: `persistAuditTrailRow` writes
-      // `sys_audit_log` AND its `sys_activity` mirror, and ADR-0057 §3.6 routes
-      // both, so the question is asked about both tables.
-      const missingTable =
-        isMissingTableError(err, 'sys_audit_log') || isMissingTableError(err, 'sys_activity');
-      const message =
-        `Audit write FAILED (${auditFailureCauseSummary(err, detail)}) — the compliance trail is now INCOMPLETE. ` +
-          'The audited write itself SUCCEEDED and is on disk, so the API returned success and nothing downstream ' +
-          'looks broken; only the `sys_audit_log` row that records who did it never landed, and nothing retries it. ' +
-          'Every subsequent audited write failing THIS WAY is losing its row the same way (this CAUSE is reported ' +
-          'ONCE — raise the log level to `debug` to see the rest; a DIFFERENT cause gets its own `error` line). ' +
-          (missingTable
-            ? 'Fix: confirm `sys_audit_log` is reachable from the connection this write ran on. Its ADR-0057 §3.6 ' +
-              "lifecycle class routes it to the dedicated `telemetry` datasource whenever one is registered (`os dev` " +
-              'provisions one by default as a SIBLING SQLite file), so a "no such table" here usually means the write ' +
-              'executed against a DIFFERENT datasource than the one the table was created in — see framework#5226. ' +
-              'Set `OS_TELEMETRY_DB=0` to keep every lifecycle-classed object on the primary datasource.'
-            : 'Fix: resolve the driver fault quoted at the head of this line on the connection this write ran ' +
-              'on — every audited write that hits it loses its row until it is resolved.');
+      // `sys_audit_log` AND its `sys_activity` mirror, so the question is asked
+      // about both tables.
+      //
+      // [#21262] …in a fixed order: the REFUSED table first. A SQLSTATE such as
+      // `42P01` with no phrase naming a relation answers "missing" for ANY table
+      // name, so asking in list order would name `sys_audit_log` for a refused
+      // `sys_activity` insert — the table would be inferred from a list, not
+      // read from the refused write. The other table is asked second, for an
+      // error whose phrase names it.
+      //
+      // And the missing-table remedy no longer asserts the datasource split.
+      // A table is just as missing when schema sync's DDL for it was refused at
+      // boot, and nothing in hand here tells the two apart (the boot's failure
+      // is logged, never recorded where this writer can read it), so the line
+      // names both and the order to check them in.
+      const otherTable: AuditTrailTable = table === 'sys_audit_log' ? 'sys_activity' : 'sys_audit_log';
+      const missingTable = isMissingTableError(err, table)
+        ? table
+        : isMissingTableError(err, otherTable)
+          ? otherTable
+          : undefined;
+      const message = auditWriteFailureLine({
+        object,
+        summary: auditFailureCauseSummary(err, detail),
+        refusedTable: table,
+        activityRowLost: refusal.activityRowLost,
+        missingTable,
+      });
       // `error` is OPTIONAL on this sink, so `logger?.error?.(…)` printed
       // NOTHING when the host injected one without it — the durability
       // degradation this text describes would then be reported by nobody at
       // all (#9657). Reach for `error`, fall back to `warn`, never to silence.
       if (logger?.error) {
-        logger.error(message, err instanceof Error ? err : new Error(detail), { object, action });
+        logger.error(message, err instanceof Error ? err : new Error(detail), { object, action, table });
       } else {
-        logger?.warn?.(message, { object, action, err: detail });
+        logger?.warn?.(message, { object, action, table, err: detail });
       }
     } catch {
       /* logging must never break the audited write */
@@ -1703,6 +1823,10 @@ export function installAuditWriters(
     // lever for activity-row growth (ADR-0057). The compliance audit row is
     // NOT gated — sys_audit_log capture stays unconditional.
     const activitiesEnabled = getObjectDef(ctx.object)?.enable?.activities !== false;
+    const activityRowToWrite = activitiesEnabled ? activityRow : undefined;
+    // [#21262] The ledger row is written first; the writer advances this
+    // before the activity row, so after a throw it names the refused table.
+    const progress: AuditTrailWriteProgress = { writing: 'sys_audit_log' };
 
     try {
       // Assignment notifications are NOT emitted here (framework#3403). Deciding
@@ -1716,7 +1840,7 @@ export function installAuditWriters(
       // (Comment @mention notifications remain a platform behavior — they are
       //  handled separately by the sys_comment hook below, since SKIP_OBJECTS
       //  excludes it from this writer.)
-      await persistAuditTrailRow(api, auditRow, activitiesEnabled ? activityRow : undefined);
+      await persistAuditTrailRow(api, auditRow, activityRowToWrite, progress);
     } catch (err) {
       // #5226 — DURABILITY degradation, not a functional one, so it is reported
       // at `error` (AGENTS.md "Degradation log levels"): the audited write
@@ -1724,7 +1848,12 @@ export function installAuditWriters(
       // completely normal from the outside, while the compliance ledger entry
       // that claims to record it never landed. Nothing retries it, and the gap
       // surfaces — if ever — to an auditor who cannot connect it to this line.
-      reportAuditWriteFailure(ctx.object, action, err);
+      reportAuditWriteFailure(ctx.object, action, err, {
+        table: progress.writing,
+        // A refused ledger row means the activity row due after it was never
+        // attempted; a refused activity row means the ledger row landed.
+        activityRowLost: progress.writing === 'sys_audit_log' && activityRowToWrite !== undefined,
+      });
     }
   };
 

@@ -193,8 +193,10 @@ describe('the liveness gate on the i18n coverage walk', () => {
 
     expect(keys).toEqual([
       'flows.lead_conversion.label',
+      'flows.lead_conversion.screens.conversion_details.fields.create_opportunity.inlineHelpText',
       'flows.lead_conversion.screens.conversion_details.fields.create_opportunity.label',
       'flows.lead_conversion.screens.conversion_details.fields.create_opportunity.placeholder',
+      'flows.lead_conversion.screens.conversion_details.fields.opportunity_name.inlineHelpText',
       'flows.lead_conversion.screens.conversion_details.fields.opportunity_name.label',
       'flows.lead_conversion.screens.conversion_details.fields.opportunity_name.placeholder',
       'flows.lead_conversion.screens.conversion_details.title',

@@ -90,7 +90,14 @@ const leadConversion = {
         description: 'Choose what this lead becomes.',
         fields: [
           { name: 'create_opportunity', label: 'Create Opportunity?', type: 'boolean' },
-          { name: 'opportunity_name', label: 'Opportunity Name', placeholder: 'Acme - Q3 renewal' },
+          {
+            name: 'opportunity_name',
+            label: 'Opportunity Name',
+            placeholder: 'Acme - Q3 renewal',
+            // Every per-field copy key is authored on this one field, so the
+            // key-face pin below compares the whole spec list, not a subset.
+            inlineHelpText: 'Shown on the quote',
+          },
         ],
       },
     },
@@ -137,6 +144,7 @@ describe('the screen-flow gap a green i18n gate could not see (#11485)', () => {
     expect(keys).toContain('flows.lead_conversion.screens.conversion_details.fields.create_opportunity.label');
     expect(keys).toContain('flows.lead_conversion.screens.conversion_details.fields.opportunity_name.label');
     expect(keys).toContain('flows.lead_conversion.screens.conversion_details.fields.opportunity_name.placeholder');
+    expect(keys).toContain('flows.lead_conversion.screens.conversion_details.fields.opportunity_name.inlineHelpText');
     // The object surface IS translated, so nothing else is reported: the whole
     // report is the wizard. Before this bucket the same tree reported zero.
     expect(zh.length).toBeGreaterThan(0);
@@ -166,7 +174,7 @@ describe('the screen-flow gap a green i18n gate could not see (#11485)', () => {
               title: '转化详情',
               fields: {
                 create_opportunity: { label: '创建商机？' },
-                opportunity_name: { label: '商机名称', placeholder: 'Acme - 第三季度续约' },
+                opportunity_name: { label: '商机名称', placeholder: 'Acme - 第三季度续约', inlineHelpText: '显示在报价单上' },
               },
             },
             summary: { title: '完成' },
@@ -192,8 +200,10 @@ describe('what the walker harvests from a screen flow', () => {
   it('keys screens by `FlowNode.id` and fields by `ScreenFieldConfig.name`', () => {
     expect(flowKeys({ flows: [leadConversion] }).sort()).toEqual([
       'flows.lead_conversion.label',
+      'flows.lead_conversion.screens.conversion_details.fields.create_opportunity.inlineHelpText',
       'flows.lead_conversion.screens.conversion_details.fields.create_opportunity.label',
       'flows.lead_conversion.screens.conversion_details.fields.create_opportunity.placeholder',
+      'flows.lead_conversion.screens.conversion_details.fields.opportunity_name.inlineHelpText',
       'flows.lead_conversion.screens.conversion_details.fields.opportunity_name.label',
       'flows.lead_conversion.screens.conversion_details.fields.opportunity_name.placeholder',
       'flows.lead_conversion.screens.conversion_details.title',
@@ -276,6 +286,7 @@ describe('`os i18n extract` scaffolds the flows skeleton', () => {
     expect(en.flows.lead_conversion.screens.conversion_details.fields.opportunity_name).toEqual({
       label: 'Opportunity Name',
       placeholder: 'Acme - Q3 renewal',
+      inlineHelpText: 'Shown on the quote',
     });
     // The translator's empty slots — the vocabulary an author had no way to
     // discover before this pass existed.
@@ -424,13 +435,16 @@ describe('a screen inside an ADR-0031 region (#17511)', () => {
     // The exact face, so a key that should NOT exist fails here too. Eight of
     // these ten were absent before the descent landed; `flows.onboarding.label`
     // and `screens.welcome.title` are the two the flat walk already reached.
+    // The two `inlineHelpText` rows joined with the per-field face (#17306).
     expect(flowKeys({ flows: [nestedOnboarding] }).sort()).toEqual([
       'flows.onboarding.label',
       'flows.onboarding.screens.accept_terms.title',
       'flows.onboarding.screens.card_details.title',
       'flows.onboarding.screens.payment_failed.title',
+      'flows.onboarding.screens.pick_region.fields.notes.inlineHelpText',
       'flows.onboarding.screens.pick_region.fields.notes.label',
       'flows.onboarding.screens.pick_region.fields.notes.placeholder',
+      'flows.onboarding.screens.pick_region.fields.region_code.inlineHelpText',
       'flows.onboarding.screens.pick_region.fields.region_code.label',
       'flows.onboarding.screens.pick_region.fields.region_code.placeholder',
       'flows.onboarding.screens.pick_region.title',

@@ -3740,7 +3740,7 @@ export function resolveMetadataFormSchemaTitles<T extends Record<string, any>>(
  * `ScreenFieldConfigSchema` (`automation/builtin-node-config.zod.ts`) narrowed
  * to what the overlay reads and writes. The served `ScreenFieldSpec`
  * (`contracts/automation-service.ts`) satisfies it structurally too: the
- * executor forwards `name` / `label` / `placeholder` verbatim, so the same
+ * executor forwards `name` / `label` / `placeholder` / `inlineHelpText` verbatim, so the same
  * overlay works whichever side of the wire the runner half lands on.
  */
 export interface FlowScreenFieldLike {
@@ -3752,6 +3752,8 @@ export interface FlowScreenFieldLike {
   name?: string;
   label?: string;
   placeholder?: string;
+  /** Help text drawn under the input (`ScreenFieldConfig.inlineHelpText`). */
+  inlineHelpText?: string;
   [key: string]: unknown;
 }
 
@@ -3825,19 +3827,24 @@ export type FlowScreenCopyKey = typeof FLOW_SCREEN_COPY_KEYS[number];
  * the per-FIELD face of {@link FLOW_SCREEN_COPY_KEYS}, measured against
  * `ScreenFieldConfigSchema`.
  *
- * `help` is deliberately absent. ⚠️ Not for its original reason any more: the
- * screen field used to declare nothing help-shaped, so a `help` key would have
- * parsed clean and translated nothing (the ADR-0078 shape #6080 kept out of the
- * page-component face). #17306 gave it `inlineHelpText`, so the string exists —
- * what does not exist is a key on THIS face for it, and growing the face is a
- * ruled step against the #7646 enumeration, never a resolver-side accretion.
- * The exclusion therefore stands with the same outcome and a different reason.
+ * Each key is spelled exactly as the screen field spells the string it
+ * overlays, because the overlay writes the translation back onto that same
+ * key: {@link translateScreenField} spreads the resolved copy over the field,
+ * and objectui's `FlowRunner` walks this list over the `ScreenFieldSpec` it
+ * draws.
+ *
+ * `inlineHelpText` joined `label` and `placeholder` once the console's screen
+ * dialog drew the help text under the control (#17306), so a translated help
+ * line reaches the user rather than a bundle nothing reads. It is the screen
+ * field's own spelling, which is the object field's (`FieldSchema`), so the
+ * report's `help` is not a key here: the schema answers `help` / `helpText` /
+ * `hint` / `tooltip` by name with the rename to `inlineHelpText`.
  *
  * `options` is absent because `ScreenFieldConfig.options[].value` is
- * unconstrained, so a value-keyed map cannot address the labels. Both are
- * refused by name with guidance at the schema.
+ * unconstrained, so a value-keyed map cannot address the labels. It is refused
+ * by name with guidance at the schema.
  */
-export const FLOW_SCREEN_FIELD_COPY_KEYS = ['label', 'placeholder'] as const;
+export const FLOW_SCREEN_FIELD_COPY_KEYS = ['label', 'placeholder', 'inlineHelpText'] as const;
 
 export type FlowScreenFieldCopyKey = typeof FLOW_SCREEN_FIELD_COPY_KEYS[number];
 
@@ -3935,7 +3942,7 @@ export function resolveFlowScreenTitle(
  * B, the resolver half #11287): translates the flow's own `label` against
  * `flows.<name>.label`, and — for every `type: 'screen'` node with an id —
  * the screen heading and per-field copy against
- * `flows.<name>.screens.<node_id>.{title,fields.<field_name>.{label,placeholder}}`.
+ * `flows.<name>.screens.<node_id>.{title,fields.<field_name>.{label,placeholder,inlineHelpText}}`.
  * The input document is not mutated.
  *
  * **Where the translated title lands.** The bundle's `title` is written to

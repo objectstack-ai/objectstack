@@ -80,7 +80,7 @@ export default defineStack({
 | Dataset dimension and measure labels | `datasets.<name>.dimensions.<dimension>.label` / `datasets.<name>.measures.<measure>.label` |
 | Page labels and `page:header` copy | `pages.<name>.label` / `description` / `title` / `subtitle` — on a `kind: 'slotted'` page the header under `slots.header` is the page's header |
 | Page component copy, by component id | `pages.<name>.components.<id>.title` / `description` / `label` / `placeholder` / `emptyText` — reached under `regions[].components[]` and `slots.<slot>`, through `properties.children` and a `page:tabs` / `page:accordion` panel's `items[].children` |
-| Screen-flow wizards (flow label, screen headings, screen field copy) | `flows.<flow>.label` / `flows.<flow>.screens.<node_id>.title` / `.fields.<field>.label` / `.placeholder` — see the boundary note below |
+| Screen-flow wizards (flow label, screen headings, screen field copy) | `flows.<flow>.label` / `flows.<flow>.screens.<node_id>.title` / `.fields.<field>.label` / `.placeholder` / `.inlineHelpText` — a screen field's help text is `inlineHelpText`, the key the field itself declares, not `help`; see the boundary note below |
 | Global actions, messages | `globalActions`, `messages` |
 | Settings UI shell copy (the source badge on a settings row) | `settingsCommon.sourceLabels.<layer>` — the per-namespace settings copy under `settings` is **platform-only**: an app bundle carrying it is refused by name, and the platform's own strings are translated in `@objectstack/service-settings`'s bundle |
 | A label written as an inline locale map (`label: { en: 'Members', 'zh-CN': '成员' }`) | Nowhere — it is written on the metadata and resolved at render time; see **Current boundaries** below |
@@ -382,15 +382,16 @@ Honest limits worth knowing before you plan around them:
   by rule name alone and so could not tell two objects' rules apart; the route
   above is object-scoped and shipped with its reader. ADR-0049's 2026-09-04
   amendment carries that record.
-- **The `flows` group is declared, not yet applied.** A screen flow's copy has
+- **The `flows` group is only partly applied.** A screen flow's copy has
   somewhere to live (#7646) and the keys are addressed the way the runner
-  resolves them — flow name, screen node id, screen field name — but no shipped
-  screen-flow runner reads the group yet, so a wizard still renders the strings
-  authored on the flow. The liveness ledger carries it as `planned` and the
-  compile lint warns when you author it. Two related limits are deliberate: a
-  screen field has no help text to translate (it declares none), and the
-  runner's own chrome — the Cancel and Submit buttons — belongs to the
-  console's message catalog rather than your app's bundle.
+  resolves them — flow name, screen node id, screen field name. The console's
+  screen-flow runner reads `screens`: each screen's `title` and each field's
+  `label`, `placeholder` and `inlineHelpText` render in the active locale. The
+  flow's own `label` is read by nothing yet, so the liveness ledger carries the
+  group as `planned` and the compile lint warns when you author it. The runner's
+  own chrome — the Cancel and Submit buttons — is deliberately outside the
+  group: it belongs to the console's message catalog rather than your app's
+  bundle.
 
   **So the tooling does not ask you for these keys either.** `os lint` does not
   report `flows.*` as missing translations, and `os i18n extract` does not

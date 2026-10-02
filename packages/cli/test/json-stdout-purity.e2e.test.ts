@@ -91,6 +91,12 @@ const FAMILY: Record<string, string[]> = {
   // diagnostic the failed scan produces is emitted before it.
   'migrate account-issuer': [],
   'migrate apply': [],
+  // A dry run is its DEFAULT and the only form driven here: without `--apply`
+  // it boots (plugin-audit's objects registered), reads `sys_audit_log` /
+  // `sys_activity` and writes nothing. Its rewrite runner logs through a sink of
+  // its own, which `--json` points at stderr — a third pollution source beside
+  // the two in the header, so this member is worth driving, not only listing.
+  'migrate audit-metadata-bodies': [],
   'migrate files-to-references': [],
   'migrate meta': ['--stored'],
   'migrate multi-value-columns': [],

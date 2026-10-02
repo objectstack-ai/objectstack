@@ -140,7 +140,7 @@ const legacyObjectRow = {
         name: 'crm_invoice',
         label: 'Invoice',
         fields: {
-            status: { type: 'select', label: 'Status' },
+            status: { type: 'select', label: 'Status', options: [{ label: 'Sent', value: 'sent' }] },
             amount: { type: 'currency', label: 'Amount', conditionalRequired: "record.status == 'sent'" },
         },
     },
@@ -154,7 +154,7 @@ const canonicalObjectRow = {
         name: 'crm_quote',
         label: 'Quote',
         fields: {
-            status: { type: 'select', label: 'Status' },
+            status: { type: 'select', label: 'Status', options: [{ label: 'Sent', value: 'sent' }] },
             amount: { type: 'currency', label: 'Amount', requiredWhen: "record.status == 'sent'" },
         },
     },
@@ -577,6 +577,32 @@ describe('migrateStoredMetadata — what it declines to touch, loudly (#4327)', 
         expect(report.rows[0]!.reason).toMatch(/failed spec validation/);
         expect(historyRows(tables)).toHaveLength(0);
         expect(JSON.parse(metaRows(tables)[0]!.metadata).fields.amount.conditionalRequired).toBe('x');
+    });
+
+    it('marks a legacy row whose select has no option source `failed` and leaves its bytes alone', async () => {
+        // The choice door (ruling record 5910124148): the conversion chain
+        // lowers the retired alias, but no entry can invent the options an
+        // author meant, so the rewritten body still fails `FieldSchema`. The
+        // pass records the refusal; the row keeps reading through the chain
+        // and is named by its diagnostics until an option or a picklist is added.
+        const { engine, tables } = makeStubEngine([{
+            ...legacyObjectRow,
+            metadata: {
+                ...legacyObjectRow.metadata,
+                fields: { ...legacyObjectRow.metadata.fields, status: { type: 'select', label: 'Status' } },
+            },
+        }]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata({ apply: true });
+
+        expect(report.failed).toBe(1);
+        expect(report.rewritten).toBe(0);
+        expect(report.rows[0]!.reason).toMatch(/failed spec validation/);
+        expect(historyRows(tables)).toHaveLength(0);
+        const stored = JSON.parse(metaRows(tables)[0]!.metadata);
+        expect(stored.fields.status).toEqual({ type: 'select', label: 'Status' });
+        expect(stored.fields.amount.conditionalRequired).toBe("record.status == 'sent'");
     });
 
     it('does not clobber a row a concurrent writer moved — the optimistic lock is real', async () => {

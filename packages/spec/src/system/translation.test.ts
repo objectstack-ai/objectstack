@@ -1179,32 +1179,32 @@ describe('translation unknown-key strictness (#4001)', () => {
         .toContain('`title` → `label`');
     });
 
-    it('refuses `help` on a screen field, and says the string exists but the key does not', () => {
-      // The report proposed label/placeholder/help. `help` is still refused —
-      // but ⚠️ its reason changed with #17306 and this pin changed with it.
-      // The old reason was that the field declared nothing help-shaped; it now
-      // declares `inlineHelpText` (the object field's spelling), so the copy is
-      // real and only THIS face's key for it is missing. The refusal must not
-      // keep telling an author the field has no help copy when it has.
+    it('translates a screen field\'s help text under the key the field itself declares', () => {
+      // The report proposed label/placeholder/help. The face carries the help
+      // line as `inlineHelpText` — the screen field's own key (the object
+      // field's spelling), declared on `ScreenFieldConfigSchema` by #17306 —
+      // because the overlay writes each translation back onto the key it names.
       const declared = Object.keys((ScreenFieldConfigSchema as unknown as z.ZodObject<z.ZodRawShape>).shape);
-      expect(declared).toContain('inlineHelpText');
-      // The bare spellings stay undeclared on the schema — `inlineHelpText` is
-      // the one landing key, so the translation face has exactly one candidate.
-      expect(declared).not.toContain('help');
-      expect(declared).not.toContain('helpText');
-      expect(declared).toContain('label');
-      expect(declared).toContain('placeholder');
+      for (const key of FLOW_SCREEN_FIELD_COPY_KEYS) expect(declared).toContain(key);
+      expect(FLOW_SCREEN_FIELD_COPY_KEYS).toContain('inlineHelpText');
 
-      const message = parse({ lead_conversion: { screens: { s1: { fields: { f: { help: 'x' } } } } } })
-        .error?.issues.find((i) => i.code === 'unrecognized_keys')?.message ?? '';
-      expect(message).toContain('would translate nothing');
-      expect(message).toContain('inlineHelpText');
-      // …and it must not be re-pointed at `placeholder`, which means something else.
-      expect(message).not.toContain('`help` → `placeholder`');
-      // The card that moved this reason is named in the code comment above the
-      // string, never IN the string: this text is printed AT the author, who
-      // has no tracker, so `#NNNN` resolves to nothing (check:doc-authoring).
-      expect(message).not.toMatch(/#\d{3,5}\b/);
+      const result = parse({ lead_conversion: { screens: { s1: { fields: { f: { inlineHelpText: '介于 1 到 10 之间' } } } } } });
+      expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+    });
+
+    it('refuses the neighbouring help spellings by name, with the rename to `inlineHelpText`', () => {
+      // `help` is right on an object FIELD translation, `helpText` on an action
+      // param; here each is refused (`.strict()`) and the message names the key
+      // that would have been read. `description` rides the same rename: an object
+      // field uses it for tooltip copy, and a screen field has no description.
+      for (const spelling of ['help', 'helpText', 'hint', 'tooltip', 'description']) {
+        const issue = parse({ lead_conversion: { screens: { s1: { fields: { f: { [spelling]: 'x' } } } } } })
+          .error?.issues.find((i) => i.code === 'unrecognized_keys');
+        expect(issue, spelling).toBeDefined();
+        expect(issue?.message).toContain(`\`${spelling}\` → \`inlineHelpText\``);
+        // …never re-pointed at `placeholder`, the in-input hint, a different string.
+        expect(issue?.message).not.toContain('→ `placeholder`');
+      }
     });
 
     it('says why select-option labels are not translatable here', () => {

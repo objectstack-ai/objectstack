@@ -290,6 +290,7 @@ ObjectSchema.create({
     // Raw (non-factory) spelling — the map key is the field name.
     rating: {
       type: 'select',
+      options: [{ label: 'Hot', value: 'hot' }, { label: 'Cold', value: 'cold' }],
       visibleWhen: P`record.status == 'qualified'`,
     },
   },

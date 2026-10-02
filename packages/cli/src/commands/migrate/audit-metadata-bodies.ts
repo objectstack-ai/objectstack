@@ -136,10 +136,16 @@ export default class MigrateAuditMetadataBodies extends Command {
 
     let stack;
     try {
+      // [#21349] The dry run boots READ-ONLY — the same boot `os migrate plan`
+      // takes: `deferSchemaDdl` holds schema DDL back and suppresses the
+      // artifact's inline seed loader (whose upserts rewrite every seeded row
+      // of the app's tables), and `readOnlyProbe` keeps a missing sqlite file
+      // from being created. `--apply` keeps the plain boot, unchanged.
       stack = await bootSchemaStack({
         jsonOutput: flags.json,
         databaseUrl: flags['database-url'],
         extraPlugins: await buildDataMigrationPlugins({ audit: true }),
+        ...(apply ? {} : { deferSchemaDdl: true, readOnlyProbe: true }),
       });
     } catch (error: any) {
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }

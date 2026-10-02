@@ -2153,7 +2153,7 @@ describe('FieldSchema — authored `radio` + `multiple: true` is REFUSED (#11437
   });
 
   it('radio + authored `multiple: false` stays accepted — the refusal reads only the authored `true`', () => {
-    const f = FieldSchema.parse({ name: 'severity', type: 'radio', multiple: false });
+    const f = FieldSchema.parse({ name: 'severity', type: 'radio', multiple: false, options: [{ label: 'Low', value: 'low' }] });
     expect(f.multiple).toBe(false);
   });
 
@@ -2707,5 +2707,81 @@ describe('Relationship target — `reference` required on lookup/master_detail (
       ...Field.masterDetail('crm_order', { label: 'Order' }),
     });
     expect(viaMasterDetail.success).toBe(true);
+  });
+});
+
+describe('Choice source — a `select` / `radio` needs `options` or `picklist` (ADR-0078 rule at the door)', () => {
+  // The `reference` precedent applied to the single-choice types: a choice with
+  // no option source parses nowhere. A missing key and `options: []` are the
+  // SAME hole (the completeness predicate the door applies reads "no entries"),
+  // so each gets its own pin per type; a `picklist` reference IS a source.
+  const ONE_OPTION = [{ label: 'Open', value: 'open' }];
+  const choiceIssue = (input: Record<string, unknown>) => {
+    const result = FieldSchema.safeParse(input);
+    expect(result.success).toBe(false);
+    return result.error!.issues.find((i) => i.path.join('.') === 'options');
+  };
+
+  it.each(['select', 'radio'] as const)(
+    'refuses a %s with neither key, prescribing both on the `options` path',
+    (type) => {
+      const issue = choiceIssue({ name: 'status', label: 'Status', type });
+      expect(issue).toBeDefined();
+      expect(issue!.code).toBe('custom');
+      expect(issue!.message).toContain(`\`${type}\``);
+      expect(issue!.message).toMatch(/non-empty `options` list/);
+      expect(issue!.message).toMatch(/`picklist: '<name>'`/);
+    },
+  );
+
+  it.each(['select', 'radio'] as const)(
+    'refuses a %s with an empty `options: []` — a spelled-out missing list, same issue and message',
+    (type) => {
+      const issue = choiceIssue({ name: 'status', label: 'Status', type, options: [] });
+      expect(issue).toBeDefined();
+      expect(issue!.code).toBe('custom');
+      expect(issue!.message).toMatch(/non-empty `options` list/);
+    },
+  );
+
+  it.each(['select', 'radio'] as const)('accepts a %s with one option (positive control)', (type) => {
+    const result = FieldSchema.safeParse({ name: 'status', label: 'Status', type, options: ONE_OPTION });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.options).toEqual(ONE_OPTION);
+  });
+
+  it.each(['select', 'radio'] as const)('accepts a %s with a `picklist` and no `options` (positive control)', (type) => {
+    const result = FieldSchema.safeParse({ name: 'industry', label: 'Industry', type, picklist: 'industry' });
+    expect(result.success).toBe(true);
+  });
+
+  it.each(['multiselect', 'checkboxes', 'tags'] as const)(
+    'leaves the multi-option type %s parsing with neither key — free-form or a warning, never this refusal',
+    (type) => {
+      expect(FieldSchema.safeParse({ name: 'labels', label: 'Labels', type }).success).toBe(true);
+      expect(FieldSchema.safeParse({ name: 'labels', label: 'Labels', type, options: [] }).success).toBe(true);
+    },
+  );
+
+  it('refuses at the DOCUMENT level too, located at the field', () => {
+    const result = ObjectSchema.safeParse({
+      name: 'crm_ticket',
+      label: 'Ticket',
+      fields: { status: { name: 'status', label: 'Status', type: 'select' } },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'fields.status.options');
+    expect(issue).toBeDefined();
+    expect(issue!.code).toBe('custom');
+  });
+
+  it('helper builders that carry options pass; `Field.select([])` emits `options: []` and reaches the refusal', () => {
+    expect(FieldSchema.safeParse({ name: 'status', ...Field.select({ options: ONE_OPTION, label: 'Status' }) }).success)
+      .toBe(true);
+    expect(FieldSchema.safeParse({ name: 'status', ...Field.select(['Open', 'Closed'], { label: 'Status' }) }).success)
+      .toBe(true);
+    const empty = Field.select([], { label: 'Status' });
+    expect(empty.options).toEqual([]);
+    expect(choiceIssue({ name: 'status', ...empty })?.code).toBe('custom');
   });
 });
