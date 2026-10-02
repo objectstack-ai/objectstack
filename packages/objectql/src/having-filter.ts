@@ -801,11 +801,14 @@ function crossClassReason(
  * referent first and the target second, as there. The type is the declared
  * one, and `, multiple` follows it when the declaration says so.
  *
- * ⚠️ PENDING: this is a copy of `driver-sql`'s sentence, which lives inline
- * there (twice) and is exported from nowhere this package can import. Where the
- * one shared copy should live is an open question to the seat, not settled
- * here; until it is, the `packages/rest` twin pins read `driver-sql`'s own
- * diagnostic and compare it with what this prints, so the two cannot drift.
+ * The sentence is `driver-sql`'s, kept here as a local copy beside
+ * {@link crossClassReason}, its precedent: the cross-class sentence is this
+ * package's copy of `driver-sql`'s too, which lives inline there and is
+ * exported from nowhere this package can import (the seat's ruling on #21299,
+ * comment 5952549615). The guard is the `packages/rest` twin pin
+ * (`aggregation-filter-where-doors.test.ts`): it reads the real `where` twin's
+ * diagnostic from `driver-sql` and asserts that each engine position's reason
+ * equals it verbatim, so a drift in either copy turns it red.
  */
 function noClassReason(
   field: string,
