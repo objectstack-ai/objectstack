@@ -1,7 +1,7 @@
 ---
 title: System lifecycle — from boot to ready state
 navTitle: System Lifecycle
-description: Boot sequence, plugin installation, zero-downtime upgrades, and rollback strategies
+description: Boot sequence, schema evolution and graceful shutdown as implemented today, plus the design intent for plugin installation, zero-downtime upgrades, and rollback
 ---
 
 import { Zap, Power, Package, RefreshCw, ArrowLeft, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
@@ -13,10 +13,18 @@ behaviour. The plugin upgrade flow (`objectstack upgrade @vendor/pkg
 --strategy blue-green`, multi-instance rolling upgrades, automatic backup &
 rollback) describes the **target** lifecycle for hosted ObjectStack — today it is
 partially implemented in the control plane and exposed only on hosted plans.
-Treat those command snippets as design intent.
+Treat those command snippets as design intent: the `os` CLI has no `upgrade`
+command, so no `objectstack upgrade …` line on this page is runnable.
+
+**Code-plugin installation is not implemented.** The `os plugin` group is
+`build`, `sign` and `publish` only; there is no `os plugin install`, `enable`
+or `test`. [ADR-0025](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0025-plugin-package-distribution.md)
+records the install half (download, verify, materialize, load) as not yet
+implemented; see [Plugin Installation](#plugin-installation) for what an author
+does today.
 </Callout>
 
-ObjectStack manages the complete **lifecycle** of the platform runtime—from initial boot to plugin installation, upgrades, and rollbacks. Every operation is **declarative**, **idempotent**, and **auditable**.
+ObjectStack manages the complete **lifecycle** of the platform runtime—from initial boot through schema evolution and graceful shutdown, and describes the design intent for plugin installation, upgrades, and rollbacks. The boot sequence is implemented as described; the installation and upgrade flows are design intent (see the callout above).
 
 ## Boot Sequence
 
@@ -186,12 +194,21 @@ class AppPlugin implements Plugin {
 
 ## Plugin Installation
 
-Installing a plugin is a **multi-step transaction**. If any step fails, the entire installation rolls back.
+<Callout type="warn">
+**Not implemented.** Installing a code plugin is a design that
+[ADR-0025](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0025-plugin-package-distribution.md)
+records but the platform does not yet ship: the install half (download,
+verify, materialize, load) has no command and no runtime path. The sections
+below up to *Upgrades* describe that design, not a command you can run. See
+[What an author does today](#what-an-author-does-today).
+</Callout>
 
-### Installation Flow
+The design is that installing a plugin is a **multi-step transaction**: if any step fails, the entire installation rolls back.
+
+### Installation Flow (design)
 
 ```typescript
-// Command: objectstack plugin install @vendor/salesforce@3.2.1
+// Design sketch (ADR-0025). No `os` command runs this flow today.
 
 async function installPlugin(packageName: string, version: string) {
   const transaction = await db.beginTransaction();
@@ -243,9 +260,9 @@ async function installPlugin(packageName: string, version: string) {
 }
 ```
 
-### Installation States
+### Installation States (design)
 
-A plugin progresses through these states:
+A plugin would progress through these states:
 
 ```mermaid
 stateDiagram-v2
@@ -284,7 +301,7 @@ async function resolveDependencies(
     if (!installed) {
       throw new Error(
         `Dependency ${pkg} is not installed. ` +
-        `Install it first: objectstack plugin install ${pkg}`
+        `Install it first.`
       );
     }
     
@@ -350,58 +367,26 @@ transitions (this page, above), not code hooks; boot-time code goes in
 `init`/`start`.
 </Callout>
 
-### Installation CLI
+### What an author does today
 
-```bash
-# Install latest version
-objectstack plugin install @vendor/salesforce
+There is no install command for a code plugin. What exists, per the
+[CLI reference](https://github.com/objectstack-ai/objectstack/blob/main/packages/cli/README.md):
 
-# Install specific version
-objectstack plugin install @vendor/salesforce@3.2.1
+- **Runtime plugins** declared in `objectstack.config.ts` `plugins` are loaded
+  automatically by `os serve` / `os dev`, and are bundled into the build
+  artifact. To distribute a build, publish it as a package with
+  `os package publish`.
+- **Packages** are installed into a running runtime with `os package install`
+  (a catalog id or a compiled artifact file), or into an environment by
+  publishing with `os package publish … --env <env-id> --install`.
+- **Code-bearing plugins** (a directory carrying an `objectstack.plugin.json`
+  manifest) are packaged and shipped with `os plugin build`, `os plugin sign`
+  and `os plugin publish`. The group stops there: ADR-0025 records the install
+  half as not yet implemented, so a published `.osplugin` has no `os` command
+  that installs it.
 
-# Install from local directory (development)
-objectstack plugin install ./plugins/my-plugin
-
-# Install with options
-objectstack plugin install @vendor/salesforce \
-  --enable \                    # Auto-enable after install
-  --config salesforce.apiKey=abc123  # Set config during install
-  
-# Dry run (validate without installing)
-objectstack plugin install @vendor/salesforce --dry-run
-
-# Force reinstall (remove + install)
-objectstack plugin install @vendor/salesforce --force
-```
-
-### Installation Output
-
-```
-Installing @vendor/salesforce@3.2.1...
-
-[1/8] Downloading package...         ✓ 1.2 MB in 0.5s
-[2/8] Validating manifest...         ✓ 
-[3/8] Checking dependencies...       ✓ 
-  → @objectstack/core@2.0.0          ✓ (satisfied)
-  → @vendor/http@1.5.0               ✓ (satisfied)
-[4/8] Creating backup...             ✓ backup-20240115-102301.tar.gz
-[5/8] Applying schema changes...     ✓ 3 objects created
-[6/8] Registering UI metadata...     ✓ 7 views registered
-[7/8] Running post-install hook...   ✓ 
-[8/8] Finalizing installation...     ✓ 
-
-✓ Successfully installed @vendor/salesforce@3.2.1
-
-Next steps:
-  1. Configure API credentials:
-     objectstack config set salesforce.apiKey <YOUR_KEY>
-     
-  2. Enable the plugin:
-     objectstack plugin enable @vendor/salesforce
-     
-  3. Test connection:
-     objectstack plugin test @vendor/salesforce
-```
+See [Plugin System](/docs/plugins) for how kernel plugins are created and
+registered.
 
 ## Upgrades
 
@@ -585,8 +570,8 @@ whatever Knex / driver tooling your team uses to apply the `up()`.
 
 ### Upgrade Configuration
 
-The behaviour around backups, rollback, and health checks during an
-`objectstack upgrade` is controlled by the host runtime / hosting platform —
+The behaviour around backups, rollback, and health checks during a
+design-intent `objectstack upgrade` is controlled by the host runtime / hosting platform —
 not by a top-level `defineStack` key today. Hosted ObjectStack and self-hosted
 ObjectStack expose this through environment-specific configuration:
 
@@ -884,11 +869,14 @@ Always validate upgrades in a staging environment that mirrors production.
 
 ```bash
 # Staging
+# Design intent: `os` has no `upgrade` command
 objectstack upgrade --dry-run  # Preview changes
 objectstack upgrade            # Apply upgrade
-objectstack test               # Run integration tests
 
-# If tests pass → Production
+# `os test` is real: it runs qa/*.test.json scenarios against a running server
+os test --url https://staging.example.com
+
+# If tests pass → Production (design intent)
 objectstack upgrade --production
 ```
 
@@ -924,7 +912,7 @@ Plugin authors must document breaking changes in CHANGELOG.md.
 
 ObjectStack lifecycle management provides:
 - **Deterministic Boot:** 7-phase boot sequence with clear error handling
-- **Atomic Installations:** Transactions ensure all-or-nothing plugin installs
+- **Atomic Installations (design):** ADR-0025 calls for transactional, all-or-nothing plugin installs; code-plugin installation is not implemented yet
 - **Zero-Downtime Upgrades:** Blue-green and rolling strategies for production
 - **Automatic Rollback:** Failed upgrades auto-revert to previous version
 - **Health Monitoring:** Built-in health checks validate system state
