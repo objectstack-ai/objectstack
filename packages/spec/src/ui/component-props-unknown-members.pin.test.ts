@@ -28,7 +28,7 @@
  * - §4 THE MEMBERS THIS CARD TYPES: `navigation` on `object-map`,
  *   `object-gantt` and `object-tree` is the list view's
  *   `NavigationConfigSchema`, by identity, and refuses an off-shape value with
- *   the code AND the path.
+ *   the code AND the path; its ADR-0087 D3 entry is registered.
  *
  * ## The STAGED reason is debt, not a verdict
  *
@@ -52,6 +52,7 @@ import {
   pageComponentSlotPositions,
 } from './component.zod';
 import { NavigationConfigSchema } from './view.zod';
+import { MIGRATIONS_BY_MAJOR } from '../migrations/registry';
 
 // ───────────────────────────────────────────────────────────────────────────
 // The walk
@@ -419,4 +420,8 @@ describe('§4 `navigation` on object-map / object-gantt / object-tree is the lis
       expect(r.success && r.data).not.toHaveProperty('navigation');
     });
   }
+
+  it('is registered as the ADR-0087 D3 entry step 18 carries', () => {
+    expect(MIGRATIONS_BY_MAJOR[18]!.semantic.map((s) => s.id)).toContain('ui-object-map-gantt-tree-navigation-typed');
+  });
 });
