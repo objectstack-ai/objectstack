@@ -30,7 +30,12 @@
  *  7. with no crypto provider a save carrying a credential is refused before
  *     anything is written;
  *  8. deleting the flow drops its credential — a new flow of the same name
- *     inherits nothing.
+ *     inherits nothing;
+ *  9. Q3 A: a packaged literal hook verifies on its literal when the
+ *     credential store is unreachable — the channel is asked only for a
+ *     position it holds;
+ * 10. the control: a HELD hook secret whose store becomes unreachable is
+ *     answered 503, never verified against the literal.
  *
  * The inbound door is the real `ApiTrigger` (`@objectstack/trigger-api`),
  * registered on the real engine with an in-memory queue, so `202` means the
@@ -53,7 +58,8 @@ const SIGN_V1 = 'pin-dogfood-sign-v1-e613';
 const LEGACY_V1 = 'pin-dogfood-legacy-v1-41bb';
 const LEGACY_V2 = 'pin-dogfood-legacy-v2-0c95';
 const NO_PROVIDER = 'pin-dogfood-noprov-77a3';
-const ALL = [HOOK_V1, HOOK_V2, HOOK_DRAFT, SIGN_V1, LEGACY_V1, LEGACY_V2, NO_PROVIDER];
+const PACKAGED_LITERAL = 'pin-dogfood-packaged-3d6a';
+const ALL = [HOOK_V1, HOOK_V2, HOOK_DRAFT, SIGN_V1, LEGACY_V1, LEGACY_V2, NO_PROVIDER, PACKAGED_LITERAL];
 const SYSTEM = { isSystem: true } as const;
 
 function inbound(name: string, secrets: { hook?: string; sign?: string } = {}, label = 'Inbound probe') {
@@ -320,5 +326,50 @@ describe('[#20790] flow credentials live in the write-only channel, not the stor
         const again = await stack.apiAs(token, 'PUT', `/meta/flow/${FLOW}`, inbound(FLOW));
         expect(again.status).toBe(422);
         expect(await channelRows(FLOW)).toEqual([]);
+    });
+
+    /**
+     * Tests 9 and 10 swap the engine's credential source for a channel of the
+     * plugin's own class whose store is unreachable — the composition with no
+     * data engine — and restore the live one after.
+     */
+    async function withSource<T>(source: unknown, run: () => Promise<T>): Promise<T> {
+        const live = automation.flowCredentialSource;
+        automation.setFlowCredentialSource(source);
+        try {
+            return await run();
+        } finally {
+            automation.setFlowCredentialSource(live);
+        }
+    }
+    const channelClass = () => automation.flowCredentialSource.constructor as new (resolveEngine: () => unknown) => any;
+
+    it('9 — Q3 A: a packaged literal hook verifies on its literal when the credential store is unreachable', async () => {
+        const unreachable = new (channelClass())(() => undefined);
+        await withSource(unreachable, async () => {
+            automation.registerFlow('zz_channel_packaged', inbound('zz_channel_packaged', { hook: PACKAGED_LITERAL }));
+            expect(await post('zz_channel_packaged', PACKAGED_LITERAL)).toBe(202);
+            expect(await post('zz_channel_packaged', HOOK_V1)).toBe(401);
+        });
+    });
+
+    it('10 — the control: a held hook secret whose store becomes unreachable answers 503, never the literal', async () => {
+        let reachable: unknown = ql;
+        const channel = new (channelClass())(() => reachable);
+        await channel.store({ name: 'zz_channel_heldpack', state: 'active', body: inbound('zz_channel_heldpack', { hook: HOOK_V2 }) });
+        expect(channel.holds('zz_channel_heldpack', 'start', 'secret')).toBe(true);
+        try {
+            await withSource(channel, async () => {
+                automation.registerFlow('zz_channel_heldpack', inbound('zz_channel_heldpack', { hook: PACKAGED_LITERAL }));
+                expect(await post('zz_channel_heldpack', HOOK_V2)).toBe(202);
+                reachable = undefined;
+                expect(await post('zz_channel_heldpack', PACKAGED_LITERAL)).toBe(503);
+                expect(await post('zz_channel_heldpack', HOOK_V2)).toBe(503);
+            });
+        } finally {
+            reachable = ql;
+            await channel.prune({ name: 'zz_channel_heldpack', liveStates: new Set() });
+        }
+        expect(await channelRows('zz_channel_heldpack')).toEqual([]);
     });
 });

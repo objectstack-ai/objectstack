@@ -27,7 +27,10 @@ import {
     FLOW_CREDENTIAL_UNAVAILABLE_STATUS,
     FlowCredentialChannel,
     FlowCredentialChannelRefusal,
+    FlowCredentialUnresolvableError,
 } from './flow-credential-channel.js';
+import { AutomationEngine } from './engine.js';
+import type { FlowTriggerBinding } from './engine.js';
 import { redactFlowCredentials } from './flow-credential-projection.js';
 import { SysFlowCredential } from './sys-flow-credential.object.js';
 
@@ -36,6 +39,7 @@ const SIGN = 'pin-channel-sign-3e9b';
 const NESTED = 'pin-channel-nested-5d20';
 const ROTATED = 'pin-channel-rotated-c4f1';
 const DRAFTED = 'pin-channel-drafted-08aa';
+const PACKAGED = 'pin-channel-packaged-literal-e2b6';
 const ALL = [HOOK, SIGN, NESTED, ROTATED, DRAFTED];
 const SYSTEM = { isSystem: true } as const;
 
@@ -297,5 +301,50 @@ describe('[#20790] no crypto provider ⇒ the save is refused before anything is
 
         // A body that carries no credential still saves: nothing needs the provider.
         await expect(channel.store({ name: 'pin_inbound', state: 'active', body: inbound() })).resolves.toBeTruthy();
+    });
+});
+
+describe('[#20790] Q3 A at the inbound door: a packaged literal asks the channel only for a held position', () => {
+    /** An engine whose `api` trigger records the binding it is handed, with `channel` as its credential source. */
+    function engineOn(channel: FlowCredentialChannel): { engine: AutomationEngine; started: FlowTriggerBinding[] } {
+        const engine = new AutomationEngine({ debug() {}, info() {}, warn() {}, error() {} } as never);
+        const started: FlowTriggerBinding[] = [];
+        engine.registerTrigger({ type: 'api', start: (b) => { started.push(b); }, stop: () => {} });
+        engine.setFlowCredentialSource(channel);
+        return { engine, started };
+    }
+    const packaged = (secret: string) => ({
+        name: 'pin_packaged',
+        label: 'Pin packaged',
+        type: 'api',
+        status: 'active',
+        nodes: [
+            { id: 'begin', type: 'start', label: 'Start', config: { hookId: 'h1', secret } },
+            { id: 'finish', type: 'end', label: 'End' },
+        ],
+        edges: [{ id: 'e1', source: 'begin', target: 'finish' }],
+    });
+
+    it('with no reachable store, the literal verifies and the channel is never asked', async () => {
+        const channel = new FlowCredentialChannel(() => undefined);
+        const { engine, started } = engineOn(channel);
+        engine.registerFlow('pin_packaged', packaged(PACKAGED));
+        expect(started).toHaveLength(1);
+        expect(await started[0]!.resolveSecret!()).toBe(PACKAGED);
+    });
+
+    it('the control: a HELD position whose store becomes unreachable rejects, never answers the literal', async () => {
+        const ql = await boot();
+        let reachable: ObjectQL | undefined = ql;
+        const channel = new FlowCredentialChannel(() => reachable as never);
+        await channel.store({ name: 'pin_packaged', state: 'active', body: packaged(HOOK) });
+        expect(channel.holds('pin_packaged', 'begin', 'secret')).toBe(true);
+        const { engine, started } = engineOn(channel);
+        engine.registerFlow('pin_packaged', packaged(PACKAGED));
+        // Held and readable: the channel row wins over the literal.
+        expect(await started[0]!.resolveSecret!()).toBe(HOOK);
+
+        reachable = undefined;
+        await expect(started[0]!.resolveSecret!()).rejects.toBeInstanceOf(FlowCredentialUnresolvableError);
     });
 });

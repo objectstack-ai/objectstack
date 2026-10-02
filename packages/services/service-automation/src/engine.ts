@@ -2273,7 +2273,10 @@ export type PackagedFlowSource = (name: string) => string | undefined;
  * — the registration check and the binding are synchronous. `resolve` reads
  * the value at the moment of use and never caches it: `undefined` means the
  * channel holds nothing there; a held credential that does not come back
- * THROWS, and is never read as "no credential".
+ * THROWS, and is never read as "no credential". With no reachable store
+ * `resolve` cannot tell held from not, so it throws too — which is why every
+ * caller with a fallback (a packaged literal) asks `resolve` only for a
+ * position `holds` reports.
  */
 export interface FlowCredentialSource {
     holds(flowName: string, nodeId: string, key: string): boolean;
@@ -4799,10 +4802,18 @@ export class AutomationEngine implements IAutomationService {
      *
      * Q3 A, as ruled: a packaged flow's literal stays its author's source of
      * truth, and at verification the channel's row wins where one exists. So
-     * a LITERAL start-node secret yields a reader that asks the channel first
-     * and falls back to the literal; a WITHHELD one (the key absent — every
+     * a LITERAL start-node secret yields a reader that asks the channel only
+     * when the channel's index says it holds that position (the `http` node's
+     * shape — both doors read one rule), and otherwise answers the literal
+     * without touching the channel; a WITHHELD one (the key absent — every
      * flow stored through the metadata save door) yields one only when the
      * channel holds it; a cleared or unusable one yields none.
+     *
+     * A HELD secret that does not come back still rejects — it is never
+     * verified against the literal. The index is per process: a row written
+     * after its last refresh (boot, `kernel:ready`, `metadata:reloaded`, every
+     * channel write in this process) loses to the literal until the next
+     * refresh, exactly as at the `http` node.
      */
     private hookSecretResolver(
         flowName: string,
@@ -4817,7 +4828,10 @@ export class AutomationEngine implements IAutomationService {
             return literal === undefined ? undefined : async () => literal;
         }
         if (literal === undefined && !source.holds(flowName, startNodeId, FLOW_HOOK_SECRET_KEY)) return undefined;
-        return async () => (await source.resolve(flowName, startNodeId, FLOW_HOOK_SECRET_KEY)) ?? literal;
+        return async () => {
+            if (literal !== undefined && !source.holds(flowName, startNodeId, FLOW_HOOK_SECRET_KEY)) return literal;
+            return (await source.resolve(flowName, startNodeId, FLOW_HOOK_SECRET_KEY)) ?? literal;
+        };
     }
 
     /**
