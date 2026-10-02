@@ -24,7 +24,9 @@
 // on another package's object it expands under the container's own name —
 // `<object>.<container name>`, the spec's qualified ViewItem spelling. The two
 // doors answer the same row for `<object>.default`: the packaged one,
-// unchanged. Control: the sanctioned override, a write to
+// unchanged. The seat's answer extends it: every keyed member expands under
+// `<object>.<container name>.<key>`, and such a container never claims the
+// object's default, so the object keeps ONE list default — the showcase's. Control: the sanctioned override, a write to
 // `showcase_task.default` by name, still reaches both doors — run FIRST, on
 // the pristine stack, so it never reads another case's residue.
 //
@@ -47,6 +49,8 @@ interface ViewRow {
   name: string;
   label?: unknown;
   isDefault?: boolean;
+  viewKind?: string;
+  _diagnostics?: { valid?: boolean };
   _packageId?: string;
   _provenance?: string;
   config?: { columns?: unknown[] };
@@ -98,6 +102,12 @@ describe('dogfood: a bare-list container on another package\'s object leaves its
     expectPackagedDefault(read);
     expect({ label: read.label, config: read.config, _packageId: read._packageId })
       .toEqual({ label: listed[0].label, config: listed[0].config, _packageId: listed[0]._packageId });
+  };
+
+  /** The object keeps ONE list default — the showcase's own. */
+  const expectOnlyThePackagedListDefault = async () => {
+    const defaults = (await objectDoor()).filter((r) => r.viewKind === 'list' && r.isDefault);
+    expect(defaults.map((r) => r.name), 'one list default, the packaged one').toEqual([DEFAULT]);
   };
 
   it('control, first: the sanctioned override — a write to showcase_task.default by name — reaches both doors', async () => {
@@ -155,6 +165,8 @@ describe('dogfood: a bare-list container on another package\'s object leaves its
     expect(own[0].config?.columns).toEqual(PROBE_COLUMNS);
     expect(own[0]._packageId).toBe(REPAIR);
     expect(own[0]._provenance).not.toBe('package');
+    expect(own[0].isDefault, 'a container on another package\'s object claims no default').toBeUndefined();
+    await expectOnlyThePackagedListDefault();
     // The by-name read answers the container's own name with its row.
     expect((await byName('os_qa_shadow_probe')).list).toEqual(probe('os_qa_shadow_probe').list);
 
@@ -173,8 +185,47 @@ describe('dogfood: a bare-list container on another package\'s object leaves its
     expect(own).toHaveLength(1);
     expect(own[0].config?.columns).toEqual(PROBE_COLUMNS);
     expect(own[0]._packageId, 'a package-less container lends its view no package').toBeUndefined();
+    expect(own[0].isDefault).toBeUndefined();
+    await expectOnlyThePackagedListDefault();
 
     const deleted = await stack.apiAs(token, 'DELETE', '/meta/view/os_qa_shadow_probe2');
+    expect(deleted.status).toBe(200);
+    await expectDefaultUnchangedOnBothDoors();
+  });
+
+  it('a keyed member (listViews.in_progress) leaves the packaged showcase_task.in_progress alone, on both doors', async () => {
+    const SHIPPED = `${OBJECT}.in_progress`;
+    const before = named(await objectDoor(), SHIPPED);
+    expect(before).toHaveLength(1);
+    expect(before[0]._packageId).toBe(SHOWCASE);
+    const readBefore = await byName(SHIPPED);
+
+    const saved = await stack.apiAs(token, 'PUT', `/meta/view/os_qa_keyed_probe?package=${REPAIR}`, {
+      name: 'os_qa_keyed_probe',
+      object: OBJECT,
+      listViews: { in_progress: { label: 'Probe keyed', type: 'grid', columns: ['title'] } },
+    });
+    expect(saved.status).toBe(200);
+
+    const after = named(await objectDoor(), SHIPPED);
+    expect(after, 'exactly one item answers showcase_task.in_progress on the object door').toHaveLength(1);
+    expect({ label: after[0].label, config: after[0].config, _packageId: after[0]._packageId })
+      .toEqual({ label: before[0].label, config: before[0].config, _packageId: SHOWCASE });
+    const readAfter = await byName(SHIPPED);
+    expect({ label: readAfter.label, config: readAfter.config, _packageId: readAfter._packageId })
+      .toEqual({ label: readBefore.label, config: readBefore.config, _packageId: SHOWCASE });
+
+    // Served under the container's own name, carrying its own package.
+    const own = named(await objectDoor(), `${OBJECT}.os_qa_keyed_probe.in_progress`);
+    expect(own).toHaveLength(1);
+    expect(own[0].label).toBe('Probe keyed');
+    expect(own[0]._packageId).toBe(REPAIR);
+    expect(own[0]._provenance).not.toBe('package');
+    expect(own[0]._diagnostics?.valid).toBe(true);
+    expect(own[0].isDefault).toBeUndefined();
+    await expectOnlyThePackagedListDefault();
+
+    const deleted = await stack.apiAs(token, 'DELETE', `/meta/view/os_qa_keyed_probe?package=${REPAIR}`);
     expect(deleted.status).toBe(200);
     await expectDefaultUnchangedOnBothDoors();
   });
