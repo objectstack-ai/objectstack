@@ -2,6 +2,8 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { lowerFilterCondition, type FilterCondition } from '@objectstack/spec/data';
+
 import { matchesFilterCondition as m } from './matches-filter';
 
 const rec = {
@@ -137,31 +139,52 @@ describe('matchesFilterCondition — FAIL CLOSED', () => {
   });
 });
 
-describe('matchesFilterCondition — calendar-day upper bounds (ADR-0053 D-D, #3777)', () => {
-  // A `check` policy of this shape on a datetime post-image used to DENY every
-  // write made after 00:00 of the bound day — the write-side twin of the
-  // read-side data loss #3777 fixed. The four other filter backends already
-  // share this rule; this evaluator was the last one that disagreed.
+describe('matchesFilterCondition — calendar-day upper bounds (ADR-0053 D-D1, #3777, #21242)', () => {
+  // [#21242] This face keeps no whole-day copy of the bare-day upper bound any
+  // more (ADR-0053 D-D1 items 5 and 9; ruling A on #21109). The whole day is
+  // applied ONCE, at the seams that feed it: the RLS compile seam lowers its
+  // policy filters with the shared `lowerFilterCondition` on the declared
+  // `datetime` columns, the engine's aggregate seam does the same for
+  // `having` and `aggregations[i].filter`, and the RLS write check puts a
+  // declared `date` column into its stored calendar-day form. So each
+  // whole-day assertion below is made on what a seam hands this face, and a
+  // bound that reaches it unlowered is compared as written.
   const at = (created_at: string) => ({ created_at });
+  /** What a typed seam hands this face: `created_at` is the declared `datetime` column. */
+  const seam = (filter: Record<string, unknown>) =>
+    lowerFilterCondition(filter as FilterCondition, { isDatetimeColumn: (column) => column === 'created_at' });
 
-  it('a bare-day $lte admits the whole day', () => {
-    expect(m(at('2026-07-28T00:00:00.000Z'), { created_at: { $lte: '2026-07-28' } })).toBe(true);
-    expect(m(at('2026-07-28T09:15:00.000Z'), { created_at: { $lte: '2026-07-28' } })).toBe(true);
-    expect(m(at('2026-07-28T23:59:59.999Z'), { created_at: { $lte: '2026-07-28' } })).toBe(true);
+  it('a bare-day $lte is compared as written — an instant on that day sorts above the bare day', () => {
+    // These three were admitted by the deleted copy; the seam now carries them (next case).
+    expect(m(at('2026-07-28T00:00:00.000Z'), { created_at: { $lte: '2026-07-28' } })).toBe(false);
+    expect(m(at('2026-07-28T09:15:00.000Z'), { created_at: { $lte: '2026-07-28' } })).toBe(false);
+    expect(m(at('2026-07-28T23:59:59.999Z'), { created_at: { $lte: '2026-07-28' } })).toBe(false);
+    expect(m(at('2026-07-27T23:59:59.999Z'), { created_at: { $lte: '2026-07-28' } })).toBe(true);
+  });
+
+  it('…the seam\'s lowering admits the whole day', () => {
+    expect(seam({ created_at: { $lte: '2026-07-28' } })).toEqual({ created_at: { $lt: '2026-07-29' } });
+    expect(m(at('2026-07-28T00:00:00.000Z'), seam({ created_at: { $lte: '2026-07-28' } }))).toBe(true);
+    expect(m(at('2026-07-28T09:15:00.000Z'), seam({ created_at: { $lte: '2026-07-28' } }))).toBe(true);
+    expect(m(at('2026-07-28T23:59:59.999Z'), seam({ created_at: { $lte: '2026-07-28' } }))).toBe(true);
   });
 
   it('…and stops at the next day', () => {
+    expect(m(at('2026-07-29T00:00:00.000Z'), seam({ created_at: { $lte: '2026-07-28' } }))).toBe(false);
     expect(m(at('2026-07-29T00:00:00.000Z'), { created_at: { $lte: '2026-07-28' } })).toBe(false);
   });
 
-  it('a plain calendar-day value is unchanged (string ordering is equivalent)', () => {
+  it('a stored calendar day is unchanged (the `date` storage form orders as the day)', () => {
+    // A `date` column is not lowered: its stored text orders exactly as the day.
+    expect(seam({ signed_on: { $lte: '2026-07-28' } })).toEqual({ signed_on: { $lte: '2026-07-28' } });
     expect(m({ signed_on: '2026-07-28' }, { signed_on: { $lte: '2026-07-28' } })).toBe(true);
     expect(m({ signed_on: '2026-07-29' }, { signed_on: { $lte: '2026-07-28' } })).toBe(false);
   });
 
-  it('a full-ISO bound keeps exact-instant semantics — never widened', () => {
+  it('a full-ISO bound keeps exact-instant semantics — never widened, by the face or the seam', () => {
     expect(m(at('2026-07-28T09:15:00.000Z'), { created_at: { $lte: '2026-07-28T12:00:00.000Z' } })).toBe(true);
     expect(m(at('2026-07-28T21:40:00.000Z'), { created_at: { $lte: '2026-07-28T12:00:00.000Z' } })).toBe(false);
+    expect(m(at('2026-07-28T21:40:00.000Z'), seam({ created_at: { $lte: '2026-07-28T12:00:00.000Z' } }))).toBe(false);
   });
 
   it('$gte / $gt / $lt keep their midnight anchoring', () => {
@@ -170,15 +193,19 @@ describe('matchesFilterCondition — calendar-day upper bounds (ADR-0053 D-D, #3
     expect(m(at('2026-07-28T09:15:00.000Z'), { created_at: { $lt: '2026-07-28' } })).toBe(false);
   });
 
-  it('$between inherits the rule on its max, and still bounds the min', () => {
-    expect(m(at('2026-07-28T21:40:00.000Z'), { created_at: { $between: ['2026-04-29', '2026-07-28'] } })).toBe(true);
-    expect(m(at('2026-07-29T00:00:00.000Z'), { created_at: { $between: ['2026-04-29', '2026-07-28'] } })).toBe(false);
+  it('$between is inclusive as written at both ends; the seam splits it and gives its max the whole day', () => {
+    expect(m(at('2026-07-28T21:40:00.000Z'), { created_at: { $between: ['2026-04-29', '2026-07-28'] } })).toBe(false);
+    expect(m(at('2026-07-28T21:40:00.000Z'), seam({ created_at: { $between: ['2026-04-29', '2026-07-28'] } }))).toBe(true);
+    expect(m(at('2026-07-29T00:00:00.000Z'), seam({ created_at: { $between: ['2026-04-29', '2026-07-28'] } }))).toBe(false);
+    // The min still bounds, on either reading.
     expect(m(at('2026-04-28T23:00:00.000Z'), { created_at: { $between: ['2026-04-29', '2026-07-28'] } })).toBe(false);
+    expect(m(at('2026-04-28T23:00:00.000Z'), seam({ created_at: { $between: ['2026-04-29', '2026-07-28'] } }))).toBe(false);
   });
 
   it('an impossible day is not rolled over — the bound stays as written', () => {
-    // `2026-02-30` is rejected by the primitive, so the comparison falls back
-    // to the literal `<=` rather than silently querying March 2nd.
+    // `2026-02-30` is not a calendar day, so the seam leaves it as written
+    // rather than silently querying March 2nd, and this face compares it as text.
+    expect(seam({ created_at: { $lte: '2026-02-30' } })).toEqual({ created_at: { $lte: '2026-02-30' } });
     expect(m({ signed_on: '2026-02-30' }, { signed_on: { $lte: '2026-02-30' } })).toBe(true);
     expect(m({ signed_on: '2026-03-01' }, { signed_on: { $lte: '2026-02-30' } })).toBe(false);
   });
@@ -186,26 +213,36 @@ describe('matchesFilterCondition — calendar-day upper bounds (ADR-0053 D-D, #3
   it('stays fail-closed on a null bound', () => {
     expect(m(at('2026-07-28T09:15:00.000Z'), { created_at: { $lte: null } as never })).toBe(false);
     expect(m(at('2026-07-28T09:15:00.000Z'), { created_at: { $between: ['2026-04-29', null] } as never })).toBe(false);
+    expect(m(at('2026-07-28T09:15:00.000Z'), seam({ created_at: { $between: ['2026-04-29', null] } }))).toBe(false);
   });
 
   // [#20600] 9999-12-31, the last supported day, has no next day: every instant
-  // is inside its whole-day bound. It compared against the five-digit
-  // '10000-01-01', which every '2026-…' value sorts above, so the check DENIED
-  // every write it should have admitted.
-  it('on the last supported day, every instant is admitted — string or Date', () => {
-    expect(m(at('2026-07-15T14:00:00.000Z'), { created_at: { $lte: '9999-12-31' } })).toBe(true);
-    expect(m(at('9999-12-31T23:59:59.999Z'), { created_at: { $lte: '9999-12-31' } })).toBe(true);
-    expect(m({ created_at: new Date('9999-12-31T10:00:00.000Z') }, { created_at: { $lte: '9999-12-31' } })).toBe(true);
+  // is inside its whole-day bound, so the seam drops the bound (a lone `$lte`
+  // keeps only `$null: false`, a `$between` its minimum). Unlowered, the bound
+  // is compared as written, as on every other day.
+  it('on the last supported day, the seam admits every instant — string or Date', () => {
+    expect(seam({ created_at: { $lte: '9999-12-31' } })).toEqual({ created_at: { $null: false } });
+    expect(m(at('2026-07-15T14:00:00.000Z'), seam({ created_at: { $lte: '9999-12-31' } }))).toBe(true);
+    expect(m(at('9999-12-31T23:59:59.999Z'), seam({ created_at: { $lte: '9999-12-31' } }))).toBe(true);
+    expect(m({ created_at: new Date('9999-12-31T10:00:00.000Z') }, seam({ created_at: { $lte: '9999-12-31' } }))).toBe(true);
     expect(m({ signed_on: '9999-12-31' }, { signed_on: { $lte: '9999-12-31' } })).toBe(true);
-    expect(m(at('2026-07-15T14:00:00.000Z'), { created_at: { $between: ['2026-01-01', '9999-12-31'] } })).toBe(true);
-    expect(m(at('9999-12-31T10:00:00.000Z'), { created_at: { $between: ['9999-12-31', '9999-12-31'] } })).toBe(true);
+    expect(m(at('2026-07-15T14:00:00.000Z'), seam({ created_at: { $between: ['2026-01-01', '9999-12-31'] } }))).toBe(true);
+    expect(m(at('9999-12-31T10:00:00.000Z'), seam({ created_at: { $between: ['9999-12-31', '9999-12-31'] } }))).toBe(true);
     // The min still bounds.
-    expect(m(at('2025-12-31T23:59:59.999Z'), { created_at: { $between: ['2026-01-01', '9999-12-31'] } })).toBe(false);
+    expect(m(at('2025-12-31T23:59:59.999Z'), seam({ created_at: { $between: ['2026-01-01', '9999-12-31'] } }))).toBe(false);
+  });
+
+  it('…unlowered, the last day is compared as written: text above the day, and a Date after its midnight, fall outside', () => {
+    expect(m(at('2026-07-15T14:00:00.000Z'), { created_at: { $lte: '9999-12-31' } })).toBe(true);
+    expect(m(at('9999-12-31T23:59:59.999Z'), { created_at: { $lte: '9999-12-31' } })).toBe(false);
+    expect(m({ created_at: new Date('9999-12-31T10:00:00.000Z') }, { created_at: { $lte: '9999-12-31' } })).toBe(false);
+    expect(m(at('9999-12-31T10:00:00.000Z'), { created_at: { $between: ['9999-12-31', '9999-12-31'] } })).toBe(false);
   });
 
   it('…9999-12-30 is still a bound (the control)', () => {
-    expect(m(at('9999-12-30T10:00:00.000Z'), { created_at: { $lte: '9999-12-30' } })).toBe(true);
-    expect(m(at('9999-12-31T10:00:00.000Z'), { created_at: { $lte: '9999-12-30' } })).toBe(false);
+    expect(m(at('9999-12-30T10:00:00.000Z'), seam({ created_at: { $lte: '9999-12-30' } }))).toBe(true);
+    expect(m(at('9999-12-31T10:00:00.000Z'), seam({ created_at: { $lte: '9999-12-30' } }))).toBe(false);
+    expect(m(at('9999-12-30T10:00:00.000Z'), { created_at: { $lte: '9999-12-30' } })).toBe(false);
   });
 
   it('…a value that denotes no instant keeps the comparison as written — no schema here says it is temporal', () => {
@@ -214,5 +251,13 @@ describe('matchesFilterCondition — calendar-day upper bounds (ADR-0053 D-D, #3
     expect(m({ code: true }, { code: { $lte: '9999-12-31' } })).toBe(false);
     expect(m({ code: null }, { code: { $lte: '9999-12-31' } })).toBe(false);
     expect(m({}, { code: { $lte: '9999-12-31' } })).toBe(false);
+  });
+
+  it('…and so does a number: a day string is not a number, so the comparison is false', () => {
+    // The deleted copy admitted any value that denotes an instant on the last
+    // day, and read an epoch number as one; compared as written, a number
+    // against a day string is false.
+    expect(m({ amount: 5 }, { amount: { $lte: '9999-12-31' } })).toBe(false);
+    expect(m({ amount: 5 }, { amount: { $lte: '2026-07-28' } })).toBe(false);
   });
 });

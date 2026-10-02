@@ -203,9 +203,11 @@ describe('the translation face — outcome copy rides beside `successMessage`', 
     expect(out.outcomeMessages.archived).toBe('环境 ${result.environmentId} 已归档，可在 ${result.retentionDays} 天内恢复。');
   });
 
-  it('falls back object-scoped → globalActions per outcome, then to the authored copy', () => {
+  it('reads a bound action\'s outcomes under its own object only, then falls back to the authored copy', () => {
     const out = translateAction(DELETE_ENVIRONMENT as never, bundle, { locale: 'zh-CN' }) as typeof DELETE_ENVIRONMENT;
-    expect(out.outcomeMessages.destroyed).toBe('环境 ${result.environmentId} 已销毁。');
+    // The action is bound to `sys_environment`, so its `globalActions` copy is
+    // never read — that group is for object-less actions.
+    expect(out.outcomeMessages.destroyed).toBe(DELETE_ENVIRONMENT.outcomeMessages.destroyed);
     expect(out.outcomeMessages.already_archived).toBe(DELETE_ENVIRONMENT.outcomeMessages.already_archived);
     expect(out.outcomeMessages.purge_deferred).toEqual(DELETE_ENVIRONMENT.outcomeMessages.purge_deferred);
   });
