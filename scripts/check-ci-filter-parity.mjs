@@ -1688,7 +1688,7 @@ export async function selfTest() {
     { name: 'Bar self-test', run: 'node scripts/check-bar.mjs --self-test' },
     { name: 'Build', run: 'pnpm build' },
     { name: 'Foo guard', run: 'pnpm check:foo' },
-    { name: 'Analyze', run: 'pnpm --filter @objectstack/probe analyze' },
+    { name: 'Analyze', run: 'pnpm --filter @objectstack/spec analyze' },
   ];
   const guardWorkflow = ({ core = GUARD_CORE, steps = GUARD_STEPS } = {}) => {
     const list = (xs) => xs.map((e) => `              - '${e}'`).join('\n');
