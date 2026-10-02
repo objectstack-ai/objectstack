@@ -487,7 +487,9 @@ whose write depth covers the owner is **not** admitted without visibility: a
 link creates access, so they need to see the record to mint one. Under the
 `group` and `isolated` tenancy postures the owner and Modify-All alternatives
 are withheld and visibility alone admits, so no mint crosses the organization
-wall. The opt-in is checked first and `eligibility` (below) last.
+wall. Nor do they apply past a capability the object requires
+(`requiredPermissions`): a caller who lacks it is refused even on a record they
+own. The opt-in is checked first and `eligibility` (below) last.
 Revoking a link is allowed for the link's **creator**, a **record share-manager**
 (the record's owner, a `modifyAllRecords` admin, or a hierarchy manager whose
 write depth covers the owner — the same authority as `canManageShares`), or
