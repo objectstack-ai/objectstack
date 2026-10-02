@@ -2112,11 +2112,15 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // the uninstall, and its refusal (another package extends an object
             // this one owns, ADR-0029) is the request's refusal.
             //
-            // With a persisted half, that refusal now arrives AFTER the stored
-            // rows were deleted — the registry has no verb that answers it
-            // without performing it. It is reported as `registryRemoved: false`
-            // on the answer rather than as a failure the store does not bear
-            // out: the package leaves the running process at the next restart.
+            // With a persisted half, that refusal does not arrive here:
+            // `deletePackage` asks it (`SchemaRegistry.assertPackageUninstallable`)
+            // before its store delete and throws it with nothing removed, which
+            // the `catch` above answers — `500`, nothing changed. This `try`
+            // stays as a safety net for a registry without that method, or a
+            // throw nothing asked ahead of time. The stored rows are already
+            // gone by then, so it is reported as `registryRemoved: false`
+            // rather than as a failure the store does not bear out, and the
+            // package leaves the running process at the next restart.
             if (registry.getPackage(id) !== undefined) {
                 if (persists) {
                     try {

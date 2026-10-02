@@ -20720,19 +20720,22 @@ export class ObjectStackProtocolImplementation implements
      * so each object's table is torn down once. Per-item failures are collected
      * without aborting the rest.
      *
-     * [#21276] The steps, in order. Nothing durable happens before step 3, so
-     * a refusal at any of steps 1–3 leaves everything as it was:
+     * [#21276] The steps, in order. Nothing durable happens before step 4, so
+     * a refusal at any of steps 1–4 leaves everything as it was:
      *  1. the tenant-scope refusals (`TENANT_SCOPE_REQUIRED`) — pure;
      *  2. the `sys_metadata` read — a read; a failure is thrown;
-     *  3. the `sys_packages` delete through the `package` service — the FIRST
+     *  3. the registry's uninstall refusal (another package extends an object
+     *     this one owns, ADR-0029), asked through
+     *     `SchemaRegistry.assertPackageUninstallable` — pure; thrown as is;
+     *  4. the `sys_packages` delete through the `package` service — the FIRST
      *     durable step; a refusal, returned or thrown, is thrown as this verb's
      *     failure (see {@link packagePersistFailureError});
-     *  4. the per-item `sys_metadata` deletes and table teardown — each refusal
+     *  5. the per-item `sys_metadata` deletes and table teardown — each refusal
      *     is collected in `failed[]`;
-     *  5. the registry withdrawal — a refusal (another package extends an
-     *     object this one owns, ADR-0029) is logged, and the package leaves at
-     *     the next restart, since its stored row is already gone;
-     *  6. the uninstall cleanups — each refusal is reported in `cleanups[]`.
+     *  6. the registry withdrawal — step 3 already asked its refusal; anything
+     *     it still throws is logged, and the package leaves at the next
+     *     restart, since its stored row is already gone;
+     *  7. the uninstall cleanups — each refusal is reported in `cleanups[]`.
      */
     async deletePackage(request: DeletePackageRequest): Promise<DeletePackageResponse> {
         // [#7780] A cross-tenant uninstall must be DECLARED, never inferred from
@@ -20882,6 +20885,26 @@ export class ObjectStackProtocolImplementation implements
             throw metadataReadFailureError(e);
         }
 
+        // [#21276] THE REGISTRY'S UNINSTALL REFUSAL, ASKED BEFORE THE STORE
+        // DELETE. `SchemaRegistry` refuses an uninstall when another package
+        // `extend`s an object this one owns (ADR-0029), and it decides that
+        // before it mutates (#7970). Here that refusal used to be met only at
+        // the registry withdrawal below, after the stored row, the metadata rows
+        // and the tables were already gone. `assertPackageUninstallable` asks
+        // the same predicate (the one copy `unregisterObjectsByPackage` itself
+        // calls) without performing the uninstall, so the refusal is thrown
+        // here, as is, with nothing removed. The HTTP door answers it through
+        // its `catch` around this verb: `500`, nothing changed.
+        //
+        // The registry is reached the way the withdrawal below reaches it. A
+        // registry that does not carry the method (an engine double, a host on
+        // a registry without it) is not asked, and this verb behaves as it did
+        // before the method existed: the refusal surfaces at the withdrawal.
+        const packageRegistry = (this.engine as any)?.registry;
+        if (typeof packageRegistry?.assertPackageUninstallable === 'function') {
+            packageRegistry.assertPackageUninstallable(request.packageId);
+        }
+
         // [#21276] THE STORE DELETE COMES FIRST, and its refusal is this verb's
         // refusal. Triage's ruling: refuse before withdrawing, not undo. Every
         // step above this one only reads; every step below it — the per-item
@@ -20991,18 +21014,16 @@ export class ObjectStackProtocolImplementation implements
 
         // [#2747] Unregister from the in-memory SchemaRegistry too, so the
         // running kernel stops serving the package without waiting for a
-        // restart. Best-effort: the HTTP dispatcher already unregisters
-        // before calling us (second call is a no-op warn), and a package
-        // with live extenders refuses unregistration — that failure is
-        // logged, not fatal (the durable row is gone, so the next boot is
-        // clean either way).
+        // restart. [#21276] The HTTP door no longer unregisters before calling
+        // this verb; it withdraws only after this verb has answered, and skips
+        // that when this step already did it.
         //
-        // [#21276] This refusal can still come AFTER the store delete above,
-        // and it stays here. `SchemaRegistry` has no verb that answers "would
-        // this uninstall be refused?" without performing it; a copy of its
-        // extender predicate here would be a second place that must agree with
-        // the first; and performing the uninstall first would withdraw the
-        // package before the store decides.
+        // [#21276] The registry's own refusal (ADR-0029 extenders) was asked
+        // before the store delete, through `assertPackageUninstallable`, so it
+        // does not arrive here. The `catch` stays as a safety net for a
+        // registry that lacks that method, or a throw nothing asked ahead of
+        // time: it is logged, not fatal, because the durable row is already
+        // gone and the next boot is clean either way.
         try {
             (this.engine as any)?.registry?.uninstallPackage?.(request.packageId);
         } catch (e) {
