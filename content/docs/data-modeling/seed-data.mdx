@@ -422,9 +422,12 @@ whatever identity the load run carries (`config.identity`). During the normal
 boot sequence no identity is supplied, so `os.user` resolves to a null
 identity and `cel\`os.user.id\`` evaluates to `null` — the record still seeds
 successfully, with the field left `null` rather than the load failing. Once
-the first human user is promoted to platform admin, a one-time ownership
-handoff re-owns every orphaned row (`owner_id` `null`, or the legacy
-`usr_system` value from older databases) to that admin.
+the first human user is promoted to platform admin, an ownership handoff
+re-owns every orphaned row (`owner_id` `null`, or the legacy `usr_system`
+value from older databases) to that admin. The handoff is not one-time: it
+runs again whenever a seed settles, on that boot and on every later one, so
+rows a later boot's seed replay inserts go to the existing platform admin the
+same way. A row someone already owns is never touched.
 
 - Because `cel\`os.user.id\`` resolves to `null` before an admin exists, a
   **required** (non-nullable) owner-style field must not depend on it —
