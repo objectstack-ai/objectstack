@@ -366,6 +366,17 @@ export interface SharingServiceOptions {
 }
 
 /**
+ * [ADR-0111 D1] What `SharingService.ownerOrBypass` concluded about a record:
+ * the caller owns it or holds the Modify-All bypass (`admit`), there is
+ * nothing to decide on (`refuse`), or neither branch applies and the record's
+ * `owner` is handed on to the DEPTH branch (`undecided`).
+ */
+type OwnerOrBypassVerdict =
+  | { readonly kind: 'admit' }
+  | { readonly kind: 'refuse' }
+  | { readonly kind: 'undecided'; readonly owner: unknown };
+
+/**
  * Default `ISharingService` implementation.
  *
  * Stores every grant in `sys_record_share`. The plugin layer registers
@@ -950,31 +961,15 @@ export class SharingService implements ISharingService {
     context: ExecutionContext,
   ): Promise<boolean> {
     if (context?.isSystem) return true;
-    if (!object || !recordId || !context?.userId) return false;
 
-    // Ownership — read under system context so field-level masking cannot
-    // hide the owner column from the decision itself. Keep the owner value:
-    // the DEPTH branch below reuses it rather than re-reading the row.
-    let owner: unknown;
-    try {
-      const rows = await this.engine.find(object, {
-        where: { id: recordId },
-        fields: ['id', OWNER_FIELD],
-        limit: 1,
-        context: SYSTEM_CTX,
-      });
-      const row: any = Array.isArray(rows) ? rows[0] : undefined;
-      if (!row) return false;
-      owner = row[OWNER_FIELD];
-      if (owner != null && String(owner) === String(context.userId)) return true;
-    } catch {
-      return false;
-    }
-
-    // Modify All Data — the EXPLICIT bypass only (ADR-0111 D1/D2; never the
-    // effective write scope, whose unmatched-object case fails open to 'org').
-    // [#4647] Shared with `canEdit`/`canDelete` so the three gates cannot drift.
-    if (await this.hasModifyAllBypass(object, context)) return true;
+    // The record owner and the Modify-All bypass, read in `ownerOrBypass` —
+    // the two branches this gate shares with mint authority
+    // (`canMintWithoutVisibility`). A verdict there is final; `undecided`
+    // hands the owner value on, so the DEPTH branch below does not re-read
+    // the row.
+    const direct = await this.ownerOrBypass(object, recordId, context);
+    if (direct.kind !== 'undecided') return direct.kind === 'admit';
+    const owner = direct.owner;
 
     const probe = this.securityService?.();
 
@@ -999,6 +994,92 @@ export class SharingService implements ISharingService {
       }
     }
     return false;
+  }
+
+  /**
+   * [ADR-0111 D8 rule 1 — ruling 5950188467, A′] May `context` mint a share
+   * link on `(object, recordId)` WITHOUT being able to see it?
+   *
+   * Mint authority is "visibility, or the record owner, or an explicit
+   * Modify-All bypass". The link service runs the visibility read itself; this
+   * answers the other two alternatives, and it answers them with
+   * {@link canManageShares}' own first two branches (`ownerOrBypass`) — the
+   * same owner column and the same `hasWriteBypass` probe, so there is one
+   * notion of ownership, not two.
+   *
+   * ## What it deliberately leaves out
+   *
+   * **The hierarchy-depth branch.** A manager whose write DEPTH covers the
+   * owner manages the record's shares (revoke, grant, list — D8 rule 2), but a
+   * link CREATES access, and that manager may hold write depth over a record
+   * the data door will not let them read. Admitting them would let minting
+   * outrun reading; so a hierarchy manager still needs visibility to mint. This
+   * method never calls `resolveWriteScope` or the hierarchy resolver.
+   *
+   * **A deployment that walls organizations.** Under the `group` / `isolated`
+   * postures the visibility read applies Layer 0 (ADR-0095 D1 / ADR-0105 D1),
+   * and neither alternative here knows the record's organization: the owner
+   * column outlives a membership, and `hasWriteBypass` is object-wide. So where
+   * a wall is in force both alternatives are withheld and visibility alone
+   * admits — a member who left an organization cannot mint a public link to a
+   * record they still own in it. The posture is the one
+   * {@link organizationScopeRequired} reads, fail-closed: an unresolvable
+   * posture counts as walled.
+   *
+   * Everything else fails CLOSED to `false`: a missing record, a
+   * principal-less context, a failed read or probe.
+   */
+  async canMintWithoutVisibility(
+    object: string,
+    recordId: string,
+    context: ExecutionContext,
+  ): Promise<boolean> {
+    if (this.organizationScopeRequired()) return false;
+    return (await this.ownerOrBypass(object, recordId, context)).kind === 'admit';
+  }
+
+  /**
+   * [ADR-0111 D1] The record OWNER and the explicit Modify-All bypass — the
+   * branches {@link canManageShares} and {@link canMintWithoutVisibility} both
+   * read, written once.
+   *
+   * `admit`: the caller owns the record, or holds `modifyAllRecords` on the
+   * object. `refuse`: there is nothing to decide on — no object, record or
+   * user identity, no such record, or the owner read failed. `undecided`: the
+   * record exists and the caller is neither; `owner` is carried for the DEPTH
+   * branch, which only `canManageShares` consults.
+   *
+   * Ownership is read under the system context so field-level masking cannot
+   * hide the owner column from the decision itself. The bypass is the EXPLICIT
+   * one only (ADR-0111 D1/D2; never the effective write scope, whose
+   * unmatched-object case fails open to 'org'), shared with `canEdit` /
+   * `canDelete` [#4647] so the gates cannot drift.
+   */
+  private async ownerOrBypass(
+    object: string,
+    recordId: string,
+    context: ExecutionContext,
+  ): Promise<OwnerOrBypassVerdict> {
+    if (!object || !recordId || !context?.userId) return { kind: 'refuse' };
+
+    let owner: unknown;
+    try {
+      const rows = await this.engine.find(object, {
+        where: { id: recordId },
+        fields: ['id', OWNER_FIELD],
+        limit: 1,
+        context: SYSTEM_CTX,
+      });
+      const row: any = Array.isArray(rows) ? rows[0] : undefined;
+      if (!row) return { kind: 'refuse' };
+      owner = row[OWNER_FIELD];
+      if (owner != null && String(owner) === String(context.userId)) return { kind: 'admit' };
+    } catch {
+      return { kind: 'refuse' };
+    }
+
+    if (await this.hasModifyAllBypass(object, context)) return { kind: 'admit' };
+    return { kind: 'undecided', owner };
   }
 
   /**
