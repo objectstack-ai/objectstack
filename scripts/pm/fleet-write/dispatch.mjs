@@ -1109,10 +1109,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the round trip: the card's 41,699 bytes with a multi-byte character across every 16 KiB boundary of every stream, byte for byte through pack, the wire, the runner's env text, the validator and the executor; a per-chunk decode is NOT STORED": 8,
   'the read-back end to end: after a success run each body at its locator — a corrupted read-back exits 4 through the CLI, an unreadable or unfound one 6, a body-less stroke reads nothing, never a retry': 17,
   'the issue_create re-list: a list that lags the create reads back IDENTICAL on a bounded re-list; a real miss is still unfound (exit 6) after exactly the declared window; an unreadable re-list is unread; the create is never re-sent': 13,
+  "the run's annotations: after a success run carrying an op that creates or moves a card its check-run annotations are read first — an issue_create they name read back AT that number with NO re-list; absent, unreadable, ignored or past the cap, the re-list as before; a stroke with no such op reads none": 14,
   'the wiring: the POST is paced and on the roster, the reads are not, the token never reaches the log': 5,
   'the CLI: a dry run sends nothing, usage, the exit ladder, the session derived from the container, a route read behind a dead proxy refuses': 11,
 });
-const SELF_TEST_BATTERY_FLOOR = 16;
+const SELF_TEST_BATTERY_FLOOR = 17;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -1366,7 +1367,14 @@ export async function selfTest() {
     const T0 = Date.UTC(2026, 8, 22, 9, 4, 0);
     const at = (ms) => new Date(T0 + ms).toISOString();
     const DEFAULT_STORE = { [`GET /repos/objectstack-ai/objectstack/issues/19701/comments`]: { status: 200, json: [{ id: 501, created_at: at(8_000), body: ACTIONS[0].body }] } };
-    const platform = ({ dispatch = { status: 204 }, runs = () => [], one = () => null, store = DEFAULT_STORE }, seen, clock) => async (url, init) => {
+    /**
+     * The run's one job and its check run's annotations: by default the job answers and its check run carries only the
+     * runner's own notice (measured on a live relay run) — no relay annotation, so every stroke below that does not
+     * script `notes` takes the fallback, as a run of a relay older than the emission does.
+     */
+    const JOB = { id: 4200, name: 'Fleet write relay', check_run_url: `https://api.github.test/repos/${RELAY_REPO}/check-runs/4200` };
+    const RUNNER_NOTICE = { path: '.github', annotation_level: 'notice', title: '', message: '"The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026."' };
+    const platform = ({ dispatch = { status: 204 }, runs = () => [], one = () => null, store = DEFAULT_STORE, jobs = () => ({ status: 200, json: { total_count: 1, jobs: [JOB] } }), notes = () => ({ status: 200, json: [RUNNER_NOTICE] }) }, seen, clock) => async (url, init) => {
       const u = new URL(url);
       const call = `${init?.method ?? 'GET'} ${u.pathname}`;
       seen.push({ call, query: u.search, body: init?.body ? JSON.parse(init.body) : null, auth: init?.headers?.authorization ?? '' });
@@ -1379,6 +1387,16 @@ export async function selfTest() {
         const r = runs(clock.elapsed());
         if (r === 'down') return { status: 503, headers, json: async () => ({ message: 'down' }) };
         return { status: 200, headers, json: async () => ({ total_count: r.length, workflow_runs: r }) };
+      }
+      const jm = /\/actions\/runs\/(\d+)\/jobs$/.exec(u.pathname);
+      if (jm) {
+        const a = jobs(Number(jm[1]));
+        return { status: a.status, headers, json: async () => a.json };
+      }
+      const am = /\/check-runs\/(\d+)\/annotations$/.exec(u.pathname);
+      if (am) {
+        const a = notes(Number(am[1]));
+        return { status: a.status, headers, json: async () => a.json };
       }
       const m = /\/actions\/runs\/(\d+)$/.exec(u.pathname);
       if (m) {
@@ -1722,6 +1740,99 @@ export async function selfTest() {
       t("the re-list is issue_create's alone: a pull its head does not find is read ONCE and unfound, as before", [noPr.state, noPr.readBack?.rows?.[0]?.cls, pulls], ['unverified', 'unfound', 1]);
     }
 
+    // ── the run's annotations ───────────────────────────────────────────────
+    battery("the run's annotations: after a success run carrying an op that creates or moves a card its check-run annotations are read first — an issue_create they name read back AT that number with NO re-list; absent, unreadable, ignored or past the cap, the re-list as before; a stroke with no such op reads none");
+    {
+      const REPO = 'objectstack-ai/objectstack';
+      const UI = 'objectstack-ai/objectui';
+      const ISSUES = `GET /repos/${REPO}/issues`;
+      const ONE = `GET /repos/${REPO}/issues/20998`;
+      const JOBS = `GET /repos/${RELAY_REPO}/actions/runs/42/jobs`;
+      const NOTES = `GET /repos/${RELAY_REPO}/check-runs/4200/annotations`;
+      const OK_RUN = { runs: () => [RUN('completed', 'success')] };
+      const B = 'Body with a multi-byte tail: no… 全部\n';
+      const SPLIT = B.replace('全', '\uFFFD\uFFFD');
+      const strokeOf = (actions, repo = REPO) => packRequest({ repo, session: SESSION, actions, requestId: 'fw-test-1' }).payload;
+      const create = strokeOf([{ op: 'issue_create', title: 'Card', body: B }]);
+      const CARD = { id: 8, number: 20998, title: 'Card', created_at: at(3_000), body: B };
+      const URL98 = `https://github.test/${REPO}/issues/20998`;
+      /** One annotation as the runner stores the executor's notice: the message the relay's own speller writes. */
+      const note = (action, op, number, repo = REPO) => ({ path: '.github', annotation_level: 'notice', title: `fleet-write ${op}`, message: relayAnnotationMessage({ action, op, number, url: `https://github.test/${repo}/issues/${number}` }) });
+      const named = (...rows) => () => ({ status: 200, json: [RUNNER_NOTICE, ...rows] });
+      const calls = (r, call) => r.seen.filter((x) => x.call === call).length;
+      const writes = (r) => r.seen.filter((x) => !x.call.startsWith('GET ')).map((x) => x.call);
+      // The issue list never shows the new card — the measured lag at its worst: only the annotation can find it.
+      const blindList = { [ISSUES]: { status: 200, json: [] }, [ONE]: { status: 200, json: CARD } };
+
+      const hit = await drive({ ...OK_RUN, notes: named(note(1, 'issue_create', 20998)), store: blindList }, { stroke: create });
+      t(
+        "⭐ the run's annotation names #20998: read back AT that number — IDENTICAL, success, exit 0 — with ZERO list reads and no wait, though the list never shows it",
+        [hit.state, hit.readBack?.rows?.[0]?.where, hit.readBack?.rows?.[0]?.cls, hit.readBack?.rows?.[0]?.foundBy, calls(hit, ISSUES), calls(hit, ONE), hit.logs.some((l) => l.includes('re-list')), exitForResult(hit)],
+        ['success', `${REPO}#20998`, 'identical', 'annotation', 0, 1, false, EXIT_OK],
+        hit.logs.join(' | '),
+      );
+      const order = hit.seen.map((x) => x.call);
+      t('…the jobs, then their check run\'s annotations, then the issue — all after the run completed — and ONE write, the dispatch', [order.indexOf(JOBS) > order.lastIndexOf(`GET /repos/${RELAY_REPO}/actions/runs`), order.indexOf(NOTES) > order.indexOf(JOBS), order.indexOf(ONE) > order.indexOf(NOTES), writes(hit)], [true, true, true, [DISPATCH]]);
+      t("…and the result hands the matched row on for the callers, the runner's own notice passed over", [hit.annotations?.state, hit.annotations?.rows], ['read', [{ action: 1, op: 'issue_create', number: 20998, url: URL98, repo: REPO }]]);
+      const split = await drive({ ...OK_RUN, notes: named(note(1, 'issue_create', 20998)), store: { ...blindList, [ONE]: { status: 200, json: { ...CARD, body: SPLIT } } } }, { stroke: create });
+      t('a split character on the annotated issue is NOT STORED on THAT issue, exit 4', [split.state, split.notStored, split.readBack?.rows?.[0]?.where, exitForResult(split)], ['failure', true, `${REPO}#20998`, EXIT_NOT_STORED]);
+      const gone = await drive({ ...OK_RUN, notes: named(note(1, 'issue_create', 20998)), store: { ...blindList, [ONE]: { status: 503, json: { message: 'down' } } } }, { stroke: create });
+      t('⛔ an annotated number whose issue cannot be read is unverified (unread), exit 6 — and still NO list: the fallback is for an ABSENT annotation only', [gone.state, gone.readBack?.rows?.[0]?.cls, calls(gone, ISSUES), exitForResult(gone)], ['unverified', 'unread', 0, EXIT_UNCONFIRMED]);
+
+      // The fallback, unchanged: absent, unreadable or ignored, the list is read and re-read as before.
+      const lagReads = [];
+      const lagging = { [ISSUES]: (q, ms) => {
+        if ((q.get('page') ?? '1') === '1') lagReads.push(ms);
+        return { status: 200, json: ms >= 8_000 ? [CARD] : [] };
+      } };
+      const absent = await drive({ ...OK_RUN, store: lagging }, { stroke: create });
+      t('absent (the check run carries only the runner\'s notice): said, and the re-list finds the card as before — success via the list', [absent.state, absent.readBack?.rows?.[0]?.foundBy, lagReads.length, absent.logs.some((l) => l.includes('no annotation on run 42 names action 1 issue_create'))], ['success', 'list', 3, true], absent.logs.join(' | '));
+      const unreadable = await drive({ ...OK_RUN, jobs: () => ({ status: 403, json: { message: 'Forbidden' } }), store: { ...blindList, [ISSUES]: { status: 200, json: [CARD] } } }, { stroke: create });
+      t('unreadable (the jobs read answers 403): said, naming the call, and the list finds the card — never a failure', [unreadable.state, unreadable.annotations?.state, unreadable.readBack?.rows?.[0]?.foundBy, unreadable.logs.some((l) => l.includes('could not be read') && l.includes(JOBS) && l.includes('HTTP 403'))], ['success', 'unread', 'list', true], unreadable.logs.join(' | '));
+      const foreign = await drive({ ...OK_RUN, notes: named(note(1, 'issue_create', 20998, UI)), store: { ...blindList, [ISSUES]: { status: 200, json: [CARD] } } }, { stroke: create });
+      t('an annotation whose url names another repository than the create landed on is ignored — said — and the list finds the card', [foreign.state, foreign.annotations?.rows, foreign.readBack?.rows?.[0]?.foundBy, foreign.logs.some((l) => l.includes('is ignored') && l.includes(`names ${UI}`))], ['success', [], 'list', true]);
+
+      // Past the cap: the platform keeps ten notices per step, so a later action may carry none — that one falls back alone.
+      const CARD2 = { id: 9, number: 20999, title: 'Card', created_at: at(4_000), body: B };
+      const two = await drive({ ...OK_RUN, notes: named(note(1, 'issue_create', 20998)), store: { [ONE]: { status: 200, json: CARD }, [ISSUES]: { status: 200, json: [CARD2, CARD] } } }, { stroke: strokeOf([{ op: 'issue_create', title: 'Card', body: B }, { op: 'issue_create', title: 'Card', body: B }]) });
+      t('two creates, only the first annotated: the first read at its number, the second found by the list — never the first one\'s issue again', [two.state, two.readBack?.rows?.map((r) => [r.action, r.where, r.foundBy])], ['success', [[1, `${REPO}#20998`, 'annotation'], [2, `${REPO}#20999`, 'list']]]);
+
+      const plain = await drive(OK_RUN, { stroke: strokeOf([{ op: 'labels_add', issue: 1, labels: ['a'] }]) });
+      t('a stroke with no op that creates or moves a card reads NO jobs and NO annotations', [plain.state, plain.annotations?.state, calls(plain, JOBS), calls(plain, NOTES)], ['success', 'none', 0, 0]);
+      const move = await drive({ ...OK_RUN, notes: named(note(1, 'transfer', 31, UI)) }, { stroke: strokeOf([{ op: 'transfer', issue: 7, target_repo: UI }]) });
+      t('a transfer stroke reads them (it carries no body, so nothing is read back) and hands its row on for issue-transfer', [move.state, move.readBack?.state, move.annotations?.rows], ['success', 'none', [{ action: 1, op: 'transfer', number: 31, url: `https://github.test/${UI}/issues/31`, repo: UI }]]);
+
+      const P = (action, op, number, repo = REPO) => parseRelayAnnotation(note(action, op, number, repo).message);
+      const mixed = { repo: REPO, actions: [{ op: 'issue_create', title: 'a', body: 'b' }, { op: 'comment', issue: 1, body: 'c' }, { op: 'issue_create', title: 'd', body: 'e' }] };
+      const matched = matchRunAnnotations(mixed, [P(1, 'issue_create', 5), P(1, 'issue_create', 5), P(2, 'issue_create', 6), P(4, 'issue_create', 7), P(3, 'issue_create', 8), P(3, 'issue_create', 9)]);
+      t(
+        'the matcher: an identical repeat is one row; an index holding another op, or no action, is ignored; two DIFFERENT rows for one action are both ignored — a reader never picks between two answers',
+        [matched.rows.map((r) => [r.action, r.number]), matched.ignored.map((r) => [r.action, r.number])],
+        [[[1, 5]], [[2, 6], [4, 7], [3, 8], [3, 9]]],
+      );
+      t('a job\'s check run id: from its check_run_url, else its own id, else none', [checkRunIdOf(JOB), checkRunIdOf({ id: 77 }), checkRunIdOf({})], [4200, 77, null]);
+
+      // The CLI: --json carries the numbers a seat could not read before, and how each read-back found its object.
+      writeFileSync(join(dir, 'create.json'), JSON.stringify([{ op: 'issue_create', title: 'Card', body: B }]), 'utf8');
+      let nowMs = T0;
+      const clock = { now: () => nowMs, elapsed: () => nowMs - T0 };
+      const out = [];
+      const [log, err] = [console.log, console.error];
+      console.log = (l) => out.push(String(l));
+      console.error = () => {};
+      let code;
+      try {
+        code = await main(['--repo', REPO, '--actions-file', join(dir, 'create.json'), '--request-id', 'fw-test-1', '--json'], {
+          env: { GITHUB_TOKEN: TOKEN, [SESSION_ENV]: SESSION },
+          send: { fetch: platform({ ...OK_RUN, notes: named(note(1, 'issue_create', 20998)), store: blindList }, [], clock), pace: paceFor(join(dir, `pace-cli-${paceCase++}.jsonl`)), now: clock.now, sleep: async (ms) => { nowMs += ms; }, log: () => {}, ceilings: { startMs: 90_000, ceilingMs: 300_000, pollMs: 5_000, notes: [] } },
+        });
+      } finally {
+        [console.log, console.error] = [log, err];
+      }
+      const json = out.length ? JSON.parse(out[out.length - 1]) : null;
+      t('the CLI: exit 0, and --json names the annotated number and url and that the read-back found it by the annotation', [code, json?.annotations, json?.read_back?.[0]?.found_by], [EXIT_OK, [{ action: 1, op: 'issue_create', number: 20998, url: URL98 }], 'annotation']);
+    }
+
     // ── the wiring ──────────────────────────────────────────────────────────
     battery('the wiring: the POST is paced and on the roster, the reads are not, the token never reaches the log');
     {
@@ -1803,7 +1914,7 @@ export async function selfTest() {
     `✓ fleet-write/dispatch self-test: ${cases.length} cases pass across ${declared.length} batteries — the transport selector that never guesses, ` +
       'the session on the envelope, one paced dispatch per stroke, a run found by its request id and waited to its conclusion, both ceilings answered UNCONFIRMED and never retried, ' +
       'and every body read back after a success run — the card\'s 41,699 bytes byte-exact across every 16 KiB boundary, a corrupted read-back NOT STORED (exit 4), an unfound one UNCONFIRMED (6) ' +
-      'only after a lagging issue list was re-read on its bounded schedule, the create never re-sent.',
+      "only after a lagging issue list was re-read on its bounded schedule — unless the run's annotation named the new number, which is read at once and never listed — the create never re-sent.",
   );
   selfTestReachedVerdict = true;
   return 0;
