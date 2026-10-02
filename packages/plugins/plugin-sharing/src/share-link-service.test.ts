@@ -538,6 +538,22 @@ describe('ShareLinkService', () => {
       expect(read.where.created_by, 'constrained server-side to the caller').toBe('alice');
     });
 
+    it('the system read trusts no query predicate alone: a dropped created_by constraint still leaks no foreign row', async () => {
+      // A driver that silently drops a `where` key answers with the WIDER set —
+      // under the system context, every creator's tokens. The rows that leave
+      // must still pass the creator rule.
+      const dropsCreator = {
+        ...engine,
+        async find(object: string, options?: any) {
+          const where = { ...(options?.where ?? {}) };
+          delete where.created_by;
+          return engine.find(object, { ...options, where });
+        },
+      };
+      const leaky = new ShareLinkService({ engine: dropsCreator as any });
+      expect(listed(await leaky.listLinks({ ...ON_C1, createdBy: 'alice' }, { userId: 'alice' }))).toEqual(mine);
+    });
+
     it('through the record filter, other creators\' links on the same record are absent', async () => {
       const links = await svc.listLinks({ ...ON_C1, createdBy: 'alice' }, { userId: 'alice' });
       expect(listed(links)).toEqual(mine);
