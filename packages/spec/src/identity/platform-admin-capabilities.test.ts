@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { ADMIN_FULL_ACCESS, ADMIN_FULL_ACCESS_CAPABILITIES } from './eval-user.zod';
 import { PermissionSetSchema } from '../security/permission.zod';
-import { PLATFORM_CAPABILITY_NAMES } from '../security/capabilities';
+import { PLATFORM_CAPABILITIES, PLATFORM_CAPABILITY_NAMES } from '../security/capabilities';
 
 describe('ADMIN_FULL_ACCESS_CAPABILITIES (#11965, Choice 6A)', () => {
   it('carries exactly the two capability-bearing fields — name/label stay with the declaring package', () => {
@@ -38,6 +38,15 @@ describe('ADMIN_FULL_ACCESS_CAPABILITIES (#11965, Choice 6A)', () => {
     expect('allowExport' in ADMIN_FULL_ACCESS_CAPABILITIES.objects!['*']).toBe(false);
     const parsed = PermissionSetSchema.parse({ name: ADMIN_FULL_ACCESS, ...ADMIN_FULL_ACCESS_CAPABILITIES });
     expect(parsed.objects['*'].allowExport).not.toBe(true);
+  });
+
+  it('[#21260] carries the compliance ledger’s audit capability, declared org-scoped', () => {
+    // Ruling B on #21175: platform administrators hold it by default, through
+    // this grant (and the config-derived envelope core builds from this same
+    // list). The other shipped sets withhold it, pinned on the seeded sets in
+    // plugin-security's `default-permission-sets.test.ts`.
+    expect(ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions).toContain('view_all_audit_log');
+    expect(PLATFORM_CAPABILITIES.find((c) => c.name === 'view_all_audit_log')?.scope).toBe('org');
   });
 
   it('every granted system permission is a declared built-in capability (ADR-0066 registry)', () => {

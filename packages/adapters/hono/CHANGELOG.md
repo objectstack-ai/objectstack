@@ -1,5 +1,35 @@
 # @objectstack/hono
 
+## 17.6.0
+
+### Patch Changes
+
+- Updated dependencies [5a23096]
+- Updated dependencies [c96beb2]
+- Updated dependencies [3f45b6c]
+- Updated dependencies [96e7244]
+- Updated dependencies [4b45afa]
+- Updated dependencies [c8111a5]
+- Updated dependencies [b9087d7]
+- Updated dependencies [7c5a311]
+- Updated dependencies [49d2a24]
+- Updated dependencies [76bd58f]
+- Updated dependencies [cb4c31d]
+- Updated dependencies [8368f1c]
+- Updated dependencies [514001a]
+- Updated dependencies [70dae53]
+- Updated dependencies [f20f669]
+- Updated dependencies [2bddb19]
+- Updated dependencies [7a606a9]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [454bbb6]
+- Updated dependencies [01e78dc]
+- Updated dependencies [a186aea]
+- Updated dependencies [00f045d]
+  - @objectstack/runtime@17.6.0
+  - @objectstack/types@17.6.0
+  - @objectstack/plugin-hono-server@17.6.0
+
 ## 17.5.0
 
 ### Patch Changes

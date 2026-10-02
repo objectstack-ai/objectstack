@@ -10,7 +10,7 @@ import {
 } from '@objectstack/spec/automation';
 import {
     resolveScheduledWorkPolicy,
-    SCHEDULED_WORK_DISABLED_REASON,
+    scheduledWorkDisabledReason,
     type ScheduledWorkPolicy,
 } from '@objectstack/types';
 
@@ -331,10 +331,18 @@ export interface ScheduledWorkTriggerOptions {
  * it is running the configuration it asked for, and the flow it ships is
  * perfectly well-formed. Reporting the second as "binding failed" sends an
  * operator to look for a broken flow, and sends an author to look for a key
- * they may already have written. So the sentence is
- * {@link SCHEDULED_WORK_DISABLED_REASON}, it names the switch and its remedy,
+ * they may already have written. So the sentence is the policy's own reason —
+ * `scheduledWorkDisabledReason(policy)` from `@objectstack/types`, the one
+ * answer the engine's bind log, binding audit and `/_status` row read too —
  * and the automation engine's binding audit reports it under its own branch —
  * ⛔ never as "binding failed — see earlier warnings", which is ruled item 6.
+ *
+ * [#21110] That answer is the HOST's `hostDisabledReason` when the per-kernel
+ * policy that refused carries one, and otherwise the deployment sentence,
+ * `SCHEDULED_WORK_DISABLED_REASON`, which names the switch and its remedy.
+ * `policy` is the very reading the caller's gate refused on, never a second
+ * read: a resolver re-asked here could answer a different reason than the one
+ * that decided.
  *
  * ## Why `info` and not `warn` or `error`
  *
@@ -361,8 +369,9 @@ export function refuseScheduledWorkDisabled(
     logger: TriggerLogger,
     tag: 'schedule' | 'time-relative',
     flowName: string,
+    policy: ScheduledWorkPolicy,
 ): never {
-    const sentence = `${tag} flow '${flowName}' is not armed: ${SCHEDULED_WORK_DISABLED_REASON}`;
+    const sentence = `${tag} flow '${flowName}' is not armed: ${scheduledWorkDisabledReason(policy)}`;
     logger.info(`[${tag}] NOT ARMED — ${sentence}`);
     throw new Error(sentence);
 }
@@ -688,7 +697,7 @@ export class ScheduleTrigger implements FlowTrigger {
             // prior binding before throwing, so a rebind under a switch that
             // has since been turned off cannot leave the previous job armed.
             this.stop(binding.flowName);
-            refuseScheduledWorkDisabled(this.logger, 'schedule', binding.flowName);
+            refuseScheduledWorkDisabled(this.logger, 'schedule', binding.flowName, policy);
         }
 
         const raw = binding.schedule ?? (binding.config as Record<string, unknown> | undefined)?.schedule;

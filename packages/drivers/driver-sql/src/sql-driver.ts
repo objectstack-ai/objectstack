@@ -158,7 +158,13 @@ import { currentPerfTiming, perfNow, type PerfTiming } from '@objectstack/observ
 // [#21007] The JSON-column gate's operator set and refusal text — shared with
 // `@objectstack/objectql`'s per-aggregation `filter`, which refuses the same
 // operators on the same declared fields. See {@link jsonColumnOperatorError}.
-import { JSON_COLUMN_INCOMPATIBLE_OPERATORS, jsonColumnOperatorRefusalText } from '@objectstack/core';
+// [#21236] And the class of JSON column the refusal words, which this driver
+// reads from its own registries — see {@link SqlDriver.jsonColumnFieldClass}.
+import {
+  JSON_COLUMN_INCOMPATIBLE_OPERATORS,
+  jsonColumnOperatorRefusalText,
+  type JsonColumnFieldClass,
+} from '@objectstack/core';
 
 /**
  * [#20768] The async scope of a driver's own PRE-DDL question: the ADR-0104
@@ -3395,9 +3401,22 @@ function unrenderableTextComparandError(
  * [#21067] That text no longer names this driver's storage form, since the
  * engine and `driver-memory` print it too; the measured SQL consequences above
  * live in the builder's docblock.
+ *
+ * [#21236] The `$contains` prescription is the multi-value class's. A
+ * single-value file-class field inside the ADR-0104 window is a JSON column
+ * here too, but it holds one JSON string, and `$contains` with its exact id
+ * answered no rows. So `fieldClass`, which the gate reads from this driver's
+ * registries ({@link SqlDriver.jsonColumnFieldClass}), picks the words, and
+ * that class is told to finish the media-column move.
  */
-function jsonColumnOperatorError(field: string, op: string, bare: boolean, subtree?: unknown): Error {
-  const { message, diagnostic } = jsonColumnOperatorRefusalText(field, op, bare);
+function jsonColumnOperatorError(
+  field: string,
+  op: string,
+  bare: boolean,
+  fieldClass: JsonColumnFieldClass,
+  subtree?: unknown,
+): Error {
+  const { message, diagnostic } = jsonColumnOperatorRefusalText(field, op, bare, fieldClass);
   return withheldFilterError(message, diagnostic, subtree);
 }
 
@@ -16121,6 +16140,30 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * [#21236] Which class of JSON column `localField` is on `table`, or
+   * `undefined` when it is not a JSON column here ({@link isJsonColumn}). The
+   * JSON-column refusal's reason and repair turn on it
+   * (`JsonColumnFieldClass`, `@objectstack/core`).
+   *
+   * `'single-value-media'` is a field BOTH registries name: {@link mediaFields}
+   * (a single-value file-class field, on either arm of the ADR-0104 window) and
+   * `jsonFields`. {@link isJsonField} put such a field in `jsonFields` only
+   * because {@link mediaColumnIsJson} answered `true` when it registered, so
+   * the window is asked once, by the predicate that already asks it, and this
+   * method asks only the class. On a deployment whose columns have moved the
+   * field is not a JSON column, and this answers `undefined`. Every other JSON
+   * column (a multi-value field, a structured-JSON type) is
+   * `'multi-value-or-json'`.
+   *
+   * `driver-turso`'s remote transport asks the same question through this
+   * method, so both faces of one `TursoDriver` word one refusal.
+   */
+  protected jsonColumnFieldClass(table: string | null | undefined, localField: string): JsonColumnFieldClass | undefined {
+    if (!table || !this.isJsonColumn(table, localField)) return undefined;
+    return this.mediaFields[table]?.includes(localField) === true ? 'single-value-media' : 'multi-value-or-json';
+  }
+
+  /**
    * [#14079/#15683/#17343] Is `localField` a column on `table` a text operator
    * must not be aimed at — a SCALAR column DECLARED numeric, boolean or
    * temporal?
@@ -16393,8 +16436,11 @@ export class SqlDriver implements IDataDriver {
     subtree?: unknown,
   ): void {
     if (!JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op)) return;
-    if (!this.isJsonColumn(table, localField)) return;
-    throw jsonColumnOperatorError(column, op, bare, subtree);
+    // [#21236] The same JSON-column question {@link isJsonColumn} answers, with
+    // the column's class beside it, so the refusal names the class's repair.
+    const fieldClass = this.jsonColumnFieldClass(table, localField);
+    if (fieldClass === undefined) return;
+    throw jsonColumnOperatorError(column, op, bare, fieldClass, subtree);
   }
 
   /**

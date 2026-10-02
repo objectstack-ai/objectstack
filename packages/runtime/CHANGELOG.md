@@ -1,5 +1,558 @@
 # @objectstack/runtime
 
+## 17.6.0
+
+### Minor Changes
+
+- cb4c31d: fix(runtime)!: the /automation create and update doors save the flow as a tenant row, so what they answer 200 for survives a restart, and the removal door deletes that row too (#20862)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata changes shape and nothing an author wrote is renamed or removed, so `objectstack migrate meta` has nothing to rewrite. What moves is which definition writes and removals the /automation doors accept: the ones the metadata store refuses are now refused there too. -->
+  
+  **BREAKING**: shipped as `minor` under the launch-window convention. `POST /api/v1/automation` and `PUT /api/v1/automation/:name` now refuse a definition the metadata store refuses, which they used to register and answer `200` for. `DELETE /api/v1/automation/:name` now relays a store's refusal to delete the flow's row.
+  
+  **What changed.** The create and update doors registered a flow in the automation engine and wrote no metadata row. The next boot binds flows from the stored metadata, so a flow created through `POST /automation` was gone after a restart, and an update through `PUT /automation/:name` to a flow stored through `/meta` lost to the stored definition. Both doors now save the definition through the metadata protocol's own `saveMetaItem`: the save `PUT /api/v1/meta/flow/:name` uses, and the one the clone door (`POST /automation/:name/clone`) already used. The row is env-wide and live (`active`), so the flow reads back on `/meta` and survives a cold boot. The three doors share one path.
+  
+  - **Engine first, store second.** The engine's registration is still the first check. Its refusal is answered as before (`400 VALIDATION_FAILED`), and nothing is saved.
+  - **A save the store refuses is relayed with its own code and status, and leaves no registration behind.** A create is withdrawn from the engine. An update puts back the definition the engine held, so a refused update does not take the flow down.
+  - **`DELETE /automation/:name` deletes the tenant row too**, through `deleteMetaItem`, so a flow created through the door does not come back at the next boot. The engine's own removal refusal (`DELETE_RESTRICTED` / `409`) is still raised before the store is touched. A name with no stored row is removed as before. A delete the store refuses puts the definition back and relays the refusal.
+  - **Unchanged:** the locked-base refusal on a packaged flow's name (`403 NOT_OVERRIDABLE`) and the refusal of a definition claiming a package's provenance (`422 INVALID_METADATA`) still answer first. A composition with no metadata protocol keeps the engine-only registration and removal it always had.
+  
+  **Newly refused, because the metadata store refuses them** (measured on the showcase):
+  
+  - A flow name with a leading underscore. `FlowSchema` admits it and the metadata item-name grammar does not, so the door answers `400 INVALID_REQUEST`. Rename the flow to a name that starts with a letter.
+  - A definition a gating runtime publish rule refuses, such as a default edge that also carries a condition (`flow-default-edge-with-condition`). The door answers `422 INVALID_METADATA` with the rule's finding. Fix the definition as the finding says.
+  
+  Such a flow could never be stored, so before this change it ran only until the next restart.
+- f20f669: fix(cli): `os migrate plan` / `apply` no longer run the app's `onEnable` or a host plugin's post-declaration hooks during their boot
+  
+  Clause-②: yes (widening)
+  
+  The two schema commands boot the host's stack to read what it declares. That boot ran the
+  config's `onEnable`, and every `kernel:bootstrapped` / `kernel:listening` hook a host plugin
+  registered from `init()`. A hook that reads a table the plan does not declare then failed on
+  every plan. On `examples/app-crm`, whose `onEnable` binds positions to permission sets, each
+  plan printed six `[sql-driver] DATABASE_ERROR` lines and six `position binding lookup failed`
+  warnings, on a database `apply` had just migrated as well as on an absent one.
+  
+  The boot now composes host code for its declarations only:
+  
+  - `AppPlugin` takes a new `skipOnEnable` option. When it is set, `start()` does not run the
+    bundle's `onEnable`, logs that it withheld it, and reports it through `onEnableWithheld`. The
+    migrate commands set it on the app they compose from `objectstack.config.ts`.
+  - A host plugin's `init()` gets a context that does not register `kernel:bootstrapped` or
+    `kernel:listening` hooks. The kernel contract defines those phases as work after registration
+    ends: reconcile/backfill, and opening listeners. `kernel:ready` hooks still run, and the
+    write guard still refuses their row writes. `kernel:shutdown` hooks and data hooks register
+    as before.
+  - The plan's notes, and the `--json` payload's `composition.notes`, carry one line naming what
+    was not run.
+  
+  The plan itself is unchanged: the same tables, the same pending DDL, the same drift. `apply`
+  still flushes the DDL the operator confirms and still runs the coverage pass. The platform's own
+  plugins are untouched, so the value-shape gate announcement still prints.
+  
+  `@objectstack/runtime` widens its public surface, additively: `AppPlugin`, exported from the
+  package root, gains the optional constructor option `skipOnEnable` (default `false`) and the
+  read-only getter `onEnableWithheld`. A composition that does not pass the option gets exactly
+  the behaviour it had, `onEnable` included.
+- 2bddb19: fix(runtime)!: the analytics dispatcher faces refuse an unauthenticated caller with `401 UNAUTHENTICATED`, like every other data-serving door (#21061)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key, export, stored shape or wire shape is removed or renamed, so `objectstack migrate meta` has nothing to rewrite. What moves is which callers the analytics dispatcher faces accept: a caller with no session is now refused before the domain reads anything. -->
+  
+  **BREAKING**: shipped as `minor` under the launch-window convention. The three analytics faces the dispatcher mounts under `/api/v1/analytics` (cube read, SQL echo, meta) now answer a caller without a session `401 UNAUTHENTICATED`, in the dispatcher's wrapped envelope (`{ success: false, error: { code: 'UNAUTHENTICATED', message, httpStatus: 401 } }`). They answered that caller as a guest before.
+  
+  **What changed.** The analytics domain handler opens with the shared anonymous-deny decision (`shouldDenyAnonymous`, ADR-0056 D2), the same floor the `/data`, `/meta`, `/actions`, `/automation` and `/packages` doors stand on, and the one the REST analytics dataset door already applied. The floor is the handler's first statement:
+  
+  - it runs before the analytics service is looked up, so an unauthenticated caller gets `401` whether or not the analytics capability is installed, never the `404` an empty slot answers;
+  - it runs before the request body is validated, so a malformed body from an unauthenticated caller is `401`, never the `400 VALIDATION_FAILED` the entry check answers.
+  
+  **What is not affected.** A signed-in caller, an API-key caller and an internal system context are served exactly as before: the same `200`, the same `400` for a malformed body, the same `404` when no analytics service is installed. Object admission and the row scope behind the service are unchanged by this release.
+  
+  **If an analytics call now answers `401`,** it was made without a session: send it with the signed-in user's session or bearer token, or with an API key.
+
+### Patch Changes
+
+- 5a23096: Warnings, refusals and hints that cited a tracker number now say what was decided
+  
+  Clause-②: no
+  
+  Several runtime strings an author or operator reads sent the reader to an issue-tracker number for
+  the reason behind them. Each now states that reason in the sentence itself:
+  
+  - `@objectstack/objectql`: the two data-event warnings. A write that names no single record publishes
+    no per-record event rather than one with an empty `recordId`; a predicate (`multi: true`) write
+    publishes its own `data.records.*` event carrying the affected-row count and nothing else, so a
+    driver result that is not a count publishes no bulk event either.
+  - `@objectstack/service-automation`: the warning for a pausing node type that never declares
+    `resumeAuthority`, the generic-route resume refusal (its log line and its error text), and the
+    refusal of a suspension from a type that declares `supportsPause: false`. An undeclared
+    `resumeAuthority` resolves to `'service'` (fail-closed), so the generic resume route refuses those
+    pauses; guessing `'any'` is how a raw resume once walked past an approval decision no service had
+    recorded.
+  - `@objectstack/runtime`: the endpoint step's `NOT_IMPLEMENTED` message and its two hints (the
+    composed runtime always threads the policy context and the execution wiring, because execution is
+    reachable only past the policy chain), and the endpoint mapping refusals (the publish gate rejects
+    the same shapes, so a declaration that reaches the runtime check was stored without passing it).
+  
+  Text only: no error code, field name, status or behaviour changes.
+- c96beb2: fix(security): a flow's inbound-hook secret is withheld from every served flow definition, and a read → edit → republish round trip keeps it (#20552)
+  
+  Clause-②: yes (widening)
+  
+  **The widening.** `@objectstack/metadata-protocol` gains one public method,
+  `ObjectStackProtocolImplementation.getMetaItemsForExecution`. It returns the stored
+  bodies without the serving decorations, for in-process binders that execute what they
+  read. No door that answers a caller may use it.
+  
+  An `api` flow's start node carries its inbound hook's HMAC secret (`config.secret`,
+  ADR-0041), the one credential that hook has. Every read that served the flow's
+  definition served the secret with it, to any authenticated caller. It is now
+  withheld from what is SERVED, and from nothing the engine executes.
+  
+  **What no longer carries the secret.** The automation domain's flow-definition read
+  and the flow its `POST` / `PUT` / clone doors answer with; and on the metadata plane,
+  every read of a flow — item, list, layered, draft preview, published snapshot, diff,
+  audit — plus a package export. The key is removed, not masked: a mask is a non-blank
+  string the registration gate would accept as the secret.
+  
+  **Consequence for a reader.** A client that read the secret back from a definition
+  no longer can. A package exported from one deployment and imported into another
+  arrives without it, and its `api` flows are refused at registration until a secret is
+  set on the start node again.
+  
+  **The round trip.** A save that carries the projected form — no `secret` where the
+  read served none — keeps the stored secret, on both authoring surfaces (the metadata
+  plane's save door and the automation domain's `PUT` / `POST`). Only an explicit value
+  replaces it, so a rotation is written as before. The start node is matched by its
+  `id`, not its position, so an edit that reorders `nodes` keeps it too. The first save of an item that has no stored row yet, such as a code-authored flow or datasource, takes the value from the code layer the read served, for every type with a registered redactor.
+  
+  - `@objectstack/service-automation` owns the projection (`redactFlowCredentials`) and
+    registers it as the `flow` read-path redactor at plugin `init`. The engine keeps
+    binding with the stored secret: it now reads flows from the protocol's execution
+    face, because the served face no longer holds the credential its hooks verify
+    against.
+  - `@objectstack/metadata-protocol` gains `getMetaItemsForExecution` on
+    `ObjectStackProtocolImplementation` — the same flattened list `getMetaItems`
+    serves, without the serving decorations (no `_diagnostics`, no credential
+    redaction). It is for in-process engines that execute what they read; every door
+    that answers a caller keeps serving `getMetaItems`. `carryForwardRedactedValues`
+    now follows a redacted path through an array by the element's `id`.
+  - `@objectstack/metadata`'s `getPublished` applies the type's registered read-path
+    redactor to the body it returns. It was the one metadata read exit that served a
+    stored body without it.
+- 3f45b6c: fix(security): every credential a flow definition holds is withheld from what is served, at every depth, and an edit round trip keeps each one where it belongs (#20590)
+  
+  Clause-②: no
+  
+  **What is now withheld.** Beside an `api` flow's inbound-hook secret (the start node's
+  `config.secret`), every served flow definition now also withholds an `http` node's
+  outbound signing secret (`config.signingSecret`), and both are withheld wherever the
+  node sits: at the top level, or inside a `loop` body, a `parallel` branch, or a
+  `try_catch` region. The engine still executes the stored values.
+  
+  **Removing a signing secret.** A definition saved back without the key keeps the
+  stored secret, because an absent key is what every read serves. To remove it, save
+  the key as the empty string (`signingSecret: ''`): the durable callout is then
+  delivered unsigned, and the empty value is served as written, so the next round trip
+  keeps it cleared.
+  
+  **Changing a node's kind.** An edit that keeps a node's `id` and changes its kind no
+  longer carries that node's stored credential onto it. The credential belonged to the
+  old kind; a start node that needs a secret asks for one again at registration.
+  
+  **Moving a node.** A node moved into or out of a `loop` body, a `parallel` branch or a
+  `try_catch` region keeps its stored credential across the round trip, as long as its
+  `id` and kind are unchanged and it is the only node, at the top level or in any region,
+  that carries that `id`. An edge or a config value with the same `id` does not count.
+  
+  **The `/meta` list read on a dispatcher host.** When the metadata protocol's list read
+  fails, the list answers that failure (`503 SERVICE_UNAVAILABLE` for a store outage, or
+  the protocol's own refusal) instead of serving the metadata service's stored list,
+  which applies no credential redaction. A host whose protocol has no list verb keeps
+  its metadata-service fallback.
+- 96e7244: fix(runtime): `POST /api/v1/automation/:name/clone` is served over HTTP
+  
+  Clause-②: no
+  
+  Cloning a flow under a new machine name (ADR-0126 §7.1) is how an admin customizes a packaged
+  flow whose base is locked. The runtime implemented the clone, but the dispatcher never mounted
+  its route, so every clone answered `404 ENDPOINT_NOT_FOUND` before the request reached it: from
+  the API, and from the Clone dialog on Setup's packaged-automation page, for every caller and
+  every body.
+  
+  The route is now mounted beside `POST /automation/:name/toggle`, at `/api/v1/automation/:name/clone`
+  and, when environment scoping is enabled, at `/api/v1/environments/:environmentId/automation/:name/clone`.
+  It answers what the clone implementation already answered: `200 { flow, notice }` for a legal
+  clone, `400` for a missing or illegal `name` or `label`, `404` for an unknown source flow,
+  `409 RESOURCE_CONFLICT` for a name already in use, `401` for an anonymous caller and `403` for a
+  caller without `manage_metadata`. No request or response shape changed.
+- 4b45afa: fix(runtime): the `/automation` write doors refuse a packaged flow, as the metadata door does (#20679)
+  
+  Clause-②: yes (widening)
+  
+  A flow that a code package ships has a locked base (ADR-0126 §2): changing or removing it in place is refused. `PUT /api/v1/meta/flow/:name` already refused it. The two `/automation` definition doors did not: an administrator holding `manage_metadata` could rewrite a packaged flow in the live engine with `PUT /api/v1/automation/:name` or with `POST /api/v1/automation` under its name (a create onto an existing name overwrites it), or remove it with `DELETE /api/v1/automation/:name`.
+  
+  All three now answer a packaged flow with the same code and status the metadata door gives (`403` `NOT_OVERRIDABLE`), and with the same sentence wherever the metadata protocol's own package door answers. The refusal comes before the engine is called, so nothing is registered or removed. On `DELETE`, it also comes before the engine's own `DELETE_RESTRICTED` / `409` for a packaged subflow that packaged callers still reach.
+  
+  What is not refused:
+  
+  - A flow that no code package ships, including a flow created with `POST /api/v1/automation` or authored through the metadata door. It is updated and removed as before.
+  - `POST /api/v1/automation/:name/clone`, which copies a packaged flow under a new name. This is the supported way to customize one (ADR-0126 §7.1).
+  - `POST /api/v1/automation/:name/toggle`, the switch that turns a packaged flow on or off (ADR-0126 §7.2).
+  - A deployment that sets `OS_METADATA_WRITABLE=flow`. It opens both doors, as the refusal message says.
+  
+  **The widening.** `@objectstack/metadata-protocol` gains one public method, `ObjectStackProtocolImplementation.packagedBaseRefusal({ type, name, operation })`. It returns the refusal the metadata door would give for writing (`'save'`) or removing (`'delete'`) an existing item because a code package ships it, or `null` when that door would not refuse on this ground. `saveMetaItem` and `deleteMetaItem` call the same code, so the two doors cannot disagree. Their own refusals are unchanged.
+- c8111a5: fix(runtime): the clone door's notice names the clone's own off-switch, its status (#20726)
+  
+  `POST /api/v1/automation/:name/clone` answers a `notice` saying the clone is armed. It told the admin to switch the clone off through `POST /api/v1/automation/NAME/toggle`. A clone carries no package envelope, so it is a flow authored in the deployment, and that switch refuses it: the switch turns packaged flows on and off only. The notice now names the clone's own switch: send its complete definition with `status: 'obsolete'` to `PUT /api/v1/automation/NAME`. It also says that the toggle switches packaged flows only and refuses the clone, whatever flow the clone was copied from. The response shape is unchanged; only the notice text moves.
+- 7c5a311: Runtime refusals, boot errors and warnings no longer cite tracker numbers; each one states the decision behind it in words
+  
+  Clause-②: no
+  
+  Strings `@objectstack/runtime` shows to callers, authors and operators pointed at an issue-tracker number for the reason behind them. The number goes; where the sentence did not already say what was decided, it now does.
+  
+  - The enablement refusal (`POST /actions/_activation/:object/:action`) adds that the switch is not scoped to the caller's organization, which is why `manage_metadata` gates it.
+  - The doubled post-success navigation warning (`[action-contract]`) says the contract refuses a pair of destinations rather than ranking them, and that "declared `onSuccess` wins" is the console renderer's interim precedence, not a contract.
+  - The legacy database notice says `dev`, `start` and `migrate` now share one default database file.
+  - The `BodyRunner` warning for a `log` capability with no logger says the capability writes only to the factory's logger, never to `console`.
+  - The seed tenancy handoff warning says what a failure leaves behind: seed and API writes on separate autonumber counters until the next boot's migration repairs it.
+  - The auth forwarder's sanitised-500 log line says the client's message was withheld unconditionally and that this line is where the original error is read.
+  - The `StandaloneStack` guard for a driver kind with no dispatch arm says falling through to SQLite would hand the caller an engine they never selected.
+  - The `StandaloneStack` refusals for an unsupported or URL-less database driver, the declarative-endpoint hints, the `cacheTtlSeconds` warning and the two other `BodyRunner` warnings drop their citations; each already said what it refuses and why.
+  
+  Text only: no status, error code, field, route, export or control flow moves. A log filter or test that matched the old text (for example a `See #NNNN` suffix) needs the new spelling.
+- 76bd58f: fix(automation): which flows are packaged is the package loader's fact, never the flow definition's own, and every flow written through an authoring door is authored in the deployment (#20761)
+  
+  Clause-②: yes (widening)
+  
+  A flow counts as packaged only when a managed package's loader registered it (ADR-0126 §2, ADR-0131 D6). Before this change, a flow definition written through an authoring door could carry a code package's provenance, and the automation engine then treated that flow as the package's.
+  
+  - **The automation engine reads the loader's set.** The ADR-0126 §7.3 subflow guards, the arming gate, the activation switch and the package an activation row names now come from the packages the loader registered. The provenance a flow definition carries is kept for display only. `AutomationEngine` gains `setPackagedFlowSource(reader)` and `packagedFlowOwner(name)`, and the package exports the `PackagedFlowSource` type. `AutomationServicePlugin` attaches the reader for you: it asks the metadata protocol when the engine needs the answer. An engine with no reader attached treats no flow as packaged.
+  - **One authoring rule for flows.** `ObjectStackProtocolImplementation` gains two methods. `packagedArtifactOwner({ type, name })` names the package whose loader registered an item. `tenantAuthoredWriteRefusal({ type, name, item, packageId? })` is the rule every flow write door asks: the automation create, update and clone doors, and the metadata door's flow write.
+    - A write to a name a package ships is refused as a locked base. The answer is `packagedBaseRefusal`'s own (`403 NOT_OVERRIDABLE`), so sending a shipped flow's definition back is refused.
+    - A definition that claims a code package's provenance for a name no package ships is refused with `422 INVALID_METADATA`, and nothing is written. Before, the automation doors kept the claim and the metadata door removed it without saying so.
+    - A customer flow's definition sent back as it was read is accepted as before. That includes a stored flow bound to one of your own packages, whose read carries that binding.
+    - `packagedBaseRefusal` also takes an optional `packageId`, the base a save names.
+  - **The metadata door's other types are unchanged.** Only flows are judged by this rule. Migrating stored rows and duplicating a package are not affected either.
+  - **A clone is saved.** `POST /automation/:name/clone` now writes its copy as a stored flow of the deployment, through the metadata protocol's save, with no package provenance. The copy reads back on the metadata door and is still there after a restart. Before, it lived only in the running engine and was gone after a restart. If the save fails, the clone is withdrawn and the failure is returned.
+  
+  **If a write of yours is now refused with `422 INVALID_METADATA`:** remove the package provenance from the flow definition and send it again. To customize a packaged flow, clone it under a new name.
+- 514001a: fix(rest,runtime): the published-snapshot read of a flow name a managed package ships answers the package's flow, as the layered read does (#21002)
+  
+  Clause-②: yes (widening)
+  
+  `flow` is in ADR-0126's Regime C: a managed package's flow is sealed, and there is no overlay read path for it. Since the previous half of #21002, the layered read, `GET /api/v1/meta/flow/:name/layers`, reports the package's flow as the effective layer for a name a managed package ships, and a stored flow of that name as a separate layer that does not take effect. The published-snapshot read, `GET /api/v1/meta/:type/:name/published`, and its runtime-dispatcher twin read that same layered answer, but served its stored layer whenever one was present. So for such a name they still answered `200` with the stored flow, not the package's.
+  
+  Both published-snapshot doors now serve the layered read's effective layer when that read put the package's flow over a stored flow, which is the package's flow. They ask the metadata protocol's own check for that decision rather than repeating it. In every other case they answer exactly as before: a flow name no managed package ships, and every other metadata type, `object` included, still answer the stored layer when one is present, and an item with no stored layer still falls through to the code/package snapshot. The stored flow is not deleted, rewritten or refused.
+  
+  **The widening.** `@objectstack/metadata-protocol` makes one existing method public: `ObjectStackProtocolImplementation.isShippedFlowName(type, name)`. It answers whether `name` is a flow name a managed package ships. It was private to the class, so a door in another package could not ask it any other way. Its answer is unchanged, and the layered read, the by-name read and the flow list keep calling it.
+- 70dae53: feat(spec): discovery reports which optional `/auth` route families are mounted, starting with the better-auth admin family (`authFamilies.admin`) (#21046)
+  
+  Clause-②: yes
+  
+  **New key.** `DiscoverySchema` declares an optional `authFamilies` block, `{ admin: boolean }`. `admin` says whether the better-auth admin family (`{routes.auth}/admin/*`: `list-users`, `set-role`, `update-user`, `ban-user`, …) is mounted on this deployment. On a deployment that does not enable the admin plugin those routes answer a plain `404`, the same as a mistyped path, so a caller checks `authFamilies.admin` before building a URL into the family. `@objectstack/spec/api` also exports the block's schema (`AuthFamiliesSchema`, type `AuthFamilies`) and its reader, `readAuthFamilies(authService)`.
+  
+  **Same answer as `/auth/config`.** The value is the auth service's own `getPublicConfig().features.admin`, the object `GET /api/v1/auth/config` serves. Both discovery producers read it through `readAuthFamilies`: `getDiscovery()` in `@objectstack/metadata-protocol` (served by `@objectstack/rest` at `GET /api/v1/discovery`) and `getDiscoveryInfo()` in `@objectstack/runtime` (served at `GET /.well-known/objectstack`). Neither re-derives whether the admin plugin is on, so on one boot the two documents and `/auth/config` agree. On a stock boot `authFamilies.admin` is `false`. With the admin plugin on (`plugins.admin: true`, or SCIM, which forces it on) it is `true`.
+  
+  **When the key is absent.** A producer that cannot read the answer emits no `authFamilies`, rather than a guessed `false`. That happens when no `auth` service is registered (then `routes.auth` is absent too), when the registered service has no `getPublicConfig()`, or when that call throws (`/auth/config` answers `500 AUTH_CONFIG_ERROR` in that state). Treat an absent block as "not known to be mounted".
+  
+  **What did not change.** No existing key, route or status moved. The unmounted admin routes still answer a plain `404`.
+- 7a606a9: fix(rest,runtime): reading `datasource` and `external_catalog` metadata through `/api/v1/meta` requires `manage_platform_settings`, the capability each type's own door already requires (#21087)
+  
+  Clause-②: no
+  
+  - A `GET` or `HEAD` of `/api/v1/meta/datasource` or `/api/v1/meta/external_catalog` (and their plural spellings) is now admitted only for a caller who holds `manage_platform_settings`. That is the capability the datasource admin door (`GET /api/v1/datasources`, `GET /api/v1/datasources/:name`) and the federation read door (`GET /api/v1/datasources/:name/external/tables`) already require for the same data. Every read route under the type is judged alike: the list, the item read and each of its query switches, `/published`, `/layers`, `/history`, `/audit`, `/diff` and `/references`. `/history`, `/audit` and `/diff` still also require an authoring capability, as before.
+  - A caller without the capability gets `403` with `error.code` `PERMISSION_DENIED`, and a message that names the capability. The answer is the same whether or not the named item exists, and nothing is read from the metadata store first.
+  - Holders of `manage_platform_settings` are served exactly as before. Platform administrators hold it through `admin_full_access`. Every other metadata type, and every write route, is unchanged.
+  - Both transports answer the same way: `RestServer`, and the runtime dispatcher's `/meta` domain that a host mounting only the `/api/v1/*` catch-all is served by.
+  - If you read either type with a caller that holds only an authoring capability (`manage_metadata`, `studio.access` or `setup.access`), grant `manage_platform_settings` to that caller, or read through a caller that already has it.
+- f3b16fc: Raise the published dependency floors to the 2026-10 production dependency group. No API changes. A consumer install resolves these ranges:
+  
+  Clause-②: no
+  
+  - `zod` `^4.6.1` → `^4.6.5`: `@objectstack/spec`, `@objectstack/core`, `@objectstack/objectql`, `@objectstack/rest`, `@objectstack/runtime`, `@objectstack/cli`, `@objectstack/mcp`, `@objectstack/metadata`, `@objectstack/metadata-core`, `@objectstack/metadata-protocol`, `@objectstack/driver-turso`.
+  - `@libsql/client` `^0.17.3` → `^0.18.0`: `@objectstack/driver-turso`. Every behaviour the driver documents was re-measured on 0.18.0 and holds unchanged. That covers the URL scheme routing, the `URL_INVALID` and `URL_SCHEME_NOT_SUPPORTED` refusals, the WebSocket transport having no `fetch` or timeout seam, `syncUrl` being read only by the embedded-replica client, and the `?authToken=` precedence on `url` and `syncUrl`. The driver's refusal messages now name 0.18.0 as the measured version. 0.18.0 changes only the local `file:` client, which now pools connections. The driver creates that client only for an embedded replica, and calls only `sync()` on it.
+  - `@modelcontextprotocol/sdk` `^1.30.0` → `^1.30.1`: `@objectstack/connector-mcp`, `@objectstack/mcp`.
+  - `chalk` `^6.0.0` → `^6.0.1`: `@objectstack/cli`, `create-objectstack`. `yaml` `^2.9.0` → `^2.9.1` and `tsx` `^4.23.12` → `^4.23.15`: `@objectstack/cli`.
+  - `mongodb` `^7.5.0` → `^7.6.0`: `@objectstack/driver-mongodb`.
+  - `sql.js` `^1.14.1` → `^1.14.2`: `@objectstack/driver-sqlite-wasm`.
+  - `@noble/hashes` `^2.3.0` → `^2.4.0` and `jose` `^6.2.8` → `^6.2.12`: `@objectstack/plugin-auth`. The better-auth family stays at exactly `1.7.3`.
+  - `hono` `^4.13.5` → `^4.13.9`: `@objectstack/plugin-hono-server`.
+  - `pinyin-pro` `^3.29.1` → `^3.29.4`: `@objectstack/plugin-pinyin-search`.
+  - `@noble/ciphers` `^2.3.0` → `^2.4.0`: `@objectstack/service-settings`.
+- 454bbb6: fix(rest,runtime): writing `datasource` metadata through `/api/v1/meta` requires `manage_platform_settings`, the capability the datasource admin door already requires (#21124)
+  
+  Clause-②: no
+  
+  - A write of a `datasource` definition through `/api/v1/meta` (and its plural spelling) is now admitted only for a caller who holds `manage_platform_settings`. That is the capability the datasource admin door (`POST /api/v1/datasources`, `PATCH` and `DELETE /api/v1/datasources/:name`) already requires for the same create, update and remove. Every write verb is judged alike: the save (`PUT /meta/datasource/:name`, a draft save included), the reset (`DELETE`), `/publish` and `/rollback`.
+  - A caller without the capability gets `403` with `error.code` `PERMISSION_DENIED`, and a message that names the capability. Nothing is written. The answer is the same whether or not the named item exists.
+  - The write doors' own authoring admission is unchanged and still applies, so a datasource write needs `manage_platform_settings` and `manage_metadata` both. Platform administrators hold both through `admin_full_access`. Every other metadata type, and every read route, is unchanged. `external_catalog` writes are unchanged: that type's own write door requires `manage_metadata`.
+  - Both transports answer the same way: `RestServer`, and the runtime dispatcher's `/meta` domain that a host mounting only the `/api/v1/*` catch-all is served by.
+  - If you write datasource definitions through `/api/v1/meta` with a caller that holds only an authoring capability (`manage_metadata`, `studio.access` or `setup.access`), grant `manage_platform_settings` to that caller, or write through the datasource admin door with a caller that already holds it.
+- a186aea: Provenance comments in `@objectstack/runtime` were re-anchored
+  
+  Comment and docblock lines under `src/` that cited tracker numbers which no
+  longer resolve on GitHub now cite the commit in this repository's history that
+  decided the matter, and say in their own words what was decided. Comments
+  only: no route, error code, refusal text, type, export or runtime behaviour
+  changes.
+- Updated dependencies [e5c7d07]
+- Updated dependencies [e5c7d07]
+- Updated dependencies [e5c7d07]
+- Updated dependencies [6f1f1c1]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [05a7547]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [b531c7b]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [7001918]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [df67985]
+- Updated dependencies [42d78b9]
+- Updated dependencies [3572916]
+- Updated dependencies [fe463b4]
+- Updated dependencies [5a23096]
+- Updated dependencies [a94f3ba]
+- Updated dependencies [3fbf3ca]
+- Updated dependencies [eb4b17c]
+- Updated dependencies [24d521e]
+- Updated dependencies [19fc8d6]
+- Updated dependencies [b785c3b]
+- Updated dependencies [97005ae]
+- Updated dependencies [2473e26]
+- Updated dependencies [3a89d45]
+- Updated dependencies [c96beb2]
+- Updated dependencies [6e3aa75]
+- Updated dependencies [f379f57]
+- Updated dependencies [889139c]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [3f45b6c]
+- Updated dependencies [7510663]
+- Updated dependencies [820d3f4]
+- Updated dependencies [a7d9768]
+- Updated dependencies [4bf4e7e]
+- Updated dependencies [4d04b6b]
+- Updated dependencies [9a4b2bb]
+- Updated dependencies [0e9ad74]
+- Updated dependencies [a6866da]
+- Updated dependencies [1a75e39]
+- Updated dependencies [67c1b11]
+- Updated dependencies [72f8c38]
+- Updated dependencies [cd901d7]
+- Updated dependencies [31ed067]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [89801cd]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [cd6d8a5]
+- Updated dependencies [ace770d]
+- Updated dependencies [7184436]
+- Updated dependencies [ed54768]
+- Updated dependencies [d3f88fa]
+- Updated dependencies [99786f9]
+- Updated dependencies [63bfe69]
+- Updated dependencies [4b45afa]
+- Updated dependencies [1940afd]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [165c1d4]
+- Updated dependencies [d7b9817]
+- Updated dependencies [f80e2a6]
+- Updated dependencies [22e584c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [7afdc5c]
+- Updated dependencies [9ad6544]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [e47355b]
+- Updated dependencies [b9087d7]
+- Updated dependencies [f115b1f]
+- Updated dependencies [f10d802]
+- Updated dependencies [856321f]
+- Updated dependencies [76bd58f]
+- Updated dependencies [810d42b]
+- Updated dependencies [6b004c0]
+- Updated dependencies [93e9e42]
+- Updated dependencies [157baa7]
+- Updated dependencies [ca5408c]
+- Updated dependencies [ca5408c]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [793fb83]
+- Updated dependencies [4d0b9cd]
+- Updated dependencies [cf0346e]
+- Updated dependencies [8fec76a]
+- Updated dependencies [ceee88f]
+- Updated dependencies [8460592]
+- Updated dependencies [e18fea6]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [dcd3309]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [95fed33]
+- Updated dependencies [26437ae]
+- Updated dependencies [33b6e8b]
+- Updated dependencies [b1aee33]
+- Updated dependencies [05be352]
+- Updated dependencies [250dec8]
+- Updated dependencies [d67b942]
+- Updated dependencies [f8178ff]
+- Updated dependencies [d1633f3]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [8f78495]
+- Updated dependencies [a3dc817]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [0c5a71b]
+- Updated dependencies [75519e1]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [657b6b7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [de8cd58]
+- Updated dependencies [83480c6]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [25f2e64]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [e161ad3]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [c35436c]
+- Updated dependencies [58a77db]
+- Updated dependencies [a9d36d5]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [94990a2]
+- Updated dependencies [514001a]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [a11faee]
+- Updated dependencies [2c1cef3]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [097ef80]
+- Updated dependencies [70dae53]
+- Updated dependencies [c6954d6]
+- Updated dependencies [d34aa58]
+- Updated dependencies [bafb8c9]
+- Updated dependencies [9c8b65a]
+- Updated dependencies [665cab3]
+- Updated dependencies [665cab3]
+- Updated dependencies [45ce12a]
+- Updated dependencies [682873d]
+- Updated dependencies [1bd14c9]
+- Updated dependencies [432c8ab]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [cfad7de]
+- Updated dependencies [7a606a9]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [df1feae]
+- Updated dependencies [ef96c9e]
+- Updated dependencies [e35c40a]
+- Updated dependencies [336e191]
+- Updated dependencies [336e191]
+- Updated dependencies [454bbb6]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [24c554d]
+- Updated dependencies [c6b6889]
+- Updated dependencies [ebdb6f2]
+- Updated dependencies [55012df]
+- Updated dependencies [862f12c]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [be5a83c]
+- Updated dependencies [d2bc644]
+- Updated dependencies [7923c8e]
+- Updated dependencies [95b91cc]
+- Updated dependencies [cfa9315]
+- Updated dependencies [61455de]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [04b202e]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+- Updated dependencies [00f045d]
+  - @objectstack/rest@17.6.0
+  - @objectstack/plugin-security@17.6.0
+  - @objectstack/spec@17.6.0
+  - @objectstack/driver-sql@17.6.0
+  - @objectstack/objectql@17.6.0
+  - @objectstack/metadata@17.6.0
+  - @objectstack/metadata-protocol@17.6.0
+  - @objectstack/core@17.6.0
+  - @objectstack/driver-turso@17.6.0
+  - @objectstack/driver-memory@17.6.0
+  - @objectstack/metadata-core@17.6.0
+  - @objectstack/formula@17.6.0
+  - @objectstack/observability@17.6.0
+  - @objectstack/plugin-auth@17.6.0
+  - @objectstack/service-datasource@17.6.0
+  - @objectstack/types@17.6.0
+  - @objectstack/driver-sqlite-wasm@17.6.0
+  - @objectstack/service-cluster@17.6.0
+  - @objectstack/service-i18n@17.6.0
+
 ## 17.5.0
 
 ### Minor Changes

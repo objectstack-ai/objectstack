@@ -2,7 +2,8 @@
 
 /**
  * Default inline-grid columns — the single source of WHICH child fields an
- * inline master-detail grid draws when its author listed no columns.
+ * inline master-detail grid draws when its author listed no columns, and of
+ * which fields its per-row expand form draws when its author listed none.
  *
  * Two carriers draw a grid of a child object's records inside the parent's
  * form, and both say "derived from the child object when omitted":
@@ -54,6 +55,35 @@
  * renderer hydrates them from the child field, exactly as it hydrates an
  * identity-only column an author wrote. So the derived list is precisely the
  * `inlineColumns` an author could have written to draw the same grid.
+ *
+ * ## The per-row expand form ({@link deriveInlineRowFormFields})
+ *
+ * Each row of the grid can open a full form for that row, and that form draws
+ * more than the grid: it has room for the rich inputs a cell cannot hold. Its
+ * fields are derived from the child object too, by a broader rule — measured
+ * against objectui at the `.objectui-sha` pin `31971ff1e28f`
+ * (`packages/plugin-form/src/deriveMasterDetail.ts`, `deriveFormFields`).
+ * Every child field, in the field map's own order, except:
+ *
+ *   - a name in {@link INLINE_GRID_SYSTEM_FIELDS} or
+ *     {@link INLINE_GRID_SORT_FIELDS} — the same two sets the grid skips;
+ *   - the relationship field back to the parent, and any name in `exclude`;
+ *   - a field flagged `system` or `hidden` — NOT `readonly`: the form shows a
+ *     read-only value, where a cell would only waste the width;
+ *   - a field whose `type` is in {@link INLINE_ROW_FORM_NON_INPUT_TYPES}, the
+ *     computed types nobody types into. `richtext`, `json`, `markdown` and the
+ *     other types a cell cannot edit stay in.
+ *
+ * Every type the form skips the grid skips too, so with the same
+ * `relationshipField` and `exclude`, the derived grid's columns are always a
+ * subset of the derived form's fields.
+ *
+ * The form is not always offered ({@link isInlineRowFormOffered}). Measured in
+ * the same pin's `MasterDetailForm.tsx`, it is offered when it adds something:
+ * always when the collection's form factor is `form` (the row form IS the
+ * editor there), and otherwise only when the form has more fields than the
+ * grid has columns. A thin grid whose columns already cover every field shows
+ * no expand control.
  */
 
 /** Default-visible column budget of a derived inline grid; the rest are `defaultHidden`. */
@@ -208,4 +238,61 @@ export function deriveInlineGridColumns(
     visible.add(c.name);
   }
   return candidates.map(({ name }) => (visible.has(name) ? { name } : { name, defaultHidden: true }));
+}
+
+/**
+ * Field types the per-row expand form leaves out: the computed, server-derived
+ * values nobody types. Narrower than {@link INLINE_GRID_NON_EDITABLE_TYPES} —
+ * the form has room for the rich inputs a cell cannot hold. As there, the
+ * names that are not `FieldType` members are the renderer's legacy tolerances.
+ */
+const INLINE_ROW_FORM_NON_INPUT_TYPES: ReadonlySet<unknown> = new Set([
+  'formula', 'summary', 'rollup', 'autonumber', 'auto_number',
+]);
+
+/**
+ * Derive the fields of an inline master-detail grid's per-row expand form
+ * from the child object's definition (or any bare record shaped like one:
+ * `{ fields }` with the field map the spec declares). The rule is in the
+ * module note; the renderer offers the form only when
+ * {@link isInlineRowFormOffered} says so.
+ *
+ * `relationshipField` is the child's field back to the parent — excluded, as
+ * in {@link deriveInlineGridColumns}. `exclude` drops further names.
+ *
+ * Returns `[]` when the definition carries no field map.
+ */
+export function deriveInlineRowFormFields(
+  def: unknown,
+  opts: { relationshipField?: string; exclude?: readonly string[] } = {},
+): string[] {
+  const fields = prop(def, 'fields');
+  if (!fields || typeof fields !== 'object') return [];
+  const exclude = new Set<string>([...(opts.exclude ?? []), ...(opts.relationshipField ? [opts.relationshipField] : [])]);
+
+  const out: string[] = [];
+  for (const [name, field] of Object.entries(fields as AnyRec)) {
+    if (INLINE_GRID_SYSTEM_FIELDS.has(name) || exclude.has(name) || INLINE_GRID_SORT_FIELDS.has(name)) continue;
+    if (prop(field, 'system') || prop(field, 'hidden')) continue;
+    if (INLINE_ROW_FORM_NON_INPUT_TYPES.has(prop(field, 'type'))) continue;
+    out.push(name);
+  }
+  return out;
+}
+
+/**
+ * Whether an inline child collection offers its per-row expand form: always
+ * when its form factor is `form`, else only when the form has more fields
+ * than the grid has columns.
+ *
+ * `inlineMode` is the collection's RESOLVED form factor (`grid` / `form`), as
+ * the renderer resolved it. `formFields` and `columns` are the lists the
+ * collection draws, authored or derived; only their lengths are read.
+ */
+export function isInlineRowFormOffered(opts: {
+  inlineMode?: 'grid' | 'form';
+  formFields?: readonly unknown[];
+  columns?: readonly unknown[];
+}): boolean {
+  return opts.inlineMode === 'form' || (opts.formFields?.length ?? 0) > (opts.columns?.length ?? 0);
 }

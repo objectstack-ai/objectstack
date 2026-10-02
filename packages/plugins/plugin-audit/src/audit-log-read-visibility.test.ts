@@ -8,7 +8,13 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { installAuditLogReadVisibility, isLedgerRowAboutNoRecord } from './audit-log-read-visibility.js';
+import { ADMIN_FULL_ACCESS_CAPABILITIES } from '@objectstack/spec';
+import { PLATFORM_CAPABILITIES } from '@objectstack/spec/security';
+import {
+  LEDGER_AUDIT_CAPABILITY,
+  installAuditLogReadVisibility,
+  isLedgerRowAboutNoRecord,
+} from './audit-log-read-visibility.js';
 import type { CommentAccessEngine, CommentReadMiddlewareCtx } from './comment-access-hooks.js';
 
 const DENY = { id: '__audit_log_parent_denied__' };
@@ -210,5 +216,47 @@ describe('installAuditLogReadVisibility', () => {
   it('is inert on an engine without the middleware seam', () => {
     const engine: CommentAccessEngine = { registerHook: () => {}, find: async () => [], findOne: async () => null };
     expect(() => installAuditLogReadVisibility(engine, silentLogger())).not.toThrow();
+  });
+});
+
+describe('[#21260] the ledger audit capability', () => {
+  const unreadable = () => [
+    { id: 'l1', action: 'delete', object_name: 'crm_case', record_id: 'c1' },
+    { id: 'l2', action: 'logout', object_name: 'sys_session', record_id: 's1' },
+  ];
+  const holder = { userId: 'u1', systemPermissions: ['setup.access', LEDGER_AUDIT_CAPABILITY] };
+
+  it('is the capability the platform declares, org-scoped, and grants platform administrators by default', () => {
+    expect(PLATFORM_CAPABILITIES.find((c) => c.name === LEDGER_AUDIT_CAPABILITY)?.scope).toBe('org');
+    expect(ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions).toContain(LEDGER_AUDIT_CAPABILITY);
+  });
+
+  it('its holder is not narrowed, on any read operation, and nothing is scanned for it', async () => {
+    for (const operation of ['find', 'findOne', 'count', 'aggregate'] as const) {
+      const { mw, calls } = install({ scan: unreadable, readable: { crm_case: [], sys_session: [] } });
+      const existing = { action: 'delete' };
+      const { where, ran } = await read(mw, { operation, context: holder, ast: { object: 'sys_audit_log', where: existing } });
+      expect(ran).toBe(true);
+      expect(where).toBe(existing);
+      expect(calls.scans).toEqual([]);
+      expect(calls.probes).toEqual([]);
+    }
+  });
+
+  it('its holder’s broad read never meets the pre-scan bound', async () => {
+    const logger = silentLogger();
+    const rows = Array.from({ length: 2000 }, (_, i) => ({ id: `l${i}`, action: 'update', object_name: 'crm_case', record_id: `c${i}` }));
+    const { mw, calls } = install({ scan: () => rows, readable: { crm_case: [] }, logger });
+    expect((await read(mw, { context: holder })).where).toBeUndefined();
+    expect(calls.scans).toEqual([]);
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('a caller without it gets exactly the parent-record gate: other capabilities, a non-list, or none', async () => {
+    for (const systemPermissions of [['setup.access', 'manage_users'], LEDGER_AUDIT_CAPABILITY, undefined]) {
+      const { mw, calls } = install({ scan: unreadable, readable: { crm_case: [], sys_session: [] } });
+      expect((await read(mw, { context: { userId: 'u1', systemPermissions } })).where).toEqual(DENY);
+      expect(calls.scans).toHaveLength(1);
+    }
   });
 });

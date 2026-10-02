@@ -802,6 +802,81 @@ describe('[#20148] per-aggregation filter — a { $field } names a declared fiel
   });
 });
 
+// ───────────────────────────────────────────────────────────────────────────
+// [#21255] A plain { $field } takes the class rule `where` gives every reference
+// ───────────────────────────────────────────────────────────────────────────
+
+describe('[#21255] per-aggregation filter — a plain { $field } across two comparison classes is refused, as where refuses it', () => {
+  // Before (2791138cbf), the class rule judged only an `addDays` pair, so the
+  // card's query — `closed_at` (datetime) `$lte` `{ $field: 'due_on' }` (date)
+  // — was answered by `@objectstack/formula`'s whole-day reading of the bare
+  // day: 3 of these 6 rows (o1, o2, o5), measured here with the rule reverted,
+  // and the same shape counted on `SqlDriver` over better-sqlite3 through
+  // `engine.aggregate`, while its `where` twin was refused 400 by `driver-sql`'s
+  // cross-field compiler. The twin itself runs in `packages/rest`
+  // (`aggregation-filter-where-doors.test.ts`), where a real `SqlDriver`
+  // refuses it; the engine judges no `where` reference (the #20148 control
+  // above).
+  const CROSS_CLASS: ReadonlyArray<readonly [string, () => Record<string, unknown>, string]> = [
+    ['a datetime against a date (the card\'s measured query)', () => ({ closed_at: { $lte: { $field: 'due_on' } } }), '"closed_at" is datetime but "due_on" is date'],
+    ['a date against a datetime', () => ({ due_on: { $gte: { $field: 'closed_at' } } }), '"due_on" is date but "closed_at" is datetime'],
+    ['a text against a number', () => ({ customer_id: { $gt: { $field: 'amount' } } }), '"customer_id" is text but "amount" is numeric'],
+    ['a time against a datetime', () => ({ slot: { $lt: { $field: 'opened_at' } } }), '"slot" is time but "opened_at" is datetime'],
+    ['a datetime against a date under $ne', () => ({ closed_at: { $ne: { $field: 'due_on' } } }), '"closed_at" is datetime but "due_on" is date'],
+    ['a datetime against a date behind a $or branch that holds', () => ({ $or: [{ amount: { $gt: 0 } }, { closed_at: { $lte: { $field: 'due_on' } } }] }), '"closed_at" is datetime but "due_on" is date'],
+    ['a datetime against a date under $not', () => ({ $not: { closed_at: { $lte: { $field: 'due_on' } } } }), '"closed_at" is datetime but "due_on" is date'],
+  ];
+
+  for (const [name, filter, diagnostic] of CROSS_CLASS) {
+    it(`${name}: refused before any read, whatever the rows, the names withheld and logged`, async () => {
+      const { message, warnings } = await expectOrderFilterRefusal(filter);
+      expect(message).toContain(`\`${AT}\``);
+      expect(message).toContain('withheld from the message');
+      for (const field of ['closed_at', 'due_on', 'customer_id', 'amount', 'slot', 'opened_at']) {
+        expect(message).not.toContain(`"${field}"`);
+      }
+      // The withheld half names both fields and both classes, once per refusal.
+      expect(warnings).toHaveLength(8);
+      for (const line of warnings) expect(line).toContain(diagnostic);
+    });
+  }
+
+  // Answered exactly as before, on both driver kinds: one class on both sides.
+  const SAME_CLASS: ReadonlyArray<readonly [string, () => Record<string, unknown>, number]> = [
+    ['a date against a date', () => ({ placed_on: { $lte: { $field: 'due_on' } } }), 3],
+    ['a datetime against a datetime', () => ({ closed_at: { $gt: { $field: 'opened_at' } } }), 4],
+    ['a number against a number', () => ({ cap: { $lt: { $field: 'amount' } } }), 4],
+    ['a time against a time', () => ({ slot: { $lte: { $field: 'slot' } } }), 6],
+    ['a text against a text', () => ({ customer_id: { $ne: { $field: 'customer_id' } } }), 0],
+  ];
+
+  for (const [name, filter, populatedCount] of SAME_CLASS) {
+    it(`${name} counts ${populatedCount} of 6, and 0 on an empty table`, async () => {
+      for (const native of [true, false]) {
+        const { driver } = makeCountingDriver(ORDERS, native);
+        const populated = await makeOrderEngine(driver);
+        expect(await populated.aggregate('crm_order', withFilter(filter()))).toEqual([{ opp_count: 6, picked: populatedCount }]);
+        const { driver: emptyDriver } = makeCountingDriver([], native);
+        const empty = await makeOrderEngine(emptyDriver);
+        expect(await empty.aggregate('crm_order', withFilter(filter()))).toEqual([{ opp_count: 0, picked: 0 }]);
+      }
+    });
+  }
+
+  it('an object the registry does not declare is not judged — the card\'s query is answered as before', async () => {
+    // The fail-open direction an `addDays` pair already takes for a
+    // registry-less host: no declaration, no class, no verdict.
+    for (const native of [true, false]) {
+      const { driver } = makeCountingDriver(ORDERS, native);
+      const engine = new ObjectQL();
+      engine.registerDriver(driver, true);
+      await engine.init();
+      expect(await engine.aggregate('crm_order', withFilter({ closed_at: { $lte: { $field: 'due_on' } } })))
+        .toEqual([{ opp_count: 6, picked: 3 }]);
+    }
+  });
+});
+
 describe('[#20148] a Date bound is compared as an instant — as the same bound in a where is', () => {
   // Before, measured through `engine.aggregate` on driver-memory and
   // driver-sql: every Date row below counted NO row (`$ne` / `$nin` / the

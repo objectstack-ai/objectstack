@@ -491,7 +491,7 @@ ai:
 
 - `category` — overrides the derived tool category (`data`, `action`, `flow`, `integration`, `vector_search`, `analytics`, `utility`).
 - `paramHints` — per-parameter hints (keyed by param name or `recordId`) that tighten the JSON Schema the model sees without changing UI metadata.
-- `outputSchema` — JSON Schema for the return value, enabling structured tool chaining.
+- `outputSchema` — JSON Schema for the return value. The cloud AI runtime validates the action's result against it and withholds a result that does not conform; a schema it cannot enforce is refused before the action runs.
 - `requiresConfirmation` — override the human-in-the-loop gate for AI invocations.
 
 ## Real-World Examples

@@ -1,7 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { DEFAULT_MAX_INLINE_GRID_COLUMNS, deriveInlineGridColumns } from './inline-grid-columns';
+import {
+  DEFAULT_MAX_INLINE_GRID_COLUMNS,
+  deriveInlineGridColumns,
+  deriveInlineRowFormFields,
+  isInlineRowFormOffered,
+} from './inline-grid-columns';
 import { InlineGridColumnSchema } from './field.zod';
 
 /**
@@ -164,5 +169,125 @@ describe('deriveInlineGridColumns', () => {
     const cols = deriveInlineGridColumns(wide);
     expect(cols.some((c) => c.defaultHidden)).toBe(true);
     for (const col of cols) expect(InlineGridColumnSchema.parse(col)).toEqual(col);
+  });
+});
+
+/**
+ * [#21091] The fields of an inline grid's per-row expand form. The first two
+ * fixtures are the renderer's own `deriveFormFields` cases (objectui
+ * `packages/plugin-form/src/deriveMasterDetail.test.ts` at the `.objectui-sha`
+ * pin `31971ff1e28f`), asserted here as whole lists rather than as the
+ * `toContain` probes they are there.
+ */
+describe('deriveInlineRowFormFields', () => {
+  const taskSchema = {
+    name: 'showcase_task',
+    fields: {
+      id: { type: 'text', system: true },
+      title: { type: 'text', label: 'Title', required: true },
+      status: { type: 'select', label: 'Status', options: [{ label: 'To Do', value: 'todo' }] },
+      estimate_hours: { type: 'number', label: 'Estimate (h)' },
+      budget: { type: 'currency', label: 'Budget' },
+      due_date: { type: 'date', label: 'Due Date' },
+      assignee: { type: 'lookup', label: 'Assignee', reference: 'user' },
+      project: { type: 'master_detail', label: 'Project', reference: 'showcase_project', required: true },
+      health: { type: 'formula', label: 'Health', expression: 'x' },
+      created_at: { type: 'datetime' },
+    },
+  };
+
+  it('returns the business fields in field order, skipping system, audit, the relationship and computed types', () => {
+    expect(deriveInlineRowFormFields(taskSchema, { relationshipField: 'project' })).toEqual([
+      'title', 'status', 'estimate_hours', 'budget', 'due_date', 'assignee',
+    ]);
+  });
+
+  it('keeps the rich input types the grid omits, and drops the computed ones', () => {
+    const rich = {
+      fields: {
+        title: { type: 'text', required: true },
+        parent: { type: 'master_detail', reference: 'p', required: true },
+        notes: { type: 'textarea' },
+        cover: { type: 'image' },
+        attachment: { type: 'file' },
+        total: { type: 'summary' },
+      },
+    };
+    expect(deriveInlineRowFormFields(rich, { relationshipField: 'parent' })).toEqual(['title', 'notes', 'cover', 'attachment']);
+  });
+
+  it('keeps `readonly` fields and every type a cell cannot edit; drops `system`, `hidden`, sort positions and `exclude`', () => {
+    const def = {
+      fields: {
+        line_no: { type: 'number' },
+        sort_order: { type: 'number' },
+        frozen: { type: 'text', readonly: true },
+        secret: { type: 'text', hidden: true },
+        internal: { type: 'text', system: true },
+        owner: { type: 'lookup', reference: 'sys_user' },
+        body: { type: 'richtext' },
+        meta: { type: 'json' },
+        place: { type: 'location' },
+        page: { type: 'html' },
+        doc: { type: 'markdown' },
+        seq: { type: 'autonumber' },
+        roll: { type: 'rollup' },
+        note: { type: 'text' },
+      },
+    };
+    expect(deriveInlineRowFormFields(def, { exclude: ['note'] })).toEqual(['frozen', 'body', 'meta', 'place', 'page', 'doc']);
+  });
+
+  it('without a relationship field, the relationship is an ordinary field', () => {
+    expect(deriveInlineRowFormFields(taskSchema)).toContain('project');
+  });
+
+  it('returns no fields for a definition with no field map', () => {
+    expect(deriveInlineRowFormFields(undefined)).toEqual([]);
+    expect(deriveInlineRowFormFields(null)).toEqual([]);
+    expect(deriveInlineRowFormFields('line')).toEqual([]);
+    expect(deriveInlineRowFormFields({ name: 'line' })).toEqual([]);
+  });
+
+  it('the derived grid draws a subset of the derived form: the form has every column, in the same order', () => {
+    const wide = {
+      fields: {
+        ...taskSchema.fields,
+        body: { type: 'richtext' },
+        frozen: { type: 'number', readonly: true },
+        ...Object.fromEntries(Array.from({ length: 6 }, (_, i) => [`f${i}`, { type: 'text' }])),
+      },
+    };
+    const opts = { relationshipField: 'project' };
+    const form = deriveInlineRowFormFields(wide, opts);
+    const columns = deriveInlineGridColumns(wide, opts).map((c) => c.name);
+    expect(columns.length).toBeGreaterThan(0);
+    expect(form.filter((name) => columns.includes(name))).toEqual(columns);
+    expect(form.filter((name) => !columns.includes(name))).toEqual(['body', 'frozen']);
+  });
+});
+
+/**
+ * [#21091] When an inline grid offers its per-row expand form — the condition
+ * objectui's `MasterDetailForm` applies at the `.objectui-sha` pin
+ * `31971ff1e28f` before it hands a row an expand control.
+ */
+describe('isInlineRowFormOffered', () => {
+  it('always in the `form` factor: the row form IS the editor', () => {
+    expect(isInlineRowFormOffered({ inlineMode: 'form', formFields: ['a'], columns: [{ name: 'a' }, { name: 'b' }] })).toBe(true);
+    expect(isInlineRowFormOffered({ inlineMode: 'form' })).toBe(true);
+  });
+
+  it('in the `grid` factor, only when the form has more fields than the grid has columns', () => {
+    expect(isInlineRowFormOffered({ inlineMode: 'grid', formFields: ['a', 'b', 'c'], columns: [{ name: 'a' }, { name: 'b' }] })).toBe(true);
+    expect(isInlineRowFormOffered({ inlineMode: 'grid', formFields: ['a', 'b'], columns: [{ name: 'a' }, { name: 'b' }] })).toBe(false);
+    expect(isInlineRowFormOffered({ inlineMode: 'grid', formFields: ['a'], columns: [{ name: 'a' }, { name: 'b' }] })).toBe(false);
+  });
+
+  it('with no form factor, the same count decides; an absent list counts as empty', () => {
+    expect(isInlineRowFormOffered({ formFields: ['a'], columns: [] })).toBe(true);
+    expect(isInlineRowFormOffered({ formFields: ['a'] })).toBe(true);
+    expect(isInlineRowFormOffered({ columns: [{ name: 'a' }] })).toBe(false);
+    expect(isInlineRowFormOffered({})).toBe(false);
   });
 });

@@ -1,5 +1,258 @@
 # @objectstack/driver-mongodb
 
+## 17.6.0
+
+### Minor Changes
+
+- a3dc817: fix(driver-memory, driver-mongodb)!: a non-boolean `$exists` comparand is refused with `INVALID_FILTER` / 400, as `$null`'s is, instead of selecting the rows with no value (#20897)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered filter-query-face-comparands-refused-at-save) this narrows the query faces to the rule that registered entry already records: its reason states that every query face refuses a non-boolean $null / $exists flag, and its replacement is this change's whole migration (a flag is the boolean itself; $exists true is "has a value", false "has no value"). This change makes that statement true on the two drivers that did not yet refuse. No authorable key, spelling, export or published type moves, and no stored row is read or rewritten; a stored filter carrying such a flag is already refused when it is saved, by that entry. -->
+  
+  **BREAKING**: this narrows what the in-memory driver and the MongoDB driver accept in a filter. A `$exists` comparand that is not a boolean (a string, a number, `null`, `undefined`, an object) is now refused with `INVALID_FILTER` / 400, where these two drivers used to answer it. It ships as `minor` under the launch-window convention for accept-set narrowings. No export or published type changes.
+  
+  `FieldOperatorsSchema` declares `$exists` as a boolean, and `driver-sql`, `driver-sqlite-wasm` and both Turso transports already refused any other comparand. The in-memory driver and the MongoDB driver did not: they read `$exists` as `value === true`, so every other value asked for the rows with NO value. `{ stage: { $exists: "yes" } }` and `{ stage: { $exists: 1 } }` returned the rows without a stage, the opposite of what was written. `0`, `null` and the string `"false"` landed on that same side by the same default, not because anything read them. The in-memory driver's analytics face read the same flag by truthiness and answered the valued rows for the same filter, so that driver gave two different answers.
+  
+  **What an author sees now.** `400 INVALID_FILTER` with `driver-sql`'s message, beginning `Operator "$exists" on field "FIELD" requires a boolean comparand (true or false).` and naming the position (`filter.stage.$exists`). On the in-memory driver the refusal covers `find`, `findOne`, `count`, `aggregate`, `updateMany`, `deleteMany` and the analytics face (`query()` and `generateSql()`). There, an `undefined` or object comparand is refused first by that face's comparand-type check, also `INVALID_FILTER` / 400, in its own words. A refused write changes nothing.
+  
+  **What to write instead.** Write the boolean itself. `"$exists": true` matches rows whose field has a value, and `"$exists": false` matches rows whose field has none.
+  
+  **Who is affected.** A caller that sent a non-boolean `$exists` to `InMemoryDriver` or `MongoDBDriver` (a test suite, a local or embedded deployment, a flow or hook calling the engine in-process) and read the answer as a real one. On `SqlDriver` the same filter was already a 400.
+  
+  **Unchanged.** `$exists: true` and `$exists: false` answer exactly as before. The aggregation `filter` and `having` positions, which the engine evaluates itself after the driver, are not changed by this entry.
+
+### Patch Changes
+
+- 3fbf3ca: Refusals, log lines and field help in core, the in-memory and MongoDB drivers, formula, metadata, metadata-core, objectql and platform-objects no longer cite tracker numbers; each states the reason in words
+  
+  Clause-②: no
+  
+  Many messages these packages show to authors, administrators and operators ended with an issue-tracker
+  number where the reason belonged. The number goes, and where the sentence did not already say what was
+  decided, it now does. Where an ADR stood beside the number, the ADR stays.
+  
+  - Refusals and prescriptions: the retired health-check keys, the `IMetadataService.register` refusals
+    (the contract refuses loudly and names the mismatch, never coerces a value into storability), the
+    kernel's plugin-ordering errors (registration order is not a contract), the in-memory and MongoDB
+    filter and aggregation refusals, formula's empty field constraint, the retired `artifact-api`
+    source, and the by-id update and delete refusals. The MongoDB retired-aggregate refusal now says the
+    function left `AggregationFunction` because no SQL backend compiled it; its undeclared-aggregate
+    refusal says the builder used to sum an unrecognised name before this refusal existed.
+  - The `findOne` no-predicate refusal loses its citation in `objectql` and in `metadata-core`'s
+    `engineFindOnePredicateRefusalMessage` together, so the two still read byte for byte the same.
+  - The in-memory and MongoDB drivers' multi-tenancy refusals (`MEMORY_MULTI_TENANT_UNSUPPORTED`,
+    `MONGODB_MULTI_TENANT_UNSUPPORTED`) no longer end with a `Tracking:` line linking a tracker card;
+    the sentence above it already says the driver refuses rather than run or answer unisolated.
+  - Field help and protection text: the `sys_account` token help (and its es-ES, ja-JP and zh-CN
+    translations), the `sys_email` headers help and the SCIM credential store's protection reason.
+  - Log lines: the superseded-registration warning, the authz cache posture line, the endpoint matcher's
+    excluded-item error, the metadata history and loader-read failure errors, and the fresh-datastore
+    attestation info lines.
+  
+  Text only: no error code, field name, status or behaviour changes.
+- 1a75e39: fix(spec,drivers): a `datetime` filter `$lte '9999-12-31'`, or a `$between` whose maximum is that day, includes the whole last supported day on every backend (#20600)
+  
+  Clause-②: yes (widening) — three new exports on `@objectstack/spec` (`data`) and `@objectstack/core`: the constant `UNBOUNDED_ABOVE`, its type `UnboundedAbove` and the guard `isUnboundedAbove`; `nextUtcCalendarDay` answers the constant for one input that used to answer a string. Nothing any door accepted before is refused, and nothing is removed or renamed.
+  
+  **BREAKING for TypeScript and JavaScript callers of `nextUtcCalendarDay`** (`@objectstack/spec/data`, re-exported by `@objectstack/core`): its return type gains a member and its answer for one input changes from a string to a symbol, landing in the launch window as `minor` (the lockstep convention: the bump level is not the carrier, this banner and the disposition below are). No filter an author writes and no stored row changes meaning except that a whole-day upper bound on `9999-12-31` now includes that day.
+  
+  `9999-12-31` is the last day of the supported years (0001..9999). A bare-day upper bound on a `datetime` field — `$lte`, a `$between` maximum, an analytics `dateRange` end — means that whole day, and is compiled as "before the next day's midnight". That day has no next day with a `YYYY-MM-DD` spelling: `nextUtcCalendarDay('9999-12-31')` answered the five-digit `'10000-01-01'`, which sorts below `'2026-…'` as text. So on SQLite, where a `datetime` column is ISO text, `$lte '9999-12-31'` and `$between ['2026-01-01', '9999-12-31']` answered no rows; PostgreSQL parsed the bound as an instant and answered them. The memory and mongo drivers, the analytics strategies and the draft preview built their bound from the same answer, and `formula`'s RLS `check` evaluator compared a `'2026-…'` value against it and denied the write.
+  
+  Every supported value is at most the last millisecond of `9999-12-31`, so that day's whole-day bound bounds nothing. `nextUtcCalendarDay('9999-12-31')` now answers `UNBOUNDED_ABOVE`, a symbol that is neither `null` ("not a calendar day", which would compile the day's midnight and miss the rest of it) nor a string, and every backend compiles no upper bound for it:
+  
+  - `$lte` / `<=` on that day asks only that the value is not null: `IS NOT NULL` on the SQL drivers and the analytics echo, `$ne: null` on the memory and mongo drivers.
+  - A `$between` / `between` whose maximum is that day, and an explicit analytics `dateRange` ending on it, keep only their minimum.
+  - The type-blind `formula` `check` evaluator and the draft preview admit every value that denotes an instant, and compare any other value as written.
+  - `$gte`, `$gt`, `$lt` and `$eq` on that day are unchanged: they anchor to its midnight, as on every other day. `9999-12-30` and every earlier day compile the same bound as before.
+  
+  Measured through `POST /api/v1/data/:object/query`, rows at `2026-07-15T14:00Z`, `9999-12-30T10:00Z`, `9999-12-31T00:00Z`, `T10:00Z` and `T23:59:59.999Z`: on SQLite, `$lte '9999-12-31'` and `$between ['2026-01-01', '9999-12-31']` answered none of them and now answer all five; `$between ['9999-12-31', '9999-12-31']` answered none and now answers the three on that day. PostgreSQL 16 answers the same before and after. `$lte '9999-12-30'` answers the first two rows on both, before and after.
+  
+  **If your code stops compiling.** `nextUtcCalendarDay` now returns `string | UnboundedAbove | null`, where `UnboundedAbove` is a `symbol` with a structural brand. TypeScript refuses that member in a template literal (TS2731), a relational comparison (TS2469) and a `string` parameter (TS2345), so code that used the answer as a day string no longer compiles until it handles the last day. Test the answer with `isUnboundedAbove(answer)` (or `typeof answer === 'symbol'`) first: on its false branch the answer is `string | null` as before, and on its true branch there is no upper bound to compile. `answer === UNBOUNDED_ABOVE` compares correctly but does not narrow, because the branded type is not a unit type. The type is structural on purpose: `@objectstack/spec` ships `./data` as `index.d.mts` and `index.d.ts`, and a `unique symbol` would be two unrelated types in a program that meets both.
+  
+  **If your JavaScript code handled the answer as text.** For `'9999-12-31'` it is now a registered symbol (`Symbol.for('objectstack.calendarDay.unboundedAbove')`), not `'10000-01-01'`: a template literal or a relational comparison on it throws a `TypeError`, and better-sqlite3 and `pg` refuse to bind it. Every other input answers exactly as before.
+  
+  The shared temporal conformance kit (`TEMPORAL_ROWS` / `TEMPORAL_CASES` in `@objectstack/spec/data`) gains the row `z_last` (`9999-12-31T10:00:00.000Z`) and five last-day cases, so every backend it drives is held to this answer; three existing `$gte` / `$gt` cases now also expect `z_last`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing an author writes moves — no spec key, no stored row and no accept set changes, so `objectstack migrate meta` has nothing to reach — and what moves is one published function's return type and its answer for one input, whose channel is the caller's compiler and the banner above. -->
+- 53ed3d1: fix(driver-mongodb): `MongoDBDriver` compiles the whole-day comparison it is handed — its own copy of the bare-day upper bound is deleted (ADR-0053 D-D1 items 5, 7 and 9, #20822)
+  
+  Clause-②: no
+  
+  - **What is deleted.** `translateFilter` no longer widens a bare `YYYY-MM-DD` `$lte` to `$lt` the next day, no longer widens a `$between` maximum the same way, and no longer turns `$lte '9999-12-31'` into `$ne: null` or drops a `$between` maximum on that day. Every verb that translates a `where` inherits it: `find`, `findOne`, `count`, `updateMany`, `deleteMany`, `explain`, and the `$match` stage of `aggregate` / `buildAggregationPipeline`.
+  - **A read through the engine or the RLS compile seam is unchanged.** The seam hands the driver a filter the shared `lowerFilterCondition` (`@objectstack/spec/data`) has already rewritten on the declared `datetime` columns: `$lt` the next day, a split `$between`, `$null: false` on the last supported day. The deleted copy gave the same answer on that input. A `date` column answers as before, because its stored calendar-day text orders the same either way.
+  - **Two answers converge on what `SqlDriver` returns** (ADR-0053 D-D1 item 7's scope). On a registered object, a bare-day `$lte` or `$between` maximum is now compared as written on a column that is not declared `datetime`: a `text` column holding ISO instant text, or a column the object does not declare. This driver used to widen it to the whole day.
+  - **A caller that passes no seam gets the comparison it wrote** (item 5): a `MongoDBDriver` verb or `translateFilter` called directly. A bare-day `$lte` compares against that day's midnight, a `$between` is inclusive at both ends, and `$lte '9999-12-31'` compares against that midnight. To keep the seam's reading on a direct call, lower the filter first: `driver.find(object, { where: lowerFilterCondition(where, { isDatetimeColumn }) })`, with `lowerFilterCondition` from `@objectstack/spec/data`.
+  - No exported name changes.
+- e18fea6: fix(objectql,driver-mongodb,formula): the `having` and per-aggregation evaluator compiles the whole-day comparison it is handed, and `$contains` asks membership on a JSON-stored field in `MongoDBDriver` and in `matchesFilterCondition` (ADR-0053 D-D1 items 5 and 9; the `FILTER_OPERATORS` `$contains` contract, #20822)
+  
+  Clause-②: no
+  
+  - **`@objectstack/objectql`: the aggregate evaluator's own whole-day copy is deleted.** The walker behind `having` and `aggregations[i].filter` no longer widens a bare `YYYY-MM-DD` `$lte`, or a `$between` maximum, on a `datetime` column to the whole day, and no longer drops the bound on `9999-12-31`. Through `engine.aggregate` nothing changes: the engine's seam lowers both positions with the shared `lowerFilterCondition` (`@objectstack/spec/data`) before the walker runs, by the object's declared `datetime` fields for the per-aggregation `filter` and by the aggregated column's type for `having`. A caller that passes no seam gets the comparison it wrote: `applyInMemoryAggregation(rows, ast, tz, fields)` called directly now counts `{ at: { $lte: '2026-02-01' } }` against that day's midnight. To keep the seam's reading on a direct call, lower each `filter` first with `lowerFilterCondition(filter, { isDatetimeColumn })`.
+  - **`@objectstack/driver-mongodb`: `$contains` / `$notContains` ask membership on a declared JSON-stored field.** On a field `syncSchema` recorded as `multiple: true`, a multi-option type (`tags`, `multiselect`, `checkboxes`) or a JSON type, `translateFilter` (every verb, and the aggregation `$match`) now emits an array-only `$elemMatch` over the members the comparand names, with the candidate rule the SQL dialects bind (`jsonMembershipCandidates`, `@objectstack/core`): `'1'` names the string `'1'` or the number `1`, `'true'` the string or `true`. It used to emit a `$regex`, which MongoDB applies to each element, so `{ owners: { $contains: 'u1' } }` matched a stored `['u10']` and `{ tags: { $contains: 'red' } }` a stored `['redwood']`. `$notContains` is the exact complement, and still admits a row with no value. A scalar column, and a field whose declaration the driver does not hold (an object never synced, a standalone `translateFilter` call), keep the substring `$regex`.
+  - **`@objectstack/formula`: `matchesFilterCondition` asks membership of a JSON-stored column.** When the caller supplies `options.fields` and it names the column, the declaration decides: membership on a JSON-stored column, substring on any other. Otherwise the stored value decides: an array asks membership, anything else substring. A stored array used to fail `$contains` and pass `$notContains` whatever it held.
+    - **The RLS write check, which evaluates a policy with this function, moves with it.** Under a `check` such as `record.tags.contains('x')` on a multi-valued field, a write whose post-image holds `['x']` (a row the same policy's read shows) is now admitted; it was refused `PERMISSION_DENIED` / 403. `['xy']` stays refused, and the read hides it.
+    - A scalar written to a declared multi-valued field is judged as written, before the write door wraps it in a list. So `tags: 'xy'`, which the check used to admit while the read hides the stored `['xy']`, is now refused 403. And `tags: 'x'` is now refused 403 too, although the read shows the stored `['x']`. Send the list, `tags: ['x']`.
+  - **`@objectstack/spec`: docblock only, in the shipped `src/data/filter.zod.ts`.** The three pointers to the deleted `SqlDriver.calendarDayUpperBoundRewrite` / `calendarDayBetweenRewrite` now name the shared `lowerFilterCondition` at the seams, and the `FILTER_OPERATORS` `$contains` implementation-status list gains `driver-mongodb` and `formula`. No schema, type or export changes.
+  - No exported name changes.
+- f3b16fc: Raise the published dependency floors to the 2026-10 production dependency group. No API changes. A consumer install resolves these ranges:
+  
+  Clause-②: no
+  
+  - `zod` `^4.6.1` → `^4.6.5`: `@objectstack/spec`, `@objectstack/core`, `@objectstack/objectql`, `@objectstack/rest`, `@objectstack/runtime`, `@objectstack/cli`, `@objectstack/mcp`, `@objectstack/metadata`, `@objectstack/metadata-core`, `@objectstack/metadata-protocol`, `@objectstack/driver-turso`.
+  - `@libsql/client` `^0.17.3` → `^0.18.0`: `@objectstack/driver-turso`. Every behaviour the driver documents was re-measured on 0.18.0 and holds unchanged. That covers the URL scheme routing, the `URL_INVALID` and `URL_SCHEME_NOT_SUPPORTED` refusals, the WebSocket transport having no `fetch` or timeout seam, `syncUrl` being read only by the embedded-replica client, and the `?authToken=` precedence on `url` and `syncUrl`. The driver's refusal messages now name 0.18.0 as the measured version. 0.18.0 changes only the local `file:` client, which now pools connections. The driver creates that client only for an embedded replica, and calls only `sync()` on it.
+  - `@modelcontextprotocol/sdk` `^1.30.0` → `^1.30.1`: `@objectstack/connector-mcp`, `@objectstack/mcp`.
+  - `chalk` `^6.0.0` → `^6.0.1`: `@objectstack/cli`, `create-objectstack`. `yaml` `^2.9.0` → `^2.9.1` and `tsx` `^4.23.12` → `^4.23.15`: `@objectstack/cli`.
+  - `mongodb` `^7.5.0` → `^7.6.0`: `@objectstack/driver-mongodb`.
+  - `sql.js` `^1.14.1` → `^1.14.2`: `@objectstack/driver-sqlite-wasm`.
+  - `@noble/hashes` `^2.3.0` → `^2.4.0` and `jose` `^6.2.8` → `^6.2.12`: `@objectstack/plugin-auth`. The better-auth family stays at exactly `1.7.3`.
+  - `hono` `^4.13.5` → `^4.13.9`: `@objectstack/plugin-hono-server`.
+  - `pinyin-pro` `^3.29.1` → `^3.29.4`: `@objectstack/plugin-pinyin-search`.
+  - `@noble/ciphers` `^2.3.0` → `^2.4.0`: `@objectstack/service-settings`.
+- Updated dependencies [e5c7d07]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [05a7547]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [3fbf3ca]
+- Updated dependencies [24d521e]
+- Updated dependencies [b785c3b]
+- Updated dependencies [2473e26]
+- Updated dependencies [3a89d45]
+- Updated dependencies [f379f57]
+- Updated dependencies [889139c]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [7510663]
+- Updated dependencies [a6866da]
+- Updated dependencies [1a75e39]
+- Updated dependencies [cd901d7]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [89801cd]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [ace770d]
+- Updated dependencies [ed54768]
+- Updated dependencies [99786f9]
+- Updated dependencies [63bfe69]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [b9087d7]
+- Updated dependencies [f10d802]
+- Updated dependencies [856321f]
+- Updated dependencies [6b004c0]
+- Updated dependencies [93e9e42]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [ceee88f]
+- Updated dependencies [e18fea6]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [dcd3309]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [26437ae]
+- Updated dependencies [d1633f3]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [58a77db]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [a11faee]
+- Updated dependencies [2c1cef3]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [097ef80]
+- Updated dependencies [70dae53]
+- Updated dependencies [665cab3]
+- Updated dependencies [682873d]
+- Updated dependencies [1bd14c9]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [df1feae]
+- Updated dependencies [336e191]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [24c554d]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [d2bc644]
+- Updated dependencies [cfa9315]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+- Updated dependencies [00f045d]
+  - @objectstack/spec@17.6.0
+  - @objectstack/core@17.6.0
+  - @objectstack/types@17.6.0
+
 ## 17.5.0
 
 ### Minor Changes

@@ -3082,6 +3082,8 @@ describe('validateTranslationReferences — object-branch coverage vs the schema
  * `params.<name>` was the only one judged; `outcomeMessages.<outcome>` (#21095)
  * and `resultDialog.fields.<path>` joined the shape with no leg following, so a
  * key the action does not declare parsed, linted clean and was read by nothing.
+ * The dialog's prose leaves followed in #21264: under an action with no
+ * `resultDialog` they are read by nothing either.
  */
 describe('validateTranslationReferences — keyed children of an action entry (#21216)', () => {
   /**
@@ -3228,6 +3230,53 @@ describe('validateTranslationReferences — keyed children of an action entry (#
     });
   });
 
+  /**
+   * #21264 — the dialog's prose leaves. `resolveActionResultDialog` returns
+   * before any lookup when the action declares no `resultDialog`, so these are
+   * judged on that one fact; under a declared dialog every leaf is read, even
+   * one the dialog does not author itself (`mint_token` declares no `title`).
+   */
+  describe('resultDialog.title / .description / .acknowledge', () => {
+    it('refuses each leaf under `_actions.<name>` when the action declares no `resultDialog`, at the code and level `params` uses', () => {
+      const findings = validateTranslationReferences(
+        actionStack(
+          onEnv({
+            plain_env: {
+              label: '普通',
+              resultDialog: { title: '无对话框', description: '无说明', acknowledge: '知道了', fields: { token: '令牌' } },
+            },
+          }),
+        ),
+      );
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.plain_env.resultDialog.title`],
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.plain_env.resultDialog.description`],
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.plain_env.resultDialog.acknowledge`],
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.plain_env.resultDialog.fields.token`],
+      ]);
+    });
+
+    it('refuses a leaf under `globalActions.<name>` when the object-less action declares no `resultDialog`', () => {
+      const findings = validateTranslationReferences(
+        actionStack({ globalActions: { check_updates: { resultDialog: { acknowledge: '好的' } } } }),
+      );
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${GLOBAL}.check_updates.resultDialog.acknowledge`],
+      ]);
+    });
+
+    it('accepts every leaf under a declared dialog at both addresses, one the dialog does not author included (the control)', () => {
+      expect(
+        validateTranslationReferences(
+          actionStack({
+            ...onEnv({ rotate_secret: { resultDialog: { title: '密钥', description: '请保存', acknowledge: '已保存' } } }),
+            globalActions: { mint_token: { resultDialog: { title: '令牌', description: '请保存', acknowledge: '已保存' } } },
+          }),
+        ),
+      ).toEqual([]);
+    });
+  });
+
   describe('params.<name>.options.<value>', () => {
     it('warns on an option key a declared param does not declare, as the field `options` leg does', () => {
       const findings = validateTranslationReferences(
@@ -3304,13 +3353,19 @@ describe('validateTranslationReferences — keyed children of an action entry (#
     };
 
     type Address = 'bound' | 'global';
-    /** Which declared action a ghost is written under, per address. */
-    const HOST: Record<'outcome' | 'dialog', Record<Address, string>> = {
+    type Host = 'outcome' | 'dialog' | 'noDialog';
+    /**
+     * Which declared action a ghost is written under, per address. `noDialog`
+     * names an action that declares no `resultDialog`: the dialog's leaves
+     * reference the declaration of the dialog itself (#21264).
+     */
+    const HOST: Record<Host, Record<Address, string>> = {
       outcome: { bound: 'archive_env', global: 'check_updates' },
       dialog: { bound: 'rotate_secret', global: 'mint_token' },
+      noDialog: { bound: 'plain_env', global: 'check_updates' },
     };
     type Coverage =
-      | { kind: 'reference-checked'; host: 'outcome' | 'dialog'; ghost: Record<string, unknown>; suffix: string; rule: string }
+      | { kind: 'reference-checked'; host: Host; ghost: Record<string, unknown>; suffix: string; rule: string }
       | { kind: 'leaf-copy' | 'container'; why: string };
 
     const COVERAGE: Record<string, Coverage> = {
@@ -3342,10 +3397,31 @@ describe('validateTranslationReferences — keyed children of an action entry (#
         suffix: '.params.mode.options.ghost_value',
         rule: TRANSLATION_OPTION_KEY_UNKNOWN,
       },
-      resultDialog: { kind: 'container', why: 'a fixed-key node; its keyed child is `resultDialog.fields`' },
-      'resultDialog.title': { kind: 'leaf-copy', why: 'prose' },
-      'resultDialog.description': { kind: 'leaf-copy', why: 'prose' },
-      'resultDialog.acknowledge': { kind: 'leaf-copy', why: 'prose' },
+      resultDialog: {
+        kind: 'container',
+        why: 'a fixed-key node; its leaves and its keyed child `resultDialog.fields` are each judged below',
+      },
+      'resultDialog.title': {
+        kind: 'reference-checked',
+        host: 'noDialog',
+        ghost: { resultDialog: { title: 'x' } },
+        suffix: '.resultDialog.title',
+        rule: TRANSLATION_TARGET_UNKNOWN,
+      },
+      'resultDialog.description': {
+        kind: 'reference-checked',
+        host: 'noDialog',
+        ghost: { resultDialog: { description: 'x' } },
+        suffix: '.resultDialog.description',
+        rule: TRANSLATION_TARGET_UNKNOWN,
+      },
+      'resultDialog.acknowledge': {
+        kind: 'reference-checked',
+        host: 'noDialog',
+        ghost: { resultDialog: { acknowledge: 'x' } },
+        suffix: '.resultDialog.acknowledge',
+        rule: TRANSLATION_TARGET_UNKNOWN,
+      },
       'resultDialog.fields': {
         kind: 'reference-checked',
         host: 'dialog',

@@ -57,6 +57,7 @@ import {
   JSON_COLUMN_INCOMPATIBLE_OPERATORS,
   jsonColumnOperatorRefusalText,
   jsonMembershipPredicate,
+  type JsonColumnFieldClass,
 } from '@objectstack/core';
 // [#8413] What a `unique: true` FIELD becomes, from the one place that decides
 // it. `uniqueIndexesFromFields`' own contract is that it is "the ONLY place
@@ -946,8 +947,17 @@ export type DeclaredValueShapeResolver = (object: string, field: string) => Valu
  * deployment fact. Absent (a transport driven standalone), every column reads
  * as not-JSON — the local face's own answer for a table it was never told
  * about — and the gate and the membership reading stay off.
+ *
+ * [#21236] It answers WHICH class of JSON column the field is, or `undefined`
+ * when it is not one, from `SqlDriver.jsonColumnFieldClass`: the same
+ * registry, with the class beside it. The refusal's reason and repair turn on
+ * the class. Remote mode never moves its media columns, so a single-value
+ * file-class field is a JSON column here on every deployment, and it reads
+ * `'single-value-media'` exactly as it does on the local face inside the
+ * ADR-0104 window. A yes/no answer would leave this face printing the
+ * `$contains` repair for it, which answers no rows there.
  */
-export type JsonColumnResolver = (object: string, field: string) => boolean;
+export type JsonColumnResolver = (object: string, field: string) => JsonColumnFieldClass | undefined;
 
 /**
  * [#21226] The caller's tenant scope, as ONE compiled predicate: a SQL
@@ -1201,6 +1211,10 @@ export class RemoteTransport {
    * ({@link pushJsonMembership}). Same shape as
    * {@link setNonTextColumnResolver} and for the same reason: the declaration
    * lives on the driver, and this transport asks rather than re-deriving it.
+   *
+   * [#21236] The answer is the column's CLASS, or `undefined` for a column that
+   * is not JSON, so the refusal can word the class's repair
+   * ({@link JsonColumnResolver}).
    */
   setJsonColumnResolver(resolver: JsonColumnResolver): void {
     this.jsonColumn = resolver;
@@ -3138,11 +3152,14 @@ export class RemoteTransport {
           // matched every row — while the local face refused each with
           // `INVALID_FILTER` / 400. The arms below never see such an operator
           // on such a column.
-          if (JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op) && this.isJsonColumn(object, key)) {
+          const jsonClass = JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op)
+            ? this.jsonColumnFieldClass(object, key)
+            : undefined;
+          if (jsonClass !== undefined) {
             // [#8220] `value` — this field's operator map — is the node the
             // entry seam resolves the refusal's provenance against, as the
             // local face hands its gate the same map.
-            throw this.jsonColumnOperator(key, op, false, value);
+            throw this.jsonColumnOperator(key, op, false, jsonClass, value);
           }
           switch (op) {
             case '$eq':
@@ -3412,8 +3429,9 @@ export class RemoteTransport {
         // with `INVALID_FILTER` / 400 while this branch answered the NULL row —
         // a different answer from one driver by connection string. `$null: true`
         // is the presence spelling, and both faces answer it.
-        if (this.isJsonColumn(object, key)) {
-          throw this.jsonColumnOperator(key, '=', true, filters);
+        const jsonClass = this.jsonColumnFieldClass(object, key);
+        if (jsonClass !== undefined) {
+          throw this.jsonColumnOperator(key, '=', true, jsonClass, filters);
         }
         const column = `"${this.mapSortField(key)}"`;
         clauses.push(`${column} IS NULL`);
@@ -3436,8 +3454,9 @@ export class RemoteTransport {
         // order the local face's bare-value positions run their two gates in.
         // [#8220] A bare comparand is usually a primitive, so `filters` — the
         // node carrying `key` — is what carries the mark.
-        if (this.isJsonColumn(object, key)) {
-          throw this.jsonColumnOperator(key, '=', true, refusalNode(value, filters));
+        const jsonClass = this.jsonColumnFieldClass(object, key);
+        if (jsonClass !== undefined) {
+          throw this.jsonColumnOperator(key, '=', true, jsonClass, refusalNode(value, filters));
         }
         clauses.push(`${this.comparisonColumn(object, key, column)} = ?`);
         args.push(bind);
@@ -3486,7 +3505,18 @@ export class RemoteTransport {
    * injected — never a guess from the value.
    */
   private isJsonColumn(object: string, field: string): boolean {
-    return this.jsonColumn !== null && this.jsonColumn(object, field);
+    return this.jsonColumnFieldClass(object, field) !== undefined;
+  }
+
+  /**
+   * [#21236] WHICH class of JSON column `field` on `object` is, per the driver's
+   * injected {@link JsonColumnResolver}, or `undefined` when it is not one or
+   * no rule was injected. The local face's `SqlDriver.jsonColumnFieldClass`,
+   * read through the resolver, so {@link jsonColumnOperator} words the same
+   * refusal on both faces.
+   */
+  private jsonColumnFieldClass(object: string, field: string): JsonColumnFieldClass | undefined {
+    return this.jsonColumn === null ? undefined : this.jsonColumn(object, field);
   }
 
   /**
@@ -3505,9 +3535,19 @@ export class RemoteTransport {
    *
    * `bare` is the implicit-equality spelling `{ field: value }`, whose operator
    * the diagnostic names as `=`.
+   *
+   * [#21236] `fieldClass` is the column's class ({@link jsonColumnFieldClass}),
+   * so a single-value file-class field reads the media-column move here, as it
+   * does locally, rather than a `$contains` repair that answers no rows on it.
    */
-  private jsonColumnOperator(field: string, op: string, bare: boolean, subtree: unknown): Error {
-    const { message, diagnostic } = jsonColumnOperatorRefusalText(this.mapSortField(field), op, bare);
+  private jsonColumnOperator(
+    field: string,
+    op: string,
+    bare: boolean,
+    fieldClass: JsonColumnFieldClass,
+    subtree: unknown,
+  ): Error {
+    const { message, diagnostic } = jsonColumnOperatorRefusalText(this.mapSortField(field), op, bare, fieldClass);
     return this.withheldRefusal(message, subtree, diagnostic);
   }
 

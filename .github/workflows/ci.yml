@@ -2047,7 +2047,41 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # ── Turbo remote cache (#21186) ─────────────────────────────────────
+      # Vercel's managed Turborepo remote cache. objectstack-ai/cloud's
+      # test.yml builds this repo at its pinned SHA with the same command and
+      # reads/writes the same Vercel team, and the task hashes are identical
+      # in both places (72 of 72 build tasks, read from both CI logs at one
+      # SHA), so a pin bump there can replay what this step built on `main`.
+      #
+      # Scope: THIS step only, i.e. `build` tasks. `test` / `test:repo` stay
+      # off the remote: their cross-package inputs are hand-declared, and a
+      # wrong hash replayed from a remote reaches every run and cloud too.
+      # Build Docs forces execution and carries no credentials.
+      #
+      # TURBO_CACHE is the env form of `--cache`. Writes happen on
+      # `merge_group` and on `push` / `workflow_dispatch` against main; every
+      # other event, `pull_request` and `schedule` included, only reads,
+      # because read-only is the default branch of the expression. This is
+      # turbo configuration, not a property of the credential: a same-repo PR
+      # receives the secrets and runs its own copy of this file; fork PRs
+      # receive none. ⚠️ Never let it evaluate to '': turbo then disables the
+      # LOCAL cache too (`no caches are enabled`) and re-executes everything.
+      #
+      # Credentials: TURBO_TOKEN (secret) is passed only when the signing key
+      # is non-empty, because an empty key still "signs" with a zero-length
+      # HMAC key; TURBO_TEAM is a repo VARIABLE so the slug is not masked out
+      # of the log; TURBO_REMOTE_CACHE_SIGNATURE_KEY (secret) must equal
+      # cloud's. turbo.json's `remoteCache.signature` makes turbo tag every
+      # upload and verify every download with that key. Any of the three
+      # unset: remote caching is off and the build is unchanged; the summary
+      # then reads `Remote caching disabled (remote cache requested — …)`.
       - name: Build packages (excluding docs)
+        env:
+          TURBO_CACHE: ${{ (github.event_name == 'merge_group' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')) && 'local:rw,remote:rw' || 'local:rw,remote:r' }}
+          TURBO_TOKEN: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY != '' && secrets.TURBO_TOKEN || '' }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
         run: pnpm build
 
       # [#15042] The closure-wide declaration re-check. `check-dts-emitted` runs

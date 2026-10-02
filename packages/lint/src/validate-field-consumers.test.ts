@@ -771,25 +771,29 @@ describe('[#20951] validateFieldConsumers — a child collection credits its chi
       secret: { type: 'text', hidden: true },
       frozen: { type: 'number', readonly: true },
     };
-    /** The parent's two fields (nothing reads them) and the three the derivation leaves out. */
+    /**
+     * The parent's two fields (nothing reads them) and the one child field no
+     * derivation draws: the `hidden` one. The grid leaves out the JSON and
+     * `readonly` fields too, but [#21091] its per-row expand form draws them.
+     */
     const DERIVED = {
       'inv.total': 'inert',
       'inv.line_total': 'inert',
-      'line.blob': 'inert',
       'line.secret': 'inert',
-      'line.frozen': 'inert',
     };
+    /** {@link DERIVED} plus the two the grid alone leaves out: reported wherever no derived row form is drawn. */
+    const NO_ROW_FORM = { ...DERIVED, 'line.blob': 'inert', 'line.frozen': 'inert' };
 
     it('baseline: without `inlineEdit` no grid is drawn, and every child field is reported', () => {
       expect(verdicts(stack(lineFields))).toEqual({
-        ...DERIVED,
+        ...NO_ROW_FORM,
         'line.qty': 'inert',
         'line.line_total': 'inert',
         'line.memo': 'inert',
       });
     });
 
-    it.each([['grid'], ['form'], [true]])('`inlineEdit: %s` with no `inlineColumns` credits the derived columns, and only them', (inlineEdit) => {
+    it.each([['grid'], ['form'], [true]])('`inlineEdit: %s` with no `inlineColumns` credits the derived columns and row form, and only them', (inlineEdit) => {
       expect(verdicts(stack(lineFields, {}, { ...MASTER_DETAIL, inlineEdit }))).toEqual(DERIVED);
     });
 
@@ -799,7 +803,7 @@ describe('[#20951] validateFieldConsumers — a child collection credits its chi
 
     it('an authored `inlineColumns` replaces the derivation: only the named column is credited', () => {
       expect(verdicts(stack(lineFields, {}, { ...MASTER_DETAIL, inlineEdit: 'grid', inlineColumns: [{ name: 'qty' }] }))).toEqual({
-        ...DERIVED,
+        ...NO_ROW_FORM,
         'line.line_total': 'inert',
         'line.memo': 'inert',
       });
@@ -807,7 +811,7 @@ describe('[#20951] validateFieldConsumers — a child collection credits its chi
 
     it('`inlineEdit` on a field that is not a relationship draws no grid', () => {
       expect(verdicts(stack({ ...lineFields, tag: { type: 'text', inlineEdit: 'grid' } }))).toEqual({
-        ...DERIVED,
+        ...NO_ROW_FORM,
         'line.qty': 'inert',
         'line.line_total': 'inert',
         'line.memo': 'inert',
@@ -922,5 +926,340 @@ describe('[#20928] validateFieldConsumers — an `object-master-detail-form` det
     // Non-vacuity: the component does read a field, so a slot that skipped it would show.
     expect(elsewhere['line.memo']).toBeUndefined();
     expect(verdicts(stack([], { details: [component] }))).toEqual(elsewhere);
+  });
+});
+
+/**
+ * [#21091] The family's closeout: the last positions where an inline child
+ * collection reads a CHILD field that the rule called inert.
+ *
+ * Position 1 — the join key. A `lookup` or `master_detail` field that sets
+ * `inlineEdit` is the key the renderer loads the child rows by and stamps on
+ * every row it saves, whatever columns the grid draws. `master_detail` was
+ * exempt already; `lookup` now reads the same.
+ *
+ * Position 2 — the per-row expand form. Each row of a derived grid can open a
+ * full form whose fields `deriveInlineRowFormFields` (`@objectstack/spec/data`)
+ * derives: it keeps the `richtext`, `json` and `readonly` fields the grid
+ * leaves out. It is offered when `isInlineRowFormOffered` says so.
+ *
+ * Position 3 — an `object-master-detail-form` detail entry's authored
+ * `formFields`, read against its `childObject` rather than the parent.
+ *
+ * `ord` is the parent and `itm` the child. `ord.notes` is a parent twin of the
+ * child's `notes`, so a list read against the wrong object shows up as the
+ * wrong one of the pair going quiet. `itm.secret` is `hidden`: no derivation
+ * draws it and nothing names it — the control every case keeps reported.
+ */
+describe('[#21091] validateFieldConsumers — an inline collection reads its join key and its per-row expand form', () => {
+  const data = { provider: 'object', object: 'ord' };
+  const LOOKUP = { type: 'lookup', reference: 'ord' };
+  const MASTER_DETAIL = { type: 'master_detail', reference: 'ord' };
+
+  /** Drawn by the grid (`name`, `qty`), by the row form only (`notes`, `spec`, `frozen`), by nothing (`secret`). */
+  const ITEM_FIELDS = {
+    name: { type: 'text' },
+    qty: { type: 'number' },
+    notes: { type: 'richtext' },
+    spec: { type: 'json' },
+    frozen: { type: 'text', readonly: true },
+    secret: { type: 'text', hidden: true },
+  };
+
+  const stack = (relationship: AnyRec, extra: { form?: AnyRec; details?: unknown[] } = {}): AnyRec => ({
+    objects: [
+      { name: 'ord', fields: { name: { type: 'text' }, notes: { type: 'textarea' } } },
+      { name: 'itm', fields: { ...ITEM_FIELDS, ord: relationship } },
+    ],
+    views: [{ list: { type: 'grid', data, columns: [{ field: 'name' }] }, ...(extra.form ? { form: extra.form } : {}) }],
+    ...(extra.details
+      ? {
+          pages: [{
+            name: 'ord_entry',
+            regions: [{
+              name: 'main',
+              components: [{ type: 'object-master-detail-form', properties: { objectName: 'ord', details: extra.details } }],
+            }],
+          }],
+        }
+      : {}),
+  });
+
+  /** `object.field` → verdict, for every field the rule reports. */
+  const verdicts = (s: AnyRec): Record<string, string> =>
+    Object.fromEntries(validateFieldConsumers(s).map((f) => [`${f.object}.${f.field}`, f.verdict]));
+
+  /** Left reported once the grid, its row form and the join key are all credited. */
+  const ALL_DRAWN = { 'ord.notes': 'inert', 'itm.secret': 'inert' };
+  /** What a grid with no row form leaves: the row-form-only fields stay reported. */
+  const GRID_ONLY = { ...ALL_DRAWN, 'itm.notes': 'inert', 'itm.spec': 'inert', 'itm.frozen': 'inert' };
+
+  describe('position 1: the inline relationship is its grid\'s join key', () => {
+    it('baseline: a `lookup` with no `inlineEdit` draws no grid, and it and every child field are reported', () => {
+      expect(verdicts(stack(LOOKUP))).toEqual({ ...GRID_ONLY, 'itm.qty': 'inert', 'itm.ord': 'inert' });
+    });
+
+    it.each([['grid'], ['form'], [true]])('a `lookup` with `inlineEdit: %s` is read', (inlineEdit) => {
+      expect(verdicts(stack({ ...LOOKUP, inlineEdit }))['itm.ord']).toBeUndefined();
+    });
+
+    it('and with authored `inlineColumns` that do not name it, too: the key is read whatever the grid draws', () => {
+      const findings = verdicts(stack({ ...LOOKUP, inlineEdit: 'grid', inlineColumns: [{ name: 'qty' }] }));
+      expect(findings).toEqual(GRID_ONLY);
+    });
+
+    it('`inlineEdit: false` draws no grid, so the `lookup` stays reported', () => {
+      expect(verdicts(stack({ ...LOOKUP, inlineEdit: false }))['itm.ord']).toBe('inert');
+    });
+
+    it('a `lookup` whose `reference` is missing draws no grid, so it stays reported', () => {
+      expect(verdicts(stack({ type: 'lookup', inlineEdit: 'grid' }))['itm.ord']).toBe('inert');
+    });
+  });
+
+  describe('position 2: a derived grid\'s per-row expand form draws the fields the grid leaves out', () => {
+    it.each([
+      ['a `lookup` with `inlineEdit: grid`', { ...LOOKUP, inlineEdit: 'grid' }],
+      ['a `lookup` with `inlineEdit: true`', { ...LOOKUP, inlineEdit: true }],
+      ['a `master_detail` with `inlineEdit: form`', { ...MASTER_DETAIL, inlineEdit: 'form' }],
+    ])('%s credits the row form\'s `richtext`, `json` and `readonly` fields — never the `hidden` one', (_label, relationship) => {
+      expect(verdicts(stack(relationship))).toEqual(ALL_DRAWN);
+    });
+
+    it('a `subforms` entry with no `columns` credits its row form the same way', () => {
+      const form = { type: 'simple', data, subforms: [{ childObject: 'itm', relationshipField: 'ord' }] };
+      expect(verdicts(stack(LOOKUP, { form }))).toEqual(ALL_DRAWN);
+    });
+
+    it('a detail entry with no `columns` credits its row form the same way', () => {
+      expect(verdicts(stack(LOOKUP, { details: [{ childObject: 'itm', relationshipField: 'ord' }] }))).toEqual(ALL_DRAWN);
+    });
+
+    it('an authored grid keeps no derived row form: a `subforms` entry with `columns` and a `relationshipField`', () => {
+      const form = { type: 'simple', data, subforms: [{ childObject: 'itm', relationshipField: 'ord', columns: [{ name: 'qty' }] }] };
+      expect(verdicts(stack(LOOKUP, { form }))).toEqual(GRID_ONLY);
+    });
+
+    it('a computed field is no row-form input: it stays reported', () => {
+      const withFormula: AnyRec = { ...stack({ ...LOOKUP, inlineEdit: 'grid' }) };
+      const [ord, itm] = withFormula.objects as AnyRec[];
+      withFormula.objects = [ord, { ...itm, fields: { ...(itm.fields as AnyRec), calc: { type: 'formula', expression: '1' } } }];
+      expect(verdicts(withFormula)).toEqual({ ...ALL_DRAWN, 'itm.calc': 'inert' });
+    });
+  });
+
+  describe('position 3: a detail entry\'s authored `formFields` names fields of its CHILD', () => {
+    const entry = (extra: AnyRec): AnyRec => ({ childObject: 'itm', relationshipField: 'ord', columns: [{ name: 'qty' }], ...extra });
+    /** The authored grid draws `qty`; `name` is the title field; `ord` is read as `relationshipField`. */
+    const AUTHORED_GRID = { 'ord.notes': 'inert', 'itm.notes': 'inert', 'itm.spec': 'inert', 'itm.frozen': 'inert', 'itm.secret': 'inert' };
+
+    it('baseline: an authored grid with no `formFields` draws none of the row-form fields', () => {
+      expect(verdicts(stack(LOOKUP, { details: [entry({})] }))).toEqual(AUTHORED_GRID);
+    });
+
+    it("`formFields` with `inlineMode: form` credits the CHILD's field, and the parent's twin stays reported", () => {
+      const { 'itm.notes': _credited, ...rest } = AUTHORED_GRID;
+      expect(verdicts(stack(LOOKUP, { details: [entry({ formFields: ['qty', 'notes'], inlineMode: 'form' })] }))).toEqual(rest);
+    });
+
+    it('`inlineMode: grid` with more form fields than grid columns: the form is offered, and its fields credited', () => {
+      const details = [entry({ formFields: ['notes', 'spec', 'frozen'], inlineMode: 'grid' })];
+      expect(verdicts(stack(LOOKUP, { details }))).toEqual({ 'ord.notes': 'inert', 'itm.secret': 'inert' });
+    });
+
+    it('`inlineMode: grid` with no more form fields than grid columns: never offered, so the list is a carrier', () => {
+      const details = [entry({ columns: [{ name: 'qty' }, { name: 'name' }], formFields: ['notes'], inlineMode: 'grid' })];
+      const findings = validateFieldConsumers(stack(LOOKUP, { details }));
+      const notes = findings.find((f) => f.object === 'itm' && f.field === 'notes');
+      expect(notes?.verdict).toBe('carrier-only');
+      expect(notes?.carriers).toEqual(['pages[0].regions[0].components[0].properties.details[0].formFields[0]']);
+    });
+
+    it('kept as authored (`relationshipField` and `columns`), an omitted `inlineMode` is no form factor: one form field against two columns is never offered, so the list is a carrier', () => {
+      const details = [entry({ columns: [{ name: 'qty' }, { name: 'name' }], formFields: ['notes'] })];
+      expect(verdicts(stack(LOOKUP, { details }))['itm.notes']).toBe('carrier-only');
+    });
+
+    it('kept as authored, an omitted `inlineMode` with more form fields than grid columns: the form is offered, and its fields credited', () => {
+      const details = [entry({ formFields: ['notes', 'spec'] })];
+      const findings = verdicts(stack(LOOKUP, { details }));
+      expect(findings['itm.notes']).toBeUndefined();
+      expect(findings['itm.spec']).toBeUndefined();
+      expect(findings['itm.frozen']).toBe('inert');
+    });
+
+    it('derived (no authored columns), an omitted `inlineMode` is resolved by the renderer from the child, which this rule does not reproduce: the list is credited as drawn', () => {
+      const details = [{ childObject: 'itm', relationshipField: 'ord', formFields: ['notes'] }];
+      expect(verdicts(stack(LOOKUP, { details }))['itm.notes']).toBeUndefined();
+    });
+
+    it('an authored list replaces the derived row form: with a derived grid, only the listed field is credited', () => {
+      // `inlineMode: form` offers it; the derived row form would also draw `spec` and `frozen`.
+      const details = [{ childObject: 'itm', relationshipField: 'ord', formFields: ['notes'], inlineMode: 'form' }];
+      expect(verdicts(stack(LOOKUP, { details }))).toEqual({
+        'ord.notes': 'inert',
+        'itm.spec': 'inert',
+        'itm.frozen': 'inert',
+        'itm.secret': 'inert',
+      });
+    });
+
+    it('against a derived grid, the comparison counts the derived columns', () => {
+      // The derived grid draws `name` and `qty`: one form field is not more than two columns.
+      const details = [{ childObject: 'itm', relationshipField: 'ord', formFields: ['notes'], inlineMode: 'grid' }];
+      expect(verdicts(stack(LOOKUP, { details }))['itm.notes']).toBe('carrier-only');
+    });
+  });
+
+  /**
+   * Position 4 — a `record:line_items` page block. Its `properties` is one
+   * child entry: objectui's `LineItemsPanel` lists the `childObject` rows
+   * whose `relationshipField` holds the page's record, draws the authored
+   * `columns`, sums `amountField` and writes the sum to the parent's
+   * `totalField`. It derives no column and offers no row form.
+   */
+  describe('position 4: a `record:line_items` block reads its columns and child keys against its `childObject`', () => {
+    const block = (properties: AnyRec): AnyRec => ({
+      ...stack(LOOKUP),
+      pages: [{
+        name: 'ord_record',
+        type: 'record',
+        object: 'ord',
+        regions: [{ name: 'main', components: [{ type: 'record:line_items', properties }] }],
+      }],
+    });
+    const UNREAD = {
+      'ord.notes': 'inert',
+      'itm.qty': 'inert',
+      'itm.notes': 'inert',
+      'itm.spec': 'inert',
+      'itm.frozen': 'inert',
+      'itm.secret': 'inert',
+      'itm.ord': 'inert',
+    };
+
+    it('baseline: a block with no columns and no keys reads nothing, and derives nothing', () => {
+      expect(verdicts(block({ childObject: 'itm' }))).toEqual(UNREAD);
+    });
+
+    it('its authored columns, `relationshipField` and `amountField` credit the CHILD; the parent twin stays reported', () => {
+      const properties = { childObject: 'itm', relationshipField: 'ord', columns: [{ name: 'qty' }, { name: 'notes' }], amountField: 'spec' };
+      expect(verdicts(block(properties))).toEqual({ 'ord.notes': 'inert', 'itm.frozen': 'inert', 'itm.secret': 'inert' });
+    });
+
+    it('its `sort[].field` and `filter[].field` name CHILD fields: credited there, and the parent twin stays reported', () => {
+      const properties = {
+        childObject: 'itm',
+        relationshipField: 'ord',
+        columns: [{ name: 'qty' }],
+        sort: [{ field: 'notes', order: 'desc' }],
+        filter: [{ field: 'spec', operator: 'equals', value: 'x' }],
+      };
+      expect(verdicts(block(properties))).toEqual({ 'ord.notes': 'inert', 'itm.frozen': 'inert', 'itm.secret': 'inert' });
+    });
+
+    it('a field-keyed `filter` — a shape the panel lowers but the contract refuses — is read against the CHILD too', () => {
+      const properties = { childObject: 'itm', relationshipField: 'ord', columns: [{ name: 'qty' }], filter: { frozen: 'x' } };
+      expect(verdicts(block(properties))).toEqual({ 'ord.notes': 'inert', 'itm.notes': 'inert', 'itm.spec': 'inert', 'itm.secret': 'inert' });
+    });
+
+    it('control: a `sort` and `filter` read against the child do not credit a field only the parent declares', () => {
+      const properties = { childObject: 'itm', relationshipField: 'ord', columns: [{ name: 'qty' }], sort: [{ field: 'notes' }] };
+      const s = block(properties);
+      const [ord, itm] = s.objects as AnyRec[];
+      const { notes: _dropped, ...childFields } = itm.fields as AnyRec;
+      s.objects = [ord, { ...itm, fields: childFields }];
+      // The child no longer declares `notes`: the sort names nothing it has, and the parent's `notes` stays reported.
+      expect(verdicts(s)['ord.notes']).toBe('inert');
+    });
+
+    it('control: the same properties under a component type that is no child entry credit no child column', () => {
+      const s = block({ childObject: 'itm', columns: [{ name: 'qty' }] });
+      const page = (s.pages as AnyRec[])[0];
+      const region = (page.regions as AnyRec[])[0];
+      (region.components as AnyRec[])[0].type = 'record:details';
+      expect(verdicts(s)['itm.qty']).toBe('inert');
+    });
+  });
+
+  /**
+   * The boundary the pin does NOT cover: a row form opened with no field
+   * list. An authored grid in the `form` factor with no `formFields` makes the
+   * renderer open the child's default object form, which draws every visible
+   * child field the way the child's own create and edit forms do. No spec
+   * derivation states that form's field set, so this rule credits none of it
+   * — pinned here so the boundary is a reading, not an omission.
+   */
+  describe('boundary: a row form opened with no field list is not credited', () => {
+    it('authored `inlineColumns` with `inlineEdit: form`: the child fields outside the columns stay reported', () => {
+      expect(verdicts(stack({ ...LOOKUP, inlineEdit: 'form', inlineColumns: [{ name: 'qty' }] }))).toEqual(GRID_ONLY);
+    });
+
+    it('a detail entry kept as authored with `inlineMode: form` and no `formFields`: the same', () => {
+      const details = [{ childObject: 'itm', relationshipField: 'ord', columns: [{ name: 'qty' }], inlineMode: 'form' }];
+      expect(verdicts(stack(LOOKUP, { details }))).toEqual(GRID_ONLY);
+    });
+  });
+
+  /**
+   * The family's closing check, one row per position the card enumerates:
+   * after it, `field-no-consumers` reports no inert verdict on any of these,
+   * and the control — a child field nothing draws or names — stays inert in
+   * every one of the same stacks. "The per-row expand form" here is the form
+   * the spec derives (`deriveInlineRowFormFields`) and an authored
+   * `formFields` list the form is offered for — not a form opened with no
+   * field list (the boundary above).
+   */
+  describe('the enumeration pin', () => {
+    const form = (subform: AnyRec): { form: AnyRec } => ({ form: { type: 'simple', data, subforms: [subform] } });
+    const rows: [string, AnyRec, string][] = [
+      ["a field read as an inline grid's join key", stack({ ...LOOKUP, inlineEdit: 'grid' }), 'itm.ord'],
+      ['a field drawn by a derived inline-grid column', stack({ ...LOOKUP, inlineEdit: 'grid' }), 'itm.qty'],
+      ['a field drawn by the per-row expand form (`richtext`)', stack({ ...LOOKUP, inlineEdit: 'grid' }), 'itm.notes'],
+      ['a field drawn by the per-row expand form (`json`)', stack({ ...LOOKUP, inlineEdit: 'grid' }), 'itm.spec'],
+      ['a field drawn by the per-row expand form (`readonly`)', stack({ ...LOOKUP, inlineEdit: 'grid' }), 'itm.frozen'],
+      ["a subform entry's `amountField`", stack(LOOKUP, form({ childObject: 'itm', columns: [{ name: 'name' }], amountField: 'qty' })), 'itm.qty'],
+      ["a subform entry's `relationshipField`", stack(LOOKUP, form({ childObject: 'itm', columns: [{ name: 'name' }], relationshipField: 'ord' })), 'itm.ord'],
+      ['an authored `inlineColumns` member', stack({ ...LOOKUP, inlineEdit: 'grid', inlineColumns: [{ name: 'notes' }] }), 'itm.notes'],
+      ['an authored `subforms[].columns` member', stack(LOOKUP, form({ childObject: 'itm', columns: [{ name: 'spec' }] })), 'itm.spec'],
+      ["a detail entry's authored `formFields` member", stack(LOOKUP, { details: [{ childObject: 'itm', relationshipField: 'ord', columns: [{ name: 'qty' }], formFields: ['frozen'], inlineMode: 'form' }] }), 'itm.frozen'],
+      [
+        'a `record:line_items` block\'s column',
+        {
+          ...stack(LOOKUP),
+          pages: [{
+            name: 'ord_record',
+            type: 'record',
+            object: 'ord',
+            regions: [{ name: 'main', components: [{ type: 'record:line_items', properties: { childObject: 'itm', relationshipField: 'ord', columns: [{ name: 'notes' }] } }] }],
+          }],
+        },
+        'itm.notes',
+      ],
+      ...([
+        ['a `record:line_items` block\'s `sort[].field`', { sort: [{ field: 'spec', order: 'asc' }] }, 'itm.spec'],
+        ['a `record:line_items` block\'s `filter[].field`', { filter: [{ field: 'notes', operator: 'equals', value: 'x' }] }, 'itm.notes'],
+      ] as [string, AnyRec, string][]).map(([label, extra, key]): [string, AnyRec, string] => [
+        label,
+        {
+          ...stack(LOOKUP),
+          pages: [{
+            name: 'ord_record',
+            type: 'record',
+            object: 'ord',
+            regions: [{ name: 'main', components: [{ type: 'record:line_items', properties: { childObject: 'itm', relationshipField: 'ord', columns: [{ name: 'qty' }], ...extra } }] }],
+          }],
+        },
+        key,
+      ]),
+    ];
+
+    it.each(rows)('%s is not reported', (_label, s, key) => {
+      expect(verdicts(s)[key]).toBeUndefined();
+    });
+
+    it.each(rows)('control, beside %s: a child field nothing draws or names stays inert', (_label, s) => {
+      expect(verdicts(s)['itm.secret']).toBe('inert');
+    });
   });
 });

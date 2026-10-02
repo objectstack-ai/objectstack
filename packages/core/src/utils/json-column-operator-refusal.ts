@@ -50,6 +50,28 @@
  * and then the any-of example last, so a longer name pushes those out first;
  * the any-of example survives up to 36 characters.
  *
+ * ## Two classes of JSON column, two repairs
+ *
+ * [#21236] The membership repair is right for a field that IS a list or a
+ * structured value, which is every JSON column the engine and `driver-memory`
+ * meet. The SQL family meets one more: on a deployment still inside the
+ * ADR-0104 dual-encoding window (its media columns not yet moved),
+ * `driver-sql` stores a SINGLE-VALUE file-class field (`file`, `image`,
+ * `avatar`, `video`, `audio`) as a JSON column too, holding one JSON string.
+ * There is no member to find there: measured on SQLite through `SqlDriver`,
+ * `$contains` with the field's exact id answered no rows, while the same
+ * `$startsWith` answered rows once the columns had moved. So that class gets
+ * its own reason and its own repair, the media-column move, in the words the
+ * migration entry `filter-text-operator-declared-type-refused` gives it
+ * (`@objectstack/spec`). The face knows the class and passes it
+ * ({@link JsonColumnFieldClass}); this module never reads a declaration. The
+ * operator set, the presence spellings and the "withheld" sentence are the
+ * same for both classes. Only the SQL family meets the second class, so its
+ * reason may name the storage the window leaves behind, where the first
+ * class's must not. Its message is held under the same bound by the same pin;
+ * its diagnostic names the field once, and is whole on the wire for a field
+ * name of up to 91 characters.
+ *
  * ## The other half of the JSON column's contract
  *
  * `$contains` is the membership spelling on such a column (`FILTER_OPERATORS`'
@@ -126,6 +148,28 @@ export const JSON_COLUMN_INCOMPATIBLE_OPERATORS: ReadonlySet<string> = new Set([
   '$startsWith', '$endsWith', '$icontains', '$like', '$ilike',
 ]);
 
+/**
+ * [#21236] Which class of JSON column a refused operator met. The class decides
+ * the reason the refusal gives and the repair it prescribes.
+ *
+ * - `'multi-value-or-json'`: a multi-value field (`multiple: true`, or an
+ *   inherently multi-value option type) or a structured-JSON type. Such a
+ *   column is JSON on every deployment, and its repair is membership:
+ *   `$contains`, or an `$or` of `$contains` for any-of.
+ * - `'single-value-media'`: a single-value file-class field that a SQL
+ *   deployment inside the ADR-0104 dual-encoding window still stores as a JSON
+ *   column. The column holds one JSON string, so this is not a membership
+ *   question. Its repair is the media-column move, after which the column
+ *   holds the bare id and these operators answer again.
+ *
+ * The face decides the class from its own registries; the builder only words
+ * it. `driver-sql`, and `driver-turso`'s two faces that ask its registries, are
+ * the only faces that meet the second class. The engine's per-aggregation
+ * `filter` and `driver-memory` never store a single-value file-class field as
+ * JSON, so they meet only the first, which is the default.
+ */
+export type JsonColumnFieldClass = 'multi-value-or-json' | 'single-value-media';
+
 /** The two texts of one JSON-column refusal — see {@link jsonColumnOperatorRefusalText}. */
 export interface JsonColumnOperatorRefusalText {
   /**
@@ -150,12 +194,18 @@ export interface JsonColumnOperatorRefusalText {
  * prints them — see the module docblock. Shared by both texts, so the message
  * and the diagnostic cannot come to give two reasons; the diagnostic passes
  * `op` and so names the operator, the bare spelling's as `=`.
+ *
+ * [#21236] The field's half of the reason is its class's. A single-value
+ * file-class field is not a field "it cannot test for one member": it has no
+ * members, so its reason says what the window left behind instead.
  */
-function refusalReason(op?: string): string {
+function refusalReason(fieldClass: JsonColumnFieldClass, op?: string): string {
   const operator = op === undefined
     ? 'a scalar comparison or text operator'
     : `"${op}", a scalar comparison or text operator,`;
-  return `it aims ${operator} at a multi-value or JSON field, which it cannot test for one member.`;
+  return fieldClass === 'single-value-media'
+    ? `it aims ${operator} at a single-value file-class field still stored as JSON.`
+    : `it aims ${operator} at a multi-value or JSON field, which it cannot test for one member.`;
 }
 
 /**
@@ -177,6 +227,30 @@ function containsRemedy(name: string): string {
     `"$contains" for any-of ({ "$or": [{ "${name}": { "$contains": "a" } }, ` +
     `{ "${name}": { "$contains": "b" } }] }). ${PRESENCE_REMEDY}`
   );
+}
+
+/**
+ * [#21236] The prescription for a single-value file-class field whose column is
+ * still JSON: the media-column move, which makes the column hold the bare id.
+ * It agrees with the migration entry `filter-text-operator-declared-type-refused`
+ * (`@objectstack/spec`), which says that such a field "is not a membership
+ * question: it answers text operators again once its deployment finishes the
+ * media-column move". The equality and ordering operators answer again too,
+ * hence "these operators". `$contains` is not named: on that column it answers
+ * no rows.
+ *
+ * The presence clause stays. `$null` and `$empty` are outside the refused set,
+ * and they answer on that column: `$empty` takes the spec's null-only row for
+ * a file-class type, so both are `IS NULL`.
+ */
+const MEDIA_COLUMN_MOVE_REMEDY =
+  'Such a field is not a membership question: it answers these operators again once this ' +
+  'deployment finishes the media-column move (the column step of ' +
+  `\`objectstack migrate files-to-references --apply\`). ${PRESENCE_REMEDY}`;
+
+/** [#21236] The prescription for `fieldClass`, spelled with `name` in the field position where it has one. */
+function refusalRemedy(fieldClass: JsonColumnFieldClass, name: string): string {
+  return fieldClass === 'single-value-media' ? MEDIA_COLUMN_MOVE_REMEDY : containsRemedy(name);
 }
 
 /**
@@ -225,20 +299,29 @@ function containsRemedy(name: string): string {
  * withheld; it is now 486, with the presence spellings a `null` comparand
  * needs (see `PRESENCE_REMEDY`). The mechanism above stays here, where the
  * next author reads it.
+ *
+ * [#21236] `fieldClass` is the class of JSON column the operator met
+ * ({@link JsonColumnFieldClass}). The default, `'multi-value-or-json'`, gives
+ * the words above unchanged. `'single-value-media'` gives the media-column
+ * move as the repair: on a single-value file-class field inside the ADR-0104
+ * window, `$contains` answered no rows. A face that can hold such a field as
+ * JSON passes the class it read from its own registries.
  */
 export function jsonColumnOperatorRefusalText(
   field: string,
   op: string,
   bare: boolean,
+  fieldClass: JsonColumnFieldClass = 'multi-value-or-json',
 ): JsonColumnOperatorRefusalText {
   const subject = bare
     ? `The bare equality spelling { "${field}": value }`
     : `Operator "${op}" on field "${field}"`;
   return {
     message:
-      `A constraint in this filter WAS NOT APPLIED: ${refusalReason()} ${containsRemedy('FIELD')} ` +
+      `A constraint in this filter WAS NOT APPLIED: ${refusalReason(fieldClass)} ` +
+      `${refusalRemedy(fieldClass, 'FIELD')} ` +
       `The field and the operator are withheld from the message; the full diagnostic is in the ` +
       `server log.`,
-    diagnostic: `${subject} WAS NOT APPLIED: ${refusalReason(op)} ${containsRemedy(field)}`,
+    diagnostic: `${subject} WAS NOT APPLIED: ${refusalReason(fieldClass, op)} ${refusalRemedy(fieldClass, field)}`,
   };
 }

@@ -1,5 +1,204 @@
 # @objectstack/plugin-approvals
 
+## 17.6.0
+
+### Minor Changes
+
+- 2f2fa11: fix(approvals): a snapshot field the reader is served masked on the data plane is no longer served as stored (#20964)
+  
+  Clause-②: yes (widening)
+  
+  The approval payload snapshot is redacted at serve time by the security service's read projection, `getReadableFields`. That projection counts a field whose `maskingRule` applies to the reader as readable, because the data plane serves the column with its value replaced. So the snapshot kept such a field and served it as captured at submission. The redaction now also reads the security contract's `getQueryableFields`, which differs from the read projection by exactly the fields the reader is served masked, and drops those fields, with their derived labels, on both read doors: the approvals inbox reads and the generic data door on the request object. A reader for whom the masking rule is lifted still sees the stored value. The full snapshot stays at rest.
+  
+  The field is dropped rather than masked. The contract names which fields are masked for a reader, not the masked value, and reproducing the mask in this plugin would be a second copy of the masking rule.
+  
+  The one public-surface addition is an optional `getQueryableFields(object, context)` member on the field-visibility source that `ApprovalServiceOptions.fieldVisibility` and `ApprovalService.attachFieldVisibility` accept.
+  
+  A host that constructs `ApprovalService` itself and passes its own `fieldVisibility` source: that source must now also answer `getQueryableFields` (delegate it to the `security` service). A source without it cannot say which readable fields are masked for the reader, so the redaction fails closed and serves no snapshot field. The approvals plugin's own wiring already forwards it.
+- 1ecb871: fix(plugin-audit,plugin-approvals)!: a query over the activity stream's value-bearing columns, the compliance ledger's before/after snapshots, or an approval request's snapshot is refused for a reader withheld a field of the objects the query can reach — the one parent object it names, or every object when it names none (#21154)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable changes spelling, type or shape: no packages/spec schema, object definition, export or stored metadata moves, and neither package's public exports change. What changes is which READ queries three engine middlewares answer: a filter, sort, search, grouping or aggregation that names a value-bearing column of sys_activity or sys_audit_log, or the snapshot column of sys_approval_request, is refused with 403 PERMISSION_DENIED for a non-system reader withheld a field of the objects the query can reach (the one parent object it names, or every registered object when it names none). objectstack migrate meta has nothing to rewrite: which object a caller meant to query is the caller's decision. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id covers a query refusal and this diff adds none (not registered / already-registered); and the change is runtime behaviour, not a declaration (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: an accept-set narrowing on three engine read middlewares, shipped as `minor` under the launch-window convention.
+  
+  **What was wrong.** An activity row carries field values of the record it is about in three columns: its one-line summary, its record label and its recorded change. A compliance-ledger row carries them in its before and after snapshots. An approval request carries the submitted record's snapshot. A read-time redaction narrows such values on the rows a reader is SERVED, after the driver has answered. A filter over the same columns was evaluated at rest, before that, so row presence answered whether the stored text held a value the reader is served masked or not at all, one guess at a time. A grouping by one of them handed the stored text back as the group key.
+  
+  **What is refused now.** For a non-system caller, on every door that reaches these objects through the engine (the list and query doors, record export, and any other `find` / `count` / `aggregate`), a query that filters, searches, sorts, groups or aggregates by one of those columns is refused with `403 PERMISSION_DENIED`, in the engine's own words for a field the caller may not query, unless the caller is served every field, as the security service answers it, of the objects the query can reach:
+  
+  - when the query names exactly one parent object, by equality on the column that names it, at the root of its filter (or inside a root `$and`): that object;
+  - when it names none: every object registered in the deployment, the set these rows can concern, read from metadata and never from the rows.
+  
+  A grouping or aggregation by such a column answers the engine's aggregate refusal; every other position answers its predicate refusal. Both are followed by one sentence naming the remedy.
+  
+  **Who is affected.** A caller withheld any field of the parent object (served masked, gated by a capability it does not hold, or not granted by its permission sets) can no longer filter, search, sort or group by those columns of that object's activity rows, ledger rows or approval requests. A caller withheld any field of any registered object can no longer do so in a query that names no parent object, or names one only inside an alternative — that includes a free-text search over the activity stream or the compliance ledger, whose searched sets include those columns. A caller served every field of the parent it names, or, for a query naming none, of every object (an administrator in a stock deployment), queries as before; the latter costs three security-service calls per registered object per such query.
+  
+  **One-line fix:** a caller withheld some field names one parent object it is served in full, by equality in the query's filter; for a parent it is withheld a field of, it reads the rows unfiltered by those columns.
+  
+  **Unchanged.** A query that names none of those columns answers as before, for every caller. System-context reads are not judged. A deployment without the security service answers as before: the columns are served whole there, so a filter over them discloses nothing the rows do not. The approvals service door's own search keeps its own rule for the snapshot.
+
+### Patch Changes
+
+- cbaf04c: Provenance comments in `plugin-approvals` were re-anchored
+  
+  Comment and docblock lines under `src/` that cited tracker numbers which no
+  longer resolve on GitHub now cite the commit in this repository's history that
+  decided the matter, and say in their own words what was decided. Comments
+  only: no type, schema, export, log or refusal text, or runtime behaviour changes.
+- Updated dependencies [e5c7d07]
+- Updated dependencies [addbbf0]
+- Updated dependencies [93d4e0e]
+- Updated dependencies [88b484e]
+- Updated dependencies [9905e61]
+- Updated dependencies [fa0a4b6]
+- Updated dependencies [f11b5f2]
+- Updated dependencies [0cb72cf]
+- Updated dependencies [c1d8051]
+- Updated dependencies [a918fe7]
+- Updated dependencies [41dcf11]
+- Updated dependencies [c46279f]
+- Updated dependencies [688ddef]
+- Updated dependencies [b1aab1e]
+- Updated dependencies [274e162]
+- Updated dependencies [05a7547]
+- Updated dependencies [0efbdc3]
+- Updated dependencies [c8dd8dd]
+- Updated dependencies [03cdb9a]
+- Updated dependencies [15b586d]
+- Updated dependencies [542670d]
+- Updated dependencies [e73ee2d]
+- Updated dependencies [92fe081]
+- Updated dependencies [c4c68ca]
+- Updated dependencies [d78a0bd]
+- Updated dependencies [5363e2d]
+- Updated dependencies [c876a74]
+- Updated dependencies [f1e921a]
+- Updated dependencies [7a1faf1]
+- Updated dependencies [c9d234c]
+- Updated dependencies [3572916]
+- Updated dependencies [3fbf3ca]
+- Updated dependencies [24d521e]
+- Updated dependencies [f4ce10c]
+- Updated dependencies [b785c3b]
+- Updated dependencies [2473e26]
+- Updated dependencies [3a89d45]
+- Updated dependencies [f379f57]
+- Updated dependencies [889139c]
+- Updated dependencies [05cb2bc]
+- Updated dependencies [7510663]
+- Updated dependencies [a6866da]
+- Updated dependencies [1a75e39]
+- Updated dependencies [cd901d7]
+- Updated dependencies [d7631d5]
+- Updated dependencies [d830d71]
+- Updated dependencies [89801cd]
+- Updated dependencies [1ab9892]
+- Updated dependencies [fbec216]
+- Updated dependencies [35587f7]
+- Updated dependencies [cd6d8a5]
+- Updated dependencies [ace770d]
+- Updated dependencies [ed54768]
+- Updated dependencies [99786f9]
+- Updated dependencies [5757463]
+- Updated dependencies [63bfe69]
+- Updated dependencies [1940afd]
+- Updated dependencies [4f83db5]
+- Updated dependencies [f5c7b2c]
+- Updated dependencies [6afccda]
+- Updated dependencies [671d4c1]
+- Updated dependencies [bbcd20c]
+- Updated dependencies [c8111a5]
+- Updated dependencies [9ad6544]
+- Updated dependencies [c9c182e]
+- Updated dependencies [4b4ee88]
+- Updated dependencies [b9087d7]
+- Updated dependencies [f10d802]
+- Updated dependencies [856321f]
+- Updated dependencies [6b004c0]
+- Updated dependencies [93e9e42]
+- Updated dependencies [ca5408c]
+- Updated dependencies [b280546]
+- Updated dependencies [975b248]
+- Updated dependencies [ebb66aa]
+- Updated dependencies [ceee88f]
+- Updated dependencies [e18fea6]
+- Updated dependencies [f750119]
+- Updated dependencies [660a9b2]
+- Updated dependencies [dcd3309]
+- Updated dependencies [f6ccca4]
+- Updated dependencies [26437ae]
+- Updated dependencies [05be352]
+- Updated dependencies [d1633f3]
+- Updated dependencies [32d3b3c]
+- Updated dependencies [c6b3a01]
+- Updated dependencies [bee75ce]
+- Updated dependencies [2742e53]
+- Updated dependencies [a75311d]
+- Updated dependencies [d98bf24]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [8368f1c]
+- Updated dependencies [31c3996]
+- Updated dependencies [95555e7]
+- Updated dependencies [a29a0ea]
+- Updated dependencies [83480c6]
+- Updated dependencies [013f97d]
+- Updated dependencies [5d5e679]
+- Updated dependencies [e07566b]
+- Updated dependencies [11d28c1]
+- Updated dependencies [399e3aa]
+- Updated dependencies [ba03198]
+- Updated dependencies [94608a7]
+- Updated dependencies [58a77db]
+- Updated dependencies [b3d7a70]
+- Updated dependencies [b3917d9]
+- Updated dependencies [c27404f]
+- Updated dependencies [a11faee]
+- Updated dependencies [2c1cef3]
+- Updated dependencies [27c0cf3]
+- Updated dependencies [097ef80]
+- Updated dependencies [70dae53]
+- Updated dependencies [665cab3]
+- Updated dependencies [682873d]
+- Updated dependencies [1bd14c9]
+- Updated dependencies [62b90d7]
+- Updated dependencies [cb45469]
+- Updated dependencies [f3b16fc]
+- Updated dependencies [d6d6e87]
+- Updated dependencies [df1feae]
+- Updated dependencies [336e191]
+- Updated dependencies [9bdc6d3]
+- Updated dependencies [24c554d]
+- Updated dependencies [3dc33b2]
+- Updated dependencies [9969228]
+- Updated dependencies [95e24b0]
+- Updated dependencies [1a4c7f8]
+- Updated dependencies [c7396f1]
+- Updated dependencies [434c6c7]
+- Updated dependencies [4b59a38]
+- Updated dependencies [d2bc644]
+- Updated dependencies [cfa9315]
+- Updated dependencies [0803a8b]
+- Updated dependencies [0d42104]
+- Updated dependencies [a3d7588]
+- Updated dependencies [b8191f7]
+- Updated dependencies [315888d]
+- Updated dependencies [1741c5d]
+- Updated dependencies [3711e0b]
+- Updated dependencies [a8acee2]
+- Updated dependencies [a51920f]
+- Updated dependencies [0f6dcac]
+- Updated dependencies [682873f]
+- Updated dependencies [2123fcc]
+- Updated dependencies [00f045d]
+  - @objectstack/spec@17.6.0
+  - @objectstack/platform-objects@17.6.0
+  - @objectstack/core@17.6.0
+  - @objectstack/metadata-core@17.6.0
+  - @objectstack/formula@17.6.0
+  - @objectstack/types@17.6.0
+
 ## 17.5.0
 
 ### Minor Changes

@@ -277,8 +277,9 @@ no framework executor loads a metadata-authored tool.
 `ToolSchema` is **strict** — an unknown key (a typo, or a retired one) is a parse
 error, not a silent strip. Required `name` / `label` / `description` and a JSON
 Schema `parameters` object; optional `objectName` and `outputSchema` (⚠️
-experimental — its top-level keys are folded into the tool description shown to
-the model, and outputs are **not** validated). Retired in protocol 17:
+experimental — nothing reads it on a tool record; declare the schema as
+`ai.outputSchema` on the **action** instead, which the AI runtime ☁️ enforces
+by withholding a result that does not conform). Retired in protocol 17:
 `category`, `permissions`, `active`, `builtIn` — all authorable and inert —
 joining `requiresConfirmation`; each rejection carries its replacement.
 
@@ -306,9 +307,10 @@ there is **no top-level `temperature` / `maxTokens`** on an agent
 
 ## Common Pitfalls
 
-1. **Mistaking `guardrails` for a gate.** `guardrails` / `memory` /
-   `structuredOutput` are declared only — no runtime reads them, and real limits
-   come from the quota service. For a gate that is **enforced**, use
+1. **Mistaking `guardrails` for a gate.** `guardrails` is enforced per user turn
+   by the AI runtime ☁️ — token and time limits, blocked tool names and categories
+   refused — but it is a limit, not an approval; `memory` is declared only — no
+   runtime reads it. For a gate that is **enforced**, use
    `enableActionApproval: true` (approval queue ☁️), `ai.requiresConfirmation` on
    the **action**, or `approval: 'always'` on an MCP tool binding. AI metadata
    edits are already gated: they land as drafts a human must publish (ADR-0033).

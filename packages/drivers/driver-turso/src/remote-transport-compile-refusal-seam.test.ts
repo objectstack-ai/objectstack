@@ -372,7 +372,8 @@ function transport() {
   t.setDiagnosticSink((m) => sink.push(m));
   // [#21178] Only `POLICY_JSON_COL` is a JSON column, so every other row
   // compiles exactly as it does on a transport handed no rule at all.
-  t.setJsonColumnResolver((_object, field) => field === POLICY_JSON_COL);
+  // [#21236] The resolver answers the column's class; this one is multi-value.
+  t.setJsonColumnResolver((_object, field) => (field === POLICY_JSON_COL ? 'multi-value-or-json' : undefined));
   return { t, sink, client };
 }
 
