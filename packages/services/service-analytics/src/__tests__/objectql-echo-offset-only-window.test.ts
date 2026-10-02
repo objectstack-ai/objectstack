@@ -30,6 +30,9 @@
  *     otherwise: `OFFSET n` alone, byte-identical to before. No CI step
  *     provisions that variable for this package, so the live cell is
  *     red-capable and un-run in CI.
+ *   - **unknown (no `sqlDialect` hook) → EXECUTED** on both engines above,
+ *     through an `ObjectQLStrategy` whose context names no dialect:
+ *     `LIMIT 9223372036854775807 OFFSET n`, the native face's spelling for it.
  *
  * In each cell the echo's window is compared with the statement the native
  * face runs for the same query on the same driver, and the echo is then run
@@ -43,6 +46,8 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import type { Cube } from '@objectstack/spec/data';
 import type { AnalyticsService } from '../analytics-service.js';
 import { AnalyticsServicePlugin } from '../plugin.js';
+import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
+import type { StrategyContext } from '../strategies/types.js';
 
 const DEAL = 'os21365_echo_deal';
 
@@ -213,6 +218,14 @@ for (const cell of CELLS) {
         // The echo binds no parameter, so it runs as printed — and answers the face's rows.
         expect(dryRun.params).toEqual([]);
         expect(tuples(await run(echo), ['note', 'amount_sum'])).toEqual(AFTER_FIRST);
+      });
+
+      it('a host that wires no sqlDialect hook (the `unknown` arm) echoes the dialect-neutral window, and it runs', async () => {
+        const ctx = { getCube: (name: string) => (name === CUBE ? CUBES[0] : undefined) } as unknown as StrategyContext;
+        const { sql, params } = await new ObjectQLStrategy().generateSql(OFFSET_ONLY as any, ctx);
+        expect(sql.endsWith('ORDER BY "note" ASC LIMIT 9223372036854775807 OFFSET 1'), sql).toBe(true);
+        expect(params).toEqual([]);
+        expect(tuples(await run(sql), ['note', 'amount_sum'])).toEqual(AFTER_FIRST);
       });
 
       it('CONTROL: an integer window keeps its bytes — `LIMIT 2 OFFSET 1` — and the echo runs', async () => {
