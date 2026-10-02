@@ -29,6 +29,23 @@
  * | `!record.tags.contains('x')` | `'x'` | admitted | `["x"]` | hidden |
  * | `record.tags.contains('x')`, a by-id update | `'x'` | 403 | `["x"]` | shown |
  *
+ * [#21254] An operator the read refuses on a declared JSON-stored column
+ * (`@objectstack/core`'s `JSON_COLUMN_INCOMPATIBLE_OPERATORS`, or implicit
+ * equality) is refused by the write check too, with the read's
+ * `INVALID_FILTER` / 400 and core's words. Measured on `main` before the step:
+ *
+ * | `check` | written | write, before | stored | read |
+ * |---|---|---|---|---|
+ * | `record.tags != 'x'` | `['x']` or `'x'` | admitted | `["x"]` | 400 |
+ * | `!(record.tags in ['x'])` | `['x']` | admitted | `["x"]` | 400 |
+ * | `record.tags == 'x'` | `['x']` | 403 | — | 400 |
+ * | `record.tags in ['x']` | `['x']` | 403 | — | 400 |
+ * | `record.tags > 'a'` | `['x']` | 400 | — | 400 |
+ * | `record.meta != 'x'` / `record.meta == 'x'` (`json`) | `'y'` / `'x'` | admitted | the scalar | 400 |
+ *
+ * The membership pair and the presence predicates answer as before, and so
+ * does every operator on a column declared neither way.
+ *
  * ## formula's whole-day copy is out of reach here
  *
  * `@objectstack/formula`'s matcher carries its own copy of the whole-day upper
@@ -44,6 +61,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 // The mocked module (see `vi.mock` below), loaded at module top.
 import { matchesFilterCondition } from '@objectstack/formula';
+import { JSON_COLUMN_INCOMPATIBLE_OPERATORS, jsonColumnOperatorRefusalText } from '@objectstack/core';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
@@ -51,8 +69,11 @@ import { PermissionSetSchema } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 import {
+  declaredJsonStoredColumns,
   declaredMultiValueColumns,
   declaredTemporalColumns,
+  findJsonColumnCheckRefusal,
+  jsonColumnCheckRefusalCarriedBy,
   storedFormCheckFilter,
   storedFormCheckJudge,
   storedFormImage,
@@ -117,8 +138,11 @@ afterEach(async () => {
 });
 
 let seq = 0;
-/** One engine and plugin, with ONE policy whose `using` and `check` are the same predicate. */
-async function boot(makeDriver: () => Driver, predicate: string) {
+/**
+ * One engine and plugin, with ONE policy whose `using` and `check` are the same
+ * predicate — or, given `using`, a policy whose `using` is that one instead.
+ */
+async function boot(makeDriver: () => Driver, predicate: string, using: string = predicate) {
   const OBJ = `qa_due_stored_${process.pid}_${++seq}`;
   const engine = new ObjectQL();
   engine.registerDriver(makeDriver() as never, true);
@@ -142,6 +166,7 @@ async function boot(makeDriver: () => Driver, predicate: string) {
           start_time: { name: 'start_time', type: 'time' },
           tags: { name: 'tags', type: 'tags' },
           owners: { name: 'owners', type: 'select', multiple: true, options: [{ label: 'X', value: 'x' }, { label: 'XY', value: 'xy' }] },
+          meta: { name: 'meta', type: 'json' },
         },
       },
     ],
@@ -152,7 +177,7 @@ async function boot(makeDriver: () => Driver, predicate: string) {
   const set = PermissionSetSchema.parse({
     name: 'qa_due_guard',
     objects: { [OBJ]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
-    rowLevelSecurity: [{ name: 'due_guard', object: OBJ, operation: 'all', using: predicate, check: predicate }],
+    rowLevelSecurity: [{ name: 'due_guard', object: OBJ, operation: 'all', using, check: predicate }],
   });
   const services: Record<string, unknown> = {
     manifest: { register: vi.fn() },
@@ -180,7 +205,7 @@ async function boot(makeDriver: () => Driver, predicate: string) {
     ((await engine.find(OBJ, { where: { id }, context: SYS_CTX } as never)) as Array<Record<string, unknown>>)[0];
   const shownTo = async (id: string) =>
     ((await engine.find(OBJ, { where: { id }, context: caller } as never)) as unknown[]).length > 0;
-  return { OBJ, engine, caller, storedRow, shownTo };
+  return { OBJ, engine, caller, storedRow, shownTo, logger: ctx.logger };
 }
 
 type Envelope = { code: string; status: number };
@@ -289,6 +314,201 @@ for (const [driverName, makeDriver] of DRIVERS) {
     });
   });
 }
+
+// [#21254] The card's table at the engine write door, beside the read the same
+// policy scopes. A refused cell names what the withheld diagnostic names: the
+// column, the operator, and whether it is the bare equality spelling.
+const REFUSED: Envelope = { code: 'INVALID_FILTER', status: 400 };
+type JsonColumnCell = {
+  predicate: string;
+  column: string;
+  value: unknown;
+  refused?: [field: string, op: string, bare: boolean];
+  /** A cell the check still evaluates: whether it admits, the read shows the row, and what is stored. */
+  admitted?: boolean;
+  stored?: unknown;
+};
+const JSON_COLUMN_CELLS: JsonColumnCell[] = [
+  // The card's rows 1–2: admitted before, while the read refused the policy.
+  { predicate: "record.tags != 'x'", column: 'tags', value: ['x'], refused: ['tags', '$ne', false] },
+  { predicate: "record.tags != 'x'", column: 'tags', value: 'x', refused: ['tags', '$ne', false] },
+  { predicate: "!(record.tags in ['x'])", column: 'tags', value: ['x'], refused: ['tags', '$in', false] },
+  // Rows 3–5: refused before (403, 403, 400). Nothing is stored, as before; the answer is now the read's.
+  { predicate: "record.tags == 'x'", column: 'tags', value: ['x'], refused: ['tags', '=', true] },
+  { predicate: "record.tags in ['x']", column: 'tags', value: ['x'], refused: ['tags', '$in', false] },
+  { predicate: "record.tags > 'a'", column: 'tags', value: ['x'], refused: ['tags', '$gt', false] },
+  // A `select` flagged `multiple`, and a structured-JSON column holding a scalar.
+  { predicate: "record.owners != 'x'", column: 'owners', value: ['x'], refused: ['owners', '$ne', false] },
+  { predicate: "record.meta != 'x'", column: 'meta', value: 'y', refused: ['meta', '$ne', false] },
+  { predicate: "record.meta == 'x'", column: 'meta', value: 'x', refused: ['meta', '=', true] },
+  // Control: the membership pair — `contains` and its negation — answers on the stored list as before.
+  { predicate: "record.tags.contains('x')", column: 'tags', value: ['x'], admitted: true, stored: ['x'] },
+  { predicate: "record.tags.contains('x')", column: 'tags', value: ['y'], admitted: false, stored: ['y'] },
+  { predicate: "!record.tags.contains('x')", column: 'tags', value: ['x'], admitted: false, stored: ['x'] },
+  { predicate: "!record.tags.contains('x')", column: 'tags', value: ['y'], admitted: true, stored: ['y'] },
+  // Control: presence answers on such a column.
+  { predicate: 'record.tags != null', column: 'tags', value: ['x'], admitted: true, stored: ['x'] },
+  // Control: a column declared neither way keeps every operator, the refused rows' among them.
+  { predicate: "record.title != 'x'", column: 'title', value: 'y', admitted: true, stored: 'y' },
+  { predicate: "record.title != 'x'", column: 'title', value: 'x', admitted: false, stored: 'x' },
+  { predicate: "record.title in ['x']", column: 'title', value: 'x', admitted: true, stored: 'x' },
+];
+
+/** The write gate's server-log lines for this refusal. */
+const refusalLines = (logger: { warn: unknown }): string[] =>
+  (logger.warn as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0])).filter((l) => l.includes('RLS check REFUSED'));
+
+for (const [driverName, makeDriver] of DRIVERS) {
+  describe(`[#21254] ${driverName}: an operator the read refuses on a declared JSON-stored column is refused by the write check, with the read's answer`, () => {
+    for (const cell of JSON_COLUMN_CELLS) {
+      const verdict = cell.refused ? 'refused 400 INVALID_FILTER, as the read is' : cell.admitted ? 'admitted and shown' : 'refused 403 and hidden';
+      it(`${cell.predicate}, ${cell.column} written as ${show(cell.value)}: ${verdict}`, async () => {
+        const r = await boot(makeDriver, cell.predicate);
+        const written = await r.engine
+          .insert(r.OBJ, { id: 'w', [cell.column]: cell.value }, { context: r.caller } as never)
+          .then(() => 'admitted' as const, (e: unknown) => e);
+        await r.engine.insert(r.OBJ, { id: 'r', [cell.column]: cell.value }, { context: SYS_CTX } as never);
+        if (!cell.refused) {
+          expect(written === 'admitted' ? written : envelopeOf(written)).toEqual(cell.admitted ? 'admitted' : DENIED);
+          expect((await r.storedRow('r'))?.[cell.column]).toEqual(cell.stored);
+          expect(await r.shownTo('r')).toBe(cell.admitted);
+          expect(refusalLines(r.logger)).toEqual([]);
+          return;
+        }
+        const [field, op, bare] = cell.refused;
+        const words = jsonColumnOperatorRefusalText(field, op, bare);
+        // The write: the read's code and status, and core's words, which withhold the field and the operator.
+        expect(envelopeOf(written)).toEqual(REFUSED);
+        expect((written as Error).message).toBe(words.message);
+        expect(await r.storedRow('w')).toBeUndefined();
+        // The diagnostic the message points to is in the server log, beside the policy.
+        const lines = refusalLines(r.logger);
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain("policy 'due_guard'");
+        expect(lines[0]).toContain(words.diagnostic);
+        // The read the same policy scopes, over the same value stored by the system: the same answer.
+        const read = await r.engine
+          .find(r.OBJ, { where: { id: 'r' }, context: r.caller } as never)
+          .then(() => 'answered' as const, (e: unknown) => e);
+        expect(envelopeOf(read)).toEqual(REFUSED);
+        expect((read as Error).message).toBe(words.message);
+      });
+    }
+
+    // The `using` here is a column declared neither way: under the same
+    // predicate an update's pre-image read is refused first, by the driver,
+    // and its gate fails closed 403 before any check runs.
+    it("record.tags != 'x' as the check: a by-id update and a predicate update are refused 400 too, and change nothing", async () => {
+      const r = await boot(makeDriver, "record.tags != 'x'", "record.title == 'batch'");
+      await r.engine.insert(r.OBJ, { id: 'u', title: 'batch', tags: ['y'] }, { context: SYS_CTX } as never);
+      expect(await outcome(r.engine.update(r.OBJ, { tags: 'x' }, { where: { id: 'u' }, context: r.caller } as never)))
+        .toEqual(REFUSED);
+      expect(await outcome(r.engine.update(r.OBJ, { tags: ['x'] }, { where: { title: 'batch' }, multi: true, context: r.caller } as never)))
+        .toEqual(REFUSED);
+      expect((await r.storedRow('u'))?.tags).toEqual(['y']);
+    });
+  });
+}
+
+describe('[#21254] the JSON-column refusal reads the declaration, never the record', () => {
+  const DECLARED = {
+    fields: {
+      tags: { type: 'tags', multiple: false },
+      labels: { type: 'multiselect', multiple: false },
+      owners: { type: 'select', multiple: true },
+      meta: { type: 'json', multiple: false },
+      home: { type: 'address', multiple: false },
+      status: { type: 'select', multiple: false },
+      title: { type: 'text', multiple: false },
+      due_on: { type: 'date', multiple: false },
+    },
+  };
+  const JSON_STORED = declaredJsonStoredColumns(DECLARED);
+  /** The refusal a judgement raised, with everything a caller and the log read from it. */
+  const refusalOf = (judge: (image: Record<string, unknown>) => boolean, image: Record<string, unknown>) => {
+    try {
+      judge(image);
+    } catch (e) {
+      const x = e as Error & { code?: string; status?: number; httpStatus?: number };
+      return { envelope: { code: x.code, status: x.status, httpStatus: x.httpStatus }, message: x.message, carried: jsonColumnCheckRefusalCarriedBy(e), error: e };
+    }
+    return null;
+  };
+  const IMAGES = [{ tags: ['x'] }, { tags: 'x' }, { tags: null }, {}, { tags: ['y'], meta: 'x', owners: ['x'] }];
+
+  it('names exactly the multi-valued and structured-JSON columns, and none without a declaration', () => {
+    expect([...JSON_STORED].sort()).toEqual(['home', 'labels', 'meta', 'owners', 'tags']);
+    expect(declaredJsonStoredColumns(undefined).size).toBe(0);
+  });
+
+  it("refuses every operator in core's set on such a column, with the read's envelope and core's words, for every image", () => {
+    expect(JSON_COLUMN_INCOMPATIBLE_OPERATORS.size).toBeGreaterThan(0);
+    for (const op of JSON_COLUMN_INCOMPATIBLE_OPERATORS) {
+      const judge = storedFormCheckJudge([{ tags: { [op]: 'x' } }], DECLARED);
+      const words = jsonColumnOperatorRefusalText('tags', op, false);
+      for (const image of IMAGES) {
+        const got = refusalOf(judge, image);
+        expect(got?.envelope, op).toEqual({ code: 'INVALID_FILTER', status: 400, httpStatus: 400 });
+        expect(got?.message, op).toBe(words.message);
+        expect(got?.carried, op).toMatchObject({ field: 'tags', operator: op, path: `check[0].tags.${op}`, diagnostic: words.diagnostic });
+      }
+    }
+  });
+
+  it('refuses implicit equality on such a column whatever the comparand, as the bare spelling', () => {
+    for (const comparand of ['x', null, ['x'], new Date('2026-01-05T00:00:00Z'), 5]) {
+      const got = refusalOf(storedFormCheckJudge([{ meta: comparand }], DECLARED), { meta: 'x' });
+      expect(got?.carried).toMatchObject({ field: 'meta', operator: '=', path: 'check[0].meta', diagnostic: jsonColumnOperatorRefusalText('meta', '=', true).diagnostic });
+    }
+  });
+
+  it('finds it at any depth under $and / $or / $not and in any part, and names where', () => {
+    const nested = findJsonColumnCheckRefusal(
+      [{ $and: [{ title: 'x' }, { $or: [{ tags: { $null: true } }, { $not: { home: { $eq: 'x' } } }] }] }],
+      JSON_STORED,
+    );
+    expect(nested).toMatchObject({ field: 'home', operator: '$eq', path: 'check[0].$and[1].$or[1].$not.home.$eq' });
+    expect(findJsonColumnCheckRefusal([{ title: { $ne: 'x' } }, { labels: { $nin: ['a'] } }], JSON_STORED))
+      .toMatchObject({ field: 'labels', operator: '$nin', path: 'check[1].labels.$nin' });
+  });
+
+  it('leaves the membership pair, the presence predicates and every column declared neither way to the evaluator', () => {
+    const parts = [
+      { tags: { $contains: 'x' } },
+      { tags: { $notContains: 'x' } },
+      { $not: { owners: { $contains: 'x' } } },
+      { tags: { $null: true } },
+      { meta: { $exists: true } },
+      { home: { $empty: false } },
+      { title: { $ne: 'x' } },
+      { title: 'x' },
+      { status: { $in: ['x'] } },
+      { due_on: { $gt: '2026-01-05' } },
+    ];
+    for (const part of parts) expect(findJsonColumnCheckRefusal([part], JSON_STORED), JSON.stringify(part)).toBeNull();
+    const contains = storedFormCheckJudge([{ tags: { $contains: 'x' } }], DECLARED);
+    const notContains = storedFormCheckJudge([{ tags: { $notContains: 'x' } }], DECLARED);
+    expect([contains({ tags: ['x'] }), contains({ tags: ['y'] })]).toEqual([true, false]);
+    expect([notContains({ tags: ['x'] }), notContains({ tags: ['y'] })]).toEqual([false, true]);
+    const scalar = storedFormCheckJudge([{ title: { $ne: 'x' } }], DECLARED);
+    expect([scalar({ title: 'y' }), scalar({ title: 'x' })]).toEqual([true, false]);
+  });
+
+  it('refuses nothing where the object hands over no declaration: judged as before', () => {
+    expect(findJsonColumnCheckRefusal([{ tags: { $ne: 'x' } }], declaredJsonStoredColumns(undefined))).toBeNull();
+    expect(storedFormCheckJudge([{ tags: { $ne: 'y' } }], undefined)({ tags: 'x' })).toBe(true);
+  });
+
+  it('keeps the field and the operator off the wire: they travel on the error only for the server log', () => {
+    const got = refusalOf(storedFormCheckJudge([{ owners: { $ne: 'secret_member' } }], DECLARED), {});
+    const wire = JSON.stringify({ ...(got!.error as object), message: got!.message });
+    expect(wire).not.toContain('owners');
+    expect(wire).not.toContain('$ne');
+    expect(got?.carried?.diagnostic).toContain('"owners"');
+    expect(jsonColumnCheckRefusalCarriedBy(new Error('other'))).toBeNull();
+    expect(jsonColumnCheckRefusalCarriedBy(null)).toBeNull();
+  });
+});
 
 describe('the stored-form step reads the declaration, never the values', () => {
   const COLUMNS = declaredTemporalColumns({
