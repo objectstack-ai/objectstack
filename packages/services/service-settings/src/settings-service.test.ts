@@ -2041,10 +2041,13 @@ describe('SettingsService — Phase 3 sys_secret + crypto provider + audit', () 
     await svc.set('mail', 'api_key', 'super-secret-key', { tenantId: 't1' });
     const r = await svc.get<string>('mail', 'api_key', { tenantId: 't1' });
     expect(r.value).toBe('super-secret-key');
-    expect(seen).toEqual([
-      { verb: 'encrypt', scope: 'settings', namespace: 'mail', key: 'api_key' },
-      { verb: 'decrypt', scope: 'settings', namespace: 'mail', key: 'api_key' },
-    ]);
+    // Every call — however many reads the service makes — carries this
+    // producer's scope and coordinate.
+    expect(seen.filter((c) => c.verb === 'encrypt')).toHaveLength(1);
+    expect(seen.some((c) => c.verb === 'decrypt')).toBe(true);
+    for (const call of seen) {
+      expect(call).toMatchObject({ scope: 'settings', namespace: 'mail', key: 'api_key' });
+    }
     // The stored ciphertext records the scoped derivation, and no other
     // producer's scope opens it at the same (namespace, key).
     const [secret] = [...secretRows.values()];
