@@ -407,13 +407,6 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
   },
   {
     kind: 'omit',
-    type: 'agent',
-    path: ROOT_PATH,
-    key: 'structuredOutput',
-    why: 'declared, not enforced yet — `[EXPERIMENTAL — not enforced]` in its own describe and `experimental` in the liveness ledger: parsed, no runtime consumer. No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate',
-  },
-  {
-    kind: 'omit',
     type: 'action',
     path: ROOT_PATH,
     key: 'onSuccess',

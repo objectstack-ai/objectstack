@@ -59,6 +59,11 @@ export { MigrationRecoveryPlugin, describeInterruptedRun } from './migration-rec
 export { DefaultDatasourcePlugin } from './default-datasource-plugin.js';
 export type { DefaultDatasourceDefinition, DefaultDatasourcePluginOptions } from './default-datasource-plugin.js';
 export { AppPlugin, collectBundleHooks, collectBundleFunctions, collectBundleFunctionEntries, collectBundleActions } from './app-plugin.js';
+// [#21321] The ONE binder of an app artifact's script-action bodies and body
+// hooks, under the owner `app:<appId>` — called by `AppPlugin.start` and by the
+// install-local plugin (`@objectstack/cloud-connection`) on install and rehydrate.
+export { bindAppArtifactHandlers, appArtifactHandlerOwner } from './app-artifact-handlers.js';
+export type { AppArtifactHandlerBinding, AppArtifactHandlerBindingOptions } from './app-artifact-handlers.js';
 // #14094 — what a DECLARATIVE job's handler is invoked with. A job has no graph,
 // so unlike a flow `script` node it is given data reach (`ql`) instead of being a
 // pure value-returner whose I/O the surrounding graph performs.

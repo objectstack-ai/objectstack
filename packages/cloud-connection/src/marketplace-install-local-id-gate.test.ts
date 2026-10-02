@@ -38,6 +38,11 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { manifestIdRefusal } from '@objectstack/spec/kernel';
 import { BaseResponseSchema, ApiErrorSchema, envelopeViolations } from '@objectstack/spec/api';
+// [#21321] An install, and a rehydrate of a ledger entry, now bind the package's
+// handlers through `@objectstack/runtime` (a lazy `import()` inside the plugin).
+// Its first load is paid here, at module top — never inside a clocked `it`
+// (the clocked-window rule, `scripts/check-test-source-alias.mjs`).
+import '@objectstack/runtime';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { LocalManifestSource } from './local-manifest-source.js';
 import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';

@@ -2522,6 +2522,46 @@ export async function executeRegisteredAction(_deps: ActionExecutionDeps,
 
 
 /**
+ * [#21321] The read-only twin of {@link executeRegisteredAction}: would the
+ * script door find a handler for this action? Returns a probe over ONE snapshot
+ * of the engine's handler registry (`listRegisteredActions()`, the engine's
+ * public enumeration of the Map `executeAction` reads), answering for an
+ * `(objectName, candidates)` pair by walking exactly the rotation the run door
+ * walks — `actionHandlerObjectKeys(objectName)` × the handler-key candidates —
+ * and dispatching nothing.
+ *
+ * It exists so an ADVERTISING surface reads the same source the run doors do.
+ * MCP `list_actions` used to admit a script action on its declaration alone
+ * (`target || body`), so a declaration nothing had bound — measured: an
+ * `os package install`ed package, before its bodies were bound — was listed
+ * and then refused by `run_action` with "No handler registered".
+ *
+ * An engine that cannot enumerate its handlers (no `listRegisteredActions`)
+ * answers `false` for everything: the listing then cannot vouch for any script
+ * action, and saying nothing is the honest answer — never a fall-back to the
+ * declaration, which is the very source this replaces.
+ */
+export function registeredActionHandlerProbe(_deps: ActionExecutionDeps,
+    ql: any,
+): (objectName: string, candidates: string[]) => boolean {
+    const registered = new Set<string>();
+    if (ql && typeof ql.listRegisteredActions === 'function') {
+        for (const row of ql.listRegisteredActions() as Array<{ objectName: string; actionName: string }>) {
+            registered.add(`${row.objectName}:${row.actionName}`);
+        }
+    }
+    return (objectName, candidates) => {
+        for (const obj of actionHandlerObjectKeys(objectName)) {
+            for (const key of candidates) {
+                if (registered.has(`${obj}:${key}`)) return true;
+            }
+        }
+        return false;
+    };
+}
+
+
+/**
  * Resolve the DECLARATION behind a `<object>/<action>` route pair — the
  * single source the REST `/actions` route reads for the ADR-0066 D4
  * permission gate, the ADR-0104 param contract, and (since #3915) the action

@@ -1150,7 +1150,9 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // three locales.
       // 659 since the field form offers `useGrouping` on `number` fields: one
       // new row label, authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(659);
+      // 660 since the agent form offers `structuredOutput`: one new row label,
+      // authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(660);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

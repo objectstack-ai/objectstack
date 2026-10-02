@@ -693,10 +693,27 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
             // flow action while promising "its input parameters".
             const automation: any = await actionExec.resolveAutomationService(deps, context, envId);
             const hasAutomation = Boolean(automation);
+            // [#21321] ONE source for advertising and running. `run_action`
+            // dispatches a script action through the engine's handler registry
+            // (`executeRegisteredAction`), so the listing asks that registry —
+            // the same engine, the same key rotation — instead of trusting the
+            // declaration's `target || body`. A declared action nothing bound
+            // (measured: an `os package install`ed package) was listed here and
+            // refused there with "No handler registered".
+            const hasHandler = actionExec.registeredActionHandlerProbe(
+                deps,
+                await deps.getObjectQL(context, envId).catch(() => undefined),
+            );
             const out: any[] = [];
             for (const { action, objectName, obj } of await actionExec.collectActionDeclarations(deps, meta)) {
                 if (!objectName || isSystemObjectName(objectName)) continue; // fail-closed on sys_*
                 if (!actionExec.isHeadlessInvokableAction(deps, action, hasAutomation)) continue;
+                // The script arm — every action `invokeBusinessAction` sends to
+                // the handler registry, i.e. neither the declarative update nor
+                // a flow (its branch order, read the same way). The other two
+                // arms have their own dispatchers and keep their own predicates.
+                if (!actionExec.isDeclarativeUpdateAction(action) && action?.type !== 'flow'
+                    && !hasHandler(objectName, actionExec.resolveActionHandlerKeys(action))) continue;
                 // [#2849 / ADR-0011] MCP is an AI surface: only actions the
                 // author explicitly opted in via `ai.exposed` are listed.
                 // Fail-closed — bodies run as trusted code (see

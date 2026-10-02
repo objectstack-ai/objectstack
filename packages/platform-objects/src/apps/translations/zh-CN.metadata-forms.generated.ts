@@ -2404,6 +2404,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "生命周期",
         helpText: "定义会话流程的状态机"
       },
+      structuredOutput: {
+        label: "结构化输出",
+        helpText: "代理最终回答的输出契约：JSON 格式、用于校验回答的 JSON Schema、重试、回退格式与转换步骤。由云端 AI 运行时强制执行。"
+      },
       skills: {
         label: "技能",
         helpText: "技能名称（Agent→Skill→Tool 架构）"
