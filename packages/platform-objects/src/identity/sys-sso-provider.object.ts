@@ -273,9 +273,21 @@ export const SysSsoProvider = ObjectSchema.create({
       group: 'Identity',
     }),
 
+    // [#21197] `internal: true` on both protocol blobs. They are the IdP
+    // trust configuration and can carry credential material: a SAML blob may
+    // hold service-provider private keys, and an OIDC blob written before the
+    // #8009 lift still holds its client secret in cleartext until the boot
+    // migration moves it. The declaration keeps both off every generic exit —
+    // the data path's get/list doors and the compliance ledger's CRUD mirror.
+    // ⛔ Not `Field.secret`: better-auth's sso plugin reads both blobs back off
+    // the rows its storage adapter returns (ADR-0100 §B.4). `internal` is
+    // read-side only; both have readback rows in plugin-auth's
+    // `internal-field-readback.ts`, and the #8009 client-secret injection and
+    // legacy migration read `oidc_config` through the same recovery.
     oidc_config: Field.textarea({
       label: 'OIDC Config',
       required: false,
+      internal: true,
       description: 'JSON: clientId, clientSecret, endpoints, scopes, mapping, pkce (managed by better-auth)',
       group: 'Protocol',
     }),
@@ -283,6 +295,7 @@ export const SysSsoProvider = ObjectSchema.create({
     saml_config: Field.textarea({
       label: 'SAML Config',
       required: false,
+      internal: true,
       description: 'JSON: entryPoint, cert, identifierFormat, mapping (managed by better-auth)',
       group: 'Protocol',
     }),

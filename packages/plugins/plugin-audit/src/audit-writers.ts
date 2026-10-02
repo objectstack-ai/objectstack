@@ -11,7 +11,13 @@ import type { IDataEngine } from '@objectstack/spec/contracts';
 // character and leaks on the day it does; `secret-fields.ts` makes the same
 // argument for its own single definition. The `/core` subpath is the
 // engine-free surface of the same package.
-import { SECRET_MASK, collectMaskedReadFields } from '@objectstack/objectql/core';
+//
+// [#21197] `collectInternalReadFields` is the flag-keyed half of the same
+// contract: a field declared `internal: true` is "never returned on the generic
+// data path", and the engine's read path OMITS it. The ledger is a second exit
+// for the same value, so it honours the same declaration the same way — the
+// producer's declaration consumed, not a masking rule of this package's own.
+import { SECRET_MASK, collectInternalReadFields, collectMaskedReadFields } from '@objectstack/objectql/core';
 // [#7230] ADR-0079's record display-name contract, imported rather than
 // re-derived. `resolveDisplayField` IS the definition of "which field is this
 // object's human title" (`nameField` → deprecated `displayNameField` alias →
@@ -1168,6 +1174,10 @@ export function installAuditWriters(
       const titleField = resolveDisplayField(def as any);
       if (!titleField || titleField === 'id') continue;
       if (collectMaskedReadFields(def).includes(titleField)) continue;
+      // [#21197] Same composition `ledgerView` records by: an `internal` title
+      // column is withheld here too, by the declaration rather than by the
+      // engine strip happening to answer `undefined`.
+      if (collectInternalReadFields(def).includes(titleField)) continue;
       const ids = Array.from(idSet);
       try {
         const rows: any[] = await sys.object(objectName).find({
@@ -1204,8 +1214,11 @@ export function installAuditWriters(
    * function delivers the second half — same *view* — so levelling the two
    * sides levels them UPWARD rather than down to the raw store contents.
    *
-   * Two limbs, and only two, because only two field classes still differ once
-   * both sides are raw (each measured, not assumed):
+   * Two limbs for the raw-pipeline asymmetry, because only two field classes
+   * still differ once both sides are raw (each measured, not assumed) — plus a
+   * third, [#21197], that is about what the ledger may HOLD rather than about
+   * symmetry: a field declared `internal: true` is omitted from the view (see
+   * the limb's own note in the body). The limbs below are the first two:
    *
    *  1. **credential fields** (`secret`, and `password` off better-auth
    *     objects). The raw value is a `secret:` ref, or — for `password`, which
@@ -1258,6 +1271,20 @@ export function installAuditWriters(
       // row does not carry is never invented.
       if (!(field in out)) continue;
       out[field] = out[field] == null ? null : SECRET_MASK;
+    }
+    // [#21197] Third limb: a field declared `internal: true` is OMITTED, on
+    // every side this view is taken for — create `new_value`, delete
+    // `old_value`, both halves of an update diff, the activity row's
+    // `{ old, new }` and the label source. It runs AFTER the mask, the engine's
+    // own order, so a field that is both credential-typed and flagged ends up
+    // omitted: the stricter disposition wins. Omitted rather than masked for
+    // the engine's reason — the mask says "a value is set", which on a
+    // `required` column carries nothing, and the declaration promises no value
+    // at all. An update that touched ONLY such a field still records its row
+    // (empty on both sides): the ledger records that a change happened, never
+    // the value — the same trail a masked credential rotation keeps.
+    for (const field of collectInternalReadFields(getObjectDef(objectName))) {
+      delete out[field];
     }
     // [#21120] A stored metadata BODY (`sys_metadata` / `sys_metadata_history`)
     // is not a top-level secret field, so the mask above never touches it. The

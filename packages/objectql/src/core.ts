@@ -125,6 +125,9 @@ export {
   collectSecretFields,
   collectMaskedReadFields,
   collectCredentialFields,
+  // [#21197] The flag-keyed collector, beside the type-keyed ones: the audit
+  // ledger's CRUD mirror omits what it collects, exactly as the read path does.
+  collectInternalReadFields,
 } from './secret-fields.js';
 
 // Utilities

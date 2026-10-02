@@ -53,9 +53,23 @@ export const SysJwks = ObjectSchema.create({
       description: 'JSON-serialized JWK public key',
     }),
 
+    // [#21197] `internal: true` — the signing key's private half is withheld
+    // from every generic exit: the data path (this object also declares no API
+    // door) AND the compliance ledger's CRUD mirror, which honours the same
+    // flag. A stored copy of signing-key material is forgery material, so the
+    // declaration, not the absence of a door, is what keeps it in.
+    //
+    // ⛔ Not `Field.secret`. better-auth's jwt plugin reads this column back
+    // through its storage adapter, which is implemented over the engine's
+    // generic read (ADR-0100 §B.4); a `sys_secret` ref there masks the key and
+    // degrades signing from the first request. `internal` is read-side only:
+    // storage is untouched, and the adapter gets the stored value back through
+    // plugin-auth's `internal-field-readback.ts` — the readback row for this
+    // column — never through the generic path.
     private_key: Field.textarea({
       label: 'Private Key',
       required: true,
+      internal: true,
       description: 'JSON-serialized JWK private key (encrypted at rest)',
     }),
 

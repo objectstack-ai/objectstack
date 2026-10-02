@@ -66,6 +66,61 @@ const SHARE_LINK_SWEEP_SUBJECT = {
 } as const;
 
 /** URL-safe alphabet (RFC 4648 base64url minus padding). 64 symbols. */
+/**
+ * [#21197] Read one of `sys_share_link`'s two `internal: true` columns
+ * (`token`, `password_hash`) for rows the engine handed back, keyed by row id.
+ *
+ * Both columns are declared `internal`, so the engine's generic read path —
+ * every `engine.find` in this plugin, system context included (the strip has
+ * no carve-out, #7728) — returns rows WITHOUT them. This plugin's own routes
+ * still need them: redemption must verify a password against the stored hash,
+ * and the creator's link list must hand back each token so the console can
+ * build the URL. They come back through the engine's privileged accessor
+ * (`resolveInternalField`, #8118), the one door to a flagged column, one
+ * batched read per column.
+ *
+ * A row that still carries the column (an engine that does not strip, e.g. a
+ * test fake) answers from the row, with no privileged read.
+ *
+ * ⛔ FAIL-CLOSED when a row lacks the column and the engine offers no accessor:
+ * it throws instead of answering "unset". For `password_hash` "unset" means
+ * "no password", so a degraded answer would open every password-protected
+ * link without its password — the gate this column exists for, silently gone.
+ * Every caller sits inside a try/catch that answers an error, so the refusal
+ * surfaces as a refused redemption, never as an open one.
+ */
+export async function readShareLinkInternalColumn(
+  engine: Pick<SharingEngine, 'resolveInternalField'>,
+  rows: readonly Record<string, unknown>[],
+  field: 'token' | 'password_hash',
+): Promise<Map<string, unknown>> {
+  const out = new Map<string, unknown>();
+  const stripped: string[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue;
+    const id = row.id;
+    if (typeof id !== 'string' && typeof id !== 'number') continue;
+    if (field in row) out.set(String(id), row[field] ?? null);
+    else stripped.push(String(id));
+  }
+  if (stripped.length === 0) return out;
+  if (typeof engine.resolveInternalField !== 'function') {
+    throw new Error(
+      `sys_share_link rows were read back without '${field}' (the engine's \`internal: true\` strip ran) `
+        + 'but this engine offers no `resolveInternalField` accessor to recover it, so the share-link '
+        + 'route that asked cannot answer and refuses. Wire the ObjectQL engine, which provides the '
+        + 'accessor beside the strip.',
+    );
+  }
+  const values = await engine.resolveInternalField('sys_share_link', stripped, field);
+  for (const id of stripped) {
+    // A row deleted between the read and the dereference stays absent; the
+    // caller treats it as the gone link it is.
+    if (values.has(id)) out.set(id, values.get(id) ?? null);
+  }
+  return out;
+}
+
 const TOKEN_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 
 /** ~144 bits of entropy at 24 chars — well above the OWASP recommendation. */
@@ -619,7 +674,22 @@ export class ShareLinkService implements IShareLinkService {
       orderBy: [{ field: 'created_at', order: 'desc' }],
       context: context.isSystem ? SYSTEM_CTX : context,
     } as any);
-    return Array.isArray(rows) ? (rows as ShareLink[]) : [];
+    const links = Array.isArray(rows) ? (rows as ShareLink[]) : [];
+    // [#21197] The caller's own links (the route forces `createdBy` to the
+    // caller), and the console builds and copies each link's URL from its
+    // token — so the tokens come back through the privileged accessor. The
+    // hash does NOT: no list consumer verifies a password, and the console
+    // types the row without it.
+    const tokens = await readShareLinkInternalColumn(
+      this.engine,
+      links as unknown as Record<string, unknown>[],
+      'token',
+    );
+    for (const link of links) {
+      const token = tokens.get(String(link.id));
+      if (typeof token === 'string') link.token = token;
+    }
+    return links;
   }
 
   async resolveToken(
@@ -635,6 +705,11 @@ export class ShareLinkService implements IShareLinkService {
     } as any);
     const row = Array.isArray(rows) ? (rows[0] as ShareLink | undefined) : undefined;
     if (!row) return null;
+    // [#21197] `token` is `internal`, so the row comes back without it. The
+    // holder PRESENTED it and the lookup matched on it, so it is echoed back
+    // rather than re-read: the redemption route answers it to the holder, and
+    // the console's shared page addresses the link's companion routes by it.
+    if (!('token' in row)) row.token = token;
 
     if (row.revoked_at) return null;
     if (row.expires_at && Date.parse(row.expires_at) <= Date.now()) return null;
@@ -647,9 +722,16 @@ export class ShareLinkService implements IShareLinkService {
       if (!supplied || !allow.includes(supplied)) return null;
     }
 
-    if (row.password_hash) {
+    // [#21197] `password_hash` is `internal`, so the row comes back without
+    // it, and reading `row.password_hash` would read EVERY link as
+    // unprotected. Recovered through the privileged accessor (fail-closed:
+    // see `readShareLinkInternalColumn`) into a local, never onto the row —
+    // the returned link carries no hash.
+    const passwordHash = (await readShareLinkInternalColumn(this.engine, [row as unknown as Record<string, unknown>], 'password_hash'))
+      .get(String(row.id));
+    if (passwordHash) {
       if (!probe.providedPassword) return null;
-      const ok = await this.verifyPassword(probe.providedPassword, row.password_hash);
+      const ok = await this.verifyPassword(probe.providedPassword, String(passwordHash));
       if (!ok) return null;
     }
 
