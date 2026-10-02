@@ -38,6 +38,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -389,12 +390,21 @@ function prepareCase(argv: string[], opts: { absent?: boolean } = {}): { dbFile:
 }
 
 beforeAll(async () => {
-  for (const key of [...OVERRIDING_ENV, 'OS_ARTIFACT_PATH', 'NODE_ENV', 'OS_LIFECYCLE_DISABLED'] as const) {
+  for (const key of [...OVERRIDING_ENV, 'OS_ARTIFACT_PATH', 'NODE_ENV', 'OS_LIFECYCLE_DISABLED', 'OS_SECRET_KEY'] as const) {
     savedEnv[key] = process.env[key];
   }
   for (const key of OVERRIDING_ENV) delete process.env[key];
   delete process.env.OS_LIFECYCLE_DISABLED;
   process.env.NODE_ENV = 'production';
+  // The key this production-posture file needs — the served boot and every
+  // command that composes `SettingsServicePlugin` (`secret orphans`, and the
+  // storage arm of `files-to-references` / `storage orphans`) construct a
+  // `LocalCryptoProvider`, which refuses to start in production without one.
+  // Declared here rather than inherited from a persisted
+  // `$HOME/.objectstack/dev-crypto-key` (#16491): one fresh value for the
+  // whole file, so every boot in it decrypts what the others wrote, and never
+  // written to disk.
+  process.env.OS_SECRET_KEY = randomBytes(32).toString('hex');
 
   dir = mkdtempSync(join(tmpdir(), 'os-21391-'));
   mkdirSync(join(dir, 'dist'), { recursive: true });
