@@ -885,7 +885,7 @@
     "ui/ObjectGridProps:pagination",
     "ui/ObjectGridProps:reorderableColumns",
     "ui/ObjectGridProps:resizable",
-    "ui/ObjectGridProps:resizableColumns",
+    "ui/ObjectGridProps:resizableColumns [RETIRED]",
     "ui/ObjectGridProps:rowActions",
     "ui/ObjectGridProps:rowColor",
     "ui/ObjectGridProps:rowHeight",

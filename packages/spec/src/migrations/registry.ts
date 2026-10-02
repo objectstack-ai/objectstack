@@ -5773,6 +5773,22 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`sort` is present (the renderer\'s own precedence made it unread then).',
   },
   {
+    id: 'object-grid-resizable-columns-retired',
+    order: 62,
+    text:
+      'It also retires `object-grid`\'s `resizableColumns` (#21445, ADR-0049 enforce-or-remove; '
+      + 'objectui#6152 ruling A, `resizable` is canonical, under the startup rule of immediate '
+      + 'retirement): the legacy second spelling of `resizable`, read only as '
+      + '`schema.resizable ?? schema.resizableColumns` (measured at the '
+      + '`.objectui-sha` pin `89cad75d55`, `plugin-grid/src/ObjectGrid.tsx:5361`). One switch, two '
+      + 'spellings, and zero '
+      + 'writers in either repository, so there is no window. A retiredKey tombstone on '
+      + '`ObjectGridPropsSchema` with one D2 conversion that follows the renderer\'s precedence: the '
+      + 'value moves to `resizable` when that is absent, and strips as a lossless delete when it is '
+      + 'present (it was never read then). Its D3 record is the semantic entry '
+      + '`object-grid-resizable-columns-retired`.',
+  },
+  {
     id: 'object-kanban-quick-add-retired',
     order: 28,
     text:
@@ -6085,6 +6101,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'and loads and no conversion is registered: the bare array never worked here, and lifting it '
       + 'would change the menu a deployed grid shows. The authored census found nothing to respell. '
       + 'Its D3 record is the semantic entry `ui-object-grid-export-options-closed`.',
+  },
+  {
+    id: 'ui-object-grid-row-members-typed',
+    order: 63,
+    text:
+      'It also types seven members of an `object-grid` page block (#21445): `rowHeight`, '
+      + '`rowColor`, `navigation`, `conditionalFormatting`, `bulkActionDefs`, `aggregations` and '
+      + '`operations` were `z.unknown()` (an array of it for `bulkActionDefs`), although the grid '
+      + 'reads each with one shape, so `rowHeight: 42` passed every door and rendered as `compact`. '
+      + 'The five a list view also declares take the list view\'s own schemas by reference; '
+      + '`aggregations` takes the measured `[{ field, type }]` with the query AST\'s aggregation '
+      + 'functions, and `operations` the four booleans a grid read point names (`create`, '
+      + '`update`, `delete`, `export`), refusing `read` and `import`, which nothing reads. Read by '
+      + 'the component-props gate (advisory); a stored page still saves and loads, so no conversion '
+      + 'is registered. Its D3 record is the semantic entry `ui-object-grid-row-members-typed`.',
   },
   {
     id: 'ui-object-master-detail-form-details-closed',
@@ -14865,6 +14896,33 @@ const step18: MigrationStep = {
         + 'authored both keys, the author has compared the discarded `defaultSort` pair with the kept '
         + '`sort` and confirmed the kept one.',
     },
+    // #21445 (ADR-0049 enforce-or-remove) — the D3 entry of the
+    // `object-grid-resizable-columns-removed` family (one D3 entry per retirement
+    // family, even when D2 is lossless). The conversion follows the renderer's own
+    // precedence exactly, so it preserves what every grid did — including where
+    // what the grid did was not what the author wrote.
+    {
+      id: 'object-grid-resizable-columns-retired',
+      surface: 'page.component.object-grid.resizableColumns — the legacy second spelling of the grid '
+        + 'column-resize switch',
+      replacement: '`resizable: true | false` — the one spelling the grid reads; the value is the same '
+        + 'boolean.',
+      reason: 'The D2 conversion `object-grid-resizable-columns-removed` follows the renderer\'s own '
+        + 'precedence, `resizable ?? resizableColumns`: where `resizable` was absent the legacy value WAS '
+        + 'the grid\'s setting, so it moves to `resizable` unchanged; where `resizable` held a value the '
+        + 'legacy key was never read, so it is deleted. Both are behaviour-preserving, and the second is '
+        + 'where the judgment sits. A grid that authored both keys with DIFFERENT values has always '
+        + 'behaved as `resizable` said, while its author may believe the other key governed it. The '
+        + 'conversion keeps what users have been seeing and discards the value the author also wrote; '
+        + 'only the author can say which one they meant. Code that builds object-grid props (a host, a '
+        + 'generator) must also stop emitting the key, which no conversion reaches.',
+      acceptanceCriteria: 'No `object-grid` component carries `resizableColumns`; the parse refuses it. '
+        + 'Each grid that should let users drag column borders either omits `resizable` (the renderer '
+        + 'default is on) or sets it to `true`, and each that should not sets `resizable: false`. For '
+        + 'every grid that had authored both keys, the author has compared the discarded value with the '
+        + 'kept `resizable` and confirmed the kept one.',
+      conversionIds: ['object-grid-resizable-columns-removed'],
+    },
     {
       id: 'object-index-unknown-keys-refused',
       surface: 'object `indexes[]` entries (`IndexSchema`) — undeclared keys',
@@ -19293,6 +19351,51 @@ const step18: MigrationStep = {
         + '`pageSize` shorthand are reported the same way at their own paths. The author deletes '
         + 'the key or writes the page size they meant, and `os validate` then reports no '
         + '`component-props-invalid` finding for that node.',
+    },
+    // #21445 — seven members of an `object-grid` page block's props were
+    // `z.unknown()` (`bulkActionDefs` an array of it) although the grid reads each
+    // with a fixed shape, so an off-shape value passed every door and the grid
+    // substituted a default or dropped it in silence. The row now takes the shape
+    // each read point takes. D3 only: page-component `properties` is not parsed on
+    // the metadata save or load path, so a stored page is never refused and there is
+    // no load-path refusal for a conversion to pre-empt; an off-shape value has no
+    // rewrite that says what the author meant; and the authored census found
+    // nothing in either repository's corpora to respell.
+    {
+      id: 'ui-object-grid-row-members-typed',
+      surface: 'page `object-grid` components — `properties.rowHeight`, `.rowColor`, `.navigation`, '
+        + '`.conditionalFormatting`, `.bulkActionDefs`, `.aggregations` and `.operations` (which used to '
+        + 'accept any value)',
+      replacement: 'the shape the grid reads, the list view\'s own where it has one: `rowHeight` one of '
+        + '`compact` / `short` / `medium` / `tall` / `extra_tall`; `rowColor` `{ field, colors }`; '
+        + '`navigation` `{ mode?, size?, openNewTab?, preventNavigation? }`; `conditionalFormatting` '
+        + '`[{ condition, style }]` with a CEL `condition` and a CSS `style` map; `bulkActionDefs` the '
+        + 'list view\'s bulk-action defs; `aggregations` `[{ field, type }]` with `type` one of `count`, '
+        + '`sum`, `avg`, `min`, `max`, `count_distinct`; `operations` `{ create?, update?, delete?, '
+        + 'export? }` booleans. Rewrite an objectui-native formatting rule `{ field, operator, value, '
+        + 'backgroundColor }` as `{ condition: "record.FIELD == VALUE", style: { backgroundColor } }`; '
+        + 'delete `operations.read` and `operations.import`, which nothing reads.',
+      reason: 'The grid reads each of these members with one shape, and the page-component row '
+        + 'declared them `z.unknown()`, so any value passed the component-props gate and the grid '
+        + 'answered an off-shape one with a silent default: an off-preset `rowHeight` such as `42` '
+        + 'rendered as `compact`, a `rowColor` of the wrong shape coloured no row, a `navigation` written '
+        + 'as a bare mode string opened the record page whatever it named, an aggregation with an '
+        + 'unknown function drew a zero nothing computed or no number at all, and an `operations` '
+        + 'toggle nothing reads toggled nothing. The row now takes the list view\'s own schemas for the '
+        + 'five members a list view declares, and the measured shape for `aggregations` and '
+        + '`operations`, so one value is judged the same way on both doors. It is read where every page '
+        + 'component\'s props are: the component-props gate reports a refused value as an advisory '
+        + '`component-props-invalid` / `component-props-unknown-key` finding on `objectstack validate`, '
+        + '`objectstack build` and `objectstack lint`, and a stored page still saves and loads, because a '
+        + 'page component\'s `properties` is not parsed on the metadata save or load path. No conversion '
+        + 'is registered: nothing on the load path refuses the shape, and an off-shape value has no '
+        + 'rewrite that both keeps what the grid shows today and honours what the author wrote — which '
+        + 'is the judgment this entry leaves to the upgrader. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `object-grid` node validates: `objectstack validate` reports no '
+        + '`component-props-invalid` / `component-props-unknown-key` finding under the seven members\' '
+        + 'paths. Each grid that set one of them now shows it: the declared row height, the row colours '
+        + 'its `colors` map names, the navigation mode on a row click, the conditional styles, the bulk '
+        + 'actions, the group-header numbers and the affordances `operations` names.',
     },
     // #20928 — the third carrier of the inline grid column. An
     // `object-master-detail-form` page block's `details` was `z.array(z.unknown())`
@@ -24155,6 +24258,24 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // (wrap-and-rename to `sort: [pair]` when `sort` is absent; a pure lossless
     // delete when `sort` is present, since the fallback was never read then).
     'ui/ObjectGridProps:defaultSort',
+    // #21445 — ADR-0049 enforce-or-remove (objectui#6152 ruling A: `resizable` is
+    // canonical; the startup rule of immediate retirement — zero writers in either
+    // repository, so no window). `resizableColumns` was the legacy second spelling
+    // of `object-grid`'s `resizable`, read only as
+    // `schema.resizable ?? schema.resizableColumns` (measured at the
+    // `.objectui-sha` pin `89cad75d55`, `plugin-grid/src/ObjectGrid.tsx:5361`).
+    // One switch, two spellings; a grid authoring both silently ignored this one.
+    //
+    // Registered under 18 for the reason `ui/ObjectGridProps:defaultSort` is: the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look. Tombstoned with `retiredKey()` in
+    // `ObjectGridPropsSchema` (the surface baseline line carries `[RETIRED]`);
+    // sources are rewritten by the D2 conversion
+    // `object-grid-resizable-columns-removed` (renamed to `resizable` when that is
+    // absent; a pure lossless delete when it is present, since the legacy key was
+    // never read then).
+    'ui/ObjectGridProps:resizableColumns',
     // #17260 — ADR-0049 enforce-or-remove, executing the objectui#8285
     // director-seat ruling (comment 5583979207, decision batch #91, 2026-09-08,
     // standing maintainer delegation): ruled option B — `quickAdd` is retired from

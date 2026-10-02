@@ -850,7 +850,7 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
     expect(warned).toHaveLength(1);
     expect(warned[0].rule).toBe(FLOW_TEMPLATE_LOOKUP_TRAVERSAL);
     expect(warned[0].severity).toBe('warning');
-    expect(warned[0].hint).toContain("config.expand (#3475)");
+    expect(warned[0].hint).toContain("config.expand and the engine re-reads it as the run's identity");
 
     const gated = validateFlowTemplatePaths(
       triggered({ objectName: 'crm_case', filter: { status: '{record.owner_id.manager}' } }, 'update_record'),

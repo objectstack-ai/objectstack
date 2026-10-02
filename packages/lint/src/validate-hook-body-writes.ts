@@ -405,7 +405,7 @@ export function unprovisionedAnchorWriteConsequence(): string {
     `it PAST the write-path validator that refuses an undeclared name outright (INVALID_FIELD). The remote ` +
     `database is what rejects it — on a SQL remote with an untyped driver error ('no such column') that ` +
     `aborts the whole statement, so the correctly named fields in the same payload never land either; on a ` +
-    `schemaless remote the key is persisted into a column no read surface returns (#4271).`
+    `schemaless remote the key is persisted into a column no read surface returns.`
   );
 }
 
@@ -934,7 +934,7 @@ export function validateHookBodyWrites(
             // id stays in this comment rather than in the string, which reaches
             // authors and operators who cannot resolve a tracker number.
             `clean and the value is copied back onto the record payload unfiltered, so the write is then ` +
-            `REFUSED at run time — INVALID_FIELD / 400, identically on every driver (#4271). The ` +
+            `REFUSED at run time — INVALID_FIELD / 400, identically on every driver. The ` +
             `record is never written, and the refusal names the field far from the body that wrote it.` +
             loc.messageSuffix,
           hint: fixHint(w.field, unionCandidates(targetSets)),
@@ -980,7 +980,7 @@ export function validateHookBodyWrites(
             // who cannot resolve a tracker number.
             `object '${w.object}' declares no such field. ctx.api is a scoped handle on the running ` +
             `engine, so the payload arrives as an ordinary CALLER write and the declared-field door ` +
-            `REFUSES it at run time — INVALID_FIELD / 400, identically on every driver (#4271), before ` +
+            `REFUSES it at run time — INVALID_FIELD / 400, identically on every driver, before ` +
             `any statement is built. The nested write lands nothing, and the refusal escapes the body ` +
             `and fails the operation that triggered the hook.` +
             loc.messageSuffix,

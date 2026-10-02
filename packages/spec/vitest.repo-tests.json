@@ -45,6 +45,7 @@
   "src/system/email-template-floor-locale-parity.pin.test.ts",
   "src/ui/action-requires-confirmation-docblock.pin.test.ts",
   "src/ui/form-field-public-picker-retirement.test.ts",
+  "src/ui/object-grid-resizable-columns-retirement.test.ts",
   "src/ui/page-header-breadcrumb-retirement.test.ts",
   "src/ui/view-item-owner-hidden-retirement.test.ts",
   "src/ui/view-list-tabs-retirement.test.ts"
