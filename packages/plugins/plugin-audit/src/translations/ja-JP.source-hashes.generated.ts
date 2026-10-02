@@ -18,6 +18,6 @@
  */
 
 export const jaJPGeneratedSourceHashes: Readonly<Record<string, string>> = {
-  "objects.sys_activity.fields.type.help": "bc8b10c89aacd494",
+  "objects.sys_activity.fields.type.help": "5d8df777db464241",
   "objects.sys_activity.fields.url.label": "2203b0b9f72534f7",
 };

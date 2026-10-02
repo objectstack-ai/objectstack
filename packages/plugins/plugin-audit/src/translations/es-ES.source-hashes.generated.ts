@@ -19,7 +19,7 @@
 
 export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_activity.fields.actor_id.label": "b155813f8a7f06e3",
-  "objects.sys_activity.fields.type.help": "bc8b10c89aacd494",
+  "objects.sys_activity.fields.type.help": "5d8df777db464241",
   "objects.sys_activity.fields.url.label": "2203b0b9f72534f7",
   "objects.sys_audit_log.fields.actor.label": "b155813f8a7f06e3",
 };
