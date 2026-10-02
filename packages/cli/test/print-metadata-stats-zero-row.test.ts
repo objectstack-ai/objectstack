@@ -50,6 +50,7 @@ const ZERO_APPS_STATS: MetadataStats = {
   objects: 1,
   objectExtensions: 0,
   fields: 2,
+  picklists: 0,
   views: 0,
   pages: 0,
   apps: 0,

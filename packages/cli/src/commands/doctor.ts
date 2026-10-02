@@ -2375,8 +2375,8 @@ export default class Doctor extends Command {
         // #10680 — this line used to prescribe `objectstack codemod v2-to-v3`,
         // a command `os` has never registered. oclif resolves commands by
         // globbing `dist/commands/**/*.js` (package.json `oclif.commands`);
-        // there is no `src/commands/codemod*`, and neither bundled plugin
-        // (`@oclif/plugin-help`, `@oclif/plugin-plugins`) supplies one — so the
+        // there is no `src/commands/codemod*`, and no plugin supplies one (the
+        // package declares no `oclif.plugins`) — so the
         // prescription exited 2, `command codemod:v2-to-v3 not found`, for every
         // operator who followed it. `content/docs/protocol/backward-compatibility.mdx`
         // already records the automated codemod as "not yet available".

@@ -97,7 +97,7 @@ is rejected rather than dropped.
 | `dimensions` | `string[]?` | |
 | `where` | `FilterCondition?` | Canonical Query DSL filter — the same shape `find()` takes. |
 | `timeDimensions` | `{ dimension, granularity?, dateRange? }[]?` | Also strict per item. |
-| `order` | `Record<string, 'asc' \| 'desc'>?` | |
+| `order` | `Record<string, 'asc' \| 'desc'>?` | Each key must be a selected `dimensions` / `measures` entry, or a `timeDimensions` entry with a `granularity`, spelled as selected. Any other key is refused with `400 INVALID_FIELD`. |
 | `limit` | `number?` | |
 | `offset` | `number?` | |
 | `timezone` | `string?` | IANA name. No default — an absent timezone means the engine resolves it. |
