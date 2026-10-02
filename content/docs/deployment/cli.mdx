@@ -530,6 +530,11 @@ Reports the `sys_secret` rows no producer references any more, and — only behi
 **Report-only by default: without `--delete` it writes nothing and deletes nothing.**
 It is never run for you; nothing on any boot or upgrade path invokes it.
 
+The report boots your app read-only: no schema change, no seed rows, and a SQLite file
+that does not exist is not created. Pointed at a database that lacks `sys_secret` (one
+that was never booted, or the wrong `--database-url`), it refuses and exits 1 (under
+`--json`: `"error": "scan_failed"`) instead of creating the table and reporting nothing.
+
 ```bash
 os secret orphans                                    # report (writes nothing)
 os secret orphans --json                             # the same report, machine-readable
@@ -993,6 +998,17 @@ where the data lives.
 | `os migrate summary-nulls` | Backfill roll-up `count` / `sum` columns still stored as `NULL` on parent rows created before the insert-time seed. Repairs values; no flag, nothing depends on it having run |
 | `os migrate meta --stored` | Replay the metadata conversion chain over this deployment's `sys_metadata` rows and rewrite the ones still carrying a pre-protocol shape. Hygiene, not a gate — nothing depends on it having run |
 | `os migrate duplicates` | Report business identifiers already minted twice across the organization partitions, and the rows blocking the boot-time NULL-safe index tightenings — a read-only inventory as JSON on stdout. Renumbers nothing and writes nothing at all; run it before the boot-time tenancy repair, which overwrites part of the evidence |
+
+**The boot itself writes nothing you did not ask for.** Each of these commands boots
+your app to read its metadata. Without `--apply`, that boot is read-only, the same boot
+`os migrate plan` takes: the schema sync is held back, the app's inline seed data is not
+loaded, and a SQLite file that does not exist is not created. With `--apply`, the boot
+creates missing tables and columns so the migration has somewhere to write, but it
+still loads no seed data: the only rows that change are the migration's own.
+One edge follows from the read-only boot. A dry run pointed at a database that lacks a
+table it reads (a never-booted database, or the wrong `--database-url`) can fail and exit
+1, naming the table, where it used to create the table and report nothing to do. Point
+`--database-url` at the deployment's database, or boot the deployment once first.
 
 ```bash
 os migrate files-to-references            # Dry run: full report, writes nothing
