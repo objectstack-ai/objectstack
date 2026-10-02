@@ -127,10 +127,21 @@ function boot(world: World, storeDelete: StoreDelete = landed) {
 
   const engine = {
     registry,
-    find: async (object: string, query: { where?: { package_id?: unknown } }) =>
-      object === 'sys_metadata'
-        ? world.sysMetadata.filter((r) => r.package_id === query.where?.package_id).map((r) => ({ ...r }))
-        : [],
+    // Scalar equality on every `where` key, and the caller's `limit` by
+    // presence after the filter. A combinator (`$or`, the org-scoped
+    // uninstall's) is not implemented here, so it is refused, never answered
+    // as "no rows" — these pins uninstall with `allTenants: true`.
+    find: async (object: string, query?: { where?: Record<string, unknown>; limit?: number }) => {
+      if (object !== 'sys_metadata') return [];
+      const where = query?.where ?? {};
+      for (const key of Object.keys(where)) {
+        if (key.startsWith('$')) throw new Error(`find double: '${key}' is not implemented`);
+      }
+      const matched = world.sysMetadata.filter((row) =>
+        Object.entries(where).every(([key, value]) => (row as unknown as Record<string, unknown>)[key] === value));
+      const page = typeof query?.limit === 'number' ? matched.slice(0, query.limit) : matched;
+      return page.map((row) => ({ ...row }));
+    },
   };
   const services = new Map<string, unknown>([
     ['package', {
