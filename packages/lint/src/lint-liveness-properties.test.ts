@@ -119,12 +119,13 @@ describe('lintLivenessProperties', () => {
     expect(ruleOf(findings, 'nodes.outputSchema')).toBe(LIVENESS_DEAD_PROPERTY);
   });
 
-  it('warns on an experimental prop with no authorWarn of its own (agent.memory)', () => {
+  it('warns on an experimental prop with no authorWarn of its own (tool.outputSchema)', () => {
     // `experimental` warns implicitly — shouldWarn() treats a declared-but-
     // unenforced guarantee like an opted-in dead prop. Repointed from
-    // action.undoable in #3714, which turned out to have two objectui readers.
-    const findings = lintLivenessProperties({ agents: [{ name: 'ag1', memory: { kind: 'buffer' } }] });
-    const f = findings.find((x) => x.message.includes('`memory`'));
+    // action.undoable in #3714, which turned out to have two objectui readers,
+    // and from agent.memory in #20274, which the cloud AI runtime enforces.
+    const findings = lintLivenessProperties({ tools: [{ name: 't1', outputSchema: { type: 'object' } }] });
+    const f = findings.find((x) => x.message.includes('`outputSchema`'));
     expect(f).toBeDefined();
     expect(f!.rule).toBe('liveness-experimental-property');
   });
@@ -930,12 +931,12 @@ describe('lintLivenessProperties', () => {
   describe('never throws on a malformed collection item (#11385)', () => {
     it('flat TYPE_COLLECTIONS loop: skips a null item and keeps walking past it', () => {
       const findings = lintLivenessProperties({
-        // agent.memory is a real, currently-`experimental` ledger row (see
+        // tool.outputSchema is a real, currently-`experimental` ledger row (see
         // "warns on an experimental prop" above) — a real ledger witness,
         // not a synthetic one.
-        agents: [null, { name: 'ag1', memory: { kind: 'buffer' } }],
+        tools: [null, { name: 't1', outputSchema: { type: 'object' } }],
       });
-      expect(paths(findings).some((m) => m.includes('`memory`'))).toBe(true);
+      expect(paths(findings).some((m) => m.includes('`outputSchema`'))).toBe(true);
     });
 
     it('object walk: skips a null item and keeps walking past it', () => {
@@ -1596,12 +1597,12 @@ describe('a per-type ledger that could not be READ is reported once (#19276)', (
   });
 
   it('keeps walking the types whose ledgers ARE readable, and puts the fault first', () => {
-    // agent.memory is a real `experimental` row, so this proves the fault does
-    // not abort the pass: one type is dark, the rest still enforce, and the
-    // line that explains the darkness is the one a reader meets first.
+    // tool.outputSchema is a real `experimental` row, so this proves the fault
+    // does not abort the pass: one type is dark, the rest still enforce, and
+    // the line that explains the darkness is the one a reader meets first.
     const findings = lintLivenessPropertiesFromLedgerDir(
       ledgerDirWith((dir) => rmSync(join(dir, 'object.json'))),
-      { agents: [{ name: 'ag1', memory: { kind: 'buffer' } }] },
+      { tools: [{ name: 't1', outputSchema: { type: 'object' } }] },
     );
     expect(findings.map((f) => f.rule)).toEqual([LIVENESS_LEDGER_UNREADABLE, LIVENESS_EXPERIMENTAL_PROPERTY]);
     expect(findings[0].where).toBe("liveness ledger 'object'");
