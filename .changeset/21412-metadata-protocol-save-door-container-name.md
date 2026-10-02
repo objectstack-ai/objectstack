@@ -4,7 +4,7 @@
 
 The runtime save door refuses a view container whose own `name` disagrees with the name it is saved under
 
-Clause-②: no
+Clause-②: no (narrowing)
 
 <!-- adr-0087: not-required (no-migration-prescription) A validity narrowing at one door over an existing key: `ViewSchema.name` is not removed, renamed or re-shaped, so there is no tombstone and nothing mechanical for `objectstack migrate meta` to rewrite. Which of the two names a divergent container meant (the body's, or the one it was saved under) is authoring intent no conversion entry can decide. New saves are refused with the remedy; a row stored before this change keeps its bytes. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this rule and this diff adds none (not registered / already-registered); and the change narrows what a runtime write door accepts, not a runtime interface or a type surface alone (not runtime-interface-only / type-surface-only). -->
 
