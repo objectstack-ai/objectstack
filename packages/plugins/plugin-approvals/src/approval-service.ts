@@ -1145,6 +1145,12 @@ function rowFromAction(row: any): ApprovalActionRow {
     // `null` (a row written before the column existed) stays `undefined`:
     // "not recorded" is not the same claim as "not an override".
     via_override: row.via_override == null ? undefined : row.via_override === true,
+    // #21411 / #21458 — the slot the action was taken as, beside the person in
+    // `actor_id`, so the action log shows both: "who" and "as which slot". A
+    // row no slot admitted (the submitter's own actions, a system action, an
+    // override) — or one recorded before the column, whose slot nothing kept —
+    // omits it: the contract's "not recorded" case, never an empty string.
+    acted_as: typeof row.acted_as === 'string' && row.acted_as !== '' ? row.acted_as : undefined,
     // Decision attachments (#3266): rich descriptors carrying the display name +
     // download URL, so consumers label/open them without reading `sys_file`.
     attachments: attachments.length ? attachments : undefined,
@@ -6987,9 +6993,11 @@ export class ApprovalService implements IApprovalService {
       context: SYSTEM_CTX,
     });
     const actions = Array.isArray(rows) ? rows.map(rowFromAction) : [];
-    // Timeline display: resolve actor ids to names so the audit trail never
-    // shows a raw identifier. Role/team literals are already readable. The
-    // reassign hand-off parties (#4365) resolve through the same batch.
+    // Timeline display: resolve the PERSON in `actor_id` to a name so the
+    // audit trail never shows a raw identifier. The slot the action was taken
+    // as travels beside it in `acted_as`, as stored — the "acting as" half of
+    // the line (#21411). The reassign hand-off parties (#4365) resolve through
+    // the same batch; a `type:value` literal or a machine sentinel is skipped.
     const names = await this.resolveUserNames(
       actions
         .flatMap(a => [a.actor_id, a.reassign_from, a.reassign_to])

@@ -19,6 +19,7 @@ Clause-②: no
   - The multi-approver tally and `decision_progress` count `acted_as`.
   - A participant who already acted keeps sight of a request by either of two facts: `actor_id` is their user id, or `acted_as` is a slot they act under (so a decision taken as `position:<name>` stays visible to that position's holders).
   - Nothing compares a slot with `actor_id` any more.
+  - The action log (`GET /api/v1/approvals/requests/:id/actions`, `listActions`) returns `acted_as` beside `actor_id` and `actor_name`, filling the `ApprovalActionRow.acted_as` member `@objectstack/spec` declares. It is omitted when the action took no slot, or when no stored record kept the slot.
 - **Stored rows.** A repair runs on every boot and is idempotent.
   - Pass 1: a row whose `actor_id` still holds a slot address gets `acted_as` set to it and `actor_id` cleared. No stored record names who decided it, so it shows the slot and no person.
   - Pass 2: the approve votes a still-pending request's tally counts get their `acted_as`, so in-flight `unanimous`, `quorum` and `per_group` requests keep the approvals they already collected.

@@ -4089,6 +4089,30 @@ describe('ApprovalService — actor_id records the person, acted_as the slot (#2
     expect(await svc.getRequest(req.id, holding('u_holder', [])), 'the person, position lost').not.toBeNull();
   });
 
+  it('the action log shows the person by name and the slot beside it — and a backfilled row the slot alone', async () => {
+    const engine = makeFakeEngine();
+    await engine.insert('sys_user', { id: 'u_holder', name: 'Hana Holder', email: 'hana@example.com' });
+    const svc = svcFor(engine);
+    const req = await open(svc, [...toPosition, { type: 'user', value: 'u9' }], 'unanimous');
+    await svc.decideNode(req.id, { decision: 'approve' } as any, HOLDER);
+    // A row as the boot-time backfill leaves a pre-acted_as slot literal: the
+    // slot kept, the person unknown.
+    await engine.insert('sys_approval_action', {
+      id: 'aact_backfilled', request_id: req.id, step_index: 0, action: 'comment',
+      actor_id: null, acted_as: SLOT, comment: 'older note', created_at: '2099-01-01T00:00:00.000Z',
+    });
+
+    const log = await svc.listActions(req.id, SYS);
+    const approve = log.find((a) => a.action === 'approve')!;
+    expect([approve.actor_id, approve.actor_name, approve.acted_as]).toEqual(['u_holder', 'Hana Holder', SLOT]);
+    // The submitter's own action took no slot: no acted_as member at all.
+    const submit = log.find((a) => a.action === 'submit')!;
+    expect(submit.actor_id).toBe('u1');
+    expect('acted_as' in submit && submit.acted_as !== undefined).toBe(false);
+    const backfilled = log.find((a) => a.id === 'aact_backfilled')!;
+    expect([backfilled.actor_id, backfilled.actor_name, backfilled.acted_as]).toEqual([undefined, undefined, SLOT]);
+  });
+
   it('already acted: a row written before acted_as existed is found by its person, and a slot is never matched against actor_id', async () => {
     const engine = makeFakeEngine();
     const svc = svcFor(engine);
