@@ -176,12 +176,14 @@
  * and an issue the last re-list still lacks is `unfound` — exit 6,
  * UNCONFIRMED, read the board — exactly what it meant before.
  *
- * Why a re-list and not the run's own report of the number it created: the
- * executor prints `#number url` to the job log and the step summary, and a
- * seat container reads neither — the job-log endpoint answers 302 to blob
- * storage that the egress proxy refuses (CONNECT 403), and the job's check run
- * carries a null `output.summary`. Making the run report it somewhere a seat
- * CAN read is a change to what the relay emits, not to this read-back.
+ * The re-list is the FALLBACK. The run knows the number it created, and a
+ * seat container reads neither the job log (its endpoint answers 302 to blob
+ * storage the egress proxy refuses, CONNECT 403) nor the step summary (the
+ * job's check run carries a null `output.summary`) — but it does read the
+ * check run's ANNOTATIONS, so the run reports the number there (next section).
+ * An `issue_create` whose action the run's annotation names is read back AT
+ * that number: one GET, no list, no re-list. Only an action no annotation
+ * names takes the re-list above.
  *
  * How the callers read the new outcomes — one exit vocabulary, no caller edited:
  *   - `failure` + `notStored` keeps the state every caller already reads as "the
@@ -195,6 +197,38 @@
  *     alone) and neither is 0.
  *   - a stroke carrying no body (labels, assignees, state, a transfer, the
  *     GraphQL ops) reads nothing back and its outcome is unchanged.
+ *
+ * ## The run's annotations — the numbers a seat CAN read
+ *
+ * `execute.mjs` prints, for every action whose op is in `ANNOTATED_OPS` (the
+ * ops that create or move a card) and whose request LANDED, ONE workflow
+ * command — a `notice` titled `fleet-write <op>` whose message is
+ * `fleet-write action=<i> op=<op> number=<n> url=<url>`, the number and url
+ * taken from the platform's ANSWER to that request (the created issue's
+ * `number` / `html_url`, the `transferIssue` answer's `issue.number` /
+ * `issue.url`), never from the request. The runner turns it into an
+ * annotation on the job's check run. After a success run carrying such an
+ * op, `sendFleetWrite` reads them — `GET /repos/{board}/actions/runs/{id}/jobs`
+ * (a job's id is its check run's id, measured) then
+ * `GET /repos/{board}/check-runs/{id}/annotations`, both measured readable
+ * from a seat container — and hands them on as `result.annotations`; a
+ * caller that needs a card's number (`issue-create.mjs`, `issue-transfer.mjs`)
+ * reads it there first. `relayAnnotationMessage` spells the message and
+ * `parseRelayAnnotation` reads it — ONE spelling for the writer and every
+ * reader; the executor emits only a message the parser reads back as what it
+ * meant. A parsed row is used only when the stroke's action at its index has
+ * its op and its url names the repository that op lands the card on
+ * (`matchRunAnnotations`); two different rows for one action are neither.
+ *
+ * Absent is an ordinary state, never a failure, and always said: a relay
+ * older than the emission, an annotation read that does not answer, or an
+ * action past the platform's cap — 10 notice annotations per step and 50 per
+ * job (actions/toolkit `docs/problem-matchers.md`), the rest dropped without
+ * a word, so of a stroke carrying more than ten such ops only the first ten
+ * are named. Each reader then takes its fallback: the re-list here, the
+ * redirect or the title in `issue-transfer.mjs`, the title in
+ * `issue-create.mjs`. ⛔ No second read path beyond that fallback, and ⛔ not
+ * a gate: an annotation only ever replaces a search for a number.
  *
  * ## Exit codes — capture them BEFORE any pipe
  *
@@ -525,7 +559,7 @@ export const BODY_OPS = Object.freeze(OP_NAMES.filter((op) => [...OPS[op].requir
 export const READ_BACK_LOCATORS = Object.freeze({
   issue_patch: Object.freeze({ found: 'address', where: 'GET /repos/{repo}/issues/{issue}' }),
   comment_edit: Object.freeze({ found: 'address', where: 'GET /repos/{repo}/issues/comments/{comment_id}' }),
-  issue_create: Object.freeze({ found: 'key', where: 'the newest issue created since the dispatch whose title is the title sent, the list re-read on ISSUE_CREATE_RELIST_DELAYS_MS before unfound' }),
+  issue_create: Object.freeze({ found: 'key', where: "the issue at the number the run's annotation names; absent that, the newest issue created since the dispatch whose title is the title sent, the list re-read on ISSUE_CREATE_RELIST_DELAYS_MS before unfound" }),
   pr_create: Object.freeze({ found: 'key', where: 'the newest pull request on the head sent, created since the dispatch' }),
   comment: Object.freeze({ found: 'content', where: 'the newest comment on the issue, created since the dispatch, whose stored body holds the bytes sent' }),
 });
@@ -632,6 +666,88 @@ export function unverifiedText(result, tool = 'fleet-write') {
 }
 
 // ---------------------------------------------------------------------------
+// The run's annotations — pure halves (the header's annotations section is the authority)
+// ---------------------------------------------------------------------------
+
+/**
+ * The ops whose landing the executor reports as an annotation — every op that
+ * creates or moves a card, and nothing else — each with the repository it
+ * lands the card on, which a parsed row's url is held to. `execute.mjs` reads
+ * a number and url out of each one's answer (`ANNOTATION_ANSWERS`, pinned to
+ * these keys by its self-test).
+ */
+export const ANNOTATED_OPS = Object.freeze({
+  issue_create: Object.freeze({ lands: (action, repo) => repo }),
+  transfer: Object.freeze({ lands: (action) => action?.target_repo }),
+});
+
+/** The word a relay annotation's message starts with — and its title, before the op. */
+export const RELAY_ANNOTATION_PREFIX = 'fleet-write';
+
+const RELAY_ANNOTATION_SHAPE = new RegExp(`^${RELAY_ANNOTATION_PREFIX} action=([1-9][0-9]*) op=([a-z_]+) number=([1-9][0-9]*) url=(https://\\S+)$`);
+/** An issue's web url — group 1 its repository, group 2 its number. */
+const ISSUE_URL_SHAPE = /^https:\/\/[^/\s]+\/([^/\s]+\/[^/\s]+)\/issues\/([1-9][0-9]*)$/;
+
+/** The message of the one annotation the executor emits for a landed annotated op. Pure. */
+export function relayAnnotationMessage({ action, op, number, url }) {
+  return `${RELAY_ANNOTATION_PREFIX} action=${action} op=${op} number=${number} url=${url}`;
+}
+
+/**
+ * An annotation's `message` as `{ action, op, number, url, repo }`, or null —
+ * for anything else on the check run (the runner's own notices, an action's
+ * deprecation warnings), an op outside `ANNOTATED_OPS`, or a url that is not
+ * an issue url carrying the same number. Pure; never throws.
+ */
+export function parseRelayAnnotation(message) {
+  const m = RELAY_ANNOTATION_SHAPE.exec(typeof message === 'string' ? message : '');
+  if (!m || !Object.hasOwn(ANNOTATED_OPS, m[2])) return null;
+  const at = ISSUE_URL_SHAPE.exec(m[4]);
+  if (!at || at[2] !== m[3]) return null;
+  return { action: Number(m[1]), op: m[2], number: Number(m[3]), url: m[4], repo: at[1] };
+}
+
+/**
+ * The parsed rows a stroke may use: a row whose action index holds an action
+ * of its op, and whose url names the repository that op lands the card on.
+ * Anything else is `ignored`, with why — and so are BOTH rows of an action
+ * two different rows name: a reader never picks between two answers. Pure.
+ */
+export function matchRunAnnotations(payload, parsed) {
+  const actions = Array.isArray(payload?.actions) ? payload.actions : [];
+  const ignored = [];
+  const byAction = new Map();
+  for (const row of Array.isArray(parsed) ? parsed : []) {
+    const action = actions[row.action - 1];
+    if (!action || action.op !== row.op) {
+      ignored.push({ ...row, why: `the stroke's action ${row.action} is ${action ? action.op : 'absent'}, not ${row.op}` });
+      continue;
+    }
+    const lands = String(ANNOTATED_OPS[row.op].lands(action, payload.repo) ?? '');
+    if (lands.toLowerCase() !== row.repo.toLowerCase()) {
+      ignored.push({ ...row, why: `its url names ${row.repo}, and ${row.op} lands the card on ${lands || 'no repository'}` });
+      continue;
+    }
+    byAction.set(row.action, [...(byAction.get(row.action) ?? []), row]);
+  }
+  const rows = [];
+  for (const [action, list] of byAction) {
+    const distinct = new Set(list.map((r) => `${r.number} ${r.url}`));
+    if (distinct.size > 1) ignored.push(...list.map((r) => ({ ...r, why: `${distinct.size} different annotations name action ${action}` })));
+    else rows.push(list[0]);
+  }
+  rows.sort((a, b) => a.action - b.action);
+  return { rows, ignored };
+}
+
+/** A job's check run id — from its `check_run_url`, else its own id (measured equal). Pure. */
+export function checkRunIdOf(job) {
+  const m = /\/check-runs\/([1-9][0-9]*)$/.exec(String(job?.check_run_url ?? ''));
+  if (m) return Number(m[1]);
+  return Number.isInteger(job?.id) && job.id > 0 ? job.id : null;
+}
+
+// ---------------------------------------------------------------------------
 // Transport — the one POST, paced; the reads around it are not.
 // ---------------------------------------------------------------------------
 
@@ -688,14 +804,65 @@ async function listAll(api, path, t, maxPages = 10) {
 }
 
 /**
+ * The relay annotations on a run's check runs — its jobs, then each job's
+ * check-run annotations, every message through `parseRelayAnnotation` (the
+ * rest of the check run's annotations are ignored). Returns `{ state, parsed,
+ * why }`: `read`, or `unread` naming the call that did not answer, with
+ * whatever was parsed before it. Reads only — never paced; never throws.
+ */
+export async function readRunAnnotations(runId, deps = {}) {
+  const api = deps.api ?? DEFAULT_API;
+  const t = { fetch: deps.fetch, token: deps.token };
+  const said = (r) => `${r.call} -> HTTP ${r.status}${r.detail ? ` (${r.detail})` : ''}`;
+  const jobs = await rest(api, `/repos/${RELAY_REPO}/actions/runs/${runId}/jobs?per_page=100`, {}, t);
+  if (jobs.status !== 200 || !Array.isArray(jobs.json?.jobs)) return { state: 'unread', parsed: [], why: said(jobs) };
+  const parsed = [];
+  for (const job of jobs.json.jobs) {
+    const id = checkRunIdOf(job);
+    if (id === null) continue;
+    const r = await rest(api, `/repos/${RELAY_REPO}/check-runs/${id}/annotations?per_page=100`, {}, t);
+    if (r.status !== 200 || !Array.isArray(r.json)) return { state: 'unread', parsed, why: said(r) };
+    for (const a of r.json) {
+      const row = parseRelayAnnotation(a?.message);
+      if (row) parsed.push(row);
+    }
+  }
+  return { state: 'read', parsed, why: '' };
+}
+
+/**
+ * The annotations a stroke's success run carries, matched to its actions and
+ * said: one line per row, per ignored row, per annotated action no row names,
+ * and one when the read did not answer. A stroke with no annotated op reads
+ * nothing (`state: 'none'`). Returns `{ state, rows, ignored, why }`.
+ */
+async function runAnnotationsFor(payload, run, deps) {
+  const annotated = payload.actions.map((a, i) => ({ action: i + 1, op: a.op })).filter((a) => Object.hasOwn(ANNOTATED_OPS, a.op));
+  if (!annotated.length) return { state: 'none', rows: [], ignored: [], why: '' };
+  const read = await readRunAnnotations(run.id, deps);
+  const { rows, ignored } = matchRunAnnotations(payload, read.parsed);
+  const log = deps.log;
+  for (const r of rows) log(`fleet-write: run ${run.id}'s annotation names action ${r.action} ${r.op} → ${r.repo}#${r.number} ${r.url} (the platform's own answer).`);
+  for (const r of ignored) log(`fleet-write: run ${run.id}'s annotation for action ${r.action} ${r.op} (#${r.number}) is ignored — ${r.why}.`);
+  if (read.state === 'unread') log(`fleet-write: run ${run.id}'s annotations could not be read — ${read.why}; a number no annotation above names is read from the board instead.`);
+  for (const a of annotated) {
+    if (!rows.some((r) => r.action === a.action)) log(`fleet-write: no annotation on run ${run.id} names action ${a.action} ${a.op} — its number is read from the board instead (the fallback).`);
+  }
+  return { state: read.state, rows, ignored, why: read.why };
+}
+
+/**
  * Read back every body a completed stroke wrote and judge it against the bytes
  * sent. Returns `{ state, rows }` — `state` from `strokeReadBackState`. Never
  * throws on a status: a read that fails makes its row `unverified`, with the
  * call and status in `why`. `taken` keeps two actions of one stroke from being
- * judged against the same created object. `sleep` and `log` serve the
- * `issue_create` re-list alone (`ISSUE_CREATE_RELIST_DELAYS_MS`).
+ * judged against the same created object. `annotations` are the run's matched
+ * rows (`matchRunAnnotations`): an `issue_create` one of them names is read
+ * at that number, never listed. `sleep` and `log` serve the `issue_create`
+ * re-list alone (`ISSUE_CREATE_RELIST_DELAYS_MS`), which only an
+ * `issue_create` no annotation names takes.
  */
-export async function readBackStroke(payload, { dispatchedAt }, deps = {}) {
+export async function readBackStroke(payload, { dispatchedAt, annotations = [] }, deps = {}) {
   const targets = readBackTargets(payload);
   if (!targets.length) return { state: 'none', rows: [] };
   const api = deps.api ?? DEFAULT_API;
@@ -717,6 +884,18 @@ export async function readBackStroke(payload, { dispatchedAt }, deps = {}) {
       const where = target.op === 'issue_patch' ? `${repo}#${target.issue}` : `${repo} comment ${target.comment_id}`;
       const r = await rest(api, path, {}, t);
       rows.push(r.status === 200 && r.json ? judged(where, r.json.body) : unread(target, where, r));
+      continue;
+    }
+    // An `issue_create` the run's annotation names is read AT that number — the platform's own answer to the create:
+    // one GET, no list, no re-list (header). A read that fails is `unread`, as any addressed read is.
+    const named = target.op === 'issue_create' ? annotations.find((a) => a.op === target.op && a.action === target.action) : undefined;
+    if (named) {
+      const where = `${repo}#${named.number}`;
+      const r = await rest(api, `/repos/${repo}/issues/${named.number}`, {}, t);
+      if (r.status === 200 && r.json) {
+        if (r.json.id !== undefined) taken.add(r.json.id);
+        rows.push({ ...judged(where, r.json.body), foundBy: 'annotation' });
+      } else rows.push({ ...unread(target, where, r), foundBy: 'annotation' });
       continue;
     }
     if (target.op === 'issue_create' || target.op === 'pr_create') {
@@ -751,7 +930,7 @@ export async function readBackStroke(payload, { dispatchedAt }, deps = {}) {
         continue;
       }
       taken.add(hit.id);
-      rows.push(judged(`${repo}#${hit.number}`, hit.body));
+      rows.push({ ...judged(`${repo}#${hit.number}`, hit.body), ...(isPr ? {} : { foundBy: 'list' }) });
       continue;
     }
     // `comment`: only the body finds a new comment, so a body that matches nothing is unverified, never not-stored.
@@ -783,7 +962,8 @@ export async function readBackStroke(payload, { dispatchedAt }, deps = {}) {
  * `success` (the run succeeded and every body reads back as sent) · `failure` (the run completed otherwise, or — `notStored:
  * true` — it succeeded and the read-back measured a body the board does not hold as sent) · `unverified` (it succeeded and a
  * body could not be read back) · `no-run` · `timeout` · `refused` (the dispatch itself). `readBack` is `readBackStroke`'s
- * answer, present once the run succeeded. Never throws on an HTTP status.
+ * answer, present once the run succeeded, and so is `annotations` — `{ state, rows, ignored, why }`, the run's
+ * annotations matched to the stroke (`state` `none` when it carries no annotated op). Never throws on an HTTP status.
  */
 export async function sendFleetWrite(payload, deps = {}) {
   const api = deps.api ?? DEFAULT_API;
@@ -842,18 +1022,21 @@ export async function sendFleetWrite(payload, deps = {}) {
   const done = { ...base, run, status: 204, verdict: 'ok', dispatchedAt };
   if (!ok) return { ...done, state: 'failure', ok: false, detail: `conclusion ${run.conclusion}` };
 
+  // ── the run's annotations — the numbers it created or moved, where a seat CAN read them (header) ─────
+  const annotations = await runAnnotationsFor(payload, run, { api, fetch: deps.fetch, token: deps.token, log });
+
   // ── read it back — the run's success is the executor's, not the write's ─────
-  const readBack = await readBackStroke(payload, { dispatchedAt }, { api, fetch: deps.fetch, token: deps.token, judge: deps.judge, sleep, log });
+  const readBack = await readBackStroke(payload, { dispatchedAt, annotations: annotations.rows }, { api, fetch: deps.fetch, token: deps.token, judge: deps.judge, sleep, log });
   for (const row of readBack.rows) log(readBackLine(row));
   if (readBack.state === 'not-stored') {
     const first = readBack.rows.find((r) => r.verdict === 'not-stored');
-    return { ...done, state: 'failure', ok: false, notStored: true, readBack, detail: `conclusion success, but NOT STORED — action ${first.action} (${first.op} ${first.where}) first differs from the bytes sent at byte ${first.offset}` };
+    return { ...done, state: 'failure', ok: false, notStored: true, readBack, annotations, detail: `conclusion success, but NOT STORED — action ${first.action} (${first.op} ${first.where}) first differs from the bytes sent at byte ${first.offset}` };
   }
   if (readBack.state === 'unverified') {
     const first = readBack.rows.find((r) => r.verdict === 'unverified');
-    return { ...done, state: 'unverified', ok: false, readBack, detail: `conclusion success, but UNVERIFIED — action ${first.action} (${first.op}): ${first.why ?? first.cls}` };
+    return { ...done, state: 'unverified', ok: false, readBack, annotations, detail: `conclusion success, but UNVERIFIED — action ${first.action} (${first.op}): ${first.why ?? first.cls}` };
   }
-  return { ...done, state: 'success', ok: true, readBack, detail: `conclusion ${run.conclusion}` };
+  return { ...done, state: 'success', ok: true, readBack, annotations, detail: `conclusion ${run.conclusion}` };
 }
 
 /** The exit a tool takes from a result that is not `success`. */
@@ -1778,7 +1961,8 @@ export async function main(argv, deps = {}) {
         not_stored: result.notStored === true,
         run: result.run,
         dispatched_at: new Date(result.dispatchedAt).toISOString(),
-        read_back: (result.readBack?.rows ?? []).map((r) => ({ action: r.action, op: r.op, where: r.where, verdict: r.verdict, class: r.cls, first_difference_byte: r.offset ?? null, sent_bytes: r.sentBytes ?? null, stored_bytes: r.storedBytes ?? null })),
+        read_back: (result.readBack?.rows ?? []).map((r) => ({ action: r.action, op: r.op, where: r.where, verdict: r.verdict, class: r.cls, first_difference_byte: r.offset ?? null, sent_bytes: r.sentBytes ?? null, stored_bytes: r.storedBytes ?? null, found_by: r.foundBy ?? null })),
+        annotations: (result.annotations?.rows ?? []).map((a) => ({ action: a.action, op: a.op, number: a.number, url: a.url })),
       }),
     );
   }
