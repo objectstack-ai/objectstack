@@ -52,7 +52,9 @@ import {
   BOOLEAN_COMPARAND_DOOR_LIST_OPERATORS,
   BOOLEAN_COMPARAND_DOOR_SCALAR_OPERATORS,
   NON_BOOLEAN_STRING_FORMS,
+  NON_BOOLEAN_VALUE_FORMS,
   lowerFilterCondition,
+  normalizeFilterComparandTypes,
   type BooleanComparandDoorCase,
   type BooleanComparandDoorNarrowsCase,
   type BooleanComparandDoorRefusalCase,
@@ -177,7 +179,9 @@ describe('[#21333] the boolean-comparand arm at the engine collection point', ()
 
   it('GUARD the case table is partitioned exactly, every refused form is driven, and every position both ways', () => {
     expect(BOOLEAN_COMPARAND_DOOR_CASES.length).toBe(REFUSALS.length + NARROWS.length + PASSES.length + FORMULA.length);
-    expect(new Set(REFUSALS.map((c) => c.form))).toEqual(new Set(NON_BOOLEAN_STRING_FORMS));
+    // Every refused string form is driven — and [#21382] every non-string form
+    // (a number other than 1 / 0, a Date, an array) beside them.
+    expect(new Set(REFUSALS.map((c) => c.form))).toEqual(new Set([...NON_BOOLEAN_STRING_FORMS, ...NON_BOOLEAN_VALUE_FORMS]));
     const positions = (cs: readonly BooleanComparandDoorCase[]) =>
       new Set(cs.filter((c) => c.key === 'f_boolean').map((c) => c.position.replace(/\[\d\]$/, '')));
     const judged = ['f_boolean', ...BOOLEAN_COMPARAND_DOOR_SCALAR_OPERATORS.map((op) => `f_boolean.${op}`),
@@ -407,6 +411,172 @@ describe('[#21333] the boolean-comparand arm at the engine collection point', ()
     expect(having.flag.$in).toEqual(['true', 0]);
     const untouched = { flag: true, n: { $gt: 1 } };
     expect(narrowHavingNumberComparands(OBJECT, untouched, classes as any, types)).toBe(untouched);
+  });
+
+  // ── [#21382] a number other than 1 / 0, a Date, an array: one refusal at every position ──
+
+  /**
+   * The non-string comparands the widened verdict refuses, each a value the
+   * card measured: `where` answered PostgreSQL's 500 and an empty 200
+   * elsewhere, and an array as a `$in` member split 200 / 400 across drivers.
+   */
+  const NON_STRING: ReadonlyArray<readonly [string, (v: unknown) => unknown, () => unknown, string]> = [
+    ['implicit 2 (the card)', (v) => v, () => 2, 'number'],
+    ['$eq -1', (v) => ({ $eq: v }), () => -1, 'number'],
+    ['$ne 0.5', (v) => ({ $ne: v }), () => 0.5, 'number'],
+    ['a $in member 2', (v) => ({ $in: [false, v] }), () => 2, 'number'],
+    ['implicit Date', (v) => v, () => new Date(Date.UTC(2026, 0, 1)), 'date'],
+    ['a $nin member Date', (v) => ({ $nin: [v, true] }), () => new Date(Date.UTC(2026, 0, 1)), 'date'],
+    ['a $in member [true] (the card)', (v) => ({ $in: [false, v] }), () => [true], 'array'],
+    ['$gt [true]', (v) => ({ $gt: v }), () => [true], 'array'],
+  ];
+
+  /** What the contract says is wrong, per non-string form — the clause after "which is not a boolean:". */
+  const CLAUSE: Readonly<Record<string, string>> = {
+    number: 'which is not a boolean: only the numbers 1 and 0 are read as a boolean',
+    date: 'which is not a boolean: a Date is an instant, not a boolean',
+    array: 'which is not a boolean: a list is not one boolean',
+  };
+
+  it('[#21382] where: refuses a number other than 1 / 0, a Date or an array in the arm\'s words, on both spellings — no read', async () => {
+    const schema = engine.registry.getObject(OBJECT);
+    for (const [name, at, value, form] of NON_STRING) {
+      reads.length = 0;
+      const err = await refusalOf(engine.find(OBJECT, { where: { f_boolean: at(value()) } as FilterCondition }));
+      expect(err, name).not.toBeNull();
+      expect({ code: err!.code, status: err!.status }, name).toEqual({ code: 'INVALID_FILTER', status: 400 });
+      expect(err!.message, name).toMatch(/^find\('boolean_door_probe'\): filter on 'f_boolean' compares a declared boolean field against /);
+      expect(err!.message, name).toContain(CLAUSE[form]);
+      expect(() => narrowNumberComparands(OBJECT, 'find', schema, { f_toggle: at(value()) }), name)
+        .toThrow(/compares a declared toggle field/);
+      expect(reads, name).toHaveLength(0);
+    }
+    // The FilterArray sugar lowers through `parseFilterAST` first: the same answer.
+    for (const [op, v] of [['=', 2], ['!=', -1], ['>', new Date(0)]] as const) {
+      const err = await refusalOf(engine.find(OBJECT, { where: [['f_boolean', op, v]] } as unknown as EngineQueryOptions));
+      expect({ code: err?.code, status: err?.status }, op).toEqual({ code: 'INVALID_FILTER', status: 400 });
+      expect(err!.message, op).toContain("filter on 'f_boolean' compares a declared boolean field");
+    }
+    for (const where of [
+      { $and: [{ f_text: 'a' }, { f_boolean: 2 }] },
+      { $or: [{ f_text: 'a' }, { f_toggle: { $in: [true, new Date(0)] } }] },
+      { $not: { f_boolean: { $nin: [[false]] } } },
+    ]) {
+      const err = await refusalOf(engine.find(OBJECT, { where: where as FilterCondition }));
+      expect({ code: err?.code, status: err?.status }, String(Object.keys(where))).toEqual({ code: 'INVALID_FILTER', status: 400 });
+    }
+    expect(reads).toHaveLength(0);
+    expect(engine.judgeFilter(OBJECT, { f_boolean: { $in: [false, [true]] } })).toMatchObject({ ok: false, code: 'INVALID_FILTER', status: 400 });
+  });
+
+  it('[#21382] the per-aggregation filter: refuses each, rooted at its own position, in the arm\'s words — no read', async () => {
+    for (const [name, at, value, form] of NON_STRING) {
+      reads.length = 0;
+      const err = await refusalOf(engine.aggregate(OBJECT, {
+        aggregations: [
+          { function: 'count', alias: 'all' },
+          { function: 'count', alias: 'bad', filter: { f_boolean: at(value()) } },
+        ],
+      } as EngineAggregateOptions));
+      expect(err, name).not.toBeNull();
+      expect({ code: err!.code, status: err!.status }, name).toEqual({ code: 'INVALID_FILTER', status: 400 });
+      expect(err!.message, name).toContain('aggregations[1].filter.f_boolean');
+      expect(err!.message, name).toMatch(/^aggregate\('boolean_door_probe'\): filter on 'f_boolean' compares a declared boolean field/);
+      expect(err!.message, name).toContain(CLAUSE[form]);
+      expect(reads, name).toHaveLength(0);
+    }
+  });
+
+  it('[#21382] having over a groupBy of the boolean field: refuses each as an aggregated column — no read', async () => {
+    for (const [name, at, value, form] of NON_STRING) {
+      reads.length = 0;
+      const err = await refusalOf(engine.aggregate(OBJECT, {
+        groupBy: ['f_boolean'], aggregations: [{ function: 'count', alias: 'n' }], having: { f_boolean: at(value()) },
+      } as EngineAggregateOptions));
+      expect(err, name).not.toBeNull();
+      expect({ code: err!.code, status: err!.status }, name).toEqual({ code: 'INVALID_FILTER', status: 400 });
+      expect(err!.message, name).toContain("filter on 'f_boolean' compares a boolean aggregated column against");
+      expect(err!.message, name).toContain('having.f_boolean');
+      expect(err!.message, name).toContain(CLAUSE[form]);
+      expect(reads, name).toHaveLength(0);
+    }
+  });
+
+  it('[#21382] the controls at all three positions: true and 1 answer exactly what they answered before', async () => {
+    for (const control of [true, 1]) {
+      expect(await driverWhere({ f_boolean: control }), String(control)).toEqual(lowered({ f_boolean: true }));
+      expect(await driverWhere({ f_boolean: { $in: [false, control] } }), String(control))
+        .toEqual(lowered({ f_boolean: { $in: [false, true] } }));
+      const counted = await engine.aggregate(OBJECT, {
+        aggregations: [{ function: 'count', alias: 'all' }, { function: 'count', alias: 'm', filter: { f_boolean: control } }],
+      } as EngineAggregateOptions);
+      expect(Number((counted[0] as Record<string, unknown>).m), String(control)).toBe(1);
+      const groups = (await engine.aggregate(OBJECT, {
+        groupBy: ['f_boolean'], aggregations: [{ function: 'count', alias: 'n' }], having: { f_boolean: { $ne: control } },
+      } as EngineAggregateOptions)).map((r) => (r as Record<string, unknown>).f_boolean);
+      expect(groups, String(control)).toEqual([false]);
+    }
+    // null keeps its meaning: the null test reaches the driver as written.
+    expect(await driverWhere({ f_boolean: null })).toEqual(lowered({ f_boolean: null }));
+  });
+
+  it('[#21382] a bigint is read as the number it names, at every position and on both spellings — one answer per value', async () => {
+    // `JSON.stringify` cannot print a bigint, so these read the recording driver directly.
+    const where = async (w: unknown) => {
+      reads.length = 0;
+      await engine.find(OBJECT, { where: w } as EngineQueryOptions);
+      return reads[0]?.ast?.where;
+    };
+    // 1n / 0n narrow like 1 / 0 — on the object spelling (this door first) and
+    // on the FilterArray spelling (the comparand-type door first) alike.
+    expect(await where({ f_boolean: 1n })).toEqual(lowered({ f_boolean: true }));
+    expect(await where({ f_boolean: { $ne: 0n } })).toEqual(lowered({ f_boolean: { $ne: false } }));
+    expect(await where([['f_boolean', '=', 1n]])).toEqual(lowered({ f_boolean: true }));
+    const counted = await engine.aggregate(OBJECT, {
+      aggregations: [{ function: 'count', alias: 'all' }, { function: 'count', alias: 'm', filter: { f_boolean: { $in: [false, 1n] } } }],
+    } as EngineAggregateOptions);
+    expect(Number((counted[0] as Record<string, unknown>).m)).toBe(2);
+    const groups = (await engine.aggregate(OBJECT, {
+      groupBy: ['f_boolean'], aggregations: [{ function: 'count', alias: 'n' }], having: { f_boolean: 1n },
+    } as EngineAggregateOptions)).map((r) => (r as Record<string, unknown>).f_boolean);
+    expect(groups).toEqual([true]);
+    // 2n is refused as a number on every spelling and at every position, in the same words.
+    reads.length = 0;
+    for (const call of [
+      () => engine.find(OBJECT, { where: { f_boolean: 2n } } as EngineQueryOptions),
+      () => engine.find(OBJECT, { where: [['f_boolean', '=', 2n]] } as unknown as EngineQueryOptions),
+      () => engine.aggregate(OBJECT, {
+        aggregations: [{ function: 'count', alias: 'all' }, { function: 'count', alias: 'm', filter: { f_boolean: 2n } }],
+      } as EngineAggregateOptions),
+      () => engine.aggregate(OBJECT, {
+        groupBy: ['f_boolean'], aggregations: [{ function: 'count', alias: 'n' }], having: { f_boolean: 2n },
+      } as EngineAggregateOptions),
+    ]) {
+      const err = await refusalOf(call());
+      expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
+      expect(err!.message).toContain('against 2 at');
+      expect(err!.message).toContain('only the numbers 1 and 0 are read as a boolean');
+    }
+    expect(reads).toHaveLength(0);
+  });
+
+  it('[#21382] a value OUTSIDE the accepted comparand types is the comparand-TYPE door\'s refusal, in that door\'s words, on both spellings', async () => {
+    const context = `find('${OBJECT}')`;
+    for (const [name, value] of [['a plain object', { a: 1 }], ['undefined', undefined], ['a Map', new Map()]] as const) {
+      const where = { f_boolean: { $eq: value } };
+      // The verdict passes it, so the arm has no second opinion …
+      expect(() => narrowNumberComparands(OBJECT, 'find', engine.registry.getObject(OBJECT), where), name).not.toThrow();
+      // … and the engine answers exactly what the comparand-type door answers.
+      let expected: Error | undefined;
+      try { normalizeFilterComparandTypes(where, context); } catch (e) { expected = e as Error; }
+      expect(expected, name).toBeDefined();
+      const err = await refusalOf(engine.find(OBJECT, { where: where as FilterCondition }));
+      expect({ code: err?.code, status: err?.status }, name).toEqual({ code: 'INVALID_FILTER', status: 400 });
+      expect(err!.message, name).toBe(expected!.message);
+    }
+    const sugar = await refusalOf(engine.find(OBJECT, { where: [['f_boolean', '=', { a: 1 }]] } as unknown as EngineQueryOptions));
+    expect({ code: sugar?.code, status: sugar?.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
+    expect(reads).toHaveLength(0);
   });
 
   // ── the REST doors that reach findData ───────────────────────────────────

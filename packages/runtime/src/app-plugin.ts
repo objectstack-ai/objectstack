@@ -30,7 +30,7 @@ import { readServiceSelfInfo } from '@objectstack/spec/api';
 import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
 import { hookBodyRunnerFactory, actionBodyRunnerFactory } from './sandbox/body-runner.js';
-import { GLOBAL_ACTION_OBJECT_KEY } from './action-execution.js';
+import { bindAppArtifactHandlers } from './app-artifact-handlers.js';
 import { toBoundaryJobSchedule } from './job-schedule.js';
 import type { JobHandlerContext } from './job-handler-context.js';
 import { countServerTiming, SEMCONV } from '@objectstack/observability';
@@ -1087,110 +1087,24 @@ export class AppPlugin implements Plugin {
              ctx.logger.debug('No runtime.onEnable function found', { appId });
         }
 
-        // ── Auto-bind declarative Hook metadata ─────────────────────────
-        // Hooks declared via `defineStack({ hooks })` (or attached to the
-        // bundle by other tooling) are wired into the ObjectQL execution
-        // pipeline here, with no boilerplate from user code. Inline
-        // function handlers are resolved directly; string-named handlers
-        // are looked up in `bundle.functions` (also auto-registered) or in
-        // any function previously registered on the engine.
+        // ── Auto-bind declarative Hook + Action handlers ────────────────
+        // Hooks declared via `defineStack({ hooks })` (inline function handlers,
+        // string-named `bundle.functions`, or a sandboxed `body`) and actions
+        // carrying an extracted `body` are wired into the ObjectQL engine here,
+        // with no boilerplate from user code, so `POST /api/v1/actions/<obj>/<name>`,
+        // MCP `run_action` and the record pipeline run them.
         //
-        // Runs AFTER `runtime.onEnable` so user code may still
-        // imperatively register additional hooks/functions for advanced
-        // cases — both will coexist on the engine.
-        try {
-            const hooks = collectBundleHooks(this.bundle);
-            // Entries, not bare handlers: each function's declared `effect`
-            // (#4396) rides along to the registry, where a `script` node reads
-            // it to report what its run actually did.
-            const functions = collectBundleFunctionEntries(this.bundle);
-            for (const [name, fn] of Object.entries(functions)) {
-                if (fn.unrecognizedEffect === undefined) continue;
-                ctx.logger.warn('[AppPlugin] unrecognized function effect — counted as an uncountable write', {
-                    appId,
-                    name,
-                    effect: fn.unrecognizedEffect,
-                    expected: "'pure' | 'writes'",
-                });
-            }
-            if (hooks.length > 0 || Object.keys(functions).length > 0) {
-                if (typeof ql.bindHooks === 'function') {
-                    ql.bindHooks(hooks, {
-                        packageId: `app:${appId}`,
-                        functions,
-                        bodyRunner: hookBodyRunnerFactory(new QuickJSScriptRunner(), {
-                            ql,
-                            logger: ctx.logger,
-                            appId,
-                        }),
-                    });
-                    ctx.logger.info('[AppPlugin] Bound declarative hooks', {
-                        appId,
-                        hookCount: hooks.length,
-                        functionCount: Object.keys(functions).length,
-                    });
-                } else {
-                    ctx.logger.warn('[AppPlugin] ql.bindHooks unavailable; declarative hooks ignored', {
-                        appId,
-                        hookCount: hooks.length,
-                    });
-                }
-            }
-        } catch (err: any) {
-            ctx.logger.error('[AppPlugin] Failed to bind declarative hooks', err as Error, {
-                appId,
-            });
-        }
-
-        // ── Auto-register declarative Action handlers ───────────────────
-        // Actions with an inline `handler` (or extracted `body`) are wired
-        // to the engine here so HTTP `POST /api/v1/actions/<obj>/<name>`
-        // can invoke them. Actions without a body are left for legacy
-        // imperative `engine.registerAction(...)` registration in user code.
-        try {
-            const actions = collectBundleActions(this.bundle);
-            const actionBodyRunner = actionBodyRunnerFactory(new QuickJSScriptRunner(), {
-                ql,
-                logger: ctx.logger,
-                appId,
-            });
-            let registered = 0;
-            if (actions.length > 0 && typeof ql.registerAction === 'function') {
-                for (const action of actions) {
-                    const handler = actionBodyRunner(action);
-                    if (!handler) continue;
-                    // Object-less actions register under the canonical
-                    // `'global'` key (#3913) — the literal every reader probes
-                    // (`actionHandlerObjectKeys`), since `executeAction` is an
-                    // exact-string Map lookup with no wildcard semantics.
-                    const objectKey =
-                        typeof action.object === 'string' && action.object.length > 0
-                            ? action.object
-                            : GLOBAL_ACTION_OBJECT_KEY;
-                    try {
-                        ql.registerAction(objectKey, action.name, handler, `app:${appId}`);
-                        registered++;
-                    } catch (err: any) {
-                        ctx.logger.warn('[AppPlugin] Failed to register action body', {
-                            appId,
-                            action: action.name,
-                            object: objectKey,
-                            error: err?.message ?? String(err),
-                        });
-                    }
-                }
-            }
-            if (registered > 0) {
-                ctx.logger.info('[AppPlugin] Bound declarative actions', {
-                    appId,
-                    actionCount: registered,
-                });
-            }
-        } catch (err: any) {
-            ctx.logger.error('[AppPlugin] Failed to bind declarative actions', err as Error, {
-                appId,
-            });
-        }
+        // [#21321] Through `bindAppArtifactHandlers` — the ONE binder, which the
+        // install-local plugin also calls for an installed package on install
+        // and on rehydrate. This block used to BE that loop, which made
+        // `AppPlugin.start` the only path that ever bound an artifact's
+        // handlers. See `./app-artifact-handlers.ts` for the contract.
+        //
+        // Runs AFTER `runtime.onEnable` so user code may still imperatively
+        // register additional hooks/functions/actions for advanced cases — both
+        // coexist on the engine (the binder only replaces what it owns,
+        // `app:<appId>`).
+        bindAppArtifactHandlers(ql, this.bundle, { appId, logger: ctx.logger, source: 'AppPlugin' });
 
         // [ADR-0110 D5] The action-governance inventory used to hang off a
         // `kernel:ready` hook HERE. Moved to ObjectQLPlugin: AppPlugin is

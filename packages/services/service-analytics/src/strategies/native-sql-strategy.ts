@@ -22,7 +22,7 @@ import { declaredValueShapeResolver, whereEmptyLeafSql } from '../empty-operator
 import { columnObjectOf, relationshipReferenceOf, resolvePathHops, type HopReference } from '../hop-object.js';
 import { datasetInvalidError, invalidMemberError } from '../dataset-refusal.js';
 import { type LikeShape } from '../like-pattern.js';
-import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
+import { textMatchPredicateSql, sqlDialectFor, type AnalyticsSqlDialect } from '../text-match-sql.js';
 import { whereContainsMembershipSql } from '../contains-membership-sql.js';
 import { isJsonStoredShape } from '../contains-membership-sql.js';
 import { expandEmptyOperator } from '@objectstack/spec/data';
@@ -130,6 +130,68 @@ export const CONDITIONAL_AGGREGATE_SQL_KEYS = Object.keys(CONDITIONAL_AGGREGATE_
  * set, two strategies, so the partition cannot fork per path.
  */
 export const EXPRESSION_METRIC_TYPES = new Set(['number', 'string', 'boolean']);
+
+/**
+ * [#21365] The `LIMIT` an offset-only window carries, per dialect — `null`
+ * where the dialect takes `OFFSET` with no `LIMIT` in front of it.
+ *
+ * An `offset` with no `limit` is a valid window (every row after the offset),
+ * and PostgreSQL runs it as written. SQLite and MySQL do not: their grammar
+ * has no `OFFSET` without a `LIMIT`, so `… ORDER BY "note" ASC OFFSET 1`
+ * answered `near "OFFSET": syntax error`, a 500, on SQLite — measured at
+ * `POST /analytics/query`, where PostgreSQL and the ObjectQL face both
+ * answered rows. The cell for a named dialect is that dialect's own "no upper
+ * bound", the spelling the driver's query compiler emits for the same window
+ * (knex 3.3.0: `limit -1` in the sqlite3 compiler, `limit
+ * 18446744073709551615` in the mysql one, nothing in the base compiler
+ * PostgreSQL uses), so the native statement and the engine agree on it.
+ *
+ * `unknown` is not a dialect: it is everything the `sqlDialect` hook could not
+ * name, SQLite among it (`text-match-sql.ts` lists the embedder compositions
+ * that reach it). Its cell is the largest `LIMIT` every LIMIT dialect parses —
+ * SQLite's signed 64-bit maximum, PostgreSQL's `bigint` maximum, inside
+ * MySQL's unsigned range — so an unnamed SQLite runs the window too, and an
+ * unnamed PostgreSQL answers the rows a bare `OFFSET` answers.
+ *
+ * ⚠️ The `mysql` cell is NOT MEASURED: no MySQL server is provisionable where
+ * this landed, the same declared skip as the `mysql` arm in
+ * `text-match-sql.ts`.
+ */
+const OFFSET_ONLY_LIMIT_SQL: Readonly<Record<AnalyticsSqlDialect, string | null>> = {
+  sqlite: 'LIMIT -1',
+  mysql: 'LIMIT 18446744073709551615',
+  postgres: null,
+  unknown: 'LIMIT 9223372036854775807',
+};
+
+/**
+ * [#21365] The window clause a statement ends with, for `dialect`: ` LIMIT n`,
+ * ` OFFSET n`, both, or `''` for no window.
+ *
+ * `limit` and `offset` are non-negative integers by contract
+ * (`AnalyticsQuerySchema`), refused `400 VALIDATION_FAILED` at the
+ * `/analytics` door otherwise, so they are written verbatim. An offset with no
+ * limit takes the dialect's no-limit spelling ({@link OFFSET_ONLY_LIMIT_SQL})
+ * in front of it.
+ *
+ * Exported so a face that echoes a statement for the same window can render
+ * it with the same bytes rather than a second spelling.
+ */
+export function windowClauseSql(
+  limit: number | undefined,
+  offset: number | undefined,
+  dialect: AnalyticsSqlDialect,
+): string {
+  let sql = '';
+  if (limit != null) {
+    sql += ` LIMIT ${limit}`;
+  } else if (offset != null) {
+    const noLimit = OFFSET_ONLY_LIMIT_SQL[dialect];
+    if (noLimit) sql += ` ${noLimit}`;
+  }
+  if (offset != null) sql += ` OFFSET ${offset}`;
+  return sql;
+}
 
 /**
  * A dot-separated chain of bare identifiers — `amount`, `account.amount`,
@@ -1062,12 +1124,9 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       const orderClauses = Object.entries(query.order).map(([f, d]) => `"${f}" ${d.toUpperCase()}`);
       sql += ` ORDER BY ${orderClauses.join(', ')}`;
     }
-    if (query.limit != null) {
-      sql += ` LIMIT ${query.limit}`;
-    }
-    if (query.offset != null) {
-      sql += ` OFFSET ${query.offset}`;
-    }
+    // [#21365] The dialect of the driver `execute()` hands this statement to —
+    // the base object's, the one `executeRawSql` is called with.
+    sql += windowClauseSql(query.limit, query.offset, sqlDialectFor(ctx, this.extractObjectName(cube)));
 
     return { sql, params };
   }

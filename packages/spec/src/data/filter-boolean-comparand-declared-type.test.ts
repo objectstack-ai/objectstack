@@ -29,6 +29,7 @@ import {
   BOOLEAN_COMPARAND_READING_CASES,
   BOOLEAN_COMPARAND_SPELLINGS,
   NON_BOOLEAN_STRING_FORMS,
+  NON_BOOLEAN_VALUE_FORMS,
   booleanComparandDoorVerdict,
   booleanComparandFieldVerdict,
   booleanComparandRefusalMessage,
@@ -151,9 +152,57 @@ describe('[#21333] booleanComparandDoorVerdict', () => {
     }
   });
 
-  it('passes a boolean, null, and a non-string outside the accepted set — answered as written', () => {
-    for (const comparand of [true, false, null, 2, -1, 0.5, 1n, new Date(0), [true], { $field: 'f_toggle' }, undefined]) {
+  it('passes a boolean, null, a reference and every value the comparand-type door refuses itself', () => {
+    for (const comparand of [true, false, null, { $field: 'f_toggle' }, undefined, { a: 1 }, new Map(), Symbol('s')]) {
       expect(booleanComparandDoorVerdict(field, comparand), String(comparand)).toEqual({ verdict: 'passes' });
+    }
+  });
+
+  it('[#21382] refuses a number other than 1 / 0, a Date and an array — each by what it is, with the 400 envelope', () => {
+    const refusal = (form: string) => ({ verdict: 'door-refusal', form, code: 'INVALID_FILTER', status: 400 });
+    for (const type of ['boolean', 'toggle']) {
+      for (const n of [2, -1, 0.5, -0.5, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER]) {
+        expect(booleanComparandDoorVerdict({ type }, n), `${type} ${n}`).toEqual(refusal('number'));
+      }
+      for (const d of [new Date(0), new Date(Date.UTC(2026, 0, 1)), new Date(Number.NaN)]) {
+        expect(booleanComparandDoorVerdict({ type }, d), `${type} ${String(d)}`).toEqual(refusal('date'));
+      }
+      for (const a of [[true], [], [1], ['true'], [[false]]]) {
+        expect(booleanComparandDoorVerdict({ type }, a), `${type} ${JSON.stringify(a)}`).toEqual(refusal('array'));
+      }
+    }
+    expect(booleanComparandDoorVerdict({ type: 'formula', returnType: 'boolean' }, 2)).toEqual(refusal('number'));
+    // …while on a field that is not boolean none of them is this door's subject.
+    for (const comparand of [2, new Date(0), [true]]) {
+      expect(booleanComparandDoorVerdict({ type: 'text' }, comparand)).toEqual({ verdict: 'passes' });
+      expect(booleanComparandDoorVerdict({ type: 'formula' }, comparand)).toEqual({ verdict: 'deferred' });
+    }
+  });
+
+  it('[#21382] reads a bigint as the number it names — 1n / 0n narrow like 1 / 0, any other is refused as a number', () => {
+    expect(readBooleanComparand(1n)).toEqual({ boolean: true, value: true });
+    expect(readBooleanComparand(0n)).toEqual({ boolean: true, value: false });
+    expect(readBooleanComparand(-0n)).toEqual({ boolean: true, value: false });
+    expect(booleanComparandDoorVerdict(field, 1n)).toEqual({ verdict: 'narrows', value: true });
+    expect(booleanComparandDoorVerdict(field, 0n)).toEqual({ verdict: 'narrows', value: false });
+    for (const b of [2n, -1n, 2n ** 64n]) {
+      expect(readBooleanComparand(b), String(b)).toBeNull();
+      expect(booleanComparandDoorVerdict(field, b), String(b))
+        .toEqual({ verdict: 'door-refusal', form: 'number', code: 'INVALID_FILTER', status: 400 });
+    }
+  });
+
+  it('[#21382] the accepted set is unchanged — the widening adds refusals only', () => {
+    // Every accepted spelling still narrows, a boolean still passes, null is still the null test.
+    for (const [spelling, value] of BOOLEAN_COMPARAND_SPELLINGS) {
+      expect(booleanComparandDoorVerdict(field, spelling)).toEqual({ verdict: 'narrows', value });
+    }
+    expect(booleanComparandDoorVerdict(field, true)).toEqual({ verdict: 'passes' });
+    expect(booleanComparandDoorVerdict(field, null)).toEqual({ verdict: 'passes' });
+    // The string rule is untouched: what it refused, it refuses in the same form.
+    for (const row of BOOLEAN_COMPARAND_READING_CASES) {
+      if (row.boolean !== false) continue;
+      expect(booleanComparandDoorVerdict(field, row.input), row.input).toMatchObject({ verdict: 'door-refusal', form: row.form });
     }
   });
 
@@ -187,10 +236,28 @@ describe('[#21333] booleanComparandRefusalMessage', () => {
     expect(aggregated).not.toContain('declared');
   });
 
-  it('says something different for every form, and carries no tracker number', () => {
-    const messages = NON_BOOLEAN_STRING_FORMS.map((form) => booleanComparandRefusalMessage({ ...site, form }));
-    expect(new Set(messages).size).toBe(NON_BOOLEAN_STRING_FORMS.length);
+  it('says something different for every form, string and non-string alike, and carries no tracker number', () => {
+    const forms = [...NON_BOOLEAN_STRING_FORMS, ...NON_BOOLEAN_VALUE_FORMS];
+    const messages = forms.map((form) => booleanComparandRefusalMessage({ ...site, form }));
+    expect(new Set(messages).size).toBe(forms.length);
     for (const m of messages) expect(m).not.toMatch(/#\d/);
+  });
+
+  it('[#21382] renders a non-string comparand as what it is — a Date by name, a non-finite number by name, never as JSON null', () => {
+    const at = (value: unknown, form: 'number' | 'date' | 'array') =>
+      booleanComparandRefusalMessage({ ...site, path: 'where.active.$eq', value, form });
+    expect(at(2, 'number')).toContain("against 2 at where.active.$eq, which is not a boolean: only the numbers 1 and 0 are read as a boolean");
+    expect(at(Number.NaN, 'number')).toContain('against NaN at');
+    expect(at(Number.NEGATIVE_INFINITY, 'number')).toContain('against -Infinity at');
+    expect(at(2n, 'number')).toContain('against 2 at');
+    expect(at(new Date(Date.UTC(2026, 0, 1)), 'date')).toContain('against Date(2026-01-01T00:00:00.000Z) at');
+    expect(at(new Date(Number.NaN), 'date')).toContain('against Date(Invalid Date) at');
+    expect(at(new Date(0), 'date')).toContain('compare a Date with a date or datetime field');
+    expect(at([true], 'array')).toContain('against [true] at');
+    expect(at([true], 'array')).toContain('use $in, each member a boolean');
+    // No clause names a backend: the server error was a `where` fact, and the
+    // engine evaluates the per-aggregation filter and having itself.
+    for (const form of NON_BOOLEAN_VALUE_FORMS) expect(at(2, form)).not.toMatch(/postgres/i);
   });
 
   it('stays inside the 500-character client bound for every refusal in the case table, at the longest position', () => {
@@ -205,7 +272,7 @@ describe('[#21333] booleanComparandRefusalMessage', () => {
 
   it('front-loads what a caller acts on: with 40-character names the head still ends inside the first 500 characters', () => {
     const name = 'f'.repeat(40);
-    for (const form of NON_BOOLEAN_STRING_FORMS) {
+    for (const form of [...NON_BOOLEAN_STRING_FORMS, ...NON_BOOLEAN_VALUE_FORMS]) {
       const message = booleanComparandRefusalMessage({
         field: name, declaredType: 'formula', returnType: 'boolean',
         path: `aggregations[12].filter.${name}.$between[1]`, value: 'x'.repeat(200), form,
@@ -264,6 +331,25 @@ describe('[#21333] BOOLEAN_COMPARAND_DOOR_CASES', () => {
     for (const c of BOOLEAN_COMPARAND_DOOR_CASES.filter((x) => x.name.startsWith('[unjudged]'))) {
       expect(c.verdict, c.name).toBe('passes');
     }
+  });
+
+  it('[#21382] the value group refuses every non-string form at every position the shape door leaves to it', () => {
+    const value = BOOLEAN_COMPARAND_DOOR_CASES.filter((c) => c.name.startsWith('[value]'));
+    const refused = value.filter(isRefusal);
+    expect(new Set(refused.map((c) => c.form))).toEqual(new Set(NON_BOOLEAN_VALUE_FORMS));
+    const positionsOf = (form: string) =>
+      new Set(refused.filter((c) => c.key === 'f_boolean' && c.form === form).map((c) => c.position));
+    const judged = ['f_boolean', ...BOOLEAN_COMPARAND_DOOR_SCALAR_OPERATORS.map((op) => `f_boolean.${op}`),
+      ...BOOLEAN_COMPARAND_DOOR_LIST_OPERATORS.flatMap((op) => [`f_boolean.${op}[0]`, `f_boolean.${op}[1]`])];
+    expect([...positionsOf('number')].sort()).toEqual([...judged].sort());
+    expect([...positionsOf('date')].sort()).toEqual([...judged].sort());
+    // The array rows skip the equality slots, where the comparand-shape door speaks first.
+    const equality = new Set(['f_boolean', 'f_boolean.$eq', 'f_boolean.$ne']);
+    expect([...positionsOf('array')].sort()).toEqual(judged.filter((p) => !equality.has(p)).sort());
+    // Every judged field is refused a number; null and the non-boolean field's rows pass.
+    expect(new Set(refused.filter((c) => c.comparand === -1).map((c) => c.key)))
+      .toEqual(new Set(['f_boolean', 'f_toggle', 'f_formula_boolean']));
+    for (const c of value.filter((x) => x.comparand === null || x.key === 'f_text')) expect(c.verdict, c.name).toBe('passes');
   });
 
   it('every refusal carries the ADR-0112 envelope, and the words name the key, the declared type, the comparand and its position', () => {

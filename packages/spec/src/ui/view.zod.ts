@@ -602,9 +602,10 @@ const VIEW_FILTER_TEXT_COMPARAND_OPERATOR = 'icontains' satisfies ViewFilterOper
  *   `false` (an array is none of the six accepted comparand types —
  *   `isAcceptedFilterComparand`, `filter-comparand-type.ts`), and the comparand
  *   is refused with the withheld `INVALID_FILTER` / 400 envelope.
- * - **`driver-memory` REFUSES** the same shape in the same envelope — `match()`
- *   runs `assertFilterConditionShape`, whose implicit-equality arm throws on an
- *   array (`filter-refusal.ts`). That refusal first shipped in
+ * - **`driver-memory` REFUSES** the same shape in the same envelope — its query
+ *   path's `convertToMongoQuery` runs `assertFilterConditionShape`, whose
+ *   implicit-equality arm throws on an array (`filter-refusal.ts`); the reference
+ *   matcher's `match()` ran it too until commit `8fec76a2b` retired the matcher. That refusal first shipped in
  *   `@objectstack/driver-memory@17.4.0`; published 17.3.0 returned the row
  *   stored as `['a']` (run in this change's review; which other rows it
  *   selected is NOT MEASURED).

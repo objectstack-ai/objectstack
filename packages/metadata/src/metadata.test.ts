@@ -443,7 +443,7 @@ describe('MetadataManager', () => {
     });
 
     // (The `saveOverlay()` / `overlayWritable` cases left with the manager's
-    // paper-protocol overlay limb — #13135, ADR-0049. These tests were the
+    // paper-protocol overlay limb — commit 9e0ba21a1, ADR-0049. These tests were the
     // limb's only callers; `persistence.overlayWritable` is a retiredKey
     // tombstone on the spec side now.)
 

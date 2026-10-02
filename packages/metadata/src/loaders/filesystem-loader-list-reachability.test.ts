@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #14486 — `FilesystemLoader.list()` reports only names the resolve trio can
+ * Commit 4b4d5a331 — `FilesystemLoader.list()` reports only names the resolve trio can
  * open: one shared name-to-path derivation for `list()`, `findFile()` and
  * `loadManyKeyed()`.
  *
@@ -23,7 +23,7 @@
  * author (human or AI) reads it as their own typo and retries the same word.
  *
  * ---------------------------------------------------------------------------
- * The rule this pins (maintainer ruling on #14486, via the director seat,
+ * The rule this pins (maintainer ruling recorded in commit 4b4d5a331, via the director seat,
  * 2026-09-02 — option A, narrow)
  * ---------------------------------------------------------------------------
  * `list()` reports a file only where this loader's derivation is a bijection
@@ -47,8 +47,8 @@
  * divergence that remains is visible in a diff rather than implicit. Both of
  * them are the same half of the ruling — "a file that does not fit is neither
  * listed NOR resolvable" — which could not be taken here: each would invert a
- * landed #14341 pin in `filesystem-loader-keyed-items.test.ts`, a file under a
- * concurrent claim (PR #14627) when this landed.
+ * landed pin of commit 2e471e362 in `filesystem-loader-keyed-items.test.ts`, a file under a
+ * concurrent claim (squashed as commit ac8ed476f) when this landed.
  *
  * `CONTROL:` cases pin the things that must NOT move, and one of them
  * (`javascript` registered) is the reverse verification that the narrowing
@@ -232,10 +232,10 @@ describe('#14486 the repair reaches MetadataManager', () => {
 describe('#14486 RECORD: the half of the ruling this PR could not take', () => {
   it('RECORD: loadMany() still returns bodies for files list() no longer names', async () => {
     // The ruling also pinned "nothing unlisted is returned by `loadMany()`
-    // either". Filtering the shared walk would invert three landed #14341 pins
+    // either". Filtering the shared walk would invert three pins commit 2e471e362 landed
     // — `filesystem-loader-keyed-items.test.ts:113`, `:167`, `:187` — and its
     // `loadMany()` CONTROL at `:196` ("with every file", length 7), in a file
-    // held by a concurrent claim (PR #14627). Recorded, not repaired.
+    // held by a concurrent claim (squashed as commit ac8ed476f). Recorded, not repaired.
     const bodies = await loader().loadMany<{ name?: string; label?: string }>(TYPE);
 
     expect(bodies).toContainEqual({ name: 'account', label: 'Account' });

@@ -311,6 +311,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     const ql: any = ctx.getService('objectql');
                     if (ql && typeof ql.syncSchemas === 'function') await ql.syncSchemas();
                 } catch { /* non-fatal */ }
+                // [#21321] Bind the package's script-action bodies and body
+                // hooks — `register` above makes them declared, not runnable.
+                await this.bindArtifactHandlers(ctx, entry.manifest, entry.manifestId);
                 // Replay translations + register seed datasets, but don't
                 // re-run seeding — existing rows are already in the DB from
                 // the original install, and multi-tenant orgs will replay
@@ -944,6 +947,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             ctx.logger?.warn?.(`[MarketplaceInstallLocal] syncSchemas failed for ${manifestId}: ${err?.message ?? err}`);
         }
 
+        // 4c. [#21321] Bind the package's script-action bodies and body hooks
+        //     through the runtime's ONE binder — the call `AppPlugin.start`
+        //     makes for a boot artifact. A reinstall replaces the previous
+        //     version's set rather than adding to it.
+        await this.bindArtifactHandlers(ctx, manifest, manifestId);
+
         // 5. Replicate the AppPlugin start-time side-effects that the
         //    `manifest` service does NOT do on its own:
         //      • load translation bundles into the i18n service
@@ -1384,6 +1393,52 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             success: true,
             data: { manifestId, deleted, skipped, errors, withSampleData: false },
         }, 200);
+    };
+
+    /**
+     * [#21321] Bind an installed package's executable handlers — its
+     * `type: 'script'` action bodies and its body hooks — through
+     * `bindAppArtifactHandlers`, the runtime's ONE binder and the call
+     * `AppPlugin.start` makes for a boot artifact, under the same owner
+     * (`app:<manifestId>`). Called on the install route and on the
+     * `kernel:ready` rehydrate.
+     *
+     * Before this, `manifest.register` was the whole install: the package's
+     * actions and hooks were DECLARED and never bound, so every door refused
+     * its script actions ("No handler registered" over MCP, 404 over REST)
+     * before and after a restart, and its body hooks never fired — while an
+     * `os start --artifact` boot of the same file dispatched them.
+     *
+     * The binder replaces the owner's previous set, so a reinstall leaves each
+     * action with exactly one handler and stops whatever the new version
+     * dropped. ⛔ No second registration path lives here: a runtime without the
+     * binder (an older build, or a suite that mocks `@objectstack/runtime`
+     * without it) binds NOTHING and says so — the package's script actions then
+     * stay unrunnable, and `list_actions` does not advertise them.
+     *
+     * Resolved lazily through `@objectstack/runtime`, like every other runtime
+     * helper this plugin calls. Never throws.
+     */
+    private bindArtifactHandlers = async (ctx: PluginContext, manifest: unknown, manifestId: string): Promise<void> => {
+        let ql: IObjectQLEngine | undefined;
+        try { ql = ctx.getService<IObjectQLEngine>('objectql'); } catch { /* no data engine */ }
+        if (!ql) {
+            ctx.logger?.warn?.(`[MarketplaceInstallLocal] no objectql engine — the script actions and body hooks of ${manifestId} are NOT bound`);
+            return;
+        }
+        let bind: typeof import('@objectstack/runtime')['bindAppArtifactHandlers'] | undefined;
+        try {
+            const mod: any = await import('@objectstack/runtime');
+            if (typeof mod?.bindAppArtifactHandlers === 'function') bind = mod.bindAppArtifactHandlers;
+        } catch { /* reported below */ }
+        if (!bind) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] this runtime has no bindAppArtifactHandlers — the script actions and body hooks of ${manifestId} are NOT bound: `
+                + 'every door refuses those actions and the hooks never fire. Upgrade @objectstack/runtime alongside @objectstack/cloud-connection.',
+            );
+            return;
+        }
+        bind(ql, manifest, { appId: manifestId, logger: ctx.logger, source: 'MarketplaceInstallLocal' });
     };
 
     /**

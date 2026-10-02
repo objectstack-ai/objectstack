@@ -49,7 +49,7 @@ import { deriveViewContainerObject } from './view-container.js';
 
 /**
  * Re-exported from {@link ./view-container.ts}, which is also the
- * `@objectstack/metadata/view-container` LEAF entry point (#14680). The
+ * `@objectstack/metadata/view-container` LEAF entry point (commit 3bd9b3498). The
  * derivation moved there so a cross-package consumer can reach it without the
  * two `@objectstack/spec` imports below, which esbuild keeps in any bundle
  * that includes this module — it tree-shakes the unused function, not an

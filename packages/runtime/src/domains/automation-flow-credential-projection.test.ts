@@ -111,14 +111,17 @@ describe('#20552 — a served definition withholds the hook secret', () => {
         expect(startOf(spies.registerFlow.mock.calls[0]![1]).config.secret).toBe(SECRET);
     });
 
-    it('POST /:name/clone — the answer withholds it; the clone carries the whole definition', async () => {
-        const { dispatcher, flows } = makeDispatcher();
+    it('POST /:name/clone — a credential-holding source is refused, and the refusal carries no credential', async () => {
+        const { dispatcher, flows, spies } = makeDispatcher();
         const result = await dispatcher.handleAutomation('/inbound_hook/clone', 'POST', { name: 'inbound_hook_copy', label: 'Copy' }, AUTHOR);
-        expect(result.response?.status).toBe(200);
+        // #20790 C1: a copy would share the source's secret, so the clone door
+        // refuses it (the refusal itself is pinned in
+        // `automation-flow-clone-credential.test.ts`).
+        expect(result.response?.status).toBe(409);
+        expect(result.response?.body?.error?.code).toBe('RESOURCE_CONFLICT');
         expect(JSON.stringify(result.response?.body)).not.toContain(SECRET);
-        // ADR-0126 §7.1's whole-definition copy is unchanged: the registered
-        // clone still verifies its hook with the source's secret.
-        expect(startOf(flows.get('inbound_hook_copy'))!.config.secret).toBe(SECRET);
+        expect(flows.has('inbound_hook_copy')).toBe(false);
+        expect(spies.registerFlow).not.toHaveBeenCalled();
     });
 });
 

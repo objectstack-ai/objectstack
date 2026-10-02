@@ -148,7 +148,7 @@ export type { ClusterMetadataMutationPayload } from './protocol.js';
 // kernel-wide `metadata:reloaded` announce. Exported for the same reason its
 // mutation sibling is: the subscriber lives in another package.
 export type { MetaItemPublishedEvent } from './protocol.js';
-export type { MetadataAuthoringGate, MetadataAuthoringGateContext } from './protocol.js';
+export type { MetadataAuthoringGate, MetadataAuthoringGateContext, MetadataCredentialChannel } from './protocol.js';
 
 export { SysMetadataRepository, resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
 export type {

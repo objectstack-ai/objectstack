@@ -24,7 +24,7 @@
  *     `@objectstack/spec/shared`). Architecturally attractive and explicitly
  *     *not* precluded by this module — but out of scope on the round that
  *     needed it (spec was frozen; types was under concurrent change).
- *     ⇒ **TAKEN, by the maintainer's 2026-08-30 ruling on #13279.** The
+ *     ⇒ **TAKEN, by the maintainer's 2026-08-30 ruling (commit 6a180e42d).** The
  *     predicate now lives in `@objectstack/types`
  *     (`driver-error-classification.ts`); what forced it was a consumer this
  *     file could never serve — `resolveAuthzContext` in `@objectstack/core`,
@@ -37,7 +37,7 @@
  * Option 2 is taken, so this is the compatibility seam it always said it would
  * become — "a single, greppable seam to delete if the maintainer later takes
  * option 2". It is NOT deleted: `@objectstack/metadata/errors` is a published
- * subpath with out-of-repo consumers, and #13279 is a fix, not a removal. It
+ * subpath with out-of-repo consumers, and commit 6a180e42d is a fix, not a removal. It
  * re-exports the one symbol it always exported, from the new home. Everything
  * below still describes why the subpath exists and why it stays narrow.
  *
