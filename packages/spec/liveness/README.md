@@ -376,7 +376,8 @@ readers. **A ledger entry is a claim with a timestamp; code moves under it
 in both directions.** An entry is worth re-verifying, not trusting indefinitely
 — see the methodology below.
 
-When in doubt, the honest status is `dead` + `authorWarn`: an author who gets a
+When in doubt, the honest status is `dead`, which warns its authors with no
+`authorWarn` marker (see *Author warnings* below): an author who gets a
 warning for a property that turns out to work loses nothing *at runtime*; an
 author who gets silence for a property that does nothing ships a bug. But the
 ledger is also read as a capability catalogue — by authors and by AI — so an
@@ -549,32 +550,60 @@ its `ledgerBindings` in `proof-registry.mts`, add the `proof` to the ledger entr
 confirm the gate is green. Because the gate also triggers on `packages/qa/dogfood/**`,
 deleting or renaming a proof re-runs this check and the dangling reference is caught.
 
-## Author warnings — closing the loop (`authorWarn`)
+## Author warnings — closing the loop (verdicts, and `authorWarn`)
 
-Classification is also fed back to the *author* at build time. The CLI `compile`
-lint (`packages/lint/src/lint-liveness-properties.ts`) reads these ledgers and
-emits an advisory **warning** when an authored object/field sets a property that is
-misleading — "you set this expecting it to do something; at runtime it does nothing /
-isn't enforced" — with a corrective hint. Never fails the build.
+Classification is also fed back to the *author*. The liveness lint
+(`packages/lint/src/lint-liveness-properties.ts`) reads these ledgers and emits a
+**warning** when an authored item sets a property whose row warns — "you set this
+expecting it to do something; at runtime it does nothing / isn't enforced / isn't
+read yet" — under a rule id per verdict, with a corrective hint. `os lint`,
+`os validate` and `os build` / `os compile` run it, and so does the runtime metadata
+write door for `email_template`, `mapping` and `datasource` items. It is never an
+error and never fails `os build`, but `os lint --strict` and `os validate --strict`
+turn every warning into exit 1.
 
-Signal over noise is the whole point, so warnings are **opt-in per entry**:
+**The verdict decides which rows warn.** `authorWarn` only opts in a row whose
+verdict does not warn on its own:
+
+| Row | Warns when its property is authored | Rule id |
+|---|---|---|
+| `dead` | always — no marker needed | `liveness-dead-property` |
+| `live-elsewhere` | always — no marker needed | `liveness-live-elsewhere-property` |
+| `experimental` | always — no marker needed | `liveness-experimental-property` |
+| `planned` | only with `"authorWarn": true` | `liveness-planned-property` |
+| `live` | never — `authorWarn` on it is refused (below) | — |
 
 | Field | Effect |
 |---|---|
-| `"authorWarn": true` | warn when this property is authored (in addition, any `experimental` entry warns by default — it's a declared-but-unenforced guarantee). |
-| `"authorHint": "…"` | the corrective one-liner shown under the warning (falls back to `note`). |
+| `"authorWarn": true` | makes a `planned` row warn. On a `dead`, `live-elsewhere` or `experimental` row it changes nothing, because the verdict already warns. So leaving it off never keeps such a row quiet. |
+| `"authorHint": "…"` | the corrective one-liner shown under the warning, on every row that warns. Without one, the verdict's default hint is shown: `dead`'s says "Remove it", `planned`'s and `live-elsewhere`'s say "Keep it", and `experimental`'s says the guarantee is not yet enforced. The row's `note` is never shown to an author, on any row: it is written for this ledger's maintainers. |
 
-Two rules keep it false-positive-free, **both of which the marker author must respect**:
+Two rules keep the warnings truthful. **Both bind whoever grades a row, not only
+whoever marks one**:
 
-1. **Only mark genuinely *misleading* dead props** — ones that imply a capability/behavior
-   that doesn't exist (`versioning`, `field.columnName`, `softDelete`). Benign display/doc
-   metadata that's "dead" (no runtime reader) — `description`, `tags`, `icon` — must NOT be
-   marked; an author isn't misled by them.
-2. **Booleans: only mark `default(false)` flags.** The lint warns on a boolean only when set
-   `true`, and it can't tell author-set-`true` from a schema default. A `default(true)` flag
-   (`enable.searchable`) would then warn on *every* object that has an
-   `enable` block — so leave those unmarked (see `enable.searchable`'s `_authorWarnSkipped`).
-   Object/string/array props warn when merely present, so this caveat is boolean-only.
+1. **Grading a row `dead`, `live-elsewhere` or `experimental` is an author-facing act.**
+   The verdict warns every author who sets the key, and fails their `--strict` run. No
+   marker keeps it quiet. That includes benign display or doc metadata with no runtime
+   reader (`description`, `tags`, `icon`): graded `dead`, it warns "Remove it" like any
+   other dead key. So:
+   - measure a display key against *Designer previews count as consumers* (above)
+     before writing `dead`. A key that something shows to a person is `live`, and that
+     measurement, not a missing marker, is what keeps it quiet;
+   - a display key that is still `dead` after that warns, and the warning is the
+     measurement speaking. ⛔ Never grade a row `live` or `planned` to silence it;
+   - when the verdict's default hint is the wrong corrective for that key, give the row
+     an `authorHint` that says the right one. The `note` cannot do that job.
+2. **Booleans and materialized defaults.** The lint warns on a boolean only when it is
+   `true`, and on any other value when it is present at all. Where the stack it reads
+   has been parsed (`os validate`, `os build`, any `defineStack` config), schema
+   defaults have already filled in, so it cannot tell an authored value from a default.
+   A `default(true)` flag, or any key whose default materializes, would warn on every
+   item that carries the default, whoever wrote it. So `authorWarn` stays off such a
+   row, and a warning verdict on one warns every such item. `enable.searchable`
+   (`default(true)`) is the shape; it is graded `live`, so the question does not arise
+   for it. `mapping.errorPolicy` and `batchSize` were dead keys of this kind, and no
+   warning could reach their authors truthfully, so they were retired instead (the
+   `mapping` row below).
 
 And one the gate enforces for you: **never on a `live` row.** `live` says authoring the key
 changes runtime behaviour, so there is nothing to warn about — and the lint has no verdict
@@ -584,11 +613,16 @@ refuses the combination at every depth and prints the warned-row census on every
 caveat an author still needs about a live key (a cadence nothing schedules yet) goes in the
 key's `.describe()`.
 
-The lint is ledger-driven: coverage grows by marking more entries `authorWarn`, not by
-touching the lint code. It covers **every governed type**: objects (incl. `enable.*`)
-and their fields walk bespoke nesting; flows/actions/agents/tools/skills/datasets/
-permissions/hooks/pages are checked as flat stack collections, and container
-properties fan out over arrays (each flow node, each dataset measure).
+The lint is ledger-driven: coverage grows with the ledger's verdicts (grading a row
+`dead`, `live-elsewhere` or `experimental`) and with `authorWarn` opt-ins on `planned`
+rows, not by touching the lint code. That holds only inside the types its walk visits:
+objects (incl. `enable.*`) and their fields walk bespoke nesting, translation bundles
+walk their locale entries, and every type listed in the lint's `TYPE_COLLECTIONS` is
+checked as a flat stack collection, with container properties fanning out over arrays
+(each flow node, each dataset measure). It reads a row and its direct `children`, no
+deeper. A governed type the walk does not visit (`manifest`, `connector` and
+`realtime_subscription` are three) warns no author through this lint, whatever its
+rows say.
 
 ## Granularity — drill as deep as the ledger declares
 
@@ -963,10 +997,12 @@ marker where the Notes cell goes, never a guess at what belongs there.
 | connector | seeded 2026-09-17 (#18582) — the second of the three `PENDING_GOVERNANCE` debts #18133 declared, paid in the same diff as `analytics_cube`, which empties that map. Not a registered kind: bound in `UNREGISTERED_KIND_SCHEMAS` (#6245) and reached through `getMetadataTypeSchema`'s unregistered-kind fallback. **What the walk actually resolves, measured:** the binding names `DeclarativeConnectorEntrySchema`. ⚠️ The MECHANISM changed with the `connectionTimeoutMs` retirement and the prior sentence here is corrected rather than carried: that schema USED TO BE `ConnectorSchema.superRefine(...)`, a Zod 4 check attached to the same object def, and the key-set conclusion used to rest on that attachment. It is now a `z.preprocess` PIPE — both published carriers wrap one shared private `ConnectorBaseSchema` in the ADR-0049 retired-default residue stage, the entry schema adding the ADR-0097 cross-field rules on the base before wrapping, so the two are SIBLINGS rather than parent and child, and what preserves the walked shape is the pipe's read-through `shape`, NOT a `superRefine` attachment. The CONCLUSION is unchanged and re-measured on the built entry rather than inherited: both carriers expose 30 keys and the key sets are byte-identical, with no entry-only and no base-only key. The gate cannot tell the two schemas apart; what the entry schema buys is REFUSALS, invisible to the walk and visible only in the two rows where they are the whole verdict (`authentication` and `actions`; `triggers` was the third until its retirement made it a tombstone both carriers refuse). **ONE SCHEMA, TWO DOORS** is the shape fact behind the 31/1/10 split (live/planned/dead; counts read from the generated `state-counts/connector.md` shard, never hand-kept here): the ledger's denominator entry exists for the AUTHORING doors (`defineStack({ connectors })`, `PUT /meta/connector/:name`), while the same `ConnectorSchema` is what `AutomationEngine.registerConnector` parses for a def a PLUGIN or an ADR-0097 provider factory builds in code — so a key can have a real consumer and still do nothing when a metadata author writes it. The keys an authored entry can reach are exactly the author-supplied `ConnectorProviderContext` fields plus `provider` and `enabled` — `name` is itself one of those fields (the former "plus `name`" tail double-counted it), `loadPackageFile` is host-injected rather than authored, and `provider` selects the factory without ever reaching the context; `type` and `icon` reach that context and are dropped by all three shipped factories, and each says so on its own row. `authentication` is the ledger's `planned`, and ⛔ NOT "refused outright" — the former tail here said exactly that and all three instruments contradict it, including the one it cites: the KEY is ACCEPTED (`connector.zod.ts` declares `authentication: ConnectorAuthConfigSchema.optional().default({ type: 'none' })`, and the accepted value does nothing); what #7990 refuses is a non-`none` VALUE (`if (entry.authentication && entry.authentication.type !== 'none')`, whose own message prescribes "drop `authentication` (or set `{ type: 'none' }`)"); and ADR-0097 §3, titled "Credentials are references", rejects **inline secrets** in stack metadata, not the key. Accepted-and-ignored, plus a loud refusal of every value but `{ type: 'none' }`, is exactly the basis of the `planned` verdict — which the row itself already stated ("the accepted value does nothing"), so the summary, not the row, was the wrong half. The 10 `dead`, partitioned so every row is counted exactly once: `metadata` plus the nine top-level `retiredKey` tombstones `rateLimitConfig`, `errorMapping`, `connectionTimeoutMs`, `health`, `status`, `webhooks`, `triggers`, `syncConfig` and `fieldMappings`. That sums to 10, the dead count the generated `state-counts/connector.md` shard carries. ⚠️ It was 23 until connector-attached sync left the connector (ADR-0049, ruled ENFORCE with the definition MOVED to the target side — `mapping.connectorSource`, `planned` in mapping.json): `syncConfig` counted 8 drilled rows and `fieldMappings` 7 (its `transform` tombstone among them), and each is now ONE leaf tombstone row, by the same gate rule as `health` below. ⚠️ It was 25 until `actions.description` and `actions.outputSchema` went `live` (#20287: the flow designer reads both, objectui#11028). ⚠️ It was 30 until the connector `triggers` array was retired (ADR-0049; ADR-0041 unchanged): `triggers` counted 6 drilled rows (`key`, `label`, `description`, `type`, `intervalSeconds` and the `interval` rename tombstone — dead because nothing read a connector trigger, which the schema's own docblock said: #3197) and is now ONE leaf tombstone row, by the same gate rule as `health` below. ⚠️ It was 44 until the connector resilience family was retired (ADR-0049): `health` counted 15 drilled rows (both sub-blocks plus the `monitoringWindow` tombstone) and is now ONE leaf tombstone row — the gate refuses `children` under a property that is no longer a container — and `webhooks` left the undrilled baseline for the same reason; `status` and `webhooks` stayed one row each and changed only from dead-awaiting-a-decision to dead-and-tombstoned. ⚠️ `retryConfig` IS NO LONGER IN THIS LIST: all eight of its sub-keys went `live` when #18975 made the declared policy execute at the one platform fetch site, which is the same measurement the falsification note at the end of this row records — so a reader who still finds "`retryConfig` (8)" among the dead is reading a stale copy. ⚠️ Nor is it "the two timeouts" any more: `requestTimeoutMs` is `live` (it becomes `resilientFetch`'s per-attempt deadline) and `connectionTimeoutMs` is the retired tombstone named above. ⭐ NINE rows in this ledger are `retiredKey` tombstones that keep their rows because the key stays in the walked shape (the `rls.priority` precedent) — `rateLimitConfig`, `errorMapping`, `connectionTimeoutMs`, `health`, `status`, `webhooks`, `triggers`, `syncConfig` and `fieldMappings` — but ⛔ that nine is NOT a separate addend: they ARE the top-level tombstones counted above, which is exactly the double-count that made the previous "and four `retiredKey` tombstones" tail drift. (`fieldMappings.transform` was one of them until its subtree left whole with `fieldMappings`, whose own leaf row took its place.) (`triggers.interval` was one of the eight until its array left whole with `triggers`, whose own leaf row took its place — the count held at eight by a swap, not by standing still.) (`health.circuitBreaker.monitoringWindow` was the ninth until its block left whole with `health`.) Count them by name, never by adding the tail. **A prior in-repo claim is recorded here with its DIRECTION measured rather than remembered, because this row's job is the history of how the type got here**: the conversion registry's note inside `connector-rate-limit-config-removed`'s fixture reads "`retryConfig` and the timeouts beside it are untouched by THIS conversion — a statement about its scope, not a liveness verdict. They are not live: declared, defaulted and documented, and read by nothing." ⚠️ It asserts they are NOT live, and it scopes "untouched" to that one conversion. The former tail here quoted it as asserting the OPPOSITE ("they are live") and called it false when seeded — an inversion that turned this whole passage upside down, and it is corrected rather than carried. Measured direction: the note was TRUE when this ledger was seeded (2026-09-17) and is STALE now, #18975 having made the declared policy execute at the one platform fetch site (`connectorFetchOptions` → `resilientFetch`), so `retryConfig`'s eight sub-keys are `live` on their own rows and `requestTimeoutMs` is `live` beside them; only `connectionTimeoutMs` still answers to it, as the retired tombstone. ⛔ The stale comment is not rewritten from here — it is #19729's, as a dated note beside it — and it is not a line this PR's diff touches. ⚠️ The seeding note's supporting census — "the word does not occur outside `packages/spec` at all" — is FALSE at this head and is corrected rather than carried: `git grep -n retryConfig 14fdebd766 -- . ':!packages/spec'` returns 67 **matching lines** over 15 files — `git grep -o` on the same tree and pathspec returns 77 **occurrences**, and a line is not an occurrence, which is the trap a re-measurer falls into next (26 matching lines in the materializer `packages/services/service-automation/src/plugin.ts` and its materialization test, 22 across `connector-rest` and `connector-openapi` — providers, connectors and their tests — 13 in five `.changeset` fragments, and 6 on two `content/docs` pages). ⛔ Re-read that as the standing lesson of this row: a census is a count plus the tree it was taken against, and a bare "does not occur" with no commit behind it is the shape that rots first. The timeouts half is settled on its own rows: `requestTimeoutMs` is `live`, `connectionTimeoutMs` is retired |
 | analytics_cube | seeded 2026-09-17 (#18582) — the third debt, paid in the same diff as `connector`. Not a registered kind either: bound in `UNREGISTERED_KIND_SCHEMAS` by commit 2306a765c and reached through the same unregistered-kind fallback. **ONE Cube shape, THREE producers, one registry** is what decides every row: `cube-registry.ts` names them itself — authored cubes (`analyticsCubes[]` / `defineCube()`, threaded by the CLI into `AnalyticsServiceConfig.cubes`), COMPILED DATASETS (ADR-0021, where `dataset-compiler` mints a Cube), and ad-hoc query inference. Only the first is the authoring door governed here, so a key whose only reader sits on the compiled-dataset path is not live for an authored cube however busy that reader is — the #4837 producer rule on a shape with three producers. That kept `dimensions.granularities` (read only by `dataset-executor#granularityOf`, whose argument is a `CompiledDataset` an authored cube never becomes) and `measures.format` (written by the compiler, threaded to the wire from the DATASET measure instead) `dead` until **#20282**'s second stage (2026-09-29) read both on the query doors off whichever cube answers the name: `analytics-service#withDeclaredMeasureFormats` describes each measure column's `fields[].format`, and `#withDeclaredGranularityDefaults` buckets a grouped time dimension at the default `dataset-executor#declaredDefaultGranularity` reads — the one reading (a single-entry list) the dataset path's `granularityOf` now shares. The query path is genuinely live: `sql` is the FROM table AND the object whose RLS read scope is injected, `measures.type` picks the aggregate, `measures.sql`/`dimensions.sql` the column, `joins[].name` the joined table. The 3 `dead` are the `refreshKey` tombstone and the inner `name` on each of `measures`/`dimensions`, where the record KEY is the identity — RETIRED by #20300 (ADR-0049 enforce-or-remove) as `retiredKey()` tombstones on the member `strictObject`s, so those two rows STAY `dead` (the tombstone keeps the key in the walked shape) and the count does not move. It was 6 until **#20282**'s third stage (2026-09-29) published the three `description`s on discovery: `analytics-service#getMeta` copies each onto its `CubeMeta` entry, the read point the `title`/`label` rows already cite (display-shaped, the #7131 split). It was 7 until #20637 RETIRED `refreshKey` whole (ADR-0049 enforce-or-remove, maintainer letter C): the caching block's `every` and `sql` were two drilled `dead` rows — no refresh scheduler, pre-aggregation or analytics result cache exists anywhere, re-measured 2026-09-29 — and the `retiredKey()` tombstone that replaced the block is ONE leaf row, because the gate refuses `children` on a property that is no longer a container (the connector `health` precedent). **#20282** flips the tenth, the visibility flag `public`, `dead` → `live` 2026-09-27: seeded as a knob that was never wired (three internal mints wrote `false`, nothing read it), it is now read by `service-analytics`' `cube-visibility.ts#isCubePublic` — `getMeta` omits a hidden cube and `query()` / `generateSql()` refuse it — in the same change that moved its default from `false` to the Cube.dev `true`, since enforcing the old default would have hidden every authored cube. It was 12 until #18612 RETIRED `joins[].relationship` and the REQUIRED `joins[].sql` (ADR-0049 enforce-or-remove, maintainer-ruled batch #154): the ON clause is SYNTHESISED as an FK equality and the authored one was never consulted, so a declared join condition came back REPLACED under a 200. `CubeJoinSchema` is a `strictObject`, so the route was strict deletion plus a `guidance` prescription and the two rows left this ledger with the keys — not the `retiredKey()` route, which keeps the row. **The end-to-end measurement is not prejudged**: whether cube authoring is live end to end is still its own measurement — this ledger answers the per-key question only |
 
-The `dead` set across types is the enforce-or-remove worklist (ADR-0049); every
-misleading entry carries `authorWarn` so authors hear about it at compile time
-(governed types with warn entries must also be registered in the CLI lint's
-`TYPE_COLLECTIONS` — see lint-liveness-properties.ts).
+The `dead` set across types is the enforce-or-remove worklist (ADR-0049); a `dead`
+row warns its authors at compile time by its verdict alone, with no `authorWarn`
+marker (see *Author warnings* above). That reaches an author only in a type the lint
+walks: a governed type's warning rows are heard only once the lint visits the type,
+which for a flat stack collection means registering it in the lint's
+`TYPE_COLLECTIONS` (see lint-liveness-properties.ts).
 
 **Every registered type has been governed since #4488**, which emptied
 `PENDING_GOVERNANCE` of all nine debts the map opened with. The map itself stays,
