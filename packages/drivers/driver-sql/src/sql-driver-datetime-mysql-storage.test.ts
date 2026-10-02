@@ -54,7 +54,7 @@ describe.skipIf(!URL)('Field.datetime on MySQL (#3942)', () => {
   let driver: SqlDriver;
   let serverTimeZone = '';
 
-  // ── Why this beforeAll carries an explicit 60_000 budget (#14628) ──
+  // ── Why this beforeAll carries an explicit 60_000 budget (commit 6392b9c2b) ──
   // The live cell is one indirection away: this hook builds no driver of its
   // own, it calls `rawDriver()` above — which hard-codes `MYSQL_CELL.config()`,
   // unconditionally LIVE, not a parametrised `cell.config()` that would be

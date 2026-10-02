@@ -16,7 +16,7 @@
  * whose code comes from the closed vocabulary and names the lock wait. No retry
  * logic, no configurability.
  *
- * # #9542 — the same bound on boot, deliberately without the refusal
+ * # Commit 8bbf45947 — the same bound on boot, deliberately without the refusal
  *
  * The seam above separates "bound the wait" from "escape the swallow", and
  * #9354 armed only the flush, leaving boot schema-sync on the one-year default
@@ -110,7 +110,7 @@ class FakeMysqlDriver extends SqlDriver {
 
   issued: Issued[] = [];
   /**
-   * [#9542/#9609] Every log line the driver emitted, **with its level**.
+   * [commit 8bbf45947, #9609] Every log line the driver emitted, **with its level**.
    *
    * On the boot path this is the ONLY output a blocked widening produces — the
    * swallow eats the error itself — so "the bound fires and the operator is
@@ -378,7 +378,7 @@ describe('[#9354/#9542] a blocked widening ALTER — bounded on both paths, refu
   });
 
   // ───────────────────────────────────────────────────────────────
-  // BOOT (#9542) — the same bound, the opposite answer when it fires
+  // BOOT (commit 8bbf45947) — the same bound, the opposite answer when it fires
   // ───────────────────────────────────────────────────────────────
 
   it('bounds BOOT sync too, and still swallows — boot is not the flush', async () => {
@@ -390,7 +390,7 @@ describe('[#9354/#9542] a blocked widening ALTER — bounded on both paths, refu
     // but off the deferred path. This pin used to read the other way round:
     // boot ran the ALTER through the pool at MySQL's one-year default, so a boot
     // behind another session's metadata lock stopped at schema-sync, printed
-    // nothing, and could not be told from a crash. #9542 arms the bound here.
+    // nothing, and could not be told from a crash. Commit 8bbf45947 arms the bound here.
     await expect(driver.initObjects([WIDGET])).resolves.toBeUndefined();
 
     const set = setStatements(driver);
@@ -452,7 +452,7 @@ describe('[#9354/#9542] a blocked widening ALTER — bounded on both paths, refu
     // while something it claims is persisted has not landed? Here: yes. Boot
     // completed, traffic is served, and the `error` limb names this exact case
     // — "DDL that was supposed to run did not". The swallow is unchanged and
-    // deliberately so (#9542); only the level moved.
+    // deliberately so (commit 8bbf45947); only the level moved.
     const line = driver.logs.find((w) => /widen MySQL datetime columns/.test(w.msg));
     expect(line?.level).toBe('error');
     // ⭐ Asserted as an ABSENCE too, because `find` above would happily return
@@ -529,7 +529,7 @@ describe('[#9354/#9542] a blocked widening ALTER — bounded on both paths, refu
     await expect(driver.initObjects([WIDGET])).resolves.toBeUndefined();
     // ⚠️ This pin guards FLAG HYGIENE, not boot policy — it only ever shared an
     // assertion with the pin above. It used to read `setStatements → 0`, which
-    // since #9542 says nothing about the flag: a clean boot arms the bound too,
+    // since commit 8bbf45947 says nothing about the flag: a clean boot arms the bound too,
     // so that count is 2 either way. The observable that still discriminates is
     // the swallow on the line above (a stuck flag makes this same lock wait
     // escape `initObjects` as a refusal), and this line keeps it from passing

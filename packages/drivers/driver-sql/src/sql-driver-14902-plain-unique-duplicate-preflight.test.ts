@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SqlDriver } from '../src/index.js';
 
 /**
- * #14902 — a PLAIN unique index over existing duplicate rows.
+ * Commit 61821e54c — a PLAIN unique index over existing duplicate rows.
  *
  * ## The defect, in the two shapes it was measured side by side
  *

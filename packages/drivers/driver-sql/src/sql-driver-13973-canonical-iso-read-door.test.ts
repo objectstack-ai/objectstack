@@ -18,7 +18,7 @@
  * `Date` it is (pinned by `sql-driver-14078-invalid-date-materialisation.test.ts`;
  * never met here, because this fixture writes only valid instants).
  * `findWithWindowFunctions` used to be the one read door outside this list: it
- * applied no read presentation of any kind. Since #16609 it routes each row
+ * applied no read presentation of any kind. Since commit 78bc4ad58 it routes each row
  * through the SAME `formatOutput` pass `find()` runs (minus the window-alias
  * columns), so it presents these two column classes exactly as the doors above
  * do — pinned by `sql-driver-window-function-output.test.ts`, whose live cells
@@ -308,7 +308,7 @@ function measure(cell: DialectCell): void {
         for (const col of INSTANT_COLUMNS) expectCanonicalInstant(r[col], `bulkUpdate() return w${i} ${col}`);
         expect(r.closed_at, `bulkUpdate() return w${i} closed_at`).toBe(CLOSED_AT[i]);
         // A fresh stamp, in UTC — the same recency bound §A1 puts on `find()`.
-        // [#17690] `bulkUpdate()` publishes the contract's
+        // [commit be5c60291] `bulkUpdate()` publishes the contract's
         // `Record<string, unknown>[]` now, so the stamp is typed before it is
         // parsed.
         const updatedAt = r.updated_at;
@@ -347,7 +347,7 @@ function measure(cell: DialectCell): void {
       // the batch landed, its rows read back canonical through `find()`, and —
       // where the return carried a row — the return and the row agree value
       // for value, so the return door presents what the read door presents.
-      // [#17690] `find()` publishes `Record<string, unknown>[]`, so every id
+      // [commit be5c60291] `find()` publishes `Record<string, unknown>[]`, so every id
       // read off a returned row is narrowed before it is used as a key, and
       // `Array.prototype.find`'s absent arm is narrowed away rather than
       // asserted past.
@@ -469,7 +469,7 @@ for (const cell of DIALECT_CELLS) {
  * not to `normalizeSqliteDatetimeOutput`. The two presenters differ on exactly
  * one input class, a NUMBER: the audit presenter passes it through (ADR-0074
  * §3), the datetime fold turns it into ISO text. #13973's first cut routed the
- * audit columns to the datetime fold, and the contract review of PR #16619
+ * audit columns to the datetime fold, and the contract review recorded in commit 45cfa1b88
  * reproduced the divergence that made: an author-declared `created_at: number`
  * read `1700000000000` off `find()` and `"2023-11-14T22:13:20.000Z"` off
  * `distinct()` and `max()`. Two reachable shapes carry a number there:

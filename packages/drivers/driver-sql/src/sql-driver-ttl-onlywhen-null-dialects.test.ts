@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#10165] Dialect-compile measurement for `{ $null: true }` inside a
+ * [commit 801296050] Dialect-compile measurement for `{ $null: true }` inside a
  * lifecycle `onlyWhen` reap scope — the confidence gap named on the card:
  * the prior round (#7826) covered schema parsing and a fake engine, but not
  * the REAL driver compile path.
@@ -27,7 +27,7 @@
  *    `$null: false` must render `is not null`, and the TTL cutoff must
  *    remain a bound comparison on the same statement.
  *
- * 3. **[#10836] Live pg + mysql**: the same where EXECUTED against real
+ * 3. **[commit 7ab286e44] Live pg + mysql**: the same where EXECUTED against real
  *    servers, through `PG_CELL` / `MYSQL_CELL`. Measurement 2 proves the SQL
  *    *text*; it cannot prove the *server* returns those rows, and it never
  *    exercises the ttl cutoff against the column type each dialect actually
@@ -170,7 +170,7 @@ describe('ttl onlyWhen {$null} — real driver compile path, three dialects (#10
 });
 
 // ─────────────────────────────────────────────────────────────────
-// [#10836] MEASUREMENT 3 — the same where, EXECUTED on live servers
+// [commit 7ab286e44] MEASUREMENT 3 — the same where, EXECUTED on live servers
 // ─────────────────────────────────────────────────────────────────
 
 /** Table this file owns on the live servers. The SCHEMA it lands in is derived

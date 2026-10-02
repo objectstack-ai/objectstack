@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#16711] The object-definition parameters on `SqlDriver` accept every key
+ * [commit 7862fb711] The object-definition parameters on `SqlDriver` accept every key
  * they READ, spelled as a **fresh object literal** — and still refuse a key
  * that is genuinely not one of them.
  *
@@ -10,7 +10,7 @@
  * `SqlDriver` reads keys off caller objects through `(obj as any).<key>` while
  * the parameter's own inline literal declares none of them. Three instances
  * were carded and fixed one at a time before anyone called it a class:
- * `tenancy` (#4311), `indexes` (#16570), and `lifecycle` here. Each fix left
+ * `tenancy` (#4311), `indexes` (commit b72226f48), and `lifecycle` here. Each fix left
  * the next one standing, and each looked complete from inside its own card.
  *
  * The escape is silent by construction. TypeScript's excess-property check
@@ -105,7 +105,7 @@ describe('SqlDriver object-definition parameters accept the keys they read (#167
 
     // The PUBLIC entry point of the rotation chain, with a fresh literal
     // carrying both keys the chain's leaf (`ensureShardTable`) reads. Before
-    // #16711 this call did not compile: `rotateShards` declared neither key,
+    // commit 7862fb711 this call did not compile: `rotateShards` declared neither key,
     // and the two casts that read them sat three links down.
     const state = await driver.rotateShards({
       ...bareObject(T),
@@ -140,7 +140,7 @@ describe('SqlDriver object-definition parameters accept the keys they read (#167
 });
 
 /**
- * ⭐ THE NEGATIVE CONTROL (#16711 验收口径 item 4).
+ * ⭐ THE NEGATIVE CONTROL (验收口径 item 4 of the card commit 7862fb711 closed).
  *
  * Widening is only a fix while the accept set still has a boundary. A parameter
  * relaxed to `any`, or given an index signature, makes every assertion above
@@ -172,7 +172,7 @@ export async function refusesKeysThatAreNotDeclared(driver: SqlDriver): Promise<
 }
 
 /**
- * The narrowing axis, unchanged from #16570 and re-pinned here because the
+ * The narrowing axis, unchanged from commit b72226f48 and re-pinned here because the
  * `lifecycle` widening touches the same literal: a variable-bound argument
  * bypasses the excess-property check and is judged by ordinary assignability,
  * so the declared TYPES still bind. Compile-time only.
