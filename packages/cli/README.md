@@ -39,8 +39,8 @@ os compile
 
 | Command | Description |
 |---------|-------------|
-| `os init [name]` | Initialize a new ObjectStack project in the current directory |
-| `os dev [package]` | Start development mode with hot reload |
+| `os init [name]` | Initialize a new ObjectStack project — in a new directory of that name when `name` is given, otherwise in the current directory |
+| `os dev [package]` | Start development mode — watch sources, rebuild the artifact, and restart the server on change |
 | `os serve [config]` | Start the ObjectStack server with plugin auto-detection |
 
 ### Build & Validate
@@ -112,7 +112,17 @@ review) or `--auto-approve` (platform admins only). Set `OS_CLOUD_URL` (or
 
 ### Plugin Management
 
-Runtime plugins (declared in `objectstack.config.ts` `plugins`) are loaded automatically by `os serve` / `os dev`. There is no `os plugin` command group in v1; runtime plugins are bundled into the build artifact. To distribute a build, publish it as a package with `os package publish` (see [Cloud — publish & install](#cloud--publish--install)); the `os environments bind <id> --artifact dist/objectstack.json` path still binds an artifact directly into an environment without going through the package registry.
+Runtime plugins (declared in `objectstack.config.ts` `plugins`) are loaded automatically by `os serve` / `os dev`. Runtime plugins are bundled into the build artifact. To distribute a build, publish it as a package with `os package publish` (see [Cloud — publish & install](#cloud--publish--install)); the `os environments bind <id> --artifact dist/objectstack.json` path still binds an artifact directly into an environment without going through the package registry.
+
+A code-bearing plugin — a directory carrying an `objectstack.plugin.json` manifest — is packaged and shipped through the `os plugin` command group (ADR-0025 §3.4, build → sign → publish):
+
+| Command | Description |
+|---------|-------------|
+| `os plugin build [dir]` | Compile a plugin into a signed-ready `.osplugin` artifact (`--entry`, `--out`, `--minify`) |
+| `os plugin sign <artifact> --key <pem>` | Sign a built `.osplugin` with a publisher Ed25519 key, writing a detached `<artifact>.sig` |
+| `os plugin publish [artifact]` | Publish a signed `.osplugin` to ObjectStack Cloud |
+
+The group has no `install`: ADR-0025 records the code-plugin install half (download, verify, materialize, load) as not yet implemented. `os plugin` (singular) is unrelated to `os plugins` (plural), oclif's plugin manager, which this package does not ship — see [`os plugins` and `os help`](#os-plugins-and-os-help-not-commands).
 
 ### Quality
 
@@ -176,8 +186,13 @@ Common variables: `OS_DATABASE_URL`, `OS_DATABASE_DRIVER`,
 
 ### Global
 
-- `-v, --version` — Show version number
-- `-h, --help` — Show help
+- `--version` — Show version number
+- `--help` — Show help (`os --help`, or `os <command> --help` for one command)
+
+There are no short forms: `os -h` and `os -v` exit 2 with `command -h not found` /
+`command -v not found`. `-v` is a command's own flag instead — `--verbose` on `os dev`,
+`os serve`, `os start` and `os doctor`, `--version <semver>` on `os package publish` and
+`os package install`.
 
 ### `os init`
 
