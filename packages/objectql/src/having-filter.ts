@@ -20,11 +20,11 @@
 // ordinary FilterCondition over those columns: implicit equality, the
 // comparison / set / null / existence / string operators, and `$and` / `$or` /
 // `$not` composition. Operator semantics follow the Filter Protocol, with TWO
-// deliberate divergences from driver-memory's matcher — the face this module
-// was originally written against:
+// deliberate divergences from driver-memory's reference matcher — the face this
+// module was originally written against, which commit `8fec76a2b` retired:
 //
-// 1. AN UNKNOWN OPERATOR THROWS. The memory matcher ignores operators it does
-//    not know; here an ignored operator would silently return UNFILTERED
+// 1. AN UNKNOWN OPERATOR THROWS. The memory matcher ignored operators it did
+//    not know when this module was written; here an ignored operator would silently return UNFILTERED
 //    aggregates — the precise failure mode (#4286, ADR-0078) this module exists
 //    to end. The rejection names the operator and the supported set.
 //
@@ -2061,7 +2061,9 @@ function checkCondition(
       // at query time (SQLSTATE 42883), and `driver-memory`'s reference
       // matcher failed both polarities. The maintainer ruled the cell on
       // 2026-09-05 (option A, type-gate) and `FILTER_TEXT_CASES`' `score` rows
-      // pin it on every face: the reference matcher answers the predicate, and
+      // pin it on every face: the record-at-a-time faces (`formula`, this
+      // walker) answer the predicate, as `driver-memory`'s reference matcher did
+      // until commit `8fec76a2b` retired it, and
       // the SQL compilers emit a type-gated constant for a column whose
       // declared type is in `NON_TEXT_STORED_VALUE_TYPES`. This arm was already
       // on the ruled side; nothing here moved.
