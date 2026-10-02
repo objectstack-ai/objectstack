@@ -1036,6 +1036,10 @@ name, the package's own record is the one a field's options, an action's params,
 a dashboard's widgets and header actions, or a flow's screens are judged against;
 every other name the two declare adds up.
 
+A row that starts `{action}.` holds at both action addresses,
+`objects.{object}._actions.{action}` and `globalActions.{action}`: the keys
+beneath an action entry are judged the same way under either.
+
 | Key | Resolves when it names |
 |:---|:---|
 | `objects.{object}` | an object declared by this stack **or a sibling package of the same artifact** — its keys are then judged row by row below; **or** a platform object, or an object an `objectExtensions[]` entry extends that no package of the artifact declares — both skipped whole, because the owner's fields are not visible from here |
@@ -1046,8 +1050,12 @@ every other name the two declare adds up.
 | `objects.{object}._tabs.{tab}` | a filter-preset tab's `name` in `interfaceConfig.userFilters.tabs` on a page over that object (`interfaceConfig.source`, else the page's `object`) — a list view's own `tabs` has no renderer and is not resolvable |
 | `objects.{object}._validations.{rule}` | a validation rule's `name` in that object's `validations[]` or in an `objectExtensions[]` entry aimed at it — a `conditional` rule's `then` / `otherwise` branch included |
 | `objects.{object}._actions.{action}` | an action bound to that object: one in its `actions`, or a stack-level action whose `objectName` is that object |
-| `objects.{object}._actions.{action}.params.{param}` | a param's `name` on that action |
-| `globalActions.{action}` | an action with **no** `objectName` — a key naming a bound action is reported with the `objects.{owner}._actions` key the resolver reads instead |
+| `globalActions.{action}` | an action with **no** `objectName` — a key naming a bound action is an error whose message names the `objects.{owner}._actions.{action}` key to write instead, `{owner}` being the action's own `objectName` |
+| `{action}.params.{param}` | a param's `name` on that action |
+| `{action}.params.{param}.options.{value}` | an option's stored **`value`** in that param's inline `options` — a warning, as on a field. A param that references a `field` and declares no inline `options` takes the field's list when the dialog renders, so its option keys are not judged |
+| `{action}.outcomeMessages.{outcome}` | an outcome the action's own `outcomeMessages` declares |
+| `{action}.resultDialog.fields.{path}` | the literal `path` of a field the action's `resultDialog.fields[]` declares — dots included, so `client.secret` is one key |
+| `{action}.resultDialog.title` / `.description` / `.acknowledge` | an action that declares a `resultDialog`, whether or not the dialog sets that text itself — for an action that declares none, nothing reads the dialog's copy |
 | `apps.{app}` | an app declared, or one a `navigationContributions` entry anywhere in the artifact contributes into — including an app owned outside the artifact |
 | `apps.{app}.navigation.{id}` | a navigation item `id` the app declares (nested `children` and `areas[]` included) or one contributed into it; under an app that is only contributed into, the contributed ids alone |
 | `dashboards.{dash}` / `.widgets.{id}` / `.actions.{actionUrl}` | a dashboard declared / a widget `id` on it / a header action's `actionUrl` on it |
