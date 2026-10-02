@@ -14,7 +14,7 @@ Clause-②: yes (widening)
 - **`@objectstack/lint`.** `os validate` no longer warns that these fields are inert:
   - a `lookup` field that sets `inlineEdit`: it is the inline grid's join key, read whatever columns the grid draws, as a `master_detail` field already was;
   - a field a derived inline grid's per-row expand form draws, through `deriveInlineRowFormFields`, such as a `readonly`, `richtext` or `json` child field;
-  - a field named in an `object-master-detail-form` detail entry's `formFields`, now read against the entry's `childObject` instead of the block's object. With a declared `inlineMode` under which the form is never offered, the list is reported as a carrier;
-  - a field named in a `record:line_items` block's `columns`, `relationshipField` or `amountField`, now read against the block's `childObject`.
+  - a field named in an `object-master-detail-form` detail entry's `formFields`, now read against the entry's `childObject` instead of the block's object. When the form is never offered for the list — under a declared `inlineMode`, or, on an entry that names both its `relationshipField` and its `columns`, under no `inlineMode` at all — the list is reported as a carrier;
+  - a field named in a `record:line_items` block's `columns`, `relationshipField`, `amountField`, `sort` or `filter`, now read against the block's `childObject`.
 
   A parent field that shares a name with one of those child fields was credited in the child's place, and is now reported if nothing else reads it. A child field nothing draws or names, such as a `hidden` one, is still reported.
