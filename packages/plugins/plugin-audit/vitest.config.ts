@@ -53,6 +53,13 @@ export default defineConfig({
         find: /^@objectstack\/platform-objects\/audit$/,
         replacement: path.resolve(__dirname, '../../platform-objects/src/audit/index.ts'),
       },
+      // [#21197] The census objects `audit-internal-field-omission.test.ts`
+      // judges the ledger mirror against — their declarations ARE the subject,
+      // so they resolve to source, not to `platform-objects/dist`.
+      {
+        find: /^@objectstack\/platform-objects\/identity$/,
+        replacement: path.resolve(__dirname, '../../platform-objects/src/identity/index.ts'),
+      },
       // [#12642] The i18n provenance seam. This package's translation barrel
       // passes its committed `<locale>.source-hashes.generated.ts` companions
       // through `withSourceFallback`, whose home is this subpath — so without

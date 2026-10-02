@@ -118,7 +118,9 @@ function makeDriver() {
     async connect() {}, async disconnect() {}, async checkHealth() { return true; },
     async execute() { return null; },
     async find(object: string, ast: any) {
-      return Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where)).map(copy);
+      const rows = Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
+      // The caller's bound, applied after the filter (`check:objectql-double-limit`).
+      return (typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows).map(copy);
     },
     async findOne(object: string, ast: any) {
       for (const r of storeFor(object).values()) if (matches(r, ast?.where)) return copy(r);

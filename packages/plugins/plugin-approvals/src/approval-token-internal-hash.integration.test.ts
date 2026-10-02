@@ -15,6 +15,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { ApprovalService } from './approval-service.js';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
 import { SysApprovalAction } from './sys-approval-action.object.js';
@@ -75,7 +76,7 @@ describe('[#21197] the approval token digest is internal, and the actionable lin
     } as any, SUBMITTER);
     const { approve } = await svc.issueActionTokens(opened.id, 'approver');
 
-    const generic = (await engine.find('sys_approval_token', { context: SYSTEM } as any)) as any[];
+    const generic = (await engine.find('sys_approval_token', { context: SYSTEM } satisfies EngineQueryOptions)) as any[];
     expect(generic.length).toBeGreaterThan(0);
     for (const row of generic) expect(row).not.toHaveProperty('token_hash');
     const atRest = (await (engine as any).getDriver('sys_approval_token').find('sys_approval_token', { where: {} })) as any[];
