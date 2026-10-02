@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   AGGREGATE_FIELD_TYPE_COMPATIBILITY,
+  AggregationMetricType,
   BOOLEAN_VALUE_TYPES,
   FieldType,
   MULTI_CAPABLE_TYPES,
@@ -656,12 +657,14 @@ const cubeStack = (
     {
       name: 'fx_account',
       sharingModel: 'private',
-      fields: { name: { type: 'text' }, hq: { type: 'json' }, region: { type: 'text' } },
+      // [#21419] `revenue` is `number` here and `text` on `fx_branch`, so the
+      // two hop tiers give a cube `sum` opposite verdicts.
+      fields: { name: { type: 'text' }, hq: { type: 'json' }, region: { type: 'text' }, revenue: { type: 'number' } },
     },
     {
       name: 'fx_branch',
       sharingModel: 'private',
-      fields: { name: { type: 'text' }, hq: { type: 'text' }, region: { type: 'json' } },
+      fields: { name: { type: 'text' }, hq: { type: 'text' }, region: { type: 'json' }, revenue: { type: 'text' } },
     },
   ],
   analyticsCubes: [
@@ -741,9 +744,16 @@ describe('the cube leg — an analyticsCubes member the analytics door refuses i
     expect(validateDatasetMeasureAggregates(stack)).toEqual([]);
   });
 
-  it('judges only count_distinct among the cube measures: count reads no value, and the other rows are not this leg\'s', () => {
-    for (const type of ['count', 'sum', 'avg', 'min', 'max']) {
-      expect(findings(cubeStack({ measures: { m: measure(type, 'meta') } })), type).toEqual([]);
+  // [#21419] Every row of the table is judged on a cube measure (the sweep is
+  // in the next block): over the same json column `count` reads no value and
+  // is accepted, and every other row refuses it.
+  it('judges every row of the table on a cube measure: count reads no value, and the other rows refuse a json column', () => {
+    expect(findings(cubeStack({ measures: { m: measure('count', 'meta') } }))).toEqual([]);
+    for (const type of ['sum', 'avg', 'min', 'max']) {
+      expect(
+        findings(cubeStack({ measures: { m: measure(type, 'meta') } })).map((f) => f.path),
+        type,
+      ).toEqual(['analyticsCubes[0].measures.m.type']);
     }
   });
 
@@ -856,6 +866,190 @@ describe('the cube leg — an analyticsCubes member the analytics door refuses i
       runAuthoringRules('lint', { normalized: control, parsed: control }).filter(
         (f) => f.rule === DIMENSION_RULE || f.rule === RULE,
       ),
+    ).toEqual([]);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#21419] The cube leg judges EVERY cube measure through `acceptsDeclaration`
+// — the dataset measure's own verdict — on the column the door reads. The
+// doors are `service-analytics`' `cube-measure-field-type-door.ts` for the
+// `count` / `sum` / `avg` / `min` / `max` rows (the declared TYPE against the
+// table; the `multiple` flag is not read) and `structured-json-dimension-door.ts`
+// for `count_distinct` (the row AND `isMultiValueField`). Until this leg a cube
+// `sum` over a `text` column passed `os validate` (measured:
+// `oos-cube-sum-text`, exit 0).
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * The cube doors' verdict on a measure of `type` over a column declared as
+ * `shape`, as the two door modules state their rules — read off the spec's
+ * table and predicates, never a retyped list:
+ *
+ * - a `type` that is no row of the table (the expression metric types) is
+ *   judged by neither door;
+ * - `count_distinct` — `structured-json-dimension-door.ts`: refused when the
+ *   row refuses the type OR the declaration is multi-value;
+ * - every other row — `cube-measure-field-type-door.ts`: refused when the row
+ *   refuses the declared type, whatever the `multiple` flag says.
+ */
+const cubeDoorRefuses = (type: string, shape: { type: string; multiple: boolean }): boolean => {
+  if (!Object.prototype.hasOwnProperty.call(AGGREGATE_FIELD_TYPE_COMPATIBILITY, type)) return false;
+  if (type === 'count_distinct') {
+    return !isAggregateCompatibleWithFieldType(type, shape.type) || isMultiValueField(shape);
+  }
+  return !isAggregateCompatibleWithFieldType(type, shape.type);
+};
+
+describe('the cube leg — every cube measure is judged by the aggregate × field-type table, as the cube door judges it', () => {
+  // ⭐ The card's measured instance and its control, one pair.
+  it('refuses oos-cube-sum-text — a cube sum over a text column — and accepts sum over a number one', () => {
+    const found = validateDatasetMeasureAggregates(cubeStack({ measures: { sum_name: measure('sum', 'name') } }));
+    expect(found).toHaveLength(1);
+    const issue = found[0];
+    expect(issue.severity).toBe('error');
+    expect(issue.rule).toBe(RULE);
+    expect(issue.path).toBe('analyticsCubes[0].measures.sum_name.type');
+    expect(issue.where).toBe('cube "fx_cube" › measure "sum_name"');
+    expect(issue.message).toContain('aggregate "sum" to field "name"');
+    expect(issue.message).toContain('object "fx_ledger" declares as `text`');
+    expect(issue.message).toContain(`"sum" accepts: ${AGGREGATE_FIELD_TYPE_COMPATIBILITY.sum.join(', ')}.`);
+    // The door that refuses it later is the cube's, never the dataset compile leg.
+    expect(issue.hint).toContain('on the cube with `400 INVALID_FIELD`');
+    expect(issue.hint).not.toContain('DATASET_INVALID');
+
+    expect(
+      validateDatasetMeasureAggregates(
+        cubeStack({ measures: { sum_amount: measure('sum', 'amount') } }, {}, { amount: { type: 'number' } }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('refuses avg / min / max over that text column, and sum / avg over a datetime one; accepts min / max over the datetime', () => {
+    const datetime = { opened_at: { type: 'datetime' } };
+    for (const [type, column] of [['avg', 'name'], ['min', 'name'], ['max', 'name'], ['sum', 'opened_at'], ['avg', 'opened_at']]) {
+      const [issue] = findings(cubeStack({ measures: { m: measure(type, column) } }, {}, datetime));
+      expect(issue?.path, `${type}(${column})`).toBe('analyticsCubes[0].measures.m.type');
+      expect(issue?.message, `${type}(${column})`).toContain(`aggregate "${type}" to field "${column}"`);
+    }
+    for (const type of ['min', 'max', 'count', 'count_distinct']) {
+      expect(findings(cubeStack({ measures: { m: measure(type, 'opened_at') } }, {}, datetime)), type).toEqual([]);
+    }
+  });
+
+  // ⭐ The enumeration pin: the whole surface, against the doors' rules.
+  it('agrees with the cube doors on every cube measure type × every declared FieldType, flagged and not', () => {
+    const rows = AGGREGATES;
+    const metricTypes: readonly string[] = AggregationMetricType.options;
+    // Every row of the table is a `type` a cube measure can write, so the sweep
+    // below reaches each row through a real cube measure, not a fiction.
+    for (const row of rows) expect(metricTypes, `row ${row}`).toContain(row);
+    // The population is every cube measure `type` AND every row: a row or a
+    // metric type added later is swept here the day it lands.
+    const types = [...new Set([...metricTypes, ...rows])];
+
+    const refusedBy = new Map<string, number>();
+    const acceptedBy = new Map<string, number>();
+    for (const type of types) {
+      for (const fieldType of FieldType.options) {
+        for (const multiple of [false, true]) {
+          const def = multiple ? { type: fieldType, multiple: true } : { type: fieldType };
+          const stack = cubeStack({ measures: { probe_measure: measure(type, 'probe') } }, {}, { probe: def });
+          const fires = findings(stack).length > 0;
+          expect(fires, `cube ${type}(${fieldType}${multiple ? ', multiple' : ''})`).toBe(
+            cubeDoorRefuses(type, { type: fieldType, multiple }),
+          );
+          const tally = fires ? refusedBy : acceptedBy;
+          tally.set(type, (tally.get(type) ?? 0) + 1);
+        }
+      }
+    }
+
+    // Floors per type, so no row can agree vacuously: `count` refuses nothing,
+    // every other row both refuses and accepts, and a type outside the table
+    // is never judged.
+    const perType = FieldType.options.length * 2;
+    for (const type of types) {
+      const refused = refusedBy.get(type) ?? 0;
+      const accepted = acceptedBy.get(type) ?? 0;
+      expect(refused + accepted, type).toBe(perType);
+      if (!rows.includes(type) || type === 'count') {
+        expect(refused, `${type} refuses nothing`).toBe(0);
+      } else {
+        expect(refused, `${type} refuses`).toBeGreaterThan(10);
+        expect(accepted, `${type} accepts`).toBeGreaterThan(5);
+      }
+    }
+    // The expression metric types are in the population and outside the table.
+    expect(types.filter((t) => !rows.includes(t)).sort()).toEqual(['boolean', 'number', 'string']);
+  });
+
+  it('reads a relationship path on the object the last hop reaches — the lookup\'s reference, or the join the cube declares for it', () => {
+    // No declared join: the lookup's `reference`, `fx_account`, where `name` is text and `revenue` a number.
+    const [byReference] = findings(cubeStack({ measures: { s: measure('sum', 'account.name') } }));
+    expect(byReference?.path).toBe('analyticsCubes[0].measures.s.type');
+    expect(byReference?.message).toContain('object "fx_account" (reached through this cube\'s join chain)');
+    expect(findings(cubeStack({ measures: { s: measure('sum', 'account.revenue') } }))).toEqual([]);
+
+    // A declared join wins over the reference, as at the door: keyed `account`,
+    // reaching `fx_branch`, where `revenue` is text.
+    const joined = { joins: { account: { name: 'fx_branch' } } };
+    const [byJoin] = findings(cubeStack({ measures: { s: measure('sum', 'account.revenue') } }, joined));
+    expect(byJoin?.message).toContain('object "fx_branch"');
+    expect(byJoin?.message).toContain('declares as `text`');
+  });
+
+  it('never hands the predicate a guess: no type, a type outside the table, the row wildcard, an unresolved column', () => {
+    const silent = (measures: Record<string, unknown>, ledger: Record<string, unknown> = {}) =>
+      expect(validateDatasetMeasureAggregates(cubeStack({ measures }, {}, ledger))).toEqual([]);
+    // The expression metric types are outside the table's vocabulary (skip 5).
+    silent({ n: measure('number', 'name'), s: measure('string', 'name'), b: measure('boolean', 'name') });
+    // A prototype key is not a row.
+    silent({ p: measure('toString', 'name') });
+    // No `type`, or a non-string one — the schema's to refuse.
+    silent({ x: { label: 'X', sql: 'name' }, y: { label: 'Y', type: ['sum'], sql: 'name' } });
+    // The row wildcard names no column: whether `'*'` belongs on a non-count
+    // measure is a question of its own, not this leg's.
+    silent({ s: measure('sum', '*'), a: measure('avg', '*'), lo: measure('min', '*'), hi: measure('max', '*') });
+    // A column that does not resolve, a hop the graph cannot follow, an untyped column.
+    silent({ s: measure('sum', 'nope'), t: measure('sum', 'ghost.name'), u: measure('sum', 'untyped') }, {
+      untyped: { label: 'U' },
+    });
+    // A cube whose `sql` names no object this stack defines.
+    expect(
+      validateDatasetMeasureAggregates(cubeStack({ measures: { s: measure('sum', 'name') } }, { sql: 'not_here' })),
+    ).toEqual([]);
+  });
+
+  it('reports each refused measure once, in the cube\'s key order, after its dimensions', () => {
+    const stack = cubeStack({
+      dimensions: { meta: dim('meta') },
+      measures: {
+        sum_name: measure('sum', 'name'),
+        count_name: measure('count', 'name'),
+        distinct_meta: measure('count_distinct', 'meta'),
+        max_stage: measure('max', 'stage'),
+      },
+    });
+    expect(validateDatasetMeasureAggregates(stack).map((f) => [f.rule, f.path])).toEqual([
+      [DIMENSION_RULE, 'analyticsCubes[0].dimensions.meta.sql'],
+      [RULE, 'analyticsCubes[0].measures.sum_name.type'],
+      [RULE, 'analyticsCubes[0].measures.distinct_meta.type'],
+      [RULE, 'analyticsCubes[0].measures.max_stage.type'],
+    ]);
+  });
+
+  it('fires through runAuthoringRules on all three commands, and only on the refused measure', () => {
+    const stack = cubeStack({ measures: { sum_name: measure('sum', 'name') } });
+    for (const command of ['validate', 'build', 'lint'] as const) {
+      const found = runAuthoringRules(command, { normalized: stack, parsed: stack }).filter((f) => f.rule === RULE);
+      expect(found.map((f) => [f.path, f.severity]), command).toEqual([
+        ['analyticsCubes[0].measures.sum_name.type', 'error'],
+      ]);
+    }
+    const control = cubeStack({ measures: { count_name: measure('count', 'name') } });
+    expect(
+      runAuthoringRules('lint', { normalized: control, parsed: control }).filter((f) => f.rule === RULE),
     ).toEqual([]);
   });
 });

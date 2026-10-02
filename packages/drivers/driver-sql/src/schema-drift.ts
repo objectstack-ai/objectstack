@@ -1290,7 +1290,7 @@ export function diffManagedTable(args: {
     // never revisits an existing column, so a deployment upgrading into that
     // release gets no change AND no diagnostic. The server keeps refusing the
     // same write, and the refusal is a poor substitute for a report: the live
-    // probe behind `objectql`'s `driver-fault-redaction.ts` measured Postgres's
+    // probe behind `types`' `driver-fault-redaction.ts` measured Postgres's
     // `22001` as identifier-only and naming the TYPE rather than the column
     // (`value too long for type character varying(255)`), MySQL's `1406` as
     // `Data too long for column 'label' at row 1`. Meanwhile every

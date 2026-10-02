@@ -318,13 +318,15 @@ describe('#9380 the kernel:ready platform migrations, on the boots that reach th
   it('[read-only contract] a NON-deferred one-shot CLI boot also leaves it byte-identical', async () => {
     const before = await readState();
 
-    // The half that a `deferSchemaDdl`-keyed policy would have missed, and the
-    // more dangerous one: `os migrate summary-nulls`, `value-shapes`,
-    // `recorded-by`, `resume`, `files-to-references` and `os migrate meta` all
-    // boot WITHOUT `deferSchemaDdl` and are still dry-run-by-default ("a dry
-    // run writes NOTHING"). If the arming were gated on deferral instead of on
-    // being a one-shot boot, every one of them would silently repair rows
-    // behind a report.
+    // The half that a `deferSchemaDdl`-keyed policy would have missed: the
+    // WRITE modes boot without `deferSchemaDdl` — `--apply` of `os migrate
+    // meta --stored`, `summary-nulls`, `value-shapes`, `recorded-by`,
+    // `files-to-references` and `audit-metadata-bodies`, `os migrate resume
+    // --run`, `os secret orphans --delete`, `os meta resync --yes`. (Every
+    // no-write mode boots deferred since #21391.) Each writes only what the
+    // operator confirmed; if the arming were gated on deferral instead of on
+    // being a one-shot boot, every one of them would also repair rows the
+    // operator never saw in the preview.
     const stack = await bootSchemaStack({
       jsonOutput: false,
       databaseUrl: `file:${dbFile}`,

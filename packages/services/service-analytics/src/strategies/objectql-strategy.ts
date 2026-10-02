@@ -49,7 +49,9 @@ import {
 // `NativeSQLStrategy` so the two paths accept and refuse the same set — it
 // replaces the custom-SQL partition both used to key on, retired from the
 // spec with the three types it named.
-import { aggregateOfMeasure } from './native-sql-strategy.js';
+// [#21365] `windowClauseSql` is the same rule for the row window: one spelling
+// of an offset-only window per dialect, shared with the native face.
+import { aggregateOfMeasure, windowClauseSql } from './native-sql-strategy.js';
 
 /**
  * [#10861 / commit 399ecad58] Where a member in the cross-object envelope's inventory
@@ -674,8 +676,13 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       const orderClauses = Object.entries(query.order).map(([f, d]) => `"${f}" ${d.toUpperCase()}`);
       sql += ` ORDER BY ${orderClauses.join(', ')}`;
     }
-    if (query.limit != null) sql += ` LIMIT ${query.limit}`;
-    if (query.offset != null) sql += ` OFFSET ${query.offset}`;
+    // [#21365] The window renders through the native face's own
+    // `windowClauseSql`, for the dialect of the driver the engine aggregate
+    // runs on — the same `sqlDialect` read the read scope above makes. An
+    // offset with no limit then carries that dialect's no-limit spelling
+    // (`LIMIT -1 OFFSET n` on SQLite, whose grammar has no bare `OFFSET`), so
+    // the echoed `sql` and `/analytics/sql` print a window the dialect runs.
+    sql += windowClauseSql(query.limit, query.offset, sqlDialectFor(ctx, tableName));
 
     return { sql, params };
   }
