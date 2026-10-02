@@ -260,7 +260,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       via_override: {
         label: "Mediante anulación de administrador",
-        help: "Verdadero cuando el actor fue admitido en esta acción únicamente por la vía de anulación privilegiada (#3424): no ocupaba ningún puesto en la lista de aprobadores pendientes de la solicitud."
+        help: "Verdadero cuando el actor no ocupaba ningún puesto en la lista de aprobadores pendientes de la solicitud y fue admitido en esta acción únicamente por la anulación privilegiada, que permite a un administrador de la plataforma o de la organización actuar sobre cualquier solicitud pendiente para que una que nadie de su lista puede decidir nunca quede bloqueada."
       },
       reassign_from: {
         label: "Reasignado de",
@@ -272,7 +272,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       attachments: {
         label: "Adjuntos",
-        help: "Archivos que respaldan esta acción, p. ej. un contrato firmado o pruebas (#3266)."
+        help: "Archivos que respaldan esta acción, p. ej. un contrato firmado o pruebas."
       },
       created_at: {
         label: "Creado el"
@@ -297,7 +297,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_approval_delegation: {
     label: "Approval Delegation",
     pluralLabel: "Approval Delegations",
-    description: "Self-service out-of-office rule: route this user's approver slots to a delegate within a time window (#1322 M1).",
+    description: "Self-service out-of-office rule: route this user's approver slots to a delegate within a time window.",
     fields: {
       id: {
         label: "Delegation ID"

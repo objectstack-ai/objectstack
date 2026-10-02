@@ -5993,6 +5993,24 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + "back to the manifest's own English literal.",
   },
   {
+    id: 'translation-widget-sub-caption-retired',
+    order: 60,
+    text:
+      'It also retires the metric sub-caption at both ends (#21257; ruling C on objectui#11389, '
+      + 'which reverses #5428 item 4; ADR-0049). The widget translation key '
+      + '`dashboards.<name>.widgets.<id>.subCaption` overlaid a widget\'s `options.description`, a key '
+      + 'the dashboard schema never declared and no authored widget wrote, so the overlay in '
+      + '`translateDashboard` was its only writer. The overlay is removed, `subCaption` is a '
+      + '`retiredKey()` tombstone on the widget translation node, and its former `subtitle` alias '
+      + 'now carries the retirement instead of a rename onto a key that accepts nothing. A widget '
+      + 'keeps one authored description, `widget.description`, which renders as the card-header '
+      + 'subtitle and is translated by the widget\'s `description` key. The D2 conversion '
+      + '`translation-widget-sub-caption-removed` strips the key from bundle entries and stored '
+      + 'translation items as a lossless delete of what is served, retired from the load path so '
+      + 'authors are refused at parse; its D3 record is the semantic entry '
+      + '`translation-widget-sub-caption-retired`.',
+  },
+  {
     id: 'ui-form-layout-inline-grid-retired',
     order: 40,
     text:
@@ -6571,6 +6589,72 @@ const step18: MigrationStep = {
         + 'The migration is proved correct when no source in the tree spells a bare duration on '
         + 'this shape AND the twelve sibling counts are untouched — a sweep that suffixed any of '
         + 'them has read a count as a duration and over-applied the rule.',
+    },
+    // #21289 — the two JSON-Schema slots the cloud AI runtime compiles,
+    // `action.ai.outputSchema` and `agent.structuredOutput.schema`, were open
+    // records, so a schema whose untyped subschema carries a type-scoped keyword
+    // (`properties`, `items`, `pattern`, …) passed every authoring door and was then
+    // refused by the runtime's one shared guard before the action or agent ran.
+    // Both slots now come from one factory (`shared/ai-json-schema-slot.ts`) that
+    // mirrors that guard's keyword set and descent exactly and refuses at the
+    // subschema's path. D3 only: the runtime already refused every such schema, so
+    // nothing that worked stops working; supplying a `type` is a judgment about the
+    // author's intent (adding one also narrows what the schema accepts), not a
+    // lossless rewrite; and the authored census found nothing to respell.
+    // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+    // span already, and a nested backtick would close it.
+    {
+      id: 'ai-json-schema-untyped-subschema-refused',
+      surface: 'action.ai.outputSchema (stack actions and object-nested actions) and '
+        + 'agent.structuredOutput.schema — a JSON Schema in which an object subschema with no type '
+        + 'carries a type-scoped keyword',
+      replacement: 'the same schema with a `"type"` declared on every subschema that carries a '
+        + 'type-scoped keyword: `"object"` beside `properties`, `required`, `additionalProperties`, '
+        + '`patternProperties`, `propertyNames`, `minProperties` or `maxProperties`; `"array"` beside '
+        + '`items`, `prefixItems`, `contains`, `minItems`, `maxItems` or `uniqueItems`; `"string"` '
+        + 'beside `minLength`, `maxLength`, `pattern` or `format`; `"number"` or `"integer"` beside '
+        + '`minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum` or `multipleOf`. A subschema '
+        + 'meant to accept several types declares them as an array (`"type": ["string", "null"]`).',
+      reason: 'Both slots are compiled by the cloud AI runtime — `action.ai.outputSchema` before the '
+        + 'action runs, to validate its result, and `agent.structuredOutput.schema` as the agent\'s '
+        + 'structured-output contract — and both readers call one guard whose schema reader does not '
+        + 'check a type-scoped keyword on a subschema that declares no `type`. That guard refuses the '
+        + 'whole schema before anything runs. The spec declared both slots as open records, so such a '
+        + 'schema passed `defineStack`, `objectstack validate` and the metadata save door, and the '
+        + 'author learned of it only when the action or agent was invoked. Both slots are now one '
+        + 'declaration that mirrors the guard exactly — the same 22 type-scoped keywords (`properties`, '
+        + '`required`, `additionalProperties`, `patternProperties`, `propertyNames`, `minProperties`, '
+        + '`maxProperties`, `items`, `prefixItems`, `contains`, `minItems`, `maxItems`, `uniqueItems`, '
+        + '`minLength`, `maxLength`, `pattern`, `format`, `minimum`, `maximum`, `exclusiveMinimum`, '
+        + '`exclusiveMaximum`, `multipleOf`), present with any value on an object node whose `type` is '
+        + 'absent; the same descent into every value of `properties`, `patternProperties`, `$defs`, '
+        + '`definitions` and `dependentSchemas` and into the single subschema or each array entry of '
+        + '`items`, `additionalProperties`, `contains`, `propertyNames`, `not`, `if`, `then`, `else`, '
+        + '`unevaluatedProperties`, `unevaluatedItems`, `anyOf`, `oneOf`, `allOf` and `prefixItems`, '
+        + 'under typed and untyped parents alike, without following `$ref` — and refuses each offending '
+        + 'subschema at its own path with the `type` to declare named. Boolean subschemas, `{}`, a '
+        + 'node with any `type` value, and an untyped node carrying only keywords outside the list '
+        + '(`enum`, `const`, `$ref`, `anyOf`, `title`, …) are accepted, as the runtime accepts them. '
+        + 'Measured on the built package: the per-type schema the metadata save door validates with '
+        + 'refuses an action, an object-nested action or an agent carrying such a schema at the '
+        + 'subschema path, and `defineStack` throws with the same path; the same schema with `type` '
+        + 'declared is accepted at both. Read from source and not run: a row already stored still '
+        + 'loads, because the database loader replays the conversion chain and parses nothing, and its '
+        + 'next save is refused until the `type` is declared. No conversion is registered: '
+        + 'every refused schema was already refused by the runtime, so nothing that worked stops '
+        + 'working; and supplying a `type` is a judgment about what the author meant, not a lossless '
+        + 'rewrite, because declaring one also narrows what the schema accepts. Population measured at '
+        + 'the change, on origin/main 135daaa06b: zero untyped subschemas in the three authorings of '
+        + 'either slot across the package fixtures (one action `ai.outputSchema`, two '
+        + '`structuredOutput.schema`), and zero authorings of either slot in the examples, the '
+        + 'documentation and the published skills; the one `outputSchema` the examples carry is a '
+        + 'connector action\'s, a different key. Deployed metadata NOT MEASURED.',
+      acceptanceCriteria: 'Every `ai.outputSchema` on an action (stack-level and object-nested) and '
+        + 'every `structuredOutput.schema` on an agent parses: `objectstack validate` reports no '
+        + 'issue whose message reads `uses "…" without a "type"` at either slot, and every subschema '
+        + 'in either schema that carries a type-scoped keyword declares its `type`. The action or '
+        + 'agent then runs past the AI runtime\'s schema compilation instead of being refused before '
+        + 'it runs.',
     },
     {
       id: 'analytics-authorable-unknown-keys-refused',
@@ -17966,6 +18050,34 @@ const step18: MigrationStep = {
         + 'is wrong or missing for your locale, correct it in the platform bundle '
         + '(`@objectstack/service-settings`’s `settingsBuiltinTranslations`) — ⛔ do not re-add '
         + 'app-side copy at either door, which is refused.',
+    },
+    // The D3 entry of the `translation-widget-sub-caption-removed` family (#21257):
+    // the metric sub-caption retired at both ends by ruling C on objectui#11389,
+    // which reverses #5428 item 4. One D3 entry per retirement family, even when D2
+    // is lossless (ruling B on #17152). The strip deletes a string nothing reads any
+    // more; whether that copy still belongs on the card, and where, is the author's
+    // call and not something the conversion can decide.
+    {
+      id: 'translation-widget-sub-caption-retired',
+      surface: 'translation.dashboards.<dashboard>.widgets.<id>.subCaption — the metric sub-caption '
+        + 'overlaid onto a widget\'s options.description',
+      replacement: 'The widget\'s one authored description, `widget.description`, rendered as the '
+        + 'card-header subtitle and translated by `dashboards.<dashboard>.widgets.<id>.description`.',
+      reason: 'The D2 conversion `translation-widget-sub-caption-removed` deletes `subCaption` from every '
+        + 'translation bundle and stored translation item, and `translateDashboard` no longer overlays '
+        + 'anything onto a widget\'s `options`. The sub-caption was the string under a metric\'s value; '
+        + 'the dashboard schema never declared `options.description` and no authored widget wrote it, so '
+        + 'a translated sub-caption existed only because this key put it there. What the delete drops is '
+        + 'translation WORK: a translator who wrote a caption per locale meant a user to read it. The '
+        + 'conversion cannot move those strings to `description`, because `description` already '
+        + 'translates the card-header subtitle — a different string a widget may also carry — and only '
+        + 'the author can say whether the caption\'s wording belongs in that subtitle or is no longer '
+        + 'needed.',
+      acceptanceCriteria: 'No translation bundle or translation item carries a widget `subCaption`; the '
+        + 'parse refuses it. For each metric widget whose caption a user still needs to read, the copy '
+        + 'lives in the widget\'s `description` and its localized values sit under the widget\'s '
+        + '`description` entry for every locale the dropped strings covered — or the author has decided '
+        + 'the card-header subtitle alone is enough.',
     },
     // A forced local mode beside a remote to replicate from, refused at both doors
     // together: the datasource contract (on mode) and the turso driver's

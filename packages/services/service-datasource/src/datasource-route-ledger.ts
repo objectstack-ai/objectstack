@@ -136,7 +136,7 @@ export const DATASOURCE_ROUTE_LEDGER: readonly DatasourceRouteLedgerEntry[] = [
   // Served by `datasource-admin`; 503 SERVICE_UNAVAILABLE when that service is
   // not wired, 400 DATASOURCE_ADMIN_ERROR on a refusal (#4249).
   { route: 'GET /api/v1/datasources', family: 'datasource-lifecycle', disposition: 'server-only',
-    note: 'Setup → Datasources list: provenance (code/runtime) + the retained connect verdict per datasource (#3827). Console surface; the SDK expresses no datasource-lifecycle method.' },
+    note: 'Setup → Datasources list: provenance (code/runtime) + the retained connect verdict per datasource, so a datasource that failed to connect reports `error` here instead of looking untested. Console surface; the SDK expresses no datasource-lifecycle method.' },
   { route: 'GET /api/v1/datasources/:name', family: 'datasource-lifecycle', disposition: 'server-only',
     note: 'edit-form read, credential-stripped (`config` plus a `hasSecret` flag, never `credentialsRef`). Console surface. Registered AFTER the literal `/drivers` route so that segment is never captured as a name.' },
   { route: 'POST /api/v1/datasources', family: 'datasource-lifecycle', disposition: 'server-only',
@@ -146,7 +146,7 @@ export const DATASOURCE_ROUTE_LEDGER: readonly DatasourceRouteLedgerEntry[] = [
   { route: 'DELETE /api/v1/datasources/:name', family: 'datasource-lifecycle', disposition: 'server-only',
     note: 'wizard delete; runtime-origin only, and refused while objects are still bound. Answers 204 with no body — the one route in this family outside the `{ success, data }` envelope, deliberately. Console surface.' },
   { route: 'POST /api/v1/datasources/:name/migrate-credential', family: 'datasource-lifecycle', disposition: 'server-only',
-    note: 're-homes a saved runtime datasource\'s stored cleartext credential into `sys_secret` and drops the inline key (#8155). Console surface, and the target of the declared `migrate_credential` metadata-type action — the caller is the action, like `POST /:name/test` two rows down, not the SDK. Operator-initiated per datasource by construction: there is no batch spelling, deliberately (a boot-time sweep decides a secret\'s identity with no operator present).' },
+    note: 're-homes a saved runtime datasource\'s stored cleartext credential into `sys_secret` and drops the inline key only once the secret is stored. Console surface, and the target of the declared `migrate_credential` metadata-type action — the caller is the action, like `POST /:name/test` two rows down, not the SDK. Operator-initiated per datasource by construction: there is no batch spelling, deliberately (a boot-time sweep decides a secret\'s identity with no operator present).' },
   { route: 'POST /api/v1/datasources/test', family: 'datasource-lifecycle', disposition: 'server-only',
     note: 'probes an UNSAVED draft carried inline (with an optional cleartext `secret` that never reaches the persisted draft) — the wizard\'s "Test connection" before Save. Console surface. Registered before the `:name` routes so the literal `test` segment is never captured as a name.' },
 
@@ -158,7 +158,7 @@ export const DATASOURCE_ROUTE_LEDGER: readonly DatasourceRouteLedgerEntry[] = [
   // Served by `external-datasource`, so a refusal is EXTERNAL_DATASOURCE_ERROR
   // and the 503 names that service rather than `datasource-admin` (#4225/#4249).
   { route: 'GET /api/v1/datasources/:name/remote-tables', family: 'datasource-introspection', disposition: 'server-only',
-    note: 'lists a datasource\'s remote tables, optionally narrowed by `?schema=`. The #7744 row: this is the LIVE admin spelling, and it is a different mounted route from the federation twin `GET /:name/external/tables` in packages/rest, which the REST ledger carries as `datasources.external.listTables`. Both reach `listRemoteTables`, share one failure contract by design (#4249) and — since #7955 — one request shape; only the federation twin is SDK-expressed.' },
+    note: 'lists a datasource\'s remote tables, optionally narrowed by `?schema=`. This is the LIVE admin spelling, and it is a different mounted route from the federation twin `GET /:name/external/tables` in packages/rest, which the REST ledger carries as `datasources.external.listTables`; both stay mounted, because renaming a live route to match a ledger would be an API break. Both reach `listRemoteTables` and are kept one operation by design: one failure contract (a refusal answers 400 `EXTERNAL_DATASOURCE_ERROR`, the code registered for the service that refused) and one request shape (both forward `?schema=` with the same coercion); only the federation twin is SDK-expressed.' },
   { route: 'POST /api/v1/datasources/:name/object-draft', family: 'datasource-introspection', disposition: 'server-only',
     note: 'generates an ObjectStack object draft for one remote table (introspect + type-map, no persistence). Federation twin: `POST /:name/external/tables/:remote/draft` — same `generateObjectDraft` operation, and the twin is the SDK-expressed one (`datasources.external.draft`).' },
   { route: 'POST /api/v1/datasources/:name/test', family: 'datasource-introspection', disposition: 'server-only',

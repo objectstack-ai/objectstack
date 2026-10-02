@@ -708,7 +708,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Banned',
       defaultValue: false,
       readonly: true, // ADR-0092 — toggled via Ban/Unban actions (session side effects)
-      group: 'Admin',
+      group: 'Account',
       description: 'When true, the user cannot sign in. Toggle via Ban User / Unban User actions.',
     }),
 

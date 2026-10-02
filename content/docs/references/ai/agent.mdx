@@ -117,7 +117,7 @@ const result = AIModelConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **format** | `Enum<'json_object' \| 'json_schema' \| 'regex' \| 'grammar' \| 'xml'>` | ✅ | Expected output format |
-| **schema** | `Record<string, any>` | optional | JSON Schema definition for output |
+| **schema** | `Record<string, any>` | optional | JSON Schema definition for output. An untyped subschema that carries a type-scoped keyword (properties, items, pattern, minimum, …) is refused at its path, because the AI runtime's schema reader does not check it; declare its "type". |
 | **strict** | `boolean` | optional (default: `false`) | Enforce exact schema compliance |
 | **retryOnValidationFailure** | `boolean` | optional (default: `true`) | Retry generation when output fails validation |
 | **maxRetries** | `integer` | optional (default: `3`) | Maximum retries on validation failure |
@@ -144,7 +144,7 @@ Structured output configuration for agent responses
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **format** | `Enum<'json_object' \| 'json_schema' \| 'regex' \| 'grammar' \| 'xml'>` | ✅ | Expected output format |
-| **schema** | `Record<string, any>` | optional | JSON Schema definition for output |
+| **schema** | `Record<string, any>` | optional | JSON Schema definition for output. An untyped subschema that carries a type-scoped keyword (properties, items, pattern, minimum, …) is refused at its path, because the AI runtime's schema reader does not check it; declare its "type". |
 | **strict** | `boolean` | optional (default: `false`) | Enforce exact schema compliance |
 | **retryOnValidationFailure** | `boolean` | optional (default: `true`) | Retry generation when output fails validation |
 | **maxRetries** | `integer` | optional (default: `3`) | Maximum retries on validation failure |

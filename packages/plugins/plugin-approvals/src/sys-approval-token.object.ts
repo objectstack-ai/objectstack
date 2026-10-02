@@ -33,11 +33,17 @@ export const SysApprovalToken = ObjectSchema.create({
       group: 'System',
     }),
 
+    // [#21197] `internal: true` — the approval token's digest is withheld from
+    // every generic exit: this object's get/list doors and the compliance
+    // ledger's CRUD mirror, which honours the same flag. The approval service
+    // only FILTERS by it (`where: { token_hash }`); storage, the index and that
+    // lookup are untouched, and nothing reads it back off a row.
     token_hash: Field.text({
       label: 'Token Hash',
       required: true,
       maxLength: 100,
       readonly: true,
+      internal: true,
       description: 'SHA-256 hex of the raw token — the raw value is never stored',
       group: 'Token',
     }),
