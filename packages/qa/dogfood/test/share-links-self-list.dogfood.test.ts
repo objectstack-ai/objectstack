@@ -151,7 +151,8 @@ describe('#21328: GET /share-links is self-scoped for a plain member', () => {
     const res = await stack.apiAs(aTok, 'GET', '/data/sys_share_link');
     const text = await res.text();
     expect(res.status, `the member must stay ungranted on sys_share_link: ${text}`).toBe(403);
-    expect(JSON.parse(text)).toMatchObject({ error: { code: 'PERMISSION_DENIED' } });
+    // The data door's refusal carries `code` at the top level.
+    expect(JSON.parse(text)).toMatchObject({ code: 'PERMISSION_DENIED' });
   });
 
   it('[fixture] every link sits on the same record, so a record filter cannot separate them', async () => {
