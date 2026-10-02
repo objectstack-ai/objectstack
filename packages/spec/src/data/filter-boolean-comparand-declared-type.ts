@@ -386,16 +386,16 @@ export interface BooleanComparandDoorFixtureField {
 export const BOOLEAN_COMPARAND_DOOR_FIXTURE_OBJECT = 'boolean_door_probe';
 
 /**
- * The fixture: each judged type, one field of each neighbouring class the
- * door must pass (number, text, date), and a `formula` returning `boolean`,
- * one returning `text` and one with none. Each is a legal `FieldSchema` input
- * (pinned).
+ * The fixture: each judged type, a `text` field the door must pass, and a
+ * `formula` returning `boolean`, one returning `text` and one with none. Each
+ * is a legal `FieldSchema` input (pinned). The neighbour is a class no other
+ * field-aware door judges, so a `passes` row is observable at the engine as
+ * "the filter reached the driver unchanged" — a `number` or `date` field
+ * would be refused `"yes"` by the number or temporal door instead.
  */
 export const BOOLEAN_COMPARAND_DOOR_FIXTURE_FIELDS: readonly BooleanComparandDoorFixtureField[] = [
   ...[...BOOLEAN_VALUE_TYPES].map((type) => ({ name: `f_${type}`, type })),
-  { name: 'f_number', type: 'number' },
   { name: 'f_text', type: 'text' },
-  { name: 'f_date', type: 'date' },
   { name: 'f_formula_boolean', type: 'formula', expression: 'true', returnType: 'boolean' },
   { name: 'f_formula_text', type: 'formula', expression: '"a"', returnType: 'text' },
   { name: 'f_formula_untyped', type: 'formula', expression: 'true' },
@@ -479,7 +479,12 @@ function slotPosition(key: string, slot: Slot): string {
   return `${key}.${slot.op}[${slot.index}]`;
 }
 
-function filterAt(key: string, slot: Slot, comparand: unknown): FilterCondition {
+/** A `{ $field }` reference is mutable: every filter gets its own, so no suite can move another's. */
+const freshComparand = (comparand: unknown): unknown =>
+  (typeof comparand === 'object' && comparand !== null ? { ...comparand } : comparand);
+
+function filterAt(key: string, slot: Slot, given: unknown): FilterCondition {
+  const comparand = freshComparand(given);
   if (slot.kind === 'implicit') return { [key]: comparand } as FilterCondition;
   if (slot.kind === 'scalar') return { [key]: { [slot.op]: comparand } } as FilterCondition;
   const list = slot.index === 0 ? [comparand, LIST_NEIGHBOUR] : [LIST_NEIGHBOUR, comparand];
