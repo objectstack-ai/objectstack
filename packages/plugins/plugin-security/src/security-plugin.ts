@@ -4484,7 +4484,8 @@ export class SecurityPlugin implements Plugin {
 
     // ── Project the permission sets of a package that arrives AFTER the boot ──
     //
-    // [#21322] The declared-permission seeding above runs once, at
+    // [#21322, ADR-0086 D5 — a package's sets are seeded ON INSTALL] The
+    // declared-permission seeding above runs once, at
     // `kernel:ready`, over whatever the engine registry holds by then. A package
     // registered later — `os package install` into a running runtime (the
     // install-local plugin), an artifact reload — was never projected: its sets
