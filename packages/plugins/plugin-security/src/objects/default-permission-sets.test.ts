@@ -365,7 +365,8 @@ describe('sys_comment delete is moderation-shaped, not ownership-shaped (#8839)'
  * One capability change has landed on purpose since, on its own card, and is
  * written into the literal below: `view_all_audit_log` (#21260, ruling B on
  * #21175 — platform administrators hold the compliance ledger's audit
- * capability by default).
+ * capability by default). And one more, on #21237: the `fields` block keeping the
+ * identity object's `Admin` field group, which the `everyone` baseline withholds.
  */
 describe('admin_full_access imports the kernel capability declaration unchanged (#11965)', () => {
   it('parsed declaration deep-equals the pre-#11965 inline literal', () => {
@@ -394,6 +395,13 @@ describe('admin_full_access imports the kernel capability declaration unchanged 
         // [#21260] added on purpose — see the docblock above.
         'view_all_audit_log',
       ],
+      // [#21237] added on purpose — see the docblock above. The group is read off
+      // the identity object's declaration, never listed here.
+      fields: Object.fromEntries(
+        Object.entries(PlatformObjects.SysUser.fields as Record<string, { group?: string }>)
+          .filter(([, field]) => field.group === 'Admin')
+          .map(([name]) => [`sys_user.${name}`, { readable: true, editable: true }]),
+      ),
     });
     expect(setByName('admin_full_access')).toEqual(preMove);
   });

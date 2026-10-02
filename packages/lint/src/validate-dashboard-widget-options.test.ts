@@ -53,7 +53,6 @@ describe('validateDashboardWidgetOptions — the SDUI widget-option check at the
     // schema refuses it on any other type, so the control widget is a funnel.
     const values: AnyRec = {
       dateGranularity: 'month',
-      description: 'sub-caption',
       limit: 10,
       sortBy: 'total_amount',
       sortOrder: 'desc',

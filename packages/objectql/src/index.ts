@@ -569,12 +569,19 @@ export {
   collectMaskedReadFields,
   collectMaskedPasswordFields,
   collectCredentialFields,
+  // [#21197] The flag-keyed collector (`internal: true`), for consumers that
+  // copy record values to a second exit — the audit ledger's CRUD mirror.
+  collectInternalReadFields,
+  // [#21197] The one dereference of an `internal` column for rows a consumer
+  // holds — stripped-versus-unset by declaration, fail-closed.
+  readInternalColumn,
   // [#8559] The empty-string refusal at the credential write door — exported
   // so consumers branch on `code`/`status` rather than message text.
   EmptyCredentialWriteError,
   EMPTY_CREDENTIAL_REFUSAL_CODE,
   EMPTY_CREDENTIAL_REFUSAL_STATUS,
 } from './secret-fields.js';
+export type { InternalColumnSource } from './secret-fields.js';
 
 // Export Utilities
 export {

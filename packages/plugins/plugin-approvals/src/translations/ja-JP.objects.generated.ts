@@ -260,7 +260,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       via_override: {
         label: "管理者オーバーライド経由",
-        help: "true の場合、実行者は特権オーバーライド経路（#3424）によってのみ許可されたことを示します — 当該リクエストの承認待ちリストには含まれていません。"
+        help: "true の場合、実行者は当該リクエストの承認待ちリストに含まれておらず、特権オーバーライドによってのみこの操作を許可されたことを示します。特権オーバーライドにより、プラットフォーム管理者または組織管理者は保留中のどのリクエストにも対応できるため、リスト内の誰も判断できないリクエストが停滞したままになることはありません。"
       },
       reassign_from: {
         label: "引き継ぎ元",
@@ -272,7 +272,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       attachments: {
         label: "添付ファイル",
-        help: "この操作を裏付けるファイル——署名済み契約書や証憑など（#3266）。"
+        help: "この操作を裏付けるファイル——署名済み契約書や証憑など。"
       },
       created_at: {
         label: "作成日時"
@@ -297,7 +297,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_approval_delegation: {
     label: "Approval Delegation",
     pluralLabel: "Approval Delegations",
-    description: "Self-service out-of-office rule: route this user's approver slots to a delegate within a time window (#1322 M1).",
+    description: "Self-service out-of-office rule: route this user's approver slots to a delegate within a time window.",
     fields: {
       id: {
         label: "Delegation ID"

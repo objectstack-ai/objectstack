@@ -5993,6 +5993,24 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + "back to the manifest's own English literal.",
   },
   {
+    id: 'translation-widget-sub-caption-retired',
+    order: 60,
+    text:
+      'It also retires the metric sub-caption at both ends (#21257; ruling C on objectui#11389, '
+      + 'which reverses #5428 item 4; ADR-0049). The widget translation key '
+      + '`dashboards.<name>.widgets.<id>.subCaption` overlaid a widget\'s `options.description`, a key '
+      + 'the dashboard schema never declared and no authored widget wrote, so the overlay in '
+      + '`translateDashboard` was its only writer. The overlay is removed, `subCaption` is a '
+      + '`retiredKey()` tombstone on the widget translation node, and its former `subtitle` alias '
+      + 'now carries the retirement instead of a rename onto a key that accepts nothing. A widget '
+      + 'keeps one authored description, `widget.description`, which renders as the card-header '
+      + 'subtitle and is translated by the widget\'s `description` key. The D2 conversion '
+      + '`translation-widget-sub-caption-removed` strips the key from bundle entries and stored '
+      + 'translation items as a lossless delete of what is served, retired from the load path so '
+      + 'authors are refused at parse; its D3 record is the semantic entry '
+      + '`translation-widget-sub-caption-retired`.',
+  },
+  {
     id: 'ui-form-layout-inline-grid-retired',
     order: 40,
     text:
@@ -17966,6 +17984,34 @@ const step18: MigrationStep = {
         + 'is wrong or missing for your locale, correct it in the platform bundle '
         + '(`@objectstack/service-settings`’s `settingsBuiltinTranslations`) — ⛔ do not re-add '
         + 'app-side copy at either door, which is refused.',
+    },
+    // The D3 entry of the `translation-widget-sub-caption-removed` family (#21257):
+    // the metric sub-caption retired at both ends by ruling C on objectui#11389,
+    // which reverses #5428 item 4. One D3 entry per retirement family, even when D2
+    // is lossless (ruling B on #17152). The strip deletes a string nothing reads any
+    // more; whether that copy still belongs on the card, and where, is the author's
+    // call and not something the conversion can decide.
+    {
+      id: 'translation-widget-sub-caption-retired',
+      surface: 'translation.dashboards.<dashboard>.widgets.<id>.subCaption — the metric sub-caption '
+        + 'overlaid onto a widget\'s options.description',
+      replacement: 'The widget\'s one authored description, `widget.description`, rendered as the '
+        + 'card-header subtitle and translated by `dashboards.<dashboard>.widgets.<id>.description`.',
+      reason: 'The D2 conversion `translation-widget-sub-caption-removed` deletes `subCaption` from every '
+        + 'translation bundle and stored translation item, and `translateDashboard` no longer overlays '
+        + 'anything onto a widget\'s `options`. The sub-caption was the string under a metric\'s value; '
+        + 'the dashboard schema never declared `options.description` and no authored widget wrote it, so '
+        + 'a translated sub-caption existed only because this key put it there. What the delete drops is '
+        + 'translation WORK: a translator who wrote a caption per locale meant a user to read it. The '
+        + 'conversion cannot move those strings to `description`, because `description` already '
+        + 'translates the card-header subtitle — a different string a widget may also carry — and only '
+        + 'the author can say whether the caption\'s wording belongs in that subtitle or is no longer '
+        + 'needed.',
+      acceptanceCriteria: 'No translation bundle or translation item carries a widget `subCaption`; the '
+        + 'parse refuses it. For each metric widget whose caption a user still needs to read, the copy '
+        + 'lives in the widget\'s `description` and its localized values sit under the widget\'s '
+        + '`description` entry for every locale the dropped strings covered — or the author has decided '
+        + 'the card-header subtitle alone is enough.',
     },
     // A forced local mode beside a remote to replicate from, refused at both doors
     // together: the datasource contract (on mode) and the turso driver's

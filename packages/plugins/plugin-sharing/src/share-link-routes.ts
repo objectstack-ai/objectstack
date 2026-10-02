@@ -43,7 +43,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 // `share-link-service.ts` gates redemption with — one definition, not a
 // service-local one this layer re-exports.
 import { isPublicSharingEnabled } from '@objectstack/spec/data';
-import { type ShareLinkService } from './share-link-service.js';
+import { readShareLinkInternalColumn, type ShareLinkService } from './share-link-service.js';
 import type { SharingEngine } from './sharing-service.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
@@ -290,7 +290,12 @@ export function registerShareLinkRoutes(
           return invalidOrExpired();
         }
         if (row && !row.revoked_at && (!row.expires_at || Date.parse(row.expires_at) > Date.now())) {
-          if (row.password_hash) {
+          // [#21197] `password_hash` is `internal`, so the probe row comes back
+          // without it; read off the row, every protected link would answer
+          // "invalid" here instead of prompting for its password. Recovered
+          // through the same fail-closed accessor redemption uses.
+          const [passwordHash] = await readShareLinkInternalColumn(engine, [row], 'password_hash');
+          if (passwordHash) {
             return sendError(
               res,
               401,
