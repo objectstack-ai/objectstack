@@ -89,8 +89,10 @@ export function completedRetentionWindowMs(): number {
   if (!maxAge) {
     throw new Error(
       '[service-queue] sys_job_queue no longer declares lifecycle.retention — DbQueueAdapter dedups against '
-      + 'terminal rows by `created_at` window and relies on that declared retention to keep them (ADR-0057, #5179). '
-      + 'Restore the declaration in @objectstack/platform-objects rather than sweeping the table from here.',
+      + 'terminal rows by `created_at` window and relies on that declared retention to keep them (ADR-0057). '
+      + 'Restore the declaration in @objectstack/platform-objects rather than sweeping the table from here: '
+      + 'the one platform reaper sweeps completed rows by that declaration, and a sweeper here would be a '
+      + 'second copy of the window, free to drift from the first.',
     );
   }
   return lifecycleDurationMs(maxAge);

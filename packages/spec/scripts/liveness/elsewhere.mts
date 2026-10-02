@@ -9,9 +9,10 @@
 // measured 2026-08-29 on cloud @15f55df). Neither existing verdict can say
 // that. `dead` is true only of the local half — read alone it licenses deleting
 // a key with a real cross-repo consumer, and the maintainer ruling of
-// 2026-08-30 (#11330) explicitly ruled that deletion OUT. `live` is refused by
-// the gate itself: a live verdict's repo-local evidence must resolve against
-// this checkout, and cloud's enforcer is not local. The stopgap was a
+// 2026-08-30 (#11330) explicitly ruled that deletion OUT. `live` overstates
+// it: the key's load side belongs to this repo's loader, which does not
+// enforce it. (The gate itself does NOT refuse `live` on cloud-only evidence —
+// see the boundary pin in check-liveness.test.ts.) The stopgap was a
 // qualifying sentence in the row's `note` — prose, which no check reads, i.e.
 // the weakest protection this ledger knows. So: a status that SAYS the split —
 // dead here, enforced there — and reads as NOT deletable.

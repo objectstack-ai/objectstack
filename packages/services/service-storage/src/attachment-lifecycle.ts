@@ -526,7 +526,8 @@ export function createSysFileReapGuard(
           `file-as-reference migration is not verified, or a deviation has been observed since it ` +
           `was (a value an OS_ALLOW_LAX_* escape hatch admitted against the migration's own ` +
           `contract). Either way: fix the data, then run \`os migrate files-to-references --apply\`. ` +
-          `See sys_migration.verified_at / deviation_observed_at (ADR-0104 / #4797)`,
+          `See sys_migration.verified_at / deviation_observed_at (ADR-0104): deleting bytes cannot be undone, so ` +
+          `it waits for a verified migration with no deviation on record, while reversible work carries on.`,
       );
     }
     return confirmed;

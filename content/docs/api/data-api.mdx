@@ -430,6 +430,15 @@ in its own `sql`.
 Filtering uses the canonical Query DSL `where` object (the same MongoDB-style `FilterCondition` accepted by `find()`), not a `filters` array.
 </Callout>
 
+<Callout type="info">
+**An `order` key names a column the answer carries.** Each key must be one of the query's own
+`dimensions` or `measures` entries, or a `timeDimensions` entry that carries a `granularity`,
+spelled exactly as it is selected. Any other key — a field the query does not select, a
+relationship path it does not group by, a time dimension that only sets a `dateRange` window — is
+refused with `400 INVALID_FIELD` naming the key and the members the query does select, and nothing
+is executed. `POST /analytics/sql` refuses the same keys. To order by a member, select it.
+</Callout>
+
 **Response**: the runtime dispatcher wraps the `AnalyticsResult` as `{ success: true, data: { rows, fields, sql?, totals? } }`:
 ```json
 {

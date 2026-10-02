@@ -124,8 +124,9 @@ export async function readInternalHeadersJson(
     throw new Error(
       `EmailService: ${SYS_EMAIL_OBJECT}.${HEADERS_COLUMN} is declared \`internal: true\`, but this `
       + 'data engine does not implement resolveInternalField() — the custom headers this message was '
-      + 'authored with are stored but cannot be recovered, and a message must not be sent missing them '
-      + '(#8149). The row stays `queued`: the queue retry or the next boot outbox sweep delivers it '
+      + 'authored with are stored but cannot be recovered, and a message must not be sent missing them: '
+      + 'a missing header does not announce itself, so the send would succeed while silently deviating '
+      + 'from what was authored. The row stays `queued`: the queue retry or the next boot outbox sweep delivers it '
       + 'intact once an engine that implements the privileged accessor is mounted.',
     );
   }

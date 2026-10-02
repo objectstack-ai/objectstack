@@ -100,6 +100,7 @@ function makeFakeCrypto(): ICryptoProvider {
       return { ...handle, version: handle.version + 1 };
     },
     digest(plain: string): string { return `d:${plain.length}`; },
+    async keyedDigest(plain: string): Promise<string> { return `k:${plain.length}`; },
   };
 }
 

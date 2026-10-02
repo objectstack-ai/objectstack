@@ -304,8 +304,10 @@ export function stateCountShardName(type: string): string {
  * The status columns the table publishes, in the order it publishes them.
  * `live-elsewhere` is the deliberate fifth (#13483): dead here by measurement,
  * genuinely enforced in a sibling repo — a verdict that must read as NOT
- * deletable and must not satisfy `live`'s local-evidence rules (its own
- * executable criteria live in elsewhere.mts). Widening this list is an
+ * deletable, for a key whose load side belongs to this repo's loader, which
+ * does not enforce it. The gate does not refuse `live` on cloud-only evidence
+ * (the boundary pin in check-liveness.test.ts); this status's own executable
+ * criteria live in elsewhere.mts. Widening this list is an
  * artifact-shape decision (#7377): `StateCountsRow`, `foldStateCounts` and
  * `renderStateCountShard` name every column by hand — move all of them together
  * with this line, then regenerate.

@@ -30,6 +30,7 @@ import { declaredValueShapeResolver, whereEmptyLeafSql } from '../empty-operator
 // [#20986] The one resolver of the object a relationship-path hop reads.
 import { columnObjectOf, relationshipReferenceOf, resolvePathHops, type HopReference } from '../hop-object.js';
 import { invalidMemberError } from '../dataset-refusal.js';
+import { projectedDimensions } from '../order-key-door.js';
 import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
 import { nextUtcCalendarDay, resolveAnalyticsDateRangeString, isUnboundedAbove } from '@objectstack/core';
@@ -2094,14 +2095,11 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * the measures and a `fields` list that never mentioned the bucket — a trend
    * chart got N values and no x-axis (#4033) — even though the SQL had
    * selected `date_trunc(…) AS "<dim>"` all along. One definition, every
-   * consumer.
+   * consumer — [#21267] including the analytics door's order-key rule, which
+   * is why the body lives in `order-key-door.ts`.
    */
   private projectedDimensions(query: AnalyticsQuery): string[] {
-    const out = [...(query.dimensions ?? [])];
-    for (const td of query.timeDimensions ?? []) {
-      if (td.granularity && !out.includes(td.dimension)) out.push(td.dimension);
-    }
-    return out;
+    return projectedDimensions(query);
   }
 
   private buildFieldMeta(query: AnalyticsQuery, cube: Cube): Array<{ name: string; type: string }> {

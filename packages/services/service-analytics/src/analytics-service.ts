@@ -108,6 +108,7 @@ import { invalidMemberError } from './dataset-refusal.js';
 // [#20807] A grouped dimension on a structured-JSON field is refused in
 // `ensureCube`, ahead of both strategies, naming the member the caller wrote.
 import { assertNoStructuredJsonDimension } from './structured-json-dimension-door.js';
+import { assertOrderKeysSelected } from './order-key-door.js';
 // [#16206] The `sqlDialect` hook's DECLARED accept set, and the predicate that
 // says whether a host answered outside it. Both live next to the membership set
 // the compilers read, so the contract has one definition and this file states
@@ -1704,6 +1705,14 @@ export class AnalyticsService implements IAnalyticsService {
       query.cube ? reads.getDatasetScope(query.cube) : undefined,
       context,
     );
+    // [#21267] …and the order-key door: an `order` key must name a member this
+    // query selects, or the query is refused `INVALID_FIELD` / 400
+    // (`order-key-door.ts`). On this seam because it is the one `query()` and
+    // `generateSql()` share, so both doors and both faces answer alike. After
+    // the admission verdicts, so a key naming a field the caller may not read
+    // keeps the 403 that field gets in every other position; before the read
+    // scopes are resolved and before any strategy is selected.
+    assertOrderKeysSelected(query);
     // #3602 — `context` rides along unconditionally. It is the ENGINE-side belt
     // (forwarded to `engine.aggregate`, where the middleware chain applies its
     // own RLS), so it must not be gated on the analytics-side belt being wired:

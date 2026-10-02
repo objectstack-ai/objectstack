@@ -5006,7 +5006,8 @@ const MASTER_DETAIL_DETAIL_HISTORY =
  * child-collection surfaces. The three it adds are the renderer's own:
  * `formFields` (the per-row expand form), `inlineMode` (the two form factors
  * a relationship field's `inlineEdit` names; absence takes the relationship's
- * own resolution) and `sortField` (the line-position field the grid stamps on
+ * own resolution only on an entry the renderer derives, and its describe
+ * states both paths) and `sortField` (the line-position field the grid stamps on
  * drag-reorder). `title` and `addLabel` are plain strings because the
  * renderer draws them as a React child and a button label without resolving a
  * locale map.
@@ -5030,8 +5031,8 @@ function masterDetailDetailEntry() {
     childObject: z.string().describe('Child object whose records are entered inline'),
     relationshipField: z.string().optional().describe('FK on the child pointing back to the parent (auto-detected from the child\'s master_detail/lookup field when omitted)'),
     columns: z.array(InlineGridColumnSchema).optional().describe("Editable grid columns (derived from the child object when omitted). Each entry is the strict, name-keyed inline grid column a relationship field's `inlineColumns` takes ({ name, label?, type?, … } — objectui GridColumn); identity-only entries ({ name }) hydrate everything else from the child object's fields. Unknown keys and the retired `field` spelling are refused at parse."),
-    formFields: z.array(z.string()).optional().describe("Child field names for the per-row expand form (derived from the child object's editable fields when omitted)"),
-    inlineMode: z.enum(['grid', 'form']).optional().describe("Inline-edit form factor: 'grid' = editable cells; 'form' = read-only list + per-row full form. Resolved from the relationship field's `inlineEdit` when omitted"),
+    formFields: z.array(z.string()).optional().describe("Child field names for the per-row expand form. When omitted they are derived from the child object's fields — except on an entry that names both `relationshipField` and at least one column, which is kept as authored: nothing is derived, and the per-row form is offered only when `inlineMode` is 'form', where it draws the child object's full field list"),
+    inlineMode: z.enum(['grid', 'form']).optional().describe("Inline-edit form factor: 'grid' = editable cells; 'form' = read-only list + per-row full form. When omitted it is resolved from the relationship field's `inlineEdit`, else from the child object's shape — except on an entry that names both `relationshipField` and at least one column, which is kept as authored: nothing is resolved, the collection renders as a grid, and the per-row form is offered only when `formFields` lists more fields than `columns`"),
     amountField: z.string().optional().describe('Numeric child column summed for the running total'),
     sortField: z.string().optional().describe('Child field holding the line sort position, stamped on drag-reorder (derived from a `position` / `sort_order` / … field when omitted)'),
     totalField: z.string().optional().describe('Parent field to receive the rolled-up sum'),
