@@ -6,6 +6,7 @@ import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { StateMachineSchema } from '../automation/state-machine.zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { aiJsonSchemaSlot } from '../shared/ai-json-schema-slot';
 import { strictObject } from '../shared/strict-object';
 
 /**
@@ -90,8 +91,19 @@ export const StructuredOutputConfigSchema = lazySchema(() => strictObject({
   /** Output format type */
   format: StructuredOutputFormatSchema.describe('Expected output format'),
 
-  /** JSON Schema definition for output validation */
-  schema: z.record(z.string(), z.unknown()).optional().describe('JSON Schema definition for output'),
+  /**
+   * JSON Schema definition for output validation. The cloud AI runtime
+   * compiles it, and its schema reader refuses an untyped subschema that
+   * carries a type-scoped keyword (`properties`, `items`, `pattern`,
+   * `minimum`, …). The slot refuses the same schemas here, at the subschema's
+   * path, through the one factory `action.ai.outputSchema` shares
+   * (`shared/ai-json-schema-slot.ts`).
+   */
+  schema: aiJsonSchemaSlot('structuredOutput.schema').optional().describe(
+    'JSON Schema definition for output. An untyped subschema that carries a type-scoped keyword '
+    + '(properties, items, pattern, minimum, …) is refused at its path, because the AI runtime\'s '
+    + 'schema reader does not check it; declare its "type".',
+  ),
 
   /** Whether to enforce exact schema compliance */
   strict: z.boolean().default(false).describe('Enforce exact schema compliance'),
