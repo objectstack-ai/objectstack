@@ -12,6 +12,7 @@ import {
   lowerAnalyticsWhere,
   NO_DATETIME_COLUMNS,
   normalizeAnalyticsFilterTree,
+  normalizeDateRangeWindow,
   collectFilterLeaves,
   SQL_CONST_FALSE,
   SQL_CONST_TRUE,
@@ -36,7 +37,7 @@ import { projectedDimensions } from '../order-key-door.js';
 import { applyOrdering, applyWindow } from '../dataset-executor.js';
 import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
-import { nextUtcCalendarDay, resolveAnalyticsDateRangeString, isUnboundedAbove } from '@objectstack/core';
+import { resolveAnalyticsDateRangeString } from '@objectstack/core';
 import { explicitDateRangeWindow } from '../date-range-array-arm.js';
 import {
   rebucketCrossObject,
@@ -192,12 +193,19 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // inferred or manifest cube compiles unchanged.
     const datasetScope = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!);
 
-    // [ADR-0053 D-D1, amended — #5930 step 3] The column-type reader the `where`
-    // door's shared lowering applies at the three filter positions this path
-    // hands the engine (item 7): a member is `datetime` when the column it binds
-    // against is declared so. The engine seam lowers the same filter again with
-    // the same scope, and the lowering is idempotent.
-    const lowering = declaredDatetimeLowering(ctx, (member) => this.resolveStorageTarget(cube, member, objectName, relationshipReferenceOf(ctx)));
+    // [ADR-0053 D-D1, amended — #5930 steps 3 and 4] The column-type reader the
+    // `where` door's shared lowering applies at the three filter positions this
+    // path hands the engine (item 7): a member is `datetime` when the column it
+    // binds against is declared so. The engine seam lowers the same filter
+    // again with the object's own field map, and the lowering is idempotent. A
+    // column the host cannot name a type for is left as written: the engine's
+    // seam reads the declaration this one cannot (and applies item 7's
+    // type-blind reading itself to an object with no field map).
+    const lowering = declaredDatetimeLowering(
+      ctx,
+      (member) => this.resolveStorageTarget(cube, member, objectName, relationshipReferenceOf(ctx)),
+      'as-written',
+    );
 
     // Build aggregations from measures.
     //
@@ -492,12 +500,15 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // the same channel `execute()` reads it from, so the echo cannot drift
     // from what actually ran.
     const datasetScope = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!);
-    // [ADR-0053 D-D1, amended — #5930 step 3] The same column-type reader
-    // `execute()` hands the `where` door's shared lowering, so the echo prints
-    // the lowered bound the engine receives — a bare-day `$lte` on a `datetime`
-    // member reads `< next-day` here because that is what runs.
-    const echoLowering = declaredDatetimeLowering(ctx, (member) =>
-      this.resolveStorageTarget(cube, member, this.extractObjectName(cube), relationshipReferenceOf(ctx)),
+    // [ADR-0053 D-D1, amended — #5930 steps 3 and 4] The same column-type
+    // reader `execute()` hands the `where` door's shared lowering, so the echo
+    // prints the lowered bound the engine receives — a bare-day `$lte` on a
+    // `datetime` member reads `< next-day` here because that is what runs, in
+    // the `where`, the scopes and the `dateRange` windows alike.
+    const echoLowering = declaredDatetimeLowering(
+      ctx,
+      (member) => this.resolveStorageTarget(cube, member, this.extractObjectName(cube), relationshipReferenceOf(ctx)),
+      'as-written',
     );
     const crossByDim = new Map((plan?.crossDims ?? []).map((cd) => [cd.outputName, cd]));
     const joinClauses: string[] = [];
@@ -600,23 +611,20 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     }
     // Bounds bind as `$n` placeholders like every other comparand: this string
     // travels to the browser, and a window can carry tenant-derived dates.
-    // A bare-day upper bound renders half-open (`< day+1`) because that is
-    // what `execute()`'s driver actually runs for it on a datetime column
-    // (#3777) — rendering the BETWEEN would hand a debugger SQL that drops
-    // the final day's rows and cannot reproduce the result.
-    for (const { field, bounds } of this.dateRangeBounds(cube, query)) {
-      const nextDay = nextUtcCalendarDay(bounds.$lte);
-      // [#20600] A bare end on the last supported day renders no upper bound,
-      // because the driver compiles none for it.
-      if (isUnboundedAbove(nextDay)) {
-        params.push(bounds.$gte);
-        whereParts.push(`(${field} >= $${params.length})`);
-        continue;
-      }
-      params.push(bounds.$gte, nextDay ?? bounds.$lte);
-      whereParts.push(
-        `(${field} >= $${params.length - 1} AND ${field} ${nextDay ? '<' : '<='} $${params.length})`,
-      );
+    //
+    // [ADR-0053 D-D1 item 8, amended — #5930 step 4] Each window renders as the
+    // `{ $gte, $lte }` pair `execute()` hands the engine, lowered by
+    // {@link normalizeDateRangeWindow} with the echo's reader and rendered by
+    // the same `renderFilterNodeSql` as the `where`. So a bare-day end on a
+    // `datetime` column renders half-open (`< day+1`), and on the last
+    // supported day as `IS NOT NULL` beside the start, because that is what
+    // the engine's seam runs for it (#3777, #20600); a `date` column renders
+    // the inclusive `<=` the engine runs there. This echo kept its own
+    // type-blind copy of the rule, which rendered `< day+1` on every column,
+    // until #5930 step 4.
+    for (const { member, bounds } of this.dateRangeBounds(cube, query)) {
+      const windowSql = this.renderFilterNodeSql(normalizeDateRangeWindow(member, bounds, echoLowering), cube, params, ctx);
+      if (windowSql) whereParts.push(windowSql);
     }
     // Read scope last, so it reads as the outermost constraint. Compiled by the
     // same fail-closed compiler `NativeSQLStrategy` uses — it throws rather than
@@ -1840,11 +1848,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    *
    * An EXPLICIT `[a, b]` window is inclusive on both ends — logically "from day
    * X through day Y". The `$lte` end is left as the bare calendar day on
-   * purpose: the driver's filter compiler owns the calendar-day → instant
-   * translation, compiling a bare-day `$lte` on a `datetime` column into the
-   * half-open `< nextDay` (#3777) while a `date` column keeps the plain `<=`.
-   * `NativeSQLStrategy` performs the same half-open translation itself because
-   * it binds into raw SQL, so one dashboard reads the same on every driver.
+   * purpose: the shared lowering at the engine's `where` seam owns the
+   * calendar-day → instant translation, rewriting a bare-day `$lte` on a
+   * `datetime` column into the half-open `< nextDay` (#3777) while a `date`
+   * column keeps the plain `<=` (ADR-0053 D-D1, amended, items 7 and 8).
+   * `NativeSQLStrategy` runs the same lowering on the same pair because it
+   * binds into raw SQL, so one dashboard reads the same on every driver.
    *
    * [#16322] A window this face RESOLVED is a different question and carries
    * its own upper reading — see the string arm below.
@@ -1901,8 +1910,8 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   private dateRangeBounds(
     cube: Cube,
     query: AnalyticsQuery,
-  ): Array<{ field: string; bounds: Record<string, unknown> }> {
-    const out: Array<{ field: string; bounds: Record<string, unknown> }> = [];
+  ): Array<{ member: string; field: string; bounds: Record<string, unknown> }> {
+    const out: Array<{ member: string; field: string; bounds: Record<string, unknown> }> = [];
     for (const td of query.timeDimensions ?? []) {
       if (!td.dateRange) continue;
       // [#16322] The STRING arm is the CLOSED preset vocabulary, resolved by
@@ -1913,6 +1922,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       if (!Array.isArray(td.dateRange)) {
         const window = resolveAnalyticsDateRangeString(td.dateRange, { timezone: query.timezone });
         out.push({
+          member: td.dimension,
           field: this.resolveFieldName(cube, td.dimension, 'dimension'),
           // A window this path RESOLVED states its own upper reading: the ten
           // calendar presets stop BEFORE their end instant (`$lt`, so two
@@ -1927,10 +1937,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       }
       // ⛔ The CALLER's explicit window is untouched, bound for bound: `$lte`
       // on a bound they wrote is the reading this face has published since it
-      // existed (#16179), and the driver's own bare-day widening still owns
-      // the calendar-day → instant translation for it.
+      // existed (#16179), and the shared lowering at the engine's `where` seam
+      // owns the calendar-day → instant translation for it (ADR-0053 D-D1 item
+      // 8; the echo renders the same lowering).
       const [start, end] = explicitDateRangeWindow(td.dateRange);
       out.push({
+        member: td.dimension,
         field: this.resolveFieldName(cube, td.dimension, 'dimension'),
         bounds: { $gte: start, $lte: end },
       });
