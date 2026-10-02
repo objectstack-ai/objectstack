@@ -1201,8 +1201,7 @@ inline rows (`c4c68ca`, #20660).
 
 ### Notable fixes in 17.6.0
 
-These are the patch-level entries an upgrading deployment is most likely to
-notice. Everything else is in the per-package `CHANGELOG.md` files, which is
+These are the fixes an upgrading deployment is most likely to notice. Everything else is in the per-package `CHANGELOG.md` files, which is
 what they are for.
 
 **Security.**
@@ -1242,10 +1241,10 @@ what they are for.
   restart, and re-enabling the ledger bit of a flow whose `status` is still
   `obsolete` / `invalid` no longer arms it (`defc7f7`, #20702). A trigger-fired
   run refused because its flow is disabled logs at `info`, not `ERROR`.
-- For a flow name a managed package ships, `GET /api/v1/meta/flow/:name`, its
-  `/layers` and `/published` reads and startup hydration all serve the
-  package's flow (`25f2e64`, #20994; `94990a2`, #21043; `514001a`, #21116;
-  `75519e1`, #20942).
+- For a flow name a managed package ships, the flow list and the by-name,
+  `/layers` and `/published` reads all serve the package's flow, and every
+  startup step arms it (`25f2e64`, #20994; `94990a2`, #21043; `514001a`,
+  #21116; `75519e1`, #20942).
 
 **Drivers and databases.**
 
@@ -1268,8 +1267,9 @@ what they are for.
   (`f8178ff`, #20984), and `sum` / `avg` use compensated summation
   (`b785c3b`, #20739).
 - **Dates before year 100** are read as written, not as 1900–1999, wherever the
-  platform builds a UTC instant from parts (`a6866da`, #20746), and exports
-  write four-digit years so such rows re-import (`67c1b11`, #20688).
+  platform builds a UTC instant from parts (`a6866da`, #20746). Exports write
+  four-digit years, so a `date` in 0001–0999 re-imports; a `datetime` before
+  1000 is still refused (`67c1b11`, #20688).
 - The first boot of a new SQL database, and `os migrate plan` on a database
   that does not exist yet, no longer print spurious `DATABASE_ERROR` lines
   (`810d42b`, #20818; `cf0346e`, #21093).
@@ -1278,8 +1278,8 @@ what they are for.
 whenever the statement joins a related object, fixing ambiguous-column `500`s
 on cubes that declare no join (`2791138`, #21266). On PostgreSQL, measures come
 back as JSON numbers, not strings (`d1633f3`, #21040), `sum` / `avg` accumulate
-in double, a boolean aggregand no longer answers `500`, and an all-NULL `sum`
-answers `0` (`097ef80`, #21209). `$not`, `$notContains` and null tests over a
+in double, and a boolean aggregand no longer answers `500`; on every dialect an
+all-NULL `sum` answers `0` (`097ef80`, #21209). `$not`, `$notContains` and null tests over a
 multi-valued lookup return rows on the engine-aggregate path instead of `400`
 (`5dbeb7d`, #21036). Date-bucket keys spell four-digit years at every
 granularity (`856321f`, #20865; `525b813`, #20971).
@@ -1313,8 +1313,8 @@ converts objects built with `ObjectSchema.create(…)` instead of stopping at lo
   platform labels that contradicted their English source are re-translated
   (`f4ce10c`, #20652; `5757463`, #20707; `7184436`, #20684).
 - `security/explain` resolves the explained user in the organization
-  enforcement resolves them in, refuses a cross-class field-to-field policy as
-  enforcement does, and answers a classified refusal with its own 4xx instead of
+  enforcement resolves them in, refuses a cross-class field-to-field policy at
+  the object level too, as enforcement does, and answers a classified refusal with its own 4xx instead of
   `500 EXPLAIN_FAILED` (`889139c`, #20614; `cd901d7`, #20629; `72f8c38`,
   #20858).
 - Setup and Studio carry navigation entries for the Audit Log Browser and
@@ -1337,12 +1337,13 @@ per-commit lists are in `packages/console/CHANGELOG.md` under `## 17.6.0`.
 ⚠️ **Console hosts and authors:** 23 of those entries are declared breaking
 upstream (6, 5 and 12). They are objectui's own surfaces — they matter to a host
 that builds on `@object-ui/*` packages or authors objectui page JSON directly.
-Three of them mirror ObjectStack keys already retired in 17.5.0
-(`assignedProfiles` on a page, `chartConfig.aria`, `aria` on an action), and
-none registers a new ADR-0087 migration.
+Four of them mirror ObjectStack keys already retired in 17.5.0
+(`assignedProfiles` on a page, `chartConfig.aria`, `aria` on an action,
+`quickAdd` on `object-kanban`), and none registers a new ADR-0087 migration.
 
-- **Studio works again with the 17.6.0 spec.** The previous pin bundled
-  objectui's zod 4.4.3 beside the injected spec's 4.6.1, which broke Studio's
+- **Studio works again with the 17.6.0 spec.** The previous pin bundled a
+  second zod instance (objectui's 4.6.5) beside the injected spec's 4.6.1,
+  which broke Studio's
   spec-derived forms: the New Package dialog could not create a package and the
   dashboard and report inspectors showed no schema. The console now bundles one
   zod instance (objectui#11353, in `0d42104`).
@@ -1417,8 +1418,8 @@ on 17.5.0 already runs them, and nothing here changes when it moves to 17.6.0.
 They are listed again because the 17.5.0 version commit `8c87d26a` did not
 consume their changesets:
 
-- **Eight commits landed after the version commit** and before the publish ran
-  from `0f6dcac5`: `6e3aa75` (#20584), `a093ce3` (#20582), `92fe081` (#20458),
+- **Eight commits follow the version commit** in first-parent order, before
+  the publish ran from `0f6dcac5`: `6e3aa75` (#20584), `a093ce3` (#20582), `92fe081` (#20458),
   `3a89d45` (#20591), `7001918` (#20598), `c96beb2` (#20585), `ba4648d`
   (#20605) and `0f6dcac` (#20606). The 17.5.0 notes already describe them under
   [Also shipped in
@@ -1426,10 +1427,11 @@ consume their changesets:
   including the migration for the retired cube member `name`. The pipeline
   defect that let a publish run past its version commit is fixed in this
   release (#20625, #20613).
-- **Seven commits landed on `main` between 04:09 and 05:37 UTC on 2026-09-29,
-  before the version commit at 06:17**, but were not yet in the version PR when
-  it merged, so their changesets stayed unconsumed. The 17.5.0 notes do not mention them.
-  Three are breaking:
+- **Seven commits are ancestors of the version commit** — they landed on
+  `main` between 04:09 and 05:36 UTC on 2026-09-29 — but were not yet in the
+  version PR when it merged, so their changesets stayed unconsumed. The 17.5.0
+  notes do not mention them. Two are breaking, and one makes `os validate
+  --strict` fail:
   - **`RealtimeEventType` lists only the events the engine publishes**
     (`e73ee2d`, #20567): `data.record.created`, `data.record.updated`,
     `data.record.deleted`, `data.records.updated` and `data.records.deleted`.
@@ -1467,8 +1469,9 @@ walked](/docs/releases/v17#upgrade-checklists).
 ### 17.6.0
 
 ⛔ **Nobody has walked 17.5.0 → 17.6.0.** Every line below is derived from a
-change's own **Migration** note in [Breaking changes & migration in
-17.6.0](#breaking-changes--migration-in-1760) and is marked **not exercised**:
+**Migration** note in [Breaking changes & migration in
+17.6.0](#breaking-changes--migration-in-1760) or from a changeset of this
+release, and is marked **not exercised**:
 accurate about what changed, unproven about what it costs to cross. A step
 nobody has run, presented beside steps that were, is how a reader finishes a
 checklist and believes they are done — so this list claims nothing it has not
@@ -1534,8 +1537,9 @@ been given.
 - **Fix the new author-time refusals:** a `picklist` or `picklistExtensions`
   entry naming no declared list, an `api` flow with no `config.secret`, action
   translation keys for undeclared outcomes or result fields, dimensions over
-  JSON-stored or multi-value fields, and multi-measure `pie` / `donut` /
-  `funnel` / `scatter` / `radar` / `treemap` / `sankey` widgets. *Not
+  JSON-stored or multi-value fields, and dimensionless `pie` / `donut` /
+  `funnel` / `scatter` / `radar` / `treemap` / `sankey` widgets with two or
+  more `values`. *Not
   exercised.*
 - **Write `time` defaults and values as a bare wall clock** (`"10:00"`); rewrite
   by hand the stored `time` defaults with a non-zero offset that
@@ -1567,8 +1571,8 @@ been given.
   an html page that gained a plugin component are refused from Studio; use the
   metadata API or source for them. *Not exercised.*
 - **If you override `validation.field.invalid_date` or `invalid_datetime`,**
-  also define `invalid_date_range` / `invalid_datetime_range`. *Not
-  exercised.*
+  also define `invalid_date_range` / `invalid_datetime_range` (`f6ccca4`,
+  #20952). *Not exercised.*
 
 **Application code, hooks and flows**
 
@@ -1578,7 +1582,8 @@ been given.
   with `_`. *Not exercised.*
 - **Make sure every `http` node's `signingSecret` renders to a value**, or
   write `signingSecret: ''` to send unsigned on purpose. *Not exercised.*
-- **Stop sending `formula` values**, read a submitted formula value from
+- **Stop sending `formula` values when you pass `strictReadonlyWrites`**
+  (otherwise they are stripped), read a submitted formula value from
   `ctx.submitted`, and handle `reason: 'computed'` in `DroppedFieldsEvent`
   branches. *Not exercised.*
 - **Import the migration-chain names from `@objectstack/spec/migrations`**;
@@ -1586,7 +1591,8 @@ been given.
   --no-watch`; test `nextUtcCalendarDay` answers with `isUnboundedAbove`. *Not
   exercised.*
 - **Custom hosts and drivers:** pass `getReadableFields`, `getQueryableFields`
-  and `hasObjectMiddleware` to a hand-built `AnalyticsService`; implement
+  and (with `executeRawSql`) `hasObjectMiddleware` to a hand-built
+  `AnalyticsService`; implement
   `findOne` on stand-ins for `MigrationFlagEngine` / `SeedTenancyLedger`; lower
   filters with `lowerFilterCondition` before a direct driver call; answer
   `false` and the deny filter from an `ISecurityService` for a caller with no
