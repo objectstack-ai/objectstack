@@ -111,7 +111,7 @@ export class RemoteLoader implements MetadataLoader {
   }
 
   /**
-   * [#15037] Report only the names that ARE names.
+   * [commit efc5447ee] Report only the names that ARE names.
    *
    * This read used to be `loadMany<{ name: string }>(type)` mapped straight to
    * `items.map(i => i.name)`. That type argument is an ASSERTION about bodies
@@ -127,7 +127,7 @@ export class RemoteLoader implements MetadataLoader {
    * spelling, one `typeof` filter behind it. Silently dropping is the landed
    * direction, not a preference — `DatabaseLoader` drops rather than throws,
    * and `FilesystemLoader`'s narrowing carries a maintainer ruling (via the
-   * director seat on #14486, 2026-09-02) that chose narrowing (A) over
+   * director seat, 2026-09-02, recorded in commit 4b4d5a331) that chose narrowing (A) over
    * refusing loudly (B), because a name in the list that the door answers
    * `null` for is the silent failure an author reads as their own typo. An
    * `undefined` here is the extreme form of that name.

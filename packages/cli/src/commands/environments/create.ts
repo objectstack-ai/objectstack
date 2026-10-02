@@ -2,7 +2,7 @@
 
 import { Command, Flags } from '@oclif/core';
 import { printError, emitJson, isExitSignal, errorCodeFields } from '../../utils/format.js';
-import { createApiClient, requireAuth } from '../../utils/api-client.js';
+import { createControlPlaneApiClient, requireControlPlaneAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 import { readAuthConfig, writeAuthConfig } from '../../utils/auth-config.js';
 import { recordCloudActiveEnvironmentId } from '../../utils/active-environment.js';
@@ -18,12 +18,18 @@ import { recordCloudActiveEnvironmentId } from '../../utils/active-environment.j
  * lives in a repo this one never compiles against, so a class name here rots
  * with nothing to catch it.
  *
+ * Authenticates through `createControlPlaneApiClient` — `credentials.json`'s
+ * session where it targets the server, else `cloud.json`'s (the order is
+ * written once, there).
+ *
  * On success, optionally activates the new environment for the current session
  * and persists `activeEnvironmentId` into `~/.objectstack/credentials.json`
- * (unless `--no-activate` is passed). When the control plane it just talked
- * to IS the one `~/.objectstack/cloud.json` records, the same id is written
- * there as well, so `os package publish --install` can install into the
- * environment you just created without repeating the uuid.
+ * (unless `--no-activate` is passed, or the create ran on `cloud.json`'s
+ * session, whose server is not the one `credentials.json` names). When the
+ * control plane it just talked to IS the one `~/.objectstack/cloud.json`
+ * records, the same id is written there as well, so `os package publish
+ * --install` can install into the environment you just created without
+ * repeating the uuid.
  *
  * `os environments switch` records it through the SAME helper. An environment
  * id is only meaningful against the server that issued it, and that gate is
@@ -79,8 +85,8 @@ export default class EnvironmentsCreate extends Command {
     const { flags } = await this.parse(EnvironmentsCreate);
 
     try {
-      const { client, token, baseUrl } = await createApiClient({ url: flags.url, token: flags.token });
-      requireAuth(token);
+      const { client, token, baseUrl, session } = await createControlPlaneApiClient({ url: flags.url, token: flags.token });
+      requireControlPlaneAuth(token);
 
       // Resolve the artifact to an absolute path so the server can read it
       // regardless of its CWD. Bail early if the file is missing — better
@@ -123,7 +129,9 @@ export default class EnvironmentsCreate extends Command {
           // a second copy of it.
           recordedForCloud = await recordCloudActiveEnvironmentId(res.environment.id, baseUrl);
 
-          const cfg = await readAuthConfig().catch(() => null);
+          // Runtime store — skipped on `cloud.json`'s session, for the reason
+          // `os environments switch` gives: that server is not credentials.json's.
+          const cfg = session === 'cloud' ? null : await readAuthConfig().catch(() => null);
           if (cfg) {
             cfg.activeEnvironmentId = res.environment.id;
             cfg.lastUsedAt = new Date().toISOString();

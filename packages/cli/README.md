@@ -96,14 +96,19 @@ Typical flow (build → publish → install into an environment, seeding sample 
 
 ```bash
 os compile                                 # → dist/objectstack.json
-os cloud login                             # one-time; the session os package publish reads
-os environments create --org "$ORG" --name "Dev" --activate   # does NOT read that session — see below
+os cloud login                             # one-time; the session os package publish and os environments read
+os environments create --org "$ORG" --name "Dev" --activate
 os package publish --env <env-id> --install --seed-sample-data
 ```
 
-`os environments create` does not use the session `os cloud login` stored: give
-it `--url` and `--token` (or `OS_CLOUD_URL` / `OS_TOKEN`), or an `os login`
-session. Without either it exits 1 with `Authentication required`.
+`os environments` runs on either stored session. With no `--url` it talks to
+the server of the `os login` session (`credentials.json`) when there is one,
+else to the server of the `os cloud login` session (`cloud.json`), with that
+session's token. A `--url` (or `OS_CLOUD_URL`) picks the session that names
+that server, `credentials.json`'s first — so with both stored, a `--url` naming
+the cloud uses the cloud session. A `--url` neither file names gets
+`credentials.json`'s token as before, never `cloud.json`'s. With no session and
+no `--token` / `OS_TOKEN`, it exits 1 with `Authentication required`.
 
 `os package publish` registers a `sys_package` (keyed by a reverse-domain
 `--manifest-id`, derived from the artifact when omitted), snapshots the
@@ -124,7 +129,7 @@ Two stored sessions exist, and each command authenticates with one of them:
 | `os cloud login` | `-u, --url` (env `OS_CLOUD_URL`, default `https://cloud.objectos.ai`) | none — `-e, --email` / `-p, --password`, or the browser device flow | writes `~/.objectstack/cloud.json` |
 | `os cloud whoami` / `os cloud logout` | — | — | reads / deletes `~/.objectstack/cloud.json` |
 | `os package publish`, `os plugin publish` | `-s, --server` (env `OS_CLOUD_URL`); else the URL in `cloud.json`; else `https://cloud.objectos.ai` | `-t, --token` (env `OS_CLOUD_API_KEY`, then `OS_TOKEN`) | `~/.objectstack/cloud.json` — the `os cloud login` session |
-| `os environments list` / `show` / `create` / `bind` / `switch` | `-u, --url` (env `OS_CLOUD_URL`); else the URL in `credentials.json`; else `http://localhost:3000` | `-t, --token` (env `OS_TOKEN`) | `~/.objectstack/credentials.json` — the `os login` session, **not** `os cloud login`'s |
+| `os environments list` / `show` / `create` / `bind` / `switch` | `-u, --url` (env `OS_CLOUD_URL`); else the URL of the stored session it uses; else `http://localhost:3000` | `-t, --token` (env `OS_TOKEN`) | No `--url`: `~/.objectstack/credentials.json` (the `os login` session), else `~/.objectstack/cloud.json` (the `os cloud login` session). With `--url`: the file that names that server, `credentials.json` first; when neither does, `credentials.json` as before. `cloud.json`'s token is never sent to another URL |
 
 `os package install` is not a cloud command: it installs into a running runtime
 (`-r, --runtime`, env `OS_RUNTIME_URL`, default `http://localhost:3000`) and signs

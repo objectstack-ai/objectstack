@@ -26,10 +26,10 @@
  *
  * ## Two stores, two active environments
  *
- * `os environments switch` keeps writing `credentials.json` (that is the copy
- * `createApiClient` reads for the `data` / `meta` / `environments` families,
- * and `os environments` authenticating as the runtime identity is deliberate).
- * When the control plane it just talked to IS `cloud.json`'s server, it records
+ * `os environments switch` keeps writing `credentials.json` when it ran on that
+ * file's session (it is the copy `createApiClient` reads for the `data` / `meta`
+ * families, and `os environments` runs on either stored session, chosen once in
+ * `createControlPlaneApiClient`). When the control plane it just talked to IS `cloud.json`'s server, it records
  * the same id there too — and that is the copy the publish reads back.
  *
  * ## Two writers, ONE gate

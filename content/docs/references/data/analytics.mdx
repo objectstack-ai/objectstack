@@ -101,8 +101,8 @@ Type: `[string, string]`
 | **where** | `any` | optional | Filtering criteria (canonical Query DSL FilterCondition). An authored `FilterArray` is lowered by `parseFilterAST` on the client before the wire; this field admits only the lowered `FilterCondition` (see `FilterArray` in `data/filter.zod.ts`). |
 | **timeDimensions** | `{ dimension: string; granularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; dateRange?: Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| …> \| [string, string] }[]` | optional | Time-bucketed dimensions. Each entry names a dimension, an optional bucket `granularity`, and an optional `dateRange` — a preset name from the closed date-range vocabulary (e.g. `'last_7_days'`) or an explicit `[start, end]` window; an unrecognised string answers `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` instead of silently widening. |
 | **order** | `Record<string, Enum<'asc' \| 'desc'>>` | optional |  |
-| **limit** | `number` | optional |  |
-| **offset** | `number` | optional |  |
+| **limit** | `integer` | optional | Maximum number of rows to return, applied after `order` — a non-negative integer (`0` returns no rows) |
+| **offset** | `integer` | optional | Number of rows to skip before the first row returned, applied after `order` — a non-negative integer; an `offset` with no `limit` returns every row after it |
 | **timezone** | `string` | optional |  |
 
 ### Nested Shape: `AnalyticsQuery.timeDimensions[number]`

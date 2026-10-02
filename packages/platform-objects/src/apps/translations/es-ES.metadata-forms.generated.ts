@@ -2404,6 +2404,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Ciclo de vida",
         helpText: "Máquina de estado que define el flujo de conversación"
       },
+      structuredOutput: {
+        label: "Salida estructurada",
+        helpText: "Contrato de salida para la respuesta final del agente: formato JSON, el JSON Schema con el que se valida, reintentos, formato de respaldo y pasos de transformación. Lo aplica el runtime de IA en la nube."
+      },
       skills: {
         label: "Habilidades",
         helpText: "Nombres de skill (arquitectura Agent→Skill→Tool)"

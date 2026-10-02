@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#14921] The refusal a metadata source tree earns by naming one item twice.
+ * [commit c1d274de7] The refusal a metadata source tree earns by naming one item twice.
  *
  * ## The invariant this restores
  *
@@ -21,7 +21,7 @@
  * diagnostic anywhere, and `MetadataManager.admitLoaderItems()`'s documented
  * "keep the first and say nothing" absorbs the collision a second time.
  *
- * ## The ruling (maintainer, via the director seat on #14921, 2026-09-05)
+ * ## The ruling (maintainer, via the director seat, 2026-09-05; landed as commit c1d274de7)
  *
  * Option 1 of three: **refuse the ambiguous stem loudly at list time.** Two
  * files sharing a stem across the registered extensions is an AUTHORING ERROR,
@@ -37,7 +37,7 @@
  *
  * ## Why a brand and a predicate rather than bare `instanceof`
  *
- * `MetadataManager`'s plural reads catch per loader on purpose (#5108/#14423):
+ * `MetadataManager`'s plural reads catch per loader on purpose (#5108 and commit a56baa2bd):
  * a storage outage must degrade to a short-but-served list rather than take the
  * whole enumeration down. This refusal is the opposite kind of fact — an
  * author's tree is malformed and no retry fixes it — so those seams have to

@@ -42,6 +42,7 @@ export const agentForm = defineForm({
         { field: 'planning', type: 'composite', helpText: 'Autonomous reasoning configuration (strategy, max iterations, replan)' },
         { field: 'memory', type: 'composite', helpText: 'Memory management (short-term, long-term, reflection)' },
         { field: 'lifecycle', type: 'composite', helpText: 'State machine defining conversation flow' },
+        { field: 'structuredOutput', type: 'composite', helpText: "Output contract for the agent's final answer: JSON format, the JSON Schema it is checked against, retries, fallback format and transform steps. Enforced by the cloud AI runtime." },
       ],
     },
     {

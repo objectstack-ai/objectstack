@@ -4310,6 +4310,13 @@ describe('HttpDispatcher — MCP action bridge (list_actions / run_action)', () 
     });
     const ql: any = {
       executeAction,
+      // [#21321] The engine's enumeration of the handlers `executeAction`
+      // answers above — `list_actions` advertises a script action only when
+      // one of its handler keys is registered here.
+      listRegisteredActions: () => [
+        { objectName: 'todo_task', actionName: 'completeTask' },
+        { objectName: 'todo_task', actionName: 'issueLicense' },
+      ],
       registry: { getObject: (n: string) => (n === 'todo_task' ? todoObject : null) },
       insert: vi.fn(),
       update: vi.fn(),
@@ -4585,6 +4592,12 @@ describe('HttpDispatcher — MCP action bridge (list_actions / run_action)', () 
     });
     const ql: any = {
       executeAction,
+      // [#21321] The handlers `executeAction` answers above, enumerated.
+      listRegisteredActions: () => [
+        { objectName: 'todo_task', actionName: 'archive_task' },
+        { objectName: 'global', actionName: 'nightly_cleanup' },
+        { objectName: 'todo_task', actionName: 'completeTask' },
+      ],
       registry: { getObject: (n: string) => (n === 'todo_task' ? todoObject : null) },
       insert: vi.fn(), update: vi.fn(), delete: vi.fn(),
       find: vi.fn(async () => []),

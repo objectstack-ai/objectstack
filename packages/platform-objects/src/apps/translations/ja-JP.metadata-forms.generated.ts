@@ -2404,6 +2404,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ライフサイクル",
         helpText: "会話フローを定義するステートマシン"
       },
+      structuredOutput: {
+        label: "構造化出力",
+        helpText: "エージェントの最終回答に対する出力契約: JSON 形式、回答の検証に使う JSON Schema、リトライ、フォールバック形式、変換ステップ。クラウド AI ランタイムが適用します。"
+      },
       skills: {
         label: "スキル",
         helpText: "スキル名（Agent→Skill→Tool アーキテクチャ）"

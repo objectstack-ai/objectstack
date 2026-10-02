@@ -31,13 +31,18 @@
  * (datetime) against `due_on` (date) — is refused at both of this verb's
  * engine-evaluated positions, the per-aggregation `filter` and `having`, beside
  * the `where` twin `driver-sql` refuses, and the class reason each prints is
- * pinned against the twin's own diagnostic rather than retyped (the last
- * block).
+ * pinned against the twin's own diagnostic rather than retyped.
+ *
+ * [#21299] …and a `{ $field }` against a column the spec gives NO comparison
+ * class — a file field, a list (a multiselect), a formula — is refused at every
+ * position, beside the `where` twin, its reason read from the twin's own
+ * diagnostic; with `applyInMemoryAggregation`, the published host door, as the
+ * fourth position. The positions × verdicts parity table is the last block.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
 import type { EngineAggregateOptions } from '@objectstack/spec/data';
-import { ObjectQL } from '@objectstack/objectql';
+import { ObjectQL, applyInMemoryAggregation } from '@objectstack/objectql';
 import { SqlDriver, withheldFilterDiagnosticOf } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server';
@@ -91,16 +96,25 @@ function makeRes() {
   return res;
 }
 
-/** A booted door over a real sqlite table — populated or empty — with its driver reads counted. */
-async function boot(populated: boolean) {
+/**
+ * A booted door over a real sqlite table — populated or empty — with its driver
+ * reads counted. [#21299] The object and its rows default to this file's
+ * `ledger_order`; a block may boot its own.
+ */
+async function boot(
+  populated: boolean,
+  object: { name: string; fields: Record<string, unknown> } = LEDGER_ORDER,
+  rows: ReadonlyArray<Record<string, unknown>> = ROWS,
+) {
+  const OBJECT = object.name;
   const driver: any = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
   const engine = new ObjectQL();
   liveEngines.push(engine);
   engine.registerDriver(driver, true);
   await engine.init();
-  engine.registry.registerObject(LEDGER_ORDER as any);
+  engine.registry.registerObject(object as any);
   await engine.syncSchemas();
-  if (populated) await engine.insert(OBJECT, ROWS as any);
+  if (populated) await engine.insert(OBJECT, rows as any);
 
   const calls = { aggregate: 0, find: 0 };
   const find = driver.find.bind(driver);
@@ -312,5 +326,181 @@ describe('[#21255] POST /data/:object/query — a plain { $field } across two co
     });
     expect(res._status ?? 200).toBe(200);
     expect((res._json.records as any[]).map((r) => r.placed).sort()).toEqual(['2026-01-02', '2026-01-15']);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#21299] A column with NO comparison class, and the positions × verdicts table
+// ───────────────────────────────────────────────────────────────────────────
+
+describe('[#21299] POST /data/:object/query — every position answers a { $field } as its where twin does, verdict by verdict', () => {
+  const MEDIA = {
+    name: 'ledger_media',
+    label: 'Ledger Media',
+    fields: {
+      customer_id: { name: 'customer_id', type: 'text' as const },
+      amount: { name: 'amount', type: 'number' as const },
+      placed_on: { name: 'placed_on', type: 'date' as const },
+      due_on: { name: 'due_on', type: 'date' as const },
+      closed_at: { name: 'closed_at', type: 'datetime' as const },
+      // The three families the spec gives no class (`CROSS_FIELD_NO_CLASS_REASONS`).
+      photo: { name: 'photo', type: 'image' as const },
+      tags: { name: 'tags', type: 'multiselect' as const, options: [{ label: 'A', value: 'a' }, { label: 'B', value: 'b' }] },
+      due_f: { name: 'due_f', type: 'formula' as const, expression: 'due_on', returnType: 'date' },
+    },
+  };
+  const MEDIA_ROWS = [
+    { id: 'm1', customer_id: 'c1', amount: 100, placed_on: '2026-01-10', due_on: '2026-01-05', closed_at: '2026-01-03T10:00:00.000Z', photo: 'img1', tags: ['a'] },
+    { id: 'm2', customer_id: 'c1', amount: 400, placed_on: '2026-01-02', due_on: '2026-01-20', closed_at: '2026-01-20T12:00:00.000Z', photo: 'img2', tags: ['b'] },
+    { id: 'm3', customer_id: 'c2', amount: 900, placed_on: '2026-03-01', due_on: '2026-01-01', closed_at: '2026-02-10T10:00:00.000Z', photo: 'img3', tags: ['a', 'b'] },
+    { id: 'm4', customer_id: 'c2', amount: 300, placed_on: '2026-02-01', due_on: '2026-02-01', closed_at: '2026-02-05T11:00:00.000Z', photo: 'img4', tags: [] },
+    { id: 'm5', customer_id: 'c2', amount: 50, placed_on: '2026-01-15', due_on: '2026-03-01', closed_at: '2026-02-06T10:00:00.000Z', photo: 'img5', tags: ['a'] },
+    { id: 'm6', customer_id: 'c3', amount: 20, placed_on: '2026-02-01', due_on: '2026-01-31', closed_at: '2026-03-01T10:00:00.000Z', photo: 'img6', tags: ['b'] },
+  ];
+
+  /**
+   * The `where` twin's specific reason — the sentence after "cannot be
+   * compiled here: " in the diagnostic `driver-sql` withholds from the wire,
+   * read through the engine door, where the thrown error still carries it — so
+   * a refusal here is compared against what `where` printed, never against a
+   * copy typed into this file.
+   */
+  async function whereTwinReason(engine: ObjectQL, object: string, filter: unknown): Promise<string> {
+    let diagnostic: string | null = null;
+    try {
+      await engine.aggregate(object, { where: filter, aggregations: [{ function: 'count', alias: 'n' }] } as EngineAggregateOptions);
+    } catch (e) {
+      expect((e as { code?: unknown }).code).toBe('INVALID_FILTER');
+      diagnostic = withheldFilterDiagnosticOf(e);
+    }
+    expect(diagnostic, 'the where twin is refused with a withheld diagnostic').toBeTypeOf('string');
+    const marker = 'which cannot be compiled here: ';
+    expect(diagnostic).toContain(marker);
+    return diagnostic!.slice(diagnostic!.indexOf(marker) + marker.length);
+  }
+
+  /**
+   * One row per answer of the spec's verdict that this object can give — the
+   * pair, as a per-aggregation filter and as its `where` twin, and a `having`
+   * whose aggregated columns carry the same two classes. `havingWordsTwin`
+   * names the `where` pair whose reason the `having` refusal prints verbatim
+   * (the same column names on both sides); the cross-class row's words are
+   * the #21255 block's, above.
+   */
+  const PARITY: ReadonlyArray<{
+    verdict: string;
+    filter: Record<string, unknown>;
+    having: Record<string, unknown>;
+    havingWordsTwin?: Record<string, unknown>;
+  }> = [
+    {
+      verdict: 'comparable (date / date)',
+      filter: { placed_on: { $lte: { $field: 'due_on' } } },
+      having: {
+        groupBy: [{ field: 'placed_on', dateGranularity: 'day', alias: 'placed' }],
+        aggregations: [{ function: 'min', field: 'due_on', alias: 'first_due' }],
+        having: { placed: { $lte: { $field: 'first_due' } } },
+      },
+    },
+    {
+      verdict: 'cross-class (datetime / date)',
+      filter: { closed_at: { $lte: { $field: 'due_on' } } },
+      having: {
+        groupBy: [{ field: 'due_on', dateGranularity: 'day', alias: 'due_day' }],
+        aggregations: [{ function: 'max', field: 'closed_at', alias: 'last_closed' }],
+        having: { last_closed: { $lte: { $field: 'due_day' } } },
+      },
+    },
+    {
+      verdict: 'no-class, file (text / image) — the card\'s first shape',
+      filter: { customer_id: { $ne: { $field: 'photo' } } },
+      // The card's third shape: `having` on an image groupBy against a count.
+      having: { groupBy: ['photo'], aggregations: [{ function: 'count', alias: 'n' }], having: { photo: { $ne: { $field: 'n' } } } },
+      havingWordsTwin: { photo: { $ne: { $field: 'amount' } } },
+    },
+    {
+      verdict: 'no-class, list-or-object (number / multiselect) — the card\'s second shape',
+      filter: { amount: { $ne: { $field: 'tags' } } },
+      // Unreachable at `having`: the groupBy door refuses a multi-value field first.
+      having: { groupBy: ['tags'], aggregations: [{ function: 'count', alias: 'n' }], having: { tags: { $ne: { $field: 'n' } } } },
+    },
+    {
+      verdict: 'no-class, formula (datetime / formula) — the card\'s fourth shape',
+      filter: { closed_at: { $lte: { $field: 'due_f' } } },
+      // A formula has no column: `driver-sql` refuses a groupBy on it first.
+      having: { groupBy: ['due_f'], aggregations: [{ function: 'count', alias: 'n' }], having: { due_f: { $ne: { $field: 'n' } } } },
+    },
+  ];
+
+  /** A `where` twin's answer, or a position's: a refusal's envelope, or the total it counted. */
+  type Answer = { status: 400; code: unknown } | { status: 200; total: number };
+  const sum = (records: any[], column: string) => records.reduce((total, r) => total + Number(r[column] ?? 0), 0);
+  const answerOf = (res: any, column: string): Answer => (
+    (res._status ?? 200) === 400 ? { status: 400, code: res._json.code } : { status: 200, total: sum(res._json.records, column) }
+  );
+
+  for (const row of PARITY) {
+    it(`${row.verdict}: where, the per-aggregation filter, applyInMemoryAggregation and having give one answer, in where's words`, async () => {
+      for (const populated of [false, true]) {
+        const cell = `populated=${populated}`;
+        const { post, calls, engine } = await boot(populated, MEDIA, MEDIA_ROWS);
+        const logged: string[] = [];
+        (engine as any).logger.warn = (line: unknown) => { logged.push(String(line)); };
+
+        // The per-aggregation filter first, so a refusal can be shown to read no row.
+        const filteredRes = await post(perAggregation(row.filter));
+        const filtered = answerOf(filteredRes, 'm');
+        const readsAtRefusal = { ...calls };
+        const twin = answerOf(await post(whereTwin(row.filter)), 'n');
+        expect(filtered, `the per-aggregation filter, ${cell}`).toEqual(twin);
+
+        const rows = (await engine.find(MEDIA.name, {})) as any[];
+        const withheld: string[] = [];
+        let host: Answer;
+        try {
+          host = { status: 200, total: sum(applyInMemoryAggregation(rows, perAggregation(row.filter) as never, undefined, MEDIA.fields, (d) => withheld.push(d)), 'm') };
+        } catch (e) {
+          expect((e as { status?: unknown }).status, cell).toBe(400);
+          host = { status: 400, code: (e as { code?: unknown }).code };
+        }
+        expect(host, `applyInMemoryAggregation, ${cell}`).toEqual(twin);
+
+        const havingRes = await post(row.having);
+        expect((havingRes._status ?? 200) === 400 ? 400 : 200, `having, ${cell}`).toBe(twin.status);
+
+        if (twin.status === 200) continue;
+        expect(twin.code, cell).toBe('INVALID_FILTER');
+        expect(readsAtRefusal, `refused before any read, ${cell}`).toEqual({ aggregate: 0, find: 0 });
+        for (const name of Object.keys(MEDIA.fields)) expect(filteredRes._json.error, cell).not.toContain(`"${name}"`);
+        // The cross-class row's words are the #21255 block's (an aggregated or
+        // judged column "is" the class `where` says it "is stored as").
+        if (row.verdict.startsWith('cross-class')) continue;
+        // `where`'s words, verbatim: the twin's own reason, read from its
+        // diagnostic, inside the withheld diagnostic each filter position logs.
+        const reason = await whereTwinReason(engine, MEDIA.name, row.filter);
+        expect(logged.join('\n'), `the per-aggregation diagnostic, ${cell}`).toContain(`which cannot be evaluated here: ${reason}`);
+        expect(withheld.join('\n'), `applyInMemoryAggregation's diagnostic, ${cell}`).toContain(`which cannot be evaluated here: ${reason}`);
+        if (row.havingWordsTwin) {
+          // `having` names its own projection, so the reason is on the wire.
+          expect(havingRes._json.code, cell).toBe('INVALID_FILTER');
+          expect(havingRes._json.error, cell).toContain(await whereTwinReason(engine, MEDIA.name, row.havingWordsTwin));
+        }
+      }
+    });
+  }
+
+  it('no declaration — an audit-opt-out object\'s row-carried created_at: where refuses it, the engine positions do not judge it (the recorded posture)', async () => {
+    // The field map carries no `created_at` when the object opts out of the
+    // audit columns. `driver-sql` refuses the `where` twin (its target is not
+    // a declared field); the engine-side positions keep the fail-open
+    // direction for a side with no declaration and answer, as #21255 and
+    // #21242 pin. Recorded so a change on either side is seen.
+    const NO_AUDIT = { ...MEDIA, name: 'ledger_noaudit', systemFields: { audit: false } };
+    const { post, engine } = await boot(true, NO_AUDIT as any, MEDIA_ROWS);
+    const filter = { created_at: { $ne: { $field: 'photo' } } };
+    expect(answerOf(await post(whereTwin(filter)), 'n')).toEqual({ status: 400, code: 'INVALID_FILTER' });
+    expect(answerOf(await post(perAggregation(filter)), 'm')).toEqual({ status: 200, total: 6 });
+    const rows = (await engine.find(NO_AUDIT.name, {})) as any[];
+    expect(sum(applyInMemoryAggregation(rows, perAggregation(filter) as never, undefined, NO_AUDIT.fields), 'm')).toBe(6);
   });
 });

@@ -300,7 +300,8 @@ describe('#18265: the active environment publish installs into', () => {
 
       expect((await readCloud()).activeEnvironmentId).toBe('env_switched');
       // The runtime store keeps its copy: `createApiClient` reads THAT one for
-      // the data / meta / environments families.
+      // the data / meta families, and `createControlPlaneApiClient` prefers it
+      // for the environments family whenever it names the server.
       const runtime = JSON.parse(await readFile(credentialsJson(), 'utf8'));
       expect(runtime.activeEnvironmentId).toBe('env_switched');
     });
