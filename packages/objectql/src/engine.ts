@@ -1073,6 +1073,10 @@ function lowerWhereFilterArray<T extends object | undefined>(
     // lowers it once it can read (`ObjectQL.lowerRelationConditions`) — or
     // refused in words of its own (a key the related object does not declare,
     // a second level, a related object that is not registered).
+    // [#21333] …and the walk's BOOLEAN arm: against a declared boolean field
+    // `"true"` / `"false"`, `1` / `0` and `"1"` / `"0"` narrow to their
+    // boolean and any other string is refused `INVALID_FILTER` / 400 — the one
+    // place a bare query parameter's `"true"` becomes `true`.
     const numeric = narrowNumberComparands(object, operation, schema, where, 'where', { schemaOf });
     // [#7872] The comparand-type door, on the OBJECT form. `parseFilterAST`
     // runs the same walk on everything it lowers or passes through, but
@@ -1160,7 +1164,8 @@ function lowerWhereFilterArray<T extends object | undefined>(
   // [#20351] Same door as the object branch, on the LOWERED condition — the
   // array sugar (`[['amount','>','abc']]`) names numeric fields too. [#20546]
   // …and lowers `['amount', '=', { a: 1 }]` to the no-operator object its
-  // second arm refuses.
+  // second arm refuses. [#21333] …and `['active', '=', 'true']` to the
+  // comparand its boolean arm narrows.
   lowered.where = narrowNumberComparands(object, operation, schema, condition, 'where', { schemaOf });
   return lowered as T;
 }
@@ -17227,6 +17232,9 @@ export class ObjectQL implements IObjectQLEngine {
               // counted no row, silently, on every driver. [#20745] So did
               // `{ owner: { region: 'NA' } }` beneath a lookup; a JSON object
               // here is refused alike, one answer per filter at every position.
+              // [#21333] …and its boolean arm: `"true"` against a declared
+              // boolean field counted no row (every row under `$ne`) on both
+              // drivers; it is narrowed to `true` here, `"yes"` refused.
               const numeric = narrowNumberComparands(
                   object, 'aggregate', this._registry.getObject(object), aggFilter, `aggregations[${i}].filter`,
               );
@@ -17375,6 +17383,9 @@ export class ObjectQL implements IObjectQLEngine {
           // driver, where its `where` twin answered two ways. [#20745] A
           // relation or JSON column's type is judged too (a lookup groupBy's
           // nested-relation `having` kept no group on every driver).
+          // [#21333] …and, by the same types, the boolean arm: over a groupBy
+          // of a boolean field `"true"` kept no group (`$ne "true"` every
+          // group) on both drivers; it is narrowed to `true`, `"yes"` refused.
           const numeric = narrowHavingNumberComparands(
               object, having, havingColumnClasses,
               aggregatedRowColumnTypes(query.groupBy, query.aggregations, declaredFields),
