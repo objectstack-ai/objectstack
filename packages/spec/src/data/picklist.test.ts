@@ -126,15 +126,23 @@ describe('Field `picklist` — mutually exclusive with `options` at the schema d
     expect(FieldSchema.safeParse(def).success).toBe(false);
   });
 
-  it.each(['select', 'radio'] as const)('neither on a %s is the completeness gate\'s error, not a parse refusal', (type) => {
-    // The schema door refuses only the pair. An optionless single-choice field
-    // keeps the verdict it had before the kind existed: parse-legal, and an
-    // error-severity `field/choice-without-options` finding at the author-time
-    // and registry gates — which a `picklist` reference now satisfies.
-    expect(FieldSchema.safeParse({ name: 'f', label: 'F', type }).success).toBe(true);
+  it.each(['select', 'radio'] as const)('neither on a %s is refused at `options` — and stays the completeness gate\'s error', (type) => {
+    // The schema door refuses the pair AND the hole: a single-choice field with
+    // no option source is refused at parse on the `options` path, with a
+    // prescription naming both keys. The author-time rule is unchanged — the
+    // door is one more gate beside it, not a replacement: the same input is
+    // still an error-severity `field/choice-without-options` finding, which a
+    // `picklist` reference satisfies.
+    const issues = issuesByPath(FieldSchema.safeParse({ name: 'f', label: 'F', type }));
+    const neither = issues.get('options');
+    expect(neither?.code).toBe('custom');
+    expect(neither?.message).toContain(`\`${type}\``);
+    expect(neither?.message).toContain('`options`');
+    expect(neither?.message).toContain('`picklist');
     expect(checkFieldCompleteness({ type }).map((f) => [f.rule, f.severity]))
       .toEqual([['field/choice-without-options', 'error']]);
     expect(checkFieldCompleteness({ type, picklist: 'industry' })).toEqual([]);
+    expect(FieldSchema.safeParse({ name: 'f', label: 'F', type, picklist: 'industry' }).success).toBe(true);
   });
 
   it.each(['select', 'radio', 'multiselect', 'checkboxes', 'tags'] as const)('`picklist` is accepted on the option type %s', (type) => {

@@ -677,6 +677,8 @@ export interface NumberComparandDoorFixtureField {
   readonly returnType?: 'number' | 'text' | 'boolean' | 'date';
   /** `summary` — a roll-up declaration, present so the field is a legal declaration. */
   readonly summaryOperations?: { readonly object: string; readonly field: string; readonly function: 'count' };
+  /** Single-choice types (`select` / `radio`) — one option, present so the field is a legal declaration. */
+  readonly options?: readonly { readonly label: string; readonly value: string }[];
 }
 
 /** The fixture object's name. */
@@ -710,6 +712,7 @@ const fixtureFieldFor = (type: string): NumberComparandDoorFixtureField => {
   if (type === 'summary') {
     return { name, type, summaryOperations: { object: NUMBER_COMPARAND_DOOR_FIXTURE_OBJECT, field: 'id', function: 'count' } };
   }
+  if (SINGLE_OPTION_TYPES.has(type)) return { name, type, options: [{ label: 'Open', value: 'open' }] };
   return { name, type };
 };
 
