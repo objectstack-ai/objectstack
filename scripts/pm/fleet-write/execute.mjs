@@ -61,13 +61,36 @@
  * apply on the runner too (the runner's own home holds the log; nothing is
  * shared with a seat container, and the twenty-action cap bounds the run).
  *
- * ## The step summary — what a seat reads back
+ * ## The step summary — what a person reads back
  *
  * `$GITHUB_STEP_SUMMARY` gets one table per run: request id · sender and its
  * role · session · target, then one row per request — op, endpoint, HTTP
  * status, and the resulting id / url — and a last line saying how many landed
  * or where it stopped. Text is passed through unchanged: attribution stays
  * the session id inside the text, per protocol.
+ *
+ * ## The annotations — the numbers a seat CAN read
+ *
+ * A seat container reads neither this job's log (the endpoint answers 302 to
+ * blob storage its egress proxy refuses) nor its step summary (the check
+ * run's `output.summary` is null), but it does read the check run's
+ * annotations. So for every action whose op creates or moves a card
+ * (`ANNOTATED_OPS` in `dispatch.mjs`) and whose request LANDED, this file
+ * prints ONE workflow command to stdout — a `notice` titled
+ * `fleet-write <op>` whose message `relayAnnotationMessage` spells as
+ * `fleet-write action=<i> op=<op> number=<n> url=<url>` — and the runner turns
+ * it into an annotation. The number and url are read from the platform's
+ * ANSWER to that request (`ANNOTATION_ANSWERS`: the created issue's
+ * `number` / `html_url`, the `transferIssue` answer's `issue.number` /
+ * `issue.url`), ⛔ never from the request; an answer that carries neither, or
+ * a message `parseRelayAnnotation` would not read back as exactly this
+ * number, url and landing repository, emits nothing and says so — the
+ * reader's fallback then finds the card. No other op emits one. The
+ * platform keeps 10 notice annotations per step and 50 per job and drops the
+ * rest without a word (actions/toolkit `docs/problem-matchers.md`), so a
+ * stroke past ten such ops names only its first ten; `dispatch.mjs`'s header
+ * section of the same name is the reader's half. The message is escaped the
+ * way actions/toolkit `command.ts` escapes a command's data and properties.
  *
  * ## Exit codes — capture them BEFORE any pipe
  *
@@ -88,6 +111,7 @@ import { isEntrypoint } from '../../invoked-as.mjs';
 import { scrub } from '../fleet-token.mjs';
 import { classifyHttp } from '../label-write.mjs';
 import { EXIT_WRITE_PACE_REFUSED, isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from '../write-pace.mjs';
+import { ANNOTATED_OPS, parseRelayAnnotation, RELAY_ANNOTATION_PREFIX, relayAnnotationMessage } from './dispatch.mjs';
 import { OPS, PERMISSIONS, PR_LANDED_STATE, transferRemedy } from './ops.mjs';
 import { PAYLOAD_ENV, refusalText, tokenRepositoriesOf, validatePayload } from './validate.mjs';
 
@@ -197,6 +221,53 @@ export function resultOf(req, json) {
   return bits.join(' ') || 'ok';
 }
 
+/**
+ * Where each annotated op's ANSWER carries the number and url of the card it
+ * created or moved — keyed exactly as `ANNOTATED_OPS` (the self-test pins it).
+ * ⛔ Never the request: an annotation reports what the platform answered.
+ */
+export const ANNOTATION_ANSWERS = Object.freeze({
+  issue_create: (req, json) => ({ number: json?.number, url: json?.html_url }),
+  transfer: (req, json) => {
+    const moved = json?.data?.[req?.graphql?.mutation]?.issue;
+    return { number: moved?.number, url: moved?.url };
+  },
+});
+
+/** A workflow command's data, escaped as actions/toolkit `command.ts` `escapeData` does. */
+export function escapeCommandData(s) {
+  return String(s).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+}
+
+/** A workflow command's property value, escaped as actions/toolkit `command.ts` `escapeProperty` does. */
+export function escapeCommandProperty(s) {
+  return escapeCommandData(s).replace(/:/g, '%3A').replace(/,/g, '%2C');
+}
+
+/**
+ * The annotation one landed request earns: `{ note }` — `{ action, op,
+ * number, url, repo }`, exactly what `parseRelayAnnotation` reads back from
+ * its message — or `{ note: null, why }`: `why` is empty for an op that is not
+ * annotated, and names the reason for one whose answer cannot be reported
+ * (no number and url, a url the reader would not parse as this number, or one
+ * naming another repository than the op lands the card on). Pure.
+ */
+export function annotationFor({ action, op, req, json, payload }) {
+  if (!Object.hasOwn(ANNOTATION_ANSWERS, op) || !Object.hasOwn(ANNOTATED_OPS, op)) return { note: null, why: '' };
+  const { number, url } = ANNOTATION_ANSWERS[op](req, json);
+  if (!Number.isInteger(number) || number < 1 || typeof url !== 'string' || url === '') return { note: null, why: 'the answer carries no number and url' };
+  const back = parseRelayAnnotation(relayAnnotationMessage({ action, op, number, url }));
+  if (!back || back.action !== action || back.op !== op || back.number !== number || back.url !== url) return { note: null, why: `the answer's url ${url} is not one the reader parses as #${number}` };
+  const lands = String(ANNOTATED_OPS[op].lands(payload?.actions?.[action - 1], payload?.repo) ?? '');
+  if (back.repo.toLowerCase() !== lands.toLowerCase()) return { note: null, why: `the answer's url names ${back.repo}, not ${lands || 'the repository the op lands on'}` };
+  return { note: back, why: '' };
+}
+
+/** The workflow command that turns a note into a `notice` annotation on this job's check run. Pure. */
+export function annotationCommand(note) {
+  return `::notice title=${escapeCommandProperty(`${RELAY_ANNOTATION_PREFIX} ${note.op}`)}::${escapeCommandData(relayAnnotationMessage(note))}`;
+}
+
 /** The summary table, as markdown lines. */
 export function summaryText({ payload, sender, role, rows, stoppedAt = null, notAttempted = 0, refusal = null, remedy = null, reaches = null }) {
   const lines = [`### fleet-write \`${payload?.request_id ?? '?'}\``, ''];
@@ -287,7 +358,8 @@ async function graphqlVariables(req, payload, api, t) {
 }
 
 /**
- * The run. Returns `{ exit, rows, summary, lines }`; never throws on a status.
+ * The run. Returns `{ exit, rows, summary, lines, annotations }` — `annotations`
+ * the notes this run emitted, in order; never throws on a status.
  *
  * @param {{ payload: unknown, sender: string, token: string, api?: string }} input
  * @param {{ fetch?: Function, pace?: object, log?: Function }} [deps]
@@ -337,6 +409,7 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
 
   // ── the actions, in order ─────────────────────────────────────────────────
   const rows = [];
+  const annotations = [];
   let stoppedAt = null;
   for (let i = 0; i < payload.actions.length && stoppedAt === null; i++) {
     const action = payload.actions[i];
@@ -365,6 +438,14 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
         break;
       }
       log(`  ✓ action ${i + 1} ${action.op}: ${call} -> HTTP ${r.status} · ${rows[rows.length - 1].result}`);
+      // A landed op that creates or moves a card reports its number where a seat CAN read it (header).
+      const { note, why } = annotationFor({ action: i + 1, op: action.op, req, json: r.json, payload });
+      if (note) {
+        annotations.push(note);
+        log(annotationCommand(note));
+      } else if (why) {
+        log(`  ⚠ action ${i + 1} ${action.op}: no annotation — ${scrub(why, [token])}; a seat reading this run finds the card on the board instead.`);
+      }
     }
   }
   const notAttempted = stoppedAt ? payload.actions.length - stoppedAt.action : 0;
@@ -374,7 +455,7 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
   if (stoppedAt) log(`fleet-write/execute: ✗ stopped at action ${stoppedAt.action} (${stoppedAt.op}); ${notAttempted} later action(s) NOT attempted. The board holds what the rows above say landed.`);
   else log(`fleet-write/execute: ✓ ${rows.length} request(s) landed, every action done.`);
   if (remedy) log(`fleet-write/execute: remedy — ${remedy}`);
-  return { exit: stoppedAt ? EXIT_ACTION_FAILED : EXIT_OK, rows, summary, lines, role };
+  return { exit: stoppedAt ? EXIT_ACTION_FAILED : EXIT_OK, rows, summary, lines, role, annotations };
 }
 
 // ---------------------------------------------------------------------------
@@ -392,9 +473,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'redaction: the token reaches no summary line, log line or error': 3,
   'the wiring: both halves around every write verb, on the roster': 4,
   'the CLI: environment inputs, the payload refusal, the exit ladder': 7,
+  "the annotations: ONE notice per landed op that creates or moves a card — op, number and url read from the platform's answer, never the request; none for any other op, a failed request or an answer that cannot be reported; the reader's own parser reads back exactly what was emitted": 12,
   'the transfer: the sender gated on BOTH repositories, both node ids first, a pull or a moved card refused before the mutation, landing only on the target, the remedy on failure': 11,
 });
-const SELF_TEST_BATTERY_FLOOR = 11;
+const SELF_TEST_BATTERY_FLOOR = 12;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -677,6 +759,85 @@ export async function selfTest() {
       t('⛔ and the token never reached the throttle\'s log', records.includes(TOKEN), false);
     }
 
+    // ── the annotations ─────────────────────────────────────────────────────
+    battery("the annotations: ONE notice per landed op that creates or moves a card — op, number and url read from the platform's answer, never the request; none for any other op, a failed request or an answer that cannot be reported; the reader's own parser reads back exactly what was emitted");
+    {
+      const UI = 'objectstack-ai/objectui';
+      const notices = (r) => r.logs.filter((l) => l.startsWith('::'));
+      /** The data half of a workflow command, unescaped the way the runner stores it as the annotation's message. */
+      const messageOf = (line) => line.slice(line.indexOf('::', 2) + 2).replace(/%0A/g, '\n').replace(/%0D/g, '\r').replace(/%25/g, '%');
+      const issueUrl = (repo, n) => `https://github.test/${repo}/issues/${n}`;
+      t('the two tables name exactly the ops that create or move a card: issue_create and transfer', [Object.keys(ANNOTATION_ANSWERS).sort(), Object.keys(ANNOTATED_OPS).sort()], [['issue_create', 'transfer'], ['issue_create', 'transfer']]);
+
+      const created = await run(base([{ op: 'issue_create', title: 'I', body: 'B' }]), { ...allowed, [`POST /repos/${REPO}/issues`]: { status: 201, json: { number: 10, html_url: issueUrl(REPO, 10) } } }, { file: paceFile });
+      t(
+        'a landed issue_create prints exactly ONE workflow command: a notice titled `fleet-write issue_create` whose message names the action, op, number and url',
+        [created.exit, notices(created)],
+        [EXIT_OK, [`::notice title=fleet-write issue_create::fleet-write action=1 op=issue_create number=10 url=${issueUrl(REPO, 10)}`]],
+        created.logs.join(' | '),
+      );
+      const back = parseRelayAnnotation(messageOf(notices(created)[0] ?? ''));
+      t("…which the reader's own parser reads back as exactly what the run returns as emitted", [back, created.annotations], [{ action: 1, op: 'issue_create', number: 10, url: issueUrl(REPO, 10), repo: REPO }, [{ action: 1, op: 'issue_create', number: 10, url: issueUrl(REPO, 10), repo: REPO }]]);
+
+      const moved = await run(base([{ op: 'transfer', issue: 7, target_repo: UI }]), {
+        ...allowed,
+        [`GET /repos/${UI}/collaborators/os-support-ai/permission`]: { status: 200, json: { permission: 'write', role_name: 'write' } },
+        [`GET /repos/${REPO}/issues/7`]: { status: 200, json: { number: 7, node_id: 'I_7', repository_url: `https://api.github.test/repos/${REPO}` } },
+        [`GET /repos/${UI}`]: { status: 200, json: { node_id: 'R_ui' } },
+        'POST /graphql': { status: 200, json: { data: { transferIssue: { issue: { number: 31, url: issueUrl(UI, 31), repository: { nameWithOwner: UI } } } } } },
+      }, { file: paceFile });
+      t("⛔ a transfer's notice carries the number and url the transferIssue ANSWER placed on the target — #31 on the target, never the request's #7", [moved.exit, moved.annotations, notices(moved).length], [EXIT_OK, [{ action: 1, op: 'transfer', number: 31, url: issueUrl(UI, 31), repo: UI }], 1], moved.logs.join(' | '));
+
+      const quiet = await run(base([
+        { op: 'comment', issue: 1, body: 'a' },
+        { op: 'labels_add', issue: 1, labels: ['x'] },
+        { op: 'issue_patch', issue: 1, state: 'closed' },
+        { op: 'pr_create', title: 'T', head: 'h', base: 'main' },
+      ]), {
+        ...allowed,
+        [`POST /repos/${REPO}/issues/1/comments`]: { status: 201, json: { id: 1, html_url: issueUrl(REPO, 1) } },
+        [`POST /repos/${REPO}/issues/1/labels`]: { status: 200, json: [{ name: 'x' }] },
+        [`PATCH /repos/${REPO}/issues/1`]: { status: 200, json: { number: 1, html_url: issueUrl(REPO, 1) } },
+        [`POST /repos/${REPO}/pulls`]: { status: 201, json: { number: 9, html_url: `https://github.test/${REPO}/pull/9` } },
+      }, { file: paceFile });
+      t('no other op emits one — a comment, labels, a patch and a NEW PULL REQUEST all landed, zero workflow commands, zero notes', [quiet.exit, notices(quiet), quiet.annotations], [EXIT_OK, [], []]);
+
+      const mixed = await run(base([{ op: 'issue_create', title: 'A', body: 'a' }, { op: 'comment', issue: 1, body: 'c' }, { op: 'issue_create', title: 'B', body: 'b' }]), {
+        ...allowed,
+        [`POST /repos/${REPO}/issues`]: { status: 201, json: { number: 11, html_url: issueUrl(REPO, 11) } },
+        [`POST /repos/${REPO}/issues/1/comments`]: { status: 201, json: { id: 2 } },
+      }, { file: paceFile });
+      t('one per annotated action, in order, each naming its OWN action index — 1 and 3 around the comment', mixed.annotations.map((a) => [a.action, a.op]), [[1, 'issue_create'], [3, 'issue_create']]);
+
+      const refused = await run(base([{ op: 'issue_create', title: 'I', body: 'B' }]), { ...allowed, [`POST /repos/${REPO}/issues`]: { status: 403, json: { message: 'Resource not accessible by integration' } } });
+      t('a create the platform refused emits nothing', [refused.exit, notices(refused), refused.annotations], [EXIT_ACTION_FAILED, [], []]);
+      const blank = await run(base([{ op: 'issue_create', title: 'I', body: 'B' }]), { ...allowed, [`POST /repos/${REPO}/issues`]: { status: 201, json: {} } });
+      t('an answer that carries no number and url emits nothing, says so, and the action still landed', [blank.exit, notices(blank), blank.logs.some((l) => l.includes('no annotation — the answer carries no number and url'))], [EXIT_OK, [], true]);
+      const elsewhere = await run(base([{ op: 'issue_create', title: 'I', body: 'B' }]), { ...allowed, [`POST /repos/${REPO}/issues`]: { status: 201, json: { number: 12, html_url: issueUrl(UI, 12) } } });
+      t('⛔ an answer whose url names another repository than the op lands on emits nothing, naming it', [notices(elsewhere), elsewhere.logs.some((l) => l.includes(`names ${UI}, not ${REPO}`))], [[], true]);
+
+      t(
+        "the command's escapes are actions/toolkit's: data escapes %, CR and LF; a property also : and ,",
+        [escapeCommandData('a%b\r\nc'), escapeCommandProperty('t: a,b%'), annotationCommand({ action: 2, op: 'transfer', number: 5, url: 'https://github.test/o/r/issues/5?x=%41' })],
+        ['a%25b%0D%0Ac', 't%3A a%2Cb%25', '::notice title=fleet-write transfer::fleet-write action=2 op=transfer number=5 url=https://github.test/o/r/issues/5?x=%2541'],
+      );
+      // The other annotations a relay run carries, measured on a live run's check run: the runner's image notice and an action's deprecation warning.
+      t(
+        "the parser reads ONLY the relay's own message: the runner's notices, a deprecation warning, an op outside the table, or a url that disagrees with its number are null",
+        [
+          parseRelayAnnotation('"The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026."'),
+          parseRelayAnnotation("Input 'app-id' has been deprecated with message: Use 'client-id' instead."),
+          parseRelayAnnotation(relayAnnotationMessage({ action: 1, op: 'pr_create', number: 9, url: issueUrl(REPO, 9) })),
+          parseRelayAnnotation(relayAnnotationMessage({ action: 1, op: 'issue_create', number: 9, url: issueUrl(REPO, 8) })),
+          parseRelayAnnotation(`${relayAnnotationMessage({ action: 1, op: 'issue_create', number: 9, url: issueUrl(REPO, 9) })} trailing`),
+          parseRelayAnnotation(null),
+        ],
+        [null, null, null, null, null, null],
+      );
+      // The needle is assembled so this line does not match itself: a pattern for the message would spell its number group.
+      t('⛔ the parser is the reader\'s, imported — this file spells no pattern for the message of its own', [readReal(SELF_PATH, 'utf8').includes(['number=', '(['].join('')), typeof parseRelayAnnotation], [false, 'function']);
+    }
+
     // ── the CLI ─────────────────────────────────────────────────────────────
     battery('the CLI: environment inputs, the payload refusal, the exit ladder');
     {
@@ -733,7 +894,8 @@ export async function selfTest() {
   console.log(
     `✓ fleet-write/execute self-test: ${cases.length} cases pass across ${declared.length} batteries — the sender gate from the target repo's answer, ` +
       'every op as the request the table declares, stop at the first failure with later actions untouched, the idempotent label DELETE, the GraphQL ' +
-      'ops behind a node-id read, a pull mutation landing only when its answer shows the state it asked for (armed or queued, off, ready, draft), a transfer gated on both repositories and landing only on its target, one summary row per request, and a known ' +
+      'ops behind a node-id read, a pull mutation landing only when its answer shows the state it asked for (armed or queued, off, ready, draft), a transfer gated on both repositories and landing only on its target, one summary row per request, ' +
+      "one annotation per created or moved card carrying the number the platform answered, read back by the reader's own parser, and a known " +
       'token that came back out of NO summary, log or error.',
   );
   selfTestReachedVerdict = true;
