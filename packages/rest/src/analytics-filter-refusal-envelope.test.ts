@@ -292,6 +292,16 @@ describe('[#17551] the structurally-malformed filter spellings are refused at th
       member: 'selection.runtimeFilter.stage.$in.1',
       sentence: /^Filter comparand is a plain object \(\{"a":1\}\), which no driver can compare\./,
     },
+    {
+      // [#21448] A list at a scalar operator, whatever the column type. Both
+      // analytics faces bound its FIRST member on a text column (200, wrong
+      // rows); the shared comparand-shape face now refuses it on query, and the
+      // schema door asks that face, so it is refused here, located on the member.
+      name: 'a list at a scalar operator',
+      runtimeFilter: { stage: { $gt: ['a', 'z'] } },
+      member: 'selection.runtimeFilter.stage.$gt',
+      sentence: /^Operator "\$gt" on field "stage" requires a single comparable value, but received an array \(\["a","z"\]\)\. Write ONE value\./,
+    },
   ];
 
   for (const c of AT_THE_DOOR) {

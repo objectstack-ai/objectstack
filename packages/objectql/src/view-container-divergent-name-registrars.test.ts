@@ -257,17 +257,25 @@ describe('#14399 — the row\'s own `name` is the LAST term of the container der
         // observable on this shape: its refusal names the key it derived.
         // `toEqual(AGREED_KEYS)` above would also be satisfied by both sides
         // moving to `lead_views`, so the agreed VALUE is pinned at both.
+        //
+        // [#21412] Read from the judge's words now: the artifact door's
+        // container branch refuses through `viewContainerNameRefusal` before
+        // it files anything, so the generic register contract's refusal
+        // (#7378 row 1, `register('view', 'crm_lead'): data.name is …`) is no
+        // longer reached on this shape. Same derived key, same two values.
         const err = await loadThroughArtifactDoor(divergentContainer).catch((e) => e as any);
         expect(err).toBeInstanceOf(Error);
-        expect(err.message).toContain("register('view', 'crm_lead')");
-        expect(err.message).toContain("data.name is 'lead_views'");
+        expect(err.message).toContain("binds to, 'crm_lead'");
+        expect(err.message).toContain("`name` is 'lead_views'");
     });
 
     it('MEASURED CORRECTION: the artifact door does not silently mis-key it — it refuses, enveloped (#7378 row 1)', async () => {
         // The card predicted a second SILENT key here. Measured: the door
         // derives `crm_lead`, then `assertMetadataRegisterContract` refuses the
         // whole artifact load because the document's own `data.name` still says
-        // `lead_views`. Asserting the ADR-0112 envelope, not merely "it threw":
+        // `lead_views`. [#21412] The refusal now comes one step earlier, from
+        // the same judge the boot loop throws (`viewContainerNameRefusal`),
+        // in the same envelope. Asserting the ADR-0112 envelope, not merely "it threw":
         // a bare `toThrow()` would stay green on any unrelated failure.
         const err = await loadThroughArtifactDoor(divergentContainer).catch((e) => e as any);
         expect(err.code).toBe('VALIDATION_ERROR');

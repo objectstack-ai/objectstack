@@ -213,23 +213,35 @@ describe('[#20035] what the type face does not judge keeps this door\'s own sent
   // The face steps around arrays outside the list operators, `{ $field }`
   // references and unknown operators, so those positions reach the door's own
   // gates (#6386's `undefined` sweep, #5234's member and LIKE checks) exactly
-  // as before.
+  // as before. [#21448] Except an array at a SCALAR operator: the shared
+  // comparand-SHAPE face, which runs before this one, refuses that list as the
+  // list, so only an operator outside the vocabulary still carries an array
+  // to #6386's sweep.
   it('an undefined inside an ARRAY comparand, or under an unknown operator — #6386', () => {
     for (const [where, path] of [
-      [{ d: { $contains: ['a', undefined] } }, '"d".$contains[1]'],
+      [{ d: { $wat: ['a', undefined] } }, '"d".$wat[1]'],
       [{ d: { $wat: undefined } }, '"d".$wat'],
     ] as const) {
       const err = refusalOf(() => tree(where));
       expectEnvelope(err);
       expect(err.message).toContain(`[analytics] comparand at ${path} is undefined`);
     }
+    // [#21448] Under a declared scalar operator, the list is diagnosed as the
+    // list, by the shape face, before any member is read.
+    const list = refusalOf(() => tree({ d: { $contains: ['a', undefined] } }));
+    expectEnvelope(list);
+    expect(list.message).toMatch(/^Operator "\$contains" on field "d" requires a single comparable value/);
   });
 
-  it('an ARRAY or a { $field } member of $in, and the same as a LIKE comparand — #5234 / #7598', () => {
+  it('an ARRAY or a { $field } member of $in, and a { $field } LIKE comparand — #5234 / #7598', () => {
     expect(refusalOf(() => tree({ s: { $in: ['a', [1, 2]] } })).message).toContain('cannot be bound as a SQL parameter');
     expect(refusalOf(() => tree({ s: { $in: [{ $field: 'other' }] } })).message).toContain('cannot be bound as a SQL parameter');
-    expect(refusalOf(() => tree({ s: { $contains: ['a', 'b'] } })).message).toContain('StringOperatorSchema');
     expect(refusalOf(() => tree({ s: { $contains: { $field: 'other' } } })).message).toContain('StringOperatorSchema');
+    // [#21448] An ARRAY as a LIKE comparand is the shared comparand-shape
+    // face's now — a list at a scalar operator — so #5234's sentence no longer
+    // answers it from this door.
+    expect(refusalOf(() => tree({ s: { $contains: ['a', 'b'] } })).message)
+      .toMatch(/^Operator "\$contains" on field "s" requires a single comparable value/);
   });
 });
 
