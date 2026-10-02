@@ -163,7 +163,7 @@ describe('validateActionBodyWrites — ctx.api writes', () => {
     expect(findings[0].path).toBe('actions[0].body.source');
     expect(findings[0].message).toContain('discont_total');
     expect(findings[0].message).toContain('crm_deal');
-    expect(findings[0].message).toContain('#4271');
+    expect(findings[0].message).toContain('INVALID_FIELD / 400, identically on every driver');
     expect(findings[0].hint).toContain("'discount_total'");
   });
 
@@ -313,7 +313,7 @@ describe('validateActionBodyWrites — discarded ctx.record writes (#4345)', () 
     expect(findings[0].where).toBe('action "close_deal" › body');
     expect(findings[0].path).toBe('actions[0].body.source');
     expect(findings[0].message).toContain('ctx.record.stage');
-    expect(findings[0].message).toContain('#4345');
+    expect(findings[0].message).toContain("The snapshot stays read-only by design: an action's write channel is ctx.api.");
     expect(findings[0].hint).toContain('updateById');
   });
 
