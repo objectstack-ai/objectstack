@@ -23,17 +23,18 @@
  *    refused, the token refused on replay. The generic read omits both
  *    credential columns of the stored row.
  *
- * The second factor and the SSO protocol blobs are pinned by their own
- * real-engine suites, which run over the same manifest and therefore over the
- * same declarations: `two-factor-reenrollment-verified-reset.test.ts` /
- * `two-factor-rotated-token-echo.test.ts` (TOTP challenge on the enrolment
- * row) and `sso-client-secret-at-rest.test.ts` (② the sign-in read of the
- * provider's `oidc_config`, ⑤ the legacy-secret migration). The last case
- * below proves those suites run against the declared columns.
+ *  - **The second factor.** TOTP enrolment verifies against the stored
+ *    secret, and a later sign-in challenge is redeemed with a backup code —
+ *    single-use. The generic read omits both credential columns.
+ *
+ * The SSO protocol blobs are pinned by `sso-client-secret-at-rest.test.ts`,
+ * a real-engine suite over the platform definition (② the sign-in read of the
+ * provider's `oidc_config`, ⑤ the legacy-secret migration); the last case
+ * below proves the declarations those suites run against.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { createPublicKey, verify as verifySignature } from 'node:crypto';
+import { createHmac, createPublicKey, verify as verifySignature } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -135,6 +136,35 @@ async function verifyAgainstJwks(manager: AuthManager, token: string): Promise<s
 
 const PASSWORD = 'S3cure!Passw0rd-21197';
 
+function base32Decode(input: string): Buffer {
+  const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = 0;
+  let value = 0;
+  const out: number[] = [];
+  for (const char of input.replace(/=+$/, '').toUpperCase()) {
+    const idx = ALPHABET.indexOf(char);
+    if (idx === -1) throw new Error(`invalid base32 character: ${char}`);
+    value = (value << 5) | idx;
+    bits += 5;
+    if (bits >= 8) {
+      out.push((value >>> (bits - 8)) & 0xff);
+      bits -= 8;
+    }
+  }
+  return Buffer.from(out);
+}
+
+/** The 6-digit TOTP for `secret` at the current 30-second step (RFC 6238). */
+function totp(secret: Buffer): string {
+  const buf = Buffer.alloc(8);
+  buf.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30_000)));
+  const digest = createHmac('sha1', secret).update(buf).digest();
+  const offset = digest[digest.length - 1] & 0x0f;
+  const code = ((digest[offset] & 0x7f) << 24) | ((digest[offset + 1] & 0xff) << 16)
+    | ((digest[offset + 2] & 0xff) << 8) | (digest[offset + 3] & 0xff);
+  return String(code % 1_000_000).padStart(6, '0');
+}
+
 describe('[#21197] internal credential columns keep their better-auth consumers working', () => {
   it('the signing-key object: a key minted before the declaration signs on the first, a later and a fresh-manager request', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -213,7 +243,45 @@ describe('[#21197] internal credential columns keep their better-auth consumers 
     expect(replay.status, 'the consumed token is refused').toBe(400);
   }, 120_000);
 
-  it('the suites pinning the second factor and the SSO blobs run over the declared columns', () => {
+  it('the second factor: TOTP enrolment verifies, and a sign-in challenge is redeemed with a single-use backup code', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const engine = await bootEngine(':memory:');
+    const manager = makeManager(engine, { twoFactor: true });
+    const email = 'second-factor@example.com';
+
+    const signedUp = await post(manager, '/sign-up/email', { email, password: PASSWORD, name: 'Second Factor' });
+    expect(signedUp.status, await signedUp.clone().text()).toBe(200);
+    const cookie = cookieFrom(signedUp);
+
+    const enabled = await post(manager, '/two-factor/enable', { password: PASSWORD }, { cookie });
+    expect(enabled.status, `two-factor/enable: ${await enabled.clone().text()}`).toBe(200);
+    const { totpURI, backupCodes } = (await enabled.json()) as { totpURI: string; backupCodes: string[] };
+    const secret = base32Decode(String(new URL(totpURI.replace('otpauth://', 'https://')).searchParams.get('secret')));
+    expect(backupCodes.length).toBeGreaterThan(0);
+
+    for (const row of (await (engine as any).find('sys_two_factor', { ...SYS })) as Row[]) {
+      expect(row).not.toHaveProperty('secret');
+      expect(row).not.toHaveProperty('backup_codes');
+    }
+
+    const enrolled = await post(manager, '/two-factor/verify-totp', { code: totp(secret) }, { cookie });
+    expect(enrolled.status, `verify-totp (enrolment): ${await enrolled.clone().text()}`).toBe(200);
+
+    // A fresh sign-in now stops at the second factor.
+    const challenged = await post(manager, '/sign-in/email', { email, password: PASSWORD });
+    expect(challenged.status, await challenged.clone().text()).toBe(200);
+    expect(((await challenged.clone().json()) as any).twoFactorRedirect, 'the challenge is required').toBe(true);
+    const challengeCookie = cookieFrom(challenged);
+
+    const redeemed = await post(manager, '/two-factor/verify-backup-code', { code: backupCodes[0] }, { cookie: challengeCookie });
+    expect(redeemed.status, `verify-backup-code: ${await redeemed.clone().text()}`).toBe(200);
+
+    const again = await post(manager, '/sign-in/email', { email, password: PASSWORD });
+    const replay = await post(manager, '/two-factor/verify-backup-code', { code: backupCodes[0] }, { cookie: cookieFrom(again) });
+    expect(replay.status, 'a used backup code is refused').not.toBe(200);
+  }, 120_000);
+
+  it('the suites pinning the SSO blobs run over the declared columns', () => {
     const declared = (object: string) =>
       Object.entries((authIdentityObjects.find((o: any) => o?.name === object) as any)?.fields ?? {})
         .filter(([, def]) => (def as { internal?: unknown }).internal === true)
