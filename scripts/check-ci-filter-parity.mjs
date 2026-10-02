@@ -549,6 +549,211 @@ function reportConsole(verdict) {
   return 0;
 }
 
+// ── The third subject: Build Core and the build inputs turbo.json declares (#21202) ──
+
+/** The job every build input must schedule, by id, and the filter its `if:` reads. */
+export const BUILD_JOB = 'build-core';
+export const BUILD_FILTER = 'core';
+/** The turbo config whose declarations are the population. */
+export const TURBO_CONFIG = 'turbo.json';
+/** The root manifest whose `build` script is what Build Core's `pnpm build` runs. */
+export const ROOT_MANIFEST = 'package.json';
+/** The step Build Core runs, verbatim; the manifest's `build` script is what it expands to. */
+const BUILD_COMMAND = 'pnpm build';
+/** The prefix turbo.json spells a repo-root-relative input with. */
+const TURBO_ROOT = '$TURBO_ROOT$/';
+/**
+ * The root that only build inputs open in `core:`. Every `core` entry under it
+ * is there because some build declares a file in it, so an entry covering no
+ * declared build input is stale -- the same reverse direction `crosspkg` is
+ * held to.
+ */
+const BUILD_INPUT_ROOT = 'scripts';
+
+/** Is this turbo.json task key a build task? `build`, or `<package>#build`. */
+function isBuildTask(task) {
+  return task === 'build' || task.endsWith('#build');
+}
+
+/**
+ * The packages the root manifest's `build` script excludes with
+ * `--filter=!<name>` (or `--filter !<name>`), or `{ refusal }`. Any spelling
+ * this misreads can only yield FEWER exclusions, which REQUIRES more inputs of
+ * `core` -- a loud red, never a silent gap.
+ */
+export function buildExclusions(script) {
+  if (typeof script !== 'string' || !/^\s*turbo run build(\s|$)/.test(script)) {
+    return {
+      refusal:
+        `${ROOT_MANIFEST}'s \`build\` script is not \`turbo run build ...\` (${JSON.stringify(script ?? null)}), so it ` +
+        `no longer says which build tasks Build Core's \`${BUILD_COMMAND}\` runs.`,
+    };
+  }
+  const tokens = script.trim().split(/\s+/);
+  const excluded = new Set();
+  for (let i = 0; i < tokens.length; i++) {
+    let value = null;
+    if (tokens[i].startsWith('--filter=')) value = tokens[i].slice('--filter='.length);
+    else if (tokens[i] === '--filter' || tokens[i] === '-F') value = tokens[i + 1] ?? '';
+    if (value === null) continue;
+    value = value.replace(/^['"]|['"]$/g, '');
+    if (value.startsWith('!')) excluded.add(value.slice(1));
+  }
+  return { excluded };
+}
+
+/**
+ * Every repo-root-relative path turbo.json makes a build input: turbo.json
+ * itself, each `globalDependencies` entry (an input of every task, builds
+ * included), and each `$TURBO_ROOT$/...` input of a build task Build Core runs.
+ * Negated inputs are skipped -- a negation can only narrow a hash. Returns the
+ * rows, each with the declarations that named it, plus the build tasks left
+ * out because the build script excludes their package; or `{ refusal }`.
+ */
+export function buildInputsOf(turbo, excluded) {
+  if (!turbo || typeof turbo !== 'object' || Array.isArray(turbo)) {
+    return { refusal: `${TURBO_CONFIG} did not parse to an object.` };
+  }
+  const tasks = turbo.tasks;
+  if (!tasks || typeof tasks !== 'object' || Array.isArray(tasks)) {
+    return { refusal: `${TURBO_CONFIG} declares no \`tasks\` map.` };
+  }
+  const buildTasks = Object.keys(tasks).filter(isBuildTask);
+  if (buildTasks.length === 0) {
+    return { refusal: `${TURBO_CONFIG} declares no \`build\` task -- there is no build whose inputs Build Core could run on.` };
+  }
+
+  const byPath = new Map();
+  const add = (path, from) => byPath.set(path, [...(byPath.get(path) ?? []), from]);
+  add(TURBO_CONFIG, 'the turbo config itself');
+  for (const dep of Array.isArray(turbo.globalDependencies) ? turbo.globalDependencies : []) {
+    if (typeof dep !== 'string' || dep.startsWith('!')) continue;
+    add(dep.startsWith(TURBO_ROOT) ? dep.slice(TURBO_ROOT.length) : dep, 'globalDependencies');
+  }
+  const excludedTasks = [];
+  for (const task of buildTasks) {
+    const pkg = task.includes('#') ? task.slice(0, task.lastIndexOf('#')) : null;
+    if (pkg !== null && excluded.has(pkg)) {
+      excludedTasks.push(task);
+      continue;
+    }
+    const inputs = Array.isArray(tasks[task]?.inputs) ? tasks[task].inputs : [];
+    for (const input of inputs) {
+      if (typeof input === 'string' && input.startsWith(TURBO_ROOT)) add(input.slice(TURBO_ROOT.length), task);
+    }
+  }
+  return { rows: [...byPath].map(([path, from]) => ({ path, from })), excludedTasks };
+}
+
+/**
+ * The verdict on Build Core's scheduling against the build inputs turbo.json
+ * declares. Takes the three SOURCE STRINGS (null for one that could not be
+ * read), so the self-test can drive every failure. `{ refusal }` for every
+ * state in which the subject was not read; otherwise the findings, each list
+ * empty on a clean tree.
+ */
+export function judgeBuildInputs(source, turboSource, manifestSource) {
+  const read = readFilterLists(source);
+  if (read.refusal) return read;
+  const { jobs, filters } = read;
+
+  const entries = filters[BUILD_FILTER];
+  if (!entries) return { refusal: `${CI_WORKFLOW}'s \`filters:\` input declares no \`${BUILD_FILTER}:\` filter.` };
+
+  const job = jobs[BUILD_JOB];
+  if (!job) return { refusal: `${CI_WORKFLOW} has no \`${BUILD_JOB}\` job -- Build Core has moved.` };
+  const condition = typeof job.if === 'string' ? job.if : '';
+  if (!condition.includes(`needs.filter.outputs.${BUILD_FILTER}`)) {
+    return {
+      refusal:
+        `${CI_WORKFLOW}'s \`${BUILD_JOB}\` job no longer names \`${BUILD_FILTER}\` in its \`if:\`, so that filter ` +
+        `does not schedule it any more and parity against it means nothing.\n    if: ${condition || '(absent)'}`,
+    };
+  }
+  const steps = Array.isArray(job.steps) ? job.steps : [];
+  if (!steps.some((s) => typeof s?.run === 'string' && s.run.trim() === BUILD_COMMAND)) {
+    return {
+      refusal:
+        `${CI_WORKFLOW}'s \`${BUILD_JOB}\` job has no \`run: ${BUILD_COMMAND}\` step, so ${ROOT_MANIFEST}'s \`build\` ` +
+        'script no longer says which build tasks it runs.',
+    };
+  }
+
+  if (typeof turboSource !== 'string') return { refusal: `${TURBO_CONFIG} could not be read.` };
+  let turbo;
+  try {
+    turbo = JSON.parse(turboSource);
+  } catch (err) {
+    return { refusal: `${TURBO_CONFIG} could not be read as JSON: ${err?.message ?? err}` };
+  }
+  if (typeof manifestSource !== 'string') return { refusal: `${ROOT_MANIFEST} could not be read.` };
+  let manifest;
+  try {
+    manifest = JSON.parse(manifestSource);
+  } catch (err) {
+    return { refusal: `${ROOT_MANIFEST} could not be read as JSON: ${err?.message ?? err}` };
+  }
+
+  const exclusions = buildExclusions(manifest?.scripts?.build);
+  if (exclusions.refusal) return exclusions;
+  const declared = buildInputsOf(turbo, exclusions.excluded);
+  if (declared.refusal) return declared;
+
+  const covered = [];
+  const uncovered = [];
+  for (const row of declared.rows) {
+    const verdict = coverageVerdict(row.path, entries);
+    (verdict.covered ? covered : uncovered).push({ ...row, ...verdict });
+  }
+  const stale = entries.filter(
+    (entry) =>
+      entry.split('/')[0] === BUILD_INPUT_ROOT && !declared.rows.some(({ path }) => coverageVerdict(path, [entry]).covered),
+  );
+
+  return { entries, condition, inputs: declared.rows, covered, uncovered, stale, excludedTasks: declared.excludedTasks };
+}
+
+function reportBuildInputs(verdict) {
+  if (verdict.refusal) {
+    console.error(`FAIL: check-ci-filter-parity could not judge Build Core's build inputs.\n\n  - ${verdict.refusal}\n`);
+    return 1;
+  }
+  const problems = [];
+  if (verdict.uncovered.length > 0) {
+    problems.push(
+      `${verdict.uncovered.length} build input(s) ${TURBO_CONFIG} declares are covered by no \`${BUILD_FILTER}:\` entry in ` +
+        `${CI_WORKFLOW}. A diff confined to one moves the build hashes it reaches and starts no Build Core, so the\n` +
+        `    merge queue is the first place that build runs:\n` +
+        verdict.uncovered.map((r) => `      ${r.path}   (${r.from.join(', ')})`).join('\n') +
+        `\n    Add each one VERBATIM to the \`${BUILD_FILTER}:\` filter in ${CI_WORKFLOW}. Not \`${BUILD_INPUT_ROOT}/**\`: that ` +
+        `starts the whole\n    core pipeline on every tooling diff, and the declaration is the narrower list.`,
+    );
+  }
+  if (verdict.stale.length > 0) {
+    problems.push(
+      `${CI_WORKFLOW}'s \`${BUILD_FILTER}:\` filter carries \`${BUILD_INPUT_ROOT}/\` entr(ies) that cover no build input ` +
+        `${TURBO_CONFIG} declares any more:\n` +
+        verdict.stale.map((e) => `      ${e}`).join('\n') +
+        `\n    Delete them. A \`${BUILD_INPUT_ROOT}/\` entry is in \`${BUILD_FILTER}:\` only because a build reads it, and one ` +
+        'covering nothing starts\n    the core pipeline on a diff no build reads.',
+    );
+  }
+  if (problems.length > 0) {
+    console.error(`FAIL: ci.yml's \`${BUILD_FILTER}\` filter and the build inputs ${TURBO_CONFIG} declares are out of step.\n`);
+    for (const p of problems) console.error(`  - ${p}\n`);
+    return 1;
+  }
+  const fromGlobal = verdict.inputs.filter((r) => r.from.includes('globalDependencies')).length;
+  console.log(
+    `OK: all ${verdict.inputs.length} build input(s) ${TURBO_CONFIG} declares outside the packages (itself, ` +
+      `${fromGlobal} globalDependencies, and every \`$TURBO_ROOT$\` input of a build Build Core runs) are covered by ` +
+      `\`${BUILD_FILTER}\`, which the \`${BUILD_JOB}\` job's \`if:\` reads; every \`${BUILD_FILTER}\` entry under ` +
+      `\`${BUILD_INPUT_ROOT}/\` covers one. Left out because \`${BUILD_COMMAND}\` excludes their package: ` +
+      `${verdict.excludedTasks.length > 0 ? verdict.excludedTasks.join(', ') : 'none'}.`,
+  );
+  return 0;
+}
+
 function report(verdict) {
   if (verdict.refusal) {
     console.error(`FAIL: check-ci-filter-parity could not judge the scheduling filters.\n\n  - ${verdict.refusal}\n`);
@@ -611,10 +816,20 @@ export function main(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
     console.error(`FAIL: cannot read ${CI_WORKFLOW}: ${err?.code ?? err?.message ?? err}`);
     return 1;
   }
-  // Both subjects are judged and both report, so one red never hides the other.
+  // Every subject is judged and every one reports, so one red never hides another.
   const crosspkg = report(judge(source, table));
   const consoleCode = reportConsole(judgeConsole(source));
-  return crosspkg === 0 && consoleCode === 0 ? 0 : 1;
+  const buildCode = reportBuildInputs(judgeBuildInputs(source, readOrNull(root, TURBO_CONFIG), readOrNull(root, ROOT_MANIFEST)));
+  return crosspkg === 0 && consoleCode === 0 && buildCode === 0 ? 0 : 1;
+}
+
+/** A root file's text, or null when it cannot be read -- the judge refuses on null by name. */
+function readOrNull(root, rel) {
+  try {
+    return readFileSync(join(root, rel), 'utf8');
+  } catch {
+    return null;
+  }
 }
 
 function list(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
@@ -643,7 +858,19 @@ function list(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
     const kind = con.keyInputs.includes(entry) ? 'build input (hashed into the dist key)' : Object.hasOwn(CONSOLE_GUARDS, entry) ? `guard: ${CONSOLE_GUARDS[entry]}` : 'UNCLASSIFIED';
     console.log(`${kind === 'UNCLASSIFIED' ? 'FAIL' : 'ok  '} ${entry}   ${kind}`);
   }
-  return verdict.uncovered.length > 0 || con.unclassified.length > 0 ? 1 : 0;
+
+  const build = judgeBuildInputs(readFileSync(join(root, CI_WORKFLOW), 'utf8'), readOrNull(root, TURBO_CONFIG), readOrNull(root, ROOT_MANIFEST));
+  if (build.refusal) {
+    console.error(`FAIL: ${build.refusal}`);
+    return 1;
+  }
+  console.log(`\nbuild inputs ${TURBO_CONFIG} declares, against ${BUILD_FILTER} (${BUILD_JOB}):`);
+  for (const row of [...build.covered, ...build.uncovered].sort((a, b) => a.path.localeCompare(b.path))) {
+    console.log(`${row.covered ? 'ok  ' : 'FAIL'} ${row.path}${row.covered ? `   via ${row.kind} ${row.via}` : ''}   (${row.from.join(', ')})`);
+  }
+  for (const entry of build.stale) console.log(`FAIL ${entry}   stale: covers no declared build input`);
+  console.log(`left out (excluded by \`${BUILD_COMMAND}\`): ${build.excludedTasks.join(', ') || 'none'}`);
+  return verdict.uncovered.length > 0 || con.unclassified.length > 0 || build.uncovered.length > 0 || build.stale.length > 0 ? 1 : 0;
 }
 
 // ── self-test ────────────────────────────────────────────────────────────────
