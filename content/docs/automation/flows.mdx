@@ -489,9 +489,11 @@ only, which is all a bound can do.
   hidden `visibleWhen` field does not fire — the client is the authority on what
   was on screen.
 
-Not translatable yet: the flows translation bundle carries `label` and
-`placeholder` per field, so `inlineHelpText` renders in the authored language
-until that face grows a key for it.
+Translatable: a screen field's `inlineHelpText` is translated under
+`flows.<flow>.screens.<node_id>.fields.<field>.inlineHelpText`, beside `label`
+and `placeholder`, and the console's flow runner overlays it in the active
+locale — see the flows row in
+[Translations](/docs/ui/translations#what-you-can-translate).
 
 **Screen (object form):**
 
