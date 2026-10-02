@@ -14,7 +14,10 @@ description: "Release notes and upgrade checklist for 17.6.0 of the v17 line."
        Console" and drop each "Known console issues" line the new pin fixes
        (objectui 0858267e, 8001068b, 3ae91930); if it did not, record the
        accepted-for-GA waiver the release-readiness rule asks for;
-    5. update v17/index.mdx (status blockquote, per-release list, checklist links).
+    5. if #21158 (the guest anchor's bindings for anonymous callers) lands
+       before the cut, replace the "no supported channel" lines in Highlights,
+       the deny-baseline Migration and the checklist with its grant channel;
+    6. update v17/index.mdx (status blockquote, per-release list, checklist links).
   Delete this comment when done.
 */}
 
@@ -25,9 +28,11 @@ description: "Release notes and upgrade checklist for 17.6.0 of the v17 line."
   caller that carries a principal but resolves no permission set used to be
   admitted to every object no set grants, with every field served as stored.
   It is now refused on every object, served gated fields masked or not at all,
-  and refused any query on them. ⚠️ **App-declared anonymous endpoints and
-  embedders that set `fallbackPermissionSet: null` must grant a permission set
-  before upgrading.**
+  and refused any query on them. ⚠️ **An embedder that sets
+  `fallbackPermissionSet: null` must grant its users a permission set before
+  upgrading, and an app-declared anonymous endpoint (`authRequired: false`)
+  can no longer read or write objects: no supported channel grants anonymous
+  callers a permission set yet (#21158, open).**
 - **Field-level security reaches every query door** — cross-field comparands,
   the activity stream, the compliance ledger, approval snapshots and analytics
   (`de8cd58`, #20954; `1ecb871`, #21179; `1571aed`, #20931). And
@@ -38,7 +43,8 @@ description: "Release notes and upgrade checklist for 17.6.0 of the v17 line."
   door, audit copies, realtime events and MCP stdio (`cfad7de`, #21115;
   `336e191`, #21144; `3ddd3d0`, #21228). Run
   `os migrate audit-metadata-bodies --apply` to rewrite the copies already at
-  rest. `datasource` and `external_catalog` metadata on `/api/v1/meta` now need
+  rest. Reads of `datasource` and `external_catalog` metadata, and writes of
+  `datasource` metadata, on `/api/v1/meta` now need
   `manage_platform_settings` (`454bbb6`, #21148; `7a606a9`, #21119).
 - **Analytics is judged like the data door** — anonymous `401`, hidden and
   masked fields `403`, related objects admitted and row-scoped, structured,
@@ -54,8 +60,9 @@ description: "Release notes and upgrade checklist for 17.6.0 of the v17 line."
   `''` and `[]`** (`f1e921a`, #20570).
 - **Temporal values follow one rule at every door:** a `datetime` names a UTC
   year from 1000 to 9999, a `time` is a zone-less wall clock, and an import
-  reads `date` / `datetime` / `time` cells only in ISO 8601 and the export's
-  own shape (`05a7547`, #20843; `63bfe69`, #20721; `eb4b17c`, #20601).
+  reads `date` / `datetime` / `time` cells only in ISO 8601, the export's own
+  shape or a year-first date (`05a7547`, #20843; `63bfe69`, #20721; `eb4b17c`,
+  #20601).
 - **One rule decides which flow is packaged.** A packaged flow wins over a
   stored flow of the same name at every startup step (`75519e1`, #20942), so ⚠️
   **a stored flow that shares a packaged flow's name stops running.** Flows
@@ -69,7 +76,7 @@ description: "Release notes and upgrade checklist for 17.6.0 of the v17 line."
   tenant database — applies the caller's tenant scope (`4b59a38`, #21245), and
   a tenant-scoped `upsert` never merges into another organization's row
   (`95e24b0`, #21225). The Turso remote transport issues `auto_number` values
-  (`e35c40a`, #21160), and MySQL stores `sys_jwks` and `sys_member` rows again
+  (`e35c40a`, #21160), and MySQL stores `sys_jwks` and `sys_member` rows
   (`95b91cc`, #21272).
 - **Shared picklists:** a new `picklist` metadata kind that fields reference by
   name and other packages can extend (`addbbf0`, #20823; `88b484e`, #21047).
@@ -107,8 +114,9 @@ explicitly breaking. Several things in this release change behaviour on a
   included, only rows about records they can read — every `delete` row and
   sign-out row drops out of the data API;
 - stored metadata bodies are redacted on the data door, in audit copies,
-  realtime events and MCP stdio, and `datasource` / `external_catalog` metadata
-  on `/api/v1/meta` needs `manage_platform_settings`;
+  realtime events and MCP stdio, and reading `datasource` / `external_catalog`
+  metadata (or writing `datasource`) on `/api/v1/meta` needs
+  `manage_platform_settings`;
 - analytics widgets that read a hidden or masked field, or a related object the
   caller may not read, answer `403`; a time dimension that declares one
   granularity is bucketed by it;
@@ -118,7 +126,8 @@ explicitly breaking. Several things in this release change behaviour on a
 - 「is empty」 in a stored sharing rule or view also matches `''` and `[]`, so
   such a sharing rule shares more records;
 - a `datetime` write before year 1000, a `time` value with an offset, and an
-  import cell in a non-ISO date spelling are refused;
+  import date cell that is not ISO 8601, the export's shape or year-first
+  (`07/15/2026`, an Excel serial) are refused;
 - a caller-supplied `formula` value is stripped from every write;
 - a stored flow that shares a packaged flow's name stops running; the toggle
   refuses customer-authored flows with `409`; enabling a packaged flow whose
@@ -169,8 +178,10 @@ filtered, sorted, grouped, aggregated and written.
 - **Fields gated by `requiredPermissions`** (`665cab3`, #21134). The field is
   not served (or is served masked, if it also declares a `maskingRule`). A
   filter, sort key, group key, aggregate or write payload naming it is refused
-  `403 PERMISSION_DENIED`. `getReadableFields`, `getQueryableFields`,
-  `getWritableFields` and `getMetadataReadableFields` no longer list it.
+  `403 PERMISSION_DENIED`. `getQueryableFields` and `getWritableFields` no
+  longer list it; `getReadableFields` lists it only when a `maskingRule` serves
+  it masked, and `getMetadataReadableFields` drops it when the deployment's
+  fallback set resolves to nothing.
 - **Fields with a `maskingRule`** (`a9d36d5`, #21051). The field is served
   masked and is not queryable. A write that sends the masked placeholder back
   is refused `400 VALIDATION_ERROR`.
@@ -185,7 +196,10 @@ users of a stock `objectstack serve` are not affected.
 
 - App-declared anonymous endpoints (`authRequired: false`) can no longer read
   or write objects until the `guest` anchor's bindings resolve for anonymous
-  callers (#21158). Give those callers a permission set before you upgrade.
+  callers (#21158). That issue is open, and until it lands no administrator
+  binding grants an unauthenticated caller a permission set, so there is no
+  supported migration: an app that depends on such an endpoint reading or
+  writing objects should hold the upgrade.
 - An embedder that sets `fallbackPermissionSet: null` must grant signed-in
   users a permission set explicitly.
 - A caller that needs a gated field needs a permission set holding all of the
@@ -273,8 +287,8 @@ including a `datasource` body's credential material. That body was served as
 stored on several exits. It is now projected through the same redactor the
 `/meta` exits use:
 
-- **the generic data door** (`cfad7de`, #21115): `GET` and `POST` on
-  `/api/v1/data/:object`, the by-id read, and the export route. A body whose row
+- **the generic data door** (`cfad7de`, #21115): `GET /api/v1/data/:object`,
+  `POST /api/v1/data/:object/query`, the by-id read, and the export route. A body whose row
   has no `type`, or that fails to parse while its type registers a redactor, is
   omitted. `?select=metadata` still works.
 - **audit copies and realtime events** (`336e191`, #21144): `sys_audit_log`'s
@@ -314,8 +328,8 @@ definitions there.
 unaffected.
 
 **Migration.** Grant `manage_platform_settings`, through a permission set, to
-every user or integration that reads or writes these types through
-`/api/v1/meta` while holding only
+every user or integration that reads either type, or writes `datasource`,
+through `/api/v1/meta` while holding only
 `manage_metadata`, `studio.access` or `setup.access` — or route those calls
 through a caller that already holds it.
 
@@ -335,7 +349,7 @@ strategies.
   (`1571aed`, #20931). Dimensions, measures, time dimensions, filter members,
   order keys, joined members and a dataset's own and requested measures'
   filters are judged; a hidden one answers `403 PERMISSION_DENIED`. Before,
-  the native-SQL strategy answered, and `/sql` printed the statement.
+  the native-SQL strategy answered such queries.
 - **Masked fields cannot be grouped, aggregated, filtered or sorted**
   (`83480c6`, #20955); they answer `403`. If the security service cannot say
   which fields are queryable, every field declaring a `maskingRule` is treated
@@ -365,9 +379,11 @@ strategies.
   (`58a77db`, #21117), as the data door does. Before, a compiled read scope
   matched the stored JSON text as a substring: on SQLite a policy could admit
   rows outside it, and on PostgreSQL every query under it answered `500`.
-- **A dataset `field` that is not a column reference is refused `403`** at the
-  dataset door, for every caller and with or without a security service
-  (`ce4e205`, #21190).
+- **A dataset `field` that is not a column reference is refused at the
+  dataset door**, for every caller and with or without a security service
+  (`ce4e205`, #21190). Since `434c6c7` (#21240) the door parses the dataset
+  first and answers `400 VALIDATION_FAILED`; the `403` remains only for a
+  stored row that reaches the service without that parse.
 
 **What may be grouped, counted and aggregated**
 
@@ -384,8 +400,9 @@ strategies.
 - **Every cube measure is checked against the aggregate × field-type table**
   (`39ab294`, #21128), and so is a measure over a relationship path such as
   `account.name` (`3a7b6eb`, #21230). `min` / `max` over a non-numeric,
-  non-temporal, non-boolean type, and `sum` / `avg` over a non-numeric type
-  (or `sum` over `percent`), answer `400 INVALID_FIELD` instead of a raw value
+  non-temporal, non-boolean type, and `sum` / `avg` over a type outside the
+  numeric and boolean classes (or `sum` over `percent`), answer `400
+  INVALID_FIELD` instead of a raw value
   typed `number`, a `0` or a `500`. `min` / `max` over `date`, `datetime` or
   `time` is now described `fields[] { type: 'time' }`, not `number`, and a
   related numeric `min` / `max` on PostgreSQL returns a number instead of an
@@ -492,8 +509,8 @@ before any driver is asked. The error names the position (`groupBy[0]`,
 - **`groupBy` on a structured-JSON field** — `json`, `composite`, `repeater`,
   `record`, `location`, `address`, `vector` (`157baa7`, #20804).
 - **`groupBy` on a multi-value field** — `multiselect`, `checkboxes`, `tags`,
-  or a `select` / `lookup` / `user` / `file` / `image` declared `multiple:
-  true` — **and `count_distinct` over a JSON-stored or multi-value field**
+  or a `select` / `radio` / `lookup` / `user` / `file` / `image` declared
+  `multiple: true` — **and `count_distinct` over a JSON-stored or multi-value field**
   (`975b248`, #20911).
 - **`min` / `max` / `avg` over a type the aggregate × field-type table refuses**
   (`a75311d`, #21037). `min` / `max` accept `number`, `currency`, `percent`,
@@ -524,8 +541,8 @@ are the hand-migrations already registered under
 #### A filter is refused where it used to answer the wrong rows
 
 Each of these used to return every row, no rows, a text comparison or a
-driver's own `500`. Each now answers `INVALID_FILTER` / `400` at `where`, a
-per-aggregation `filter` and `having`, before any driver read:
+driver's own `500`. Each now answers `INVALID_FILTER` / `400` — at `where`, a
+per-aggregation `filter` and `having` unless the item names its positions:
 
 - **An object with no `$` operator under a scalar field** (`{ "amount": { "a":
   1 } }`, or `{}`) (`97005ae`, #20744), and **under a structured-JSON field or
@@ -543,17 +560,19 @@ per-aggregation `filter` and `having`, before any driver read:
   (`dcd3309`, #21065) or past what a JavaScript `Date` can hold (`1bd14c9`,
   #21123), such as `{300000_years_ago}`.
 - **`$startsWith`, `$endsWith`, `$icontains`, `$like` or `$ilike` on a
-  JSON-stored or multi-value field** (`2c1cef3`, #21165). SQLite matched the
-  serialized text (`$startsWith: "["` matched every valued row) and PostgreSQL
-  answered `500`.
+  JSON-stored or multi-value field**, in the SQL drivers' `where` (Turso's
+  local transport included) and the per-aggregation `filter` (`2c1cef3`,
+  #21165). SQLite matched the serialized text (`$startsWith: "["` matched every
+  valued row) and PostgreSQL answered `500`.
 - **`$eq`, `$ne`, orderings, `$between`, `$in`, `$nin` or implicit equality on
   a JSON-stored field inside a per-aggregation `filter`** (`a11faee`, #21097),
   as `where` already refused. `{ owners: { $in: ['u1', 'u9'] } }` counted `0`,
   and `$nin` counted the rows it was asked to exclude.
-- **A non-boolean `$exists` or `$null`** in the in-memory and MongoDB drivers
-  (`a3dc817`, #20979) and in a per-aggregation `filter` or `having`
-  (`c35436c`, #21157). `"yes"`, `1` and the string `"false"` were read by
-  truthiness.
+- **A non-boolean `$exists`** in the in-memory and MongoDB drivers, which
+  read anything but `true` as "has no value" (`a3dc817`, #20979), and **a
+  non-boolean `$exists` or `$null`** in a per-aggregation `filter` or `having`,
+  where `"yes"`, `1` and the string `"false"` were read by truthiness
+  (`c35436c`, #21157).
 
 **Migration.** Compare a field with a value or an operator; to filter by a
 related record, name a relation field. Send temporal comparands in ISO 8601
@@ -600,9 +619,10 @@ payloads.
 - **A `time` value is a zone-less wall clock.** A `time` field refuses a value
   carrying `Z` or an offset (`"10:00Z"`, `"10:00+08:00"`) and an instant whose
   UTC year has no four-digit spelling (`63bfe69`, #20721), with
-  `VALIDATION_FAILED` / `400` (`invalid_time`). A `time` field default, a
-  `time` action-param default and a submitted `time` action param are refused
-  the same way where they are authored or submitted (`c9c182e`, #20763). On
+  `VALIDATION_FAILED` / `400` (`invalid_time`). A zone-suffixed `time` field
+  default or `time` action-param default is refused when the schema parses it,
+  and a submitted `time` action param with a zone answers `invalid_shape`
+  (`c9c182e`, #20763). On
   memory and SQLite, zone-suffixed values used to be stored verbatim and read
   back differently.
 - **`POST /api/v1/data/:object/import` reads `date`, `datetime` and `time`
@@ -1456,13 +1476,16 @@ been given.
 
 **Before you upgrade**
 
-- **Give a permission set to every caller that carries a principal but
-  resolves none:** callers of app-declared anonymous endpoints
-  (`authRequired: false`) that read or write objects, and signed-in users on an
-  embedder that sets `fallbackPermissionSet: null`. After the upgrade they are
-  refused every object. *Not exercised.*
+- **Find every app-declared anonymous endpoint (`authRequired: false`) that
+  reads or writes objects.** After the upgrade it is refused every object, and
+  no supported channel can grant anonymous callers a permission set until
+  #21158 lands; hold the upgrade if you depend on one. *Not exercised.*
+- **Grant a permission set to signed-in users on an embedder that sets
+  `fallbackPermissionSet: null`;** without one they are refused every object.
+  *Not exercised.*
 - **Grant `manage_platform_settings`** to every user or integration that reads
-  or writes `datasource` or `external_catalog` metadata through `/api/v1/meta`
+  `datasource` or `external_catalog` metadata, or writes `datasource`, through
+  `/api/v1/meta`
   while holding only `manage_metadata`, `studio.access` or `setup.access`. *Not
   exercised.*
 - **List stored flows that share a packaged flow's name** — startup warnings or
