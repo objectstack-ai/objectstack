@@ -36,6 +36,7 @@
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
+import type { EngineAggregateOptions } from '@objectstack/spec/data';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver, withheldFilterDiagnosticOf } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
@@ -223,7 +224,8 @@ describe('[#21255] POST /data/:object/query — a plain { $field } across two co
   async function whereTwinReason(engine: ObjectQL): Promise<{ classes: [string, string]; tail: string }> {
     let diagnostic: string | null = null;
     try {
-      await engine.aggregate(OBJECT, whereTwin(CROSS_CLASS) as any);
+      const twin: EngineAggregateOptions = { where: CROSS_CLASS, aggregations: [{ function: 'count', alias: 'n' }] };
+      await engine.aggregate(OBJECT, twin);
     } catch (e) {
       expect((e as { code?: unknown }).code).toBe('INVALID_FILTER');
       diagnostic = withheldFilterDiagnosticOf(e);
