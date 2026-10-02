@@ -145,6 +145,42 @@
  * every declared guard is still in the list and not hashed. Pure string again,
  * for the reason above: no matcher, so no third recognizer.
  *
+ * ## The third subject: Build Core and the build inputs turbo.json declares (#21202)
+ *
+ * `core:` schedules Build Core, and Build Core runs `pnpm build`. turbo.json
+ * declares which files outside the packages move a build's hash: itself, its
+ * `globalDependencies` (inputs of every task, builds included), and each
+ * `$TURBO_ROOT$/...` input of a `build` / `<package>#build` task. A diff
+ * confined to one of those moves the hashes it reaches; if no `core` entry
+ * matches it, Build Core does not start, and the merge queue is the first
+ * place that build runs. PR #21199 showed it on itself: a turbo.json-only diff,
+ * Build Core skipped.
+ *
+ * `judgeBuildInputs` DERIVES the required set rather than holding a copy of
+ * it, so this file is not a second list of the declarations either: the
+ * build-task inputs and `globalDependencies` come out of turbo.json, and the
+ * builds Build Core does not run come out of the root manifest's `build`
+ * script (`--filter=!<package>`), which is what the job's `run: pnpm build`
+ * expands to. Every misreading of that script can only drop an exclusion,
+ * which REQUIRES more of `core` -- a loud red, never a silent gap. The only
+ * constant is turbo.json itself, which is the config being read.
+ *
+ * Findings: a declared build input no `core` entry covers (same pure-string
+ * rule as above), and the reverse direction where the declarations alone can
+ * decide it: a literal `core` entry in a directory that holds a declared
+ * literal build input, covering none of them, is a leftover from an input
+ * turbo.json dropped, and it starts the core pipeline on a diff no build reads.
+ * Root-level files and pattern entries are not judged that way -- nothing here
+ * says why `package.json` or `packages/**` is in `core`. Refusals: no `build-core` job, its `if:` no longer naming
+ * `core`, no `run: pnpm build` step, turbo.json or the root manifest unreadable
+ * or not JSON, no `tasks` map, no build task, and a `build` script that is not
+ * `turbo run build ...`.
+ *
+ * Known bounds: a package-level turbo.json (none is tracked today) would add
+ * build inputs this subject does not read; and a leftover in a directory where
+ * turbo.json no longer declares ANY build input is not reported (the cheap
+ * direction: it over-schedules, it never under-schedules).
+ *
  * ## Wiring
  *
  * Invoked from `.github/workflows/lint.yml` as `node scripts/...` directly, both
@@ -194,11 +230,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '(6) the real tree': 10,
   '(7) WIRING: the gate and its self-test really run in CI': 2,
   '(8) the `console` selection and the dist key it must move': 20,
+  '(9) Build Core and the build inputs turbo.json declares': 33,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 8;
+const SELF_TEST_BATTERY_FLOOR = 9;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -549,6 +586,218 @@ function reportConsole(verdict) {
   return 0;
 }
 
+// ── The third subject: Build Core and the build inputs turbo.json declares (#21202) ──
+
+/** The job every build input must schedule, by id, and the filter its `if:` reads. */
+export const BUILD_JOB = 'build-core';
+export const BUILD_FILTER = 'core';
+/** The turbo config whose declarations are the population. */
+export const TURBO_CONFIG = 'turbo.json';
+/** The root manifest whose `build` script is what Build Core's `pnpm build` runs. */
+export const ROOT_MANIFEST = 'package.json';
+/** The step Build Core runs, verbatim; the manifest's `build` script is what it expands to. */
+const BUILD_COMMAND = 'pnpm build';
+/** The prefix turbo.json spells a repo-root-relative input with. */
+const TURBO_ROOT = '$TURBO_ROOT$/';
+
+/** The directory part of a repo-relative path; '' for a root-level file. */
+function dirOf(path) {
+  const cut = path.lastIndexOf('/');
+  return cut === -1 ? '' : path.slice(0, cut);
+}
+
+/** Is this turbo.json task key a build task? `build`, or `<package>#build`. */
+function isBuildTask(task) {
+  return task === 'build' || task.endsWith('#build');
+}
+
+/**
+ * The packages the root manifest's `build` script excludes with
+ * `--filter=!<name>` (or `--filter !<name>`), or `{ refusal }`. Any spelling
+ * this misreads can only yield FEWER exclusions, which REQUIRES more inputs of
+ * `core` -- a loud red, never a silent gap.
+ */
+export function buildExclusions(script) {
+  if (typeof script !== 'string' || !/^\s*turbo run build(\s|$)/.test(script)) {
+    return {
+      refusal:
+        `${ROOT_MANIFEST}'s \`build\` script is not \`turbo run build ...\` (${JSON.stringify(script ?? null)}), so it ` +
+        `no longer says which build tasks Build Core's \`${BUILD_COMMAND}\` runs.`,
+    };
+  }
+  const tokens = script.trim().split(/\s+/);
+  const excluded = new Set();
+  for (let i = 0; i < tokens.length; i++) {
+    let value = null;
+    if (tokens[i].startsWith('--filter=')) value = tokens[i].slice('--filter='.length);
+    else if (tokens[i] === '--filter' || tokens[i] === '-F') value = tokens[i + 1] ?? '';
+    if (value === null) continue;
+    value = value.replace(/^['"]|['"]$/g, '');
+    if (value.startsWith('!')) excluded.add(value.slice(1));
+  }
+  return { excluded };
+}
+
+/**
+ * Every repo-root-relative path turbo.json makes a build input: turbo.json
+ * itself, each `globalDependencies` entry (an input of every task, builds
+ * included), and each `$TURBO_ROOT$/...` input of a build task Build Core runs.
+ * Negated inputs are skipped -- a negation can only narrow a hash. Returns the
+ * rows, each with the declarations that named it, plus the build tasks left
+ * out because the build script excludes their package; or `{ refusal }`.
+ */
+export function buildInputsOf(turbo, excluded) {
+  if (!turbo || typeof turbo !== 'object' || Array.isArray(turbo)) {
+    return { refusal: `${TURBO_CONFIG} did not parse to an object.` };
+  }
+  const tasks = turbo.tasks;
+  if (!tasks || typeof tasks !== 'object' || Array.isArray(tasks)) {
+    return { refusal: `${TURBO_CONFIG} declares no \`tasks\` map.` };
+  }
+  const buildTasks = Object.keys(tasks).filter(isBuildTask);
+  if (buildTasks.length === 0) {
+    return { refusal: `${TURBO_CONFIG} declares no \`build\` task -- there is no build whose inputs Build Core could run on.` };
+  }
+
+  const byPath = new Map();
+  const add = (path, from) => byPath.set(path, [...(byPath.get(path) ?? []), from]);
+  add(TURBO_CONFIG, 'the turbo config itself');
+  for (const dep of Array.isArray(turbo.globalDependencies) ? turbo.globalDependencies : []) {
+    if (typeof dep !== 'string' || dep.startsWith('!')) continue;
+    add(dep.startsWith(TURBO_ROOT) ? dep.slice(TURBO_ROOT.length) : dep, 'globalDependencies');
+  }
+  const excludedTasks = [];
+  for (const task of buildTasks) {
+    const pkg = task.includes('#') ? task.slice(0, task.lastIndexOf('#')) : null;
+    if (pkg !== null && excluded.has(pkg)) {
+      excludedTasks.push(task);
+      continue;
+    }
+    const inputs = Array.isArray(tasks[task]?.inputs) ? tasks[task].inputs : [];
+    for (const input of inputs) {
+      if (typeof input === 'string' && input.startsWith(TURBO_ROOT)) add(input.slice(TURBO_ROOT.length), task);
+    }
+  }
+  return { rows: [...byPath].map(([path, from]) => ({ path, from })), excludedTasks };
+}
+
+/**
+ * The verdict on Build Core's scheduling against the build inputs turbo.json
+ * declares. Takes the three SOURCE STRINGS (null for one that could not be
+ * read), so the self-test can drive every failure. `{ refusal }` for every
+ * state in which the subject was not read; otherwise the findings, each list
+ * empty on a clean tree.
+ */
+export function judgeBuildInputs(source, turboSource, manifestSource) {
+  const read = readFilterLists(source);
+  if (read.refusal) return read;
+  const { jobs, filters } = read;
+
+  const entries = filters[BUILD_FILTER];
+  if (!entries) return { refusal: `${CI_WORKFLOW}'s \`filters:\` input declares no \`${BUILD_FILTER}:\` filter.` };
+
+  const job = jobs[BUILD_JOB];
+  if (!job) return { refusal: `${CI_WORKFLOW} has no \`${BUILD_JOB}\` job -- Build Core has moved.` };
+  const condition = typeof job.if === 'string' ? job.if : '';
+  if (!condition.includes(`needs.filter.outputs.${BUILD_FILTER}`)) {
+    return {
+      refusal:
+        `${CI_WORKFLOW}'s \`${BUILD_JOB}\` job no longer names \`${BUILD_FILTER}\` in its \`if:\`, so that filter ` +
+        `does not schedule it any more and parity against it means nothing.\n    if: ${condition || '(absent)'}`,
+    };
+  }
+  const steps = Array.isArray(job.steps) ? job.steps : [];
+  if (!steps.some((s) => typeof s?.run === 'string' && s.run.trim() === BUILD_COMMAND)) {
+    return {
+      refusal:
+        `${CI_WORKFLOW}'s \`${BUILD_JOB}\` job has no \`run: ${BUILD_COMMAND}\` step, so ${ROOT_MANIFEST}'s \`build\` ` +
+        'script no longer says which build tasks it runs.',
+    };
+  }
+
+  if (typeof turboSource !== 'string') return { refusal: `${TURBO_CONFIG} could not be read.` };
+  let turbo;
+  try {
+    turbo = JSON.parse(turboSource);
+  } catch (err) {
+    return { refusal: `${TURBO_CONFIG} could not be read as JSON: ${err?.message ?? err}` };
+  }
+  if (typeof manifestSource !== 'string') return { refusal: `${ROOT_MANIFEST} could not be read.` };
+  let manifest;
+  try {
+    manifest = JSON.parse(manifestSource);
+  } catch (err) {
+    return { refusal: `${ROOT_MANIFEST} could not be read as JSON: ${err?.message ?? err}` };
+  }
+
+  const exclusions = buildExclusions(manifest?.scripts?.build);
+  if (exclusions.refusal) return exclusions;
+  const declared = buildInputsOf(turbo, exclusions.excluded);
+  if (declared.refusal) return declared;
+
+  const covered = [];
+  const uncovered = [];
+  for (const row of declared.rows) {
+    const verdict = coverageVerdict(row.path, entries);
+    (verdict.covered ? covered : uncovered).push({ ...row, ...verdict });
+  }
+  // The reverse direction, judged only where it is decidable from the
+  // declarations alone: a LITERAL entry in a directory that holds a declared
+  // literal build input is there for the same reason those are, so one that
+  // covers none of them is a leftover. Root-level files and pattern entries are
+  // not this subject's to judge -- nothing here says why they are in `core`.
+  const inputDirs = new Set(declared.rows.filter(({ path }) => !WILDCARD.test(path)).map(({ path }) => dirOf(path)).filter(Boolean));
+  const stale = entries.filter(
+    (entry) =>
+      !WILDCARD.test(entry) &&
+      inputDirs.has(dirOf(entry)) &&
+      !declared.rows.some(({ path }) => coverageVerdict(path, [entry]).covered),
+  );
+
+  return { entries, condition, inputs: declared.rows, covered, uncovered, stale, excludedTasks: declared.excludedTasks };
+}
+
+function reportBuildInputs(verdict) {
+  if (verdict.refusal) {
+    console.error(`FAIL: check-ci-filter-parity could not judge Build Core's build inputs.\n\n  - ${verdict.refusal}\n`);
+    return 1;
+  }
+  const problems = [];
+  if (verdict.uncovered.length > 0) {
+    problems.push(
+      `${verdict.uncovered.length} build input(s) ${TURBO_CONFIG} declares are covered by no \`${BUILD_FILTER}:\` entry in ` +
+        `${CI_WORKFLOW}. A diff confined to one moves the build hashes it reaches and starts no Build Core, so the\n` +
+        `    merge queue is the first place that build runs:\n` +
+        verdict.uncovered.map((r) => `      ${r.path}   (${r.from.join(', ')})`).join('\n') +
+        `\n    Add each one VERBATIM to the \`${BUILD_FILTER}:\` filter in ${CI_WORKFLOW}. Not the subtree it sits in: over a\n` +
+        '    tooling directory that starts the whole core pipeline on every tooling diff, and the declaration is the\n' +
+        '    narrower list.',
+    );
+  }
+  if (verdict.stale.length > 0) {
+    problems.push(
+      `${CI_WORKFLOW}'s \`${BUILD_FILTER}:\` filter carries literal entr(ies) beside declared build inputs that cover none of them -- ` +
+        `left over from an input ${TURBO_CONFIG} no longer declares:\n` +
+        verdict.stale.map((e) => `      ${e}`).join('\n') +
+        `\n    Delete them. Each one starts the whole core pipeline on a diff no build reads.`,
+    );
+  }
+  if (problems.length > 0) {
+    console.error(`FAIL: ci.yml's \`${BUILD_FILTER}\` filter and the build inputs ${TURBO_CONFIG} declares are out of step.\n`);
+    for (const p of problems) console.error(`  - ${p}\n`);
+    return 1;
+  }
+  const fromGlobal = verdict.inputs.filter((r) => r.from.includes('globalDependencies')).length;
+  console.log(
+    `OK: all ${verdict.inputs.length} build input(s) ${TURBO_CONFIG} declares outside the packages (itself, ` +
+      `${fromGlobal} globalDependencies, and every \`$TURBO_ROOT$\` input of a build Build Core runs) are covered by ` +
+      `\`${BUILD_FILTER}\`, which the \`${BUILD_JOB}\` job's \`if:\` reads; no literal \`${BUILD_FILTER}\` entry beside ` +
+      `them is a leftover. Left out because \`${BUILD_COMMAND}\` excludes their package: ` +
+      `${verdict.excludedTasks.length > 0 ? verdict.excludedTasks.join(', ') : 'none'}.`,
+  );
+  return 0;
+}
+
 function report(verdict) {
   if (verdict.refusal) {
     console.error(`FAIL: check-ci-filter-parity could not judge the scheduling filters.\n\n  - ${verdict.refusal}\n`);
@@ -611,10 +860,20 @@ export function main(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
     console.error(`FAIL: cannot read ${CI_WORKFLOW}: ${err?.code ?? err?.message ?? err}`);
     return 1;
   }
-  // Both subjects are judged and both report, so one red never hides the other.
+  // Every subject is judged and every one reports, so one red never hides another.
   const crosspkg = report(judge(source, table));
   const consoleCode = reportConsole(judgeConsole(source));
-  return crosspkg === 0 && consoleCode === 0 ? 0 : 1;
+  const buildCode = reportBuildInputs(judgeBuildInputs(source, readOrNull(root, TURBO_CONFIG), readOrNull(root, ROOT_MANIFEST)));
+  return crosspkg === 0 && consoleCode === 0 && buildCode === 0 ? 0 : 1;
+}
+
+/** A root file's text, or null when it cannot be read -- the judge refuses on null by name. */
+function readOrNull(root, rel) {
+  try {
+    return readFileSync(join(root, rel), 'utf8');
+  } catch {
+    return null;
+  }
 }
 
 function list(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
@@ -643,7 +902,19 @@ function list(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
     const kind = con.keyInputs.includes(entry) ? 'build input (hashed into the dist key)' : Object.hasOwn(CONSOLE_GUARDS, entry) ? `guard: ${CONSOLE_GUARDS[entry]}` : 'UNCLASSIFIED';
     console.log(`${kind === 'UNCLASSIFIED' ? 'FAIL' : 'ok  '} ${entry}   ${kind}`);
   }
-  return verdict.uncovered.length > 0 || con.unclassified.length > 0 ? 1 : 0;
+
+  const build = judgeBuildInputs(readFileSync(join(root, CI_WORKFLOW), 'utf8'), readOrNull(root, TURBO_CONFIG), readOrNull(root, ROOT_MANIFEST));
+  if (build.refusal) {
+    console.error(`FAIL: ${build.refusal}`);
+    return 1;
+  }
+  console.log(`\nbuild inputs ${TURBO_CONFIG} declares, against ${BUILD_FILTER} (${BUILD_JOB}):`);
+  for (const row of [...build.covered, ...build.uncovered].sort((a, b) => a.path.localeCompare(b.path))) {
+    console.log(`${row.covered ? 'ok  ' : 'FAIL'} ${row.path}${row.covered ? `   via ${row.kind} ${row.via}` : ''}   (${row.from.join(', ')})`);
+  }
+  for (const entry of build.stale) console.log(`FAIL ${entry}   stale: covers no declared build input`);
+  console.log(`left out (excluded by \`${BUILD_COMMAND}\`): ${build.excludedTasks.join(', ') || 'none'}`);
+  return verdict.uncovered.length > 0 || con.unclassified.length > 0 || build.uncovered.length > 0 || build.stale.length > 0 ? 1 : 0;
 }
 
 // ── self-test ────────────────────────────────────────────────────────────────
@@ -1100,18 +1371,162 @@ export async function selfTest() {
     'a key whose hashFiles arguments are not quoted paths => REFUSAL: the gate cannot say what it hashes',
   );
 
+  // A scratch root carrying the given ci.yml beside the REAL turbo.json and
+  // root manifest, so the only drift `main()` can see is the one injected: a
+  // root missing either file would red the build-input subject on its own and
+  // satisfy a "returns 1" assertion for the wrong reason.
+  const inScratchTree = (ciSource, fn) => {
+    const scratch = mkdtempSync(join(tmpdir(), 'ci-filter-parity-'));
+    try {
+      mkdirSync(join(scratch, '.github', 'workflows'), { recursive: true });
+      writeFileSync(join(scratch, CI_WORKFLOW), ciSource);
+      for (const rel of [TURBO_CONFIG, ROOT_MANIFEST]) writeFileSync(join(scratch, rel), readFileSync(join(REPO_ROOT, rel), 'utf8'));
+      return fn(scratch);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  };
+
   // The report path, over the real ci.yml with one drift injected: the spec's
   // tsup entry list dropped from the filter while the key still hashes it.
   const drifted = realSource.replace("              - 'packages/spec/tsup.config.ts'\n", '');
   assert(drifted !== realSource, 'the report-path fixture found its anchor in the checked-in ci.yml');
-  const scratch = mkdtempSync(join(tmpdir(), 'ci-filter-parity-'));
-  try {
-    mkdirSync(join(scratch, '.github', 'workflows'), { recursive: true });
-    writeFileSync(join(scratch, CI_WORKFLOW), drifted);
-    assert(quietly(() => main(scratch)) === 1, 'main() returns 1 over a ci.yml whose console filter lost a hashed path -- the report path, not only `judgeConsole`');
-  } finally {
-    rmSync(scratch, { recursive: true, force: true });
+  assert(
+    inScratchTree(drifted, (root) => quietly(() => main(root))) === 1,
+    'main() returns 1 over a ci.yml whose console filter lost a hashed path -- the report path, not only `judgeConsole`',
+  );
+
+  // ── (9) Build Core and the build inputs turbo.json declares (#21202) ────
+  battery('(9) Build Core and the build inputs turbo.json declares');
+  const BUILD_IF = "${{ !cancelled() && needs.filter.outputs.core != 'false' }}";
+  const buildWorkflow = ({ core, condition = BUILD_IF, run = 'pnpm build' } = {}) => {
+    const list = (xs) => xs.map((e) => `              - '${e}'`).join('\n');
+    return [
+      'name: CI',
+      'jobs:',
+      '  filter:',
+      '    steps:',
+      '      - uses: dorny/paths-filter@v4',
+      '        id: changes',
+      '        with:',
+      '          filters: |',
+      '            core:',
+      list(core ?? ['packages/**', 'tsconfig.json', 'turbo.json', 'tsup.config.ts', 'scripts/a.mjs', 'scripts/b.mjs']),
+      '  build-core:',
+      `    if: ${JSON.stringify(condition)}`,
+      '    steps:',
+      `      - run: ${run}`,
+    ].join('\n');
+  };
+  const turboFixture = ({ globalDependencies = ['tsconfig.json', 'tsup.config.ts'], tasks } = {}) =>
+    JSON.stringify({
+      globalDependencies,
+      tasks: tasks ?? {
+        build: { inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/scripts/a.mjs'] },
+        '@objectstack/probe#build': {
+          inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/scripts/a.mjs', '$TURBO_ROOT$/scripts/b.mjs', '$TURBO_ROOT$/packages/cli/src/x.ts'],
+        },
+        '@objectstack/docs#build': { inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/content/**'] },
+        test: { inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/docker/**'] },
+      },
+    });
+  const manifestFixture = (build = 'turbo run build --filter=!@objectstack/docs') => JSON.stringify({ scripts: { build } });
+  const judgeBuild = ({ workflow, turbo, manifest } = {}) =>
+    judgeBuildInputs(workflow ?? buildWorkflow(), turbo === undefined ? turboFixture() : turbo, manifest === undefined ? manifestFixture() : manifest);
+  const uncoveredPaths = (v) => (v.uncovered ?? []).map((r) => r.path);
+  const findingsOfBuild = (v) => [...(v.uncovered ?? ['(no verdict)']).map((r) => r.path ?? r), ...(v.stale ?? ['(no verdict)'])];
+
+  const buildClean = judgeBuild();
+  assert(!buildClean.refusal && findingsOfBuild(buildClean).length === 0, `positive control: the default synthetic tree is clean -- ${buildClean.refusal ?? findingsOfBuild(buildClean).join(', ')}`);
+  assert(
+    buildClean.covered?.find((r) => r.path === 'packages/cli/src/x.ts')?.via === 'packages/**',
+    '-- a root input under a package root is covered by that subtree entry, with no literal of its own',
+  );
+  assert(
+    !(buildClean.inputs ?? []).some((r) => r.path === 'docker/**'),
+    '-- a TEST task\'s root input is not a build input: `crosspkg` is that population\'s scheduler, not `core`',
+  );
+  assert(
+    (buildClean.excludedTasks ?? []).join(',') === '@objectstack/docs#build' && !(buildClean.inputs ?? []).some((r) => r.path === 'content/**'),
+    '-- a build the root `build` script excludes is left out, and its root input with it',
+  );
+
+  // THE HOLE, the one the card reads: a build input `core:` does not cover.
+  const droppedInput = judgeBuild({ workflow: buildWorkflow({ core: ['packages/**', 'tsconfig.json', 'turbo.json', 'tsup.config.ts', 'scripts/a.mjs'] }) });
+  assert(uncoveredPaths(droppedInput).join(',') === 'scripts/b.mjs', 'THE HOLE: a build input dropped from `core:` is reported uncovered, by path');
+  assert(
+    (droppedInput.uncovered?.[0]?.from ?? []).join(',') === '@objectstack/probe#build',
+    '-- naming the build task that declared it',
+  );
+  const droppedTurbo = judgeBuild({ workflow: buildWorkflow({ core: ['packages/**', 'tsconfig.json', 'tsup.config.ts', 'scripts/a.mjs', 'scripts/b.mjs'] }) });
+  assert(uncoveredPaths(droppedTurbo).join(',') === 'turbo.json', 'turbo.json itself missing from `core:` is reported -- it moves every task hash');
+  const droppedGlobal = judgeBuild({ workflow: buildWorkflow({ core: ['packages/**', 'tsconfig.json', 'turbo.json', 'scripts/a.mjs', 'scripts/b.mjs'] }) });
+  assert(uncoveredPaths(droppedGlobal).join(',') === 'tsup.config.ts', 'a `globalDependencies` entry missing from `core:` is reported -- the set is derived, not listed here');
+  const newInput = judgeBuild({
+    turbo: turboFixture({
+      tasks: { build: { inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/scripts/a.mjs', '$TURBO_ROOT$/scripts/b.mjs', '$TURBO_ROOT$/tools/gen.mjs'] } },
+    }),
+  });
+  assert(uncoveredPaths(newInput).join(',') === 'tools/gen.mjs', 'a build input turbo.json gains under a NEW root reds until `core:` covers it');
+  const negated = judgeBuild({
+    turbo: turboFixture({ tasks: { build: { inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/scripts/a.mjs', '$TURBO_ROOT$/scripts/b.mjs', '!$TURBO_ROOT$/scripts/c.mjs'] } } }),
+  });
+  assert(uncoveredPaths(negated).length === 0, 'a NEGATED root input is not required -- a negation can only narrow a hash');
+  const docsBuilt = judgeBuild({ manifest: manifestFixture('turbo run build') });
+  assert(
+    uncoveredPaths(docsBuilt).join(',') === 'content/**',
+    'the root `build` script no longer excluding a package puts that build\'s root inputs back in the required set -- the exclusion is read, not declared',
+  );
+  const staleEntry = judgeBuild({
+    workflow: buildWorkflow({
+      core: ['packages/**', 'package.json', CI_WORKFLOW, 'tsconfig.json', 'turbo.json', 'tsup.config.ts', 'scripts/a.mjs', 'scripts/b.mjs', 'scripts/old.mjs'],
+    }),
+  });
+  assert((staleEntry.stale ?? []).join(',') === 'scripts/old.mjs', 'a literal `core:` entry beside declared build inputs, covering none of them, is reported stale');
+  assert(
+    (staleEntry.stale ?? ['(no verdict)']).length === 1,
+    '-- while a root-level file, a pattern entry and a literal in a directory holding no declared build input are not judged',
+  );
+  assert(buildExclusions('turbo run build --filter !@objectstack/docs').excluded?.has('@objectstack/docs'), 'the spaced `--filter !<pkg>` spelling is read as an exclusion too');
+
+  // Refusals: never a clean zero over a subject that was not read.
+  const buildRefusal = (opts) => judgeBuild(opts).refusal ?? '';
+  assert(/no \`build-core\` job/.test(judgeBuildInputs(fixtureWorkflow(), turboFixture(), manifestFixture()).refusal ?? ''), 'no Build Core job => REFUSAL');
+  assert(/no longer names \`core\`/.test(buildRefusal({ workflow: buildWorkflow({ condition: '${{ !cancelled() }}' }) })), 'Build Core dropping `core` from its `if:` => REFUSAL');
+  assert(/no \`run: pnpm build\` step/.test(buildRefusal({ workflow: buildWorkflow({ run: 'pnpm turbo run build' }) })), 'Build Core no longer running `pnpm build` => REFUSAL');
+  assert(/turbo.json could not be read\./.test(buildRefusal({ turbo: null })), 'an unreadable turbo.json => REFUSAL');
+  assert(/could not be read as JSON/.test(buildRefusal({ turbo: '{ tasks: ' })), 'a turbo.json that is not JSON => REFUSAL');
+  assert(/no \`tasks\` map/.test(buildRefusal({ turbo: '{}' })), 'a turbo.json with no tasks map => REFUSAL');
+  assert(/no \`build\` task/.test(buildRefusal({ turbo: turboFixture({ tasks: { test: { inputs: [] } } }) })), 'a turbo.json with no build task => REFUSAL');
+  assert(/package.json could not be read\./.test(buildRefusal({ manifest: null })), 'an unreadable root manifest => REFUSAL');
+  assert(/not \`turbo run build/.test(buildRefusal({ manifest: JSON.stringify({ scripts: {} }) })), 'a root manifest with no `build` script => REFUSAL');
+  assert(/not \`turbo run build/.test(buildRefusal({ manifest: manifestFixture('tsup') })), 'a root `build` script that is not `turbo run build` => REFUSAL');
+
+  // The real tree.
+  const realBuild = judgeBuildInputs(realSource, readFileSync(join(REPO_ROOT, TURBO_CONFIG), 'utf8'), readFileSync(join(REPO_ROOT, ROOT_MANIFEST), 'utf8'));
+  assert(!realBuild.refusal && findingsOfBuild(realBuild).length === 0, `the checked-in core filter covers every build input turbo.json declares -- ${realBuild.refusal ?? findingsOfBuild(realBuild).join(', ')}`);
+  for (const path of [TURBO_CONFIG, 'tsup.config.ts', 'scripts/tsup-drop-sources-content.mjs']) {
+    assert(
+      (realBuild.covered ?? []).some((r) => r.path === path && r.kind === 'literal'),
+      `a head touching only ${path} schedules Build Core, through its own literal \`core\` entry`,
+    );
   }
+  const notABuildInput = 'scripts/check-ci-filter-parity.mjs';
+  assert(
+    existsSync(join(REPO_ROOT, notABuildInput)) &&
+      !(realBuild.inputs ?? []).some((r) => r.path === notABuildInput) &&
+      !coverageVerdict(notABuildInput, realBuild.entries ?? []).covered,
+    `the control: ${notABuildInput}, a tracked script no build declares, does NOT schedule Build Core -- \`core\` names files, not \`scripts/**\``,
+  );
+  const droppedReal = realSource.replace("              - 'scripts/invoked-as.mjs'\n", '');
+  assert(droppedReal !== realSource, 'the real-tree drop found its anchor in the checked-in ci.yml');
+  assert(
+    uncoveredPaths(judgeBuildInputs(droppedReal, readFileSync(join(REPO_ROOT, TURBO_CONFIG), 'utf8'), readFileSync(join(REPO_ROOT, ROOT_MANIFEST), 'utf8'))).join(',') ===
+      'scripts/invoked-as.mjs',
+    'the checked-in ci.yml with one build input dropped from `core:` reports exactly that input',
+  );
+  assert(inScratchTree(realSource, (root) => quietly(() => main(root))) === 0, 'main() returns 0 over the scratch copy of the real tree -- the scratch root is complete');
+  assert(inScratchTree(droppedReal, (root) => quietly(() => main(root))) === 1, '-- and 1 with that one build input dropped: the report path, not only `judgeBuildInputs`');
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
@@ -1172,7 +1587,11 @@ export async function selfTest() {
       `pre-#10015 rollback uncovering the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one plus #14561's one plus #14824's three plus #15818's two plus #18650's one, ` +
       `the CI wiring read out of lint.yml, and the \`console\` selection: the spec's entry layout selecting Console Pin ` +
       `Gate and moving its dist key while a spec source file does neither, each way the filter and the key can drift ` +
-      `observed red, and the report path red over the checked-in ci.yml with one hashed path dropped from the filter.`,
+      `observed red, and the report path red over the checked-in ci.yml with one hashed path dropped from the filter; ` +
+      `and Build Core's build inputs: a build input dropped from \`core\` observed red by path and declaring task, ` +
+      `turbo.json itself, a globalDependencies entry and a new-root input each required, test-task and negated inputs ` +
+      `and the excluded docs build left out until the build script stops excluding it, a leftover literal entry, ` +
+      `ten refusals, and the checked-in tree green with one input dropped observed red through the report path.`,
   );
   selfTestReachedVerdict = true;
   return 0;

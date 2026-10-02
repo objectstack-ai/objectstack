@@ -218,9 +218,9 @@ describe('#10230 team approver org screen', () => {
     expect(engine._reads.filter(r => r === 'sys_team')).toEqual([]);
   });
 
-  it('T7 — the drop is loud: the warning names the team, both organizations and the card', async () => {
+  it('T7 — the drop is loud: the warning names the team and both organizations', async () => {
     await svc.openNodeRequest(input([TEAM_B]), CTX_A);
-    const hit = warnings.find(([msg]) => String(msg).includes('#10230'));
+    const hit = warnings.find(([msg]) => String(msg).includes("team 'team_b' was dropped from the approver slate"));
     console.log('[PROBE T7] warning =', hit ? String(hit[0]).slice(0, 90) : 'NONE');
     expect(hit).toBeTruthy();
     expect(hit![1]).toMatchObject({

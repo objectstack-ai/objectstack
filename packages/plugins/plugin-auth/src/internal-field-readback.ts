@@ -189,6 +189,47 @@ const READBACK_FIELDS: Readonly<Record<string, readonly ReadbackColumn[]>> = {
     { field: 'id_token', absenceProvesStrip: false },
     { field: 'password', absenceProvesStrip: false },
   ],
+  // [#21197] The credential-class census, closed under the same flag (ruling
+  // record 5942811916, C2): each column below is declared `internal: true` so
+  // that no generic exit — the data path, and the compliance ledger's CRUD
+  // mirror that honours the same flag — carries it, and each is here because a
+  // better-auth route reads it back OFF a row its storage adapter returned
+  // (traced in the installed better-auth / @better-auth/* dist, 1.7.3):
+  //
+  //  - `sys_jwks.private_key` — the jwt plugin's key read (`findMany`, no
+  //    projection) feeds signing. MEASURED before this row existed: the flag
+  //    alone signs only on the request that minted the key, and degrades
+  //    signing on every later read and on a fresh manager. `required: true` ⇒
+  //    absence can only be the strip.
+  //  - `sys_verification.value` — reset-password, email/phone OTP, magic link
+  //    and OIDC code redemption read it off the found or CONSUMED row (the
+  //    adapter's `consumeOne` re-attaches through this table too).
+  //    `required: true`. `identifier` is deliberately absent: no flow reads it
+  //    back off a row — it is only ever the lookup key.
+  //  - `sys_two_factor.secret` (`required: true`) and `.backup_codes` (empty
+  //    until generated) — TOTP and backup-code verification read both off the
+  //    enrolment row.
+  //  - `sys_sso_provider.oidc_config` / `.saml_config` — the sso plugin reads
+  //    the provider's protocol blob on every federated sign-in; both are
+  //    optional (a provider carries one or the other).
+  //  - `sys_oauth_application.client_secret` — the provider reads the stored
+  //    digest off the client row to verify a presented secret; empty on a
+  //    public client.
+  [SystemObjectName.JWKS]: [{ field: 'private_key', absenceProvesStrip: true }],
+  [SystemObjectName.VERIFICATION]: [{ field: 'value', absenceProvesStrip: true }],
+  [SystemObjectName.TWO_FACTOR]: [
+    { field: 'secret', absenceProvesStrip: true },
+    { field: 'backup_codes', absenceProvesStrip: false },
+  ],
+  // Spelled, not imported from `sso-client-secret.ts` (`SSO_PROVIDER_OBJECT`):
+  // that module imports this one for its own legacy-secret migration, and a
+  // module-top constant read across an import cycle is a TDZ error. The spec
+  // declares no `SystemObjectName` member for this object.
+  sys_sso_provider: [
+    { field: 'oidc_config', absenceProvesStrip: false },
+    { field: 'saml_config', absenceProvesStrip: false },
+  ],
+  [SystemObjectName.OAUTH_APPLICATION]: [{ field: 'client_secret', absenceProvesStrip: false }],
 };
 
 /** What breaks if a stripped row is handed to better-auth un-repaired. */
@@ -200,6 +241,14 @@ const FAIL_CLOSED_CONSEQUENCE: Readonly<Record<string, string>> = {
     'better-auth OAuth token routes (/get-access-token, /account-info, /refresh-token) would '
     + 'fail to exchange the refresh token — answering REFRESH_TOKEN_NOT_FOUND, or handing back '
     + 'an empty access token — on such rows',
+  [SystemObjectName.JWKS]:
+    'better-auth JWT signing would find no private key on such rows and stop signing tokens '
+    + '(no set-auth-jwt header, no OIDC id_token)',
+  [SystemObjectName.VERIFICATION]:
+    'better-auth one-time verification flows (password reset, OTP, magic link, OIDC code redemption) '
+    + 'would find no stored value on such rows and refuse every outstanding code',
+  [SystemObjectName.TWO_FACTOR]:
+    'better-auth two-factor verification would find no TOTP secret on such rows and refuse every code',
 };
 
 /**

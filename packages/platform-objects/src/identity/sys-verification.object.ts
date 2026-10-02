@@ -33,17 +33,25 @@ export const SysVerification = ObjectSchema.create({
     docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'Email and phone verification tokens',
-  // [ADR-0079] The record title is `display_title`, a text formula over the
-  // columns `titleFormat` names. With no pointer declared, the registry's
-  // designate-only pass stamped `nameField: 'id'` (the first title-eligible
-  // field), so a renderer honouring ADR-0079's order (an explicit `nameField`
-  // wins over `titleFormat`) drew the raw id as the record page's H1.
-  // `titleFormat` stays for renderers that still read it first;
-  // `identity-display-title.test.ts` holds the two to the same text.
+  // [ADR-0079] The record title is `display_title`, a text formula. With no
+  // pointer declared, the registry's designate-only pass stamped
+  // `nameField: 'id'` (the first title-eligible field), so a renderer honouring
+  // ADR-0079's order (an explicit `nameField` wins over `titleFormat`) drew the
+  // raw id as the record page's H1. `titleFormat` stays for renderers that
+  // still read it first; `identity-display-title.test.ts` holds the two to the
+  // same text.
+  //
+  // [#21197] The title is a FIXED label, and neither it nor the highlights may
+  // name `identifier` or `value`. Both columns are `internal` (below), and the
+  // read path evaluates formulas BEFORE it omits internal fields — so a title
+  // built from either column would re-serve the credential through
+  // `display_title` on the very path the flag closes. No other column here
+  // describes a row without being a timestamp, so the label is the object's
+  // own name rather than a value.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: 'Verification for {identifier}',
-  highlightFields: ['identifier', 'expires_at', 'created_at'],
+  titleFormat: 'Verification',
+  highlightFields: ['expires_at', 'created_at'],
   
   fields: {
     id: Field.text({
@@ -53,13 +61,13 @@ export const SysVerification = ObjectSchema.create({
     }),
 
     // [ADR-0079] The record title (`nameField` above). A formula is computed on
-    // read and has no stored column. `identifier` is required, so the expression
-    // needs no null guard.
+    // read and has no stored column. [#21197] A fixed label: see the note on
+    // `titleFormat` for why it reads no column.
     display_title: Field.formula({
       label: 'Title',
       returnType: 'text',
-      expression: F`'Verification for ' + record.identifier`,
-      description: 'Record title: the identifier being verified (computed on read)',
+      expression: F`'Verification'`,
+      description: 'Record title: a fixed label (the identifier and token columns are internal and never titled)',
     }),
     
     created_at: Field.datetime({
@@ -74,9 +82,28 @@ export const SysVerification = ObjectSchema.create({
       readonly: true,
     }),
     
+    // [#21197] `internal: true` on BOTH columns of this object that carry the
+    // credential. Which one holds it depends on the flow: a password-reset row
+    // keys its token into `identifier` and stores the user in `value`; an OTP
+    // or magic-link row stores the code or payload in `value`; an OIDC
+    // authorization-code row stores its payload in `value`. Each is a LIVE
+    // one-time credential while the row exists, so the declaration keeps both
+    // off every generic exit — the data path and the compliance ledger's CRUD
+    // mirror alike.
+    //
+    // ⛔ Not `Field.secret`: `identifier` is the column every better-auth
+    // verification lookup filters by, and a `sys_secret` ref destroys that
+    // filter (ADR-0100 §B.4). `internal` is read-side only — storage, the index
+    // and the filter are untouched. better-auth reads `value` back off the rows
+    // its adapter returns (reset, OTP, magic link, OIDC code redemption), so
+    // `value` has a readback row in plugin-auth's `internal-field-readback.ts`;
+    // `identifier` has none, because no better-auth flow reads it back off a
+    // row — it is only ever the lookup key, and a flagged column nobody reads
+    // back stays stripped everywhere.
     value: Field.text({
       label: 'Verification Token',
       required: true,
+      internal: true,
       // [#11374/#11701] Deliberately UNBOUNDED: better-auth's oauth-provider
       // writes OIDC authorization-code payloads here as a JSON blob, so no
       // bound provably admits every value it may write. That is only
@@ -91,9 +118,11 @@ export const SysVerification = ObjectSchema.create({
       required: true,
     }),
     
+    // [#21197] `internal: true` — see the note on `value` above.
     identifier: Field.text({
       label: 'Identifier',
       required: true,
+      internal: true,
       // [#11374] Bound from better-auth 1.7.1's own MySQL schema: the
       // verification model declares `identifier` with `index: true`, and the
       // upstream migration emits an indexed string column as varchar(255)

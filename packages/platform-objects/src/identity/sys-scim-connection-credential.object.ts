@@ -106,10 +106,15 @@ export const SysScimConnectionCredential = ObjectSchema.create({
       group: 'Identity',
     }),
 
+    // [#21197] `internal: true` — the list view already leaves this column out
+    // (above); the declaration is what keeps it off the generic data path and
+    // out of the compliance ledger's CRUD mirror. The verifier only FILTERS by
+    // it (`scim-connection-service.ts`), so it needs no readback.
     token_digest: Field.text({
       label: 'Token Digest',
       required: true,
       readonly: true,
+      internal: true,
       maxLength: 255,
       description: 'HMAC-SHA-256 (base64url) of the bearer, keyed by the deployment auth secret — one-way; the plaintext is shown once at mint and never stored.',
       group: 'Secret',

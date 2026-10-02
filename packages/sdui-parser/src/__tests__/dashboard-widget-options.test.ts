@@ -122,23 +122,22 @@ describe('the census the expectations derive from is not vacuous', () => {
     expect([...CONSUMED_WIDGET_OPTION_KEYS].sort()).toEqual([...CONSUMED_WIDGET_OPTION_KEYS]);
   });
 
-  it('the accepted set is exactly objectui\'s — the lockstep pin this copy cannot re-derive', () => {
+  it('the accepted set is the five declared query keys — the lockstep pin this copy cannot re-derive', () => {
     // This repo has no dashboard renderer, so the read-site half of the census
     // is not measurable here (objectui owns it). What IS measurable here is the
     // DECLARED half: the five query keys below are exactly the five properties
     // `DashboardWidgetOptionsSchema` declares in
     // `packages/spec/src/ui/dashboard.zod.ts` — the spec ships from THIS repo,
     // so a declared key landing there without landing here would turn this
-    // module into a false positive on legal metadata. `description` is the
-    // sixth, undeclared, member: the metric sub-caption channel that
-    // `translateDashboard` writes into `options` (see `WidgetLike.options` in
-    // `packages/spec/src/system/i18n-resolver.ts`), also a read site in this
-    // repo. Re-read both files when this pin fails.
+    // module into a false positive on legal metadata. There is no undeclared
+    // member: `description`, the metric sub-caption `translateDashboard` used
+    // to write into `options`, was retired at both ends (objectstack#21257,
+    // ruling C on objectui#11389), and objectui's copy drops it with the
+    // reader in objectui#11389. Re-read both files when this pin fails.
     // The declared half of that sentence is re-derived by
     // `scripts/check-widget-option-census.mjs`; this pin is the array's shape.
     expect([...CONSUMED_WIDGET_OPTION_KEYS]).toEqual([
       'dateGranularity',
-      'description',
       'limit',
       'sortBy',
       'sortOrder',
@@ -192,6 +191,8 @@ describe('the ruled first case: gauge options.invert (objectui#5709)', () => {
   it('the emitted diagnostic is byte-equal to objectui\'s, field for field', () => {
     // The lockstep claim is about the WHOLE envelope, not just the code: a
     // message that drifted by one word is a different author-visible dialect.
+    // The printed set omits `description` (objectstack#21257); objectui's
+    // copy prints it until objectui#11389 drops the retired sub-caption read.
     const found = unconsumed(dash({ ...slaGauge, options: { invert: true } }));
     expect(found).toEqual([
       {
@@ -199,10 +200,23 @@ describe('the ruled first case: gauge options.invert (objectui#5709)', () => {
         code: 'unconsumed-widget-option',
         message:
           '<dashboard> widget "sla_compliance_gauge" (gauge): options.invert reaches no renderer — ' +
-          'dashboard widget renderers read only: dateGranularity, description, limit, sortBy, sortOrder, stageOrder',
+          'dashboard widget renderers read only: dateGranularity, limit, sortBy, sortOrder, stageOrder',
         tag: 'dashboard',
       },
     ]);
+  });
+
+  it('`options.description` draws the warning — the retired metric sub-caption is no consumed key (objectstack#21257)', () => {
+    // Flipped, not deleted: until objectstack#21257 `description` was the
+    // census's one undeclared member, because `translateDashboard` wrote the
+    // metric sub-caption into it. Ruling C on objectui#11389 retired that
+    // channel at both ends, so the key is now judged like any other.
+    const found = unconsumed(
+      dash({ id: 'won', type: 'metric', dataset: 'sales', values: ['won_amount'], options: { description: 'vs last quarter' } }),
+    );
+    expect(found).toHaveLength(1);
+    expect(found[0]!.severity).toBe('warning');
+    expect(found[0]!.message).toContain('options.description reaches no renderer');
   });
 });
 

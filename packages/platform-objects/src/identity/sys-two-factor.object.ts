@@ -174,15 +174,27 @@ export const SysTwoFactor = ObjectSchema.create({
       required: true,
     }),
     
+    // [#21197] `internal: true` on the second factor's two credential columns.
+    // Both are encrypted by better-auth under the deployment auth secret, so
+    // the stored form is ciphertext — but a copy of ciphertext outside the row
+    // is one secret away from a working second factor, and the compliance
+    // ledger's CRUD mirror honours this flag exactly as the generic data path
+    // does. ⛔ Not `Field.secret`: better-auth reads both columns back off the
+    // rows its storage adapter returns, an adapter implemented over the
+    // engine's generic read (ADR-0100 §B.4). `internal` is read-side only, and
+    // both columns have readback rows in plugin-auth's
+    // `internal-field-readback.ts`, so verification keeps seeing them.
     secret: Field.text({
       label: 'Secret',
       required: true,
+      internal: true,
       description: 'TOTP secret key',
     }),
     
     backup_codes: Field.textarea({
       label: 'Backup Codes',
       required: false,
+      internal: true,
       // NOT JSON at rest, despite what this said until #10681. better-auth's
       // `twoFactor()` defaults to `storeBackupCodes: 'encrypted'` and we pass
       // no `backupCodeOptions`, so `encodeBackupCodes` JSON-stringifies the

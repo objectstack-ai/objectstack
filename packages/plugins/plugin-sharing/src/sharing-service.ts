@@ -54,6 +54,15 @@ export interface SharingEngine {
   update(object: string, idOrData: any, dataOrOptions?: any, options?: any): Promise<any>;
   delete(object: string, options?: any): Promise<any>;
   getSchema?(object: string): any | undefined;
+  /**
+   * [#21197] The engine's privileged batch accessor for a field declared
+   * `internal: true` (ObjectQL `resolveInternalField`, #8118) — the only door
+   * back to a column the generic read path omits. Optional: an engine that
+   * does not implement the `internal` channel strips nothing, so it never
+   * needs it. Used by the share-link service for `sys_share_link.token` and
+   * `.password_hash`.
+   */
+  resolveInternalField?(object: string, recordIds: readonly string[], field: string): Promise<Map<string, unknown>>;
 }
 
 /**

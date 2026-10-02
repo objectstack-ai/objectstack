@@ -140,7 +140,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 | **description** | `string` | optional | LLM-facing description (≥40 chars). Required when exposed. |
 | **category** | `Enum<'data' \| 'action' \| 'flow' \| 'integration' \| 'vector_search' \| 'analytics' \| 'utility'>` | optional | Tool category override (defaults to "action"). |
 | **paramHints** | `Record<string, { description?: string; enum?: (string \| number)[]; examples?: any[] }>` | optional | Per-parameter AI hints keyed by param name. |
-| **outputSchema** | `Record<string, any>` | optional | JSON Schema for the action return value. |
+| **outputSchema** | `Record<string, any>` | optional | JSON Schema for the action return value. An untyped subschema that carries a type-scoped keyword (properties, items, pattern, minimum, …) is refused at its path, because the AI runtime's schema reader does not check it; declare its "type". |
 | **requiresConfirmation** | `boolean` | optional | Override HITL confirmation for AI invocations. |
 
 ### Nested Shape: `Action.onSuccess`
@@ -163,7 +163,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 | **description** | `string` | optional | LLM-facing description (≥40 chars). Required when exposed. |
 | **category** | `Enum<'data' \| 'action' \| 'flow' \| 'integration' \| 'vector_search' \| 'analytics' \| 'utility'>` | optional | Tool category override (defaults to "action"). |
 | **paramHints** | `Record<string, { description?: string; enum?: (string \| number)[]; examples?: any[] }>` | optional | Per-parameter AI hints keyed by param name. |
-| **outputSchema** | `Record<string, any>` | optional | JSON Schema for the action return value. |
+| **outputSchema** | `Record<string, any>` | optional | JSON Schema for the action return value. An untyped subschema that carries a type-scoped keyword (properties, items, pattern, minimum, …) is refused at its path, because the AI runtime's schema reader does not check it; declare its "type". |
 | **requiresConfirmation** | `boolean` | optional | Override HITL confirmation for AI invocations. |
 
 

@@ -137,9 +137,19 @@ const read = { allowRead: true, allowCreate: false, allowEdit: false, allowDelet
 /** View-all on the user object: the subject's ledger rows reach only a reader who can open the subject. */
 const grants = { [USER]: { ...read, viewAllRecords: true }, [LEDGER]: read };
 const withheldField = { [`${USER}.${FIELD.withheld}`]: { readable: false, editable: false } };
-const unmaskSet = PermissionSetSchema.parse({ name: 'ald_unmask_set', label: 'ALD unmask', objects: grants, systemPermissions: [CAP_UNMASK] });
-const gatedReadSet = PermissionSetSchema.parse({ name: 'ald_gated_read_set', label: 'ALD gated read', objects: grants, systemPermissions: [CAP_READ] });
-const withholdSet = PermissionSetSchema.parse({ name: 'ald_withhold_set', label: 'ALD withhold', objects: grants, fields: withheldField });
+/**
+ * The masked and gated classes ride two fields of the identity object's `Admin` group, which the
+ * platform baseline (`member_default`) withholds from every reader holding no admin set (#21237).
+ * The readers' own sets grant them back, the way an app that means its readers to see them does,
+ * so each class applies only through its own mechanism.
+ */
+const classFieldsReadable = {
+  [`${USER}.${FIELD.masked}`]: { readable: true, editable: false },
+  [`${USER}.${FIELD.gated}`]: { readable: true, editable: false },
+};
+const unmaskSet = PermissionSetSchema.parse({ name: 'ald_unmask_set', label: 'ALD unmask', objects: grants, fields: classFieldsReadable, systemPermissions: [CAP_UNMASK] });
+const gatedReadSet = PermissionSetSchema.parse({ name: 'ald_gated_read_set', label: 'ALD gated read', objects: grants, fields: classFieldsReadable, systemPermissions: [CAP_READ] });
+const withholdSet = PermissionSetSchema.parse({ name: 'ald_withhold_set', label: 'ALD withhold', objects: grants, fields: { ...classFieldsReadable, ...withheldField } });
 /** Withholds the field and grants only view-all on the user object: beside the platform read-only set, which grants the ledger read. */
 const withholdOnlySet = PermissionSetSchema.parse({
   name: 'ald_withhold_only_set',
