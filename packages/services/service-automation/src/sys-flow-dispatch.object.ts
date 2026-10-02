@@ -83,7 +83,7 @@ export const SysFlowDispatch = ObjectSchema.create({
     retention: { maxAge: '30d' },
   },
   description:
-    'Idempotency ledger for trigger dispatches (#10220): one row per claimed dispatch key — (flow, record, matched-window) for a time-relative sweep, (flow, tick-window) for a scheduled flow — so a re-scan, a rebuilt kernel or an operator replay never re-launches a flow for a window it already delivered.',
+    'Idempotency ledger for trigger dispatches: one row per claimed dispatch key — (flow, record, matched-window) for a time-relative sweep, (flow, tick-window) for a scheduled flow — so a re-scan, a rebuilt kernel or an operator replay never re-launches a flow for a window it already delivered.',
   displayNameField: 'id',
   nameField: 'id', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   highlightFields: ['id', 'dispatched_at', 'outcome'],

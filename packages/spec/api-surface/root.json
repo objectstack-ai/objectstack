@@ -132,7 +132,6 @@
     "STACK_RUNTIME_MEMBERS (const)",
     "Skill (type)",
     "StackDefinitionKey (type)",
-    "StateNodeConfig (type)",
     "StoredConversionOptions (type)",
     "TemplateExpressionInputSchema (const)",
     "Tool (type)",

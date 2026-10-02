@@ -73,21 +73,6 @@
  "packages/plugins/plugin-audit/src/audit-writers.ts": {
   "#5226": 1
  },
- "packages/plugins/plugin-audit/src/objects/sys-activity.object.ts": {
-  "#11507": 1
- },
- "packages/plugins/plugin-audit/src/translations/en.objects.generated.ts": {
-  "#11507": 1
- },
- "packages/plugins/plugin-audit/src/translations/es-ES.objects.generated.ts": {
-  "#11507": 1
- },
- "packages/plugins/plugin-audit/src/translations/ja-JP.objects.generated.ts": {
-  "#11507": 1
- },
- "packages/plugins/plugin-audit/src/translations/zh-CN.objects.generated.ts": {
-  "#11507": 1
- },
  "packages/plugins/plugin-security/src/bootstrap-system-capabilities.ts": {
   "#5876": 1,
   "#8552": 2
@@ -188,48 +173,5 @@
   "#5222": 1,
   "#5333": 1,
   "#7598": 1
- },
- "packages/services/service-automation/src/builtin/connector-nodes.ts": {
-  "#3017": 1
- },
- "packages/services/service-automation/src/builtin/parse-config.ts": {
-  "#4277": 1
- },
- "packages/services/service-automation/src/builtin/screen-nodes.ts": {
-  "#1870": 1
- },
- "packages/services/service-automation/src/builtin/template.ts": {
-  "#11060": 1
- },
- "packages/services/service-automation/src/engine.ts": {
-  "#1888": 1,
-  "#2419": 2,
-  "#3017": 1,
-  "#3528": 1,
-  "#3760": 1,
-  "#4045": 1,
-  "#4277": 1,
-  "#4414": 1,
-  "#5393": 4
- },
- "packages/services/service-automation/src/plugin.ts": {
-  "#1928": 1,
-  "#2612": 1,
-  "#2977": 1,
-  "#3017": 4,
-  "#3356": 1,
-  "#3475": 1
- },
- "packages/services/service-automation/src/runtime-identity.ts": {
-  "#1888": 1,
-  "#3760": 1
- },
- "packages/services/service-automation/src/sys-automation-run.object.ts": {
-  "#2585": 1,
-  "#3801": 1,
-  "#7533": 2
- },
- "packages/services/service-automation/src/sys-flow-dispatch.object.ts": {
-  "#10220": 1
  }
 }

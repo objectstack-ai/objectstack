@@ -333,7 +333,7 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
             success: false,
             error:
               `script node '${node.id}': no function named '${target}' is registered. ` +
-              `Register it via \`defineStack({ functions: { '${target}': fn } })\`, or fix the name (#1870).`,
+              `Register it via \`defineStack({ functions: { '${target}': fn } })\`, or fix the name.`,
           };
         }
 

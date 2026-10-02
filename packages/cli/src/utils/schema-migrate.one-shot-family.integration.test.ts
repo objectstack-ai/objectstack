@@ -61,6 +61,7 @@ import MigrateResume from '../commands/migrate/resume.js';
 import MigrateSummaryNulls from '../commands/migrate/summary-nulls.js';
 import MigrateValueShapes from '../commands/migrate/value-shapes.js';
 import SecretOrphans from '../commands/secret/orphans.js';
+import SecretRewrap from '../commands/secret/rewrap.js';
 import StorageOrphans from '../commands/storage/orphans.js';
 
 // [#10126] Pay the first transform of these dist-resolved workspace deps at
@@ -214,6 +215,14 @@ const CALLERS: Record<string, Caller> = {
     write: [{
       label: 'secret orphans --delete',
       argv: ['--delete', '--export', '@DIR@/secret-export.json', '--no-declared-datasources', '--yes', '--database-url', '@DB@', '--json'],
+    }],
+  },
+  'commands/secret/rewrap.ts': {
+    run: invoke(SecretRewrap),
+    noWrite: [{ label: 'secret rewrap', argv: ['--database-url', '@DB@', '--json'] }],
+    write: [{
+      label: 'secret rewrap --apply',
+      argv: ['--apply', '--no-declared-datasources', '--yes', '--database-url', '@DB@', '--json'],
     }],
   },
   'commands/storage/orphans.ts': {
@@ -397,7 +406,8 @@ beforeAll(async () => {
   delete process.env.OS_LIFECYCLE_DISABLED;
   process.env.NODE_ENV = 'production';
   // The key this production-posture file needs — the served boot and every
-  // command that composes `SettingsServicePlugin` (`secret orphans`, and the
+  // command that composes `SettingsServicePlugin` (`secret orphans`, `secret
+  // rewrap`, which also resolves a provider of its own from it, and the
   // storage arm of `files-to-references` / `storage orphans`) construct a
   // `LocalCryptoProvider`, which refuses to start in production without one.
   // Declared here rather than inherited from a persisted
