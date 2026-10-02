@@ -299,7 +299,7 @@ describe('[#21207] inbound version tokens are compared in keyed form', () => {
         await p.saveMetaItem({ ...ref, item: viewBody('v2'), parentVersion: v1.version } as any);
         await rejection(() => p.saveMetaItem({ ...ref, item: viewBody('lost'), parentVersion: v1.version } as any));
 
-        const denials = h.auditRows.filter((a) => a.code === 'metadata_conflict');
+        const denials = h.auditRows.filter((a) => a.code === 'metadata_conflict'); // adr0112-ok: D6b persisted audit column
         expect(denials).toHaveLength(1);
         const note = String(denials[0]!.note);
         expect(note).not.toMatch(SHA256);

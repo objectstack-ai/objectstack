@@ -100,6 +100,7 @@ export function withheldStoredHashTokens(text: string): string {
 export const METADATA_DECISION_AUDIT_OBJECT = 'sys_metadata_audit';
 
 /** The persisted code of an optimistic-concurrency refusal's decision-audit row. */
+// adr0112-ok: D6b — the persisted audit column's own vocabulary, not a wire code
 const CONFLICT_NOTE_CODE = 'metadata_conflict';
 
 /** The conflict note's one sentence, as every writer of it has spelled it. */
@@ -404,7 +405,10 @@ export async function migrateStoredMetadataBodyCopies(
   const copiedObjects = [...STORED_METADATA_BODY_OBJECTS, METADATA_DECISION_AUDIT_OBJECT];
   const tables: ReadonlyArray<{ object: string; where: Record<string, unknown> }> = [
     ...STORED_METADATA_BODY_AUDIT_OBJECTS.map((object) => ({ object, where: { object_name: { $in: copiedObjects } } })),
-    { object: METADATA_DECISION_AUDIT_OBJECT, where: { code: CONFLICT_NOTE_CODE } },
+    // A PREDICATE on the persisted `code` column (ADR-0112 D6b, the audit
+    // column's own vocabulary), written in operator form: it reads rows by the
+    // code they carry and stamps none.
+    { object: METADATA_DECISION_AUDIT_OBJECT, where: { code: { $eq: CONFLICT_NOTE_CODE } } },
   ];
   for (const { object, where } of tables) {
     report.byObject[object] = { scanned: 0, rewritten: 0 };

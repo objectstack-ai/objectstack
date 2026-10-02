@@ -2371,7 +2371,9 @@ describe('[#21207] stored metadata copies carry no content hash', () => {
     await fire('afterUpdate', {
       object: 'sys_metadata_audit',
       input: { id: 'd-1', data: { note: 'expected parent (withheld) but current is (withheld)' } },
+      // adr0112-ok: D6b persisted audit column
       previous: { id: 'd-1', code: 'metadata_conflict', note: `expected parent ${PARENT} but current is ${HASH}` },
+      // adr0112-ok: D6b persisted audit column
       result: { id: 'd-1', code: 'metadata_conflict', note: 'expected parent (withheld) but current is (withheld)' },
       session: {},
     });

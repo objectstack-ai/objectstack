@@ -35,6 +35,8 @@ const metaSnapshot = () => ({ id: 'm1', name: 'v', type: 'view', scope: 'platfor
 const historySnapshot = () => ({ id: 'h1', name: 'v', type: 'view', metadata: view('one'), checksum: HASH, previous_checksum: PARENT });
 const conflictNote = `expected parent ${PARENT} but current is ${HASH}`;
 const WITHHELD_NOTE = 'expected parent (withheld) but current is (withheld)';
+/** The decision-audit `code` column's own vocabulary (ADR-0112 D6b), not an error code. */
+const CONFLICT_CODE = 'metadata_conflict'; // adr0112-ok: D6b persisted audit column
 
 describe('planAuditRowPatch / planActivityRowPatch — the hash columns leave the copy', () => {
   it('a sys_metadata create snapshot loses its checksum, and nothing else', () => {
@@ -83,22 +85,22 @@ describe('planAuditRowPatch / planActivityRowPatch — the hash columns leave th
 
 describe('planDecisionNotePatch — the decision-audit note and its copies', () => {
   it('withholds both hashes of a conflict note', () => {
-    const patch = planDecisionNotePatch('sys_metadata_audit', { id: 'd1', code: 'metadata_conflict', note: conflictNote });
+    const patch = planDecisionNotePatch('sys_metadata_audit', { id: 'd1', code: CONFLICT_CODE, note: conflictNote });
     expect(patch).toEqual({ note: WITHHELD_NOTE });
   });
 
   it('keeps a null side as null', () => {
-    const patch = planDecisionNotePatch('sys_metadata_audit', { id: 'd2', code: 'metadata_conflict', note: `expected parent null but current is ${HASH}` });
+    const patch = planDecisionNotePatch('sys_metadata_audit', { id: 'd2', code: CONFLICT_CODE, note: `expected parent null but current is ${HASH}` });
     expect(patch).toEqual({ note: 'expected parent null but current is (withheld)' });
   });
 
   it('leaves every other note alone, and is idempotent', () => {
     expect(planDecisionNotePatch('sys_metadata_audit', { id: 'd3', code: 'ok', note: 'restored from version 2' })).toBeNull();
-    expect(planDecisionNotePatch('sys_metadata_audit', { id: 'd4', code: 'metadata_conflict', note: WITHHELD_NOTE })).toBeNull();
+    expect(planDecisionNotePatch('sys_metadata_audit', { id: 'd4', code: CONFLICT_CODE, note: WITHHELD_NOTE })).toBeNull();
   });
 
   it('rewrites the ledger and activity copies of a conflict note', () => {
-    const snapshot = { id: 'd1', type: 'view', name: 'v', operation: 'save', outcome: 'denied', code: 'metadata_conflict', note: conflictNote };
+    const snapshot = { id: 'd1', type: 'view', name: 'v', operation: 'save', outcome: 'denied', code: CONFLICT_CODE, note: conflictNote };
     const audit = planDecisionNotePatch('sys_audit_log', {
       id: 'a5', object_name: 'sys_metadata_audit', record_id: 'd1', new_value: JSON.stringify(snapshot), old_value: null,
     });
@@ -139,12 +141,12 @@ describe('migrateStoredMetadataBodyCopies — the content-hash copies (driven)',
     sys_metadata: [{ id: 'm1', type: 'view', name: 'v' }],
     sys_audit_log: [
       { id: 'a1', object_name: 'sys_metadata', record_id: 'm1', new_value: JSON.stringify(metaSnapshot()), old_value: null },
-      { id: 'a2', object_name: 'sys_metadata_audit', record_id: 'd1', new_value: JSON.stringify({ id: 'd1', code: 'metadata_conflict', note: conflictNote }), old_value: null },
+      { id: 'a2', object_name: 'sys_metadata_audit', record_id: 'd1', new_value: JSON.stringify({ id: 'd1', code: CONFLICT_CODE, note: conflictNote }), old_value: null },
       { id: 'a3', object_name: 'file_blob', record_id: 'f1', new_value: JSON.stringify({ id: 'f1', checksum: HASH }), old_value: null },
     ],
     sys_activity: [{ id: 'ac1', object_name: 'sys_metadata_history', record_id: 'h1', metadata: JSON.stringify({ old: null, new: historySnapshot() }) }],
     sys_metadata_audit: [
-      { id: 'd1', code: 'metadata_conflict', note: conflictNote },
+      { id: 'd1', code: CONFLICT_CODE, note: conflictNote },
       { id: 'd2', code: 'ok', note: 'active' },
     ],
   });
