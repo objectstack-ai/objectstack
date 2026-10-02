@@ -259,9 +259,13 @@ export interface JsonColumnCheckRefusal {
   /** What the caller is told: core's message, which names neither the field nor the operator. */
   readonly message: string;
   /**
-   * Core's full diagnostic, the field and the operator named. SERVER-SIDE ONLY:
-   * the policy is an administrator's, so it goes to a log, never into an error
-   * message (see {@link jsonColumnCheckRefusalCarriedBy}).
+   * Core's full diagnostic, the field and the operator named. SERVER-SIDE ONLY
+   * for the write check and the read: the policy is an administrator's, so it
+   * goes to a log, never into the error message either of them answers (see
+   * {@link jsonColumnCheckRefusalCarriedBy}). [#21319] `security/explain`
+   * carries it in its error message, because its report already publishes the
+   * predicate to the same caller (`jsonColumnRefusalForExplain` in
+   * `explain-engine.ts`).
    */
   readonly diagnostic: string;
 }
