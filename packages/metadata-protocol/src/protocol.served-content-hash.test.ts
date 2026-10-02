@@ -101,10 +101,14 @@ function makeEngine(opts: { provider?: boolean } = {}) {
             if (table === 'sys_metadata_history') return historyRows.find((h) => matchesWhere(h, o.where)) ?? null;
             return findRow(o.where)?.row ?? null;
         },
-        async find(table: string, o: { where?: Record<string, unknown> } = {}) {
-            if (table === 'sys_metadata_audit') return auditRows.filter((a) => matchesWhere(a, o.where));
-            if (table === 'sys_metadata_history') return historyRows.filter((h) => matchesWhere(h, o.where));
-            return Array.from(rows.values()).filter((r) => matchesWhere(r, o.where));
+        async find(table: string, o: { where?: Record<string, unknown>; limit?: number } = {}) {
+            const matched = table === 'sys_metadata_audit'
+                ? auditRows.filter((a) => matchesWhere(a, o.where))
+                : table === 'sys_metadata_history'
+                    ? historyRows.filter((h) => matchesWhere(h, o.where))
+                    : Array.from(rows.values()).filter((r) => matchesWhere(r, o.where));
+            // The caller's bound, applied after the filter, by presence.
+            return typeof o?.limit === 'number' ? matched.slice(0, o.limit) : matched;
         },
         async insert(table: string, data: Record<string, unknown>) {
             nextId += 1;
