@@ -76,6 +76,7 @@ const ZEROES: MetadataStats = {
   objects: 0,
   objectExtensions: 0,
   fields: 0,
+  picklists: 0,
   views: 0,
   pages: 0,
   apps: 0,

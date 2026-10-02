@@ -369,7 +369,18 @@ const StrictDashboard = z.object({
 const StrictNavItem = z.object({
   type: z.enum(['object', 'dashboard']).describe('What this nav entry opens'),
   target: strictIdent('Object or dashboard machine name to surface (snake_case)'),
-  label: z.string().nullable().describe('Nav entry label, or null'),
+  // ⛔ Must state the SAME rule as the lenient `BlueprintNavItemSchema.label`
+  // (cloud#2021). THIS describe is the one the design model reads:
+  // `propose_blueprint`'s structured output is generated against this mirror,
+  // and strict mode makes `label` required, so the model decides on every
+  // entry. The blueprint tools strip its `null` to an absent label, which the
+  // renderer resolves to the target's CURRENT label on every render; a written
+  // string is rendered verbatim and never follows a rename. A describe that
+  // does not say which choice inherits steers the model to write a label on
+  // every entry. The nav `label` rule pin in `solution-blueprint.test.ts`
+  // (beside the `viewName` key-parity pin) fails if the two drift.
+  label: z.string().nullable()
+    .describe('Nav entry label, or null. null ⇒ the entry inherits the CURRENT label of what it opens at render time (a renamed target shows its new name); a string ⇒ rendered verbatim, so never copy the target\'s label in as a default. Write a label ONLY when the entry must read differently from what it opens; otherwise null.'),
   icon: z.string().nullable().describe('Lucide icon name, or null'),
   // ⛔ Must stay in lockstep with the lenient `BlueprintNavItemSchema.viewName`
   // (cloud#2150). THIS side is the one that decides whether the design step can

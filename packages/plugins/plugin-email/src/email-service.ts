@@ -922,7 +922,8 @@ export class EmailService implements IEmailService {
         `EmailService: queue delivery skipped for one message — its attachments total `
         + `${encodedAttachments.totalBytes} bytes, over the ${SYS_EMAIL_ATTACHMENT_LIMIT_BYTES}-byte limit a `
         + 'sys_email row carries, so the message was delivered inline (in-process retries only) rather than '
-        + 'queued without them. Content that large is queueable through the storage capability (#5172), '
+        + 'queued without them. Content that large is queueable through the storage capability, which holds '
+        + 'it outside the row while the row keeps a reference and the attachment\'s audit metadata, '
         + `but ${encodedAttachments.storageDetail ?? 'that path was not attempted for this message'}. `
         + 'Fix: mount the storage capability (@objectstack/service-storage) so large attachments are '
         + 'stored out of the row and the message can be delivered durably.',

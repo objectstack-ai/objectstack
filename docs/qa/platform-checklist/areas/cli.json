@@ -574,7 +574,7 @@
       "title": "Wrong flags and unknown commands error with usage and a nonzero exit — never silently ignored, never executed anyway",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "cli",
       "personas": ["operator (local shell)"],
@@ -655,11 +655,12 @@
       ],
       "source": [
         "packages/cli/src/commands/ (the 20 top-level commands + 10 topics enumerated as variants — oclif pattern discovery per package.json oclif.commands)",
-        "packages/cli/package.json (oclif.plugins = help + plugins only — no not-found plugin, so unknown commands hard-error)",
+        "packages/cli/package.json (no oclif.plugins at all — no plugin manager, no help command and no not-found plugin, so unknown commands hard-error)",
         "@oclif/core parse contract (Nonexistent flag / enum FailedFlagValidation / command-not-found, exit 2)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item: flag/command error UX with the full registered command surface enumerated from src/commands/ as variants, and never-executed-anyway as the load-bearing negative", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item: flag/command error UX with the full registered command surface enumerated from src/commands/ as variants, and never-executed-anyway as the load-bearing negative", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-10-02", "change": "source: package.json no longer declares oclif.plugins — the two listed plugins sat in devDependencies and never loaded, so the array was dropped; the registered surface and the unknown-command hard-error are unchanged (os --help and the full command table read byte-identical before and after)", "ref": "claude/issue-21285-drop-dead-oclif-plugins" }
       ]
     },
     {

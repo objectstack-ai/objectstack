@@ -113,7 +113,7 @@ describe('[#14328] array-form triggerType still draws the record-change triggerâ
             /NOT bound|never fire/i,
         );
         expect(msg, 'steers to the supported single token').toMatch(/record-after-write/);
-        expect(msg, 'cites the standing decision').toMatch(/#3457/);
+        expect(msg, 'states the standing decision').toMatch(/multi-event arrays are deferred until/);
 
         // The refusal is a refusal: nothing was armed for this flow.
         expect(hooks, 'no lifecycle hook registered for an array-form flow').toHaveLength(0);

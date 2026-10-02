@@ -53,10 +53,6 @@
     "hooks": {
       "preparse": "./dist/hooks/preparse/strip-arg-separator.js"
     },
-    "plugins": [
-      "@oclif/plugin-help",
-      "@oclif/plugin-plugins"
-    ],
     "topicSeparator": " "
   },
   "dependencies": {
@@ -137,8 +133,6 @@
     "@objectstack/connector-rest": "workspace:*",
     "@objectstack/driver-turso": "workspace:*",
     "@objectstack/plugin-dev": "workspace:*",
-    "@oclif/plugin-help": "^7.0.2",
-    "@oclif/plugin-plugins": "^7.0.3",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^26.6.3",
     "typescript": "^6.0.3",

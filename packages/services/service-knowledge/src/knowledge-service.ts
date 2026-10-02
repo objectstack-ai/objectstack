@@ -318,7 +318,8 @@ export class KnowledgeService implements IKnowledgeService {
     // No identity → fail closed on object-backed hits (keep file/http hits).
     if (!ctx) {
       this.options.logger?.warn?.(
-        '[knowledge] retrieval with no ExecutionContext — dropping object-source hits to stay safe (#2981). ' +
+        '[knowledge] retrieval with no ExecutionContext — dropping object-source hits to stay safe: a missing ' +
+          'identity is not a grant of authority, so retrieval fails closed rather than searching the whole corpus unscoped. ' +
           'Pass the caller identity (or an explicit system context) to retrieve object-backed knowledge.',
       );
       return hits.filter((h) => !h.sourceRecordId);
