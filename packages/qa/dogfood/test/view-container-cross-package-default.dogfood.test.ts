@@ -24,8 +24,9 @@
 // on another package's object it expands under the container's own name —
 // `<object>.<container name>`, the spec's qualified ViewItem spelling. The two
 // doors answer the same row for `<object>.default`: the packaged one,
-// unchanged. Controls: the sanctioned override, a write to
-// `showcase_task.default` by name, still reaches both doors.
+// unchanged. Control: the sanctioned override, a write to
+// `showcase_task.default` by name, still reaches both doors — run FIRST, on
+// the pristine stack, so it never reads another case's residue.
 //
 // The same-package control (a container of the object's own package still
 // expands to `<object>.default`) and the environment-scoped topology are pinned
@@ -99,6 +100,30 @@ describe('dogfood: a bare-list container on another package\'s object leaves its
       .toEqual({ label: listed[0].label, config: listed[0].config, _packageId: listed[0]._packageId });
   };
 
+  it('control, first: the sanctioned override — a write to showcase_task.default by name — reaches both doors', async () => {
+    // First, on the pristine stack, so no other case's residue can decide it.
+    const saved = await stack.apiAs(token, 'PUT', `/meta/view/${DEFAULT}`, {
+      name: DEFAULT,
+      object: OBJECT,
+      viewKind: 'list',
+      label: 'Overridden',
+      config: { type: 'grid', columns: [{ field: 'title' }] },
+    });
+    expect(saved.status).toBe(200);
+
+    const listed = named(await objectDoor(), DEFAULT);
+    expect(listed).toHaveLength(1);
+    expect(listed[0].label).toBe('Overridden');
+    const read = await byName(DEFAULT);
+    expect(read.label).toBe('Overridden');
+    expect(read.config).toEqual(listed[0].config);
+
+    // Deleting the override hands both doors back the packaged default.
+    const deleted = await stack.apiAs(token, 'DELETE', `/meta/view/${DEFAULT}`);
+    expect(deleted.status).toBe(200);
+    await expectDefaultUnchangedOnBothDoors();
+  });
+
   it('steps 1–7: a container saved into another package never replaces the packaged default, on either door', async () => {
     // 1. Baseline.
     await expectDefaultUnchangedOnBothDoors();
@@ -152,23 +177,5 @@ describe('dogfood: a bare-list container on another package\'s object leaves its
     const deleted = await stack.apiAs(token, 'DELETE', '/meta/view/os_qa_shadow_probe2');
     expect(deleted.status).toBe(200);
     await expectDefaultUnchangedOnBothDoors();
-  });
-
-  it('step 9 (control): the sanctioned override — a write to showcase_task.default by name — reaches both doors', async () => {
-    const saved = await stack.apiAs(token, 'PUT', `/meta/view/${DEFAULT}`, {
-      name: DEFAULT,
-      object: OBJECT,
-      viewKind: 'list',
-      label: 'Overridden',
-      config: { type: 'grid', columns: [{ field: 'title' }] },
-    });
-    expect(saved.status).toBe(200);
-
-    const listed = named(await objectDoor(), DEFAULT);
-    expect(listed).toHaveLength(1);
-    expect(listed[0].label).toBe('Overridden');
-    const read = await byName(DEFAULT);
-    expect(read.label).toBe('Overridden');
-    expect(read.config).toEqual(listed[0].config);
   });
 });
