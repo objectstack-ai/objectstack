@@ -138,14 +138,16 @@ function assertDeclarativeStdioAllowed(
     throw new Error(
       `connector-mcp provider: connector '${connectorName}' declares a stdio transport with command '${command}', ` +
         `which is not in the host's declarativeStdio allowlist [${policy.join(', ')}]. ` +
-        `Add the command to new ConnectorMcpPlugin({ declarativeStdio: [...] }) if this server is trusted (#3055).`,
+        `Add the command to new ConnectorMcpPlugin({ declarativeStdio: [...] }) if this server is trusted: a stdio ` +
+        `transport launches a local process, so stack metadata may only name a command the host's own code allows.`,
     );
   }
   throw new Error(
     `connector-mcp provider: connector '${connectorName}' declares a stdio transport (command '${command}'), ` +
       `but declarative stdio transports are disabled by default — a stdio transport launches a local process ` +
       `from stack metadata (including runtime Studio publishes). If this server is trusted, opt in deliberately: ` +
-      `new ConnectorMcpPlugin({ declarativeStdio: ['${command}'] }) — or use an http transport (#3055, ADR-0024 §4).`,
+      `new ConnectorMcpPlugin({ declarativeStdio: ['${command}'] }) — or use an http transport, which this policy ` +
+      `does not gate (ADR-0024 §4).`,
   );
 }
 

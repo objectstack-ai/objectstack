@@ -324,7 +324,8 @@ export class SmsDailyQuota {
           '[sms] daily SMS quota counter is unreadable (' +
             String((err as Error)?.message ?? err) +
             ') — the gate is FAILING OPEN and today\'s spend is unbounded until the counter store recovers. ' +
-            'Sign-in is deliberately not taken down with it (#2814).',
+            'Sign-in is deliberately not taken down with it: a quota the platform cannot count must not ' +
+            'refuse the one-time codes users sign in with.',
         );
       }
       return { ok: true };

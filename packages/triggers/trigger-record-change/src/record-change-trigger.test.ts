@@ -180,7 +180,7 @@ describe('RecordChangeTrigger', () => {
         expect(msg).toMatch(/task_assigned_notify/);
         expect(msg).toMatch(/array/i);
         expect(msg).toMatch(/record-after-write/);
-        expect(msg).toMatch(/#3457/);
+        expect(msg).toMatch(/multi-event arrays are deferred until/);
     });
 
     it('keeps the generic unsupported-event warning for a non-array bad token', () => {
