@@ -965,8 +965,32 @@ export const AnalyticsQuerySchema = lazySchema(() => strictObject(
 
   order: z.record(z.string(), z.enum(['asc', 'desc'])).optional(),
 
-  limit: z.number().optional(),
-  offset: z.number().optional(),
+  /**
+   * The row window, applied after `order`: a non-negative integer each.
+   *
+   * Both were a bare `z.number()` until #21365, and every value outside the
+   * non-negative integers answered differently per driver and per face —
+   * measured at `POST /analytics/query`: `limit: -1` returned every row on
+   * SQLite, a 500 on PostgreSQL and all but the last row on the ObjectQL face;
+   * `limit: 1.5` a 500, two rows and one row; `offset: -1` a 500 on both
+   * drivers and a slice on the ObjectQL face. No answer was one answer, so the
+   * schema refuses them (`400 VALIDATION_FAILED` at the door) rather than any
+   * engine guessing. `limit: 0` stays legal — it is `LIMIT 0`, no rows.
+   *
+   * An `offset` with no `limit` is a valid window (every row after the
+   * offset); each face renders it for its own dialect.
+   *
+   * ⛔ Declared once: `DatasetSelectionSchema` (`api/analytics.zod.ts`) reads
+   * these two declarations off this shape, so the dataset door holds the same
+   * accept set with no second copy.
+   */
+  limit: z.number().int().nonnegative().optional().describe(
+    'Maximum number of rows to return, applied after `order` — a non-negative integer (`0` returns no rows)',
+  ),
+  offset: z.number().int().nonnegative().optional().describe(
+    'Number of rows to skip before the first row returned, applied after `order` — a non-negative '
+    + 'integer; an `offset` with no `limit` returns every row after it',
+  ),
 
   /**
    * Reference timezone (IANA name) for date bucketing. OPTIONAL WITH NO

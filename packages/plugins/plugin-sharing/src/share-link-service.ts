@@ -15,7 +15,9 @@ import type {
  * is the HTTP layer's 401 vocabulary and is deliberately not named in this
  * file: the contexts this file receives are forwarded into `engine.find`, where
  * `accessible_org_ids` (ADR-0105 D2), `posture` (ADR-0095 D2), `org_user_ids`,
- * `systemPermissions` and `tabPermissions` are all read.
+ * `systemPermissions` and `tabPermissions` are all read. One read is exempt by
+ * ruling: the caller's OWN share-link list, which ADR-0111 rules self-scoped
+ * and `listLinks` reads under the system context (see `isLinkCreator`).
  */
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { Expression } from '@objectstack/spec';
@@ -369,6 +371,29 @@ function makeError(status: number, code: string, message: string): Error {
   return err;
 }
 
+/**
+ * [#21328] THE creator rule — "the caller created this link" — and the only
+ * place it is written. Two methods ask it and both read this one predicate:
+ * `revokeLink` (the creator may revoke their own link) and `listLinks` (is
+ * this the caller's own list, and which rows are theirs). One predicate, so
+ * the authority to revoke a link and the right to see it in your own list
+ * cannot drift apart.
+ *
+ * Keyed on the caller's OWN user identity, and only on a non-empty one. A
+ * context with no user identity is the creator of nothing: compared bare,
+ * `undefined === undefined` would make every row whose `created_by` a driver
+ * omitted "theirs", and `'' === ''` every row minted under an empty identity.
+ * The system bypass is deliberately not part of the rule — it is a different
+ * authority, and each caller states it beside this check.
+ */
+function isLinkCreator(
+  row: { created_by?: unknown } | null | undefined,
+  context: ExecutionContext,
+): boolean {
+  const caller = context.userId;
+  return typeof caller === 'string' && caller.length > 0 && row?.created_by === caller;
+}
+
 export interface ShareLinkServiceOptions {
   engine: SharingEngine;
   /** Override the default SHA-256 hasher with argon2 / bcrypt for production. */
@@ -612,7 +637,10 @@ export class ShareLinkService implements IShareLinkService {
     //     Modify-All admin): a link someone else minted on your record is your
     //     record's exposure to kill, not only its creator's. Probed via the
     //     late-bound sharing service; absent → creator-only (pre-D8 behaviour).
-    let permitted = context.isSystem === true || row.created_by === context.userId;
+    //
+    // [#21328] The creator half is `isLinkCreator` — the same rule
+    // `listLinks` reads to decide which links are the caller's own.
+    let permitted = context.isSystem === true || isLinkCreator(row, context);
     if (!permitted && this.canManageShares && row.object_name && row.record_id) {
       permitted = await this.canManageShares(String(row.object_name), String(row.record_id), context)
         .catch(() => false);
@@ -632,19 +660,48 @@ export class ShareLinkService implements IShareLinkService {
     filter: ListShareLinksFilter,
     context: ExecutionContext,
   ): Promise<ShareLink[]> {
+    // [#21328] ADR-0111's surface table rules this list SELF-SCOPED: a caller
+    // lists the links they created. Both doors (`share-link-routes.ts` and the
+    // runtime's `/share-links` domain) force `createdBy` to the caller for
+    // exactly that reason — but the read below ran under the caller's context,
+    // so it also demanded an object-level grant on `sys_share_link` that the
+    // platform's member baseline does not carry. Every plain member's list was
+    // refused, on every object, and the console's Share dialog (which loads
+    // this list on open) failed for all of them, while an admin's answered.
+    //
+    // So the caller's OWN list is read under the system context, and only it.
+    // The elevation fires when the creator filter IS the caller, by the creator
+    // rule — which already refuses a context with no user identity, so an
+    // identity-less caller never takes this path. Every other shape keeps
+    // today's read under the caller's context: no creator filter, a foreign
+    // creator, an empty or absent identity, and an admin listing someone
+    // else's links. A system caller keeps its own bypass, as before; asking
+    // for its own links returns the same rows either way.
+    //
+    // Two things keep the system read narrow, and neither trusts the filter
+    // value: the `created_by` constraint is the caller's identity, written
+    // server-side, and every row it returns must pass `isLinkCreator` before it
+    // leaves — the same predicate `revokeLink` grants a creator's revoke with.
+    // The projection is the one this method has always returned: the engine
+    // strips both `internal` columns under any context, the token comes back
+    // through the privileged accessor below, and the password hash never does.
+    const selfScoped = isLinkCreator({ created_by: filter.createdBy }, context);
+
     const where: Record<string, unknown> = {};
     if (filter.object) where.object_name = filter.object;
     if (filter.recordId) where.record_id = filter.recordId;
-    if (filter.createdBy) where.created_by = filter.createdBy;
+    if (selfScoped) where.created_by = context.userId;
+    else if (filter.createdBy) where.created_by = filter.createdBy;
     if (!filter.includeRevoked) where.revoked_at = null;
 
     const rows = await this.engine.find('sys_share_link', {
       where,
       limit: 200,
       orderBy: [{ field: 'created_at', order: 'desc' }],
-      context: context.isSystem ? SYSTEM_CTX : context,
+      context: context.isSystem || selfScoped ? SYSTEM_CTX : context,
     } as any);
-    const links = Array.isArray(rows) ? (rows as ShareLink[]) : [];
+    const found = Array.isArray(rows) ? (rows as ShareLink[]) : [];
+    const links = selfScoped ? found.filter((link) => isLinkCreator(link, context)) : found;
     // [#21197] The caller's own links (the route forces `createdBy` to the
     // caller), and the console builds and copies each link's URL from its
     // token — so the tokens come back through the privileged accessor. The

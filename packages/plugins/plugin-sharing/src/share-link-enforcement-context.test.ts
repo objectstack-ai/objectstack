@@ -171,7 +171,10 @@ async function bootPlugin(opts: { session: () => any; tables: Record<string, any
   await plugin.start(ctx);
   for (const handler of hooks['kernel:ready'] ?? []) await handler();
 
-  return { engine, http };
+  /** A service the plugin registered — the very instance its routes call. */
+  const registered = (name: string): any =>
+    (ctx.registerService.mock.calls as Array<[string, unknown]>).find(([n]) => n === name)?.[1];
+  return { engine, http, registered };
 }
 
 interface Captured { status: number; body: any }
@@ -268,17 +271,41 @@ describe('[#6206] share-link routes hand ENFORCEMENT the whole authz envelope', 
     expect(enforcementCtx.isSystem).toBe(false);
   });
 
-  it('listLinks reads under the same whole envelope', async () => {
+  // [#21328] Observed at the CALL, not at the read. This pin used to read the
+  // envelope off the `sys_share_link` read, because that read ran under it.
+  // The route's list is always the caller's own (it forces `createdBy`), and
+  // ADR-0111 rules that list self-scoped, so `listLinks` now reads it under the
+  // system context, constrained to the caller — the read no longer carries the
+  // envelope, by design. What this file pins is unchanged: the route hands
+  // `listLinks` every key the resolver produced, so a shape that does read
+  // under the caller's context (another creator, no creator) gets all of it.
+  it('listLinks is handed the same whole envelope', async () => {
     const tables = fixtureTables();
-    const { engine, http } = await bootPlugin({ session: signedIn, tables });
+    const { engine, http, registered } = await bootPlugin({ session: signedIn, tables });
+    const listLinks = vi.spyOn(registered('shareLinks'), 'listLinks');
 
     const res = await drive(http, `GET ${BASE}`, { query: {} });
     expect(res.status).toBe(200);
 
+    expect(listLinks).toHaveBeenCalledTimes(1);
+    const [filter, handed] = listLinks.mock.calls[0] as [any, any];
+    expect(filter.createdBy, 'the route forces the caller\'s own id').toBe(USER);
+
+    const seam: any = await bootRequestContext({
+      userId: USER,
+      email: EMAIL,
+      activeOrganizationId: ORG,
+    });
+    const dropped = Object.keys(seam).filter((k) => !(k in handed));
+    expect(dropped, 'keys the route dropped on the way into listLinks').toEqual([]);
+    expect(handed.accessible_org_ids).toEqual([ORG]);
+    expect(handed.posture).toBe('MEMBER');
+    expect(handed.isSystem).toBe(false);
+
+    // …and the read itself is the self-scoped one.
     const listRead = engine.finds.filter((f) => f.object === 'sys_share_link').pop();
     expect(listRead).toBeDefined();
-    expect(listRead!.context.accessible_org_ids).toEqual([ORG]);
-    expect(listRead!.context.posture).toBe('MEMBER');
+    expect(listRead!.context.isSystem).toBe(true);
   });
 
   it('an unresolvable request is still anonymous → 401, and nothing is enforced', async () => {
