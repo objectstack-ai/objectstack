@@ -23,6 +23,9 @@
  *    refused, the token refused on replay. The generic read omits both
  *    credential columns of the stored row.
  *
+ *  - **The OAuth client secret.** A dynamically registered confidential
+ *    client authenticates to introspection with its secret; a wrong secret is
+ *    refused. The generic read omits the stored digest.
  *  - **The second factor.** TOTP enrolment verifies against the stored
  *    secret, and a later sign-in challenge is redeemed with a backup code —
  *    single-use. The generic read omits both credential columns.
@@ -279,6 +282,42 @@ describe('[#21197] internal credential columns keep their better-auth consumers 
     const again = await post(manager, '/sign-in/email', { email, password: PASSWORD });
     const replay = await post(manager, '/two-factor/verify-backup-code', { code: backupCodes[0] }, { cookie: cookieFrom(again) });
     expect(replay.status, 'a used backup code is refused').not.toBe(200);
+  }, 120_000);
+
+  it('the OAuth client secret: a confidential client authenticates with its secret, and a wrong one is refused', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const engine = await bootEngine(':memory:');
+    const manager = makeManager(engine, { oidcProvider: true, dynamicClientRegistration: true });
+
+    const registered = await manager.handleRequest(new Request(`${AUTH}/oauth2/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: BASE },
+      body: JSON.stringify({ client_name: 'internal-21197', redirect_uris: ['https://example.com/cb'] }),
+    }));
+    expect(registered.status, `oauth2/register: ${await registered.clone().text()}`).toBeLessThan(400);
+    const { client_id: clientId, client_secret: clientSecret } = (await registered.json()) as { client_id: string; client_secret: string };
+    expect(clientSecret, 'registration returns the secret once').toBeTruthy();
+
+    for (const row of (await (engine as any).find('sys_oauth_application', { ...SYS })) as Row[]) {
+      expect(row).not.toHaveProperty('client_secret');
+    }
+
+    // Introspection authenticates the CLIENT by its secret before it answers
+    // anything about the token, so its status is a verdict on the secret.
+    const introspect = (secret: string) => manager.handleRequest(new Request(`${AUTH}/oauth2/introspect`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        authorization: `Basic ${Buffer.from(`${clientId}:${secret}`).toString('base64')}`,
+        origin: BASE,
+      },
+      body: new URLSearchParams({ token: 'not-a-token' }).toString(),
+    }));
+    const ok = await introspect(clientSecret);
+    expect(ok.status, `introspect, right secret: ${await ok.clone().text()}`).toBe(200);
+    expect(((await ok.json()) as { active?: boolean }).active).toBe(false);
+    const wrong = await introspect(`${clientSecret}-wrong`);
+    expect(wrong.status, 'introspect, wrong secret').toBe(401);
   }, 120_000);
 
   it('the suites pinning the SSO blobs run over the declared columns', () => {
