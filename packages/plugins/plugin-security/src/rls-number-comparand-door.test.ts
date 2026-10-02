@@ -20,7 +20,13 @@
  * dropped through the `refused-comparand` path for both clauses: the read is
  * filtered by the deny sentinel and the write is refused 403. A numeric string
  * is narrowed to its number, as the `where` door narrows it, and a numeric
- * literal is the control.
+ * literal is the control. The WARN detail names the clause it refused, and
+ * names PostgreSQL's server error only for `using`, the clause a driver binds.
+ *
+ * The last block is the end-to-end twin of `@objectstack/formula`'s
+ * evaluator-level pin for the same card: a bare-day `$lte` on a TEXT column
+ * is compared as written by the write check, so the write the read hides is
+ * refused.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -110,7 +116,15 @@ async function boot(predicate: string) {
       .map((call) => call[1] as { reason?: string; clause?: string; policy?: string } | undefined)
       .filter((meta) => meta?.policy === 'number_guard')
       .map((meta) => `${meta!.clause}:${meta!.reason}`);
-  return { OBJ, engine, caller, storedRow, shownTo, drops };
+  /** The `detail` of each fail-closed drop of this policy, by clause. */
+  const details = () =>
+    Object.fromEntries(
+      warn.mock.calls
+        .map((call) => call[1] as { clause?: string; policy?: string; detail?: string } | undefined)
+        .filter((meta) => meta?.policy === 'number_guard')
+        .map((meta) => [meta!.clause!, meta!.detail!]),
+    ) as Record<string, string>;
+  return { OBJ, engine, caller, storedRow, shownTo, drops, details };
 }
 
 type Envelope = { code: string; status: number };
@@ -149,6 +163,34 @@ describe('[#21242] a policy comparing a numeric column with a non-number is refu
   }
 });
 
+describe('[#21242] the refusal names the clause it refused, and the server bind only for using', () => {
+  it("record.amount <= '9999-12-31': the check detail is the write check's, the using detail the read's", async () => {
+    const r = await boot("record.amount <= '9999-12-31'");
+    expect(await outcome(r.engine.insert(r.OBJ, { id: 'w', amount: 5 }, { context: r.caller } as never))).toEqual(DENIED);
+    await r.engine.insert(r.OBJ, { id: 'r', amount: 5 }, { context: SYS_CTX } as never);
+    expect(await r.shownTo('r')).toBe(false);
+    const { check, using } = r.details();
+
+    expect(check).toBe(
+      'the compiled `check` predicate compares a numeric column with a comparand that is not a number (INVALID_FILTER), '
+        + 'so the policy was not handed to the write check, which evaluates it in-process. In the platform\'s '
+        + 'number-comparand words: filter on \'amount\' compares a declared number field against "9999-12-31" at '
+        + 'check.amount.$lte, which is not a number: it has no numeric reading. The filter was NOT applied. Write a '
+        + 'number (12, -3.5, 1e3) or a string of exactly that JSON spelling ("12")',
+    );
+    expect(check).not.toContain('PostgreSQL');
+
+    expect(using).toBe(
+      'the compiled `using` predicate compares a numeric column with a comparand that is not a number (INVALID_FILTER), '
+        + 'so the policy was not handed to the read, where a driver binds it. In the platform\'s number-comparand '
+        + 'words: filter on \'amount\' compares a declared number field against "9999-12-31" at using.amount.$lte, '
+        + 'which is not a number: it has no numeric reading, and backends answer it differently (PostgreSQL with a '
+        + 'server error). The filter was NOT applied. Write a number (12, -3.5, 1e3) or a string of exactly that '
+        + 'JSON spelling ("12")',
+    );
+  });
+});
+
 describe('[#21242] a numeric string is narrowed to its number, as the where door narrows it', () => {
   const CELLS: ReadonlyArray<readonly [predicate: string, amount: number, admitted: boolean]> = [
     ["record.amount <= '10'", 5, true],
@@ -185,6 +227,33 @@ describe('[#21242] the control: a numeric literal, and a text column, are unchan
       expect(await outcome(r.engine.insert(r.OBJ, { id: 'w', ...row }, { context: r.caller } as never)))
         .toEqual(admitted ? 'admitted' : DENIED);
       await r.engine.insert(r.OBJ, { id: 'r', ...row }, { context: SYS_CTX } as never);
+      expect(await r.shownTo('r')).toBe(admitted);
+      expect(r.drops()).toEqual([]);
+    });
+  }
+});
+
+describe('[#21242] a bare-day $lte on a TEXT column is compared as written by the write check, end to end', () => {
+  // `@objectstack/formula`'s matcher no longer reads a bare `YYYY-MM-DD`
+  // bound as "through that day". The RLS compile seam lowers it only on a
+  // declared `datetime` column, so on a `text` column the write check now
+  // compares the value as written, as `driver-sql` compares it on the read:
+  // before, the write was admitted while the read hid the stored row.
+  const CELLS: ReadonlyArray<readonly [title: string, admitted: boolean]> = [
+    ['2026-01-05T15:00:00Z', false],
+    ['2026-01-05 noon', false],
+    // The controls: the bound itself, and a day before it.
+    ['2026-01-05', true],
+    ['2026-01-04T15:00:00Z', true],
+  ];
+
+  for (const [title, admitted] of CELLS) {
+    it(`record.title <= '2026-01-05', title ${JSON.stringify(title)}: ${admitted ? 'admitted and shown' : 'refused 403 and hidden'}`, async () => {
+      const r = await boot("record.title <= '2026-01-05'");
+      expect(await outcome(r.engine.insert(r.OBJ, { id: 'w', title }, { context: r.caller } as never)))
+        .toEqual(admitted ? 'admitted' : DENIED);
+      await r.engine.insert(r.OBJ, { id: 'r', title }, { context: SYS_CTX } as never);
+      expect((await r.storedRow('r'))?.title).toBe(title);
       expect(await r.shownTo('r')).toBe(admitted);
       expect(r.drops()).toEqual([]);
     });

@@ -342,6 +342,7 @@ function judgeCompiledComparands(
   filter: Record<string, unknown>,
   lowering: FilterLoweringOptions,
   numberFields?: ReadonlyMap<string, NumberComparandDoorFieldMeta>,
+  clause: 'using' | 'check' = 'using',
 ): RlsComparandVerdict {
   try {
     assertListComparandShapes(filter);
@@ -350,7 +351,7 @@ function judgeCompiledComparands(
     // leaves through the catch below like the other faces' refusals, so the
     // policy is dropped for `using` and `check` alike: the read gets the deny
     // sentinel and the write a 403, one answer for one comparison.
-    const judged = numberFields ? narrowPolicyNumberComparands(filter, numberFields, 'where') : filter;
+    const judged = numberFields ? narrowPolicyNumberComparands(filter, numberFields, clause, clause) : filter;
     // [ADR-0053 D-D1, amended — #5930] The RLS compile seam's lowering, AFTER
     // both faces (the amendment's items 2-3). No token resolution precedes it
     // because none exists on either clause: the engine resolves the caller's
@@ -362,6 +363,9 @@ function judgeCompiledComparands(
     // owns its refusal.
     return { ok: true, filter: lowerFilterCondition(normalizeFilterComparandTypes(judged), lowering) };
   } catch (thrown) {
+    // [#21242] The number door's refusal carries its own detail, already
+    // written for the clause being compiled (see `numberRefusalDetail`).
+    if (thrown instanceof PolicyNumberComparandRefusal) return { ok: false, detail: thrown.detail };
     const { code, status } = (thrown ?? {}) as { code?: unknown; status?: unknown };
     if (!(thrown instanceof Error) || typeof code !== 'string' || typeof status !== 'number') throw thrown;
     // The face's sentence is quoted whole (it names the operator, the field and
@@ -396,15 +400,53 @@ function withProvenanceOf<T>(from: unknown, to: T): T {
 }
 
 /**
+ * [#21242] The number door's refusal of one compiled policy comparand. It
+ * carries the ADR-0112 envelope the shared faces' refusals carry, and the
+ * detail the fail-closed WARN line prints, already written for the clause
+ * being compiled ({@link numberRefusalDetail}).
+ */
+class PolicyNumberComparandRefusal extends Error {
+  readonly code: string;
+  readonly status: number;
+  readonly detail: string;
+  constructor(detail: string, code: string, status: number) {
+    super(detail);
+    this.name = 'PolicyNumberComparandRefusal';
+    this.detail = detail;
+    this.code = code;
+    this.status = status;
+  }
+}
+
+/**
+ * The WARN detail for a number-door refusal, naming the clause. The spec's
+ * sentence is quoted whole bar its closing full stop (the WARN line appends its
+ * own sentence), rooted at the clause (`check.amount.$lte`), and it names
+ * PostgreSQL's server error only for `using`: that clause is composed into the
+ * read a driver binds, while `check` is evaluated in-process and reaches no
+ * bind at all (the spec's `NumberComparandRefusalSite.boundByDriver`).
+ */
+function numberRefusalDetail(clause: 'using' | 'check', code: string, message: string): string {
+  const consumer = clause === 'using'
+    ? 'the read, where a driver binds it'
+    : 'the write check, which evaluates it in-process';
+  return (
+    `the compiled \`${clause}\` predicate compares a numeric column with a comparand that is not a number (${code}), ` +
+    `so the policy was not handed to ${consumer}. In the platform's number-comparand words: ${message.replace(/\.$/, '')}`
+  );
+}
+
+/**
  * One comparand on a numeric column, by the spec's verdict: the narrowed
- * number, the comparand unchanged, or a thrown `INVALID_FILTER` / 400 in the
- * spec's words — the refusal {@link judgeCompiledComparands} routes.
+ * number, the comparand unchanged, or a thrown {@link PolicyNumberComparandRefusal}
+ * in the spec's words — the refusal {@link judgeCompiledComparands} routes.
  */
 function judgedNumberComparand(
   meta: NumberComparandDoorFieldMeta,
   field: string,
   comparand: unknown,
   path: string,
+  clause: 'using' | 'check',
 ): unknown {
   const verdict = numberComparandDoorVerdict(meta, comparand);
   if (verdict.verdict === 'narrows') return verdict.value;
@@ -416,8 +458,9 @@ function judgedNumberComparand(
     path,
     value: comparand,
     form: verdict.form,
+    boundByDriver: clause === 'using',
   });
-  throw Object.assign(new Error(message), { code: verdict.code, status: verdict.status });
+  throw new PolicyNumberComparandRefusal(numberRefusalDetail(clause, verdict.code, message), verdict.code, verdict.status);
 }
 
 /** One judged column's constraint, `{ amount: <spec> }`, with its comparands judged. */
@@ -426,23 +469,24 @@ function narrowedNumberFieldSpec(
   field: string,
   spec: unknown,
   path: string,
+  clause: 'using' | 'check',
 ): unknown {
   // Not filter structure: the implicit-equality comparand.
-  if (!isPlainFilterNode(spec)) return judgedNumberComparand(meta, field, spec, path);
+  if (!isPlainFilterNode(spec)) return judgedNumberComparand(meta, field, spec, path, clause);
   // A `{ $field }` reference is not a literal, and a plain object with no `$`
   // key is not this door's subject — each is left for the face that owns it.
   if (typeof spec.$field === 'string' || !Object.keys(spec).some((k) => k.startsWith('$'))) return spec;
   let out: Record<string, unknown> | undefined;
   for (const [op, comparand] of Object.entries(spec)) {
     if (NUMBER_DOOR_SCALAR_OPERATORS.has(op)) {
-      const judged = judgedNumberComparand(meta, field, comparand, `${path}.${op}`);
+      const judged = judgedNumberComparand(meta, field, comparand, `${path}.${op}`, clause);
       if (judged !== comparand) (out ??= { ...spec })[op] = judged;
       continue;
     }
     if (!NUMBER_DOOR_LIST_OPERATORS.has(op) || !Array.isArray(comparand)) continue;
     let members: unknown[] | undefined;
     comparand.forEach((member, index) => {
-      const judged = judgedNumberComparand(meta, field, member, `${path}.${op}[${index}]`);
+      const judged = judgedNumberComparand(meta, field, member, `${path}.${op}[${index}]`, clause);
       if (judged !== member) (members ??= [...comparand])[index] = judged;
     });
     if (members) (out ??= { ...spec })[op] = withProvenanceOf(comparand, members);
@@ -462,16 +506,17 @@ function narrowedNumberFieldSpec(
  *
  * Before this ran, a policy such as `record.amount <= '9999-12-31'` on a
  * `number` column compiled and reached both consumers: the read compared the
- * stored number with the text by the driver's own ordering (SQLite showed the
- * row; PostgreSQL refuses to bind such text against a numeric column), while
- * the write check's evaluator answered by its own reading. The same
- * comparison in a caller's `where` is refused by the engine's door, so the
- * policy is refused here, once, for both clauses.
+ * stored number with the text by the driver's own ordering (measured on
+ * SQLite, which showed the row), while the write check's evaluator answered by
+ * its own reading. The same comparison in a caller's `where` is refused by the
+ * engine's door, so the policy is refused here, once, for both clauses. The
+ * paths are rooted at the clause being compiled (`check.amount.$lte`).
  */
 function narrowPolicyNumberComparands<T>(
   node: T,
   fields: ReadonlyMap<string, NumberComparandDoorFieldMeta>,
   path: string,
+  clause: 'using' | 'check',
   depth = 0,
 ): T {
   if (depth > 32 || !isPlainFilterNode(node)) return node;
@@ -483,19 +528,19 @@ function narrowPolicyNumberComparands<T>(
       if (!Array.isArray(value)) continue;
       let arms: unknown[] | undefined;
       value.forEach((arm, index) => {
-        const walked = narrowPolicyNumberComparands(arm, fields, `${here}[${index}]`, depth + 1);
+        const walked = narrowPolicyNumberComparands(arm, fields, `${here}[${index}]`, clause, depth + 1);
         if (walked !== arm) (arms ??= [...value])[index] = walked;
       });
       if (arms) next = withProvenanceOf(value, arms);
     } else if (key === '$not') {
-      next = narrowPolicyNumberComparands(value, fields, here, depth + 1);
+      next = narrowPolicyNumberComparands(value, fields, here, clause, depth + 1);
     } else {
       // Another `$` key is not a column, and a dotted key names a path, not a
       // declared column: neither is this door's subject.
       if (key.startsWith('$') || key.includes('.')) continue;
       const meta = fields.get(key);
       if (!meta || numberComparandFieldVerdict(meta) !== 'judged') continue;
-      next = narrowedNumberFieldSpec(meta, key, value, here);
+      next = narrowedNumberFieldSpec(meta, key, value, here, clause);
     }
     if (next !== value) (out ??= { ...node })[key] = next;
   }
@@ -866,7 +911,7 @@ export class RLSCompiler {
           // refusal joins `deniedBy` like the rows above — the per-request
           // fail-closed route a list under `==` already takes — so `using` and
           // `check` refuse together and a granting sibling still grants.
-          const comparands = judgeCompiledComparands(outcome.filter, rlsLowering(fieldGuard), fieldGuard?.number);
+          const comparands = judgeCompiledComparands(outcome.filter, rlsLowering(fieldGuard), fieldGuard?.number, clause);
           if (comparands.ok) {
             filters.push(comparands.filter);
             POLICY_OF_COMPILED_FILTER.set(comparands.filter, (policy as { name?: string }).name ?? '(unnamed)');
