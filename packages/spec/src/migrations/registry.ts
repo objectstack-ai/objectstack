@@ -24801,6 +24801,18 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // conversion — this table plus the D3 semantic entry
     // `export-job-family-retired` are the declaration.
     'api/ScheduledExport',
+    // #21320 — `automation/ActionRef` (a named side effect, by name or parameterised) left with `automation/StateMachine`:
+    // every consumer it had was inside the retired state-machine family (the
+    // #3950 rule — an exported value schema with no consumer reads as a
+    // capability). See `18.automation__StateMachine.ts` for the retirement
+    // record and the ruling.
+    'automation/ActionRef',
+    // #21320 — `automation/GuardRef` (a named transition condition) left with `automation/StateMachine`:
+    // every consumer it had was inside the retired state-machine family (the
+    // #3950 rule — an exported value schema with no consumer reads as a
+    // capability). See `18.automation__StateMachine.ts` for the retirement
+    // record and the ruling.
+    'automation/GuardRef',
     // #17158 — `automation/ScheduleState`, retired whole with the export-job API family
     // (ADR-0049 enforce-or-remove; maintainer ruling A, landing route A — objectui
     // retired its side first in objectui#10247). It declared
@@ -24822,12 +24834,24 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // record-lifecycle declaration — the `workflow` type and `object.stateMachines`
     // went, and a record's legal transitions are the `state_machine` validation
     // rule — and kept the file only because the agent door still imported it
-    // (ADR-0020 implementation note 1). The rest of the family (`StateNodeSchema`,
-    // `TransitionSchema`, `ActionRefSchema`, `GuardRefSchema`) was never published
-    // as a def of its own. Upgraders get the D3 semantic entry
+    // (ADR-0020 implementation note 1). The rest of the family — `StateNode`,
+    // `Transition`, `ActionRef`, `GuardRef` — left with it, each registered in its
+    // own entry file beside this one. Upgraders get the D3 semantic entry
     // `agent-lifecycle-retired`. Registered under 18 for the launch-window reason
     // its neighbours state.
     'automation/StateMachine',
+    // #21320 — `automation/StateNode` (one state of a machine, recursive) left with `automation/StateMachine`:
+    // every consumer it had was inside the retired state-machine family (the
+    // #3950 rule — an exported value schema with no consumer reads as a
+    // capability). See `18.automation__StateMachine.ts` for the retirement
+    // record and the ruling.
+    'automation/StateNode',
+    // #21320 — `automation/Transition` (a guarded transition between states) left with `automation/StateMachine`:
+    // every consumer it had was inside the retired state-machine family (the
+    // #3950 rule — an exported value schema with no consumer reads as a
+    // capability). See `18.automation__StateMachine.ts` for the retirement
+    // record and the ruling.
+    'automation/Transition',
     // #16325 — `cloud/developer-portal.zod.ts` left `@objectstack/spec` with the `./cloud` subpath
     // (maintainer ruling, option B "cut by owner": the cloud control plane's contracts are
     // the cloud repo's own declarations, not an open-source protocol). Prescription: the
