@@ -159,9 +159,9 @@
  *     `cube-measure-field-type-door.ts` half, which reads the TYPE alone — the
  *     `multiple` flag moves only `count_distinct`, see above), and never
  *     `count`, which reads no value and accepts every type. A `type` outside
- *     the table's vocabulary — the expression metric types `number` /
- *     `string` / `boolean` — is skip 5, as on a dataset, and neither door
- *     judges it.
+ *     the table's vocabulary — since the custom-SQL metric types `number` /
+ *     `string` / `boolean` were retired (#21000), one the schema itself
+ *     refuses — is skip 5, as on a dataset, and neither door judges it.
  *
  * How a cube names its column is read the way the door reads it
  * (`analytics-service.ts`, `hop-object.ts`):

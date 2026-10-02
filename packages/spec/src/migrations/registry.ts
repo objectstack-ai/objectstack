@@ -5335,6 +5335,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'the scale change a ratio makes (a `derived` ratio is a 0–1 fraction).',
   },
   {
+    id: 'cube-metric-expression-types-retired',
+    order: 62,
+    text:
+      'It also retires a cube measure\'s custom-SQL-expression types — `number`, `string` and '
+      + '`boolean` from `AggregationMetricType`, so from `measures.<metric>.type` (ADR-0049 '
+      + 'enforce-or-remove). They marked a measure whose `sql` was the whole computation, and with '
+      + 'that `sql` now a column reference they had nothing left to compute: the raw-SQL path '
+      + 'returned the column unaggregated and the ObjectQL path refused the measure. Each is refused '
+      + 'at parse with a prescription naming the six aggregates. No D2 conversion: the column alone '
+      + 'does not say which aggregate the author meant, so the semantic entry '
+      + '`cube-metric-expression-types-retired` carries the choice, and a stored cube that still '
+      + 'carries one is refused rather than rewritten.',
+  },
+  {
     id: 'cube-metric-filters-retired',
     order: 10,
     text:
@@ -8796,6 +8810,51 @@ const step18: MigrationStep = {
         + 'ratio: the same value divided by 100 when the expression returned percentage points). '
         + 'Every dashboard, report or saved query that named the cube member now names the dataset '
         + 'measure. A cube member that aggregates a column parses byte-identically to before.',
+    },
+    // #21000 (ADR-0049 enforce-or-remove) — `AggregationMetricType`'s `number`,
+    // `string` and `boolean` declared a custom SQL expression returning that type,
+    // and a cube member's `sql` has been a column reference since
+    // `cube-member-sql-expression-retired`, so the three had nothing left to
+    // compute. A value-level retirement (`enumWithRetiredValues`), semantic only:
+    // no D2 conversion, because no rewrite can say which aggregate the author
+    // meant, and a stored cube carrying one is refused at every door rather than
+    // rewritten.
+    {
+      id: 'cube-metric-expression-types-retired',
+      // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
+      // inside a code span AND a table cell.
+      surface:
+        'analyticsCubes[].measures.<metric>.type (data.AggregationMetricType) authored as number, string '
+        + 'or boolean — the custom-SQL-expression metric types',
+      replacement:
+        'the aggregate the measure means: `sum`, `avg`, `min` or `max` over the column, `count` (over '
+        + '`\'*\'` for a row count, or over a column for its non-null values), or `count_distinct`. A value '
+        + 'computed per row becomes a field of the object (a stored or formula field) that the measure '
+        + 'aggregates; a ratio or other value derived from measures is `derived: { op, of: [...] }` on an '
+        + 'ADR-0021 dataset',
+      reason:
+        'The three types existed to mark a measure whose `sql` was the whole computation — a ratio, a '
+        + 'CASE, a window function — and named only what it returned. Since '
+        + '`cube-member-sql-expression-retired` a member\'s `sql` is a column reference, so the types had '
+        + 'nothing left to declare: measured before this retirement, the raw-SQL strategy emitted the '
+        + 'referenced column unaggregated (a bare column in a grouped statement, by SQL\'s own rules an '
+        + 'error on PostgreSQL and an arbitrary row\'s value on SQLite) and the ObjectQL strategy refused '
+        + 'the measure. There is no D2 conversion: the column alone does not say which aggregate the author '
+        + 'wanted — a `number` over `amount` may have meant its sum, its average or its largest value — '
+        + 'so only the author can choose, and a measure whose old expression computed something per row '
+        + 'needs that value stored on the object before any aggregate can read it. Nothing is rewritten '
+        + 'or dropped at rest: a stored or built cube that still carries one of the three is refused, '
+        + 'with the prescription, at the boot and write doors, and a cube that reaches the analytics '
+        + 'service without meeting the parse is refused at query time with the same text. ADR-0049 / '
+        + 'ADR-0087',
+      acceptanceCriteria:
+        'Every analytics cube parses: `CubeSchema`, the analytics_cube write door and defineStack refuse '
+        + 'a measure typed number, string or boolean at its `type` with a prescription naming the six '
+        + 'aggregates, so the sweep is mechanical — parse each cube, and each refusal is one measure to '
+        + 'retype. For each retyped measure, a query over a fixture with more than one row per group '
+        + 'returns the aggregate the author chose, and every dashboard, report or saved query that read '
+        + 'the measure is checked against the number it now returns. A measure typed with one of the six '
+        + 'aggregates parses byte-identically to before.',
     },
     // #10414 (ADR-0049 enforce-or-remove) — the D3 entry of the
     // `metric-filters-removed` family (ruling B on #17152: one D3 entry per
@@ -18978,7 +19037,15 @@ const step18: MigrationStep = {
         + 'own html-page compile refuses `div` the same way. A `div` in such a page, which used to '
         + 'pass unchecked, now fails the command with `jsx-forbidden-tag` and '
         + '`jsx-unknown-component`. A project that keeps its own `sdui.manifest.json` is checked '
-        + 'against that file, as before.',
+        + 'against that file, as before. The runtime save door now holds pages to the same manifest: '
+        + 'a server that `objectstack serve` runs (`dev` and `start` run it too) resolves the '
+        + 'deployment\'s manifest the same way, from the `sdui.manifest.json` beside the served config '
+        + 'and then the copy `@objectstack/console` ships, and the metadata save door compiles an html '
+        + 'page\'s source against it on every publish. A `div` page saved from Studio or through the '
+        + 'metadata API is refused with a `422` under the same rule ids, and a draft is stored as '
+        + 'written and refused at its publish. A server that resolves no manifest says so once at boot '
+        + 'and stores html pages unjudged, as before. Pages already stored are not rewritten; each is '
+        + 'judged the next time it is saved.',
       acceptanceCriteria:
         '`objectstack validate` reports no `jsx-forbidden-tag`, `jsx-unknown-component` or '
         + '`jsx-unknown-prop` finding on any `kind:\'html\'` page and prints no '

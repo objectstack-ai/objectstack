@@ -886,8 +886,8 @@ describe('the cube leg — an analyticsCubes member the analytics door refuses i
  * `shape`, as the two door modules state their rules — read off the spec's
  * table and predicates, never a retyped list:
  *
- * - a `type` that is no row of the table (the expression metric types) is
- *   judged by neither door;
+ * - a `type` that is no row of the table (the retired custom-SQL metric
+ *   types, which the schema refuses) is judged by neither door;
  * - `count_distinct` — `structured-json-dimension-door.ts`: refused when the
  *   row refuses the type OR the declaration is multi-value;
  * - every other row — `cube-measure-field-type-door.ts`: refused when the row
@@ -980,8 +980,11 @@ describe('the cube leg — every cube measure is judged by the aggregate × fiel
         expect(accepted, `${type} accepts`).toBeGreaterThan(5);
       }
     }
-    // The expression metric types are in the population and outside the table.
-    expect(types.filter((t) => !rows.includes(t)).sort()).toEqual(['boolean', 'number', 'string']);
+    // Every cube measure `type` IS a row: the custom-SQL metric types that
+    // used to sit outside the table (`number` / `string` / `boolean`) were
+    // retired from `AggregationMetricType` (#21000), so the population and the
+    // table are one vocabulary.
+    expect(types.filter((t) => !rows.includes(t)).sort()).toEqual([]);
   });
 
   it('reads a relationship path on the object the last hop reaches — the lookup\'s reference, or the join the cube declares for it', () => {
@@ -1002,7 +1005,8 @@ describe('the cube leg — every cube measure is judged by the aggregate × fiel
   it('never hands the predicate a guess: no type, a type outside the table, the row wildcard, an unresolved column', () => {
     const silent = (measures: Record<string, unknown>, ledger: Record<string, unknown> = {}) =>
       expect(validateDatasetMeasureAggregates(cubeStack({ measures }, {}, ledger))).toEqual([]);
-    // The expression metric types are outside the table's vocabulary (skip 5).
+    // The retired custom-SQL metric types are outside the table's vocabulary
+    // (skip 5): the schema refuses them, so this leg leaves them to it.
     silent({ n: measure('number', 'name'), s: measure('string', 'name'), b: measure('boolean', 'name') });
     // A prototype key is not a row.
     silent({ p: measure('toString', 'name') });

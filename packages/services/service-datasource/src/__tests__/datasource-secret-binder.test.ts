@@ -10,25 +10,28 @@ import {
 } from '../datasource-secret-binder.js';
 
 /**
- * Minimal AAD-binding crypto fake: ciphertext = base64(`${ns}|${key}::${plain}`).
- * decrypt() verifies the (namespace,key) AAD matches what encrypt() sealed —
- * mirroring InMemoryCryptoProvider's guarantee without pulling in node:crypto.
+ * Minimal AAD-binding crypto fake: ciphertext = base64(JSON([aad, plain])), where
+ * the AAD is the structured triple `[scope, namespace, key]`. decrypt() verifies
+ * the triple matches what encrypt() sealed — mirroring LocalCryptoProvider's
+ * producer-discriminated guarantee (ADR-0128 D1) without pulling in node:crypto.
  */
-function fakeCrypto(): ICryptoProvider {
+function fakeCrypto(seen: CryptoContext[] = []): ICryptoProvider {
+  const aadOf = (ctx: CryptoContext) => JSON.stringify([ctx.scope, ctx.namespace, ctx.key]);
   return {
     async encrypt(plain: string, ctx: CryptoContext): Promise<CryptoHandle> {
+      seen.push(ctx);
       return {
         id: 'sec_' + ctx.key,
         kmsKeyId: 'local:test:v1',
         alg: 'aes-256-gcm',
         version: 1,
-        ciphertext: Buffer.from(`${ctx.namespace}|${ctx.key}::${plain}`, 'utf8').toString('base64'),
+        ciphertext: Buffer.from(JSON.stringify([aadOf(ctx), plain]), 'utf8').toString('base64'),
       };
     },
     async decrypt(handle: CryptoHandle, ctx: CryptoContext): Promise<string> {
-      const raw = Buffer.from(handle.ciphertext, 'base64').toString('utf8');
-      const [aad, plain] = raw.split('::');
-      if (aad !== `${ctx.namespace}|${ctx.key}`) throw new Error('AAD mismatch');
+      seen.push(ctx);
+      const [aad, plain] = JSON.parse(Buffer.from(handle.ciphertext, 'base64').toString('utf8'));
+      if (aad !== aadOf(ctx)) throw new Error('AAD mismatch');
       return plain;
     },
     async rotateKey(handle: CryptoHandle): Promise<CryptoHandle> {
@@ -75,6 +78,40 @@ describe('createDatasourceSecretBinder', () => {
     expect(JSON.stringify(row)).not.toContain('super-secret-pw');
 
     expect(await binder.resolve(ref)).toBe('super-secret-pw');
+  });
+
+  it('binds and resolves under its own scope, datasource_credential (ADR-0128 D1)', async () => {
+    const engine = fakeEngine();
+    const seen: CryptoContext[] = [];
+    const binder = createDatasourceSecretBinder({ engine, cryptoProvider: fakeCrypto(seen) });
+
+    const ref = await binder.bind({ value: 'pw' }, { name: 'reporting' });
+    expect(await binder.resolve(ref)).toBe('pw');
+    expect(seen).toEqual([
+      { scope: 'datasource_credential', namespace: 'datasource', key: 'reporting' },
+      { scope: 'datasource_credential', namespace: 'datasource', key: 'reporting' },
+    ]);
+  });
+
+  it('does not resolve a row another producer sealed, even at the same (namespace, key)', async () => {
+    const engine = fakeEngine();
+    const crypto = fakeCrypto();
+    const binder = createDatasourceSecretBinder({ engine, cryptoProvider: crypto });
+    // A row at this binder's own coordinate, sealed under a different scope.
+    const foreign = await crypto.encrypt('pw', { scope: 'settings', namespace: 'datasource', key: 'reporting' });
+    await engine.insert('sys_secret', {
+      id: foreign.id,
+      namespace: 'datasource',
+      key: 'reporting',
+      kms_key_id: foreign.kmsKeyId,
+      alg: foreign.alg,
+      version: foreign.version,
+      ciphertext: foreign.ciphertext,
+    });
+    expect(await binder.resolve(toCredentialsRef(foreign.id))).toBeUndefined();
+    // Positive control: the binder's own seal at the same coordinate resolves.
+    const own = await binder.bind({ value: 'pw' }, { name: 'reporting' });
+    expect(await binder.resolve(own)).toBe('pw');
   });
 
   it('resolve() returns undefined after unbind (row gone)', async () => {

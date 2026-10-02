@@ -214,6 +214,7 @@ async function buildRuntime() {
 
   // --- family 1: a settings handle, minted by the real provider -------------
   const settingsHandle = await crypto.encrypt('smtp-app-password', {
+    scope: 'settings',
     namespace: 'smtp',
     key: 'password',
   });

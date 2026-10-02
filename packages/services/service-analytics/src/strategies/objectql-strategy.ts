@@ -45,12 +45,13 @@ import {
   type MeasureRecombine,
   type RecombinableMethod,
 } from './cross-object-rebucket.js';
-// [commit 017130a09] The custom-SQL half of the `AggregationMetricType` partition, ONE
-// source shared with `NativeSQLStrategy` and pinned against the spec enum by
-// `metric-type-coverage.test.ts` — a second literal set here would drift.
+// [#21000] The ONE verdict on a cube measure's `type`, shared with
+// `NativeSQLStrategy` so the two paths accept and refuse the same set — it
+// replaces the custom-SQL partition both used to key on, retired from the
+// spec with the three types it named.
 // [#21365] `windowClauseSql` is the same rule for the row window: one spelling
 // of an offset-only window per dialect, shared with the native face.
-import { EXPRESSION_METRIC_TYPES, windowClauseSql } from './native-sql-strategy.js';
+import { aggregateOfMeasure, windowClauseSql } from './native-sql-strategy.js';
 
 /**
  * [#10861 / commit 399ecad58] Where a member in the cross-object envelope's inventory
@@ -1547,55 +1548,32 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       | { sql: string; type: string }
       | undefined;
     if (direct) {
-      // [commit 017130a09] A custom-SQL measure (`AggregationMetricType`
-      // `number`/`string`/`boolean`) is REFUSED here rather than forwarded. Its
-      // `sql` IS the whole computation (a ratio, a `CASE`, a window function),
-      // and the engine aggregate AST has no place to carry a raw SQL
-      // expression: forwarding put the whole expression in `field` and the
-      // metric TYPE in `method`, so `driver-sql` threw `INVALID_QUERY`/400
-      // blaming a `function` key the author never wrote, and the in-memory
-      // evaluator answered `null` for every bucket through its `switch`
-      // default — a silent wrong answer under the author's own metric name,
-      // the #4157 class in its null variant. #4157's fix landed on
-      // `NativeSQLStrategy` only (where the expression is legal and emitted
-      // verbatim, `EXPRESSION_METRIC_TYPES`); this arm is the matching
-      // partition on the strategy that cannot serve it.
+      // [#21000] The measure's aggregate, or the one refusal both strategies
+      // give a type no aggregate lowers ({@link aggregateOfMeasure}).
       //
-      // Same posture and same envelope as `planCrossObject`'s refusals below
-      // (`INVALID_FIELD` / 400, #5716; the non-recombinable-measure arm is the
-      // wording twin): the engine physically cannot evaluate this member, and
-      // a loud, correctly-attributed refusal beats a silent wrong number.
+      // This arm used to refuse exactly the custom-SQL partition —
+      // `AggregationMetricType`'s `number` / `string` / `boolean` (commit
+      // 017130a09), `INVALID_FIELD` / 400, because the engine aggregate AST
+      // cannot carry a raw SQL expression — and let every other type through
+      // unchecked ON PURPOSE: an enum-INVALID type (`median`, host drift) is
+      // OUR bug, the undeclared-500 tier, and a method allowlist answering 400
+      // would have re-blamed the caller for it. The three were retired from
+      // the spec (a member's `sql` became a column reference, so they had
+      // nothing left to compute), and with them gone the partition had nothing
+      // to name. What replaces it keeps BOTH halves of that reasoning: the
+      // check is an allowlist of the aggregates, and its refusal is the
+      // undeclared-500 tier with the spec's own words — so a retired type is
+      // refused with its prescription and a never-declared one with zod's
+      // vocabulary, neither re-blamed on the caller, and neither handed to the
+      // engine as a method no driver declares (forwarded, `median` reached the
+      // host's `executeAggregate` and the SQL echo printed `MEDIAN(amount)`).
+      //
       // Sitting HERE — the one resolver both doors call — keeps
       // `/analytics/query` and `/analytics/sql` accepting/rejecting the same
       // set by construction (#10759's invariant).
-      //
-      // Keyed on the DECLARED metric-type partition, deliberately NOT on
-      // "method is not one of the six aggregates": the two read identically on
-      // every enum-valid cube, but an enum-INVALID type (host drift, e.g. a
-      // cube registered without meeting `CubeSchema`) is OUR bug — the
-      // undeclared-500 tier `dataset-refusal.ts`'s header assigns it — and a
-      // method allowlist would re-blame the caller for it with a 400.
-      if (EXPRESSION_METRIC_TYPES.has(direct.type)) {
-        throw invalidMemberError(
-          `[Analytics] ObjectQLStrategy cannot evaluate the custom-SQL measure ` +
-          `("${measureName}") — its type "${direct.type}" declares a raw SQL ` +
-          `expression, which the engine aggregate AST cannot carry; served ` +
-          `anyway it would answer null for every bucket under the measure's ` +
-          `own name. Use an aggregate measure ` +
-          `(count/sum/avg/min/max/count_distinct), or run on a native-SQL ` +
-          `driver.`,
-          { member: measureName, param: 'measures', cube: cube.name },
-        );
-      }
       return {
         field: direct.sql.replace(/^\$/, ''),
-        // The assertion, not a parse: for a CubeSchema-legal cube the type
-        // partition above leaves exactly the six `AggregationFunction` values.
-        // An enum-INVALID type (host drift, the comment above) still flows
-        // through unchecked ON PURPOSE — adding a method allowlist here would
-        // re-blame the caller with a 400 for OUR bug, so the cast keeps the
-        // compile-time contract (#12776) without changing that posture.
-        method: (direct.type === 'count_distinct' ? 'count_distinct' : direct.type) as AggregationFunction,
+        method: aggregateOfMeasure(cube.name, measureName, direct.type),
       };
     }
     // Accept `${field}_${type}` aliases (e.g. 'amount_sum') for measures whose

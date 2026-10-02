@@ -70,3 +70,55 @@ describe('storedMetadataBodyAnalyticsRefusal', () => {
     expect(err?.field).toBe('metadata');
   });
 });
+
+/**
+ * [#21207] The two stored content-hash columns of the same tables (`checksum`,
+ * and the history table's `previous_checksum`). Each is a hash over the WHOLE
+ * stored body, withheld credential material included, so a dimension serves an
+ * offline verifier and a filter is an online one. They are refused in the same
+ * envelope as the body column, in either role, on both tables.
+ */
+describe('storedMetadataBodyAnalyticsRefusal — the content-hash columns (#21207)', () => {
+  const HASH_COLUMNS: Array<[string, string]> = [
+    ['sys_metadata', 'checksum'],
+    ['sys_metadata_history', 'checksum'],
+    ['sys_metadata_history', 'previous_checksum'],
+  ];
+  for (const [object, column] of HASH_COLUMNS) {
+    it(`refuses '${column}' on ${object} as a dimension or measure (INVALID_FIELD / 400, param dimensions)`, () => {
+      const err = storedMetadataBodyAnalyticsRefusal([field(object, column, 'aggregate')]) as any;
+      expect(err).toBeInstanceOf(Error);
+      expect(err.code).toBe('INVALID_FIELD');
+      expect(err.status).toBe(400);
+      expect(err.field).toBe(column);
+      expect(err.object).toBe(object);
+      expect(err.param).toBe('dimensions');
+      // The refusal names the usable columns.
+      expect(err.message).toContain("'type'");
+    });
+
+    it(`refuses '${column}' on ${object} as a filter or sort (param where)`, () => {
+      const err = storedMetadataBodyAnalyticsRefusal([field(object, column, 'predicate')]) as any;
+      expect(err?.code).toBe('INVALID_FIELD');
+      expect(err?.status).toBe(400);
+      expect(err?.field).toBe(column);
+      expect(err?.param).toBe('where');
+    });
+  }
+
+  it('leaves a `checksum` column on an object outside the family alone', () => {
+    expect(storedMetadataBodyAnalyticsRefusal([field('file_blob', 'checksum', 'aggregate')])).toBeUndefined();
+    expect(storedMetadataBodyAnalyticsRefusal([field('file_blob', 'previous_checksum', 'predicate')])).toBeUndefined();
+  });
+});
+
+describe('storedMetadataBodyAnalyticsRefusal — the history change note (#21207)', () => {
+  it('refuses the change note, which can quote a stored hash, in either role', () => {
+    for (const role of ['aggregate', 'predicate'] as const) {
+      const err = storedMetadataBodyAnalyticsRefusal([field('sys_metadata_history', 'change_note', role)]) as any;
+      expect(err?.code).toBe('INVALID_FIELD');
+      expect(err?.status).toBe(400);
+      expect(err?.field).toBe('change_note');
+    }
+  });
+});

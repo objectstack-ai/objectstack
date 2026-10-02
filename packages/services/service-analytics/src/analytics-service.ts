@@ -703,9 +703,10 @@ const AGGREGATION_FUNCTIONS: ReadonlySet<string> = new Set(AggregationFunction.o
  * measure's aggregate and the declared type of the column it reads, and writes
  * only what it answers. It answers `undefined` for every pair it has
  * nothing to say about — the numeric and boolean classes, the count / sum / avg
- * rows, an expression metric type — and for every pair the aggregate ×
- * field-type table refuses, which the cube door has refused before any strategy
- * ran ({@link assertCubeMeasureFieldTypesAccepted}). [#21129] The column is
+ * rows, a type outside the six aggregates (which both strategies refuse) — and
+ * for every pair the aggregate × field-type table refuses, which the cube door
+ * has refused before any strategy ran
+ * ({@link assertCubeMeasureFieldTypesAccepted}). [#21129] The column is
  * {@link declaredMeasureColumn}'s, the door's own: a relationship-path column
  * is described by the declaration on the object its last hop reaches, as a
  * base-object column is by the base object's.

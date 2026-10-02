@@ -1,0 +1,7 @@
+{
+  "file": "packages/spec/src/contracts/crypto-provider.ts",
+  "adrs": [
+    "ADR-0128"
+  ],
+  "invariant": "`CryptoContext.scope` is REQUIRED and drawn from the closed `CRYPTO_CONTEXT_SCOPES` set, one member per producer of `CryptoContext`; a new producer adds its own member and never borrows one. Every provider that binds AAD folds the scope in, encodes the triple delimiter-safely (never an unescaped join), records in what it seals which derivation sealed it, and opens only with the recorded derivation — an unknown one fails closed, and no second derivation or scope is ever tried (ADR-0128 D1-D3)."
+}

@@ -980,7 +980,10 @@ describe('[#8594] a refused publish leaves the INNER verdict, in its own vocabul
                 source: 'protocol.publishPackageDrafts',
             });
             // The note names the losing race, which is the fact an author needs.
-            expect(String(conflict[0].note)).toContain('sha256:advanced_by_a_rival');
+            // [#21207] It names it WITHOUT the stored hashes — a copy never
+            // carries one (fork three, ruling A): each present side is withheld.
+            expect(String(conflict[0].note)).toBe('expected parent (withheld) but current is (withheld)');
+            expect(String(conflict[0].note)).not.toContain('sha256:advanced_by_a_rival');
             expect(publishRows(h, 'denied').map((a) => a.code).sort())
                 .toEqual(['batch_aborted', 'metadata_conflict']);
             // The batch reports the refusal in its own envelope too.
