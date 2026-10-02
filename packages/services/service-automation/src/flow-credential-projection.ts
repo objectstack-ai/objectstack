@@ -50,14 +50,21 @@
  * exits reach the same registry entry through `redactMetadataItem('flow', …)`.
  * One helper, applied where each surface's definition leaves the process.
  *
- * It is NOT applied to anything the engine EXECUTES. The flow map the engine
- * arms triggers from keeps the stored secrets, and so does the in-process
- * `getFlow` (the clone door copies a whole definition through it, ADR-0126
- * §7.1): redaction is a serving act, and a raw-record consumer keeps reading
- * the stored body (`spec/kernel/metadata-type-redaction.ts`). That is also why
- * this plugin binds flows from the protocol's EXECUTION read
- * (`getMetaItemsForExecution`) rather than the served one — a binder reading
- * the served view would register every `api` flow without its secret.
+ * It is NOT applied to anything the engine EXECUTES: redaction is a serving
+ * act, and a raw-record consumer keeps reading the stored body
+ * (`spec/kernel/metadata-type-redaction.ts`). That is why this plugin binds
+ * flows from the protocol's EXECUTION read (`getMetaItemsForExecution`) rather
+ * than the served one — a packaged flow's literal reaches the engine only
+ * through it.
+ *
+ * [#20790] And a STORED flow no longer carries its credentials at all: the
+ * metadata save door moves every explicit value into the write-only flow
+ * credential channel (`flow-credential-channel.ts`), using
+ * {@link flowCredentialPositions} and {@link stripFlowCredentialValues} below,
+ * so the stored row, its history and its hash hold exactly what a read serves.
+ * The engine reads a channel-held credential only at verification (an inbound
+ * post) and execution (an `http` node signing); the clone door refuses a
+ * source that holds one, literal or channel-held.
  *
  * ## Dropped, not masked
  *
