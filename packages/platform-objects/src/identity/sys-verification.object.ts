@@ -104,7 +104,7 @@ export const SysVerification = ObjectSchema.create({
       label: 'Verification Token',
       required: true,
       internal: true,
-      // [#11374/#11701] Deliberately UNBOUNDED: better-auth's oauth-provider
+      // [commit 3954fb7df and #11701] Deliberately UNBOUNDED: better-auth's oauth-provider
       // writes OIDC authorization-code payloads here as a JSON blob, so no
       // bound provably admits every value it may write. That is only
       // survivable because the column carries no index — see the `indexes`
@@ -123,7 +123,7 @@ export const SysVerification = ObjectSchema.create({
       label: 'Identifier',
       required: true,
       internal: true,
-      // [#11374] Bound from better-auth 1.7.1's own MySQL schema: the
+      // [commit 3954fb7df] Bound from better-auth 1.7.1's own MySQL schema: the
       // verification model declares `identifier` with `index: true`, and the
       // upstream migration emits an indexed string column as varchar(255)
       // (get-migration.mjs) — every better-auth flow that writes this table,

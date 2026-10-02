@@ -451,7 +451,9 @@ describe('[#20351] the number-comparand declared-type door at the engine collect
     ['true', () => true, 'boolean'],
     ['false', () => false, 'boolean'],
     ['a Date', () => new Date(Date.UTC(2026, 0, 1)), 'date'],
-    ['an array', () => [10], 'array'],
+    // [#21448] `[10]` left this table: a list at a scalar operator is the
+    // shared comparand-shape face's refusal, one door before this one, at every
+    // position — pinned in its own block below.
   ];
 
   it('[#20502] refuses a boolean, a Date or an array in ONE aggregation\'s own filter, rooted at that position — no read', async () => {
@@ -498,6 +500,39 @@ describe('[#20351] the number-comparand declared-type door at the engine collect
         expect(reads, `${name} ${fn}`).toHaveLength(0);
       }
     }
+  });
+
+  it('[#21448] an array at a scalar operator is the shared comparand-shape face\'s at all three positions — in its words, no read', async () => {
+    const faceSentence = (op: string, field: string, path: string) =>
+      `Operator "${op}" on field "${field}" requires a single comparable value, but received an array ([10]) at ${path}.`;
+    reads.length = 0;
+    const where = await refusalOf(engine.find(OBJECT, { where: { f_number: { $gt: [10] } } as FilterCondition }));
+    expect({ code: where!.code, status: where!.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
+    expect(where!.message).toMatch(/^find\('number_door_probe'\): Operator /);
+    expect(where!.message).toContain(faceSentence('$gt', 'f_number', 'where.f_number.$gt'));
+    for (const op of ['$gt', '$lte'] as const) {
+      const filtered = await refusalOf(engine.aggregate(OBJECT, {
+        aggregations: [
+          { function: 'count', alias: 'all' },
+          { function: 'count', alias: 'bad', filter: { f_number: { [op]: [10] } } },
+        ],
+      } as EngineAggregateOptions));
+      expect({ code: filtered!.code, status: filtered!.status }, op).toEqual({ code: 'INVALID_FILTER', status: 400 });
+      expect(filtered!.message, op).toMatch(/^aggregate\('number_door_probe'\): Operator /);
+      expect(filtered!.message, op).toContain(faceSentence(op, 'f_number', `aggregations[1].filter.f_number.${op}`));
+    }
+    const having = await refusalOf(engine.aggregate(OBJECT, {
+      groupBy: ['f_text'],
+      aggregations: [{ function: 'count', alias: 'total' }],
+      having: { total: { $gt: [10] } },
+    } as EngineAggregateOptions));
+    expect({ code: having!.code, status: having!.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
+    expect(having!.message).toContain(faceSentence('$gt', 'total', 'having.total.$gt'));
+    expect(reads).toHaveLength(0);
+    // This door's own walk still names the form when asked alone; no door
+    // reaches that arm at a scalar operator any more.
+    expect(findNonNumericComparand(engine.registry.getObject(OBJECT), { f_number: { $gt: [10] } }))
+      .toMatchObject({ field: 'f_number', form: 'array' });
   });
 
   it('[#20502] the numeric control at all three positions: a number reaches the driver and the evaluator as written', async () => {

@@ -16,7 +16,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * `plugin-auth/src/scim-connection-service.ts`.
  *
  * Deliberately NOT a resurrection of `sys_scim_provider` (which retires under
- * #11757): a row here is one bearer credential FOR a connection, not the
+ * commit 4d25d22d4): a row here is one bearer credential FOR a connection, not the
  * connection itself. Several rows may authenticate the same `connection_id`
  * (staged rotation); the connection's durable lifecycle state lives in
  * `sys_scim_connection_binding`, written by the library.

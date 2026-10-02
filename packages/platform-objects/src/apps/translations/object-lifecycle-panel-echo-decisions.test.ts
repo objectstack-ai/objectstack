@@ -239,11 +239,23 @@ const BOTH_TRANSLATE: Readonly<Record<string, Verdict>> = {
   'es-ES': 'translate',
 };
 
-/** The `agent` panel's own authored `Lifecycle` — the head noun two rows copy. */
-const AGENT_LIFECYCLE: Copy = {
+/**
+ * The authored `Lifecycle` head noun two rows copy, as a SHARED FRAGMENT.
+ *
+ * ⚠️ RE-JUDGED (#21320). These rows were decided against the `agent` panel's
+ * own `Lifecycle` label (`agent.fields.lifecycle.label`, copied whole, mode
+ * `in`). That twin left the catalog when `agent.lifecycle` — the agent
+ * conversation state machine — was retired and its form row deleted, so the
+ * copy had nothing left to be asserted against. The renderings did not move:
+ * the same head noun stands authored in the hook form's `Lifecycle events`
+ * helpText (ライフサイクルイベント / Eventos de ciclo de vida), the twin this
+ * ledger already copies `例: ` / `p. ej.` from, so the head noun is now asserted
+ * as a fragment both strings carry.
+ */
+const LIFECYCLE_HEAD_NOUN: Copy = {
   catalog: 'metadataForms',
-  key: 'agent.fields.lifecycle.label',
-  modes: { 'ja-JP': 'in', 'es-ES': 'in' },
+  key: 'hook.fields.events.helpText',
+  modes: { 'ja-JP': 'ライフサイクル', 'es-ES': 'ciclo de vida' },
 };
 
 const DECISIONS: readonly Decision[] = [
@@ -255,9 +267,9 @@ const DECISIONS: readonly Decision[] = [
     en: 'Lifecycle',
     verdict: BOTH_TRANSLATE,
     verbatim: [],
-    copies: [AGENT_LIFECYCLE],
+    copies: [LIFECYCLE_HEAD_NOUN],
     reason:
-      'THE HEAD NOUN IS COPIED FROM AN EXACT AUTHORED TWIN and then QUALIFIED, because the bare word is already spent. agent.fields.lifecycle.label carries the IDENTICAL English string and is 生命周期 / ライフサイクル / Ciclo de vida — but it names the AGENT conversation state machine, a different concept on a different panel, and this block is ADR-0057 DATA lifecycle. Leaving both as the bare word would collide two contracts on one rendering. ⇒ the twin is copied and the catalog word for "data" is prefixed: データ from object.sections.fields.description (データモデル), datos from the same twin (modelo de datos). ⇒ データライフサイクル / Ciclo de vida de los datos. ⭐ CONCEPT settled by zh-CN, which reached the same qualification independently (数据生命周期 against the agent panel plain 生命周期); the WORDS come from each locale own authored twin, and the containment of the twin is asserted below.',
+      '⚠️ RE-JUDGED: the twin this row was decided against, agent.fields.lifecycle.label, left the catalog with the retired agent.lifecycle key; the head noun is now asserted against hook.fields.events.helpText (see LIFECYCLE_HEAD_NOUN), and the rendering below is unchanged. As decided: THE HEAD NOUN IS COPIED FROM AN EXACT AUTHORED TWIN and then QUALIFIED, because the bare word is already spent. agent.fields.lifecycle.label carried the IDENTICAL English string and was 生命周期 / ライフサイクル / Ciclo de vida — but it named the AGENT conversation state machine, a different concept on a different panel, and this block is ADR-0057 DATA lifecycle. Leaving both as the bare word would collide two contracts on one rendering. ⇒ the twin is copied and the catalog word for "data" is prefixed: データ from object.sections.fields.description (データモデル), datos from the same twin (modelo de datos). ⇒ データライフサイクル / Ciclo de vida de los datos. ⭐ CONCEPT settled by zh-CN, which reached the same qualification independently (数据生命周期 against the agent panel plain 生命周期); the WORDS come from each locale own authored twin, and the containment of the twin is asserted below.',
   },
   {
     population: 'lifecycle',
@@ -281,9 +293,9 @@ const DECISIONS: readonly Decision[] = [
     prop: 'label',
     en: 'Class',
     verdict: BOTH_TRANSLATE,
-    copies: [AGENT_LIFECYCLE],
+    copies: [LIFECYCLE_HEAD_NOUN],
     reason:
-      'THE HUMANIZE IS A BARE WORD AND THE BARE WORD IS AMBIGUOUS IN BOTH LOCALES. objectForm declares no label (asserted), so "Class" is humanizeFieldPath of the path leaf; bare クラス and bare Clase read as a programming class or a CSS class, and the form nests this row under a composite whose own label is now the qualified one. ⇒ qualified with the parent block, copying AGENT_LIFECYCLE the same way the row above does: ライフサイクルクラス / Clase de ciclo de vida. ⭐ CONCEPT from the live LifecycleSchema, ⛔ not from zh-CN: `class` is LifecycleClassSchema, a five-member enum (record | audit | telemetry | transient | event) asserted below, i.e. the persistence contract of the object rows — zh-CN independently reached the same qualification (生命周期类别), which is corroboration rather than the source.',
+      'THE HUMANIZE IS A BARE WORD AND THE BARE WORD IS AMBIGUOUS IN BOTH LOCALES. objectForm declares no label (asserted), so "Class" is humanizeFieldPath of the path leaf; bare クラス and bare Clase read as a programming class or a CSS class, and the form nests this row under a composite whose own label is now the qualified one. ⇒ qualified with the parent block, copying the same head noun the row above does (LIFECYCLE_HEAD_NOUN): ライフサイクルクラス / Clase de ciclo de vida. ⭐ CONCEPT from the live LifecycleSchema, ⛔ not from zh-CN: `class` is LifecycleClassSchema, a five-member enum (record | audit | telemetry | transient | event) asserted below, i.e. the persistence contract of the object rows — zh-CN independently reached the same qualification (生命周期类别), which is corroboration rather than the source.',
   },
   {
     population: 'lifecycle',
@@ -1152,7 +1164,10 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // new row label, authored in all three locales.
       // 660 since the agent form offers `structuredOutput`: one new row label,
       // authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(660);
+      // 659 since #21320: the agent form's `lifecycle` row left with its key
+      // (the conversation state machine was retired — nothing ever read it),
+      // taking its label — authored in all three locales — out of the catalog.
+      expect(translated.length, `${locale} positive control`).toBe(659);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

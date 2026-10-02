@@ -343,9 +343,11 @@ describe('[#21333] BOOLEAN_COMPARAND_DOOR_CASES', () => {
       ...BOOLEAN_COMPARAND_DOOR_LIST_OPERATORS.flatMap((op) => [`f_boolean.${op}[0]`, `f_boolean.${op}[1]`])];
     expect([...positionsOf('number')].sort()).toEqual([...judged].sort());
     expect([...positionsOf('date')].sort()).toEqual([...judged].sort());
-    // The array rows skip the equality slots, where the comparand-shape door speaks first.
-    const equality = new Set(['f_boolean', 'f_boolean.$eq', 'f_boolean.$ne']);
-    expect([...positionsOf('array')].sort()).toEqual(judged.filter((p) => !equality.has(p)).sort());
+    // The array rows skip every one-value slot, where the comparand-shape door
+    // speaks first: the equality slots since #19757 / #19886, and [#21448] every
+    // other scalar operator since. They sit at the list members alone.
+    const listMember = (p: string) => /\[\d\]$/.test(p);
+    expect([...positionsOf('array')].sort()).toEqual(judged.filter(listMember).sort());
     // Every judged field is refused a number; null and the non-boolean field's rows pass.
     expect(new Set(refused.filter((c) => c.comparand === -1).map((c) => c.key)))
       .toEqual(new Set(['f_boolean', 'f_toggle', 'f_formula_boolean']));

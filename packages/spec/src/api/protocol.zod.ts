@@ -2611,7 +2611,9 @@ export const GetEffectivePermissionsResponseSchema = lazySchema(() => z.object({
 // `/api/v1/workflow` (the pre-#3586 DEFAULT_DISPATCHER_ROUTES listed it among
 // routes that never existed). The capability the wrappers promised is live
 // elsewhere: record state machines are enforced by the `state_machine`
-// validation rule (`StateMachineSchema` stays authorable on the object),
+// validation rule (a flat `{ from: [to] }` transition table in the object's
+// `validations`, `data/validation.zod.ts` — the XState `StateMachineSchema` was
+// never authorable on the object after ADR-0020 and left the package in #21320),
 // approvals are first-class flow nodes on the approvals runtime (ADR-0019 —
 // decisions via `POST /approvals/requests/:id/{approve,reject}`), and
 // record-triggered automation is lifecycle hooks + `record_change` flows.

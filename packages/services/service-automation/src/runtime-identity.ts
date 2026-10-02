@@ -110,7 +110,7 @@ export class UnscopedRunDataAccessError extends Error {
         `'user' but no trigger user could be resolved, so the operation would execute UNSCOPED ` +
         `(elevated, RLS-bypassing) rather than restricted to a user. Declare \`runAs: 'system'\` on the ` +
         `flow to make the elevation explicit and intended, or arrange for the trigger to supply a user ` +
-        `(a write made with a system context carries none). (ADR-0049, #1888, #3760)`,
+        `(a write made with a system context carries none). (ADR-0049)`,
     );
     this.name = 'UnscopedRunDataAccessError';
     // #3863 — a guard refusal, so a `fault` edge must not route it. Elevation

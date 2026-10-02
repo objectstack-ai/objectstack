@@ -428,7 +428,9 @@ describe('[#21333] the boolean-comparand arm at the engine collection point', ()
     ['implicit Date', (v) => v, () => new Date(Date.UTC(2026, 0, 1)), 'date'],
     ['a $nin member Date', (v) => ({ $nin: [v, true] }), () => new Date(Date.UTC(2026, 0, 1)), 'date'],
     ['a $in member [true] (the card)', (v) => ({ $in: [false, v] }), () => [true], 'array'],
-    ['$gt [true]', (v) => ({ $gt: v }), () => [true], 'array'],
+    // [#21448] `$gt [true]` left this table: a list at a scalar operator is the
+    // shared comparand-shape face's refusal, one door before this arm, at every
+    // position — pinned in its own block below.
   ];
 
   /** What the contract says is wrong, per non-string form — the clause after "which is not a boolean:". */
@@ -500,6 +502,34 @@ describe('[#21333] the boolean-comparand arm at the engine collection point', ()
       expect(err!.message, name).toContain(CLAUSE[form]);
       expect(reads, name).toHaveLength(0);
     }
+  });
+
+  it('[#21448] $gt [true] is the shared comparand-shape face\'s at all three positions — in its words, no read', async () => {
+    const faceSentence = (field: string, path: string) =>
+      `Operator "$gt" on field "${field}" requires a single comparable value, but received an array ([true]) at ${path}.`;
+    reads.length = 0;
+    const where = await refusalOf(engine.find(OBJECT, { where: { f_boolean: { $gt: [true] } } as FilterCondition }));
+    expect({ code: where!.code, status: where!.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
+    expect(where!.message).toMatch(/^find\('boolean_door_probe'\): Operator /);
+    expect(where!.message).toContain(faceSentence('f_boolean', 'where.f_boolean.$gt'));
+    const filtered = await refusalOf(engine.aggregate(OBJECT, {
+      aggregations: [
+        { function: 'count', alias: 'all' },
+        { function: 'count', alias: 'bad', filter: { f_boolean: { $gt: [true] } } },
+      ],
+    } as EngineAggregateOptions));
+    expect({ code: filtered!.code, status: filtered!.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
+    expect(filtered!.message).toContain(faceSentence('f_boolean', 'aggregations[1].filter.f_boolean.$gt'));
+    const having = await refusalOf(engine.aggregate(OBJECT, {
+      groupBy: ['f_boolean'], aggregations: [{ function: 'count', alias: 'n' }], having: { f_boolean: { $gt: [true] } },
+    } as EngineAggregateOptions));
+    expect({ code: having!.code, status: having!.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
+    expect(having!.message).toContain(faceSentence('f_boolean', 'having.f_boolean.$gt'));
+    expect(reads).toHaveLength(0);
+    // This arm's own walk still refuses the form when asked alone; no door
+    // reaches it at a scalar operator any more.
+    expect(() => narrowNumberComparands(OBJECT, 'find', engine.registry.getObject(OBJECT), { f_toggle: { $gt: [true] } }))
+      .toThrow(/compares a declared toggle field/);
   });
 
   it('[#21382] the controls at all three positions: true and 1 answer exactly what they answered before', async () => {

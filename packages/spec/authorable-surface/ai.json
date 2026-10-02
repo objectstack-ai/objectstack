@@ -26,7 +26,7 @@
     "ai/Agent:instructions",
     "ai/Agent:knowledge [RETIRED]",
     "ai/Agent:label",
-    "ai/Agent:lifecycle",
+    "ai/Agent:lifecycle [RETIRED]",
     "ai/Agent:memory",
     "ai/Agent:model",
     "ai/Agent:name",
