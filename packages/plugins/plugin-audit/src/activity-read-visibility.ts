@@ -47,6 +47,15 @@
  * System-context reads (the audit writer, engine self-reads) and context-less
  * programmatic calls on bare kernels are not narrowed, as for comments: every
  * real transport carries a context.
+ *
+ * [#21388] One more per-reader ROW rule rides this mechanism: an update row
+ * whose stored change is withheld whole from the reader is withheld as a row,
+ * by a WHERE built from a SYSTEM pre-scan on the same four reads, so a list's
+ * total, its pages and a grouped count agree with the rows served. It judges by
+ * the security service's field answer, so it lives with the field redaction
+ * (`activity-field-redaction.ts`, `computeWithheldUpdateFilter`), whose
+ * middleware `AuditPlugin` registers after this one: its pre-scan reads the
+ * WHERE this gate has already narrowed.
  */
 
 import type { CommentAccessEngine, CommentAccessLogger, CommentReadMiddlewareCtx } from './comment-access-hooks.js';
