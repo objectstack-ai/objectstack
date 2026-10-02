@@ -9,7 +9,7 @@ Clause-②: no
 - **What was wrong.** A runtime view container expands each member to `<object>.<key>`. A `list` that names no key becomes `<object>.default`, a `form` becomes `<object>.form`, and every member that names a key uses that key. Saved under another name, in another package or in none, for an object a code package ships, those expansions replaced that package's views of the same names on `GET /api/v1/meta/view?object=<object>`. The replacements were still stamped with the shipping package's `_packageId` and `_provenance: 'package'`.
   - On an environment-scoped kernel, the by-name read `GET /api/v1/meta/view/<name>` kept the packaged view, so the two reads disagreed.
   - On an unscoped kernel, the by-name read served the replacement too, for a container saved into a package or environment-wide.
-  - The container's default list kept `isDefault: true`, so the object listed two list defaults.
+  - The container's own default kept `isDefault: true`. It either replaced the object's default view or stood beside it as a second list default.
 - **What it does now.** For an object a code package ships, a container that belongs to another package, or to none, expands every member under its own name:
   - a `list` that names no key becomes `<object>.<container name>`;
   - every other member becomes `<object>.<container name>.<key>`. That covers a `list` that names its key, each `listViews` and `formViews` entry, and `form`.
