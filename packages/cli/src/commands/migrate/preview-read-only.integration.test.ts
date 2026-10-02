@@ -493,16 +493,22 @@ for (const cell of DIALECT_CELLS) {
         expect(payload.error).toContain("'sys_metadata'");
       }, cell.timeout);
 
-      it('audit-metadata-bodies without --apply on a database that does not exist exits 1 with both tables counted unread', async () => {
+      // [#21207] The audit reads a third table: the decision-audit trail, whose
+      // conflict notes named stored content hashes. The #21391 intent is
+      // unchanged — EVERY audited table is counted unread — so the expected set
+      // is the whole audited set, stated literally: a widening that is not
+      // carried here turns this case red instead of passing on a stale count.
+      it('audit-metadata-bodies without --apply on a database that does not exist exits 1 with every audited table counted unread', async () => {
         const absent = join(fixture!.dir, 'data', 'never-started.db');
         const { payload, exitCode } = await runJson(auditBodies, ['--database-url', `file:${absent}`]);
+        const audited = ['sys_activity', 'sys_audit_log', 'sys_metadata_audit'];
 
         expect(exitCode).toBe(1);
         expect(payload.apply).toBe(false);
         // `failures` counts the tables whose rows were NOT examined.
-        expect(payload.report.failures).toBe(2);
+        expect(payload.report.failures).toBe(audited.length);
         expect(payload.report.scanned).toBe(0);
-        expect(Object.keys(payload.report.byObject).sort()).toEqual(['sys_activity', 'sys_audit_log']);
+        expect(Object.keys(payload.report.byObject).sort()).toEqual(audited);
       }, cell.timeout);
     }
   });

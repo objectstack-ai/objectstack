@@ -116,9 +116,12 @@ function makeStubDriver() {
 function makeFakeCrypto() {
   let n = 0;
   const calls: { encrypt: number; decrypt: number } = { encrypt: 0, decrypt: 0 };
+  /** Every context the engine handed the provider, per verb (ADR-0128 D1 pin). */
+  const contexts: { encrypt: CryptoContext[]; decrypt: CryptoContext[] } = { encrypt: [], decrypt: [] };
   const provider: ICryptoProvider = {
-    async encrypt(plain: string, _ctx: CryptoContext): Promise<CryptoHandle> {
+    async encrypt(plain: string, ctx: CryptoContext): Promise<CryptoHandle> {
       calls.encrypt += 1;
+      contexts.encrypt.push(ctx);
       n += 1;
       return {
         id: `sec_${n}`,
@@ -128,8 +131,9 @@ function makeFakeCrypto() {
         ciphertext: Buffer.from(plain, 'utf8').toString('base64'),
       };
     },
-    async decrypt(handle: CryptoHandle, _ctx: CryptoContext): Promise<string> {
+    async decrypt(handle: CryptoHandle, ctx: CryptoContext): Promise<string> {
       calls.decrypt += 1;
+      contexts.decrypt.push(ctx);
       return Buffer.from(handle.ciphertext, 'base64').toString('utf8');
     },
     async rotateKey(handle: CryptoHandle): Promise<CryptoHandle> {
@@ -138,7 +142,7 @@ function makeFakeCrypto() {
     digest(plain: string): string { return `d:${plain.length}`; },
     async keyedDigest(plain: string): Promise<string> { return `k:${plain.length}`; },
   };
-  return { provider, calls };
+  return { provider, calls, contexts };
 }
 
 const sysSecretObject = {
@@ -235,6 +239,21 @@ describe('objectql secret-field channel', () => {
     const plain = await ctx.engine.resolveSecret(stored.db_password);
     expect(plain).toBe('s3cr3t');
     expect(ctx.crypto.calls.decrypt).toBe(1);
+  });
+
+  it('seals and dereferences under its own scope, object_secret_field (ADR-0128 D1)', async () => {
+    const created = await ctx.engine.insert('ext_datasource', { name: 'pg', db_password: 's3cr3t' });
+    const stored = ctx.stores.get('ext_datasource')!.get(created.id) as any;
+    await ctx.engine.resolveSecret(stored.db_password);
+    await ctx.engine.resolveSecretField('ext_datasource', String(created.id), 'db_password');
+
+    expect(ctx.crypto.contexts.encrypt).toEqual([
+      expect.objectContaining({ scope: 'object_secret_field', namespace: 'ext_datasource', key: 'db_password' }),
+    ]);
+    expect(ctx.crypto.contexts.decrypt).toHaveLength(2);
+    for (const opened of ctx.crypto.contexts.decrypt) {
+      expect(opened).toMatchObject({ scope: 'object_secret_field', namespace: 'ext_datasource', key: 'db_password' });
+    }
   });
 
   // [#6231] `resolveSecret` reads `sys_secret` straight off the driver. That

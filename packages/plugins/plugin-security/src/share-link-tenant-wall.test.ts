@@ -160,6 +160,8 @@ interface MintOptions {
   memberOf: string[];
   /** The record's owning organization. */
   recordOrg?: string;
+  /** The record's `owner_id`; absent ⇒ the row carries none. */
+  recordOwner?: string;
 }
 
 /**
@@ -167,7 +169,9 @@ interface MintOptions {
  * `crm_account/acc_1` as a signed-in member — the exact call a user makes from
  * the record page's "share" button.
  */
-async function groupPostureMint(opts: MintOptions): Promise<{ status: number; body: any }> {
+async function groupPostureMint(
+  opts: MintOptions,
+): Promise<{ status: number; body: any; links: any[] }> {
   const userId = 'u_sharer';
   const activeOrg = opts.memberOf[0];
   const tables: Record<string, any[]> = {
@@ -181,7 +185,12 @@ async function groupPostureMint(opts: MintOptions): Promise<{ status: number; bo
     sys_user_position: [],
     sys_user_permission_set: [],
     sys_permission_set: [],
-    [OBJECT]: [{ id: RECORD, name: 'Acme', organization_id: opts.recordOrg ?? ORG_A }],
+    [OBJECT]: [{
+      id: RECORD,
+      name: 'Acme',
+      organization_id: opts.recordOrg ?? ORG_A,
+      ...(opts.recordOwner ? { owner_id: opts.recordOwner } : {}),
+    }],
     sys_share_link: [],
   };
 
@@ -194,6 +203,9 @@ async function groupPostureMint(opts: MintOptions): Promise<{ status: number; bo
     getService: (name: string) => {
       if (name === 'objectql') return engine;
       if (name === 'http-server') return http;
+      // The posture the sharing service reads (ADR-0105 D1) — the same one the
+      // engine's Layer 0 applies.
+      if (name === 'tenancy') return { posture: opts.posture };
       if (name === 'auth') {
         return {
           api: {
@@ -233,7 +245,8 @@ async function groupPostureMint(opts: MintOptions): Promise<{ status: number; bo
     },
     res,
   );
-  return captured;
+  // The store, read back: a refusal is only a refusal if no row landed.
+  return { ...captured, links: tables.sys_share_link ?? [] };
 }
 
 describe('[#6206] share-link creation under the `group` tenancy posture', () => {
@@ -265,5 +278,51 @@ describe('[#6206] share-link creation under the `group` tenancy posture', () => 
   it('`single` posture is unchanged — Layer 0 is inert there, before and after', async () => {
     const res = await groupPostureMint({ posture: 'single', memberOf: [ORG_A] });
     expect(res.status).toBe(201);
+  });
+});
+
+/**
+ * [ADR-0111 D8 rule 1 — ruling 5950188467, A′] The owner may mint on a record
+ * their visibility read refuses — but never across the organization wall.
+ *
+ * The owner alternative reads `owner_id`, and `owner_id` outlives a
+ * membership: a member who left the record's organization still owns the rows
+ * they created there. Under a walled posture the visibility read applies Layer
+ * 0, and that refusal is the only thing standing between such a member and a
+ * capability token on their former organization's record, which
+ * `resolveToken` would then serve anonymously. So where a wall is in force the
+ * owner and Modify-All alternatives are withheld and visibility alone admits.
+ *
+ * Real here, as above: the plugin's own wiring (the link service's
+ * `canMintWithoutVisibility` probe is the one `SharingServicePlugin` composes)
+ * and the real `computeTenantLayer0Filter`.
+ */
+describe('[ADR-0111 D8] the owner alternative does not cross the organization wall', () => {
+  it.each(['group', 'isolated'] as const)(
+    '%s: a member of plant B who OWNS a record in plant A is refused, and nothing lands',
+    async (posture) => {
+      const res = await groupPostureMint({
+        posture,
+        memberOf: [ORG_B],
+        recordOrg: ORG_A,
+        recordOwner: 'u_sharer',
+      });
+
+      expect(res.status).toBe(403);
+      expect(res.body).toMatchObject({ success: false, error: { code: 'FORBIDDEN' } });
+      expect(res.links).toEqual([]);
+    },
+  );
+
+  it('control: the same owner, in the record\'s own organization, mints', async () => {
+    const res = await groupPostureMint({
+      posture: 'isolated',
+      memberOf: [ORG_A],
+      recordOrg: ORG_A,
+      recordOwner: 'u_sharer',
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.data).toMatchObject({ object_name: OBJECT, record_id: RECORD, created_by: 'u_sharer' });
+    expect(res.links.map((l) => l.created_by)).toEqual(['u_sharer']);
   });
 });

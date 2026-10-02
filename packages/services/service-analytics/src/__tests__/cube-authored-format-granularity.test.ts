@@ -29,12 +29,13 @@
  *   window-only `timeDimensions` entry stays a filter — the same five answers
  *   the dataset path gives;
  * - the declared narrowing: a bucketed query is served by the engine path,
- *   which refuses every member it cannot evaluate — a custom-SQL measure, and,
- *   on a cube with `joins`, a cross-object member (`planCrossObject`) — so
- *   grouping such a query by a declared-default dimension is now refused, with
- *   the envelope, byte for byte, that stating the same granularity by hand
- *   already got. One pin per refusal source: the custom-SQL measure, and a
- *   cross-object measure on a joined cube.
+ *   which refuses every member it cannot evaluate — on a cube with `joins`, a
+ *   cross-object member (`planCrossObject`) — so grouping such a query by a
+ *   declared-default dimension is now refused, with the envelope, byte for
+ *   byte, that stating the same granularity by hand already got. Pinned on a
+ *   cross-object measure on a joined cube. (A custom-SQL measure was the
+ *   second refusal source until its metric types were retired, #21000: both
+ *   paths now refuse it by type whatever the route, which its case pins.)
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -273,19 +274,22 @@ describe('analytics_cube.dimensions.granularities — the declared single granul
     expect(sqls[0]).toMatch(/created_at/);
   });
 
-  it('DECLARED NARROWING: a custom-SQL measure grouped by a declared-default dimension gets the refusal a stated granularity gets', async () => {
-    // NOT parsed: since #20943 the cube contract admits a column reference
-    // only, so `CubeSchema` refuses this expression member at every authoring
-    // door. The engine path's refusal it pins is still owed to a cube that
-    // reaches the service without meeting that parse (a host registering one
-    // in-process), so the member is built directly on the parsed cube.
-    const withExpression: Cube = {
+  it('a retired custom-SQL metric type is refused whatever the route — by default bucket, by a stated granularity, and on the raw-SQL path', async () => {
+    // NOT parsed: `CubeSchema` refuses this member at every authoring door —
+    // its `sql` since #20943, its `type` since #21000. The refusal pinned here
+    // is still owed to a cube that reaches the service without meeting that
+    // parse (a host registering one in-process), so the member is built
+    // directly on the parsed cube. Before #21000 the engine path refused it and
+    // the raw-SQL path served it, so the route a declared default chose decided
+    // the answer; now both refuse it by type, before anything executes.
+    // `as unknown as Cube`: `tsc` refuses the retired type at a typed cube too.
+    const withExpression = {
       ...authored,
       measures: {
         ...authored.measures,
         done_rate: { label: 'Done', type: 'number', sql: "SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) * 1.0 / COUNT(*)" },
       },
-    };
+    } as unknown as Cube;
     expect(CubeSchema.safeParse(withExpression).success).toBe(false);
     const aggregated: string[] = [];
     const sqls: string[] = [];
@@ -302,7 +306,7 @@ describe('analytics_cube.dimensions.granularities — the declared single granul
         return [];
       },
     });
-    const envelope = (e: any) => ({ code: e?.code, status: e?.status });
+    const refusal = (e: any) => ({ code: e?.code, status: e?.status, message: (e as Error)?.message });
 
     const byDefault = await service
       .query({ cube: 'orders', measures: ['done_rate'], dimensions: ['placed_at'] })
@@ -315,20 +319,21 @@ describe('analytics_cube.dimensions.granularities — the declared single granul
         timeDimensions: [{ dimension: 'placed_at', granularity: 'month' }],
       })
       .catch((e: unknown) => e);
+    // The control that used to be SERVED on the raw-SQL path: a dimension that
+    // declares no single default keeps the query there.
+    const rawSqlRoute = await service
+      .query({ cube: 'orders', measures: ['done_rate'], dimensions: ['shipped_at'] })
+      .catch((e: unknown) => e);
 
-    expect(envelope(byDefault)).toEqual({ code: 'INVALID_FIELD', status: 400 });
-    // Not a new refusal: the one stating the granularity by hand already got.
-    expect({ ...envelope(byDefault), message: (byDefault as Error).message }).toEqual({
-      ...envelope(byHand),
-      message: (byHand as Error).message,
-    });
+    expect(byDefault).toBeInstanceOf(Error);
+    expect(refusal(byDefault).message).toContain('measure "done_rate" on cube "orders" cannot be served: its type "number"');
+    // One refusal, whichever route the query took.
+    expect(refusal(byDefault)).toEqual(refusal(byHand));
+    expect(refusal(byDefault)).toEqual(refusal(rawSqlRoute));
+    // The undeclared-500 tier, never the caller-blaming 400.
+    expect(refusal(byDefault).code).toBeUndefined();
     expect(aggregated).toEqual([]);
     expect(sqls).toEqual([]);
-
-    // Control: the same measure grouped by a dimension that declares no single
-    // default is still answered, on the raw-SQL path, as it was before.
-    await service.query({ cube: 'orders', measures: ['done_rate'], dimensions: ['shipped_at'] });
-    expect(sqls).toHaveLength(1);
   });
 
   it('DECLARED NARROWING, joined cube: a cross-object measure grouped by a declared-default dimension gets the refusal a stated granularity gets', async () => {

@@ -93,15 +93,19 @@
  *     arrival there is our bug; an undeclared `500` is the honest answer, and
  *     staying bare keeps it readable in the response (#5667's tiering) instead of
  *     withheld like a declared server fault. [#5716] `native-sql-strategy.ts`'s
- *     "measure … has unrecognised type" joins this bullet after measurement, and
+ *     "measure … has unrecognised type" joined this bullet after measurement, and
  *     against #5716's own list, which had it down as author-shaped: `Metric.type`
  *     is the CLOSED `AggregationMetricType` enum, `metric-type-coverage.test.ts`
  *     pins that every member of it is handled (its second case is literally "leaves
- *     no metric type to the unrecognised-type throw"), the dataset compiler maps
- *     only `SUPPORTED_AGGREGATES` into a cube, and `inferMeasure` mints six known
+ *     no metric type to the refusal"), the dataset compiler maps only
+ *     `SUPPORTED_AGGREGATES` into a cube, and `inferMeasure` mints six known
  *     types. So no spec-valid cube can reach it — an arrival is our own drift or a
  *     host registering an unparsed cube object, which is the same 500 tier as the
- *     line above, not the author's 400.
+ *     line above, not the author's 400. [#21000] That refusal is now
+ *     `aggregateOfMeasure`'s "measure … cannot be served", the ONE both
+ *     strategies give, worded by the spec's enum — the retired custom-SQL types
+ *     (`number` / `string` / `boolean`) arrive here the same way, from a cube
+ *     that never met the parse, and take the same tier.
  *   - **Producer/consumer drift between two of OUR tables** — the posture
  *     `objectql-strategy.ts`'s display-SQL renderer already states explicitly
  *     ("Deliberately NOT `invalidFilterError`'s 400 envelope: this is drift

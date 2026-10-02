@@ -198,19 +198,19 @@ export const STARTUP_SOURCE_UNPARSEABLE = 'startup-source-unparseable';
 export const OPEN_VOCABULARY_PROBES: ReadonlyMap<string, string> = new Map([
   [
     'getRegisteredNodeTypes',
-    'ADR-0018 keeps the flow node-type vocabulary open and runtime-extensible — a plugin registers its executor from its own init()/start(), which can be after this line (#4771)',
+    'ADR-0018 keeps the flow node-type vocabulary open and runtime-extensible — a plugin registers its executor from its own init()/start(), which can be after this line, so the engine itself judges node types only once the vocabulary is sealed at `kernel:bootstrapped`',
   ],
   [
     'knownNodeTypes',
-    'ADR-0018 keeps the flow node-type vocabulary open and runtime-extensible — a plugin registers its executor from its own init()/start(), which can be after this line (#4771)',
+    'ADR-0018 keeps the flow node-type vocabulary open and runtime-extensible — a plugin registers its executor from its own init()/start(), which can be after this line, so the engine itself judges node types only once the vocabulary is sealed at `kernel:bootstrapped`',
   ],
   [
     'getUnknownNodeTypeAudit',
-    'the unknown-node-type audit is a snapshot of an OPEN vocabulary a plugin can still extend during boot; it is read-only by design and answers "unknown as of now", never "unknown for this deployment" (#4771)',
+    'the unknown-node-type audit is a snapshot of an OPEN vocabulary a plugin can still extend during boot; it is read-only by design and answers "unknown as of now", never "unknown for this deployment", so the engine itself reads it as a verdict only once the vocabulary is sealed at `kernel:bootstrapped`',
   ],
   [
     'getActionDescriptors',
-    'ADR-0018 action descriptors are published by plugins during boot, so a type missing from them here means "not published YET" (#4771)',
+    'ADR-0018 action descriptors are published by plugins during boot, so a type missing from them here means "not published YET", and the engine itself judges node types only once the vocabulary is sealed at `kernel:bootstrapped`',
   ],
   [
     'getRegisteredExecutors',
@@ -356,9 +356,9 @@ export interface StartupRegistryVerdictFinding {
  */
 export const STARTUP_VERDICT_HINT =
   'Take one of the three shapes the fixes took: ' +
-  "(1) resolve where the value is USED, not where you start — a lazy accessor or a `kernel:ready`/`kernel:bootstrapped` hook sees a provider that registered later (`createLazyCacheRateLimitStorage()` in plugin-auth, #4772); " +
-  '(2) seal the vocabulary, then judge — have the host declare the moment it can no longer grow and draw the conclusion there (`AutomationEngine.sealNodeTypeVocabulary()`, called at `kernel:bootstrapped`, #4771); ' +
-  '(3) order the verdict AFTER the mutation it describes, so it cannot attest to a state this same boot goes on to contradict (the ADR-0104 attestation, #4769). ' +
+  "(1) resolve where the value is USED, not where you start — a lazy accessor or a `kernel:ready`/`kernel:bootstrapped` hook sees a provider that registered later (`createLazyCacheRateLimitStorage()` in plugin-auth, which takes the cache service only when a rate-limit counter is used); " +
+  '(2) seal the vocabulary, then judge — have the host declare the moment it can no longer grow and draw the conclusion there (`AutomationEngine.sealNodeTypeVocabulary()`, called at `kernel:bootstrapped`); ' +
+  '(3) order the verdict AFTER the mutation it describes, so it cannot attest to a state this same boot goes on to contradict (the ADR-0104 born-migrated attestation, written only after the first boot has seeded its data). ' +
   'If the conclusion must stay here, keep the two worlds apart in the wording: "no executor registered YET (as of plugin start)" is true; "will fail at execution time" is a claim about a world that has not finished forming.';
 
 // ── AST helpers ──────────────────────────────────────────────────────────────
@@ -739,7 +739,7 @@ export function findStartupRegistryVerdicts(
           `(${record.kind}: ${record.detail}, line ${record.line}). ${note}; ${phaseNote}. ` +
           `"absent" here has two meanings the recorded verdict cannot tell apart — no provider in this ` +
           `deployment, or a provider that registers later in this same boot — and nothing retracts the ` +
-          `record when the second one turns out to be the case (#4771 / #4772).`,
+          `record when the second one turns out to be the case.`,
         hint: STARTUP_VERDICT_HINT,
       });
 
@@ -759,11 +759,13 @@ export function findStartupRegistryVerdicts(
           path: `${fileLabel}:${rec.line}`,
           message:
             `the diagnostic says "${hit}" about a vocabulary that can still grow during this boot. ` +
-            `#4771 printed "will fail at execution time" for eight approval flows 0.8s before the executor ` +
-            `that runs them was registered, and a deployment that genuinely lacked the plugin printed the ` +
-            `identical eight — so the line could not tell an operator which of the two they had. #4772's ` +
-            `remedy ("you need Redis") sent operators to fix a problem they did not have, and connecting ` +
-            `Redis did not change the message.`,
+            `The flow engine's node-type check once printed "will fail at execution time" for eight approval ` +
+            `flows 0.8s before the executor that runs them was registered, and a deployment that genuinely ` +
+            `lacked the plugin printed the identical eight — so the line could not tell an operator which of ` +
+            `the two they had; the engine now judges node types only once the vocabulary is sealed at ` +
+            `\`kernel:bootstrapped\`. The auth plugin's missing-cache warning prescribed "you need Redis", ` +
+            `which sent operators to fix a problem they did not have, and connecting Redis did not change the ` +
+            `message; the plugin now resolves the cache where a rate-limit counter uses it.`,
           hint: STARTUP_VERDICT_HINT,
         });
       }

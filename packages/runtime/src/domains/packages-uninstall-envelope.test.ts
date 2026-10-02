@@ -76,10 +76,20 @@ const authed = (caps: string[] = ['manage_metadata']): any => ({
 });
 
 function make(deletePackageResult: any, opts: { registryRemoved?: boolean } = {}) {
+    // [#21276] The door reads existence with `getPackage` before it asks
+    // `deletePackage`, and withdraws only afterwards, so both verbs read one
+    // `registered` flag: `registryRemoved: false` is a package the registry
+    // does not hold, exactly as `SchemaRegistry` would answer it.
+    let registered = opts.registryRemoved ?? true;
+    const pkg = { id: 'com.example.pkg-a', manifest: { id: 'com.example.pkg-a', name: 'A' } };
     const registry = {
         getAllPackages: vi.fn().mockReturnValue([]),
-        getPackage: vi.fn().mockReturnValue({ id: 'com.example.pkg-a', manifest: { id: 'com.example.pkg-a', name: 'A' } }),
-        uninstallPackage: vi.fn().mockReturnValue(opts.registryRemoved ?? true),
+        getPackage: vi.fn(() => (registered ? pkg : undefined)),
+        uninstallPackage: vi.fn(() => {
+            const removed = registered;
+            registered = false;
+            return removed;
+        }),
     };
     const protocol = {
         deletePackage: vi.fn().mockResolvedValue(deletePackageResult),

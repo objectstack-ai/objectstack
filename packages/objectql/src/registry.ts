@@ -3312,44 +3312,67 @@ export class SchemaRegistry {
   }
 
   /**
+   * [#21276] Would uninstalling `packageId` be refused? Throws the refusal
+   * {@link unregisterObjectsByPackage} (and so {@link uninstallPackage}) would
+   * raise, and returns normally otherwise. It reads `objectContributors` and
+   * mutates nothing, so a caller can ask before a step it cannot take back:
+   * `deletePackage` (`@objectstack/metadata-protocol`) asks it before it
+   * deletes the stored `sys_packages` row, so an uninstall this registry would
+   * refuse is refused with nothing removed.
+   *
+   * [#7970] THE REFUSAL PASS — the whole decision, taken before a single
+   * contribution is removed. This check used to live inline in the mutation
+   * walk of {@link unregisterObjectsByPackage}, one object at a time, so a
+   * package owning `account` (free) and `contact` (extended by another
+   * package) lost `account` on the way to refusing over `contact`: the guard
+   * that exists to keep a registry whole was itself reached through a
+   * mutation, and nothing rolled it back. Same predicate and same iteration
+   * order as the inline check it replaced, so the same object still refuses
+   * with the same message.
+   *
+   * ⛔ ONE predicate: {@link unregisterObjectsByPackage} calls this method
+   * rather than keeping its own copy, so the question asked ahead and the
+   * refusal raised by the uninstall cannot disagree. `force` is not a
+   * parameter here: forcing means not asking, and stays the caller's choice.
+   *
+   * @throws Error if the package owns an object another package extends (ADR-0029)
+   */
+  assertPackageUninstallable(packageId: string): void {
+    for (const [fqn, contributors] of this.objectContributors.entries()) {
+      const ownedHere = contributors.some(
+        c => c.packageId === packageId && c.ownership === 'own'
+      );
+      if (!ownedHere) continue;
+      // Extenders from other packages
+      const otherExtenders = contributors.filter(
+        c => c.packageId !== packageId && c.ownership === 'extend'
+      );
+      if (otherExtenders.length > 0) {
+        throw new Error(
+          `Cannot uninstall package "${packageId}": object "${fqn}" is extended by ` +
+          `${otherExtenders.map(c => c.packageId).join(', ')}. Uninstall extenders first.`
+        );
+      }
+    }
+  }
+
+  /**
    * Unregister all objects contributed by a package.
    *
    * [#7970] **Refuses before it mutates.** If any object this package owns is
    * extended by another package (ADR-0029), the call throws having removed
-   * nothing — the refusal is decided across every object first. Callers may
-   * therefore treat a throw as a no-op, which is what lets
-   * {@link uninstallPackage} run this verb ahead of its own mutations.
+   * nothing — the refusal is decided across every object first, by
+   * {@link assertPackageUninstallable}. Callers may therefore treat a throw as
+   * a no-op, which is what lets {@link uninstallPackage} run this verb ahead of
+   * its own mutations.
    *
    * @throws Error if trying to uninstall an owner that has extenders
    */
   unregisterObjectsByPackage(packageId: string, force: boolean = false): void {
-    // [#7970] REFUSAL PASS — the whole decision, taken before a single
-    // contribution is removed. This check used to live inline in the mutation
-    // walk below, one object at a time, so a package owning `account` (free)
-    // and `contact` (extended by another package) lost `account` on the way to
-    // refusing over `contact`: the guard that exists to keep a registry whole
-    // was itself reached through a mutation, and nothing rolled it back. Same
-    // predicate and same iteration order as the inline check it replaces, so
-    // the same object still refuses with the same message — what changed is
-    // only that no removal precedes the throw.
-    if (!force) {
-      for (const [fqn, contributors] of this.objectContributors.entries()) {
-        const ownedHere = contributors.some(
-          c => c.packageId === packageId && c.ownership === 'own'
-        );
-        if (!ownedHere) continue;
-        // Extenders from other packages
-        const otherExtenders = contributors.filter(
-          c => c.packageId !== packageId && c.ownership === 'extend'
-        );
-        if (otherExtenders.length > 0) {
-          throw new Error(
-            `Cannot uninstall package "${packageId}": object "${fqn}" is extended by ` +
-            `${otherExtenders.map(c => c.packageId).join(', ')}. Uninstall extenders first.`
-          );
-        }
-      }
-    }
+    // [#7970] REFUSAL PASS — see {@link assertPackageUninstallable}, which holds
+    // the one copy of the predicate ([#21276] extracted so it can be asked
+    // without uninstalling).
+    if (!force) this.assertPackageUninstallable(packageId);
 
     // MUTATION PASS — carries no refusal of its own; the pass above already
     // proved every removal below is allowed. Keep it that way: a second copy of

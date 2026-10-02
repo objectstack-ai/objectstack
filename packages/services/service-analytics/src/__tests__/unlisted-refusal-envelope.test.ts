@@ -522,9 +522,10 @@ describe('[#5716] the verdicts that deliberately stay an undeclared 500', () => 
     // measurement is three-sided:
     //
     //   - `Metric.type` is the CLOSED `AggregationMetricType` enum, and
-    //     `metric-type-coverage.test.ts` pins that the strategy's aggregate and
-    //     expression sets PARTITION it — its second case is literally "leaves no
-    //     metric type to the unrecognised-type throw";
+    //     `metric-type-coverage.test.ts` pins that the strategy's aggregate set
+    //     EQUALS it (the custom-SQL expression set that used to partition it
+    //     with them was retired, #21000) — its second case is literally "leaves
+    //     no metric type to the refusal";
     //   - `dataset-compiler` writes only a `SUPPORTED_AGGREGATES` member into a
     //     cube (and refuses the other two aggregates with `DATASET_INVALID`
     //     first), so no DATASET can produce one;
@@ -548,7 +549,7 @@ describe('[#5716] the verdicts that deliberately stay an undeclared 500', () => 
       ),
     );
 
-    expect(String(err?.message)).toMatch(/has unrecognised type "median"/);
+    expect(String(err?.message)).toMatch(/cannot be served: its type "median"/);
     expect(err?.code).toBeUndefined();
     expect(err?.status).toBeUndefined();
   });

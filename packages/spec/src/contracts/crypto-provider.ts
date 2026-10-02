@@ -11,24 +11,27 @@
  * the handle differs per producer — see "Producers" below.
  *
  * Producers — three independent call sites construct a
- * {@link CryptoContext}, and only the first of them means "settings":
+ * {@link CryptoContext}, and only the first of them means "settings". Each
+ * names itself with its own member of {@link CRYPTO_CONTEXT_SCOPES}
+ * (`ctx.scope`, ADR-0128 D1):
  *
- *  1. **Settings** (`SettingsService`) — `ctx.namespace` is the settings
- *     namespace, `ctx.key` the specifier key; `handle.id` is recorded in
- *     `sys_setting.value_enc`.
- *  2. **Object secret fields** (the ObjectQL engine's secret-field path)
- *     — `ctx.namespace` is the **object name**, `ctx.key` the **field
- *     name**; `handle.id` is recorded as a `secret:` ref on the business
- *     row itself.
- *  3. **Datasource credentials** (the datasource secret binder) —
- *     `ctx.namespace` is caller-supplied (default `'datasource'`),
- *     `ctx.key` the datasource name; `handle.id` is recorded as the
- *     artefact's `sys_secret:` credentialsRef.
+ *  1. **Settings** (`SettingsService`, scope `'settings'`) —
+ *     `ctx.namespace` is the settings namespace, `ctx.key` the specifier
+ *     key; `handle.id` is recorded in `sys_setting.value_enc`.
+ *  2. **Object secret fields** (the ObjectQL engine's secret-field path,
+ *     scope `'object_secret_field'`) — `ctx.namespace` is the **object
+ *     name**, `ctx.key` the **field name**; `handle.id` is recorded as a
+ *     `secret:` ref on the business row itself.
+ *  3. **Datasource credentials** (the datasource secret binder, scope
+ *     `'datasource_credential'`) — `ctx.namespace` is caller-supplied
+ *     (default `'datasource'`), `ctx.key` the datasource name; `handle.id`
+ *     is recorded as the artefact's `sys_secret:` credentialsRef.
  *
- * All three persist a `sys_secret` row keyed by `handle.id`, and all three
- * share one flat `(namespace, key)` space: `sys_secret` declares that pair
- * **non-unique** precisely because it does not attribute a row to a
- * producer. See {@link CryptoContext} for what that costs an AAD binding.
+ * All three persist a `sys_secret` row keyed by `handle.id`, and the three
+ * `(namespace, key)` vocabularies are uncoordinated: `sys_secret` declares
+ * that pair **non-unique** precisely because it does not attribute a row to
+ * a producer. The scope is what does — see {@link CryptoContext} for how an
+ * AAD binding uses it.
  *
  * Why an interface (not a concrete class):
  *
@@ -55,9 +58,10 @@
  *     value to reveal the plaintext to the consumer (e.g. EmailService
  *     building a transport). Implementations may cache decrypted
  *     plaintext in-process for the duration of a request.
- *  3. `rotateKey(handle)` — re-wraps the same plaintext under a new
- *     KMS key. Returns a new handle (typically `version + 1`). Audit
- *     trail records the rotation as `action='rotate'`.
+ *  3. `rotateKey(handle, ctx)` — re-wraps the same plaintext under the
+ *     provider's current KMS key and current AAD derivation. Returns a new
+ *     handle (typically `version + 1`). Audit trail records the rotation as
+ *     `action='rotate'`.
  *
  * Threading: implementations MUST be safe to call concurrently from
  * multiple async tasks. They should *not* assume sequential access.
@@ -74,45 +78,100 @@ export interface CryptoHandle {
   readonly kmsKeyId: string;
   /** AEAD / cipher tag (e.g. `'aes-256-gcm'`). */
   readonly alg: string;
-  /** Monotonic version bumped on every rotation. */
+  /**
+   * Monotonic version bumped on every rotation. A rotation counter only —
+   * not the AAD derivation that sealed {@link CryptoHandle.ciphertext},
+   * which the provider records inside the ciphertext itself.
+   */
   readonly version: number;
   /**
    * Provider-encoded ciphertext blob. The caller is expected to persist
    * this verbatim under `sys_secret.ciphertext`. Round-tripped to the
-   * provider on `decrypt` and `rotateKey`.
+   * provider on `decrypt` and `rotateKey`. Verbatim matters: the blob
+   * carries the provider's record of which AAD derivation sealed it (see
+   * {@link CryptoContext}), and that record is what `decrypt` dispatches on.
    */
   readonly ciphertext: string;
 }
 
 /**
- * Optional context passed to encrypt/decrypt so providers can implement
- * Additional Authenticated Data (AAD) bindings — e.g. AWS KMS encryption
- * context.
+ * The closed set of producer vocabularies a {@link CryptoContext} is drawn
+ * from — ADR-0128 D1. One member per producer of `CryptoContext` (see
+ * "Producers" on {@link ICryptoProvider}):
  *
- * ⚠️ **What an AAD over this pair does and does not guarantee.**
- * `(namespace, key)` is one flat space shared by the three producer
- * vocabularies listed under {@link ICryptoProvider} — settings
- * namespace/specifier key, object name/field name, datasource binder —
- * and nothing reserves a name in one vocabulary against another. So a
- * provider binding its ciphertext to this pair **rejects a ciphertext
- * swapped between two coordinates within one producer's vocabulary** (a
- * settings value moved to another specifier; a secret field moved to
- * another field). It does **NOT** exclude a cross-vocabulary pair: an
- * object named `mail` carrying a secret field named `api_key` yields the
- * same coordinate as the `mail` settings namespace's `api_key` specifier,
- * under the same provider and key, in a `sys_secret` table that permits
- * both rows — and a ciphertext swapped between those two rows decrypts
- * cleanly. Implementations MUST NOT treat this pair as attributing a
- * ciphertext to a producer.
+ *  - `'settings'` — `SettingsService`: settings namespace + specifier key.
+ *  - `'object_secret_field'` — the ObjectQL engine's secret-field path:
+ *    object name + field name.
+ *  - `'datasource_credential'` — the datasource secret binder:
+ *    caller-supplied namespace (default `'datasource'`) + datasource name.
  *
- * This describes the contract as it stands today, not the shape it is
- * meant to keep: the intended end state is a producer-discriminated AAD
- * (a scope discriminant on this type, delimiter-safe encoding), deferred
- * because it is a breaking `ICryptoProvider` change plus an at-rest
- * rewrap of every existing ciphertext. Until that lands, the paragraph
- * above is the guarantee — do not read a stronger one into it.
+ * Closed on purpose. A new producer of `CryptoContext` adds its own member
+ * here in the same change that adds the producer — ⛔ it never borrows an
+ * existing member, because borrowing one puts the new vocabulary's
+ * `(namespace, key)` pairs back into another producer's AAD space, which is
+ * exactly what the discriminant exists to prevent.
+ */
+export const CRYPTO_CONTEXT_SCOPES = [
+  'settings',
+  'object_secret_field',
+  'datasource_credential',
+] as const;
+
+/** A producer vocabulary — derived from {@link CRYPTO_CONTEXT_SCOPES}. */
+export type CryptoContextScope = (typeof CRYPTO_CONTEXT_SCOPES)[number];
+
+/**
+ * Context passed to encrypt/decrypt/rotateKey so providers can bind
+ * Additional Authenticated Data (AAD) — e.g. AWS KMS encryption context.
+ *
+ * **What the binding covers (ADR-0128).** The AAD binds a ciphertext to the
+ * triple `(scope, namespace, key)`. `(namespace, key)` alone is not a
+ * coordinate: the three producer vocabularies share it, uncoordinated, and
+ * nothing reserves a name in one against another. `scope` names which
+ * vocabulary the pair is drawn from, so under a conforming provider a
+ * ciphertext sealed by one producer does not authenticate under another
+ * producer's context — however the two pairs are spelled — and within one
+ * producer a ciphertext moved to another coordinate does not authenticate
+ * either.
+ *
+ * Every provider that binds AAD MUST:
+ *
+ *  1. **Fold `scope` in** (D1). A binding over `(namespace, key)` alone
+ *     cannot say which producer sealed a ciphertext.
+ *  2. **Encode delimiter-safely** (D2). Distinct `(scope, namespace, key)`
+ *     triples MUST produce distinct AAD bytes — length-prefixing, escaping,
+ *     or a canonical structured encoding. ⛔ Never an unescaped join:
+ *     neither a settings specifier key nor a caller-supplied datasource
+ *     namespace is barred from containing any separator.
+ *  3. **Record its derivation in what it seals** (§4's versioned handle). A
+ *     provider whose AAD derivation changes records, in the ciphertext it
+ *     returns, which derivation sealed it. `decrypt` and `rotateKey` open a
+ *     ciphertext with the derivation it records, and refuse — fail closed —
+ *     one whose derivation they do not know. ⛔ Never try a second
+ *     derivation, or a second scope, after one fails (D3: the fix lives at
+ *     the producer of the AAD, never in a fallback): the record decides,
+ *     nothing is guessed.
+ *
+ * ⚠️ **What it does not cover yet.** A ciphertext sealed before its
+ * provider adopted the scope (for `LocalCryptoProvider`: every handle whose
+ * ciphertext carries no derivation marker) still carries the older binding
+ * over `(namespace, key)` alone. That binding rejects a ciphertext moved
+ * between two coordinates of one vocabulary and does NOT exclude a pair
+ * spelled identically in two vocabularies. It holds until the ciphertext is
+ * re-wrapped under the current derivation ({@link ICryptoProvider.rotateKey}).
+ * Implementations MUST NOT treat such a ciphertext as attributed to a
+ * producer.
  */
 export interface CryptoContext {
+  /**
+   * The producer vocabulary `namespace` and `key` are drawn from — REQUIRED
+   * (ADR-0128 D1). Each producer passes its own member of
+   * {@link CRYPTO_CONTEXT_SCOPES}, on every call (`encrypt`, `decrypt` and
+   * `rotateKey` alike), so the AAD names the producer as well as the
+   * coordinate. Required, never optional: an optional discriminant is
+   * absent exactly where nobody thought about it.
+   */
+  scope: CryptoContextScope;
   /**
    * Producer-scoped namespace: a settings namespace, an **object name**
    * (secret fields), or a caller-supplied datasource namespace (default
@@ -132,19 +191,27 @@ export interface ICryptoProvider {
   /**
    * Encrypt plaintext and return a handle. The caller persists it as a
    * `sys_secret` row and references it from wherever its producer keeps
-   * the reference (see "Producers" on {@link ICryptoProvider}).
+   * the reference (see "Producers" on {@link ICryptoProvider}). The
+   * ciphertext is bound to `ctx` under the provider's current AAD
+   * derivation, and records that derivation (see {@link CryptoContext}).
    */
   encrypt(plain: string, ctx: CryptoContext): Promise<CryptoHandle>;
 
   /**
-   * Decrypt a handle previously returned by `encrypt`. Throws when the
-   * ciphertext is invalid for the given context (AAD mismatch, missing
-   * KMS key, expired version, etc.).
+   * Decrypt a handle previously returned by `encrypt`. Opens the ciphertext
+   * with the AAD derivation it records, under the caller's `ctx` — the same
+   * producer's scope that sealed it. Throws when the ciphertext is invalid
+   * for the given context (AAD mismatch, a scope or coordinate other than
+   * the sealing one, missing KMS key, a derivation the provider does not
+   * know, etc.).
    */
   decrypt(handle: CryptoHandle, ctx: CryptoContext): Promise<string>;
 
   /**
-   * Re-wrap the plaintext under the provider's current KMS key.
+   * Re-wrap the plaintext under the provider's current KMS key and current
+   * AAD derivation: the input is opened with the derivation it records and
+   * the output is sealed with the current one, so this is also the seam an
+   * at-rest re-wrap of older ciphertexts uses.
    * The returned handle replaces the input handle in `sys_secret`.
    * Implementations SHOULD bump `version` and update `kmsKeyId` while
    * leaving `id` stable, so no producer's stored reference to the handle

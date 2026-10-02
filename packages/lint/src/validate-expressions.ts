@@ -860,19 +860,20 @@ const FIELD_RULE_SLOT_CONSEQUENCE: Record<string, string> = {
     // inside the message registers `sectionFields` as a read receiver of this
     // rule. Measured — it went red on the first run, exactly as the sibling did.
     '(plugin-form\'s `sectionFields` copies this object rule onto the runtime form field and ' +
-    '`resolveFieldRuleState` evaluates it with the host scope bound, objectui#6010) — so the ' +
+    '`resolveFieldRuleState` evaluates it with the host scope bound, the `current_user` binding ' +
+    'ADR-0089 D1 gives every runtime record surface) — so the ' +
     'control is hidden in that one form while NO server-side gate evaluates a field-level ' +
     '`visibleWhen` at all: the record still carries the value and every other reader still ' +
     'returns it, a SILENT enforcement gap. Where no host publishes a scope (the console public ' +
     '`/f/:slug` route, and every non-form reader) the root is unbound, the predicate faults and ' +
     'the renderer falls back to VISIBLE (`resolveFieldRuleState` evaluates visibility with ' +
-    '`fallback: true`), leaving the field the test was meant to hide showing for everyone ' +
-    '(#6146). The gap is the WORSE of the two — a visible fail-open gets reported, and a ' +
+    '`fallback: true`), leaving the field the test was meant to hide showing for everyone. ' +
+    'The gap is the WORSE of the two — a visible fail-open gets reported, and a ' +
     'silent one does not',
   readonlyWhen:
     'the predicate faults — and the two ends fault in OPPOSITE directions. The server treats ' +
     'the field as LOCKED (`isReadonlyWhenLocked` will not waive a declared lock it could not ' +
-    'evaluate, #4889) and drops your value from the payload, while the form still renders the ' +
+    'evaluate) and drops your value from the payload, while the form still renders the ' +
     'field editable (`fallback: false`). The server is the one that decides: ' +
     'the field looks writable, the save reports success, and the value silently never lands',
   requiredWhen:
@@ -928,7 +929,8 @@ export function fieldRuleRootIssue(
       `holds server-side. To hide the FIELD by role, declare field-level security on a ` +
       `permission set (\`fields: { '<object>.<field>': { readable: false } }\`), which the ` +
       `server enforces. To gate on record state, rewrite the predicate against \`record\`. ` +
-      `Note that a form VIEW's own field predicate HAS bound these roots since objectui#6010 — ` +
+      `Note that a form VIEW's own field predicate HAS bound these roots since the form renderer ` +
+      `took up the \`current_user\` binding ADR-0089 D1 gives every runtime record surface — ` +
       `but only in the renderer, so moving a server-enforced object rule there swaps a loud ` +
       `error for a silent enforcement gap; it is not a fourth answer.`
     : root === 'data'
@@ -1732,7 +1734,8 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
               where: `${at} · node '${node.id}' (script) callable`,
               message:
                 `script node carries \`${retired.map((k) => `config.${k}`).join('`, `')}\` — retired in ` +
-                `@objectstack/spec 17 (#4343). The built-in 'email'/'slack' actions were logger-backed ` +
+                `@objectstack/spec 17, which made \`script\` a call to a registered function and nothing ` +
+                `else. The built-in 'email'/'slack' actions were logger-backed ` +
                 `stubs that delivered nothing, and inline \`config.script\` was never executed. ` +
                 (action && action !== 'invoke_function' && !['email', 'slack'].includes(action)
                   ? `\`actionType: '${action}'\` named a registered function — move it to \`function: '${action}'\`. `

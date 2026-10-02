@@ -8563,6 +8563,26 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#21207] Read accessor for the registered provider's keyed digest
+   * (`ICryptoProvider.keyedDigest`), or `undefined` while no provider is
+   * registered.
+   *
+   * The ONE way a consumer outside this engine reaches the server-held key:
+   * the doors that serve a stored metadata content hash serve
+   * `keyedDigest(stored)` instead, and compare a caller's version token in that
+   * same form. Deliberately narrower than the provider itself — a consumer
+   * that needs a keyed digest gets that one primitive, never `decrypt`.
+   *
+   * Read at the moment of use, never cached by the caller: a host injects the
+   * provider AFTER the kernel starts (see {@link setCryptoProvider}), so a
+   * value captured at boot would still say "none" once one is registered.
+   */
+  getKeyedDigest(): ((plain: string) => Promise<string>) | undefined {
+    const provider = this.cryptoProvider;
+    return provider ? (plain: string) => provider.keyedDigest(plain) : undefined;
+  }
+
+  /**
    * [#8022] Observe crypto-provider registration.
    *
    * Exists for consumers that must dereference a `secret` field on a schedule
@@ -8681,7 +8701,10 @@ export class ObjectQL implements IObjectQLEngine {
       }
 
       const plain = typeof value === 'string' ? value : JSON.stringify(value);
+      // ADR-0128 D1: this producer's own scope, so the AAD names the
+      // object-secret-field vocabulary and no other producer's context opens it.
       const handle: CryptoHandle = await this.cryptoProvider.encrypt(plain, {
+        scope: 'object_secret_field',
         namespace: object,
         key: field,
         tenantId: context?.tenantId,
@@ -8994,7 +9017,11 @@ export class ObjectQL implements IObjectQLEngine {
       version: secret.version,
       ciphertext: secret.ciphertext,
     };
+    // ADR-0128 D1: a `secret:` ref is the object-secret-field producer's
+    // holder, so the scope is that producer's. A row another producer sealed
+    // under a scoped derivation therefore does not open here.
     return this.cryptoProvider.decrypt(handle, {
+      scope: 'object_secret_field',
       namespace: secret.namespace,
       key: secret.key,
       tenantId: opts?.tenantId,

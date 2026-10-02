@@ -441,15 +441,39 @@ const RUNTIME_NEEDS_FULL_SNAPSHOT =
   'now would report the rest of the tenant\'s metadata as missing rather than judging this write.';
 
 /**
- * The rule parses authored SOURCE (react/jsx page bodies, L2 JS hook/action
+ * The rule parses authored SOURCE (react page bodies, L2 JS hook/action
  * bodies) through `typescript` / `sucrase`. Those are exactly the dependencies
  * `lazy-deps.test.ts` keeps off the kernel boot path, and `@objectstack/lint`'s
  * runtime entry is guarded to load neither. Studio's page editor has its own
  * save-time compile path; this gate is not where that check belongs.
+ *
+ * The html tier's rule (`validateJsxPages`) is NOT this case — see
+ * {@link RUNTIME_HTML_SOURCE_COMPILED_AT_SAVE}.
  */
 const RUNTIME_HEAVY_SOURCE_PARSE =
   'Not runtime-safe: parses authored source through typescript/sucrase, the two dependencies the ' +
   'kernel boot path must never load (lazy-deps.test.ts). Studio compiles page source on its own path.';
+
+/**
+ * `validateJsxPages` parses an html page's source with `@objectstack/sdui-parser`
+ * — no dependencies, never executes the source — so nothing about it is unsafe
+ * on the kernel boot path. It stays off this registry's runtime surface because
+ * the save door already runs the same compile itself: `findHtmlPageSourceGaps`
+ * in `@objectstack/metadata-protocol`'s `runtime-authoring-gate.ts` imports the
+ * same `compile()` and runs it against the deployment's SDUI component manifest,
+ * reports under the same `jsx-CODE` rule ids, and adds the page's `requires`
+ * check (`page-requires-disagrees-with-source`). Wiring this entry there too
+ * would judge every html page twice.
+ *
+ * The two differ in one case: with no manifest this rule still checks syntax
+ * and structure, while a host that registered no manifest has its save door
+ * judge nothing and says so once at boot.
+ */
+const RUNTIME_HTML_SOURCE_COMPILED_AT_SAVE =
+  'Runtime-safe (the dependency-free @objectstack/sdui-parser, which never executes the source) but ' +
+  'not wired here: the save door already compiles an html page\'s source itself, with the same ' +
+  'compiler against the deployment\'s SDUI component manifest and under the same jsx-* rule ids ' +
+  '(metadata-protocol\'s findHtmlPageSourceGaps), so a second run would judge each page twice.';
 
 /**
  * The rule judges an OBJECT/field declaration at `advisory` tier — it can
@@ -1111,7 +1135,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ALL,
     source: 'packages/lint/src/validate-jsx-pages.ts',
     surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_HEAVY_SOURCE_PARSE,
+    surfaceReason: RUNTIME_HTML_SOURCE_COMPILED_AT_SAVE,
     run: (stack, ctx) =>
       validateJsxPages(stack, ctx.sduiManifest ? { manifest: ctx.sduiManifest as never } : {}),
   },
