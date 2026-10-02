@@ -102,6 +102,13 @@ const DIAGNOSTIC: Readonly<Record<DialectId, Readonly<Record<LineId, RegExp>>>> 
   },
 };
 
+/** A missing table, in each dialect's own words. */
+const MISSING_TABLE_DIAGNOSTIC: Readonly<Record<DialectId, RegExp>> = {
+  sqlite: /no such table/,
+  pg: /relation .* does not exist/,
+  mysql: /doesn't exist/,
+};
+
 /** The code and the class of fault each line opens with. */
 const LEAD: Readonly<Record<LineId, string>> = {
   where: `[sql-driver] INVALID_FILTER — a WHERE column could not be resolved on '${TABLE}'`,
@@ -195,6 +202,100 @@ class RecordingDriver extends SqlDriver {
   }
 }
 
+/** One way to make one line refuse, with what its pin and its control expect. */
+interface Drive {
+  readonly name: string;
+  readonly line: LineId;
+  readonly run: (driver: RecordingDriver, cell: DialectCell) => Promise<unknown>;
+  /** Whether the dialect text this drive hands the line carries the sentinel (see the header). */
+  readonly handed: (cell: DialectCell) => boolean;
+  /** The caller-facing envelope, which this card leaves unchanged. */
+  readonly envelope: { readonly code: string; readonly status: number };
+  /** The diagnostic the line must keep, when not its line's row of {@link DIAGNOSTIC}. */
+  readonly diagnostic?: Readonly<Record<DialectId, RegExp>>;
+  /** The line prints the dialect's own error code in its lead. */
+  readonly dialectCode?: boolean;
+  /** Identifiers the line must still name. */
+  readonly subject?: readonly string[];
+}
+
+const DRIVES: readonly Drive[] = [
+  {
+    name: '① the unresolvable WHERE column, on find',
+    line: 'where',
+    run: (d) => d.find(TABLE, { where: { [MISSING_COLUMN]: SENTINEL } }),
+    handed: (cell) => HANDED[cell.id].where,
+    envelope: { code: 'INVALID_FILTER', status: 400 },
+    subject: [TABLE, MISSING_COLUMN],
+  },
+  {
+    name: '① the unresolvable WHERE column, on count',
+    line: 'where',
+    run: (d) => d.count(TABLE, { where: { [MISSING_COLUMN]: SENTINEL } }),
+    handed: (cell) => HANDED[cell.id].where,
+    envelope: { code: 'INVALID_FILTER', status: 400 },
+    subject: [TABLE, MISSING_COLUMN],
+  },
+  {
+    // Postgres coerces nothing: a string compared to an integer column is
+    // refused with `22P02`, whose diagnostic inlines the value. SQLite and
+    // MySQL coerce that comparison, so they are refused on a table that does
+    // not exist instead, and carry the value in the statement knex prefixes.
+    name: '② the read terminal',
+    line: 'read',
+    run: (d, cell) =>
+      cell.id === 'pg'
+        ? d.find(TABLE, { where: { rank: SENTINEL } })
+        : d.find(MISSING, { where: { title: SENTINEL } }),
+    handed: (cell) => HANDED[cell.id].read,
+    envelope: { code: 'DATABASE_ERROR', status: 500 },
+    dialectCode: true,
+  },
+  {
+    name: '③ the raw-statement terminal, a bound value',
+    line: 'raw',
+    run: (d, cell) =>
+      cell.id === 'pg'
+        ? d.execute('select cast(? as integer) as x', [SENTINEL])
+        : d.execute(`select ? as x from ${MISSING}`, [SENTINEL]),
+    handed: (cell) => HANDED[cell.id].raw,
+    envelope: { code: 'DATABASE_ERROR', status: 500 },
+    dialectCode: true,
+  },
+  {
+    // The line used to write the statement it was sent beside the dialect's
+    // text. A raw statement may spell a value inline, so that field carried it
+    // on every dialect, Postgres included; it is no longer written.
+    name: '③ the raw-statement terminal, a value spelled inline',
+    line: 'raw',
+    run: (d) => d.execute(`select '${SENTINEL}' as x from ${MISSING}`),
+    handed: () => true,
+    envelope: { code: 'DATABASE_ERROR', status: 500 },
+    diagnostic: MISSING_TABLE_DIAGNOSTIC,
+    dialectCode: true,
+  },
+  {
+    name: '④ the unresolvable groupBy / aggregation column',
+    line: 'aggregate',
+    run: (d) =>
+      d.aggregate(TABLE, {
+        where: { title: SENTINEL },
+        aggregations: [{ function: 'avg', field: MISSING_COLUMN, alias: 'os21385_avg' }],
+      }),
+    handed: (cell) => HANDED[cell.id].aggregate,
+    envelope: { code: 'INVALID_FIELD', status: 400 },
+    subject: [TABLE, MISSING_COLUMN],
+  },
+  {
+    name: '⑤ the unresolvable listed-distinct column',
+    line: 'distinct',
+    run: (d) => d.distinct(TABLE, MISSING_COLUMN, { title: SENTINEL }),
+    handed: (cell) => HANDED[cell.id].distinct,
+    envelope: { code: 'INVALID_FIELD', status: 400 },
+    subject: [TABLE, MISSING_COLUMN],
+  },
+];
+
 function declareCell(cell: DialectCell): void {
   describe(`[#21385] driver-sql refusal log lines carry no bound value (${cell.label})`, () => {
     let driver: RecordingDriver;
@@ -213,104 +314,37 @@ function declareCell(cell: DialectCell): void {
       await driver.disconnect();
     });
 
-    /**
-     * The pin every line shares: handed as measured, written with no sentinel,
-     * and keeping its code, class and diagnostic. Booleans only, by design.
-     */
-    function expectCut(
-      line: LineId,
-      outcome: { handed: Handed; written: string },
-      extra: { code?: string; subject?: readonly string[] } = {},
-    ): void {
-      const { handed, written } = outcome;
-      expect(handed.carriesSentinel, `${line}: the dialect text handed to the line carried the sentinel`)
-        .toBe(HANDED[cell.id][line]);
-      expect(written.includes(SENTINEL), `${line}: the sentinel reached the written line`).toBe(false);
-      // The controls: what the line is FOR survives the cut.
-      expect(written.startsWith(LEAD[line]), `${line}: keeps its code and class of fault`).toBe(true);
-      expect(DIAGNOSTIC[cell.id][line].test(written), `${line}: keeps the dialect's own diagnostic`).toBe(true);
-      expect(written.includes(STATEMENT_MARKER), `${line}: says a statement was cut`).toBe(true);
-      if (extra.code !== undefined) {
-        expect(written.includes(`(${extra.code})`), `${line}: keeps the dialect's error code`).toBe(true);
-      }
-      for (const name of extra.subject ?? []) {
-        expect(written.includes(`'${name}'`), `${line}: still names '${name}'`).toBe(true);
-      }
+    for (const drive of DRIVES) {
+      // Two cases per drive, so a reverse verification can tell them apart:
+      // the SENTINEL pin, which only the cut makes green, and the CONTROL,
+      // which holds with or without the cut (what the line is FOR).
+      it(`${drive.name}: the line carries no sentinel`, async () => {
+        const { handed, written } = await driver.refuse(drive.line, () => drive.run(driver, cell));
+        expect(handed.carriesSentinel, `${drive.name}: the dialect text handed to the line carried the sentinel`)
+          .toBe(drive.handed(cell));
+        expect(written.includes(SENTINEL), `${drive.name}: the sentinel reached the written line`).toBe(false);
+        expect(written.includes(STATEMENT_MARKER), `${drive.name}: says a statement was cut`).toBe(true);
+        if (drive.line === 'raw') {
+          expect(written.includes('statement: '), `${drive.name}: no separate statement field`).toBe(false);
+        }
+      });
+
+      it(`${drive.name}: CONTROL — the line keeps its code, class of fault and diagnostic`, async () => {
+        const { err, handed, written } = await driver.refuse(drive.line, () => drive.run(driver, cell));
+        expect(err.code, `${drive.name}: the envelope's code is unchanged`).toBe(drive.envelope.code);
+        expect(err.status, `${drive.name}: the envelope's status is unchanged`).toBe(drive.envelope.status);
+        expect(written.startsWith(LEAD[drive.line]), `${drive.name}: keeps its code and class of fault`).toBe(true);
+        const diagnostic = drive.diagnostic?.[cell.id] ?? DIAGNOSTIC[cell.id][drive.line];
+        expect(diagnostic.test(written), `${drive.name}: keeps the dialect's own diagnostic`).toBe(true);
+        if (drive.dialectCode) {
+          expect(typeof handed.code, `${drive.name}: the dialect error has a code`).toBe('string');
+          expect(written.includes(`(${String(handed.code)})`), `${drive.name}: keeps the dialect's error code`).toBe(true);
+        }
+        for (const name of drive.subject ?? []) {
+          expect(written.includes(`'${name}'`), `${drive.name}: still names '${name}'`).toBe(true);
+        }
+      });
     }
-
-    it('① the unresolvable WHERE column — on find and on count', async () => {
-      for (const half of ['find', 'count'] as const) {
-        const outcome = await driver.refuse('where', () =>
-          half === 'find'
-            ? driver.find(TABLE, { where: { [MISSING_COLUMN]: SENTINEL } })
-            : driver.count(TABLE, { where: { [MISSING_COLUMN]: SENTINEL } }),
-        );
-        expect(outcome.err.code, `where/${half}: the envelope is unchanged`).toBe('INVALID_FILTER');
-        expect(outcome.err.status, `where/${half}: the envelope is unchanged`).toBe(400);
-        expectCut('where', outcome, { subject: [TABLE, MISSING_COLUMN] });
-      }
-    });
-
-    it('② the read terminal', async () => {
-      // Postgres coerces nothing: a string compared to an integer column is
-      // refused with `22P02`, whose diagnostic inlines the value. SQLite and
-      // MySQL coerce that comparison, so they are refused on a table that does
-      // not exist instead, and carry the value in the statement knex prefixes.
-      const outcome = await driver.refuse('read', () =>
-        cell.id === 'pg'
-          ? driver.find(TABLE, { where: { rank: SENTINEL } })
-          : driver.find(MISSING, { where: { title: SENTINEL } }),
-      );
-      expect(outcome.err.code, 'read: the envelope is unchanged').toBe('DATABASE_ERROR');
-      expect(outcome.err.status, 'read: the envelope is unchanged').toBe(500);
-      expect(typeof outcome.handed.code, 'read: the dialect error has a code').toBe('string');
-      expectCut('read', outcome, { code: String(outcome.handed.code) });
-    });
-
-    it('③ the raw-statement terminal — a bound value', async () => {
-      const outcome = await driver.refuse('raw', () =>
-        cell.id === 'pg'
-          ? driver.execute('select cast(? as integer) as x', [SENTINEL])
-          : driver.execute(`select ? as x from ${MISSING}`, [SENTINEL]),
-      );
-      expect(outcome.err.code, 'raw: the envelope is unchanged').toBe('DATABASE_ERROR');
-      expect(outcome.err.status, 'raw: the envelope is unchanged').toBe(500);
-      expect(typeof outcome.handed.code, 'raw: the dialect error has a code').toBe('string');
-      expectCut('raw', outcome, { code: String(outcome.handed.code) });
-    });
-
-    it('③ the raw-statement terminal — a value spelled inline, which the sent statement itself carries', async () => {
-      // The line used to write the statement it was sent beside the dialect's
-      // text. A raw statement may spell a value inline, so that field carried
-      // it on every dialect, Postgres included; it is no longer written.
-      const outcome = await driver.refuse('raw', () => driver.execute(`select '${SENTINEL}' as x from ${MISSING}`));
-      expect(outcome.handed.carriesSentinel, 'raw/inline: the dialect text handed to the line carried the sentinel')
-        .toBe(true);
-      expect(outcome.written.includes(SENTINEL), 'raw/inline: the sentinel reached the written line').toBe(false);
-      expect(outcome.written.includes('statement: '), 'raw/inline: no separate statement field').toBe(false);
-      expect(outcome.written.includes(STATEMENT_MARKER), 'raw/inline: says a statement was cut').toBe(true);
-    });
-
-    it('④ the unresolvable groupBy / aggregation column', async () => {
-      const outcome = await driver.refuse('aggregate', () =>
-        driver.aggregate(TABLE, {
-          where: { title: SENTINEL },
-          aggregations: [{ function: 'avg', field: MISSING_COLUMN, alias: 'os21385_avg' }],
-        }),
-      );
-      expect(outcome.err.code, 'aggregate: the envelope is unchanged').toBe('INVALID_FIELD');
-      expect(outcome.err.status, 'aggregate: the envelope is unchanged').toBe(400);
-      expectCut('aggregate', outcome, { subject: [TABLE, MISSING_COLUMN] });
-    });
-
-    it('⑤ the unresolvable listed-distinct column', async () => {
-      const outcome = await driver.refuse('distinct', () =>
-        driver.distinct(TABLE, MISSING_COLUMN, { title: SENTINEL }),
-      );
-      expect(outcome.err.code, 'distinct: the envelope is unchanged').toBe('INVALID_FIELD');
-      expect(outcome.err.status, 'distinct: the envelope is unchanged').toBe(400);
-      expectCut('distinct', outcome, { subject: [TABLE, MISSING_COLUMN] });
-    });
 
     it('CONTROL — a read that succeeds writes no refusal line at all', async () => {
       driver.warned.length = 0;
