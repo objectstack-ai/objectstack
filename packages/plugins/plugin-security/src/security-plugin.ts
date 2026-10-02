@@ -37,7 +37,7 @@ import {
   d10NarrowingStatement,
 } from './explain-engine.js';
 import { declaredComparisonColumns } from './declared-comparison-columns.js';
-import { storedFormCheckJudge } from './rls-check-stored-form.js';
+import { jsonColumnCheckRefusalCarriedBy, storedFormCheckJudge } from './rls-check-stored-form.js';
 import type { ExplainDecision, ExplainOperation } from '@objectstack/spec/security';
 import type { II18nService, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
 
@@ -3331,6 +3331,26 @@ export class SecurityPlugin implements Plugin {
                     field: refusal.field,
                     operator: refusal.operator,
                     reference: refusal.reference,
+                    userId: opCtx.context?.userId ?? 'unknown',
+                  },
+                );
+              }
+              // [#21254] An operator the read refuses on a declared JSON-stored
+              // column. The caller's 400 withholds the field and the operator
+              // and says the full diagnostic is in the server log: this line.
+              const jsonColumnRefusal = jsonColumnCheckRefusalCarriedBy(e);
+              if (jsonColumnRefusal) {
+                const policy = jsonColumnRefusal.policy ?? '(unattributed)';
+                ctx.logger.warn(
+                  `[Security] RLS check REFUSED on ${opCtx.operation} '${opCtx.object}' (INVALID_FILTER): ` +
+                    `policy '${policy}' — At ${jsonColumnRefusal.path}: ${jsonColumnRefusal.diagnostic} The ` +
+                    `read this policy scopes is refused for the same reason.`,
+                  {
+                    operation: opCtx.operation,
+                    object: opCtx.object,
+                    policies: [policy],
+                    field: jsonColumnRefusal.field,
+                    operator: jsonColumnRefusal.operator,
                     userId: opCtx.context?.userId ?? 'unknown',
                   },
                 );

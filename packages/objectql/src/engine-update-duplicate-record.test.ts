@@ -64,8 +64,23 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
 import { ObjectQL, ScopedContext } from './engine';
 import { DuplicateRecordError, DUPLICATE_RECORD_CODE } from './duplicate-record-error';
+import { redactPropagatedDriverFault } from './driver-fault-redaction';
 import { SchemaRegistry } from './registry';
 import type { IDataDriver } from '@objectstack/spec/contracts';
+
+/**
+ * [#21274] The driver's error as it LEAVES the engine: the same class, the same
+ * code and the database's own diagnostic, with the bound statement and the
+ * caller's values cut (`redactPropagatedDriverFault`). Until #21274 this was
+ * the very same object; identity is what the boundary cut gives up, and only
+ * identity — a driver error with nothing to cut still arrives as itself.
+ */
+function expectDriverErrorAsItLeaves(actual: unknown, raw: Error): void {
+  const expected = redactPropagatedDriverFault(raw) as Error;
+  expect(Object.getPrototypeOf(actual)).toBe(Object.getPrototypeOf(raw));
+  expect((actual as Error).message).toBe(expected.message);
+  expect((actual as { code?: unknown }).code).toBe((raw as { code?: unknown }).code);
+}
 
 vi.mock('./registry', async () => {
   const { createRegistryModuleMock } = await import('./registry-module-mock.js');
@@ -272,9 +287,10 @@ describe('engine.update — a driver unique violation is a DUPLICATE_RECORD enve
       expect(failure.code).toBe(DUPLICATE_RECORD_CODE);
       expect(failure.code).toBe('DUPLICATE_RECORD');
       expect(failure.status).toBe(409);
-      // The driver's own diagnosis is preserved rather than replaced — and it is
-      // the SAME object, not a copy, so nothing about it was lost in transit.
-      expect(failure.cause).toBe(raw);
+      // The driver's own diagnosis is preserved rather than replaced: its class,
+      // its code and the database's words. [#21274] A copy since the boundary
+      // cut — the bound statement and the caller's values are what it gave up.
+      expectDriverErrorAsItLeaves(failure.cause, raw);
       expect(failure).toBeInstanceOf(DuplicateRecordError);
       expect(failure.name).toBe('DuplicateRecordError');
       // Non-vacuity: the by-id exit is the one that threw.
@@ -334,7 +350,7 @@ describe('engine.update — a driver unique violation is a DUPLICATE_RECORD enve
 
       expect(failure.code).toBe('DUPLICATE_RECORD');
       expect(failure.status).toBe(409);
-      expect(failure.cause).toBe(raw);
+      expectDriverErrorAsItLeaves(failure.cause, raw);
       expect((failure.cause as any).code).toBe('UNIQUE_VIOLATION');
       // Measured on a real InMemoryDriver: its declared-index sentence names the
       // key columns in parentheses and no single column, so the column reader
@@ -352,8 +368,12 @@ describe('engine.update — a driver unique violation is a DUPLICATE_RECORD enve
 
       const failure = await refusalOf(() => byId(engine));
 
-      expect(failure).toBe(already);
-      expect(failure.cause).toBe(inner);
+      // [#21274] No longer the same object — the boundary cuts the envelope's
+      // `cause` — but still ONE envelope deep, which is what this pins.
+      expect(failure).toBeInstanceOf(DuplicateRecordError);
+      expect(failure.field).toBe(already.field);
+      expect(failure.cause).not.toBeInstanceOf(DuplicateRecordError);
+      expectDriverErrorAsItLeaves(failure.cause, inner);
     });
   });
 
@@ -373,7 +393,7 @@ describe('engine.update — a driver unique violation is a DUPLICATE_RECORD enve
       expect(driver.update).not.toHaveBeenCalled();
       expect(failure.code).toBe('DUPLICATE_RECORD');
       expect(failure.status).toBe(409);
-      expect(failure.cause).toBe(raw);
+      expectDriverErrorAsItLeaves(failure.cause, raw);
       expect(failure.object).toBe('doc');
       expect(failure).toBeInstanceOf(DuplicateRecordError);
     });
@@ -419,7 +439,7 @@ describe('engine.update — a driver unique violation is a DUPLICATE_RECORD enve
 
       expect(failure.code).toBe('DUPLICATE_RECORD');
       expect(failure.status).toBe(409);
-      expect(failure.cause).toBe(raw);
+      expectDriverErrorAsItLeaves(failure.cause, raw);
     });
   });
 
@@ -440,7 +460,7 @@ describe('engine.update — a driver unique violation is a DUPLICATE_RECORD enve
 
       expect(failure.code).toBe('DUPLICATE_RECORD');
       expect(failure.status).toBe(409);
-      expect(failure.cause).toBe(raw);
+      expectDriverErrorAsItLeaves(failure.cause, raw);
     });
 
     it('`updateById(id, data)` — the by-id alias', async () => {
@@ -453,7 +473,7 @@ describe('engine.update — a driver unique violation is a DUPLICATE_RECORD enve
 
       expect(failure.code).toBe('DUPLICATE_RECORD');
       expect(failure.status).toBe(409);
-      expect(failure.cause).toBe(raw);
+      expectDriverErrorAsItLeaves(failure.cause, raw);
       expect(failure.field).toBe('email');
     });
   });
@@ -533,7 +553,8 @@ describe('engine.update — a driver unique violation is a DUPLICATE_RECORD enve
       const failure = await refusalOf(() => byId(engine));
 
       expect(driver.update).toHaveBeenCalledTimes(1);
-      expect(failure).toBe(nested);
+      // [#21274] Cut where it leaves the engine, so a copy — but THIS error, unwrapped.
+      expectDriverErrorAsItLeaves(failure, nested);
       expect(failure).not.toBeInstanceOf(DuplicateRecordError);
       expect(failure.code).toBe('SQLITE_CONSTRAINT_UNIQUE');
       expect(failure.status).toBeUndefined();
@@ -572,8 +593,8 @@ describe('engine.update — a driver unique violation is a DUPLICATE_RECORD enve
     });
 
     it('carries none of the driver statement or its bound values', async () => {
-      // #8682's discipline, one layer out: the compiled statement stays where it
-      // was, on `cause`. REST's declared-4xx arm ships `message` to the client
+      // #8682's discipline, one layer out: the compiled statement is not quoted
+      // here (and, since #21274, is cut from `cause` too). REST's declared-4xx arm ships `message` to the client
       // verbatim, so quoting the driver here would move the leak onto the wire.
       const { engine } = makeRig({ refuse: sqliteDuplicate });
       await engine.init();
@@ -584,7 +605,11 @@ describe('engine.update — a driver unique violation is a DUPLICATE_RECORD enve
       expect(failure.message).not.toContain('set `email`');
       expect(failure.message).not.toContain('a@b.example');
       expect(failure.message).not.toContain("'r2'");
-      expect(String((failure.cause as Error).message)).toMatch(/update `doc` set/i);
+      // [#21274] …and since the boundary cut, not on `cause` either: its kind and
+      // the database's own words stay, the statement and its values do not.
+      expect(String((failure.cause as Error).message)).not.toMatch(/update `doc` set/i);
+      expect(String((failure.cause as Error).message)).not.toContain('a@b.example');
+      expect(String((failure.cause as Error).message)).toMatch(/^update \[statement and bound values redacted\] - UNIQUE constraint failed: doc\.email$/);
     });
 
     it('addresses the application author on `developerMessage`, and does not call the write an insert', async () => {

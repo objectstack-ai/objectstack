@@ -76,8 +76,9 @@
  * `@objectstack/types` refuses to read a column out of it for exactly that
  * reason), and an operator debugging a duplicate needs that index name.
  *
- * ⛔ This is a server LOG. The rethrown error is untouched and every HTTP
- * boundary is unaffected.
+ * ⛔ This is a server LOG. [#21274] The rethrown error is cut too, at the
+ * engine boundary, by the same templates; every HTTP answer is unaffected (see
+ * "The thrown error is redacted too" below).
  *
  * ## [#9160] The list is now MEASURED, and there is a way to notice a gap
  *
@@ -243,14 +244,47 @@
  * constraint failed: sys_user.email`, `SQLITE_CONSTRAINT_NOTNULL: …`) and is
  * returned untouched — there is nothing there but the diagnostic already.
  *
- * ## Not a change to the thrown error
+ * ## [#21274] The thrown error is redacted too, once, where it leaves the engine
  *
- * This never mutates and never replaces what the engine rethrows. The REST
- * boundary reads the driver's raw message to answer `400 INVALID_FIELD` with
- * the failing field name (`mapDataError`), and that answer is correct and must
- * stay byte-identical. The redaction applies to the LOG SLOT only — one
- * argument at one call site — so the caller's answer and the operator's log
- * diverge exactly where they should.
+ * The paragraphs above were written for ONE consumer, the engine's own log
+ * line, and they left the error the engine rethrows untouched. That error has
+ * other consumers: every in-process caller that logs what it caught. The auth
+ * library's logger was measured printing a failed auth-table write's statement
+ * and bound values, through three carriers (its error line, its server-error
+ * line and the error object's properties), while the engine's own line for the
+ * same failure was redacted. A per-consumer patch would leave the class open
+ * for the next logger, so the cut now also runs at the ENGINE BOUNDARY, on the
+ * error itself: {@link redactPropagatedDriverFault}.
+ *
+ * It is the same cut, with two differences, both MEASURED rather than chosen:
+ *
+ *  1. **Where the marker goes.** The log line appends it. The propagated
+ *     message keeps the statement's POSITION and its leading verb instead
+ *     (`<verb> [statement and bound values redacted] - <diagnostic>`). The
+ *     propagated message is READ by classifiers the log line never feeds:
+ *     `mapDataError` withholds a driver dump as `DATABASE_ERROR`, and for
+ *     several families (Postgres 22P02 and 22001, MySQL 1366 and 1406) the
+ *     shared leak predicate recognises the dump only by its leading statement
+ *     verb. The appended form would move those answers to `INTERNAL_ERROR`,
+ *     and SQLite's unique-violation column reader, which reads to end of line,
+ *     would lose the column. Measured on SQLite, live PostgreSQL 16 and live
+ *     MySQL 8.0 across nine families: the verb-head form keeps every status,
+ *     code, `field` and leak verdict, and the appended form moved six of them.
+ *     The verb names the statement's KIND, never its target or its values.
+ *  2. **More properties.** The log line serializes `message` and `stack`
+ *     only; the thrown error carries the driver's own statement-bearing
+ *     properties as well. Measured per driver: mysql2 puts the bound statement
+ *     on `sql` and value-bearing diagnostics on `sqlMessage`; node-postgres
+ *     puts the caller's row on `detail` (unique and not-null violations), and
+ *     its `where` carries a bound value whenever the server enables
+ *     `log_parameter_max_length_on_error`; better-sqlite3 carries nothing
+ *     beyond `message` and `stack`. Each is cut by its own rule (see
+ *     {@link redactPropagatedDriverFault}).
+ *
+ * What survives is what callers branch on: the error's class (its prototype),
+ * `name`, `code`, `errno`, `sqlState`, Postgres' identifier fields, and the
+ * database's own diagnostic. The engine's log line is unchanged: it is computed
+ * from the raw error, before the boundary.
  */
 
 import { looksLikeInternalErrorLeak } from '@objectstack/types';
@@ -675,20 +709,256 @@ export function redactBoundStatement(error: unknown): unknown {
  * Returns the input string unchanged when nothing is cut.
  */
 export function redactStatementFromMessage(message: string): string {
-  if (!message || !looksLikeInternalErrorLeak(message)) return message;
-  const cut = statementCut(message);
+  const dump = splitDriverDump(message);
+  if (dump === undefined) return message;
   // No statement to cut — but a dialect may still have inlined a value in the
   // diagnostic itself, and since commit 27a567dd8 taught the shared predicate this
   // phrasing, a BARE `Duplicate entry …` now reaches this line instead of
   // being turned away above.
-  if (cut === -1) return redactDiagnosticValues(message);
-  const diagnostic = redactDiagnosticValues(message.slice(cut + STATEMENT_SEPARATOR.length).trim());
+  if (dump.statement === undefined) return dump.diagnostic;
   // A dump whose tail is empty still had its head removed: report the
   // redaction rather than an empty message, so the entry never reads as a
   // fault with no detail at all.
-  return diagnostic.length > 0
-    ? `${diagnostic} ${REDACTED_STATEMENT}`
+  return dump.diagnostic.length > 0
+    ? `${dump.diagnostic} ${REDACTED_STATEMENT}`
     : REDACTED_STATEMENT;
+}
+
+/**
+ * [#21274] The cut BOTH faces share — the log line's
+ * {@link redactStatementFromMessage} and the propagated error's
+ * {@link redactPropagatedDriverFault} — so "the same redaction" is one
+ * function rather than two that agree.
+ *
+ * Returns `undefined` when the shared predicate does not call the message a
+ * driver dump (nothing is cut). Otherwise the bound statement, or `undefined`
+ * when the dump carries none, and the database's diagnostic with the values a
+ * dialect inlines in it already dropped.
+ */
+function splitDriverDump(
+  message: string,
+): { statement: string | undefined; diagnostic: string } | undefined {
+  if (!message || !looksLikeInternalErrorLeak(message)) return undefined;
+  const cut = statementCut(message);
+  if (cut === -1) return { statement: undefined, diagnostic: redactDiagnosticValues(message) };
+  return {
+    statement: message.slice(0, cut),
+    diagnostic: redactDiagnosticValues(message.slice(cut + STATEMENT_SEPARATOR.length).trim()),
+  };
+}
+
+/**
+ * [#21274] The leading verbs the shared leak predicate reads a bound statement
+ * by (`looksLikeInternalErrorLeak`'s `startsWith` limbs), spelled exactly as
+ * it reads them: at offset 0, followed by a space.
+ */
+const STATEMENT_KIND = /^(insert into|update|select|delete from) /i;
+
+/**
+ * [#21274] What a cut statement becomes on the PROPAGATED error: its kind, then
+ * the marker. The kind is kept because classifiers downstream read a driver
+ * dump by it (see the module header, "The thrown error is redacted too"); it
+ * carries no identifier and no value. A statement that opens with any other
+ * word leaves the marker alone.
+ */
+function redactedStatement(statement: string): string {
+  const kind = STATEMENT_KIND.exec(statement);
+  return kind ? `${kind[1]} ${REDACTED_STATEMENT}` : REDACTED_STATEMENT;
+}
+
+/**
+ * [#21274] The propagated face of {@link redactStatementFromMessage}: the same
+ * cut, with the statement's POSITION and kind kept rather than the marker
+ * appended. Returns the input unchanged when nothing is cut.
+ */
+function redactPropagatedMessage(message: string): string {
+  const dump = splitDriverDump(message);
+  if (dump === undefined) return message;
+  if (dump.statement === undefined) return dump.diagnostic;
+  const statement = redactedStatement(dump.statement);
+  return dump.diagnostic.length > 0
+    ? `${statement}${STATEMENT_SEPARATOR}${dump.diagnostic}`
+    : statement;
+}
+
+/** [#21274] What replaces a Postgres `DETAIL` line that is not key-shaped. */
+const REDACTED_DETAIL = '[detail redacted]';
+
+/** [#21274] What replaces a Postgres `CONTEXT` line. */
+const REDACTED_CONTEXT = '[context redacted]';
+
+/**
+ * [#21274] Postgres' key-shaped `DETAIL`, through the opening parenthesis of
+ * the VALUES: `Key (<columns>)=(` — the unique (23505), foreign-key (23503) and
+ * exclusion (23P01) families. Group 1 is the identifier half, which is kept,
+ * because `uniqueViolationColumn` in `@objectstack/types` reads the
+ * conflicting column from exactly that half and REST's 409 names it. The
+ * values after it are the caller's and are dropped whole, with everything that
+ * follows them: a value may contain `)`, so no right anchor bounds it.
+ *
+ * An expression index (`Key (lower(email))=(…)`) does not match, because the
+ * column class forbids `)`, and so takes the whole-line cut instead — the same
+ * answer the column reader gives it (not a column).
+ */
+const PG_KEY_DETAIL = /^(key \([^)]*\)=\()/i;
+
+/**
+ * [#21274] Cut a Postgres `DETAIL` line. A key-shaped one keeps its identifier
+ * half; any other (`Failing row contains (…)`, measured carrying the whole
+ * row on a not-null violation) is replaced whole, because its contents are
+ * the caller's row.
+ */
+function redactPgDetail(detail: string): string {
+  const key = PG_KEY_DETAIL.exec(detail);
+  return key ? `${key[1]}${REDACTED_VALUE})` : REDACTED_DETAIL;
+}
+
+/**
+ * [#21274] One rule per statement-bearing property a shipped driver attaches,
+ * as MEASURED off thrown errors (better-sqlite3 13, node-postgres 8 against
+ * PostgreSQL 16, mysql2 3 against MySQL 8.0). Each rule returns the cut value,
+ * or the input unchanged.
+ *
+ * `appliesTo` keeps a property name that is generic (`detail`, `where`) to the
+ * driver that defines it: a Postgres error always carries its `severity`.
+ * mysql2's two names are its own and are cut wherever they appear.
+ *
+ * ⛔ Not listed, deliberately: `code`, `errno`, `sqlState` (what callers branch
+ * on), Postgres' `severity`, `routine`, `file`, `line`, `position`, `schema`,
+ * `table`, `column`, `dataType`, `constraint` (identifiers and positions,
+ * measured value-free) and `hint`.
+ */
+const STATEMENT_BEARING_PROPERTIES: ReadonlyArray<{
+  readonly key: string;
+  readonly appliesTo: (error: Error) => boolean;
+  readonly cut: (value: string) => string;
+}> = [
+  // mysql2: the statement as sent, bound values inlined.
+  { key: 'sql', appliesTo: () => true, cut: redactedStatement },
+  // mysql2: the server's own message — value-bearing for 1062 and 1366.
+  { key: 'sqlMessage', appliesTo: () => true, cut: redactDiagnosticValues },
+  // node-postgres: the caller's row (23505 key, 23502 failing row).
+  { key: 'detail', appliesTo: isPostgresError, cut: redactPgDetail },
+  // node-postgres: CONTEXT — a bound value once the server enables
+  // `log_parameter_max_length_on_error`, and PL/pgSQL statement text.
+  { key: 'where', appliesTo: isPostgresError, cut: () => REDACTED_CONTEXT },
+  // node-postgres: the text of an internally generated statement.
+  { key: 'internalQuery', appliesTo: isPostgresError, cut: () => REDACTED_STATEMENT },
+];
+
+/** node-postgres' `DatabaseError` always carries the server's `severity`. */
+function isPostgresError(error: Error): boolean {
+  return typeof (error as { severity?: unknown }).severity === 'string';
+}
+
+/**
+ * How far the boundary follows `cause` — the same depth the shared predicates
+ * (`isUniqueViolationError`, `isMissingTableError`) read to, so nothing they
+ * can still see is left uncut.
+ */
+const MAX_CAUSE_DEPTH = 4;
+
+/**
+ * [#21274] Cut the bound statement and the caller's values out of an error
+ * that is about to LEAVE THE ENGINE — on `message`, `stack`, every
+ * statement-bearing property a shipped driver attaches, and down the `cause`
+ * chain — keeping what callers branch on.
+ *
+ * Applied once, at the engine boundary (`ObjectQL`'s middleware seam and the
+ * few public methods that reach a driver outside it), so every consumer that
+ * logs a propagated error gets the cut without a patch of its own.
+ *
+ * ## Contract
+ *
+ *  - **Nothing to cut ⇒ the same reference.** A validation error, a hook's
+ *    business error and a policy refusal leave exactly as before.
+ *  - **Otherwise a NEW error** — the input is never mutated. It is a native
+ *    `Error` (so `util.types.isNativeError` and every `instanceof Error`
+ *    router still recognise it) whose prototype is the input's, so
+ *    `instanceof SqliteError` / `instanceof DuplicateRecordError` hold. Every
+ *    own property is carried — symbol-keyed ones included, with their
+ *    enumerability — except the ones cut, which carry the cut value.
+ *  - **`cause` is cut the same way**, recursively, so an envelope that wraps a
+ *    driver error (`DuplicateRecordError`, the driver's `DATABASE_ERROR`)
+ *    leaves with its own fields intact and a redacted `cause`.
+ *  - **Idempotent.** A propagated error that crosses a second boundary (an
+ *    engine call made from inside a hook) is returned unchanged.
+ *
+ * @param error - the thrown value, of any shape.
+ */
+export function redactPropagatedDriverFault(error: unknown): unknown {
+  return redactFaultAt(error, 0);
+}
+
+function redactFaultAt(error: unknown, depth: number): unknown {
+  if (!(error instanceof Error) || depth > MAX_CAUSE_DEPTH) return error;
+  const replacements = new Map<PropertyKey, unknown>();
+
+  const message = redactPropagatedMessage(error.message);
+  if (message !== error.message) {
+    replacements.set('message', message);
+    replacements.set('stack', redactStack(error.stack, error.name, message));
+  }
+
+  for (const property of STATEMENT_BEARING_PROPERTIES) {
+    const value = ownValue(error, property.key);
+    if (typeof value !== 'string' || !property.appliesTo(error)) continue;
+    const cut = property.cut(value);
+    if (cut !== value) replacements.set(property.key, cut);
+  }
+
+  const cause = ownValue(error, 'cause');
+  if (cause !== undefined) {
+    const redactedCause = redactFaultAt(cause, depth + 1);
+    if (redactedCause !== cause) replacements.set('cause', redactedCause);
+  }
+
+  return replacements.size === 0 ? error : copyWithReplacements(error, replacements);
+}
+
+/** An OWN property's value, read through its getter when it has one. */
+function ownValue(target: object, key: PropertyKey): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(target, key);
+  if (descriptor === undefined) return undefined;
+  if ('value' in descriptor) return descriptor.value;
+  try {
+    return (target as Record<PropertyKey, unknown>)[key];
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * A native `Error` with `error`'s prototype and own properties, `replacements`
+ * written over the ones they name. `stack` is rebuilt as an own, non-enumerable
+ * data property, which is what V8 gives every error.
+ */
+function copyWithReplacements(error: Error, replacements: ReadonlyMap<PropertyKey, unknown>): Error {
+  const message = replacements.has('message') ? String(replacements.get('message')) : error.message;
+  const copy = new Error(message);
+  Object.setPrototypeOf(copy, Object.getPrototypeOf(error));
+  for (const key of Reflect.ownKeys(error)) {
+    if (key === 'message' || key === 'stack') continue;
+    const descriptor = Object.getOwnPropertyDescriptor(error, key);
+    if (descriptor === undefined) continue;
+    if (!replacements.has(key) && 'value' in descriptor) {
+      Object.defineProperty(copy, key, descriptor);
+      continue;
+    }
+    Object.defineProperty(copy, key, {
+      value: replacements.has(key) ? replacements.get(key) : ownValue(error, key),
+      writable: true,
+      enumerable: descriptor.enumerable,
+      configurable: true,
+    });
+  }
+  Object.defineProperty(copy, 'stack', {
+    value: replacements.has('stack') ? replacements.get('stack') : error.stack,
+    writable: true,
+    enumerable: false,
+    configurable: true,
+  });
+  return copy;
 }
 
 /**
