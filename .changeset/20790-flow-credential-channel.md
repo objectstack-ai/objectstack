@@ -24,4 +24,4 @@ What else changes:
   - With no crypto provider, a save that carries a flow credential is refused with `503 SERVICE_UNAVAILABLE` before anything is written. Register a provider (`setCryptoProvider`) and save again.
   - The clone door (`POST /api/v1/automation/:name/clone`) refuses a source that holds a credential, as a literal or in the channel, with `409 RESOURCE_CONFLICT`, because a copy would share it. ⚠️ Accepted cost: a packaged inbound flow can no longer be cloned in one step. Author the copy as a new flow under a new name, with its own secret.
 
-<!-- adr-0087: not-required (no-migration-prescription) -->
+<!-- adr-0087: not-required (no-migration-prescription) the one-time move rewrites stored flow rows through the metadata save door itself, at boot; no authorable key, spelling, export or stored shape is retired, so an author or an upgrading agent has nothing to rewrite. The operator's action is the rotation stated above, which is not a FROM to TO mapping. The gate reads this changeset as non-breaking; the disposition is stated for the migration the ruling named. -->

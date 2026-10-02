@@ -301,7 +301,8 @@ describe('[#20790] flow credentials live in the write-only channel, not the stor
             const res = await stack.apiAs(token, 'PUT', '/meta/flow/zz_channel_noprov', inbound('zz_channel_noprov', { hook: NO_PROVIDER }));
             expect(res.status).toBe(503);
             const text = await res.text();
-            expect(JSON.parse(text).error?.code).toBe('SERVICE_UNAVAILABLE');
+            // The metadata door's error body names the code at its top level.
+            expect(JSON.parse(text).code).toBe('SERVICE_UNAVAILABLE');
             expect(hasAny(text, ALL)).toBe(false);
         } finally {
             ql.cryptoProvider = provider;

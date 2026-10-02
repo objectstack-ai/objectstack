@@ -10341,10 +10341,12 @@ export class AutomationEngine implements IAutomationService {
         const config = (resolved.binding.config ?? {}) as Record<string, unknown>;
         if (typeof config.secret === 'string' && config.secret.trim() !== '') return;
         // [#20790] …or the write-only credential channel holds it: a flow stored
-        // through the metadata save door keeps no secret in its definition. Only
-        // for the WITHHELD form — a start node that writes `secret: ''` cleared
-        // it, and is refused below whatever the channel still holds.
-        if (resolved.binding.resolveSecret && !Object.prototype.hasOwnProperty.call(config, FLOW_HOOK_SECRET_KEY)) return;
+        // through the metadata save door keeps no secret in its definition, and
+        // its binding carries the reader instead. Only for the WITHHELD form —
+        // `hookSecretResolver` yields no reader for a start node that writes
+        // `secret: ''` (cleared), so that one is refused below whatever the
+        // channel still holds.
+        if (resolved.binding.resolveSecret) return;
         const asks = [
             flow.type === 'api' ? "`type: 'api'`" : undefined,
             config.triggerType === 'api' ? "start-node `config.triggerType: 'api'`" : undefined,
