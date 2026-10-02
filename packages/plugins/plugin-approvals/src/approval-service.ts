@@ -1581,15 +1581,17 @@ export class ApprovalService implements IApprovalService {
 
   /**
    * The caller's server-resolved acting identity (`approver-address.ts`'s
-   * `ActingCaller`): the session's user id, the email their own account
-   * carries, and `context.positions` — or `null` for a caller with no user id,
-   * who acts under nothing. A machine caller skips the email read: its actor
-   * is server-minted, never an account's email.
+   * `ActingCaller`): the context's user id, the email that user's own account
+   * carries, and `context.positions` — or `null` for a context with no user id,
+   * which acts under nothing. The one context that names a user beside the
+   * system flag — the ADR-0043 action link, which puts the token's bound
+   * approver on it — reads that approver's own account, which is the identity
+   * the token proves.
    */
   private async actingCaller(context: ExecutionContext): Promise<ActingCaller | null> {
     const userId = context?.userId != null ? String(context.userId) : '';
     if (!userId) return null;
-    const email = context.isSystem ? null : await this.callerAccountEmail(userId);
+    const email = await this.callerAccountEmail(userId);
     return { userId, email, positions: context?.positions ?? [] };
   }
 

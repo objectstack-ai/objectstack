@@ -85,7 +85,7 @@ export function equivalentApproverAddresses(address: string): string[] {
  *   - `userId` — the session's user id;
  *   - `email` — the email the caller's own `sys_user` row carries, the same
  *     row `resolveActor` proves a named email against; absent when the row has
- *     none, and for a machine caller, whose actor is server-minted;
+ *     none;
  *   - `positions` — the shared authz resolver's `context.positions`.
  */
 export interface ActingCaller {
