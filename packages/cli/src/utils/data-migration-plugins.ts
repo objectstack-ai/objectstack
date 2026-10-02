@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { resolveStorageCapabilityArg, resolveStorageLocalRootEnv } from '../commands/serve.js';
+import { oneShotSettingsPlugin } from './one-shot-settings.js';
 
 /**
  * The plugins a gated data migration boots with.
@@ -18,7 +19,10 @@ import { resolveStorageCapabilityArg, resolveStorageLocalRootEnv } from '../comm
  *  - Settings first: the storage plugin re-resolves its adapter from
  *    persisted settings when a settings service is present, which is how an
  *    S3-configured deployment's backfill uploads land in S3 rather than on
- *    this machine.
+ *    this machine. [#21471] It is the one-shot composition
+ *    (`./one-shot-settings.ts`): the settings service opens a stored
+ *    credential with the data key this host already has, and never mints
+ *    one in the key home — `os storage orphans` is report-only.
  *  - Storage config through the SAME resolver `os serve` uses
  *    (`resolveStorageCapabilityArg`), fed by the SAME env channel
  *    (`resolveStorageLocalRootEnv`, #4968), so the CLI materialises bytes
@@ -61,8 +65,7 @@ export async function buildDataMigrationPlugins(
   }
   if (opts.storage === true) {
     try {
-      const { SettingsServicePlugin } = await import('@objectstack/service-settings');
-      plugins.push(new SettingsServicePlugin({ registerRoutes: false }));
+      plugins.push(await oneShotSettingsPlugin());
     } catch {
       // optional — without it, constructor/env-driven storage config still applies
     }
