@@ -364,7 +364,7 @@ export const AgentSchema = lazySchema(() => strictObject({
 
     /** Topics or actions the agent must avoid */
     blockedTopics: z.array(z.string()).optional().describe('Forbidden topics or action names'),
-  }).optional().describe('[EXPERIMENTAL — not enforced] Safety guardrails for the agent. Parsed but not enforced — real limits come from the quota service.'),
+  }).optional().describe('Safety guardrails for the agent (token budget, time limit, blocked topics), enforced per user turn by the cloud AI runtime; the open framework edition does not run agents.'),
 
   /** Structured Output */
   structuredOutput: StructuredOutputConfigSchema.optional().describe('[EXPERIMENTAL — not enforced] Structured output format and validation configuration. Parsed but no runtime consumer yet.'),
