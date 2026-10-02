@@ -2352,13 +2352,13 @@ export function translatePage<T extends PageLike>(
  * the page has no tab bar or nothing resolved, so `translatePage` leaves the
  * key off the copy entirely.
  *
- * **This is where `ViewTabSchema` is actually rendered.** The schema has two
- * carriers — `UserFiltersSchema.tabs` (page-only preset bar, ADR-0047) and
- * `ListViewSchema.tabs` ("multi-tab view interface") — and only the first has a
- * renderer: objectui's `TabFilters` draws it from a page's `interfaceConfig`,
- * while nothing in either repo reads the ListView carrier. Translating the
- * carrier nothing draws would declare a capability no user can see, so this
- * covers the live one and stops there.
+ * **This is where `ViewTabSchema` is actually rendered.** Its one carrier is
+ * `UserFiltersSchema.tabs` (page-only preset bar, ADR-0047), which objectui's
+ * `TabFilters` draws from a page's `interfaceConfig`. The list view's own
+ * `tabs` is a `retiredKey` tombstone (@objectstack/spec 17.5.0): nothing ever
+ * drew it, and a named list-view preset is a `listViews` entry, which the
+ * saved-view switcher renders as a tab. So there is no second carrier to
+ * translate.
  *
  * The object comes from `interfaceConfig.source` — the page's own binding for
  * the records these presets filter — falling back to the page-level `object`.
