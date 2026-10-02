@@ -296,7 +296,7 @@ export function validateDashboardActionRefs(stack: AnyRec): DashboardActionRefFi
         message:
           actionType === 'modal'
             ? `modal action target "${target}" names no declared page — a modal target ` +
-              `names a PAGE, only (objectstack#6739). The button renders but the runtime ` +
+              `names a PAGE, only. The button renders but the runtime ` +
               `refuses the dispatch when clicked — a dangling reference ` +
               `(ADR-0049: a declared reference must resolve).`
             : `script action target "${target}" resolves to no defined action. ` +

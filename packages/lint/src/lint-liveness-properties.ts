@@ -285,7 +285,8 @@ function describe(entry: LedgerEntry): { kind: string; rule: string; defaultHint
     "describe() only knows 'experimental' | 'planned' | 'dead' | 'live-elsewhere'. This is a " +
     'shipped-ledger integrity bug, not an authoring error: either the ledger JSON has a typo, or a ' +
     'new status was added to the vocabulary without teaching describe() in ' +
-    'lint-liveness-properties.ts about it (#11384).',
+    'lint-liveness-properties.ts about it. An unrecognised status fails loudly here rather than being ' +
+    'graded `dead`.',
   );
 }
 
