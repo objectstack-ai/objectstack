@@ -358,7 +358,7 @@ A ruling that adds a new predicate *kind* or a dialect construct still costs one
 | F4 reference matcher | — (no production caller) | no | keep as test oracle, or retire (D6) | 20 test files | — |
 | F5 cube face | the new `normalizeFilters` door | **yes**: doors + lowering, and widen `$or` / `$not` / `$null` | whole-day calls (5 sites) | its own suites; not in `check:driver-conformance` | an accept-set widening, so a changeset with its Clause-② line |
 | F6 `driver-mongodb` | the engine seam | no | whole-day calls (4 sites) | mongodb filter-logic, text, temporal, comparand-type | the server answer was NOT MEASURED here |
-| F7 `formula` | the RLS compile seam (policies); the engine (via F8) | no | `lteBound` (2 sites), only under D4 (b): F7 is also a public evaluator (explain engine, test doubles) | matches-filter not-null-safe, or-semantics, temporal | — |
+| F7 `formula` | the RLS compile seam (policies); the engine (via F8) | no | **retired** (#21242): `lteBound` and its 2 sites are deleted; a bound that reaches F7 unlowered is compared as written (D-D1 item 5) | matches-filter not-null-safe, or-semantics, temporal | — |
 | F8 `having` | the engine seam | no | whole-day calls (4 sites) | having filter-logic, text, temporal | — |
 | F9 read scope | the new call at its entry | **yes**: the lowering call | polarity quartet (67 lines), `assertDefinedComparands` | read-scope-sql conformance, read-scope not-null-safe | fixes §2.5 item 1, which changes the rows a scope returns, so it needs a changeset |
 | F10 `where` → tree | the analytics `where` door | no | polarity quartet (90 lines), `assertDefinedComparands`, the `$between` lowering | native-sql filter-logic, text, temporal | echo fidelity (R6) |

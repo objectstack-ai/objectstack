@@ -270,9 +270,8 @@ for (const cell of CELLS) {
           const { res, err } = await call(face, 'query', query);
           expect(err, `${face}: ${err?.message}`).toBeUndefined();
           const got = tuples(res.rows, ['note', 'count']);
-          // The native face runs the ORDER BY; the ObjectQL face serves the same groups.
-          if (face === 'native') expect(got).toEqual([['z', 1], ['y', 1], ['x', 2]]);
-          else expect(sorted(got)).toEqual([['x', 2], ['y', 1], ['z', 1]]);
+          // Both faces apply the ORDER BY (the ObjectQL face since #21316).
+          expect(got, face).toEqual([['z', 1], ['y', 1], ['x', 2]]);
           const { res: dry, err: dryErr } = await call(face, 'generateSql', query);
           expect(dryErr, `${face} dry run: ${dryErr?.message}`).toBeUndefined();
           expect(dry.sql, face).toContain('ORDER BY "note" DESC');
@@ -285,8 +284,7 @@ for (const cell of CELLS) {
           const { res, err } = await call(face, 'query', query);
           expect(err, `${face}: ${err?.message}`).toBeUndefined();
           const got = tuples(res.rows, ['note', 'amount_sum']);
-          if (face === 'native') expect(got).toEqual([['x', 15], ['y', 7], ['z', 1]]);
-          else expect(sorted(got)).toEqual([['x', 15], ['y', 7], ['z', 1]]);
+          expect(got, face).toEqual([['x', 15], ['y', 7], ['z', 1]]);
           const { res: dry, err: dryErr } = await call(face, 'generateSql', query);
           expect(dryErr, `${face} dry run: ${dryErr?.message}`).toBeUndefined();
           expect(dry.sql, face).toContain('ORDER BY "amount_sum" DESC');

@@ -32,6 +32,7 @@ import { describe, it, expect } from 'vitest';
 import { normalizeFilterComparandTypes, type EngineAggregateOptions } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 import { matchesAggregationFilter } from './having-filter.js';
+import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 
 // The #10413 measurement's dataset shape: opportunities with a stage and an
 // amount. 6 rows, 2 closed_won worth 700 total.
@@ -863,17 +864,106 @@ describe('[#21255] per-aggregation filter — a plain { $field } across two comp
     });
   }
 
-  it('an object the registry does not declare is not judged — the card\'s query is answered as before', async () => {
+  it('an object the registry does not declare is not judged — the card\'s query is answered, as written', async () => {
     // The fail-open direction an `addDays` pair already takes for a
     // registry-less host: no declaration, no class, no verdict.
+    //
+    // [#21242] What answers it is `@objectstack/formula`'s matcher, which no
+    // longer keeps a whole-day copy of the bare-day upper bound: a pair that
+    // reaches it without a seam is compared as written (ADR-0053 D-D1 item 5).
+    // None of the six ORDERS closes on its due day, so they count 3 either
+    // way. `o7` does, at 15:00: the deleted copy read its due day as "through
+    // that day" and counted it (4 of 7); as written, the instant's text sorts
+    // above the bare day, and it is not counted (3 of 7).
+    const ON_THE_DUE_DAY = {
+      id: 'o7', customer_id: 'c3', amount: 10, cap: 1, placed_on: '2026-01-05', due_on: '2026-01-05', grace: 0,
+      opened_at: '2026-01-05T08:00:00.000Z', closed_at: '2026-01-05T15:00:00.000Z', slot: '15:00:00', created_at: '2026-09-01T00:00:00.000Z',
+    };
     for (const native of [true, false]) {
-      const { driver } = makeCountingDriver(ORDERS, native);
-      const engine = new ObjectQL();
-      engine.registerDriver(driver, true);
-      await engine.init();
-      expect(await engine.aggregate('crm_order', withFilter({ closed_at: { $lte: { $field: 'due_on' } } })))
-        .toEqual([{ opp_count: 6, picked: 3 }]);
+      for (const [rows, expected] of [
+        [ORDERS, { opp_count: 6, picked: 3 }],
+        [[...ORDERS, ON_THE_DUE_DAY], { opp_count: 7, picked: 3 }],
+      ] as const) {
+        const { driver } = makeCountingDriver(rows, native);
+        const engine = new ObjectQL();
+        engine.registerDriver(driver, true);
+        await engine.init();
+        expect(await engine.aggregate('crm_order', withFilter({ closed_at: { $lte: { $field: 'due_on' } } })))
+          .toEqual([expected]);
+      }
     }
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#21242] formula's whole-day copy is deleted: what reaches the matcher
+// unlowered is compared as written
+// ───────────────────────────────────────────────────────────────────────────
+
+describe('[#21242] per-aggregation filter — a { $field } pair no seam lowers is compared as written', () => {
+  // `@objectstack/formula`'s `matchesFilterCondition`, which this position
+  // calls for every `{ $field }` comparison, read a bare-day referent as
+  // "through that day" until its copy of the rule was deleted (ADR-0053 D-D1
+  // items 5 and 9). The engine's seam lowers a literal bound; a referent is
+  // per row and no seam can lower it, so each pair below is now compared as
+  // written. Measured through `engine.aggregate` before the deletion (counts
+  // in the names), and on `SqlDriver` over better-sqlite3 for the `where`
+  // twin of the text pair, which keeps only `b2` there.
+  const DAY_ROWS: ReadonlyArray<Record<string, unknown>> = [
+    { id: 'b1', code: '2026-01-05 noon', label: '2026-01-05', due_on: '2026-01-05', created_at: '2026-01-05T15:00:00.000Z', updated_at: '2026-01-05T15:00:00.000Z', closed_at: '2026-01-05T15:00:00.000Z' },
+    { id: 'b2', code: '2026-01-04', label: '2026-01-05', due_on: '2026-01-05', created_at: '2026-01-05T00:00:00.000Z', updated_at: '2026-01-05T00:00:00.000Z', closed_at: '2026-01-05T00:00:00.000Z' },
+    { id: 'b3', code: '2026-01-06', label: '2026-01-05', due_on: '2026-01-05', created_at: '2026-01-04T10:00:00.000Z', updated_at: '2026-01-04T10:00:00.000Z', closed_at: '2026-01-04T10:00:00.000Z' },
+    { id: 'b4', code: '2026-01-05', label: '2026-01-05', due_on: '2026-01-05', created_at: '2026-01-06T01:00:00.000Z', updated_at: '2026-01-06T01:00:00.000Z', closed_at: '2026-01-06T01:00:00.000Z' },
+  ];
+  const FIELDS = { code: { type: 'text' }, label: { type: 'text' }, due_on: { type: 'date' }, closed_at: { type: 'datetime' } };
+
+  async function dayEngine(native: boolean, object: Record<string, unknown> | null) {
+    const { driver } = makeCountingDriver(DAY_ROWS, native);
+    const engine = new ObjectQL();
+    engine.registerDriver(driver, true);
+    await engine.init();
+    if (object) (engine.registry as any).registerObject(object);
+    return engine;
+  }
+
+  it('two declared text columns (one class): "2026-01-05 noon" is not <= "2026-01-05" — 2 of 4, was 3, as the where twin keeps', async () => {
+    for (const native of [true, false]) {
+      const engine = await dayEngine(native, { name: 'qa_day', fields: FIELDS });
+      expect(await engine.aggregate('qa_day', withFilter({ code: { $lte: { $field: 'label' } } })))
+        .toEqual([{ opp_count: 4, picked: 2 }]);
+    }
+  });
+
+  it('an audit-opt-out object\'s row-carried created_at / updated_at against a date — 1 of 4, was 3 (the residual fail-open, not judged)', async () => {
+    // The field map carries no `created_at` / `updated_at` when the object
+    // opts out of the audit columns, so the class rule has no declaration to
+    // judge; `declaredReferenceNames` still admits them as referents. The same
+    // pair is refused 400 on an object that keeps its audit columns (below)
+    // and by `driver-sql` in a `where`.
+    for (const native of [true, false]) {
+      const engine = await dayEngine(native, { name: 'qa_day', fields: FIELDS, systemFields: { audit: false } });
+      for (const column of ['created_at', 'updated_at']) {
+        expect(await engine.aggregate('qa_day', withFilter({ [column]: { $lte: { $field: 'due_on' } } })), column)
+          .toEqual([{ opp_count: 4, picked: 1 }]);
+      }
+    }
+  });
+
+  it('…the same pair on an object that keeps its audit columns is refused before any read (the control)', async () => {
+    for (const native of [true, false]) {
+      const engine = await dayEngine(native, { name: 'qa_day', fields: FIELDS });
+      const err = await refusalOf(() => engine.aggregate('qa_day', withFilter({ created_at: { $lte: { $field: 'due_on' } } })));
+      expect(err.code).toBe('INVALID_FILTER');
+      expect(err.status).toBe(400);
+    }
+  });
+
+  it('a direct applyInMemoryAggregation call — no seam, no class rule — 1 of 4, was 3, with or without a field map', () => {
+    // The class rule is `engine.aggregate`'s; this published function applies
+    // the JSON-column rule alone, so a cross-class pair reaches the matcher.
+    const ast = withFilter({ closed_at: { $lte: { $field: 'due_on' } } }) as never;
+    expect(applyInMemoryAggregation([...DAY_ROWS], ast)).toEqual([{ opp_count: 4, picked: 1 }]);
+    expect(applyInMemoryAggregation([...DAY_ROWS], ast, undefined, FIELDS)).toEqual([{ opp_count: 4, picked: 1 }]);
   });
 });
 

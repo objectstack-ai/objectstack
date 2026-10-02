@@ -25,9 +25,10 @@
  * | `dimensions: ['note']`, `order: { amount }` | 200, ordered by an arbitrary row | 500 (42803, must appear in GROUP BY) | 200 |
  * | `dimensions: ['note']`, `order: { 'owner.email' }` | 500 | 500 (42703, no such column) | 200 |
  *
- * The ObjectQL face answered 200 because its execution never applies `order`
- * at all; its echoed statement and `/analytics/sql` showed the same `ORDER BY`
- * the native face could not run.
+ * The ObjectQL face answered 200 because its execution then never applied
+ * `order` at all (it does since #21316, over the selected columns this door
+ * admits); its echoed statement and `/analytics/sql` showed the same
+ * `ORDER BY` the native face could not run.
  *
  * ## What "selected" means
  *
