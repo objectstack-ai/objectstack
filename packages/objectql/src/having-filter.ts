@@ -799,9 +799,8 @@ function crossClassReason(
  *   names no class at all;
  * - a side with no declaration — a registry-less host, a column the map does
  *   not list (`id`), a column whose type the query cannot tell — is not
- *   judged, the fail-open direction every
- *   declared-type door of the engine takes, and the posture an `addDays` pair
- *   already has there.
+ *   judged: the fail-open direction every declared-type door of the engine
+ *   takes, and the posture an `addDays` pair already has there.
  *
  * An `addDays` pair is judged by {@link offsetPairViolation} instead, unchanged.
  */
