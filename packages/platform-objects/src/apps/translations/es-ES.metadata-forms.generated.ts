@@ -2400,10 +2400,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Memoria",
         helpText: "Memoria a largo plazo: notas destiladas que se guardan por usuario, se recuperan antes de cada conversación y las escribe una reflexión cada reflectionInterval interacciones entregadas. Cuando la memoria a largo plazo está habilitada, maxEntries y reflectionInterval son obligatorios. Lo aplica el runtime de IA en la nube."
       },
-      lifecycle: {
-        label: "Ciclo de vida",
-        helpText: "Máquina de estado que define el flujo de conversación"
-      },
       structuredOutput: {
         label: "Salida estructurada",
         helpText: "Contrato de salida para la respuesta final del agente: formato JSON, el JSON Schema con el que se valida, reintentos, formato de respaldo y pasos de transformación. Lo aplica el runtime de IA en la nube."
