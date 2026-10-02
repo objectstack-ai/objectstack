@@ -372,11 +372,13 @@ const CHILD_ENTRY_COMPONENT_TYPES: ReadonlySet<string> = new Set(['record:line_i
  * [#21091] Keys of a `panel` entry that shape the CHILD query, so every field
  * they name is a field of `childObject`. `LineItemsPanel` (at the same pin)
  * converts `sort` (`SortConfig[]`) to the child fetch's order and merges
- * `filter` (any shape `toFilterNode` accepts: rule array, AST, field-keyed
- * map) into its `$filter`, beside the relationship condition. The general walk
- * reads them as it reads any sort or filter — behaviour sites, a predicate
- * map's keys included — but with `childObject` as the context instead of the
- * page's object, which is the parent here.
+ * `filter` into its `$filter`, beside the relationship condition. The
+ * contract declares `filter` as the ViewFilterRule array
+ * (`RecordLineItemsProps`); the panel's lowering also takes the field-keyed
+ * map and AST forms, and this rule reads whichever is authored. The general
+ * walk reads them as it reads any sort or filter — behaviour sites, a
+ * predicate map's keys included — but with `childObject` as the context
+ * instead of the page's object, which is the parent here.
  */
 const PANEL_CHILD_QUERY_KEYS: ReadonlySet<string> = new Set(['sort', 'filter']);
 

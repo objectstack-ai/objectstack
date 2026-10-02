@@ -1147,13 +1147,19 @@ describe('[#21091] validateFieldConsumers — an inline collection reads its joi
       expect(verdicts(block(properties))).toEqual({ 'ord.notes': 'inert', 'itm.frozen': 'inert', 'itm.secret': 'inert' });
     });
 
-    it('its `sort[].field` and a field-keyed `filter` name CHILD fields: credited there, and the parent twin stays reported', () => {
-      const properties = { childObject: 'itm', relationshipField: 'ord', columns: [{ name: 'qty' }], sort: [{ field: 'notes', order: 'desc' }], filter: { spec: 'x' } };
+    it('its `sort[].field` and `filter[].field` name CHILD fields: credited there, and the parent twin stays reported', () => {
+      const properties = {
+        childObject: 'itm',
+        relationshipField: 'ord',
+        columns: [{ name: 'qty' }],
+        sort: [{ field: 'notes', order: 'desc' }],
+        filter: [{ field: 'spec', operator: 'equals', value: 'x' }],
+      };
       expect(verdicts(block(properties))).toEqual({ 'ord.notes': 'inert', 'itm.frozen': 'inert', 'itm.secret': 'inert' });
     });
 
-    it('a rule-array `filter` names a CHILD field the same way', () => {
-      const properties = { childObject: 'itm', relationshipField: 'ord', columns: [{ name: 'qty' }], filter: [{ field: 'frozen', operator: 'equals', value: 'x' }] };
+    it('a field-keyed `filter` — a shape the panel lowers but the contract refuses — is read against the CHILD too', () => {
+      const properties = { childObject: 'itm', relationshipField: 'ord', columns: [{ name: 'qty' }], filter: { frozen: 'x' } };
       expect(verdicts(block(properties))).toEqual({ 'ord.notes': 'inert', 'itm.notes': 'inert', 'itm.spec': 'inert', 'itm.secret': 'inert' });
     });
 
@@ -1232,8 +1238,7 @@ describe('[#21091] validateFieldConsumers — an inline collection reads its joi
       ],
       ...([
         ['a `record:line_items` block\'s `sort[].field`', { sort: [{ field: 'spec', order: 'asc' }] }, 'itm.spec'],
-        ['a `record:line_items` block\'s field-keyed `filter`', { filter: { frozen: 'x' } }, 'itm.frozen'],
-        ['a `record:line_items` block\'s rule-array `filter`', { filter: [{ field: 'notes', operator: 'equals', value: 'x' }] }, 'itm.notes'],
+        ['a `record:line_items` block\'s `filter[].field`', { filter: [{ field: 'notes', operator: 'equals', value: 'x' }] }, 'itm.notes'],
       ] as [string, AnyRec, string][]).map(([label, extra, key]): [string, AnyRec, string] => [
         label,
         {
