@@ -43,6 +43,8 @@ type Row = Record<string, unknown>;
 function makeEngine() {
     const rows: Row[] = [];
     const historyRows: Row[] = [];
+    /** Every other table: reads find nothing, as the stand-in has none. */
+    const others: Row[] = [];
     let next = 1;
     const tableOf = (t: string) => (t === 'sys_metadata_history' ? historyRows : t === 'sys_metadata' ? rows : null);
     const matches = (row: Row, where: Record<string, unknown> = {}) =>
@@ -51,8 +53,11 @@ function makeEngine() {
             return v === undefined || row[k] === v;
         });
     const engine: any = {
-        async find(t: string, opts: { where?: Record<string, unknown> } = {}) {
-            return (tableOf(t) ?? []).filter((r) => matches(r, opts.where));
+        async find(t: string, opts: { where?: Record<string, unknown>; limit?: number } = {}) {
+            const table = t === 'sys_metadata_history' ? historyRows : t === 'sys_metadata' ? rows : others;
+            const hits = table.filter((r) =>
+                Object.entries(opts.where ?? {}).every(([k, v]) => v === undefined || r[k] === v));
+            return typeof opts?.limit === 'number' ? hits.slice(0, opts.limit) : hits;
         },
         async findOne(t: string, opts: { where: Record<string, unknown> }) {
             assertEngineFindOnePredicate(t, opts);

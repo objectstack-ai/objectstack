@@ -69,9 +69,9 @@ export interface FlowCredentialMigrationProtocol {
 }
 
 interface MigrationLogger {
-    info?(msg: string, meta?: unknown): void;
-    warn?(msg: string, meta?: unknown): void;
-    error?(msg: string, error?: Error, meta?: unknown): void;
+    info(msg: string, meta?: unknown): void;
+    warn(msg: string, meta?: unknown): void;
+    error(msg: string, error?: Error, meta?: unknown): void;
 }
 
 export interface FlowCredentialMigrationResult {
@@ -163,7 +163,7 @@ async function persistReceipt(engine: FlowCredentialMigrationEngine, flag: DataM
 export async function migrateFlowCredentialsIntoChannel(deps: {
     engine: FlowCredentialMigrationEngine;
     protocol: FlowCredentialMigrationProtocol;
-    logger?: MigrationLogger;
+    logger: MigrationLogger;
 }): Promise<FlowCredentialMigrationResult> {
     const { engine, protocol, logger } = deps;
     const result: FlowCredentialMigrationResult = { status: 'nothing-to-move', found: 0, migrated: [], failed: [] };
@@ -174,7 +174,7 @@ export async function migrateFlowCredentialsIntoChannel(deps: {
             await engine.find(STORED_ROW_OBJECT, { where: { type: FLOW_METADATA_TYPE }, context: SYSTEM_CONTEXT }),
         );
     } catch (err) {
-        logger?.warn?.(
+        logger.warn(
             '[Automation] the stored flow credential move could not read the stored flow rows; it runs again at the ' +
                 'next boot or crypto-provider registration.',
             { error: (err as Error)?.message ?? String(err) },
@@ -212,27 +212,35 @@ export async function migrateFlowCredentialsIntoChannel(deps: {
                 // No crypto provider (yet): the door refused before writing
                 // anything, and every other row would be refused the same way.
                 result.status = 'deferred';
-                logger?.info?.(
+                // Functional, not a loss: nothing was written, and the move
+                // runs when the provider registers — `info`, every boot.
+                logger.info(
                     '[Automation] stored flow credentials wait for a crypto provider: their move into the write-only ' +
                         'flow credential store runs when one is registered.',
                 );
                 return result;
             }
             result.failed.push({ flow: name, state, code });
-            logger?.warn?.(
+            // A security property the platform claims — no flow credential in a
+            // stored definition — does not hold for this row, and nothing else
+            // looks wrong: `error`, with the consequence and the fix.
+            logger.error(
                 `[Automation] flow '${name}' (${state}): its credential could not be moved into the write-only flow ` +
-                    `credential store (${code}), so its stored definition still carries it in cleartext. Fix the cause ` +
-                    'and restart, or save the flow with a new value.',
+                    `credential store (${code}), so its stored definition STILL CARRIES IT IN CLEARTEXT, readable ` +
+                    'wherever the stored row is. Fix the cause and restart, or save the flow with a new value — and ' +
+                    'rotate it.',
+                err instanceof Error ? err : undefined,
+                { flow: name, state, code },
             );
         }
     }
 
     if (result.found === 0) return result;
     result.status = 'applied';
-    for (const notice of notices) logger?.warn?.(flowCredentialRotationNotice(notice.flow, notice.state, notice.keys));
+    for (const notice of notices) logger.warn(flowCredentialRotationNotice(notice.flow, notice.state, notice.keys));
 
     if (typeof engine.getObject === 'function' && !engine.getObject(DATA_MIGRATION_FLAG_OBJECT)) {
-        logger?.warn?.(
+        logger.warn(
             `[Automation] the stored flow credential move ran, but ${DATA_MIGRATION_FLAG_OBJECT} is not registered on this ` +
                 'kernel, so the deployment ledger holds no receipt of it. Compose PlatformObjectsPlugin, or keep this ' +
                 "boot's log: the rotation notices above are the only record.",
@@ -247,8 +255,7 @@ export async function migrateFlowCredentialsIntoChannel(deps: {
             `[Automation] the stored flow credential move ran, but writing its receipt to ${DATA_MIGRATION_FLAG_OBJECT} ` +
             `failed (${detail}). The move itself is not retried — the rows no longer carry the credentials — so the ` +
             "rotation notices above are the only record of which flows must rotate. Keep this boot's log.";
-        if (logger?.error) logger.error(message, e instanceof Error ? e : new Error(detail));
-        else logger?.warn?.(message, { error: detail });
+        logger.error(message, e instanceof Error ? e : new Error(detail));
     }
     return result;
 }

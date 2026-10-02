@@ -18,7 +18,7 @@
  * append-only — is the dogfood pin `flow-credential-channel.dogfood.test.ts`.
  */
 import { describe, expect, it } from 'vitest';
-import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 import {
     FLOW_CREDENTIAL_MIGRATION_ID,
@@ -48,7 +48,8 @@ function fakes(rows: Array<Record<string, unknown>>, refuse?: (name: string) => 
         async find(object: string) {
             return object === 'sys_metadata' ? rows : [];
         },
-        async findOne() {
+        async findOne(object: string, query?: Record<string, unknown>) {
+            assertEngineFindOnePredicate(object, query as never);
             return receipts[0] ?? null;
         },
         async insert(_o: string, data: Record<string, unknown>) {
