@@ -465,7 +465,7 @@ const ORDERING_COMPARAND_DESCRIPTION =
  */
 function nullOrderingComparandMessage(op: string): string {
   return (
-    `null is not a valid ${op} comparand. null is not ordered, and no two evaluation faces `
+    `null is not a valid ${op} comparand. null is not ordered, and the evaluation faces do not `
     + 'agree on what an ordering against it matches (driver-memory\'s query path reads a '
     + 'stored null as equal to it, so {"$gte": null} admits that row; driver-sql compares '
     + 'against SQL NULL and admits no row). State absence '

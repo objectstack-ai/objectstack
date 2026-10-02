@@ -2,7 +2,7 @@
 '@objectstack/spec': patch
 ---
 
-fix(spec): the null ordering-comparand refusal names only evaluation faces that exist
+fix(spec): the null ordering-comparand refusals name only evaluation faces that exist, and say only what was measured
 
 Clause-②: no
 
@@ -14,7 +14,12 @@ and were measured to disagree: driver-memory's query path reads a stored `null` 
 comparand, so `{"$gte": null}` admits that row, while driver-sql compares against SQL `NULL` and
 admits no row.
 
-Text only: the first sentence (`null is not a valid $gt comparand.` and its siblings), the prescription
-(`{"$eq": null}` / `{"$ne": null}`) and the ruling sentence are unchanged, and the schemas accept
-and refuse exactly the same filters. A client or log filter that matches the old parenthesis needs
-the new spelling.
+That refusal and its runtime twin, the `parseFilterAST` refusal for the same comparand
+(`Operator "$gt" on field "…" does not accept a null comparand …`), both said "no two evaluation
+faces agree" on what an ordering against `null` matches. Measured, two faces do agree (driver-sql
+and formula both admit no row), so both now say "the evaluation faces do not agree".
+
+Text only: each message's first sentence, its prescription (`{"$eq": null}` / `{"$ne": null}`), the
+schema door's ruling sentence and the runtime door's "NOT applied" sentence are unchanged, and both
+doors accept and refuse exactly the same filters. A client or log filter that matches the old
+wording needs the new spelling.
