@@ -169,7 +169,9 @@
  * rule as above), and the reverse direction where the declarations alone can
  * decide it: a literal `core` entry in a directory that holds a declared
  * literal build input, covering none of them, is a leftover from an input
- * turbo.json dropped, and it starts the core pipeline on a diff no build reads.
+ * turbo.json dropped, and it starts the core pipeline on a diff no build reads
+ * (since #21341 a row covering one of Build Core's guards, the population the
+ * next section adds, is not a leftover either).
  * Root-level files and pattern entries are not judged that way -- nothing here
  * says why `package.json` or `packages/**` is in `core`. Refusals: no `build-core` job, its `if:` no longer naming
  * `core`, no `run: pnpm build` step, turbo.json or the root manifest unreadable
@@ -178,8 +180,9 @@
  *
  * Known bounds: a package-level turbo.json (none is tracked today) would add
  * build inputs this subject does not read; and a leftover in a directory where
- * turbo.json no longer declares ANY build input is not reported (the cheap
- * direction: it over-schedules, it never under-schedules).
+ * turbo.json no longer declares ANY build input, and no Build Core step runs
+ * any script, is not reported (the cheap direction: it over-schedules, it
+ * never under-schedules).
  *
  * ## The same subject's second population: the scripts Build Core's steps run (#21341)
  *

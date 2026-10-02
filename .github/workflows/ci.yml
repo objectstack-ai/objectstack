@@ -191,7 +191,8 @@ jobs:
               # scripts/check-ci-filter-parity.mjs DERIVES the required set from
               # turbo.json and the root `build` script, and reds while a declared
               # build input is uncovered here, or while a literal entry beside
-              # them covers none (a leftover). `tsconfig.json` and the
+              # them covers none of them and none of Build Core's guards below
+              # (a leftover). `tsconfig.json` and the
               # `packages/cli/...` input are covered by the entries above;
               # `@objectstack/docs#build` (its input is `content/**`) is the
               # docs filter's, since `pnpm build` excludes that package.
