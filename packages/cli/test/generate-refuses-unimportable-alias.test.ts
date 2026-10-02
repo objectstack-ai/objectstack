@@ -127,19 +127,23 @@ beforeAll(async () => {
   // Sequential on purpose: cold tsx starts, each loading every command module,
   // in a container several agents share.
   //
-  // The card's measured row. `view` because that generator suffixes its `const`
+  // The card's measured row was `os g view class`. `view` suffixes its `const`
   // binding (`classViews`), so the scaffold parses and the barrel alias is the
-  // only thing left that cannot be named.
-  reserved = await runTsx([CLI, 'generate', 'view', 'class'], reservedDir);
+  // only thing left that cannot be named. Since #21325 a view binds an object
+  // the project's stack must declare, so in these config-less directories it
+  // is refused before this layer; `dashboard` suffixes its binding the same
+  // way (`classDashboard`) and binds nothing, so it reaches this layer alone.
+  reserved = await runTsx([CLI, 'generate', 'dashboard', 'class'], reservedDir);
   // A second generator, to show the refusal is not one patched call site —
   // and `let`, which is reserved only because a module is in strict mode.
-  strictReserved = await runTsx([CLI, 'generate', 'flow', 'let'], strictDir);
-  dryRun = await runTsx([CLI, 'generate', 'view', 'class', '--dry-run'], dryRunDir);
+  // (`skill`, not `flow`, for the same #21325 reason as above.)
+  strictReserved = await runTsx([CLI, 'generate', 'skill', 'let'], strictDir);
+  dryRun = await runTsx([CLI, 'generate', 'dashboard', 'class', '--dry-run'], dryRunDir);
   // The layer in front, on the name it owns.
   parseLayer = await runTsx([CLI, 'generate', 'object', 'class'], parseLayerDir);
   charsetLayer = await runTsx([CLI, 'generate', 'object', 'order-line'], charsetLayerDir);
-  control = await runTsx([CLI, 'generate', 'view', 'order_line'], controlDir);
-  contextual = await runTsx([CLI, 'generate', 'view', 'type'], contextualDir);
+  control = await runTsx([CLI, 'generate', 'dashboard', 'order_line'], controlDir);
+  contextual = await runTsx([CLI, 'generate', 'dashboard', 'type'], contextualDir);
 }, RUN_TIMEOUT_MS);
 
 afterAll(() => {
@@ -151,7 +155,7 @@ afterAll(() => {
   }
 });
 
-describe('[#17410] `os generate view class` refuses instead of exiting 0', () => {
+describe('[#17410] `os generate dashboard class` refuses instead of exiting 0', () => {
   it('exits non-zero — the reported defect was exit 0', () => {
     expect(reserved.code).not.toBe(0);
     expect(reserved.code).toBe(1);
@@ -173,26 +177,26 @@ describe('[#17410] `os generate view class` refuses instead of exiting 0', () =>
     // The defect is invisible without it: the line parses, so the author has
     // no reason to suspect it. Printing it is what connects the refusal to the
     // thing they typed.
-    expect(reserved.stdout).toContain("export { default as class } from './class.view';");
+    expect(reserved.stdout).toContain("export { default as class } from './class.dashboard';");
   });
 
   it('⛔ does not rewrite the name into an importable one', () => {
     // The sanitiser outcome the #16726 ruling refused, and this layer declines
     // to be. No repaired alias may appear, and nothing may be reported created.
     expect(reserved.stdout).not.toContain('Created');
-    expect(reserved.stdout).not.toContain('classView ');
+    expect(reserved.stdout).not.toContain('classDashboard ');
     expect(reserved.stdout).not.toContain('klass');
     expect(reserved.stdout).not.toContain('class_');
   });
 
   it('writes nothing — no scaffold, no barrel, no directory', () => {
-    expect(existsSync(join(reservedDir, 'src', 'views', 'class.view.ts'))).toBe(false);
-    expect(existsSync(join(reservedDir, 'src', 'views', 'index.ts'))).toBe(false);
+    expect(existsSync(join(reservedDir, 'src', 'dashboards', 'class.dashboard.ts'))).toBe(false);
+    expect(existsSync(join(reservedDir, 'src', 'dashboards', 'index.ts'))).toBe(false);
     expect(existsSync(join(reservedDir, 'src'))).toBe(false);
   });
 
   it('is ONE chokepoint, not one patched generator', () => {
-    // `flow` + `let`: a different generator and a word reserved for a
+    // `skill` + `let`: a different generator and a word reserved for a
     // different reason (a module is automatically in strict mode).
     expect(strictReserved.code).toBe(1);
     expect(strictReserved.stdout).toContain('could not be imported');
@@ -248,10 +252,10 @@ describe('[#17410] ⭐ CONTROL — names that work today still generate', () => 
   it('an ordinary name still exits 0 and writes both files', () => {
     // A refusal that fired on everything would satisfy every assertion above.
     expect(control.code).toBe(0);
-    expect(control.stdout).toContain('Created src/views/order_line.view.ts');
-    expect(control.stdout).toContain('Created src/views/index.ts');
-    const barrel = readFileSync(join(controlDir, 'src', 'views', 'index.ts'), 'utf8');
-    expect(barrel).toContain("export { default as orderLine } from './order_line.view';");
+    expect(control.stdout).toContain('Created src/dashboards/order_line.dashboard.ts');
+    expect(control.stdout).toContain('Created src/dashboards/index.ts');
+    const barrel = readFileSync(join(controlDir, 'src', 'dashboards', 'index.ts'), 'utf8');
+    expect(barrel).toContain("export { default as orderLine } from './order_line.dashboard';");
   });
 
   it('⭐ a CONTEXTUAL reserved word still generates — the expensive direction', () => {
@@ -260,8 +264,8 @@ describe('[#17410] ⭐ CONTROL — names that work today still generate', () => 
     // that costs an author a working command — and the direction a hand-picked
     // keyword list gets wrong. Read from disk, not from the exit code.
     expect(contextual.code).toBe(0);
-    const barrel = readFileSync(join(contextualDir, 'src', 'views', 'index.ts'), 'utf8');
-    expect(barrel).toContain("export { default as type } from './type.view';");
-    expect(existsSync(join(contextualDir, 'src', 'views', 'type.view.ts'))).toBe(true);
+    const barrel = readFileSync(join(contextualDir, 'src', 'dashboards', 'index.ts'), 'utf8');
+    expect(barrel).toContain("export { default as type } from './type.dashboard';");
+    expect(existsSync(join(contextualDir, 'src', 'dashboards', 'type.dashboard.ts'))).toBe(true);
   });
 });
