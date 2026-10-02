@@ -63,7 +63,7 @@ class MockHttp implements IHttpServer {
 async function drive(
   http: MockHttp,
   key: string,
-  opts: { params?: Record<string, string>; query?: Record<string, unknown>; headers?: Record<string, string> } = {},
+  opts: { params?: Record<string, string>; query?: Record<string, string | string[]>; headers?: Record<string, string> } = {},
 ): Promise<{ status: number; body: any }> {
   const handler = http.routes.get(key);
   if (!handler) throw new Error(`no handler for ${key}`);
