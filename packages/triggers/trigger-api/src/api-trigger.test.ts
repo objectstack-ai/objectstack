@@ -159,3 +159,65 @@ describe('ApiTrigger', () => {
         expect(trigger.listHooks()).toHaveLength(0);
     });
 });
+
+/**
+ * [#20790] A flow stored through the metadata save door keeps its secret in the
+ * write-only flow credential store, not in its start node, so the engine's
+ * binding hands this trigger a reader instead: the hook arms on it, every post
+ * is verified against what it reads at that moment, and a secret that cannot
+ * be read refuses the post rather than verifying it against nothing.
+ */
+describe('ApiTrigger — a secret read at verification time', () => {
+    const HELD = 'pin-trigger-held-5e1a';
+    const ROTATED = 'pin-trigger-rotated-b82d';
+
+    function armWith(resolveSecret: () => Promise<string | undefined>, config: Record<string, unknown> = {}) {
+        const queue = makeFakeQueue();
+        const t = new ApiTrigger(() => queue, logger as any);
+        t.start({ flowName: 'held_intake', config, resolveSecret }, async () => {});
+        const post = (secret: string) =>
+            t.handleRequest({ flowName: 'held_intake', hookId: 'default', rawBody: '{"a":1}', signatureHeader: sig(secret, '{"a":1}') });
+        return { t, queue, post };
+    }
+
+    it('arms with no secret in its config, and verifies against what the reader holds', async () => {
+        let current = HELD;
+        const { t, queue, post } = armWith(async () => current);
+        expect(t.listHooks()).toEqual([{ flowName: 'held_intake', hookId: 'default', signed: true }]);
+        expect((await post(HELD)).status).toBe(202);
+        expect((await post('not-the-secret')).status).toBe(401);
+        expect(queue.published).toHaveLength(1);
+
+        // A rotation applies to the next post — nothing re-arms.
+        current = ROTATED;
+        expect((await post(HELD)).status).toBe(401);
+        expect((await post(ROTATED)).status).toBe(202);
+    });
+
+    it('the reader is read as the literal was: trimmed', async () => {
+        const { post } = armWith(async () => `  ${HELD}  `);
+        expect((await post(HELD)).status).toBe(202);
+    });
+
+    it('a secret the reader cannot produce refuses the post with 503 — never verified, never enqueued', async () => {
+        for (const reader of [
+            async () => { throw new Error('no crypto provider'); },
+            async () => undefined,
+            async () => '   ',
+        ]) {
+            const { queue, post } = armWith(reader as () => Promise<string | undefined>);
+            const res = await post(HELD);
+            expect(res.status).toBe(503);
+            expect((res.body as any).error.code).toBe('SERVICE_UNAVAILABLE');
+            expect(queue.published).toEqual([]);
+        }
+    });
+
+    it('an unknown hook still answers 404 before any secret is read (no oracle)', async () => {
+        let reads = 0;
+        const { t } = armWith(async () => { reads += 1; return HELD; });
+        const res = await t.handleRequest({ flowName: 'held_intake', hookId: 'wrong', rawBody: '{}', signatureHeader: sig(HELD, '{}') });
+        expect(res.status).toBe(404);
+        expect(reads).toBe(0);
+    });
+});

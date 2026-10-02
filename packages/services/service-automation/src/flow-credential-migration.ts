@@ -114,13 +114,16 @@ function parseBody(raw: unknown): unknown {
  * never a value, a node id or a path.
  */
 export function flowCredentialRotationNotice(flow: string, state: string, keys: Iterable<string>): string {
-    const classes = flowCredentialClassList(keys);
+    const distinct = new Set(keys);
+    const classes = flowCredentialClassList(distinct);
+    const plural = distinct.size > 1;
     return (
-        `[Automation] flow '${flow}' (${state}): ${classes} was stored in cleartext in the flow definition before ` +
-        'this release — in its stored row and in its version history, where an administrator could read it. It is ' +
-        'now held by the write-only flow credential store and no longer stored in the definition, but the copies ' +
-        'already written stay in the append-only version history and audit trail. ROTATE IT: save the flow with a new ' +
-        'value, and give the new secret to whoever signs posts to this hook or verifies these deliveries.'
+        `[Automation] flow '${flow}' (${state}): ${classes} ${plural ? 'were' : 'was'} stored in cleartext in the flow ` +
+        `definition before this release — in its stored row and its version history, where an administrator could read ` +
+        `${plural ? 'them' : 'it'}. ${plural ? 'They are' : 'It is'} now held by the write-only flow credential store and ` +
+        'no longer stored in the definition; the copies already written stay in the append-only version history and ' +
+        'audit trail. ROTATE: save the flow with a new value for each, and give the new secret to whoever signs posts ' +
+        'to this hook or verifies these deliveries.'
     );
 }
 
