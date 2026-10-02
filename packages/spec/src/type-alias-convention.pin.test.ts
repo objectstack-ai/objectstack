@@ -116,7 +116,6 @@ import type * as M38 from './automation/bpmn-interop.zod.js';
 import type * as M39 from './automation/execution.zod.js';
 import type * as M40 from './automation/flow-function.zod.js';
 import type * as M41 from './automation/node-executor.zod.js';
-import type * as M42 from './automation/state-machine.zod.js';
 import type * as M43 from './automation/time-relative-trigger.zod.js';
 import type * as M44 from './automation/webhook.zod.js';
 import type * as M50 from './marketplace/marketplace.zod.js';
@@ -749,13 +748,6 @@ export type Iso_automation_scheduleOrganization__ScheduleOrganizationSchema = As
 
 // automation/schemaless-node-config.zod.ts
 export type Iso_automation_schemalessNodeConfig__DecisionConditionSchema = Assert<Eq< z.input< typeof M173.DecisionConditionSchema >, z.infer< typeof M173.DecisionConditionSchema > >>;
-
-// automation/state-machine.zod.ts
-export type Iso_automation_stateMachine__ActionRefSchema = Assert<Eq< z.input< typeof M42.ActionRefSchema >, z.infer< typeof M42.ActionRefSchema > >>;
-export type Iso_automation_stateMachine__GuardRefSchema = Assert<Eq< z.input< typeof M42.GuardRefSchema >, z.infer< typeof M42.GuardRefSchema > >>;
-export type Iso_automation_stateMachine__StateMachineSchema = Assert<Eq< z.input< typeof M42.StateMachineSchema >, z.infer< typeof M42.StateMachineSchema > >>;
-export type Iso_automation_stateMachine__StateNodeSchema = Assert<Eq< z.input< typeof M42.StateNodeSchema >, z.infer< typeof M42.StateNodeSchema > >>;
-export type Iso_automation_stateMachine__TransitionSchema = Assert<Eq< z.input< typeof M42.TransitionSchema >, z.infer< typeof M42.TransitionSchema > >>;
 
 // automation/time-relative-trigger.zod.ts
 export type Iso_automation_timeRelativeTrigger__TimeRelativeTriggerSchema = Assert<Eq< z.input< typeof M43.TimeRelativeTriggerSchema >, z.infer< typeof M43.TimeRelativeTriggerSchema > >>;
