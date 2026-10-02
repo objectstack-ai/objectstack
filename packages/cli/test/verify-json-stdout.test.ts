@@ -94,8 +94,13 @@ function runCli(dir: string, args: string[]): Run {
     cwd: dir,
     encoding: 'utf8',
     // Every spawned child under this directory declares its environment at the
-    // call site (#11595).
-    env: childEnv({ NO_COLOR: '1' }),
+    // call site (#11595). `OS_REGISTRY_LOG: 'info'` is the shipped default,
+    // restated because this package's vitest config sets `warn` for its own
+    // workers and the child would inherit it: at `warn` the registry's
+    // `console.log` — the writer a logger-level fix cannot reach — never speaks,
+    // and the pin would hold over one writer instead of the three an operator's
+    // run has.
+    env: childEnv({ NO_COLOR: '1', OS_REGISTRY_LOG: 'info' }),
     maxBuffer: 64 * 1024 * 1024,
   });
   return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
