@@ -416,6 +416,19 @@ describe('[#21299] the card\'s four measured shapes are refused before any read,
     expect(out.diagnostic).toContain('"due_f" (type "formula")');
   });
 
+  it('…and at having, an addDays pair from a formula projection, which was answered: refused, naming the formula', async () => {
+    const { engine, calls } = await makeEngine(OBJ);
+    const out = await outcomeOf(() => engine.aggregate(OBJECT, {
+      groupBy: ['due_f', { field: 'due_on', dateGranularity: 'day', alias: 'due_day' }],
+      aggregations: [{ function: 'count', alias: 'n' }],
+      having: { due_f: { $lte: { $field: 'due_day', addDays: 1 } } },
+    } as unknown as EngineAggregateOptions), () => []);
+    expect(out).toMatchObject({ refused: true, code: 'INVALID_FILTER', status: 400 });
+    expect(calls).toEqual({ aggregate: 0, find: 0 });
+    expect(out.message).toContain('the target field "due_f" (type "formula")');
+    expect(out.message).toContain('{ "$field": "due_day" } with addDays');
+  });
+
   it('the same-class control on the same object answers as before', async () => {
     const { engine } = await makeEngine(OBJ);
     expect(await engine.aggregate(OBJECT, perAggregation({ due_on: { $lte: { $field: 'due_on' } } }))).toEqual([{ n: 0, m: 0 }]);
