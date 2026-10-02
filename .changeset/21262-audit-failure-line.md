@@ -6,7 +6,7 @@ The `Audit write FAILED` line names the table whose insert was refused and the r
 
 Clause-②: no
 
-The record writer stores two rows per audited write: the `sys_audit_log` row that records who did it, then its `sys_activity` timeline row. When either insert was refused, the line always said the `sys_audit_log` row never landed. When the refused insert was `sys_activity`, every ledger row had in fact landed.
+The record writer stores the `sys_audit_log` row that records who did it, then, when activities are enabled and the write has one, its `sys_activity` timeline row. When either insert was refused, the line always said the `sys_audit_log` row never landed. When the refused insert was `sys_activity`, every ledger row had in fact landed.
 
 - The line now opens `Audit write FAILED on TABLE` and names the table the writer had in flight when it threw. A refused `sys_activity` insert says the ledger row landed and only the activity row is lost. A refused `sys_audit_log` insert says the ledger row is lost, and so is the activity row due after it when the object writes one.
 - A missing table no longer gets only the telemetry-datasource split as its remedy. The table may never have been created because schema sync's DDL for it was refused at boot. The line cannot tell the two causes apart, so it names both, in order: look for `Schema sync FAILED for object 'TABLE'` in the boot log first, then the split and `OS_TELEMETRY_DB=0`. Any other cause keeps the driver-fault remedy.
