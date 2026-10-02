@@ -45,6 +45,9 @@ import {
   // above: it asks the schema whether a name is legal instead of restating
   // the charset the schema declares.
   ObjectSchema,
+  // #21325 — the record's title field (ADR-0079's ladder), which the `view`
+  // scaffold sorts its list by. Asked, never re-derived here.
+  resolveDisplayField,
 } from '@objectstack/spec/data';
 // #20197 — the namespace-prefix gate's own verdict, IMPORTED for the reason
 // the block above gives: `objectNameFor` asks it rather than restating it.
@@ -55,7 +58,7 @@ import { validateObjectNamespacePrefix } from '@objectstack/spec/kernel';
 import { singularToPlural } from '@objectstack/spec/shared';
 import { printHeader, printSuccess, printError, printInfo, printStep, printWarning, createTimer, isReportedError, CLI_ALIAS } from '../utils/format.js';
 import { metadataFileName } from '../utils/metadata-file-name.js';
-import { readProjectNamespace } from '../utils/project-namespace.js';
+import { readProjectNamespace, type ProjectNamespace } from '../utils/project-namespace.js';
 import { findEmissionParseFailures } from '../utils/emitted-source-parses.js';
 import { findBarrelAliasRefusal } from '../utils/importable-binding.js';
 import {
@@ -65,6 +68,7 @@ import {
   wiringLines,
   type StackReach,
 } from '../utils/scaffold-wiring.js';
+import { authoringRuleUnionStack } from '../utils/stack-collections.js';
 
 // ─── Metadata Type Templates ────────────────────────────────────────
 
@@ -76,6 +80,51 @@ import {
  * measurement.
  */
 const FLOW_SCAFFOLD_REQUIRES = ['automation', 'triggers'] as const;
+
+/**
+ * An object a binding scaffold binds to, as the project's stack declares it
+ * (#21325). Read off the loaded stack by {@link stackBindingCandidates}, never
+ * built from the name the author gave the new item.
+ */
+export interface ScaffoldObjectBinding {
+  /** The object's machine name, exactly as the stack declares it. */
+  name: string;
+  /** Its `label`, when the stack declares one as a plain string. */
+  label?: string;
+  /** Its `pluralLabel`, when the stack declares one as a plain string. */
+  pluralLabel?: string;
+  /** Its declared field names, in declaration order. */
+  fields: readonly string[];
+  /** The record's title field (`resolveDisplayField`), when it is a declared field. */
+  displayField?: string;
+}
+
+/** What a binding scaffold is rendered against: each reference it writes, resolved. */
+export interface ScaffoldBindings {
+  object?: ScaffoldObjectBinding;
+  /** The machine name of a flow the stack declares. */
+  flow?: string;
+}
+
+/**
+ * Where a binding scaffold takes each reference it writes from (#21325).
+ *
+ *  - `object: 'name'` — the item's own name names the object. Only `view`:
+ *    a views container is registered under the object it binds to, so
+ *    `os g view task` IS "the views of task", and the name resolves through
+ *    {@link objectNameFor} exactly as `os g object task` writes it.
+ *  - `object: 'flag'` — `--object`, or the stack's only object.
+ *  - `flow: 'flag'`   — `--flow`, or the stack's only flow.
+ *
+ * Every reference is checked against the loaded stack before anything is
+ * rendered, so no scaffold is written naming metadata the stack does not
+ * declare. ⛔ No reference is ever derived from the new item's own name
+ * (`os g flow task_done` once bound object `task_done`).
+ */
+export interface ScaffoldBinds {
+  object?: 'name' | 'flag';
+  flow?: 'flag';
+}
 
 /**
  * The scaffold templates, keyed by metadata type.
@@ -107,9 +156,20 @@ const FLOW_SCAFFOLD_REQUIRES = ['automation', 'triggers'] as const;
  * Only object names are prefixed. The scaffold's own `name` on an action, a
  * flow, a dashboard, an app, a skill or a picklist is not judged against the
  * namespace by any gate `os validate` runs, so it stays the name the author
- * typed. A view
- * container's own `name` IS an object name — the container is registered under
- * the object it binds to — so it is prefixed with it (#20215).
+ * typed. A view container writes no `name` at all: it is registered under
+ * the object it binds to (#21325, see the `view` generator).
+ *
+ * ## A binding is read off the stack, never derived from the new item's name
+ *
+ * `view`, `action`, `flow` and `app` write references to OTHER metadata — an
+ * object, and for an action a flow. `binds` says where each comes from (see
+ * {@link ScaffoldBinds}), and `runMetadataGeneration` resolves every one of
+ * them against the loaded stack before rendering, refusing when it cannot:
+ * `generate` receives them already resolved, as {@link ScaffoldBindings}.
+ * These four used to bind the object NAMED LIKE the new item, so
+ * `os g flow task_done` wrote a flow on an object `task_done` nobody declared
+ * (a trigger that never fires), and `os g action complete_task` could only
+ * ever be written for an object called `complete_task` (#21325).
  *
  * ## Every scaffold reaches the stack, or the command says it does not
  *
@@ -122,8 +182,15 @@ const FLOW_SCAFFOLD_REQUIRES = ['automation', 'triggers'] as const;
 const GENERATORS: Record<string, {
   description: string;
   defaultDir: string;
-  /** Whether the scaffold writes an object machine name (see above). */
+  /**
+   * Whether the scaffold writes an object machine name (see above) — its own
+   * (`object`) or one it binds (`view`, `action`, `flow`, `app`). Such a
+   * generator reads the project's config first and refuses when it does not
+   * load, because the namespace and the stack's objects are both read there.
+   */
   namesObject: boolean;
+  /** The references the scaffold writes, and where each is taken from (#21325). */
+  binds?: ScaffoldBinds;
   /**
    * The metadata `name` the scaffold writes, for the same arguments as
    * `generate`. `runMetadataGeneration` looks for exactly this name in the
@@ -142,8 +209,10 @@ const GENERATORS: Record<string, {
    * @param name      the name the author passed, already past the charset gate
    * @param namespace the project's `manifest.namespace`; omitted for a project
    *                  that declares none, which is the gate's own "no prefix owed"
+   * @param bindings  every reference `binds` declares, resolved against the
+   *                  stack; a binding scaffold throws without them
    */
-  generate: (name: string, namespace?: string) => string;
+  generate: (name: string, namespace?: string, bindings?: ScaffoldBindings) => string;
 }> = {
   object: {
     description: 'Business data object',
@@ -178,6 +247,16 @@ const GENERATORS: Record<string, {
      * the `${namespace}_` prefix the namespace-prefix gate demands, the way
      * the `os init` template's own object does. The binding and the filename
      * stay derived from the name the author typed.
+     *
+     * ONE field, the record's title (#21325). The scaffold used to declare a
+     * `description` textarea too, which nothing in the stack reads: the moment
+     * the project held any view, flow, action, app, dashboard or skill,
+     * `os validate` / `os build` / `os lint` reported it (`field-no-consumers`)
+     * for every object this command had written. `name` is exempt — the
+     * platform reads the title field for every record's display name — so the
+     * scaffold carries no finding into any project. A field the author adds
+     * gets its consumer from `os g view NAME`, whose list shows every field the
+     * object declares.
      */
     namesObject: true,
     itemName: (name: string, namespace?: string) => objectNameFor(name, namespace),
@@ -191,15 +270,14 @@ const ${toCamelCase(name)} = ObjectSchema.create({
   label: '${toTitleCase(name)}',
   pluralLabel: '${toTitleCase(name)}s',
   fields: {
+    // The record's title: the platform shows it as each record's name. Add
+    // the fields this object needs beside it; \`objectstack generate view\`
+    // then lists every one of them.
     name: {
       type: 'text',
       label: 'Name',
       required: true,
       maxLength: 255,
-    },
-    description: {
-      type: 'textarea',
-      label: 'Description',
     },
   },
   // Org-wide default (OWD): who can see records they don't own. 'private' is
@@ -234,45 +312,74 @@ export default ${toCamelCase(name)};
      *
      * The object binding is `object` — the key `getViewsByObject()` reads and
      * the one a stack-level `views: [...]` entry needs to say which object its
-     * views belong to. `objectName` is the spelling on the QUERY surface. It
-     * names the object `os g object NAME` writes, prefix included, so the two
-     * scaffolds compose.
+     * views belong to. `objectName` is the spelling on the QUERY surface. The
+     * view is NAMED after that object (`binds.object: 'name'`): `os g view
+     * task` writes the views of the object `os g object task` writes, prefix
+     * included, and refuses when the stack declares no such object.
      *
-     * The container's own `name` is that SAME object name (#20215). A views
-     * container is registered under the object it binds to, and the runtime
-     * refuses one whose `name` disagrees with that key at boot
-     * (`ObjectQL.registerMetadataCollections`: "Register under one name: drop
-     * `name`, or set it to …"). `os validate` did not say so, and the scaffold
-     * was never loaded, so nobody met it until `os init` started wiring
-     * `src/views`: in a namespaced project the scaffold then stopped `os serve`
-     * from booting. Unprefixed and prefixed are the same string in a project
-     * with no namespace, so only a namespaced project sees the difference.
+     * ## No container `name` or `label` (#21325) — decided from their readers
+     *
+     * The template used to write both, with a comment saying the server
+     * refuses a container whose `name` disagrees, while `os validate` called
+     * both dead. Read from the code that reads them, both statements are true
+     * and they do not conflict:
+     *
+     *  - The container is registered under the key
+     *    `deriveViewContainerObject` returns (`@objectstack/metadata`,
+     *    `view-container.ts`): its own `object`, else `list.data.object` /
+     *    `form.data.object`, and only then `name`. With `object` set, `name`
+     *    is never the key. Its one reader is `viewContainerNameRefusal`
+     *    (`@objectstack/objectql`), which refuses a `name` that is set AND
+     *    differs from that key, and passes a container with no `name`. So
+     *    `name` can only ever restate the key or contradict it — the liveness
+     *    ledger's `dead` (`packages/spec/liveness/view.json`) — and the
+     *    refusal's own remedy is "drop `name`".
+     *  - A container's `label` reaches no reader: every ViewItem the container
+     *    expands into takes the label of its list or form entry
+     *    (`expandViewContainerWithDiagnostics`), never the container's.
+     *
+     * So both are dropped, and the label a person sees is the list view's
+     * own: `list.label`, which `os lint` requires (`required/label`) and the
+     * Console draws as the view's tab and title.
+     *
+     * The list shows every field the bound object declares, read off the
+     * stack: a column naming a field the object lacks renders blank and is
+     * refused (`list-view-field-unknown`), and the template's old fixed `name`
+     * column was exactly that on any object without a `name` field. It is
+     * sorted by the record's title field when the object has one.
      */
     namesObject: true,
+    binds: { object: 'name' },
     itemName: (name: string, namespace?: string) => objectNameFor(name, namespace),
-    generate: (name: string, namespace?: string) => `import * as UI from '@objectstack/spec/ui';
+    generate: (name: string, _namespace?: string, bindings?: ScaffoldBindings) => {
+      const object = requireBinding('view', bindings, 'object');
+      const columns = object.fields.map((field) => `      { field: ${tsString(field)} },`).join('\n');
+      const sort = object.displayField
+        ? `\n    sort: [{ field: ${tsString(object.displayField)}, order: 'asc' }],`
+        : '';
+      return `import * as UI from '@objectstack/spec/ui';
 
 /**
  * ${toTitleCase(name)} Views
  */
 const ${toCamelCase(name)}Views: UI.View = {
-  // A views container is registered under the object it binds to, so its
-  // \`name\` is that object's name: the server refuses one that disagrees.
-  name: '${objectNameFor(name, namespace)}',
-  label: '${toTitleCase(name)}',
-  object: '${objectNameFor(name, namespace)}',
+  // A views container is registered under the object it binds to: \`object\`
+  // is its identity, so it declares no \`name\` or \`label\` of its own. The
+  // label people see is the list view's, below.
+  object: ${tsString(object.name)},
   list: {
+    label: ${tsString(`All ${objectPluralLabel(object)}`)},
     type: 'grid',
     columns: [
-      { field: 'name', width: 200 },
-    ],
-    sort: [{ field: 'name', order: 'asc' }],
+${columns}
+    ],${sort}
     pagination: { pageSize: 25 },
   },
 };
 
 export default ${toCamelCase(name)}Views;
-`,
+`;
+    },
   },
 
   action: {
@@ -287,20 +394,34 @@ export default ${toCamelCase(name)}Views;
      * `execute`/`handler` second slot was removed in protocol 17 precisely so
      * no consumer has two places to disagree about. What that block was trying
      * to express is exactly `type: 'flow'` with `target` naming the flow, so
-     * that is what it now says — and it targets the name `os g flow NAME`
-     * writes, so the two scaffolds compose.
+     * that is what it now says.
      *
      * `target` is REQUIRED for every type but `script`, enforced by
      * `ActionSchema`'s own refinement, so this cannot drift back to an action
      * bound to nothing.
      *
-     * `objectName` is an object name, so it carries the namespace prefix;
-     * `defineStack` refuses one that names no declared object. `target` names
-     * a FLOW, whose name no gate prefixes, so it does not.
+     * Both references are BINDINGS (#21325): `objectName` is the object from
+     * `--object` (or the stack's only object), `target` the flow from `--flow`
+     * (or the stack's only flow), each one the stack declares. They used to be
+     * derived from the action's own name — `os g action complete_task` named
+     * object `complete_task` and flow `complete_task_flow` — so `defineStack`
+     * refused the action in every project that had not happened to give an
+     * object and a flow that same name, and in one with no flows at all it
+     * loaded an action whose flow did not exist.
+     *
+     * `locations` places it (#21325): an action with none, that no view
+     * places by name, renders on no surface, and `os validate` says so
+     * (`action-no-placement`). `record_header` is the button on the record it
+     * acts on; the emitted comment names the rest of the vocabulary and the
+     * explicit headless `[]`.
      */
     namesObject: true,
+    binds: { object: 'flag', flow: 'flag' },
     itemName: (name: string) => toSnakeCase(name),
-    generate: (name: string, namespace?: string) => `import * as UI from '@objectstack/spec/ui';
+    generate: (name: string, _namespace?: string, bindings?: ScaffoldBindings) => {
+      const object = requireBinding('action', bindings, 'object');
+      const flow = requireBinding('action', bindings, 'flow');
+      return `import * as UI from '@objectstack/spec/ui';
 
 /**
  * ${toTitleCase(name)} Action
@@ -308,13 +429,19 @@ export default ${toCamelCase(name)}Views;
 const ${toCamelCase(name)}Action: UI.Action = {
   name: '${toSnakeCase(name)}',
   label: '${toTitleCase(name)}',
+  // Runs the flow named in \`target\` against the record it is invoked on.
   type: 'flow',
-  objectName: '${objectNameFor(name, namespace)}',
-  target: '${toSnakeCase(name)}_flow',
+  objectName: ${tsString(object.name)},
+  target: ${tsString(flow)},
+  // Where the button is drawn: the record's header. Others: 'record_more',
+  // 'record_section', 'list_item', 'list_toolbar'. An action meant only for
+  // REST / MCP / AI callers says so with an empty list.
+  locations: ['record_header'],
 };
 
 export default ${toCamelCase(name)}Action;
-`,
+`;
+    },
   },
 
   flow: {
@@ -339,13 +466,20 @@ export default ${toCamelCase(name)}Action;
      * gates on. `generate-scaffold-validates.test.ts` puts this output through
      * both layers, which is the drift this template is not allowed to repeat.
      *
-     * `status` stays `'draft'`: the scaffold fixes the SHAPE and leaves the
-     * arming decision to the author (`os validate` says so — draft flows do
-     * fire, so declare `'active'` to arm deliberately).
+     * `status` is `'active'` (#21325). It used to be `'draft'`, which arms
+     * nothing less: only `'obsolete'` and `'invalid'` disable a flow
+     * (`AutomationEngine` keeps exactly those two in `flowStatusDisabled`), so
+     * a draft flow fires its trigger exactly as an active one does. What
+     * `'draft'` added was ambiguity, which `os validate` reports on every
+     * scaffold (`flow-draft-status-ambiguous`, and the server's own boot line
+     * says the same). `'active'` is the runtime behaviour the scaffold always
+     * had, declared; the emitted comment names `'obsolete'` as the off switch.
      *
-     * The start node's `objectName` carries the namespace prefix: a trigger
-     * bound to an object the stack does not define never fires, and
-     * `validate-flow-trigger-readiness` reports it.
+     * The start node's `objectName` is a BINDING (#21325): the object from
+     * `--object`, or the stack's only object, one the stack declares. It used
+     * to be derived from the flow's own name, so `os g flow task_done` bound
+     * object `task_done`, a trigger that never fires — the generator printed
+     * "Reaches the stack" while `validate-flow-trigger-readiness` warned.
      *
      * It declares what it needs to run (#20215): {@link FLOW_SCAFFOLD_REQUIRES}.
      * `defineStack` refuses a record-change flow in a stack whose `requires`
@@ -358,9 +492,12 @@ export default ${toCamelCase(name)}Action;
      * stack is missing, and the emitted file says so in its own header.
      */
     namesObject: true,
+    binds: { object: 'flag' },
     itemName: (name: string) => `${toSnakeCase(name)}_flow`,
     requires: FLOW_SCAFFOLD_REQUIRES,
-    generate: (name: string, namespace?: string) => `import * as Automation from '@objectstack/spec/automation';
+    generate: (name: string, _namespace?: string, bindings?: ScaffoldBindings) => {
+      const object = requireBinding('flow', bindings, 'object');
+      return `import * as Automation from '@objectstack/spec/automation';
 
 /**
  * ${toTitleCase(name)} Flow
@@ -374,7 +511,8 @@ const ${toCamelCase(name)}Flow: Automation.Flow = {
   name: '${toSnakeCase(name)}_flow',
   label: '${toTitleCase(name)} Flow',
   type: 'record_change',
-  status: 'draft',
+  // Armed: the trigger below fires it. Set 'obsolete' to switch it off.
+  status: 'active',
   nodes: [
     {
       id: 'start',
@@ -387,7 +525,7 @@ const ${toCamelCase(name)}Flow: Automation.Flow = {
       //               token ('write' is create OR update, in one flow)
       //   condition   optional bare-CEL gate, e.g. 'record.amount >= 500'
       config: {
-        objectName: '${objectNameFor(name, namespace)}',
+        objectName: ${tsString(object.name)},
         triggerType: 'record-after-write',
       },
     },
@@ -403,7 +541,8 @@ const ${toCamelCase(name)}Flow: Automation.Flow = {
 };
 
 export default ${toCamelCase(name)}Flow;
-`,
+`;
+    },
   },
 
   dashboard: {
@@ -439,13 +578,19 @@ export default ${toCamelCase(name)}Dashboard;
      * It scaffolds one real entry rather than an empty array, because the
      * entry shape is the thing an author copies to add the second one — and
      * because an app with no navigation renders a shell with nothing in it.
-     * The entry points at the object `os g object NAME` writes, prefix
-     * included, so the two scaffolds compose: `defineStack` refuses a nav
-     * `objectName` that names no declared object.
+     *
+     * The entry's `objectName` is a BINDING (#21325): the object from
+     * `--object`, or the stack's only object, one the stack declares, and the
+     * entry is labelled with that object's own plural label. It used to be
+     * derived from the app's name, so `os g app tasks` opened an object
+     * `tasks` and `defineStack` refused the app in every project without one.
      */
     namesObject: true,
+    binds: { object: 'flag' },
     itemName: (name: string) => `${toSnakeCase(name)}_app`,
-    generate: (name: string, namespace?: string) => `import * as UI from '@objectstack/spec/ui';
+    generate: (name: string, _namespace?: string, bindings?: ScaffoldBindings) => {
+      const object = requireBinding('app', bindings, 'object');
+      return `import * as UI from '@objectstack/spec/ui';
 
 /**
  * ${toTitleCase(name)} App
@@ -455,16 +600,17 @@ const ${toCamelCase(name)}App: UI.App = {
   label: '${toTitleCase(name)}',
   navigation: [
     {
-      id: '${toSnakeCase(name)}_nav',
+      id: ${tsString(`${object.name}_nav`)},
       type: 'object',
-      label: '${toTitleCase(name)}s',
-      objectName: '${objectNameFor(name, namespace)}',
+      label: ${tsString(objectPluralLabel(object))},
+      objectName: ${tsString(object.name)},
     },
   ],
 };
 
 export default ${toCamelCase(name)}App;
-`,
+`;
+    },
   },
 
   skill: {
@@ -617,15 +763,23 @@ export const GENERATOR_SCAFFOLD_TARGETS: readonly {
   /** The `defineStack` key this type is collected under: `singularToPlural(type)`. */
   stackKey: string;
   namesObject: boolean;
+  /**
+   * The references the scaffold writes and where each comes from (#21325);
+   * `{}` for a scaffold that binds nothing. A pin builds each binding's
+   * prerequisite from this — an object, a flow — so a generator added later
+   * is measured against a stack that declares what it binds.
+   */
+  binds: ScaffoldBinds;
   itemName: (name: string, namespace?: string) => string;
   requires: readonly string[];
-  generate: (name: string, namespace?: string) => string;
+  generate: (name: string, namespace?: string, bindings?: ScaffoldBindings) => string;
 }[] =
   Object.entries(GENERATORS).map(([type, gen]) => ({
     type,
     defaultDir: gen.defaultDir,
     stackKey: singularToPlural(type),
     namesObject: gen.namesObject,
+    binds: gen.binds ?? {},
     itemName: gen.itemName,
     requires: gen.requires ?? [],
     generate: gen.generate,
@@ -789,11 +943,107 @@ function toSnakeCase(str: string): string {
  * is refused by `runMetadataGeneration` before anything is written.
  */
 function objectNameFor(name: string, namespace?: string): string {
-  const shortName = toSnakeCase(name);
+  return prefixedObjectName(toSnakeCase(name), namespace);
+}
+
+/**
+ * The namespace half of {@link objectNameFor}, applied to a name taken as
+ * written: `--object` names an object the stack already declares, so it is
+ * looked up, never re-spelled (#21325).
+ */
+function prefixedObjectName(shortName: string, namespace?: string): string {
   if (!namespace) return shortName;
   return validateObjectNamespacePrefix(shortName, namespace) === null
     ? shortName
     : `${namespace}_${shortName}`;
+}
+
+/**
+ * A TypeScript single-quoted string literal for `value`. Bindings carry text
+ * read off the author's stack (an object's label), so it is escaped rather
+ * than interpolated raw.
+ */
+function tsString(value: string): string {
+  return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r/g, '\\r').replace(/\n/g, '\\n')}'`;
+}
+
+/** The words a scaffold labels a bound object's records with. */
+function objectPluralLabel(object: ScaffoldObjectBinding): string {
+  return object.pluralLabel ?? object.label ?? toTitleCase(object.name);
+}
+
+/**
+ * The binding `generate` was handed, or a thrown error naming what is missing.
+ * Reached without one only by a caller that skipped `runMetadataGeneration`'s
+ * resolution — a test or a new call site — never by an author: rendering a
+ * binding scaffold with a reference made up on the spot is the defect #21325
+ * removed, so there is no fallback to fall to.
+ */
+function requireBinding(type: string, bindings: ScaffoldBindings | undefined, key: 'object'): ScaffoldObjectBinding;
+function requireBinding(type: string, bindings: ScaffoldBindings | undefined, key: 'flow'): string;
+function requireBinding(
+  type: string,
+  bindings: ScaffoldBindings | undefined,
+  key: 'object' | 'flow',
+): ScaffoldObjectBinding | string {
+  const bound = bindings?.[key];
+  if (bound === undefined) {
+    throw new Error(`generate: the \`${type}\` scaffold binds a ${key} and was rendered without one`);
+  }
+  return bound;
+}
+
+/**
+ * Every object and flow a loaded stack declares, in the shape a binding
+ * scaffold is rendered against (#21325). Read off the stack the config
+ * EVALUATES to, folded the way `os validate` folds it
+ * ({@link authoringRuleUnionStack}, so a `packages[]` composition counts), and
+ * from both collection spellings — the array every scaffold config uses and
+ * the name-keyed map `normalizeStackInput` also accepts.
+ *
+ * Exported so a pin can resolve bindings from the same reader the command
+ * uses, against a stack of scaffolds it composed.
+ */
+export function stackBindingCandidates(config: unknown): {
+  objects: ScaffoldObjectBinding[];
+  flows: string[];
+} {
+  const stack = authoringRuleUnionStack((config ?? {}) as Record<string, unknown>) as Record<string, unknown>;
+  const entries = (key: string): [string | undefined, Record<string, unknown>][] => {
+    const collection = stack[key];
+    if (Array.isArray(collection)) {
+      return collection
+        .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+        .map((item) => [undefined, item]);
+    }
+    if (collection && typeof collection === 'object') {
+      return Object.entries(collection as Record<string, unknown>)
+        .filter((entry): entry is [string, Record<string, unknown>] => !!entry[1] && typeof entry[1] === 'object');
+    }
+    return [];
+  };
+  const named = ([key, item]: [string | undefined, Record<string, unknown>]) =>
+    typeof item.name === 'string' && item.name ? item.name : key;
+
+  const objects: ScaffoldObjectBinding[] = [];
+  for (const entry of entries('objects')) {
+    const name = named(entry);
+    if (!name) continue;
+    const item = entry[1];
+    const declared = item.fields && typeof item.fields === 'object' && !Array.isArray(item.fields)
+      ? Object.keys(item.fields as Record<string, unknown>)
+      : [];
+    const title = resolveDisplayField(item as Parameters<typeof resolveDisplayField>[0]);
+    objects.push({
+      name,
+      ...(typeof item.label === 'string' && item.label ? { label: item.label } : {}),
+      ...(typeof item.pluralLabel === 'string' && item.pluralLabel ? { pluralLabel: item.pluralLabel } : {}),
+      fields: declared,
+      ...(title && declared.includes(title) ? { displayField: title } : {}),
+    });
+  }
+  const flows = entries('flows').map(named).filter((name): name is string => !!name);
+  return { objects, flows };
 }
 
 /**
@@ -1132,7 +1382,11 @@ export function generateTypesFromConfig(config: Record<string, unknown>): string
 
 // ─── Command ────────────────────────────────────────────────────────
 
-async function runMetadataGeneration(type: string, name: string, flags: { dir?: string; dryRun?: boolean }): Promise<void> {
+async function runMetadataGeneration(
+  type: string,
+  name: string,
+  flags: { dir?: string; dryRun?: boolean; object?: string; flow?: string },
+): Promise<void> {
     printHeader('Generate');
 
     // A withdrawn type never reaches this function: `Generate.run` answers it
@@ -1253,7 +1507,13 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
       if (project.kind === 'loaded') namespace = project.namespace;
     }
 
-    const objectName = generator.namesObject ? objectNameFor(name, namespace) : undefined;
+    // The object name derived from what the author TYPED as this item's name:
+    // the `object` scaffold's own name, and a view's, which names the object
+    // it binds. A scaffold that binds through `--object` derives nothing from
+    // its own name (#21325), so it has none.
+    const nameNamesObject = (generator.namesObject && generator.binds === undefined)
+      || generator.binds?.object === 'name';
+    const objectName = nameNamesObject ? objectNameFor(name, namespace) : undefined;
     if (objectName !== undefined && namespace) {
       // Prefixing answers the one refusal it can answer — a missing prefix.
       // A name the gate still refuses after it (the legacy `NS__SHORT` form)
@@ -1271,6 +1531,19 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
         process.exit(1);
       }
     }
+
+    // Every reference the scaffold writes, resolved against the loaded stack
+    // BEFORE anything is rendered (#21325) — see `resolveScaffoldBindings`.
+    // Below the namespace read and the residual-prefix gate because the
+    // namespace is how a typed object name is resolved, and above the render,
+    // the parse check and the dry-run branch, so a preview never shows a file
+    // bound to something the stack does not declare.
+    const verdict = generator.binds
+      ? resolveScaffoldBindings({ type, name, binds: generator.binds, project, namespace, objectName, flags })
+      : undefined;
+    if (verdict && !verdict.ok) refuseGeneration(verdict.headline, verdict.lines);
+    const resolved = verdict?.ok ? verdict : undefined;
+    const bindings = resolved?.bindings;
 
     const dir = flags.dir || generator.defaultDir;
     // The written name comes from the registry's `filePatterns` for this type
@@ -1307,7 +1580,11 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
 
     console.log(`  ${chalk.dim('Type:')}  ${chalk.cyan(type)} — ${generator.description}`);
     console.log(`  ${chalk.dim('Name:')}  ${chalk.white(name)}`);
-    if (objectName !== undefined && namespace) {
+    if (resolved) {
+      // Said out loud: a binding scaffold's references are not the string the
+      // author typed as its name, so where each came from is printed.
+      for (const line of resolved.said) console.log(line);
+    } else if (objectName !== undefined && namespace) {
       // Said out loud: in a namespaced project the object name that lands is
       // not the string the author typed, so it is never left to be discovered.
       console.log(
@@ -1323,7 +1600,7 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
     // where the name has finished being derived is what lets one refusal cover
     // every emission site of every generator (14 across 7 when it landed)
     // instead of one patch per site.
-    const content = generator.generate(name, namespace);
+    const content = generator.generate(name, namespace, bindings);
     const exportLine = `export { default as ${toCamelCase(name)} } from '${moduleSpecifier}';`;
 
     // ⛔ REFUSE rather than rewrite (#16541).
@@ -1602,6 +1879,230 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
 
     for (const line of written) printSuccess(line);
     reportStackReach(reach, { type, dir, scaffoldLabel, stackKey, itemName, requires, barrelDir: fullDir });
+}
+
+/** Print a refusal and exit 1 — never returns. Every caller has written nothing yet. */
+function refuseGeneration(headline: string, lines: readonly string[]): never {
+  printError(`Refusing to generate — ${headline}`);
+  console.log('');
+  for (const line of lines) console.log(line ? chalk.dim(`  ${line}`) : '');
+  console.log('');
+  process.exit(1);
+}
+
+/** `a flow`, `an action` — the type's name with the article it takes. */
+function article(type: string, capitalized = false): string {
+  const a = /^[aeiou]/.test(type) ? 'an' : 'a';
+  return `${capitalized ? a[0].toUpperCase() + a.slice(1) : a} ${type}`;
+}
+
+/** `a, b and c` — a stack's own names, listed for the author to pick from. */
+function listed(names: readonly string[]): string {
+  const quoted = names.map((n) => `'${n}'`);
+  return quoted.length <= 1 ? quoted.join('') : `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`;
+}
+
+/** What {@link resolveScaffoldBindings} answers: the bindings, or why there are none. */
+export type ScaffoldBindingVerdict =
+  /** Every reference resolved; `said` is the header lines naming each and where it came from. */
+  | { ok: true; bindings: ScaffoldBindings; said: string[] }
+  /** A refusal, for the caller to print: a headline completing "Refusing to generate — …" and its body. */
+  | { ok: false; headline: string; lines: string[] };
+
+/**
+ * Resolve every reference a binding scaffold writes against the project's
+ * loaded stack, or answer why it cannot — the refusal names the remedy, and
+ * `runMetadataGeneration` prints it and exits 1 with nothing written (#21325).
+ * Pure: it prints nothing and exits nothing, so every branch is pinned
+ * in-process (`generate-binds-from-stack.test.ts`).
+ *
+ * ## Where each reference comes from
+ *
+ *  - An object named by the item's own name (`view`): {@link objectNameFor},
+ *    exactly as `os g object` writes it, and the stack must declare it.
+ *  - An object from `--object`: the name as written, or with the namespace
+ *    prefix {@link objectNameFor} would give it — looked up, never re-spelled
+ *    — and the stack must declare it.
+ *  - No `--object`: the stack's only object. With none there is nothing to
+ *    bind; with several, which one a scaffold acts on is the author's to say,
+ *    so the command lists them and asks for `--object` rather than choosing.
+ *  - A flow (`action`): the same three answers, with `--flow`.
+ *
+ * ⛔ What it never does is the thing it replaced: derive a reference from the
+ * new item's own name. `os g flow task_done` bound object `task_done`, and
+ * `os g action complete_task` bound object `complete_task` and flow
+ * `complete_task_flow`, whether or not the stack declared either.
+ *
+ * Only DECLARED metadata binds: an object another installed package provides
+ * is not in this stack, so `os validate` could not tell a scaffold bound to
+ * it from one bound to a typo. Outside a project (no config) there is no stack
+ * to check against, so a binding scaffold is refused there too. A config that
+ * does not load never reaches here: it was refused above, for every generator
+ * that names an object.
+ */
+export function resolveScaffoldBindings(args: {
+  type: string;
+  name: string;
+  binds: ScaffoldBinds;
+  project: ProjectNamespace;
+  namespace: string | undefined;
+  /** The object named by the item's own name, for `binds.object === 'name'`. */
+  objectName: string | undefined;
+  flags: { object?: string; flow?: string };
+}): ScaffoldBindingVerdict {
+  const { type, name, binds, project, namespace, objectName, flags } = args;
+  const g = `${CLI_ALIAS} g`;
+  const what = binds.flow ? 'an object and a flow' : 'an object';
+  const refuse = (headline: string, lines: string[]): ScaffoldBindingVerdict => ({ ok: false, headline, lines });
+  const aType = article(type);
+  const AType = article(type, true);
+
+  if (project.kind !== 'loaded') {
+    return refuse(
+      `\`${g} ${type}\` binds ${what}, and there is no objectstack.config.{ts,js,mjs} here to bind in`,
+      [
+        `${AType} is written against metadata the project's stack declares, and what it binds`,
+        'is checked against that stack before anything is written. Outside a project there is',
+        'nothing to check it against. Nothing was written.',
+        '',
+        `Run \`${g} ${type}\` in the project's directory, next to its objectstack.config.ts.`,
+      ],
+    );
+  }
+
+  const { objects, flows } = stackBindingCandidates(project.config);
+  const objectNames = objects.map((o) => o.name);
+  const declaredObjects = objectNames.length > 0
+    ? `Objects this stack declares: ${listed(objectNames)}.`
+    : 'This stack declares no object.';
+  const ns = namespace ? ` ${chalk.dim(`(manifest.namespace '${namespace}')`)}` : '';
+  const bindings: ScaffoldBindings = {};
+  const said: string[] = [];
+
+  if (binds.object === 'name') {
+    const object = objects.find((o) => o.name === objectName);
+    if (!object) {
+      return refuse(
+        `\`${g} ${type} ${name}\` binds object '${objectName}', which this stack does not declare`,
+        [
+          `${AType} is named after the object it binds, and that object has to be one the stack`,
+          'declares — a view of an object nobody declared lists nothing. Nothing was written.',
+          '',
+          declaredObjects,
+          `Generate the object first (\`${g} object ${name}\`), or name one the stack declares.`,
+        ],
+      );
+    }
+    bindings.object = object;
+    said.push(`  ${chalk.dim('Object:')} ${chalk.white(object.name)}${object.name !== name ? ns : ''}`);
+  } else if (binds.object === 'flag') {
+    if (flags.object !== undefined) {
+      const typed = flags.object;
+      const object = objects.find((o) => o.name === typed)
+        ?? objects.find((o) => o.name === prefixedObjectName(typed, namespace));
+      if (!object) {
+        return refuse(
+          `--object ${typed} names no object this stack declares`,
+          [
+            `${AType} is bound to an object the stack declares, so it is checked before anything`,
+            'is written. Nothing was written.',
+            '',
+            declaredObjects,
+            `Pass one of them, or generate the object first (\`${g} object ${typed}\`).`,
+          ],
+        );
+      }
+      bindings.object = object;
+      said.push(
+        `  ${chalk.dim('Object:')} ${chalk.white(object.name)} `
+          + chalk.dim(object.name !== typed && namespace
+            ? `(--object ${typed}, prefixed by manifest.namespace '${namespace}')`
+            : '(--object)'),
+      );
+    } else if (objects.length === 1) {
+      bindings.object = objects[0];
+      said.push(
+        `  ${chalk.dim('Object:')} ${chalk.white(objects[0].name)} `
+          + chalk.dim('(the only object this stack declares; --object binds another)'),
+      );
+    } else if (objects.length === 0) {
+      return refuse(
+        `${aType} binds an object, and this stack declares none`,
+        [
+          `Generate the object first, then bind the ${type} to it. Nothing was written.`,
+          '',
+          `    ${g} object <object>`,
+          `    ${g} ${type} ${name} --object <object>`,
+        ],
+      );
+    } else {
+      return refuse(
+        `${aType} binds an object, and this stack declares ${objects.length}: name one with --object`,
+        [
+          `Which object ${aType} acts on is yours to say, so it is not picked for you. Nothing`,
+          'was written.',
+          '',
+          declaredObjects,
+          '',
+          `    ${g} ${type} ${name} --object <object>`,
+        ],
+      );
+    }
+  }
+
+  if (binds.flow === 'flag') {
+    const declaredFlows = flows.length > 0
+      ? `Flows this stack declares: ${listed(flows)}.`
+      : 'This stack declares no flow.';
+    const objectArg = flags.object !== undefined ? ` --object ${flags.object}` : '';
+    if (flags.flow !== undefined) {
+      const flow = flows.find((f) => f === flags.flow);
+      if (!flow) {
+        return refuse(
+          `--flow ${flags.flow} names no flow this stack declares`,
+          [
+            `${AType} runs a flow the stack declares, so it is checked before anything is`,
+            'written. Nothing was written.',
+            '',
+            declaredFlows,
+            `Pass one of them, or generate the flow first (\`${g} flow <name> --object <object>\`).`,
+          ],
+        );
+      }
+      bindings.flow = flow;
+      said.push(`  ${chalk.dim('Flow:')}   ${chalk.white(flow)} ${chalk.dim('(--flow)')}`);
+    } else if (flows.length === 1) {
+      bindings.flow = flows[0];
+      said.push(
+        `  ${chalk.dim('Flow:')}   ${chalk.white(flows[0])} `
+          + chalk.dim('(the only flow this stack declares; --flow runs another)'),
+      );
+    } else if (flows.length === 0) {
+      return refuse(
+        `${aType} runs a flow, and this stack declares none`,
+        [
+          `Generate the flow first, then the ${type} that runs it. Nothing was written.`,
+          '',
+          `    ${g} flow <name> --object <object>`,
+          `    ${g} ${type} ${name}${objectArg} --flow <name>_flow`,
+        ],
+      );
+    } else {
+      return refuse(
+        `${aType} runs a flow, and this stack declares ${flows.length}: name one with --flow`,
+        [
+          `Which flow ${aType} runs is yours to say, so it is not picked for you. Nothing was`,
+          'written.',
+          '',
+          declaredFlows,
+          '',
+          `    ${g} ${type} ${name}${objectArg} --flow <flow>`,
+        ],
+      );
+    }
+  }
+
+  return { ok: true, bindings, said };
 }
 
 /**
@@ -3507,6 +4008,66 @@ async function runMigrationGeneration(configPath: string | undefined, flags: { o
 
 // ─── Main Generate Command ──────────────────────────────────────────
 
+/** The generator types whose `binds[key]` is `source`, read off the roster. */
+function typesBinding(key: keyof ScaffoldBinds, source: 'name' | 'flag'): string {
+  return Object.entries(GENERATORS)
+    .filter(([, gen]) => gen.binds?.[key] === source)
+    .map(([type]) => type)
+    .join(', ');
+}
+
+/**
+ * The refusal for `--object` / `--flow` on a type that does not take them, or
+ * `undefined` (#21325). A type with no generator and no sub-command route is
+ * left to the unknown-type answer, which is the more useful one. Pure, like
+ * {@link resolveScaffoldBindings}: `Generate.run` prints and exits.
+ */
+export function unusedBindingFlagRefusal(
+  type: string,
+  given: { object?: string; flow?: string },
+): { headline: string; lines: string[] } | undefined {
+  const generator = Object.prototype.hasOwnProperty.call(GENERATORS, type) ? GENERATORS[type] : undefined;
+  if (!generator && !Object.prototype.hasOwnProperty.call(SUB_COMMANDS, type)) return undefined;
+  for (const key of ['object', 'flow'] as const) {
+    if (given[key] === undefined || generator?.binds?.[key] === 'flag') continue;
+    return {
+      headline: `\`${CLI_ALIAS} g ${type}\` takes no --${key}`,
+      lines: [
+        generator?.binds?.[key] === 'name'
+          ? `${article(type, true)} is named after the ${key} it binds: \`${CLI_ALIAS} g ${type} <${key}>\`.`
+          : `${article(type, true)} binds no ${key}, so --${key} would name nothing it writes.`,
+        `--${key} is read by: ${typesBinding(key, 'flag')}. Nothing was written.`,
+      ],
+    };
+  }
+  return undefined;
+}
+
+/**
+ * The types `Generate.run` routes to a sub-command instead of a scaffold
+ * generator. One table, read by the routing and by
+ * {@link unusedBindingFlagRefusal}, so the set of types neither `--object`
+ * nor `--flow` reaches cannot drift from the set that is routed.
+ */
+const SUB_COMMANDS: Record<
+  string,
+  (name: string | undefined, flags: { output?: string; format?: string; 'dry-run'?: boolean }) => Promise<void>
+> = {
+  types: (name, flags) => runTypesGeneration(name, {
+    output: flags.output ?? 'src/types/objectstack.d.ts',
+    dryRun: flags['dry-run'],
+  }),
+  client: (name, flags) => runClientGeneration(name, {
+    output: flags.output ?? 'src/client/objectstack-client.ts',
+    dryRun: flags['dry-run'],
+  }),
+  migration: (name, flags) => runMigrationGeneration(name, {
+    output: flags.output,
+    format: flags.format ?? 'typescript',
+    dryRun: flags['dry-run'],
+  }),
+};
+
 export default class Generate extends Command {
   static override description = 'Generate metadata files or TypeScript types';
 
@@ -3528,6 +4089,16 @@ export default class Generate extends Command {
     'dry-run': Flags.boolean({ description: 'Show what would be created without writing files' }),
     output: Flags.string({ char: 'o', description: 'Output file path' }),
     format: Flags.string({ description: 'Output format: sql or typescript. The sql format emits PostgreSQL-only DDL and makes no MySQL or SQLite claim.', default: 'typescript' }),
+    // #21325 — the references a binding scaffold writes, named by the author
+    // instead of derived from the new item's name. Spelled as the other flags
+    // here are (a long name, a value), and described from the roster so the
+    // types they apply to cannot drift from the generators that read them.
+    object: Flags.string({
+      description: `Object the scaffold binds (${typesBinding('object', 'flag')}). The name as declared, or without the namespace prefix. Default: the stack's only object`,
+    }),
+    flow: Flags.string({
+      description: `Flow the scaffold runs (${typesBinding('flow', 'flag')}). Default: the stack's only flow`,
+    }),
   };
 
   async run(): Promise<void> {
@@ -3542,25 +4113,21 @@ export default class Generate extends Command {
       refuseRetiredGenerator(args.type);
     }
 
-    // Route to sub-commands by type name
-    switch (args.type) {
-      case 'types':
-        return runTypesGeneration(args.name, {
-          output: flags.output ?? 'src/types/objectstack.d.ts',
-          dryRun: flags['dry-run'],
-        });
-      case 'client':
-        return runClientGeneration(args.name, {
-          output: flags.output ?? 'src/client/objectstack-client.ts',
-          dryRun: flags['dry-run'],
-        });
-      case 'migration':
-        return runMigrationGeneration(args.name, {
-          output: flags.output,
-          format: flags.format ?? 'typescript',
-          dryRun: flags['dry-run'],
-        });
+    // ⛔ `--object` / `--flow` on a type that takes neither is refused, not
+    // ignored (#21325): a reference the author named and the command dropped
+    // would land as a file bound to something else, or to nothing, with the
+    // flag reading as honoured. An unknown type still meets the roster below.
+    const unusedFlag = unusedBindingFlagRefusal(args.type, { object: flags.object, flow: flags.flow });
+    if (unusedFlag) {
+      printHeader('Generate');
+      refuseGeneration(unusedFlag.headline, unusedFlag.lines);
     }
+
+    // Route to sub-commands by type name
+    const subCommand = Object.prototype.hasOwnProperty.call(SUB_COMMANDS, args.type)
+      ? SUB_COMMANDS[args.type]
+      : undefined;
+    if (subCommand) return subCommand(args.name, flags);
 
     // Metadata generation
     if (!args.name) {
@@ -3572,6 +4139,8 @@ export default class Generate extends Command {
     await runMetadataGeneration(args.type, args.name, {
       dir: flags.dir,
       dryRun: flags['dry-run'],
+      object: flags.object,
+      flow: flags.flow,
     });
   }
 }

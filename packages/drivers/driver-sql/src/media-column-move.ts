@@ -6,7 +6,7 @@
  * `sys_file` id, and the pre-check that ABORTS instead of destroying a row the
  * backfill never converted.
  *
- * The ruling on #15041 gave this step one requirement in words — abort *"on
+ * The ruling in ADR-0104's 2026-09-05 addendum gave this step one requirement in words — abort *"on
  * the first cell that is not a JSON string"* — and one sketch in SQL beside
  * it. **The sketch does not implement the requirement, and that was measured
  * rather than argued** (director ruling, decision batch #120 item 1): on live

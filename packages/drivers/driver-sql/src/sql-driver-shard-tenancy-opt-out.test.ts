@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#16729] The shard path resolves its tenant column through the STICKY
+ * [commit 0f38ab084] The shard path resolves its tenant column through the STICKY
  * opt-out record, so a rotation-declared platform-global object scopes its
  * declared `unique: 'organization'` index identically on the base table and on
  * every shard.

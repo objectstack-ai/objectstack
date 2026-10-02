@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { retiredKey } from '../shared/retired-key';
+import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { StateMachineSchema } from '../automation/state-machine.zod';
@@ -49,28 +49,77 @@ export const AIModelConfigSchema = lazySchema(() => strictObject({
  * the chain (it rewrites historical SOURCES and imports nothing from here).
  */
 
+// ── Retired structured-output members (ADR-0049 enforce-or-remove) ──────────
+//
+// Ruling record 5945617233 (letter A, #21277) retired the four members the one
+// runtime that executes agents, cloud's AI service, refuses before an agent's
+// first turn (`AI_AGENT_STRUCTURED_OUTPUT_UNSUPPORTED`): the `regex`, `grammar`
+// and `xml` formats and the `coerce_types` step. Each is a VALUE-level
+// retirement (`enumWithRetiredValues`, shared/retired-key.ts): the member left
+// its enum, so `tsc` refuses it, and the parse answers it with the
+// prescription below instead of zod's anonymous enum message. The ADR-0087
+// conversion `agent-structured-output-refused-members-removed`
+// (conversions/registry.ts) lists the mechanical edit for existing sources and
+// replays it over stored rows. Module-private and written with `//`, never
+// `/** */`: prose an enum's error map consumes, not documented surface — an
+// export with no reader is a published surface the next narrowing must keep.
+const JSON_ONLY_FORMAT_FIX =
+  'Structured output is JSON-only. At `agent.structuredOutput.format`, use `json_schema` with a JSON '
+  + 'Schema in `schema`, or `json_object` — or delete the `structuredOutput` block if the agent needs '
+  + 'no output contract; at `agent.structuredOutput.fallbackFormat`, name one of those two or delete '
+  + 'the key. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+const STRUCTURED_OUTPUT_FORMAT_RETIRED = {
+  regex:
+    '`regex` was removed from `StructuredOutputFormat` in @objectstack/spec 17.7.0 (ADR-0049 '
+    + 'enforce-or-remove) — no key ever carried the pattern a `regex` answer would be checked '
+    + 'against, and the cloud AI runtime refuses an agent that declares it before its first turn. '
+    + JSON_ONLY_FORMAT_FIX,
+  grammar:
+    '`grammar` was removed from `StructuredOutputFormat` in @objectstack/spec 17.7.0 (ADR-0049 '
+    + 'enforce-or-remove) — no key ever carried the grammar a `grammar` answer would be checked '
+    + 'against, and the cloud AI runtime refuses an agent that declares it before its first turn. '
+    + JSON_ONLY_FORMAT_FIX,
+  xml:
+    '`xml` was removed from `StructuredOutputFormat` in @objectstack/spec 17.7.0 (ADR-0049 '
+    + 'enforce-or-remove) — the cloud AI runtime checks a final answer only as JSON, and refuses an '
+    + 'agent that declares `xml` before its first turn. '
+    + JSON_ONLY_FORMAT_FIX,
+} as const;
+
+const COERCE_TYPES_RETIRED =
+  '`coerce_types` was removed from `TransformPipelineStep` in @objectstack/spec 17.7.0 (ADR-0049 '
+  + 'enforce-or-remove) — there is no coercion engine, and the cloud AI runtime refuses an agent '
+  + 'whose `agent.structuredOutput.transformPipeline` lists it before its first turn. Delete the '
+  + 'step and declare the exact types in `schema`, so the answer is validated as the model wrote '
+  + 'it; `trim`, `parse_json` and `validate` are unchanged. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
 /**
  * Structured Output Format
- * Defines the expected output format for agent responses
+ *
+ * The format an agent's final answer is checked against: JSON only
+ * (`json_object` or `json_schema`). The `regex`, `grammar` and `xml` members
+ * were retired (ADR-0049) — the runtime refused all three — and are answered
+ * at parse with their prescription.
  */
-export const StructuredOutputFormatSchema = lazySchema(() => z.enum([
-  'json_object',
-  'json_schema',
-  'regex',
-  'grammar',
-  'xml',
-]).describe('Output format for structured agent responses'));
+export const StructuredOutputFormatSchema = lazySchema(() => enumWithRetiredValues(
+  ['json_object', 'json_schema'],
+  STRUCTURED_OUTPUT_FORMAT_RETIRED,
+).describe('Output format for structured agent responses (JSON only)'));
 
 /**
  * Transform Pipeline Step
- * Post-processing steps applied to structured output
+ *
+ * Post-processing steps applied to structured output. The `coerce_types` step
+ * was retired (ADR-0049) — no coercion engine existed and the runtime refused
+ * it — and is answered at parse with its prescription.
  */
-export const TransformPipelineStepSchema = lazySchema(() => z.enum([
-  'trim',
-  'parse_json',
-  'validate',
-  'coerce_types',
-]).describe('Post-processing step for structured output'));
+export const TransformPipelineStepSchema = lazySchema(() => enumWithRetiredValues(
+  ['trim', 'parse_json', 'validate'],
+  { coerce_types: COERCE_TYPES_RETIRED },
+).describe('Post-processing step for structured output'));
 
 /**
  * Structured Output Configuration
@@ -114,8 +163,13 @@ export const StructuredOutputConfigSchema = lazySchema(() => strictObject({
   /** Maximum retry attempts */
   maxRetries: z.number().int().min(0).default(3).describe('Maximum retries on validation failure'),
 
-  /** Fallback format if primary format fails */
-  fallbackFormat: StructuredOutputFormatSchema.optional().describe('Fallback format if primary format fails'),
+  /**
+   * Fallback format. The cloud AI runtime checks the last answer against it
+   * once the primary format's retries are spent.
+   */
+  fallbackFormat: StructuredOutputFormatSchema.optional().describe(
+    "Fallback format: once the primary format's retries are spent, the last answer is checked against this format instead",
+  ),
 
   /** Post-processing pipeline steps */
   transformPipeline: z.array(TransformPipelineStepSchema).optional().describe('Post-processing steps applied to output'),
@@ -374,12 +428,18 @@ export const AgentSchema = lazySchema(() => strictObject({
     /** Maximum wall-clock time per invocation in seconds */
     maxExecutionTimeSec: z.number().int().min(1).optional().describe('Max execution time in seconds'),
 
-    /** Topics or actions the agent must avoid */
-    blockedTopics: z.array(z.string()).optional().describe('Forbidden topics or action names'),
+    /**
+     * Topics or actions the agent must avoid. The cloud AI runtime matches each
+     * entry exactly and case-sensitively against the tool name, against
+     * `action_` plus the action type, and against the tool category.
+     */
+    blockedTopics: z.array(z.string()).optional().describe(
+      'Forbidden topics or action names: each entry is an exact, case-sensitive match on the tool name, on `action_` plus the action type, or on the tool category',
+    ),
   }).optional().describe('Safety guardrails for the agent (token budget, time limit, blocked topics), enforced per user turn by the cloud AI runtime; the open framework edition does not run agents.'),
 
   /** Structured Output */
-  structuredOutput: StructuredOutputConfigSchema.optional().describe('[EXPERIMENTAL — not enforced] Structured output format and validation configuration. Parsed but no runtime consumer yet.'),
+  structuredOutput: StructuredOutputConfigSchema.optional().describe('Structured output contract for the agent\'s final answer (JSON format, schema, retries, fallback format, transform steps), enforced on every final answer by the cloud AI runtime; the open framework edition does not run agents.'),
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package
    * authors declare lock policy here; the loader translates it

@@ -1199,7 +1199,7 @@
       "title": "The audit-log browser surfaces attributable events over sys_audit_log with correct actor/object, filters, and a before/after payload drawer",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1220,21 +1220,21 @@
         "open /system/audit-log; wait for the table to settle; screenshot",
         "locate all three events in the page and read their action / object / actor cells",
         "narrow to writes and confirm the narrowing is server-side; capture the re-issued /api/v1/data/sys_audit_log request with its $filter. ⚠️ There is no Action dropdown on this console: use the prebuilt filtered views (Recent / Writes / Auth / Config) or the generic Filter Records → Where → Add filter builder to constrain action",
-        "click the delete row → the side drawer opens; screenshot the Before (old_value) / After (new_value) JSON panels",
+        "click an UPDATE row (e.g. PATCH a showcase_contact first) → the side drawer opens; screenshot the Before (old_value) / After (new_value) JSON panels. Since 17.6.0 no delete row is served to the page (#21194), so the drawer is checked on an update row",
         "cross-check the API twin directly: GET /api/v1/data/sys_audit_log?$filter=... for each of the three actions and compare actor/object/action to the page",
         "attempt to forge the trail: POST and PATCH /api/v1/data/sys_audit_log — both must be refused (get+list only)"
       ],
       "acceptance": [
         {
-          "clause": "all three ops produce audit rows with the correct action, actor and target: login→action 'login' attributed to the member; delete→action 'delete' with object_name showcase_task + record_id; settings write→action 'config_change'",
+          "clause": "all three ops produce audit rows with the correct action, actor and target: login→action 'login' attributed to the member; settings write→action 'config_change' — both SERVED on the data API; delete→action 'delete' with object_name showcase_task + record_id is WRITTEN but, since 17.6.0, NOT served to a non-system reader (administrators included): the ledger serves only rows about records the reader can read, and a deleted record is readable by nobody (30c530e5, #21194)",
           "oracle": "api",
-          "verify": "GET /api/v1/data/sys_audit_log returns the three rows; action/actor(user_id)/object_name/record_id match what each op did (fields per packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts)",
-          "evidence": "the three audit rows"
+          "verify": "GET /api/v1/data/sys_audit_log returns the login and config_change rows with action/actor(user_id)/object_name/record_id matching what each op did (fields per packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts), and returns NO row for $filter action='delete' even to the admin who deleted; the delete row's existence and attribution are proven from the store itself (the audit table in the telemetry database, read under system context or with the server stopped) — a delete row SERVED on the data API is the FAIL, and so is a delete row missing from the store",
+          "evidence": "the two served rows + the delete row's stored copy + the empty delete-filtered read"
         },
         {
           "clause": "the browser renders those same rows: after a screenshot confirms the table painted, the DOM rows carry the same action/actor/object the API returned — the page shows server truth, not a recomputation",
           "oracle": "dom",
-          "verify": "post-screenshot, the three rows' Action/Object/Actor cells equal the API values (read the DOM only after render is confirmed — hydration-race)",
+          "verify": "post-screenshot, the served rows' Action/Object/Actor cells equal the API values (read the DOM only after render is confirmed — hydration-race)",
           "evidence": "screenshot + the row DOM read"
         },
         {
@@ -1250,9 +1250,9 @@
           "evidence": "the drawer screenshot annotated 'before/after panels, not a diff'"
         },
         {
-          "clause": "the API twin reconciles with the page: GET /api/v1/data/sys_audit_log returns the same three events with matching actor/object — a page row without a backing API row (or vice versa) is a FAIL",
+          "clause": "the API twin reconciles with the page: GET /api/v1/data/sys_audit_log returns the same served events (login, config_change) with matching actor/object, and both omit the delete — a page row without a backing API row (or vice versa) is a FAIL",
           "oracle": "api",
-          "verify": "field-by-field compare of the page's three rows against the /api/v1/data/sys_audit_log bodies",
+          "verify": "field-by-field compare of the page's rows against the /api/v1/data/sys_audit_log bodies",
           "evidence": "API list vs page rows"
         },
         {
@@ -1283,7 +1283,8 @@
           "change": "new — audit-log browser over sys_audit_log: attributable events, server-side filter, before/after payload drawer, API cross-check, append-only guard",
           "ref": "claude/platform-test-checklist-ocwugl"
         },
-        { "revision": 2, "date": "2026-08-18", "change": "re-pointed clause 2 and step 5 at controls that exist. The item named an 'Action filter' dropdown; this console offers prebuilt filtered views (Recent / Writes / Auth / Config) plus a generic Filter Records / Where / Add filter builder. Server-side narrowing — the property the clause is actually for — is provable through the Writes view; naming a control that does not exist invites the absence-inference trap (#9453 CF-9)", "ref": "#9386" }
+        { "revision": 2, "date": "2026-08-18", "change": "re-pointed clause 2 and step 5 at controls that exist. The item named an 'Action filter' dropdown; this console offers prebuilt filtered views (Recent / Writes / Auth / Config) plus a generic Filter Records / Where / Add filter builder. Server-side narrowing — the property the clause is actually for — is provable through the Writes view; naming a control that does not exist invites the absence-inference trap (#9453 CF-9)", "ref": "#9386" },
+        { "revision": 3, "date": "2026-10-02", "change": "re-pointed clause 1 (and the clauses that counted its three rows) at 17.6.0's ledger read rule. 30c530e5 (#21194) serves a non-system reader, administrators included, only audit rows about records it can read, so the delete row is written but never served on the data API; the 17.6.0 release-verification run measured the admin's delete-filtered read at 0 rows while the stored row carried correct attribution. The clause now asserts the login and config_change rows served, the delete row stored and NOT served; step 6's drawer check moves to an update row, since no delete row reaches the page", "ref": "#21330" }
       ]
     },
     {
@@ -2273,10 +2274,10 @@
     },
     {
       "id": "access-security.packaged-flow-write-door-parity",
-      "title": "Write-door parity on a packaged flow: PUT/DELETE /automation/:name must refuse the same packaged artifact that PUT /meta/flow/:name refuses (ADR-0126 §2 locked base) — EXPECTED FAIL today, the /automation door sails through on manage_metadata alone",
+      "title": "Write-door parity on a packaged flow: PUT/DELETE /automation/:name must refuse the same packaged artifact that PUT /meta/flow/:name refuses (ADR-0126 §2 locked base)",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2289,7 +2290,7 @@
           "capture the flow's full current definition BEFORE any probe (GET /api/v1/automation/showcase_urgent_task_alert) — it is the restore payload"
         ],
         "knownGaps": [
-          "the acceptance is the ADR-0126 §2 PARITY PROMISE ('the packaged base is locked — in-place edit refused loudly at the write door'), not today's behavior: as of #12438 the /automation door has NO lock — PUT/DELETE /automation/:name reach registerFlow/unregisterFlow with only the manage_metadata authoring gate in front (packages/runtime/src/domains/automation.ts), and the engine has zero lock/provenance check on that path (packages/services/service-automation/src/engine.ts). Clauses 2-3 are EXPECTED FAILS: a 200 there, where /meta refuses the same artifact, is the product finding, tracked centrally in FOLLOW-UPS (#12438). Keep the parity promise as the acceptance so the item flips green when the door is locked, without a rewrite"
+          "the acceptance is the ADR-0126 §2 PARITY PROMISE ('the packaged base is locked — in-place edit refused loudly at the write door'). It was an expected fail when authored (#12438: the /automation door had no lock); 4b45afae (#20817) gave the /automation write doors the packaged-base lock the /meta door keeps, and on 17.6.0 all three doors answer 403 NOT_OVERRIDABLE with the same lock message. The permanent pin is packages/qa/dogfood/test/packaged-flow-write-door-parity.dogfood.test.ts"
         ]
       },
       "steps": [
@@ -2297,7 +2298,7 @@
         "control leg, the /meta door: PUT /api/v1/meta/flow/showcase_urgent_task_alert with a trivially modified copy of the definition (e.g. label suffix) — capture status, code and WHICH layer answered; repeat with ?package=com.example.showcase and capture that code too",
         "probe leg 1: PUT /api/v1/automation/showcase_urgent_task_alert with the same trivially modified definition — capture status and, if 2xx, GET the flow back to prove the live registration mutated",
         "probe leg 2: DELETE /api/v1/automation/showcase_urgent_task_alert — capture status and, if 2xx, confirm GET /api/v1/automation/showcase_urgent_task_alert now 404s (the shipped flow is gone from the live engine)",
-        "RESTORE, unconditionally: PUT /api/v1/automation/showcase_urgent_task_alert with the stored original definition (re-registering is the cheap path; a cold restart's boot flow pull is the fallback), then GET it back and diff against the stored capture — byte-identical",
+        "RESTORE, only if a probe mutated anything: diff GET /api/v1/automation/showcase_urgent_task_alert against the stored capture; if it differs (or 404s), restore with a cold restart over the same database (the boot flow pull re-registers the packaged body — a restore PUT is itself refused 403 once the door is locked) and diff again — byte-identical",
         "verify the flow still fires: trigger its record-change mutation once and confirm a run appears (the restore must revive the trigger binding, not just the definition read)"
       ],
       "acceptance": [
@@ -2308,13 +2309,13 @@
           "evidence": "both PUT traces (with and without ?package=) + the before/after /meta reads"
         },
         {
-          "clause": "parity, update door: PUT /api/v1/automation/showcase_urgent_task_alert against the SAME packaged artifact is refused — ⚠️ EXPECTED FAIL today: the door runs only the manage_metadata authoring gate (automation.ts) and registerFlow re-registers with no lock or provenance check (engine.ts), so a 200 here while /meta refused the identical artifact IS the finding. Record the fail with both traces side by side; the defect is tracked centrally in FOLLOW-UPS (#12438) — do not re-file it per run",
+          "clause": "parity, update door: PUT /api/v1/automation/showcase_urgent_task_alert against the SAME packaged artifact is refused with the same lock the /meta door applies (4b45afae, #20817). A 200 here while /meta refused the identical artifact is the fail — record both traces side by side",
           "oracle": "api",
           "verify": "same admin session, same artifact, same-shape body at both doors; the verdicts must MATCH. A 2xx on /automation with a mutated GET read-back, paired with the /meta refusal from clause 1, is a fail of this clause and the expected present-day outcome",
           "evidence": "the /automation PUT trace + the mutated (or unchanged) GET read-back, paired with clause 1's refusal"
         },
         {
-          "clause": "parity, delete door: DELETE /api/v1/automation/showcase_urgent_task_alert is refused for the same reason — ⚠️ EXPECTED FAIL today (unregisterFlow, engine.ts, removes the shipped flow from the live engine with no check; 'delete first, refuse second' is the exact shape the #10145 measurement recorded at this door before the capability gate existed, and the lock half is still missing)",
+          "clause": "parity, delete door: DELETE /api/v1/automation/showcase_urgent_task_alert is refused for the same reason (4b45afae, #20817) — a 200 that removes the shipped flow from the live engine is the fail ('delete first, refuse second' is the shape the #10145 measurement recorded at this door before the lock existed)",
           "oracle": "api",
           "verify": "DELETE answers >=400 and the flow still serves; a 200 followed by a 404 on GET /api/v1/automation/showcase_urgent_task_alert is the fail (and the deletion this item's restore step exists to undo)",
           "evidence": "the DELETE trace + the follow-up GET"
@@ -2349,7 +2350,8 @@
           "date": "2026-08-26",
           "change": "new — #12438 measured that PUT/DELETE /automation/:name re-register/unregister a PACKAGED flow on manage_metadata alone while PUT /meta/flow/:name refuses the same artifact: the ADR-0126 §2 lock is unimplemented at the /automation door. Authored as a door-parity item with the parity promise as the acceptance and the present-day 200 recorded as an expected fail (tracked centrally in FOLLOW-UPS), plus a mandatory restore step because the probe mutates a live engine registration",
           "ref": "#12438"
-        }
+        },
+        { "revision": 2, "date": "2026-10-02", "change": "retired the expected-fail framing: 4b45afae (#20817) locked the /automation write doors against the packaged base, and the 17.6.0 release-verification run measured PUT and DELETE /automation/showcase_urgent_task_alert answering 403 NOT_OVERRIDABLE with the /meta door's lock message, the flow unchanged and still firing. Title, knownGaps and clauses 2-3 now state the parity as holding; the restore step is conditional (a restore PUT is itself refused), and the knownGap names the permanent pin packaged-flow-write-door-parity.dogfood.test.ts", "ref": "#21330" }
       ]
     },
     {

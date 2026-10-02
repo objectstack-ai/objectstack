@@ -4,7 +4,7 @@
  * [#15989] The file family is stored as the BARE `sys_file` id in a string
  * column — per dialect, and for BOTH encodings across the ADR-0104 window.
  *
- * Maintainer ruling on #15041, verbatim: 「15041 应该改为实际 id 保存。选A，其他
+ * Maintainer ruling (ADR-0104's 2026-09-05 addendum), verbatim: 「15041 应该改为实际 id 保存。选A，其他
  * 同意」. The physical column for `file` / `image` / `avatar` / `video` /
  * `audio` holds the actual id, not a JSON-quoted id in a JSON column. The
  * generator already emits `VARCHAR(2048)` for the family and does not move; the

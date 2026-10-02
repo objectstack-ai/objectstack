@@ -1117,7 +1117,7 @@
       "title": "Filter comparand conformance: only the accepted comparand TYPES pass the where-door, a bigint past the exact-integer limit is refused, and a dotted head is classified rather than guessed",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1167,9 +1167,9 @@
           "evidence": "per-class request + observed handling"
         },
         {
-          "clause": "the refusal is a CONTRACT-level refusal, not a transport quirk: the same bad comparand is refused through a second door with the same code",
+          "clause": "the refusal is a CONTRACT-level refusal, not a transport quirk: the same bad comparand is refused through a second door with the same contract sentence — and with the code that door's family answers: POST /api/v1/data/:object/query refuses it in the request schema, 400 VALIDATION_FAILED with a fields[] entry at query.where.<field>.<op>; GET ?$filter= and the engine answer 400 INVALID_FILTER",
           "oracle": "api",
-          "verify": "compare the two doors' error codes; a comparand refused at REST but accepted through the engine is a FAIL of the single-contract property",
+          "verify": "drive the same bad comparand through POST /query, GET ?$filter= and the engine door; each must refuse (status 400, never rows, never 500) and each must quote the same accepted-type sentence. The code split is the documented door posture since #20116 moved the POST refusal into the request schema (cfc3bcf1 #20247, dd1b8031 #20325) — the same split api-backend.query-contract-matrix rev 3 records — so VALIDATION_FAILED on POST beside INVALID_FILTER on GET is NOT a fail. A comparand refused at one door but accepted (rows returned) at another IS the fail of the single-contract property",
           "evidence": "both refusals side by side"
         }
       ],
@@ -1217,6 +1217,12 @@
           "date": "2026-08-21",
           "change": "made clause 2 (the bigint exact-integer boundary) name the door it is actually assertable at, and marked it door-specific. As written it prescribed 'both requests' against the api oracle, but the refusal arm is guarded by `typeof value === 'bigint'` and JSON.parse never yields a bigint, so the clause was unreachable over REST at any magnitude — a runner following it collected a 200 that proves nothing in either direction. Re-derived rather than assumed: 9007199254740993 parses to 9007199254740992, which is exactly the limit and so also inside the inclusive bound, giving two independent reasons the REST arm cannot fail. Clause 2 now points at engine-comparand-type-door.test.ts and the five driver conformance suites with oracle: test, step 3 says to pass a real bigint in-process, and a knownGap records that the REST verdict is not-applicable rather than blocked (#10236 A3)",
           "ref": "#10236"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-02",
+          "change": "re-pointed clause 5 at the door posture #20116 established. It demanded the SAME CODE at a second door; on 17.6.0 the POST /query door refuses the comparand in the request schema (400 VALIDATION_FAILED, fields[] at query.where.f_number.$eq) while GET $filter and the engine answer 400 INVALID_FILTER — every door refusing, none returning rows, the same contract sentence throughout. The release-verification run scored it a stale-clause fail; the clause now asserts refusal + shared sentence at every door and names each door's code, mirroring query-contract-matrix rev 3",
+          "ref": "#21330"
         }
       ]
     },
@@ -1225,7 +1231,7 @@
       "title": "Every date-range preset resolves to its declared macro window, and a bare preset name used as a raw comparand is refused with the prescription",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1246,7 +1252,7 @@
         "record the run's wall clock and timezone BEFORE issuing any request — every expectation below is derived from it",
         "for EACH preset, issue a data-API read filtered by that preset against the date field and capture the answer set",
         "for each preset, independently compute the expected window from DATE_RANGE_PRESET_MACRO_WINDOWS and the recorded clock, then reconcile the answer set against a direct comparison-operator query over that literal window",
-        "issue a read whose comparand is the BARE preset name as a raw string (e.g. where: { created: 'today' }) and capture the refusal",
+        "issue reads whose comparand is the BARE preset name as a raw string against a date field — once in an ORDERING position (e.g. where: { signed_on: { $gte: 'this_week' } }) and once as an equality (e.g. where: { signed_on: 'today' }) — and capture both refusals",
         "issue a read with an unknown preset name and capture the refusal"
       ],
       "acceptance": [
@@ -1263,9 +1269,9 @@
           "evidence": "the 13-row table"
         },
         {
-          "clause": "a BARE preset name used as a raw comparand is REFUSED with the prescription telling the author the correct spelling — not treated as a literal string comparison that silently matches nothing",
+          "clause": "a BARE preset name used as a raw comparand on a date field is REFUSED — never treated as a literal string comparison that silently matches nothing: in an ORDERING position ($gt/$gte/$lt/$lte) the refusal carries the preset prescription telling the author the correct spelling; as an equality or membership it is refused by the temporal door ('not a date value this platform can interpret')",
           "oracle": "api",
-          "verify": "status 4xx and the message matches bareDateRangePresetComparandMessage; a 200 with zero rows is the FAIL mode (it is indistinguishable from a correct empty answer)",
+          "verify": "ordering arm: 400 and the message matches bareDateRangePresetComparandMessage (the schema door judges ordering positions only, by design — packages/spec/src/migrations/entries/semantic/18.filter-preset-ordering-comparand-refused.ts: 'it judges no equality or membership'); equality arm: 400 INVALID_FILTER with the temporal-door message. A 200 with zero rows on either arm is the FAIL mode (it is indistinguishable from a correct empty answer). A bare preset name against a TEXT field answering 200 is not this clause's subject — a text column may legitimately hold the word",
           "evidence": "status + message"
         },
         {
@@ -1316,6 +1322,12 @@
           "date": "2026-08-17",
           "change": "new — DATE_RANGE_PRESETS landed at 17.0.0 (2026-08-15) with 13 members and no matrix item; the enum is exported as a const array so it is enumSource-pinnable, closing it against a 14th preset landing unnoticed. The bare-preset-comparand refusal is authored as its own clause because the spec ships a dedicated message for it, which means the failure mode was observed rather than imagined",
           "ref": "#9299"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-02",
+          "change": "split clause 3 into its two designed arms. The clause expected the preset prescription for step 5's own example, an EQUALITY (where: { created: 'today' }); the platform deliberately raises that message only in ordering positions (18.filter-preset-ordering-comparand-refused.ts) and refuses an equality on a date field at the temporal door (400 INVALID_FILTER). Measured on 17.6.0 by the release-verification run: equality → INVALID_FILTER with the temporal message, $gte → VALIDATION_FAILED with bareDateRangePresetComparandMessage, neither ever 200. Step 5 now drives both arms",
+          "ref": "#21330"
         }
       ]
     },

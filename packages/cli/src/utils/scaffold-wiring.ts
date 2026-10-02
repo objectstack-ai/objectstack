@@ -2,6 +2,9 @@
 
 import path from 'node:path';
 import type { ts as TS } from 'ts-morph';
+import { isAggregatedViewContainer } from '@objectstack/spec';
+// The LEAF subpath: the registry-key derivation alone, not the metadata plugin.
+import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
 import { findConfigPath, loadConfig } from './config.js';
 import { authoringRuleUnionStack } from './stack-collections.js';
 
@@ -69,6 +72,18 @@ export interface ScaffoldStackTarget {
 type Bag = Record<string, unknown>;
 
 /**
+ * The key an item is registered under: its `name` — except an aggregated views
+ * container, which is registered under the object it binds to
+ * (`deriveViewContainerObject`, the same derivation the boot registrar's
+ * container branch uses) and which `os g view` writes with no `name` at all
+ * (#21325).
+ */
+export function registeredItemName(stackKey: string, item: unknown): unknown {
+  if (stackKey === 'views' && isAggregatedViewContainer(item)) return deriveViewContainerObject(item);
+  return (item as { name?: unknown } | null)?.name;
+}
+
+/**
  * Whether the stack a loaded config evaluates to carries an item named
  * `itemName` under `stackKey`. Both collection spellings are read: the array
  * form every scaffold config uses, and the name-keyed map form
@@ -78,11 +93,11 @@ export function stackCarries(config: unknown, stackKey: string, itemName: string
   const stack = authoringRuleUnionStack((config ?? {}) as Bag) as Bag;
   const collection = stack[stackKey];
   if (Array.isArray(collection)) {
-    return collection.some((item) => (item as { name?: unknown } | null)?.name === itemName);
+    return collection.some((item) => registeredItemName(stackKey, item) === itemName);
   }
   if (collection && typeof collection === 'object') {
     return Object.entries(collection as Bag).some(
-      ([key, item]) => key === itemName || (item as { name?: unknown } | null)?.name === itemName,
+      ([key, item]) => key === itemName || registeredItemName(stackKey, item) === itemName,
     );
   }
   return false;

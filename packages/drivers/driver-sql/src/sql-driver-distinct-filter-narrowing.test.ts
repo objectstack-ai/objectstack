@@ -5,7 +5,7 @@
  * `FilterCondition`, never `any`.
  *
  * `distinct` is not declared on `IDataDriver`, so #5181's narrowing and
- * #6075's follow-through never reached it; it kept `filters?: any` while its
+ * commit d367f03d6's follow-through never reached it; it kept `filters?: any` while its
  * body said something much more specific — `applyFilters(builder, filters)`
  * takes the argument ITSELF, so what it wants is the value `find()` carries
  * under `query.where`, not a query envelope. This file holds the type to that
@@ -52,8 +52,8 @@ import { SqlDriver } from './index.js';
 type IsAny<T> = 0 extends 1 & T ? true : false;
 
 /**
- * [#17879] MEASURED — this door's `IsAny` half is a PHANTOM half, and the
- * `ContainsAny` detector (#17876) does NOT close it here. On disk, against
+ * [commit eb9334915] MEASURED — this door's `IsAny` half is a PHANTOM half, and the
+ * `ContainsAny` detector (commit be5c60291) does NOT close it here. On disk, against
  * this file's own driver, with both directions predicted before running:
  *
  *   door resolves to      `FilterCondition | undefined`
@@ -67,7 +67,7 @@ type IsAny<T> = 0 extends 1 & T ? true : false;
  * assertion forms; and `ContainsAny<FilterCondition>` is already `true` —
  * the contract type is an open map (`[key: string]: any`), so the detector is
  * SATURATED on the correct door and cannot separate it from a regression.
- * No swap was made. The two measured repairs are in the #17879 report.
+ * No swap was made. The two measured repairs are in commit eb9334915's message.
  */
 
 describe('SqlDriver.distinct takes a bare FilterCondition (#6320)', () => {

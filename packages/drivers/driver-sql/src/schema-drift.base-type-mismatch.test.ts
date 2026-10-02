@@ -364,7 +364,7 @@ describe('diffManagedTable — a SINGLE-VALUE JSON-class field over a stale text
     // The card's scope, asserted rather than described: the fork applies to
     // every single-value member of the writer's set.
     //
-    // ⚠️ [#15989] #15041 has since been ruled — option A, the file family's
+    // ⚠️ [#15989] ADR-0104's 2026-09-05 addendum has since ruled — option A, the file family's
     // column holds the bare `sys_file` id — so the family is no longer a member
     // of {@link JSON_COLUMN_FIELD_TYPES}: it is asked per deployment, and
     // `diffTags` omits `fileColumnsMoved`, i.e. every call here is about a

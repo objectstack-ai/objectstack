@@ -141,13 +141,37 @@ describe.each(PAIRS)('[#14104] addDays on the $label pair', ({ target, base }) =
 });
 
 describe('[#14104] the shape of the shifted value', () => {
-  it('a calendar day stays a calendar day, so a `$lte` still covers the whole shifted day', () => {
-    // A `date` deadline shifted by one day is 03-02 (the whole day), so a
-    // datetime completion at 23:59 on 03-02 is still on time — the #3777
-    // half-open rule the bare bound already has.
-    const rec = { done: '2026-03-02T23:59:00.000Z', due: '2026-03-01' };
+  it('a calendar day stays a calendar day, so a stored day on the shifted day is on time', () => {
+    // A `date` deadline shifted by one day is 03-02, a calendar day. A `date`
+    // completion is stored as its calendar day (the RLS write check judges the
+    // stored form), so completing on 03-02 is on time under `$lte`, and the
+    // unshifted deadline 03-01 is missed.
+    const rec = { done: '2026-03-02', due: '2026-03-01' };
     expect(m(rec, { done: { $lte: { $field: 'due', addDays: 1 } } })).toBe(true);
     expect(m(rec, { done: { $lte: { $field: 'due', addDays: 0 } } })).toBe(false);
+  });
+
+  it('[#21242] an instant against a shifted calendar day is compared as written, and refused once the columns are declared', () => {
+    // A `datetime` completion against a `date` deadline is a cross-class pair.
+    // This face kept a whole-day copy that read the shifted day 03-02 as
+    // "through 03-02" here; it is deleted (ADR-0053 D-D1 items 5 and 9), so
+    // the pair is compared as written: the instant's text sorts above the bare
+    // day it falls on.
+    const rec = { done: '2026-03-02T23:59:00.000Z', due: '2026-03-01' };
+    expect(m(rec, { done: { $lte: { $field: 'due', addDays: 1 } } })).toBe(false);
+    expect(m(rec, { done: { $lte: { $field: 'due', addDays: 2 } } })).toBe(true);
+    // Handed the declaration, as the RLS write check hands it, the pair is
+    // refused before any comparison, as driver-sql's read refuses it.
+    let err: { code?: unknown; status?: unknown } | undefined;
+    try {
+      m(rec, { done: { $lte: { $field: 'due', addDays: 1 } } }, {
+        fields: { done: { type: 'datetime' }, due: { type: 'date' } },
+      });
+    } catch (e) {
+      err = e as { code?: unknown; status?: unknown };
+    }
+    expect(err?.code).toBe('INVALID_FILTER');
+    expect(err?.status).toBe(400);
   });
 
   it('an instant keeps its time of day', () => {

@@ -72,7 +72,7 @@ export type FieldKeyClass = 'storage' | 'presentation';
 export const FIELD_KEY_STORAGE_CLASS: Readonly<Record<string, FieldKeyClass>> = Object.freeze({
   // ---- storage: the column's own shape -------------------------------------
   type: 'storage',            // `createColumn`: the column type itself
-  maxLength: 'storage',       // `createColumn`: varchar(n) vs TEXT, and the #11374 keyable decision
+  maxLength: 'storage',       // `createColumn`: varchar(n) vs TEXT, and commit d0e3a885b's keyable decision
   multiple: 'storage',        // `createColumn`: a multi-value field is a JSON column
   precision: 'storage',       // numeric column shape (this driver does not read it yet)
   scale: 'storage',           // numeric column shape (this driver does not read it yet)
