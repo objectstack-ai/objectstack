@@ -33,8 +33,9 @@ import { aggregandColumnClass, aggregandOperandSql, type AggregandColumnClass } 
 // ruling of 2026-10-02, letter A: one cutter for every log face). Each refusal
 // line below writes the dialect's text through it, so the line keeps its code,
 // its class of fault and the dialect's own diagnostic while the statement and
-// the values bound or inlined into it are cut.
-import { redactStatementFromMessage } from '@objectstack/core';
+// the values bound or inlined into it are cut. It lives in `@objectstack/types`,
+// the lowest package every face of the family reaches.
+import { redactStatementFromMessage } from '@objectstack/types';
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES, isMultiValueField } from '@objectstack/spec/data';
 // [#16318] The per-field-type physical representation of the NUMERIC family.
 // `os generate migration` reads the SAME table, in both of its formats — that
@@ -10081,7 +10082,7 @@ export class SqlDriver implements IDataDriver {
    * [#21385, maintainer ruling 2026-10-02] …and the log line is cut too. A
    * server log leaves the data's trust boundary, so the line writes the
    * dialect's text through the shared driver-fault redaction
-   * (`@objectstack/core`): the code, the column and the dialect's own
+   * (`@objectstack/types`): the code, the column and the dialect's own
    * diagnostic stay; the compiled statement and the literals inlined into it
    * do not.
    *
@@ -10291,7 +10292,7 @@ export class SqlDriver implements IDataDriver {
    * [#21385, maintainer ruling 2026-10-02] That line once wrote the statement
    * as well, and the dialect's message whole: both carry the values the
    * statement bound or spelled inline. It now writes the dialect's text
-   * through the shared driver-fault redaction (`@objectstack/core`) and drops
+   * through the shared driver-fault redaction (`@objectstack/types`) and drops
    * the sent statement, keeping the code and the dialect's own diagnostic.
    *
    * The same "is it already ours" gate {@link SqlDriver.backendStatementFault}

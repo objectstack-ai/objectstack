@@ -847,7 +847,7 @@ describe('[#8790] dialect wording — what the refusal recognises and what it na
  * the fact below no longer protects the caller — it protects the SERVER LOG,
  * which is where the driver now writes the dialect's words. A knex upgrade that
  * inlined pg bindings would put the caller's value in that log line, which is
- * precisely the exposure `redactBoundStatement` (`@objectstack/core`) closes
+ * precisely the exposure `redactBoundStatement` (`@objectstack/types`) closes
  * for the engine's own log slots — and, since #21385, the shared cut this
  * driver's refusal lines take as well. The pin therefore stays live and its
  * red still means "re-measure by hand"; only the string it is a statement about

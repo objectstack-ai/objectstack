@@ -155,20 +155,6 @@ export * from './utils/metadata-activation-store.js';
 // with. `@objectstack/metadata-protocol` re-exports it from its original home.
 export * from './utils/record-not-found.js';
 
-// [#21385] THE driver-fault redaction: the one cut that keeps a statement's
-// bound values and inlined literals out of every log face and out of the error
-// that leaves the engine. Moved down from `@objectstack/objectql` for the
-// reason the entries above were: its callers are the engine and `driver-sql`'s
-// own log lines, and the driver does not depend on the engine. Named rather
-// than `export *`: the module's template table and its load-time guard stay
-// package-internal (their test lives beside them).
-export {
-  redactBoundStatement,
-  redactStatementFromMessage,
-  redactPropagatedDriverFault,
-  type DriverFaultOrigin,
-} from './utils/driver-fault-redaction.js';
-
 // Export in-memory fallbacks for core-criticality services
 export * from './fallbacks/index.js';
 

@@ -5,7 +5,7 @@
 // [#21385] Moved here, verbatim, with the module they test: the redaction moved
 // from `@objectstack/objectql` to this package so `driver-sql`'s own log lines
 // call the same cut as the engine. The guard and the template table it checks
-// stay package-internal (not on `@objectstack/core`'s entry), which is why
+// stay package-internal (not on `@objectstack/types`' entry), which is why
 // their cases live beside them instead of in the engine suite that still pins
 // the cut's behaviour (`packages/objectql/src/driver-fault-redaction.test.ts`).
 

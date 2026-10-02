@@ -5,7 +5,7 @@
  *
  * Maintainer ruling 2026-10-02 (letter A, "one cutter for every log face"): the
  * five lines this driver writes on the way to composing a refusal call the
- * same redaction the engine boundary uses (`@objectstack/core`'s driver-fault
+ * same redaction the engine boundary uses (`@objectstack/types`' driver-fault
  * redaction, moved there from `@objectstack/objectql` so this package can
  * import it). Each line keeps its code, its class of fault and the dialect's
  * own diagnostic; the statement and the values bound or inlined into it are

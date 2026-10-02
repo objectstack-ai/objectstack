@@ -342,7 +342,17 @@
  * about the cut changed in the move: the same split, the same structural cut,
  * the same value templates. The engine keeps calling
  * {@link redactBoundStatement} and {@link redactPropagatedDriverFault}, now
- * from `@objectstack/core`.
+ * from `@objectstack/types`.
+ *
+ * Why `@objectstack/types`, and not a package above it: it is the LOWEST home
+ * every face of this family can reach. `driver-sql`, `objectql` and `core` all
+ * depend on it; and the family's fourth position, `operatorFacingErrorText`
+ * (`driver-error-classification.ts`, #21418), lives inside it, so a cutter
+ * placed in any package above `types` is one that helper could never call.
+ * The module needs nothing new to live here: its one import, the shared leak
+ * predicate, is a sibling module of this package, and the package depends on
+ * `@objectstack/spec` alone. It is edge-safe like the rest of this entry:
+ * regular expressions and `Error`, no `node:` builtin.
  *
  * The driver's lines take the LOG face, {@link redactStatementFromMessage},
  * with the same `{ statementSent: true }` the engine's raw door passes. Every
@@ -351,10 +361,10 @@
  * exactly as at the raw door. Each line keeps its code, the class of fault it
  * reports and the dialect's own diagnostic, minus the value slots the
  * templates above own. The caller-facing envelopes those terminals compose
- * are untouched: they never carried the dialect text.
+ * still carry no dialect text.
  */
 
-import { looksLikeInternalErrorLeak } from '@objectstack/types';
+import { looksLikeInternalErrorLeak } from './error-leak.js';
 
 /**
  * knex joins the bound statement to the database's own message with this

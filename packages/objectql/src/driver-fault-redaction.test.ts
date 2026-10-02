@@ -25,11 +25,11 @@
 import { describe, it, expect } from 'vitest';
 import { isUniqueViolationError, mapDataError, uniqueViolationColumn } from '@objectstack/types';
 import { ObjectQL } from './engine.js';
-// [#21385] The cut lives in `@objectstack/core` now (one cutter for every log
+// [#21385] The cut lives in `@objectstack/types` now (one cutter for every log
 // face, `driver-sql`'s own lines included). Its load-time template guard moved
 // with it, and so did that guard's cases:
-// `packages/core/src/utils/driver-fault-redaction.test.ts`.
-import { redactBoundStatement, redactStatementFromMessage } from '@objectstack/core';
+// `packages/types/src/driver-fault-redaction.test.ts`.
+import { redactBoundStatement, redactStatementFromMessage } from '@objectstack/types';
 
 /** The canaries the card planted, kept verbatim so a leak is unmistakable. */
 const SECRET = 'SENSITIVE-CANARY-9f3a2b';
