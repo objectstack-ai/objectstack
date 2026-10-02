@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#17219] Name the withheld key when a `before*` hook faults reaching THROUGH
+ * [commit 706ad0fcc] Name the withheld key when a `before*` hook faults reaching THROUGH
  * one — instead of letting the platform's own contract enforcement surface as
  * the author's crash.
  *
@@ -46,7 +46,7 @@
  * ⛔ Not by marshalling `ctx.submitted` onto the sandbox face: that face is
  * assembled key by key, `dispatch.scope` is the standing precedent for the
  * assembly discipline, and the shape was measured and refused on its merits in
- * PR #17195. Nothing here adds a key to any authoring face or to any wire
+ * commit d2c1d1980. Nothing here adds a key to any authoring face or to any wire
  * payload.
  *
  * ## The classification this restores

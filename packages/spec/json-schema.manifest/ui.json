@@ -132,6 +132,7 @@
     "ui/RecordHighlightsField",
     "ui/RecordHighlightsProps",
     "ui/RecordHistoryProps",
+    "ui/RecordLineItemsProps",
     "ui/RecordPathProps",
     "ui/RecordQuickActionsProps",
     "ui/RecordReferenceRailProps",

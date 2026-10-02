@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #14390 — the update door's ONE error contract for a driver's unique-constraint
+ * Commit 9d7f7259f — the update door's ONE error contract for a driver's unique-constraint
  * refusal: the insert door's (#14095), one verb over.
  *
  * ## What was measured, and why it is a defect rather than a preference
@@ -109,7 +109,7 @@ const mysqlDuplicate = () =>
   });
 
 /**
- * driver-memory (#13197 / #13239): already an ADR-0112 envelope, in the
+ * driver-memory (commit 56c093c4d / #13239): already an ADR-0112 envelope, in the
  * platform's own vocabulary — the declared-index sentence measured on a real
  * `InMemoryDriver` for this card, which names the KEY COLUMNS in parentheses
  * and no single column, so `uniqueViolationColumn` answers `undefined` for it.

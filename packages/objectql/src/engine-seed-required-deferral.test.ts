@@ -7,7 +7,7 @@ import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts'
 
 /**
  * Seed deferral vs `required: true` — measured against the REAL engine
- * (#11674, the card's "Second, NOT measured" question).
+ * (the "Second, NOT measured" question on the card commit 9a884c6e4 fixed).
  *
  * The seed loader defers an unresolvable reference to pass 2 by DELETING the
  * column from the row. The seed-loader suite's engine double does not
@@ -22,7 +22,7 @@ import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts'
  *  1. REQUIRED id half (`sys_approval_request` / `sys_record_share` /
  *     `sys_share_link` shape): the deferred insert — its required `record_id`
  *     deleted — is REJECTED by required-validation. Loud, counted, the row
- *     never lands, and pass 2 has nothing to write back onto. So #11674's
+ *     never lands, and pass 2 has nothing to write back onto. So commit 9a884c6e4's
  *     internal-id write-back does NOT make these three objects
  *     order-independent: their datasets must still seed the target first.
  *  2. Same object, target seeded FIRST: the pointer resolves in pass 1, the
@@ -32,7 +32,7 @@ import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts'
  *  3. OPTIONAL id half (`sys_audit_log` shape), keyless dataset, target
  *     seeded after: pass 1 inserts without the column (nothing requires it),
  *     and pass 2 back-fills through the internal id captured at insert time —
- *     #11674's fix, holding end-to-end against the engine that really
+ *     commit 9a884c6e4's fix, holding end-to-end against the engine that really
  *     validates. This is what makes `sys_audit_log` genuinely
  *     order-independent while its three required-half siblings are not.
  */
@@ -136,7 +136,7 @@ function silentLogger() {
   /**
    * Every line in the ORDER it was emitted, across levels — which is how the
    * author reads a seed run, and the only shape in which "the loader said it
-   * BEFORE the engine did" (#11674's B half) is a measurable claim rather than
+   * BEFORE the engine did" (commit 1cba33f16, the B half) is a measurable claim rather than
    * an assertion about two unrelated arrays.
    */
   const lines: Array<{ level: string; message: string }> = [];

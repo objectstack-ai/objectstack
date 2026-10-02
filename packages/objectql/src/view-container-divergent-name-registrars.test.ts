@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#14399] Where the row's own `name` sits in the view-container
+ * [commit 3c1bbd2a8] Where the row's own `name` sits in the view-container
  * object-derivation chain — pinned at BOTH SOURCE registrars.
  *
  * ---------------------------------------------------------------------------
@@ -50,7 +50,7 @@
  * by one registrar and a hard boot failure through the other.
  *
  * ---------------------------------------------------------------------------
- * ⭐ [#14666] That residual asymmetry is CLOSED, and this file inverted with it
+ * ⭐ [commit d0ee598e6] That residual asymmetry is CLOSED, and this file inverted with it
  * ---------------------------------------------------------------------------
  * The asymmetry above was filed as its own card and ruled on 2026-09-03
  * (direction 2, maintainer, via the director seat): the boot loop's SOURCE
@@ -62,7 +62,7 @@
  * refused.
  *
  * ⚠️ So the pins below changed MEANING, not just expectations, and a reader
- * arriving from #14399 should know which is which. What this file pinned
+ * arriving from commit 3c1bbd2a8 should know which is which. What this file pinned
  * before was *what each door did*; nothing in it asserted which was right, and
  * the card warned that "an implementer who reads a green suite as agreement
  * will be misled". Two boot-loop assertions inverted — they are marked ⭐ in
@@ -70,7 +70,7 @@
  * move; the ruling says they stay, and they are now also the reference the
  * boot loop's refusal envelope is asserted EQUAL to.
  *
- * The derivation #14399 owns is not lost by that inversion: at both SOURCE
+ * The derivation commit 3c1bbd2a8 landed is not lost by that inversion: at both SOURCE
  * registrars it is now read the same way — the refusal names the key it
  * derived, which is direct evidence of its answer.
  *
@@ -92,7 +92,7 @@
  * declares `@objectstack/metadata` as a dependency (and the reverse edge does
  * not exist), which is what lets one file hold both.
  *
- * Refs: #14399, #13912 (`plugin-artifact-view-container-object.test.ts` — the
+ * Refs: commit 3c1bbd2a8, #13912 (`plugin-artifact-view-container-object.test.ts` — the
  * artifact door's own-`object` pin this extends), #13913, #13407, #7378, #7163.
  */
 
@@ -148,7 +148,7 @@ const AGREED_KEYS = ['crm_lead', 'crm_lead.default', 'crm_lead.hot'];
  * Drive the boot loop once and report BOTH outcomes — the keys it minted and
  * the refusal it raised, if any.
  *
- * [#14666] Split out of `bootRegistrarKeys` because the divergent container is
+ * [commit d0ee598e6] Split out of `bootRegistrarKeys` because the divergent container is
  * now REFUSED here, and "what did it register before it threw?" became a
  * question worth asking: a refusal that has already filed half the document is
  * not a refusal. Every caller that expects registration keeps using
@@ -221,18 +221,18 @@ describe('#14399 — the row\'s own `name` is the LAST term of the container der
 
     it('THE PIN (#14666): the boot loop REFUSES the divergent container, and its refusal names the key it derived', () => {
         // ⭐ THIS ASSERTION IS THE INVERSION. Its two earlier lives, in order:
-        //   * before #14399 the boot loop minted ['lead_views',
+        //   * before commit 3c1bbd2a8 the boot loop minted ['lead_views',
         //     'lead_views.default', 'lead_views.hot'] — the container and its
         //     whole expansion filed under the row identity, so
         //     `getViewsByObject('crm_lead')` had nothing for this document;
-        //   * #14399 moved `name` to LAST in the derivation, so it minted
+        //   * commit 3c1bbd2a8 moved `name` to LAST in the derivation, so it minted
         //     AGREED_KEYS instead — the right key, but with the author's
         //     `name` silently overwritten on the way past.
-        // The #14666 ruling (direction 2, 2026-09-03) ends the second: a
+        // The ruling commit d0ee598e6 records (direction 2, 2026-09-03) ends the second: a
         // container whose `name` disagrees with its derived binding is
         // REFUSED, exactly as the artifact/HMR door has always refused it.
         //
-        // #14399's derivation answer is NOT lost by inverting this — it moves
+        // Commit 3c1bbd2a8's derivation answer is NOT lost by inverting this — it moves
         // to where the artifact door's answer was already read in this file:
         // the refusal names the key it derived. Both SOURCE registrars are now
         // read the same way, which is the convergence the card asked for.
@@ -244,7 +244,7 @@ describe('#14399 — the row\'s own `name` is the LAST term of the container der
         expect(error.message).toContain("'crm_lead'");
         // The derivation itself, still pinned: `crm_lead` is what it derived,
         // NOT the row's own `lead_views`. A refusal naming `lead_views` as the
-        // derived key would mean #14399 had regressed.
+        // derived key would mean commit 3c1bbd2a8 had regressed.
         expect(error.message).toContain("binds to, 'crm_lead'");
         // Nothing filed: a refusal that has already registered half the
         // document would leave the registry in the state the card calls the
@@ -272,7 +272,7 @@ describe('#14399 — the row\'s own `name` is the LAST term of the container der
         const err = await loadThroughArtifactDoor(divergentContainer).catch((e) => e as any);
         expect(err.code).toBe('VALIDATION_ERROR');
         expect(err.status).toBe(400);
-        // ⭐ [#14666] THE SECOND INVERSION, and the card's actual subject. This
+        // ⭐ [commit d0ee598e6] THE SECOND INVERSION, and the card's actual subject. This
         // used to read
         //
         //     expect((engine.registry.getItem('view', 'crm_lead') as any).name)
@@ -293,7 +293,7 @@ describe('#14399 — the row\'s own `name` is the LAST term of the container der
     });
 
     it('so the boot loop\'s expanded items are addressable under the object', () => {
-        // [#14666] Driven on the ANONYMOUS container now. The expansion
+        // [commit d0ee598e6] Driven on the ANONYMOUS container now. The expansion
         // property this pins — expanded items bind to the derived object, not
         // to the container's row identity — is unchanged, but the divergent
         // shape no longer reaches expansion at all: it is refused before
@@ -363,7 +363,7 @@ describe('#14399 — the row\'s own `name` is the LAST term of the container der
     });
 
     // ------------------------------------------------------------------
-    // [#14666] Scope controls. The ruling names keeping the refusal's scope
+    // [commit d0ee598e6] Scope controls. The ruling names keeping the refusal's scope
     // tight as the implementation's MAIN RISK, and `registerMetadataCollections`
     // is the GENERIC loop every metadata kind runs — so the three narrowings in
     // the gate get a control each, plus the measurement that decided which of

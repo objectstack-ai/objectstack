@@ -8,7 +8,7 @@
 // measurement fired:
 //
 //   - isSystem x a TENANT-SCOPED object = IN scope;
-//   - isSystem x a genuinely GLOBAL object = OUT of scope, #8672's reasoning
+//   - isSystem x a genuinely GLOBAL object = OUT of scope, commit ff08691e6's recorded reasoning
 //     inheriting PER OBJECT rather than by namespace.
 //
 // ## What each test here discriminates
@@ -23,7 +23,7 @@
 //      each admitted-object case carries its excluded-object control, run
 //      through the same engine on the same posture.
 //   2. The engine's `bypassTenantAudit` isSystem mute. This is the gate the
-//      #13178 census measured as silencing 135 of 175 write call sites (77%) —
+//      census cited in commit e49d98896's message measured as silencing 135 of 175 write call sites (77%) —
 //      the control's LARGEST gate, sitting ahead of the condition the control
 //      is about. Pinned as the OPTION the engine hands the driver, because that
 //      is the whole of what the engine decides; `@objectstack/objectql` cannot
@@ -91,7 +91,7 @@ const PACKAGE_ID = '#13491';
 
 /** ADMITTED by the inventory — #12745 fixed its writer, a backfill was ordered. */
 const SYS_FILE = { name: 'sys_file', fields: { key: { type: 'text' } } } as any;
-/** GLOBAL by the inventory — #8672's own example, named verbatim in the ruling. */
+/** GLOBAL by the inventory — commit ff08691e6's own example, named verbatim in the ruling. */
 const SYS_PERMISSION_SET = { name: 'sys_permission_set', fields: { label: { type: 'text' } } } as any;
 /** UNCLASSIFIED — a platform object the inventory did not adjudicate. */
 const SYS_UNADJUDICATED = { name: 'sys_audit_entry', fields: { subject: { type: 'text' } } } as any;

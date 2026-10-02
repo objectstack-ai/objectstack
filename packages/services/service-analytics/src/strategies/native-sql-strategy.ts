@@ -170,11 +170,32 @@ function measureColumnOf(
  * `relationshipReference`) so every path the statement walks — a dimension, a
  * measure, a filter member, a time dimension — is resolved with the answer the
  * door admitted the query with.
+ *
+ * [#21249] …and whether the statement qualifies its base-table columns:
+ * `true` exactly when this statement joins something, which
+ * {@link NativeSQLStrategy.generateSql} reads off the joins a first compile of
+ * the same query registered. See {@link NativeSQLStrategy.qualifyAndRegisterJoin}.
  */
 class StatementJoins extends Map<string, { readonly sql: string; readonly object: string }> {
-  constructor(readonly referenceOf: HopReference | undefined) {
+  constructor(
+    readonly referenceOf: HopReference | undefined,
+    readonly qualifyBaseColumns: boolean,
+  ) {
     super();
   }
+}
+
+/**
+ * [#21249] The clauses one compile of a query produces, before the join
+ * allowlist and the read scopes are applied and the statement is assembled.
+ */
+interface StatementClauses {
+  readonly tableName: string;
+  readonly params: unknown[];
+  readonly selectClauses: string[];
+  readonly groupByClauses: string[];
+  readonly whereClauses: string[];
+  readonly joins: StatementJoins;
 }
 
 /**
@@ -773,6 +794,38 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // See {@link assertNoCrossFieldComparison} for why it is asserted anyway.
     this.assertNoCrossFieldComparison(query, ctx);
 
+    // [#21249] A base-table column is qualified exactly when THIS statement
+    // joins something, and what it joins is known only once every member has
+    // been resolved: joins are registered lazily, by whichever member walks a
+    // relationship path first, and an absorbed `$or` takes back the joins its
+    // branches registered. So the query is compiled once with bare base
+    // columns, and, when that compile registered any join, once more with
+    // every base column qualified. The predicate is the hop resolver's own
+    // answer for this query, never `cube.joins`: a cube that declares no join
+    // still joins a lookup's declared `reference` (`hop-object.ts`, tier 2),
+    // and reading the declaration left `note` bare beside a joined target that
+    // also declares `note` — "ambiguous column" on SQLite and PostgreSQL. Both
+    // compiles walk the same members through the same resolver, so the second
+    // registers the same joins; a statement that joins nothing is compiled
+    // once and keeps its bare columns.
+    let clauses = this.compileClauses(query, ctx, cube, false);
+    if (clauses.joins.size > 0) clauses = this.compileClauses(query, ctx, cube, true);
+    return this.assembleStatement(query, ctx, cube, clauses);
+  }
+
+  /**
+   * [#21249] Compile a query's SELECT, GROUP BY and WHERE clauses — the
+   * dimensions, the measures with their scoped filters, the `where`, the
+   * dataset's own scope and the time-dimension windows — registering the joins
+   * its relationship paths walk. `qualifyBaseColumns` is whether its base-table
+   * columns are written `"<table>"."<column>"`; see {@link generateSql}.
+   */
+  private compileClauses(
+    query: AnalyticsQuery,
+    ctx: StrategyContext,
+    cube: Cube,
+    qualifyBaseColumns: boolean,
+  ): StatementClauses {
     const params: unknown[] = [];
     const selectClauses: string[] = [];
     const groupByClauses: string[] = [];
@@ -781,7 +834,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // lazily as dotted dimensions/measures/filters are resolved. [#20986] Each
     // hop's object comes from the one resolver, with the host's answer for a
     // relationship field's declared target — the door's own.
-    const joins = new StatementJoins(relationshipReferenceOf(ctx));
+    const joins = new StatementJoins(relationshipReferenceOf(ctx), qualifyBaseColumns);
 
     // Build SELECT for dimensions
     if (query.dimensions && query.dimensions.length > 0) {
@@ -935,6 +988,21 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       }
     }
 
+    return { tableName, params, selectClauses, groupByClauses, whereClauses, joins };
+  }
+
+  /**
+   * [#21249] Enforce the join allowlist, inject the read scopes and assemble
+   * the statement from the clauses {@link compileClauses} produced.
+   */
+  private assembleStatement(
+    query: AnalyticsQuery,
+    ctx: StrategyContext,
+    cube: Cube,
+    clauses: StatementClauses,
+  ): { sql: string; params: unknown[] } {
+    const { tableName, params, selectClauses, groupByClauses, whereClauses, joins } = clauses;
+
     // ── ADR-0021 D-C — enforce the join allowlist + inject per-object RLS ──
     // 1. Reject any join not backed by a relationship the dataset declared.
     const allowed = ctx.getAllowedRelationships?.(query.cube!);
@@ -1087,7 +1155,8 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
    * target under the field's alias, `LEFT JOIN "crm_person" "owner" ON …`.
    *
    * Returns the qualified SQL reference (e.g. `"account"."industry"`).
-   * Pure column references (no dot) are returned as-is.
+   * A base-table column (no dot) is returned qualified with the base table
+   * when the statement joins something, and as-is otherwise.
    */
   private qualifyAndRegisterJoin(
     rawSql: string,
@@ -1096,14 +1165,20 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     cube?: Cube,
   ): string {
     if (!rawSql.includes('.')) {
-      // Base-table column. When the cube can join other tables, a bare column
-      // that also exists on a joined table (e.g. base `status` vs joined
+      // Base-table column. When the statement joins another table, a bare
+      // column that also exists on a joined table (e.g. base `status` vs joined
       // `account.status`) makes the SQL engine raise "ambiguous column name".
       // Qualify plain identifiers with the base table; leave SQL expressions
-      // and `*` untouched. Single-object cubes (no joins) keep bare columns so
-      // their generated SQL is byte-for-byte unchanged.
-      const canJoin = !!cube?.joins && Object.keys(cube.joins).length > 0;
-      if (canJoin && /^[A-Za-z_][A-Za-z0-9_]*$/.test(rawSql)) {
+      // and `*` untouched. A statement that joins nothing keeps bare columns,
+      // so its generated SQL is byte-for-byte unchanged.
+      //
+      // [#21249] "Joins something" is THIS statement's joins, as the hop
+      // resolver registered them — `joins.qualifyBaseColumns`, set by
+      // `generateSql` — never whether the cube declares a join. The declaration
+      // answers for the cube, not the statement: a cube declaring no join still
+      // joins a lookup's declared `reference`, and its base columns were left
+      // bare beside it.
+      if (joins.qualifyBaseColumns && /^[A-Za-z_][A-Za-z0-9_]*$/.test(rawSql)) {
         return `"${parentTable}"."${rawSql}"`;
       }
       return rawSql;
@@ -1327,7 +1402,10 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     const measure = this.lookupMember(cube, member, 'measure');
     if (measure) return this.qualifyAndRegisterJoin(measure.sql, parentTable, joins, cube);
     const fieldName = member.includes('.') ? member.split('.')[1] : member;
-    return fieldName;
+    // [#21249] A member the cube does not declare is a base-table column too
+    // (`where: { id }`), so it takes the same qualification as a declared one:
+    // returned bare it sat beside a joined target's own `id`, ambiguous.
+    return this.qualifyAndRegisterJoin(fieldName, parentTable, joins, cube);
   }
 
   /**

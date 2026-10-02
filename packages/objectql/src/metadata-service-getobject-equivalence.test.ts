@@ -1,11 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Conformance pin — `getObject(name)` ≡ `get('object', name)` (#6745).
+ * Conformance pin — `getObject(name)` ≡ `get('object', name)` (commit 7a5ef0008).
  *
  * `IMetadataService.getObject` (`packages/spec/src/contracts/metadata-service.ts`)
  * DECLARES that the pair resolves through one lookup in every implementation this
- * repo ships, and that both members hand back the identical object. PR #6723 (for
+ * repo ships, and that both members hand back the identical object. commit 8ad609c69 (for
  * #6505) wrote that down after measuring it with a throwaway probe, which left the
  * statement declared-but-ungated: nothing failed if a later edit made the pair
  * diverge, and the contract TSDoc would then simply be lying. This file is the gate.
@@ -26,7 +26,7 @@
  *    `registry.getObject`). An object written the first way was readable back
  *    through neither member — measured, both `undefined` — so a pin seeded that
  *    way would have compared `undefined` to `undefined` and called it
- *    equivalence. #6725 has since closed that split (`facade.register('object',
+ *    equivalence. Commit 1507ba356 has since closed that split (`facade.register('object',
  *    …)` performs the contributor write too, and pins the round-trip in
  *    `metadata-facade.test.ts`), so either seeding would work here now; this one
  *    is kept because it seeds the registry directly, the way a registry-backed
@@ -48,7 +48,7 @@
  * converge on `SchemaRegistry.getObject`, whose merge result is memoized in
  * `mergedObjectCache`, so both members hand back the same instance.
  *
- * Refs #6745, #6505, PR #6723, #6725.
+ * Refs #6505; commits 7a5ef0008 (the getObject pin), 8ad609c69 (getObject's declared answer), 1507ba356 (the facade split fix).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -167,7 +167,7 @@ const IMPLEMENTATIONS: readonly PinnedImplementation[] = [
             for (const object of objects) {
                 // Seeded on the registry, not through `facade.register('object', …)`
                 // — see the header. That write reached neither object read until
-                // #6725 closed the split; it now would, but this seeding is the
+                // commit 1507ba356 closed the split; it now would, but this seeding is the
                 // one a registry-backed host actually performs.
                 registry.registerObject(object.definition as never, 'com.example.pin');
             }

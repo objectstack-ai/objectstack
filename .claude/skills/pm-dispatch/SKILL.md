@@ -312,7 +312,7 @@ Worktree: `<repo>-issue-<n>`
 Domain: `domain:<x>`
 Seat: `domain:<x>#<n>` (the seat number this PM sits on; absent = seat 1)
 File surface: `<预期触碰的目录>` (stop on breach; explain in the report)
-Container & model: `<S 级机械卡 / M / L>`, `mode:subagent | mode:cloud`, `model: <档位,引当次 --tier 输出>`
+Container & model: `<S 级机械卡 / M / L>`, `mode:subagent | mode:cloud`, `model: <档位词,引当次 --tier 输出;天花板拼 CONTRACT_REVIEW_TIER,同行引其 MANDATORY 路径行或 reason:;⛔ 不抄模型 id>`
 Clause-②: yes | no
 Thread-read: <id of the newest comment on the card at the moment this claim is written, or none>
 Serial constraints cleared: `<点名同文件/同包的前驱 PR 与在飞认领,及分诊点名的任意车道在飞兄弟卡中本卡 pin 断言其行为者;无则 none>`

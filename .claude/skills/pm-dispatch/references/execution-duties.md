@@ -64,7 +64,7 @@
 - 条款②入队闸门只读认领评论且只读行首键:句中提及与另发评论皆读不到,卡即不可读。
 - 谓词保持严格、⛔ 不放宽;session ID 不可省,`mode:subagent` 下 dev 与 PM 同 ID,身份看分支。
 - `Clause-②: yes | no` 恰这两种拼写,恒英文机器判据;判据:本卡放宽接受集或扩大公开面吗。
-- 引当次 `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --tier <paths>` 输出⛔ 不凭记忆
+- 档位引 `dispatch-gates --tier --repo 仓`⛔ 不凭记忆;天花板拼常量名并同行引据,⛔ 不抄模型 id
 - 末行 Serial constraints cleared 是落在评论里的读数,同包在飞单不点名等于没查。
 - 本卡 pin 断言兄弟卡在改的行为 ⇒ 派发令注明,并在用例内预登记翻转触发词,⛔ 不修绿。
 - 家族派发的折叠认领:共享分支按链首卡命名;每张成员卡各留认领评论并点名该分支。

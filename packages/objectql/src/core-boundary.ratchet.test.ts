@@ -49,7 +49,7 @@
 // What this file does NOT see, and what does (#15347)
 //
 // This is a SOURCE SCAN over two hard-coded names. Both limits are by
-// construction, and #14680 is what they cost: a heavyweight arriving through
+// construction, and the leak commit 3bd9b3498 closed is what they cost: a heavyweight arriving through
 // any other specifier is outside FORBIDDEN_PACKAGES, and a scan of this
 // package's own sources cannot follow one that arrives three packages deep —
 // which is how that one arrived, invisible to every gate for the whole time it

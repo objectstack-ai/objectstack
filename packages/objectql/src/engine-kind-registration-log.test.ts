@@ -1,5 +1,5 @@
 /**
- * [#10729] `contributes.kinds` — the registration site's debug line must name
+ * [commit 10485009a] `contributes.kinds` — the registration site's debug line must name
  * fields that EXIST.
  *
  * `registerApp()` logs one `'Registered Kind'` line per contributed kind. It

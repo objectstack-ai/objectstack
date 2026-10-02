@@ -282,7 +282,7 @@ function aggregateBucket(
       // booleans aggregate as NUMBERS on every face, with no per-aggregate
       // exception, so the order statistics answer in the same numeric domain
       // `sum`/`avg` already answer in (`toNumber`, `Number(true) === 1`). The
-      // coercion is BOOLEAN-ONLY, exactly like driver-memory's (#11065):
+      // coercion is BOOLEAN-ONLY, exactly like driver-memory's (commit 20950404c):
       // strings, dates and numbers reach the same raw comparison they always
       // did — widening it would change `min` over a text column.
       case 'min': {

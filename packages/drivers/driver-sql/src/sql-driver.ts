@@ -383,6 +383,31 @@ const NUMERIC_SCALAR_TYPES = new Set<string>([
 const AUDIT_TIMESTAMP_COLUMNS = ['created_at', 'updated_at'] as const;
 
 /**
+ * [#21241] The fractional-seconds precision of every MySQL `DATETIME` column
+ * this driver creates, and therefore of every server-clock expression that
+ * defaults or stamps one. `DATETIME(3)` keeps the canonical instant's
+ * milliseconds (#3942).
+ *
+ * ONE source, read by every site that spells it: the declared `Field.datetime`
+ * column ({@link SqlDriver.createColumn}), the builtin audit columns
+ * ({@link SqlDriver.createAuditTimestampColumn}), the `NOW()` column default
+ * ({@link SqlDriver.nowColumnDefault}), the UPDATE stamp
+ * ({@link SqlDriver.updatedAtStamp}) and the legacy `TIMESTAMP` widening
+ * ({@link SqlDriver.migrateMysqlDatetimeColumns}).
+ *
+ * A column and its default cannot disagree, and that is not a style point:
+ * MySQL refuses a `CURRENT_TIMESTAMP` default whose precision differs from its
+ * `DATETIME` column's (`ER_INVALID_DEFAULT`, "Invalid default value for …"),
+ * so the whole `CREATE TABLE` fails. The audit columns carried `now(3)` beside
+ * their `DATETIME(3)` as a second literal, and the declared-field default fell
+ * through to a bare `knex.fn.now()` beside the same `DATETIME(3)` column.
+ * Measured on MySQL 8.0.46: every table declaring a `defaultValue: 'NOW()'`
+ * datetime field (`sys_activity.timestamp`, `sys_presence.last_seen`) was
+ * never created, and its data door answered `500`.
+ */
+const MYSQL_DATETIME_PRECISION = 3;
+
+/**
  * Read-side repair for the builtin audit timestamps on SQLite.
  *
  * SQLite has no native timestamp type. Rows written before the canonical-format
@@ -5471,6 +5496,21 @@ export class SqlDriver implements IDataDriver {
   protected dateFields: Record<string, Set<string>> = {};
   protected datetimeFields: Record<string, Set<string>> = {};
   /**
+   * [#21259] The builtin audit timestamps ({@link AUDIT_TIMESTAMP_COLUMNS}) a
+   * MANAGED object does not declare — the columns this driver provisions on
+   * every table it builds ({@link createAuditTimestampColumn}) that no
+   * declaration types. `formatInput` writes them in the `Field.datetime` form,
+   * the type their column was created with.
+   *
+   * Most objects declare both, because the engine's registry injects them as
+   * `Field.datetime`; a `managedBy: 'better-auth'` or `systemFields: false`
+   * object gets nothing injected, and the engine's audit hook stamps both
+   * anyway. A declared column keeps its declaration, whatever its type.
+   * Installed by {@link registerManagedObjectMetadata} only: an external object
+   * (ADR-0015) maps a remote table whose columns this driver did not create.
+   */
+  protected undeclaredAuditTimestampFields: Record<string, readonly string[]> = {};
+  /**
    * SQLite `Field.datetime` columns proven to hold ONLY canonical UTC text —
    * either backfilled by {@link backfillCanonicalDatetimes} or created empty in
    * this process. Read by {@link needsLegacyDatetimeRepair} to drop the repair
@@ -8348,7 +8388,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected updatedAtStamp(): string | Knex.Raw {
     if (this.isSqlite) return new Date().toISOString();
-    return this.isMysql ? this.knex.fn.now(3) : this.knex.fn.now();
+    return this.isMysql ? this.knex.fn.now(MYSQL_DATETIME_PRECISION) : this.knex.fn.now();
   }
 
   /**
@@ -12025,6 +12065,11 @@ export class SqlDriver implements IDataDriver {
     // #2186: remember the authoritative metadata field set for this table so
     // drift detection / `os migrate` can diff the physical schema against it.
     this.managedObjectFields.set(tableName, obj.fields ?? {});
+    // [#21259] Recomputed on every registration, so a re-registration that now
+    // declares a column stops treating it as undeclared.
+    this.undeclaredAuditTimestampFields[tableName] = AUDIT_TIMESTAMP_COLUMNS.filter(
+      (col) => !Object.prototype.hasOwnProperty.call(obj.fields ?? {}, col),
+    );
     // Always overwrite — a metadata change that REMOVES `indexes` must clear
     // the previous entry, or drift detection keeps expecting an index nobody
     // declares any more (and never reports it as orphaned).
@@ -13062,11 +13107,20 @@ export class SqlDriver implements IDataDriver {
         // The default is re-stated because MySQL drops a column's DEFAULT when
         // MODIFY does not repeat it, and an audit column without
         // `CURRENT_TIMESTAMP(3)` would start inserting NULL.
+        //
+        // A declared `defaultValue: 'NOW()'` column is the same case (#21241),
+        // and the TIME twin ({@link migrateMysqlTimeColumns}) already restates
+        // it. Measured on MySQL 8.0.46 before this line: a legacy
+        // `timestamp null default current_timestamp` NOW() column came out of
+        // the widening as `datetime(3)` with NO default, and an insert omitting
+        // it answered `null`. Both take the expression a fresh column gets,
+        // from {@link nowColumnDefault}, so the widening cannot spell a third.
         const isAudit = (AUDIT_TIMESTAMP_COLUMNS as readonly string[]).includes(col.name);
+        const isNowDefault = isNowDefaultValue(fields[col.name]?.defaultValue);
         const nullClause = col.nullable ? 'null' : 'not null';
-        const defaultClause = isAudit ? ' default current_timestamp(3)' : '';
+        const defaultClause = isAudit || isNowDefault ? ` default ${this.nowColumnDefault('datetime').toString()}` : '';
         return {
-          sql: `alter table ?? modify column ?? datetime(3) ${nullClause}${defaultClause}`,
+          sql: `alter table ?? modify column ?? datetime(${MYSQL_DATETIME_PRECISION}) ${nullClause}${defaultClause}`,
           bindings: [table, col.name] as unknown[],
         };
       });
@@ -17787,7 +17841,11 @@ export class SqlDriver implements IDataDriver {
    * The driver-native column DEFAULT for a `defaultValue: 'NOW()'` field.
    *
    * Postgres/MySQL use native `now()` — a real zone-aware TIMESTAMP that never
-   * had the ambiguity below. SQLite has no timestamp type and `knex.fn.now()`
+   * had the ambiguity below. On MySQL a `datetime` default carries the
+   * column's fractional-seconds precision ({@link MYSQL_DATETIME_PRECISION}),
+   * because MySQL refuses a mismatched one outright (#21241); it is also the
+   * expression the builtin audit columns default with, routed through here
+   * ({@link createAuditTimestampColumn}). SQLite has no timestamp type and `knex.fn.now()`
    * compiles to `CURRENT_TIMESTAMP`, which renders a timezone-NAIVE,
    * space-separated `'YYYY-MM-DD HH:MM:SS'` (no millis, no zone). `Date.parse`
    * reads such a zone-less string as LOCAL time, so a stored UTC wall-clock
@@ -17833,6 +17891,14 @@ export class SqlDriver implements IDataDriver {
         if (this.isMysql) return this.knex.raw('(cast(utc_timestamp() as date))');
         if (this.isPostgres) return this.knex.raw("(timezone('utc', now())::date)");
       }
+      // `datetime` on MySQL (#21241): the column is `DATETIME(n)` (see
+      // `createColumn`), and MySQL REFUSES a `CURRENT_TIMESTAMP` default whose
+      // precision differs from its column's — the whole `CREATE TABLE` fails
+      // with "Invalid default value". The bare `knex.fn.now()` below is
+      // precision 0, so the default carries the column's precision from the
+      // one source both read. Postgres keeps the bare form: its `timestamptz`
+      // takes `CURRENT_TIMESTAMP` at microsecond precision, measured accepted.
+      if (type === 'datetime' && this.isMysql) return this.knex.fn.now(MYSQL_DATETIME_PRECISION);
       return this.knex.fn.now();
     }
     switch (type) {
@@ -17861,7 +17927,8 @@ export class SqlDriver implements IDataDriver {
    * bucketed like one, and must take the same physical type or they inherit the
    * `TIMESTAMP` problems on MySQL: no milliseconds, and a 2038 ceiling on the
    * column every list view sorts by (#3942). `CURRENT_TIMESTAMP` has to carry
-   * matching precision for a `DATETIME(3)` default, hence `now(3)`.
+   * matching precision for a `DATETIME(3)` default, hence `now(3)` — spelled
+   * {@link MYSQL_DATETIME_PRECISION}, the one source (#21241, below).
    *
    * ## SQLite takes the SAME canonical default a declared field gets (#11321)
    *
@@ -17886,8 +17953,20 @@ export class SqlDriver implements IDataDriver {
    * does NOW() mean in DDL on this dialect".
    *
    * Postgres is deliberately untouched: `knex.fn.now()` there is a real
-   * zone-aware `TIMESTAMP` that never had the ambiguity. MySQL keeps `now(3)`
-   * (#11224) — a `DATETIME(3)` default must carry matching precision.
+   * zone-aware `TIMESTAMP` that never had the ambiguity.
+   *
+   * ## MySQL routes through the same source (#21241)
+   *
+   * A `DATETIME(3)` default must carry matching precision (#11224), and the
+   * declared-field default is the other half of that sentence too: this
+   * column carried its own `now(3)` while a declared `Field.datetime` NOW()
+   * column of the same `DATETIME(3)` type fell through to a bare
+   * `CURRENT_TIMESTAMP`, which MySQL refuses — so the table was never created.
+   * Both the column's precision and its default now read
+   * {@link MYSQL_DATETIME_PRECISION}, the default through
+   * {@link nowColumnDefault}, exactly as the SQLite branch does. The emitted
+   * DDL for this column is byte-identical (`datetime(3) default
+   * CURRENT_TIMESTAMP(3)`).
    *
    * ⚠️ Scope: a DDL default governs only NEWLY-created tables. A table already
    * on disk keeps its legacy `CURRENT_TIMESTAMP` default; `formatOutput`'s read
@@ -17901,7 +17980,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected createAuditTimestampColumn(table: Knex.CreateTableBuilder, name: string): void {
     if (this.isMysql) {
-      table.datetime(name, { precision: 3 }).defaultTo(this.knex.fn.now(3));
+      table.datetime(name, { precision: MYSQL_DATETIME_PRECISION }).defaultTo(this.nowColumnDefault('datetime'));
       return;
     }
     if (this.isSqlite) {
@@ -19433,7 +19512,7 @@ export class SqlDriver implements IDataDriver {
         // driver writes, exactly as ServiceNow stores its MySQL timestamps
         // (#3942). Postgres deliberately keeps `table.timestamp` → `timestamptz`:
         // asking for precision 3 there would REDUCE it from microseconds.
-        col = this.isMysql ? table.datetime(name, { precision: 3 }) : table.timestamp(name);
+        col = this.isMysql ? table.datetime(name, { precision: MYSQL_DATETIME_PRECISION }) : table.timestamp(name);
         break;
       case 'time':
         // MySQL's bare `TIME` is zero-precision and ROUNDS a fractional literal
@@ -19957,6 +20036,28 @@ export class SqlDriver implements IDataDriver {
         if (v == null) continue;
         // `NOW()` was already replaced with an ISO instant above; anything else
         // that is not interpretable as a time passes through untouched.
+        const normalized = this.storageDatetimeValue(v);
+        if (normalized !== v) {
+          if (!copied) { copy = { ...copy }; copied = true; }
+          copy[field] = normalized;
+        }
+      }
+    }
+
+    // [#21259] The same rule for a builtin audit timestamp the object does NOT
+    // declare (see {@link undeclaredAuditTimestampFields}). Its column is the
+    // `DATETIME(3)` / `timestamptz` / canonical-text column this driver created,
+    // and the engine's audit hook stamps it as `toISOString()` text, which
+    // MySQL refuses as a datetime literal. Measured on live MySQL 8.0.46: every
+    // insert into `sys_jwks` (declares `created_at` only) and `sys_member` was
+    // refused on `updated_at`, so no JWT signing key was ever stored. On SQLite
+    // and Postgres the hook's text is already the canonical form and is bound
+    // unchanged; a `Date` lands as that same text instead of an epoch INTEGER.
+    const undeclaredAudit = this.undeclaredAuditTimestampFields[object];
+    if (undeclaredAudit && undeclaredAudit.length > 0 && copy && typeof copy === 'object') {
+      for (const field of undeclaredAudit) {
+        const v = copy[field];
+        if (v == null) continue;
         const normalized = this.storageDatetimeValue(v);
         if (normalized !== v) {
           if (!copied) { copy = { ...copy }; copied = true; }

@@ -634,13 +634,13 @@ describe('cascadeDeleteRelations — [#9689] authored set_null on master_detail 
     });
 });
 
-// [#13644] The DECLARED referential-cleanup marker — `HookContext.
+// [commit 34ce8e7db] The DECLARED referential-cleanup marker — `HookContext.
 // referentialFieldClear` — populated on EVERY reference-cleanup write the
 // engine issues, as the read-only projection of the operation-private
 // `__referentialFieldClear` the #3023 pin above holds on the envelope.
 //
 // Why this pin exists, and why its caller context carries a full identity: the
-// filer's corrected measurement (#13644) showed the engine builds the cleanup
+// filer's corrected measurement (on the card commit 34ce8e7db closed) showed the engine builds the cleanup
 // write as `{ ...callerContext, transaction, __referentialFieldClear: true }`
 // — it INHERITS whatever identity the caller supplied — so on the path a real
 // request takes (a REST DELETE carrying a userId) `ctx.user`, `ctx.session`

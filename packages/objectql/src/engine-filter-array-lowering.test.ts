@@ -42,7 +42,7 @@ import { ObjectQL } from './engine.js';
  * (#5285). So a test that hands the engine one has to say so, and
  * `as unknown as EngineQueryOptions` is how: it names the contract being
  * bypassed, keeps the rest of the call type-checked, and greps as an
- * intentional act — none of which a bare `as any` does. (#6300 flipped the
+ * intentional act — none of which a bare `as any` does. (Commit 74155c735 flipped the
  * find/findOne parameter from `EngineQueryOptionsParsed` to the author-state
  * `EngineQueryOptions`; the cast target follows the contract it names.)
  *
@@ -90,7 +90,7 @@ interface SeenRead { ast: DriverQuery }
  * signature moves.
  *
  * `aggregate` included: the engine reaches it by duck-typing
- * (`typeof drv.aggregate === 'function'`, `engine.ts`), and until #14345 the
+ * (`typeof drv.aggregate === 'function'`, `engine.ts`), and until commit e89fa9233 the
  * interface did not declare it, so this file carried a local extension for
  * the one verb. `IDataDriver.aggregate?` now spells the signature the engine
  * calls, so the double's `aggregate` is checked by the same annotation as

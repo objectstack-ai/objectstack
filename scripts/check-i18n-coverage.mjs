@@ -184,7 +184,7 @@
 // here is one sentence in that remedy, not a mechanism.
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, writeFileSync, existsSync, openSync, closeSync, unlinkSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, posix, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -221,11 +221,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'Root anchoring and the population classifier (#10907). These are the only': 4,
   'The build-prerequisite CLOSURE (#12564). What makes the remedy worth naming': 15,
   'The prerequisite refusal CLASS, and the advisory that names it (#14857).': 23,
+  'The dispatch-gates declaration (#21011): the example configs and the trees they import': 10,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 5;
+const SELF_TEST_BATTERY_FLOOR = 6;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -246,16 +247,52 @@ const EXAMPLES_DIR = 'examples';
 const PACKAGES_DIR = 'packages';
 const BASELINE_PATH = 'scripts/i18n-coverage-baseline.json';
 
-// ⛔ Neither root above is declared to the dispatch derivation, and that is a
-// recorded REFUSAL rather than an omission. Both populations are FILENAME
-// filters — one `objectstack.config.ts` per example directory (3 of 240), and
-// files named `i18n-extract.config.ts` beneath a `scripts` segment (9 of 5035).
-// The `ROOT_DIR_WATCH_HINTS` idiom can only name a whole subtree, so the only
-// spellable claim here would name this gate for 5035 files to reach 9 — the
-// costlier error, per `hintCovers`. Both verdicts are recorded as
-// REFUSE-UNSPELLABLE in the triage that `scripts/pm/bare-root-worklist.mjs`
-// self-tests on every PR; giving `PACKAGES_DIR` a population-constant name is
-// what made this root visible to that sweep at all.
+// ── What the dispatch derivation is told this gate reads (#21011) ──────────
+//
+// `scripts/pm/dispatch-gates.mjs` names a gate for a card by reading path
+// literals out of the gate's own source, and it refuses a bare single-segment
+// word like the two constants above as too generic. So with nothing else
+// declared, an edit under `examples/` derived nothing for this gate. Measured on
+// a real producer (#21011): a showcase diff derived 116 families locally, none
+// of them this one, and CI then failed it here (`app-showcase` 414 -> 416).
+//
+// The EXAMPLES population is not the filename filter `discoverExamples` applies.
+// This gate spawns `os lint` on each config, and `os lint` loads the config
+// through bundle-require — esbuild bundling every relative import, with
+// `@objectstack/*` kept external — so the count moves with any file the
+// config's import graph reaches: objects, datasets, dashboards, translation
+// bundles. Measured with that bundler and those externals at `30c530e5`: the 4
+// configs' import closures are 153 tracked files, each one either the config
+// itself or a file under that example's own `src/` tree.
+//
+// So the declaration below names exactly those two shapes, and nothing wider:
+//   - `examples/**` would also name this gate for the test suites, e2e specs,
+//     READMEs, changelogs and manifests — 103 of the 256 tracked files under the
+//     root, none of which any config imports (60% precise);
+//   - the two hints below cover 170: the whole closure (complete), plus 17 files
+//     no config imports — 11 `src/docs/*.md` pages (`os lint` reads them, but
+//     its docs rules are not `i18n/` rules, so they never reach this count), two
+//     `*.test.ts` and three other unimported files under `src/`, and the `src/`
+//     of an example that has no config (90% precise).
+// `--self-test` holds this against the live tree from both sides: every config
+// the population finds, and the files a real showcase edit touched, are covered
+// as the derivation itself reads this source; a test file and a `packages/` path
+// are not; and no relative import in a config or under its `src/` leaves that
+// example's `src/` — the one edit that would make this declaration under-name.
+//
+// ⛔ The PACKAGES half stays undeclared, on its own recorded verdict:
+// `scripts/pm/bare-root-worklist.mjs` holds it SPELLABLE-UNDECLARED (nine extract
+// configs, one spelling shared with two sibling i18n gates, deferred with them).
+// That map's EXAMPLES row is DECLARED-NARROWER and holds its recorded spelling
+// SET-EQUAL to the array below, so the record and the declaration cannot drift
+// apart silently. Nor does this declaration chase the workspace packages a
+// config imports by name: a spec edit can move this count too, but that closure
+// is the `packages/` root wholesale — the REFUSE-WIDE shape — and its CLI half
+// already reaches this gate through `cli-build-prerequisite.mjs`.
+//
+// Provenance, never a lookup key: the measurement never reads the array, and
+// only `--self-test` does — to hold it against what the gate really loads.
+const ROOT_DIR_WATCH_HINTS = ['examples/*/objectstack.config.ts', 'examples/*/src/**'];
 
 /** A repo-relative path, resolved against the module-derived root. */
 const at = (rel) => join(REPO_ROOT, rel);
@@ -709,7 +746,7 @@ function measureAllConfigs(configPaths, measure) {
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-i18n-coverage self-test reached its verdict';
 
-function selfTest() {
+async function selfTest() {
   // The battery ledger this self-test's floor is evaluated against (#13489).
   // `battery()` opens a battery; every assertion below is attributed to the one
   // most recently opened, so a section that stops running stops registering and
@@ -1275,6 +1312,141 @@ function selfTest() {
     'the stale-spelling predicate no longer sees `Exit code 1`',
   );
 
+  // -------------------------------------------------------------------------
+  // The dispatch-gates declaration (#21011). `ROOT_DIR_WATCH_HINTS` is read by
+  // ANOTHER tool, so nothing in this gate's own run can go red when it is wrong:
+  // a missing hint is a gate the derivation never names for an example edit
+  // (the defect this card was filed on), a surplus one names it for files it
+  // never opens. So both directions are asked here, of the live tree, through
+  // the derivation's OWN extractor and covering rule — imported inside this
+  // body, where the extractor's self-test mask blanks the specifier, so the
+  // import adds nothing to the population this file declares.
+  // -------------------------------------------------------------------------
+  battery('The dispatch-gates declaration (#21011): the example configs and the trees they import');
+  const { extractWatchHints, hintCovers } = await import('./pm/dispatch-gates.mjs');
+  const ownPath = relative(REPO_ROOT, fileURLToPath(import.meta.url)).split('\\').join('/');
+  const derivedHints = extractWatchHints(readFileSync(fileURLToPath(import.meta.url), 'utf8'), ownPath);
+  const derives = (path, hints = derivedHints) => hints.some((h) => hintCovers(h, path));
+  expect(
+    '#21011 the derivation reads every declared hint off this source',
+    ROOT_DIR_WATCH_HINTS.length > 0 && ROOT_DIR_WATCH_HINTS.every((h) => derivedHints.includes(h)),
+    `declared ${JSON.stringify(ROOT_DIR_WATCH_HINTS)}, extracted ${JSON.stringify(derivedHints)} — a declaration ` +
+      'the extractor cannot read (a computed spelling, a leading glob) names this gate for nothing',
+  );
+  // The positive case the card asked for, spelled as the paths of the real diff
+  // that went red in CI (#20998's three example source files). Strings, not
+  // files: `hintCovers` judges a path, so a later rename cannot empty this case.
+  const SHOWCASE_EDIT = [
+    'examples/app-showcase/src/data/analytics/showcase.cube.ts',
+    'examples/app-showcase/src/system/translations/index.ts',
+    'examples/app-showcase/src/ui/datasets/chart-gallery.dataset.ts',
+  ];
+  expect(
+    '#21011 an edit to the showcase files a real red diff touched derives this gate',
+    SHOWCASE_EDIT.every((p) => derives(p)),
+    `not derived: ${SHOWCASE_EDIT.filter((p) => !derives(p)).join(', ')}`,
+  );
+  const liveConfigs = discoverExamples();
+  expect(
+    '#21011 every example config the population finds derives this gate',
+    liveConfigs.length > 0 && liveConfigs.every((p) => derives(p)),
+    `${liveConfigs.length} config(s); not derived: ${liveConfigs.filter((p) => !derives(p)).join(', ') || 'none'}`,
+  );
+
+  // COMPLETENESS against what `os lint` loads. Its bundler follows relative
+  // specifiers and keeps every `@objectstack/*` import external, so the only way
+  // a config's import graph can reach an example file outside the declaration is
+  // a relative specifier — in the config or in a file under its `src/` — that
+  // leaves that example's `src/`. Asked of every such file, not only the ones
+  // the graph reaches: a superset, so a miss cannot hide behind a guess about
+  // which files are imported. Test files are skipped, being what no config loads.
+  const RELATIVE_SPECIFIER = /(?:\bfrom|\bimport|\brequire)\s*\(?\s*(['"])(\.{1,2}\/[^'"\n]*)\1/g;
+  const escapesOf = (file, text, srcRoot) => {
+    const out = [];
+    for (const m of String(text).matchAll(RELATIVE_SPECIFIER)) {
+      const target = posix.normalize(posix.join(posix.dirname(file), m[2]));
+      out.push({ target, escapes: target !== srcRoot && !target.startsWith(`${srcRoot}/`) });
+    }
+    return out;
+  };
+  const sourcesUnder = (rel, out = []) => {
+    if (!existsSync(at(rel))) return out;
+    for (const e of readdirSync(at(rel), { withFileTypes: true })) {
+      const p = posix.join(rel, e.name);
+      if (e.isDirectory()) sourcesUnder(p, out);
+      else if (/\.(?:[cm]?[jt]sx?)$/.test(e.name) && !/\.(?:test|spec)\./.test(e.name)) out.push(p);
+    }
+    return out;
+  };
+  const edges = liveConfigs.flatMap((config) => {
+    const srcRoot = posix.join(posix.dirname(config), 'src');
+    return [config, ...sourcesUnder(srcRoot)].flatMap((file) =>
+      escapesOf(file, readFileSync(at(file), 'utf8'), srcRoot).map((edge) => ({ file, ...edge })));
+  });
+  const escaped = edges.filter((e) => e.escapes);
+  expect(
+    '#21011 the import scan sees real edges — the configs reach their sources by relative specifiers',
+    edges.length > 0 && edges.some((e) => liveConfigs.includes(e.file)),
+    `${edges.length} edge(s) scanned; an empty scan would pass the next case over nothing`,
+  );
+  expect(
+    '#21011 no relative import in a config or under its `src/` leaves that example\'s `src/` — the ' +
+      'declaration names the whole graph `os lint` loads',
+    escaped.length === 0,
+    `${escaped.map((e) => `${e.file} -> ${e.target}`).slice(0, 4).join(' · ')} — this import reaches a ` +
+      'file the declaration does not name, so an edit there derives nothing for this gate. Move the file under ' +
+      '`src/`, or widen ROOT_DIR_WATCH_HINTS to the root it really reads and re-measure its precision',
+  );
+  expect(
+    '#21011 …and every target the scan resolved is a path the derivation names',
+    edges.every((e) => e.escapes || derives(e.target)),
+    edges.filter((e) => !e.escapes && !derives(e.target)).map((e) => e.target).slice(0, 4).join(' · '),
+  );
+  expect(
+    'NEGATIVE CONTROL: the escape scan can still see an escape, and passes an in-tree import',
+    escapesOf('examples/app-x/src/a.ts', "import s from '../../shared/s.js';", 'examples/app-x/src')
+      .every((e) => e.escapes)
+      && escapesOf('examples/app-x/objectstack.config.ts', "import a from './src/a.js';", 'examples/app-x/src')
+        .every((e) => !e.escapes)
+      && escapesOf('examples/app-x/src/a.ts', "export { b } from './b.js'; const c = await import('../c.js');",
+        'examples/app-x/src').filter((e) => e.escapes).length === 1,
+    'the relative-specifier scan stopped discriminating, so the completeness case above cannot fail',
+  );
+
+  // PRECISION: what the derivation must NOT name. A test file under an example
+  // is exactly what `examples/**` would add and no config imports; the two
+  // `packages/` paths are the same red diff's non-example files, which the
+  // card's other pin says must not derive through THIS declaration (the CLI half
+  // of this gate's reach is inherited from `cli-build-prerequisite.mjs`, and
+  // judged there).
+  const NOT_THIS_DECLARATION = [
+    'examples/app-showcase/test/gap-fill.test.ts',
+    'examples/README.md',
+    'packages/spec/src/data/analytics.zod.ts',
+    'packages/services/service-analytics/README.md',
+  ];
+  expect(
+    '#21011 a test file, a root README and a packages/ path that touches no declared root do NOT derive it',
+    NOT_THIS_DECLARATION.every((p) => !derives(p)),
+    `derived: ${NOT_THIS_DECLARATION.filter((p) => derives(p)).join(', ')}`,
+  );
+  // The controls that keep the cases above measurements: the extractor really
+  // reads a literal fixture and really drops the computed spelling, so the first
+  // case can fail; and `examples/**` really would name the test file, so the
+  // precision case is asked of a declaration that could have been wider.
+  const literalFixture = extractWatchHints("const HINTS = ['examples/*/src/**'];\n", ownPath);
+  const computedFixture = extractWatchHints("const HINTS = ['examples'].map((r) => r + '/*/src/**');\n", ownPath);
+  expect(
+    'NEGATIVE CONTROL: the extractor reads a literal declaration and drops a computed one',
+    literalFixture.includes('examples/*/src/**') && !computedFixture.includes('examples/*/src/**'),
+    `literal -> ${JSON.stringify(literalFixture)}, computed -> ${JSON.stringify(computedFixture)}`,
+  );
+  expect(
+    'NEGATIVE CONTROL: the wholesale spelling WOULD name the test file this declaration leaves out',
+    derives(NOT_THIS_DECLARATION[0], ['examples/**']) && !derives(NOT_THIS_DECLARATION[2], ['examples/**']),
+    'hintCovers no longer separates a subtree from its root, so the precision case is not asking anything',
+  );
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -1331,14 +1503,16 @@ function selfTest() {
       `from outside the repo root as well as inside it, and an empty one is refused rather than reported OK; ` +
       `the build-prerequisite closure names all ${onRoot.length} of them plus the CLI, and refuses whole rather ` +
       `than naming some; and all three refusal paths exit ${EXIT_PREREQUISITE_NOT_MET} — distinct from a finding's ` +
-      `${EXIT_FINDINGS} — with an advisory that names the number it claims (#14857).`,
+      `${EXIT_FINDINGS} — with an advisory that names the number it claims (#14857); and the dispatch derivation, ` +
+      `reading this source, names this gate for all ${liveConfigs.length} example config(s) and every file their ` +
+      `${edges.length} relative import(s) reach, and for no test file or undeclared packages/ path (#21011).`,
   );
 
   return SELF_TEST_VERDICT;
 }
 
 if (process.argv.includes('--self-test')) {
-  if (selfTest() !== SELF_TEST_VERDICT) {
+  if ((await selfTest()) !== SELF_TEST_VERDICT) {
     console.error(
       '\n✗ check-i18n-coverage self-test: selfTest() returned without reaching its verdict,\n'
         + 'so no success line was printed. Exiting 0 here would report a self-test\n'

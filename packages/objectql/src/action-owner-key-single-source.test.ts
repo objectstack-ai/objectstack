@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * This package spells the standalone-action owner-key ladder ONCE (#14422).
+ * This package spells the standalone-action owner-key ladder ONCE (commit dc7c226b9).
  *
  * `ObjectQLPlugin` carried a private `actionObjectKey` that repeated
  * {@link standaloneActionOwnerKey}'s three rungs, and the only thing holding
@@ -73,7 +73,7 @@ describe('standalone-action owner key — one spelling in @objectstack/objectql 
         expect(plugin, 'plugin.ts is missing from the scan').toBeDefined();
         // The negative that used to live here — "plugin.ts does not name the
         // deleted member" — moved to the TREE-scoped section at the bottom of
-        // this file (#14878). Its scope was the defect, not its subject. What
+        // this file (commit 29db3cd2a). Its scope was the defect, not its subject. What
         // stays here is the positive half: the plugin still derives owner keys,
         // it just does it through the canonical helper now.
         expect(plugin!.text).toContain('standaloneActionOwnerKey(');
@@ -95,7 +95,7 @@ describe('standalone-action owner key — one spelling in @objectstack/objectql 
 });
 
 /**
- * ── [#14878] The absence assertion is TREE-scoped, not FILE-scoped ──────────
+ * ── [commit 29db3cd2a] The absence assertion is TREE-scoped, not FILE-scoped ──────────
  *
  * The negative that used to sit in the plugin test above read `plugin.ts` and
  * nothing else, and THAT SCOPE was the defect. A pin written by the deleting PR
@@ -165,7 +165,7 @@ describe('standalone-action owner key — one spelling in @objectstack/objectql 
  */
 
 /**
- * The member PR #14667 deleted from `ObjectQLPlugin`. Held as DATA: naming a
+ * The member commit dc7c226b9 deleted from `ObjectQLPlugin`. Held as DATA: naming a
  * symbol in a string cannot resurrect it, and this file is excluded from its own
  * scan precisely so it may carry the name.
  */

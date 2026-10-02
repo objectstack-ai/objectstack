@@ -57,7 +57,7 @@ describe('SchemaRegistry — namespace install gate (ADR-0048 Phase 1)', () => {
   });
 
   it('carries the ADR-0112 envelope: code NAMESPACE_CONFLICT + status 422', () => {
-    // [#14474] The assertion the instance checks above cannot make, and the
+    // [commit df657d9df] The assertion the instance checks above cannot make, and the
     // reason this defect survived: `toThrowError(NamespaceConflictError)` and
     // `toBeInstanceOf(NamespaceConflictError)` are TRUE of a class carrying no
     // `code` and no `status`, so both stayed green while `POST /api/v1/packages`
