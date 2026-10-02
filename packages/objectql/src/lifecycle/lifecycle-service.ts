@@ -3,6 +3,7 @@
 import type { Lifecycle } from '@objectstack/spec/data';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import { isMissingTableError } from '@objectstack/metadata/errors';
+import { redactPropagatedDriverFault } from '../driver-fault-redaction.js';
 import { parseLifecycleDuration } from './duration.js';
 import type {
   DanglingReferenceAuditOptions,
@@ -681,7 +682,17 @@ export class LifecycleService {
             if (driver && typeof driver.reclaimSpace === 'function') reclaimable.add(driver);
           }
         } catch (err) {
-          const msg = (err as Error)?.message ?? String(err);
+          // [#21345] A reap leg reaches drivers DIRECTLY, never through an
+          // engine door: the Archiver's hot read, cold schema sync, cold
+          // upsert of each row, hot bulk delete and cold prune, and the
+          // Rotator's shard rotation. A driver fault there never met the
+          // boundary cut the engine applies (#21274), and a cold write's
+          // fault carries the archived row's values in its statement. So the
+          // fault is cut here, by that same helper, before it is reported or
+          // logged. Faults from the engine doors this loop also uses arrive
+          // already cut, and the helper hands those back unchanged.
+          const fault = redactPropagatedDriverFault(err);
+          const msg = (fault as Error)?.message ?? String(fault);
           report.errors.push({ object: obj.name, error: msg });
           this.opts.logger.warn(`[lifecycle] sweep of ${obj.name} failed (${msg})`);
         }

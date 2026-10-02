@@ -285,6 +285,41 @@
  * `name`, `code`, `errno`, `sqlState`, Postgres' identifier fields, and the
  * database's own diagnostic. The engine's log line is unchanged: it is computed
  * from the raw error, before the boundary.
+ *
+ * ## [#21345] The raw-statement door cuts because it SENT a statement, not because one reads like it
+ *
+ * The cut above runs on `message` and `stack` only when the shared leak
+ * predicate calls the text a driver dump, and the predicate reads a bound
+ * statement by four leading verbs. Every statement the engine composes itself
+ * opens with one of them. A RAW statement handed to `ObjectQL.execute` need
+ * not: a common-table-expression form, or a dialect's own upsert or merge
+ * verb, opens with a word the predicate does not list, and when the
+ * database's diagnostic matches none of its dialect phrasings either, the
+ * message was not cut at all. Measured on better-sqlite3, live PostgreSQL 16
+ * and live MySQL 8.0 with a synthetic sentinel bound into such a statement:
+ * the driver's declared `DATABASE_ERROR` envelope composed its own message,
+ * and the sentinel survived on its `cause`'s `message` and `stack`, so every
+ * logger that renders an error's cause chain printed it. The same statement
+ * opening with a listed verb left no carrier.
+ *
+ * ⛔ The predicate's list is frozen (its header records the ruling), so the
+ * remedy is not a fifth verb. The door is the producer here: it handed the
+ * driver a statement, so it KNOWS, without reading the text, that a statement
+ * may lead every message on the fault's chain. It says so
+ * (`{ statementSent: true }`), and the cut then runs on every message on the
+ * chain as if the predicate had answered yes. Nothing else changes: the same
+ * split, the same structural cut at the separator, the same value templates
+ * and the same property rules. A statement whose leading verb is not one of
+ * the four leaves the bare marker, with no verb kept.
+ *
+ * Why the door asserts the dump rather than cutting out the text it sent:
+ * measured, the text it sent is not in the message. knex prefixes the
+ * statement COMPILED with the bound values inlined (better-sqlite3, mysql2),
+ * so removing the sent text, placeholders and all, would match nothing and
+ * leave the values standing. What the door knows by construction is that the
+ * message LEADS with a statement, and the structural cut needs nothing more.
+ * Over-redaction is the only direction this can err in: a message on that
+ * chain that carries a separator and no statement loses the text before it.
  */
 
 import { looksLikeInternalErrorLeak } from '@objectstack/types';
@@ -734,11 +769,18 @@ export function redactStatementFromMessage(message: string): string {
  * driver dump (nothing is cut). Otherwise the bound statement, or `undefined`
  * when the dump carries none, and the database's diagnostic with the values a
  * dialect inlines in it already dropped.
+ *
+ * [#21345] `statementSent` replaces the predicate's verdict with the door's
+ * own knowledge (see the module header): the message is a dump by
+ * construction, whatever word it opens with. Only the propagated face takes
+ * it; the log line's face asks the predicate as before.
  */
 function splitDriverDump(
   message: string,
+  statementSent = false,
 ): { statement: string | undefined; diagnostic: string } | undefined {
-  if (!message || !looksLikeInternalErrorLeak(message)) return undefined;
+  if (!message) return undefined;
+  if (!statementSent && !looksLikeInternalErrorLeak(message)) return undefined;
   const cut = statementCut(message);
   if (cut === -1) return { statement: undefined, diagnostic: redactDiagnosticValues(message) };
   return {
@@ -771,8 +813,8 @@ function redactedStatement(statement: string): string {
  * cut, with the statement's POSITION and kind kept rather than the marker
  * appended. Returns the input unchanged when nothing is cut.
  */
-function redactPropagatedMessage(message: string): string {
-  const dump = splitDriverDump(message);
+function redactPropagatedMessage(message: string, statementSent: boolean): string {
+  const dump = splitDriverDump(message, statementSent);
   if (dump === undefined) return message;
   if (dump.statement === undefined) return dump.diagnostic;
   const statement = redactedStatement(dump.statement);
@@ -883,18 +925,35 @@ const MAX_CAUSE_DEPTH = 4;
  *    leaves with its own fields intact and a redacted `cause`.
  *  - **Idempotent.** A propagated error that crosses a second boundary (an
  *    engine call made from inside a hook) is returned unchanged.
+ *  - **[#21345] A door that SENT a raw statement says so** with
+ *    `{ statementSent: true }`, and every message on the chain is then cut
+ *    without asking the shared leak predicate (see the module header). Only
+ *    `ObjectQL.execute` passes it: every other door reaches a driver through a
+ *    statement the driver composes, and those open with a verb the predicate
+ *    lists.
  *
  * @param error - the thrown value, of any shape.
+ * @param origin - what the calling door knows about where the fault came from.
  */
-export function redactPropagatedDriverFault(error: unknown): unknown {
-  return redactFaultAt(error, 0);
+export function redactPropagatedDriverFault(error: unknown, origin: DriverFaultOrigin = {}): unknown {
+  return redactFaultAt(error, 0, origin.statementSent === true);
 }
 
-function redactFaultAt(error: unknown, depth: number): unknown {
+/** [#21345] What the door that rethrows a driver fault knows about its origin. */
+export interface DriverFaultOrigin {
+  /**
+   * The door handed the driver a raw statement it did not compose, so a
+   * statement may lead every message on the fault's chain whatever word it
+   * opens with. The cut then runs without the shared leak predicate's verdict.
+   */
+  readonly statementSent?: boolean;
+}
+
+function redactFaultAt(error: unknown, depth: number, statementSent: boolean): unknown {
   if (!(error instanceof Error) || depth > MAX_CAUSE_DEPTH) return error;
   const replacements = new Map<PropertyKey, unknown>();
 
-  const message = redactPropagatedMessage(error.message);
+  const message = redactPropagatedMessage(error.message, statementSent);
   if (message !== error.message) {
     replacements.set('message', message);
     replacements.set('stack', redactStack(error.stack, error.name, message));
@@ -909,7 +968,7 @@ function redactFaultAt(error: unknown, depth: number): unknown {
 
   const cause = ownValue(error, 'cause');
   if (cause !== undefined) {
-    const redactedCause = redactFaultAt(cause, depth + 1);
+    const redactedCause = redactFaultAt(cause, depth + 1, statementSent);
     if (redactedCause !== cause) replacements.set('cause', redactedCause);
   }
 
