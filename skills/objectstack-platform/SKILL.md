@@ -191,8 +191,8 @@ what the platform owns.
 
 - Bundled with `create-objectstack` — no network fetch
 - One example object; `requires: ['automation', 'triggers']` plus the three
-  generic connector executors in `plugins:`; and the seven generator barrels
-  (`objects`, `views`, `actions`, `flows`, `dashboards`, `apps`, `skills`),
+  generic connector executors in `plugins:`; and the eight generator barrels
+  (`objects`, `views`, `actions`, `flows`, `dashboards`, `apps`, `skills`, `picklists`),
   each `src/*/index.ts` handed to the stack key of its name through
   `exportsOf` — the scaffolded `AGENTS.md` says how to add to them. The
   memory driver and the Hono server are NOT in the file — the CLI

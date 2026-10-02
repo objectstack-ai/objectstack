@@ -74,7 +74,7 @@ export default defineStack({
 | Custom validation-rule messages | `objects.<name>._validations.<rule>.message` |
 | App navigation | `apps.<app>.navigation.<id>.label` |
 | Dashboard label / description | `dashboards.<name>.label` / `description` |
-| Dashboard widget title / description / sub-caption | `dashboards.<name>.widgets.<widgetId>.title` / `description` / `subCaption` |
+| Dashboard widget title / description (the card-header subtitle) | `dashboards.<name>.widgets.<widgetId>.title` / `description` |
 | Dashboard global-filter label and static option labels | `dashboards.<name>.globalFilters.<filterName>.label` / `.options.<value>` — the key is the filter's `name`, or its `field` when it authors no `name`; an option is keyed by its `value` spelled as a string |
 | Analytics dataset label / description | `datasets.<name>.label` / `description` |
 | Dataset dimension and measure labels | `datasets.<name>.dimensions.<dimension>.label` / `datasets.<name>.measures.<measure>.label` |
@@ -95,13 +95,16 @@ in a zh-CN workspace for every consumer except the Console, which happened to
 re-resolve them client-side against its own copy of the bundle.
 
 <Callout type="info">
-**A widget's `subtitle` alias resolves to `subCaption`, not `description`
-(#5428 item 4, #7862).** The metric widget's sub-caption — the string under
-the number — is the authored `widget.options.description`, a *different*
-authored field from `widget.description` (the copy under the card header).
-Two authored fields get two keys (「两个作者字段两个 key」): `description`
-translates `widget.description`, `subCaption` translates
-`widget.options.description`, and neither reaches the other's field.
+**A widget has one translatable description; the metric sub-caption is
+retired (#21257).** `widget.description` renders as the card-header subtitle
+and is translated by `dashboards.<name>.widgets.<widgetId>.description`.
+The `subCaption` key, which used to overlay a caption under a metric's value
+onto `widget.options.description`, is refused at parse with its prescription,
+and the server no longer writes `options.description`. A `subtitle` entry is
+refused too, naming both readings: card-header copy belongs under
+`description`; a caption under the value has nowhere to render, so delete
+it. `os migrate meta --from 17` lists the `subCaption` entries to delete from
+existing bundles.
 </Callout>
 
 <Callout type="info">
@@ -185,7 +188,7 @@ with the same string in the item as the package shipped it:
 
 | Packaged type | Strings compared, and how each is matched |
 |:---|:---|
-| Dashboard | its `label` and `description`; each widget's `title`, `description` and sub-caption (`subCaption`), matched by widget `id`; each global filter's `label` and static option labels, matched by the filter key and the option `value` |
+| Dashboard | its `label` and `description`; each widget's `title` and `description`, matched by widget `id`; each global filter's `label` and static option labels, matched by the filter key and the option `value` |
 | View | its `label` and `description`; each bulk action's `label`, `confirmText` and `confirmLabel`, and each of its params' `label`, `help` and `placeholder`, matched by `name` |
 
 - **Only the edited strings move.** A widget the org left alone on an edited

@@ -260,7 +260,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       via_override: {
         label: "Via Admin Override",
-        help: "True when the actor was admitted to this action only by the privileged-override path (#3424) — they held no slot in the request’s pending-approver slate."
+        help: "True when the actor held no slot in the request’s pending-approver slate and was admitted to this action only by the privileged override, which lets a platform or organization admin act on any pending request so that one nobody in its slate can decide never stays stuck."
       },
       reassign_from: {
         label: "Reassigned From",
@@ -272,7 +272,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       attachments: {
         label: "Attachments",
-        help: "Files supporting this action — e.g. a signed contract or evidence (#3266)."
+        help: "Files supporting this action — e.g. a signed contract or evidence."
       },
       created_at: {
         label: "Created At"
@@ -297,7 +297,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_approval_delegation: {
     label: "Approval Delegation",
     pluralLabel: "Approval Delegations",
-    description: "Self-service out-of-office rule: route this user's approver slots to a delegate within a time window (#1322 M1).",
+    description: "Self-service out-of-office rule: route this user's approver slots to a delegate within a time window.",
     fields: {
       id: {
         label: "Delegation ID"

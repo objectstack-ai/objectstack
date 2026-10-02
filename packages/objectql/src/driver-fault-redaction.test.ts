@@ -23,7 +23,7 @@
 // the tolerant-fallback direction, not the loud one.
 
 import { describe, it, expect } from 'vitest';
-import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
+import { isUniqueViolationError, mapDataError, uniqueViolationColumn } from '@objectstack/types';
 import { ObjectQL } from './engine.js';
 import {
   VALUE_BEARING_TEMPLATES,
@@ -853,14 +853,23 @@ describe('#8682 half B — the write-path loggers', () => {
     }
   });
 
-  it('the RETHROWN error is untouched — the caller`s 400 must not move', async () => {
-    // `mapDataError` reads the driver's raw message to extract the failing
-    // field and answer `400 INVALID_FIELD`. Redacting what we THROW would break
-    // that answer; the redaction is one argument at one call site.
+  it('the caller`s 400 does not move — and since #21274 the rethrown error carries no caller value either', async () => {
+    // `mapDataError` reads the thrown message to extract the failing field and
+    // answer `400 INVALID_FIELD`. This pin used to hold that by asserting the
+    // thrown error was the driver's RAW one, statement and values included —
+    // which is the exposure #21274 closed for every in-process logger. What it
+    // protects is the ANSWER, so the answer is what it asserts now: the cut at
+    // the engine boundary keeps the diagnostic the field is read from.
     const { thrown } = await insertAgainstADriftedColumn();
 
-    expect(String(thrown?.message)).toContain('insert into');
-    expect(String(thrown?.message)).toContain(SECRET);
+    expect(String(thrown?.message)).not.toContain(SECRET);
+    expect(String(thrown?.message)).not.toContain(DESCRIPTION);
+    expect(String(thrown?.stack)).not.toContain(SECRET);
+    expect(String(thrown?.message)).toContain('has no column named secret_note');
+    expect(thrown?.code).toBe('SQLITE_ERROR');
+    const answer = mapDataError(thrown, 'crm_account');
+    expect(answer.status).toBe(400);
+    expect(answer.body).toMatchObject({ code: 'INVALID_FIELD', field: 'secret_note' });
   });
 
   /**
@@ -905,10 +914,13 @@ describe('#8682 half B — the write-path loggers', () => {
     }
   });
 
-  it('MySQL duplicate entry — the driver error reaches the caller UNTOUCHED, on `cause`', async () => {
-    // Same boundary as above: the log narrows, and what the driver said is not
-    // rewritten anywhere. `isUniqueViolationError` and `uniqueViolationColumn`
-    // read this text downstream and must keep seeing it.
+  it('MySQL duplicate entry — the driver error reaches the caller on `cause`, cut, with every verdict kept', async () => {
+    // `isUniqueViolationError` and `uniqueViolationColumn` read this error
+    // downstream and must keep answering as they did. This pin used to hold
+    // that by asserting the `cause` was the driver's error UNTOUCHED, statement
+    // and value included; #21274 cuts both where the error leaves the engine,
+    // so what is asserted now is what those readers actually read — the code,
+    // the diagnostic and the index name — and that the value is gone.
     //
     // ⚠️ [#14095] WHERE the caller finds it moved by one step, and only for a
     // recognised unique violation: the insert door now answers the
@@ -924,9 +936,10 @@ describe('#8682 half B — the write-path loggers', () => {
     expect((thrown as any)?.status).toBe(409);
 
     const cause = (thrown as any)?.cause;
-    expect(String(cause?.message)).toContain('insert into');
-    expect(String(cause?.message)).toContain(SECRET);
+    expect(String(cause?.message)).not.toContain(SECRET);
+    expect(String(cause?.message)).not.toContain(DESCRIPTION);
     expect(String(cause?.message)).toContain('Duplicate entry');
+    expect(String(cause?.message)).toContain("for key 'crm_account.secret_note'");
     expect(cause?.code).toBe('ER_DUP_ENTRY');
 
     // The verdicts the downstream consumers ask of it, asked of the envelope.

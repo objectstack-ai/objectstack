@@ -428,7 +428,9 @@ describe('sys_user self-service — the four pins, each attributed to a layer', 
     // Worth pinning next to the refusal: the two behaviours are one branch apart
     // and a change that made stripping silent-refuse (or refusal silent-strip)
     // would be invisible to either test alone.
-    const r = await route(ME, { locale: 'zh-CN', role: 'admin' });
+    // A non-whitelisted column OUTSIDE the identity object's `Admin` group: a group field in the
+    // payload is refused one layer earlier, by the field-level write gate (#21237).
+    const r = await route(ME, { locale: 'zh-CN', email: 'attacker@example.com' });
     expect(r.refusedBy).toBeNull();
     expect(r.data).toEqual({ id: ME, locale: 'zh-CN' });
   });

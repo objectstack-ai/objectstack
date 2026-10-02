@@ -329,10 +329,19 @@ export const SysOauthApplication = ObjectSchema.create({
       group: 'Credentials',
     }),
 
+    // [#21197] `internal: true` — the client secret's stored digest is
+    // withheld from every generic exit: this object's get/list doors and the
+    // compliance ledger's CRUD mirror. The one-time reveal at registration and
+    // rotation is the auth route's own response, never a generic read, so it
+    // is unaffected. ⛔ Not `Field.secret`: the provider reads this column back
+    // off the client row its storage adapter returns, to verify a presented
+    // secret (ADR-0100 §B.4) — it has a readback row in plugin-auth's
+    // `internal-field-readback.ts`.
     client_secret: Field.text({
       label: 'Client Secret',
       required: false,
       maxLength: 1024,
+      internal: true,
       // Citation, not a re-measurement: #8011 already verified by real
       // round-trip that this column stores a SHA-256 digest and never
       // receives cleartext (#8313). The description below exists so a

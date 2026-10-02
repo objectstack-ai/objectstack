@@ -918,11 +918,11 @@ function renderObjectSource(
       ? [
           `  ${REMOTE_PRIMARY_KEY_COMMENT}${primaryKeyFields.join(', ')}`,
           `  // Preserved as a COMMENT because 'ServiceObject' has no authorable key for a`,
-          `  // federated object's remote primary key (#11000): 'fields.<f>.primaryKey' is`,
+          `  // federated object's remote primary key: 'fields.<f>.primaryKey' is`,
           `  // not part of the field schema, so emitting it produced a draft that neither`,
           `  // 'tsc' nor 'ObjectSchema' accepted. Nothing below reads this line.`,
           `  // It names the column(s) THIS DRAFT WAS GIVEN as the key. For a COMPOSITE key`,
-          `  // some drivers report only the first column (#10997), so treat the list as a`,
+          `  // a driver's introspection can report only the first column, so treat the list as a`,
           `  // lower bound and check it against the remote table before relying on it.`,
         ]
       : [];

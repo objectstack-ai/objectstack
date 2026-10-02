@@ -427,22 +427,23 @@ function main() {
 // GAP 1 — SCHEDULING, NOW CLOSED. The original argument: `create-objectstack#test`
 // is reached only from ci.yml's `test` job; that job was
 // `if: ... needs.filter.outputs.core != 'false'`; and the `core` paths-filter
-// (`packages/**`, `examples/**`, `apps/!(docs)/**`, `package.json`,
-// `pnpm-lock.yaml`, `tsconfig.json`, `.github/workflows/ci.yml`) matches NO path
-// under `scripts/` — so a diff confined to this file skipped Test Core in full,
-// and with it the vitest, on precisely the PR that changes the rewriter.
+// then matched NO path under `scripts/` — so a diff confined to this file
+// skipped Test Core in full, and with it the vitest, on precisely the PR that
+// changes the rewriter.
 //
-// `core` is still false for such a diff; `core` was never widened. What changed
-// is that the `test` job now ORs in a SECOND filter output — `crosspkg:`, which
-// carries `'scripts/**'` among its entries — and skips only when BOTH say false
-// (#9829; the output was named `scripts:` until #10015 generalised it to the
-// other four roots that declare cross-package test inputs).
+// Two changes closed it, and either one alone is enough. The `test` job ORs in
+// a SECOND filter output — `crosspkg:`, which carries `'scripts/**'` among its
+// entries — and skips only when BOTH say false (#9829; the output was named
+// `scripts:` until #10015 generalised it). And `core` itself now names this
+// file: it is a declared build input of `create-objectstack#build` in
+// turbo.json, and `core:` lists every such input literally, held there by
+// check-ci-filter-parity.mjs (#21202).
 //
-// Re-measured against the merged workflow, with picomatch 2.3.1: that is the
+// Re-measured against the workflow at #21202, with picomatch 2.3.1: that is the
 // version dorny/paths-filter@v4's own lockfile resolves and ncc-bundles, NOT the
 // 4.0.5 in this tree — the two agree on these globs, but the action is what
 // runs, so it is the one to quote. For a diff confined to this file:
-// `core=false`, `crosspkg=true`, so
+// `core=true`, `crosspkg=true`, so
 // `!cancelled() && (core != 'false' || crosspkg != 'false')` is TRUE. The job
 // runs.
 //
