@@ -19,7 +19,7 @@ export { MemoryLoader } from './loaders/memory-loader.js';
 export { RemoteLoader } from './loaders/remote-loader.js';
 export { DatabaseLoader, type DatabaseLoaderOptions } from './loaders/database-loader.js';
 
-// [#14921] The ambiguous-stem refusal. Published from the ROOT entry, not only
+// [commit c1d274de7] The ambiguous-stem refusal. Published from the ROOT entry, not only
 // from `./node` beside `FilesystemLoader`: the error reaches consumers through
 // `MetadataManager.listNames()` / `list()`, which live here, and a caller that
 // wants to tell "this deployment's metadata tree names one item twice" apart
@@ -54,7 +54,7 @@ export { TypeScriptSerializer } from './serializers/typescript-serializer.js';
 
 // View container binding
 //
-// [#14399] `deriveViewContainerObject` is this package's ONE spelling of "which
+// [commit 3c1bbd2a8] `deriveViewContainerObject` is this package's ONE spelling of "which
 // object does an aggregated `defineView` container bind to" — the container's
 // own top-level `object` first, then `list.data.object`, `form.data.object`,
 // and the row's own `name` last (its own docblock carries the ruling). It is

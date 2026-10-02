@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The environment gate on the metadata HMR door (#12140).
+ * The environment gate on the metadata HMR door (commit f4e7ae5c7).
  *
  * ## What was wrong, measured rather than inferred
  *

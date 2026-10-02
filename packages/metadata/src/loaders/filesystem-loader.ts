@@ -166,7 +166,7 @@ export class FilesystemLoader implements MetadataLoader {
   }
 
   /**
-   * [#14341] The keyed half of {@link loadMany} — see {@link MetadataKeyedItem}
+   * [commit 2e471e362] The keyed half of {@link loadMany} — see {@link MetadataKeyedItem}
    * for why the store's key travels BESIDE the body instead of being folded
    * into it.
    *
@@ -178,7 +178,7 @@ export class FilesystemLoader implements MetadataLoader {
    * this same file); every other shape keeps the pre-#14205 behaviour verbatim,
    * keyed by `body.name` when it has one and dropped when it has none.
    *
-   * Why the rule stops there (PM ruling on #14341, 2026-09-02, knowingly over
+   * Why the rule stops there (PM ruling of 2026-09-02, landed as commit 2e471e362, knowingly over
    * triage's "a nested path keeps whatever `list()` reports for it today"):
    * `list()` and `findFile()` DISAGREE outside that shape. For
    * `ROOT/TYPE/crm/account.json`, `list()` reports the bare `account`, but
@@ -194,17 +194,17 @@ export class FilesystemLoader implements MetadataLoader {
    * unsettled, and is pinned as a RECORD in
    * `filesystem-loader-keyed-items.test.ts`.
    *
-   * [#14486, partial] `list()` and {@link findFile} have since converged on
+   * [commit 4b4d5a331, partial] `list()` and {@link findFile} have since converged on
    * {@link resolvableNameForPath} — the derivation this method already used —
    * so a nested or extension-less file is now neither listed nor resolvable.
    * What did NOT change is the WALK behind this method: `loadManyEntries()`
    * still READS those files, so `loadMany()` still returns their bodies and
    * this method still falls back to `body.name` for them. That half of the
-   * #14486 ruling ("nothing unlisted is returned by `loadMany()` either") is
-   * deliberately NOT taken here: it would invert the three landed #14341 pins
+   * ruling in commit 4b4d5a331 ("nothing unlisted is returned by `loadMany()` either") is
+   * deliberately NOT taken here: it would invert the three pins commit 2e471e362 landed
    * in `filesystem-loader-keyed-items.test.ts:113,167,187` and the
    * `loadMany()` CONTROL at `:196`, and that file was under a concurrent
-   * claim (PR #14627) when this landed. The remaining divergence — listed ⊂
+   * claim (squashed as commit ac8ed476f) when this landed. The remaining divergence — listed ⊂
    * loaded — is pinned as a RECORD in
    * `filesystem-loader-list-reachability.test.ts` rather than left implicit.
    *
@@ -261,7 +261,7 @@ export class FilesystemLoader implements MetadataLoader {
         path.join(typeDir, pattern)
       );
 
-      // [#14921] Matched first, read second. The two-body answer this card
+      // [commit c1d274de7] Matched first, read second. The two-body answer this card
       // names is produced HERE, not by `list()`: the walk reads both files of
       // a colliding stem and hands back both bodies while only one of them can
       // ever be addressed. The refusal therefore has to sit in front of the
@@ -351,7 +351,7 @@ export class FilesystemLoader implements MetadataLoader {
   }
 
   /**
-   * [#14486] The names this loader can be asked for, and ONLY those: a file
+   * [commit 4b4d5a331] The names this loader can be asked for, and ONLY those: a file
    * directly under `ROOT/TYPE/` carrying an extension one of this instance's
    * REGISTERED serializers claims. Every name it reports resolves back through
    * {@link findFile}, so `listNames()` and `get()` give the same answer.
@@ -365,7 +365,7 @@ export class FilesystemLoader implements MetadataLoader {
    * silent failure an author (human or AI) reads as their own typo, so they
    * retry the same word: the list and the door now agree instead.
    *
-   * Ruling (maintainer, via the director seat on #14486, 2026-09-02): narrow
+   * Ruling (maintainer, via the director seat, 2026-09-02, recorded in commit 4b4d5a331): narrow
    * the list — direction A, over B (reverse-unify: report `crm/account` and
    * teach `findFile()` path-shaped names), which would have made a slash inside
    * a metadata name every consumer's permanent obligation with no measured
@@ -392,7 +392,7 @@ export class FilesystemLoader implements MetadataLoader {
       return [];
     }
 
-    // [#14921] Derived OUTSIDE that `catch`, deliberately: the walk failing is
+    // [commit c1d274de7] Derived OUTSIDE that `catch`, deliberately: the walk failing is
     // a degradation this method has always swallowed into `[]`, while an
     // ambiguous stem is an authoring error the caller must see. Left inside,
     // this method's own diagnostic would eat the refusal and answer `[]` —
@@ -526,7 +526,7 @@ export class FilesystemLoader implements MetadataLoader {
   ];
 
   /**
-   * [#14486] The extensions a name can be resolved under, for THIS instance:
+   * [commit 4b4d5a331] The extensions a name can be resolved under, for THIS instance:
    * the ones belonging to the serializer set it was constructed with. Shared by
    * {@link findFile}, {@link resolvableNameForPath} and therefore {@link list},
    * so the set a name can be RESOLVED under cannot drift from the set that is
@@ -591,7 +591,7 @@ export class FilesystemLoader implements MetadataLoader {
   }
 
   /**
-   * [#14921] The names this loader reports for `files` — and the ONE place an
+   * [commit c1d274de7] The names this loader reports for `files` — and the ONE place an
    * ambiguous stem is refused.
    *
    * Shared by {@link list} and {@link loadManyEntries} so the two can never

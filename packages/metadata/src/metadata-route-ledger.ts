@@ -22,7 +22,7 @@
  * filing: two routes, one registrar module, one wire path served by both verbs.
  *
  * BOTH ROWS ARE NOW CONDITIONAL, and the condition is part of each row's
- * disposition rather than a footnote to it (#12140). `registerMetadataHmrRoutes`
+ * disposition rather than a footnote to it (commit f4e7ae5c7). `registerMetadataHmrRoutes`
  * refuses to mount anything unless the process runs an explicit
  * `NODE_ENV=development` posture, so on every production-shaped boot this
  * package's mounted-route census is EMPTY. A census that describes what is
