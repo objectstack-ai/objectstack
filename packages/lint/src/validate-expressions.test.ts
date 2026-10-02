@@ -158,7 +158,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       }],
     });
     expect(issues).toHaveLength(1);
-    expect(issues[0].message).toMatch(/#4343/);
+    expect(issues[0].message).toMatch(/made `script` a call to a registered function and nothing else/);
     expect(issues[0].message).toMatch(/config\.actionType/);
     expect(issues[0].message).toMatch(/config\.template/);
     expect(issues[0].message).toMatch(/`notify` node/);
@@ -1849,7 +1849,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         // read receiver in #5017's scan, and it went red on the first run.
         expect(m).toMatch(/`sectionFields` copies this object rule/);
         expect(m).not.toMatch(/sectionFields\.ts/);
-        expect(m).toMatch(/objectui#6010/);
+        expect(m).toMatch(/the `current_user` binding ADR-0089 D1 gives every runtime record surface/);
         // …and the consequence is stated as the gap, not as a fail-open
         expect(m).toMatch(/SILENT enforcement gap/);
         expect(m).toMatch(/every other reader still returns it/);
@@ -1868,7 +1868,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       it('`readonlyWhen` — says LOCKED, and never says the field stays visible', () => {
         const m = messageFor('readonlyWhen');
         expect(m).toMatch(/LOCKED/);
-        expect(m).toMatch(/#4889/);
+        expect(m).toMatch(/will not waive a declared lock it could not evaluate/);
         // The defect this card was filed for. The server treats the field as
         // locked and drops the write; telling the author it is "showing for
         // everyone" inverts both the urgency and the troubleshooting direction.

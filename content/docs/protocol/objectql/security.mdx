@@ -477,12 +477,24 @@ publicSharing:
 ```
 
 **Who may mint and revoke** (ADR-0111 D8). Minting a link requires the object's
-`publicSharing` opt-in **and** that the caller can see the record — an opted-in
-object deliberately delegates re-share power to anyone who can view the row.
+`publicSharing` opt-in **and** authority over the record: the caller can see it,
+**or** owns it, **or** holds `modifyAllRecords` on the object. An opted-in object
+deliberately delegates re-share power to anyone who can view the row; the owner
+and the Modify-All holder may mint even where the data door refuses them, as on
+an object declared `access: { default: 'private' }`, which no wildcard grant
+covers — so a member can share a record of their own there. A hierarchy manager
+whose write depth covers the owner is **not** admitted without visibility: a
+link creates access, so they need to see the record to mint one. Under the
+`group` and `isolated` tenancy postures the owner and Modify-All alternatives
+are withheld and visibility alone admits, so no mint crosses the organization
+wall. Nor do they apply past a capability the object requires
+(`requiredPermissions`): a caller who lacks it is refused even on a record they
+own. The opt-in is checked first and `eligibility` (below) last.
 Revoking a link is allowed for the link's **creator**, a **record share-manager**
-(the record's owner or a `modifyAllRecords` admin — the same authority as
-`canManageShares`), or system context: a link someone else minted on your record
-is your record's exposure to kill, not only its creator's.
+(the record's owner, a `modifyAllRecords` admin, or a hierarchy manager whose
+write depth covers the owner — the same authority as `canManageShares`), or
+system context: a link someone else minted on your record is your record's
+exposure to kill, not only its creator's.
 
 **When `eligibility` is enforced** (#13608). The optional `eligibility` CEL
 predicate is a **standing policy about which records may be reached

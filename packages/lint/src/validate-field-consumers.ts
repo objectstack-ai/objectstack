@@ -37,8 +37,9 @@
  *
  *   - **behaviour** — the field makes something happen: a formula or roll-up,
  *     a validation predicate, a view FILTER / sort / grouping, a flow node, a
- *     hook or action body, a dataset dimension or measure, a widget filter, a
- *     sharing-rule condition.
+ *     hook or action body, a dataset or cube dimension or measure (every
+ *     field its column path reads — {@link creditAnalyticsColumns}), a widget
+ *     filter, a sharing-rule condition.
  *   - **display** — the field is drawn: a view column, a form section, a page
  *     binding, an inline grid column ({@link creditInlineGridColumns}),
  *     `highlightFields`, `searchableFields`, an index.
@@ -116,6 +117,26 @@
  * (no site of any kind). One id, one fix sentence — an author acts the same
  * way on both, and a split would invite reading `carrier-only` as fine.
  *
+ * ## An analytics member's column path reads every field on it
+ *
+ * [#21439] A dataset dimension's or measure's `field` and a cube dimension's or
+ * measure's `sql` name a COLUMN, and a column path names more than one field:
+ * `account.region.code` reads the `account` lookup on the base object, the
+ * `region` lookup on the object it reaches, and `code` on the object the last
+ * hop reaches — the field-level read gate in `service-analytics`
+ * (`fieldsOfColumnSql`) names exactly those. A text scan sees one dotted
+ * token and credits none of them — and on a cube not even a bare column, since
+ * a cube names its object in its own `sql`, which {@link contextOf} does not
+ * read as an object context. So {@link creditAnalyticsColumns} owns these four
+ * slots, bare names included, and the general walk skips them. Each hop is
+ * resolved the way the analytics door resolves it, by the resolvers this
+ * package already shares: a cube's by `resolveCubeColumn` (its declared join
+ * for the hop, else the lookup's `reference`), a dataset's by
+ * `resolveFieldPath` (the `reference` its compiler joins through). A path the
+ * door reads credits every field on it; a path the door refuses is a carrier
+ * for each field it names, and one the graph cannot judge credits the fields
+ * it can resolve — {@link creditColumnPath} says which is which.
+ *
  * ## Advisory, deliberately — and the boundaries, stated
  *
  * A consumer can legitimately live outside this stack: an API client, a hook
@@ -161,8 +182,16 @@ import {
 import type { DisplayNameObjectMeta } from '@objectstack/spec/data';
 import { referenceTargetOf } from '@objectstack/spec/data';
 import { collectionEntries } from './collection-entries.js';
-import { recordsOf } from './object-graph.js';
+import {
+  indexObjectGraph,
+  isUnjudgeable,
+  joinablePrefixes,
+  recordsOf,
+  resolveFieldPath,
+  type FieldPathVerdict,
+} from './object-graph.js';
 import { injectedColumnsFor } from './system-fields.js';
+import { resolveCubeColumn } from './validate-dataset-measure-aggregates.js';
 
 export const FIELD_NO_CONSUMERS = 'field-no-consumers';
 
@@ -472,6 +501,12 @@ class ConsumerLedger {
   readonly fieldMapByObject = new Map<string, Record<string, AnyRec>>();
   /** `object.field` → sites */
   readonly sites = new Map<string, Site[]>();
+  /**
+   * [#21439] Config paths of the analytics column slots
+   * {@link creditAnalyticsColumns} read. The general walk skips them: one
+   * account of a slot, the one that resolves its path.
+   */
+  readonly analyticsColumns = new Set<string>();
   /** Tokens that looked like a field but resolved to no object — counted, never dropped. */
   unresolved = 0;
   private mentionRe: RegExp | undefined;
@@ -852,6 +887,8 @@ function walk(
     return;
   }
   if (typeof node === 'string') {
+    // [#21439] An analytics column slot was read whole, path and all.
+    if (ledger.analyticsColumns.has(path)) return;
     scanText(ledger, node, ctx, root, path, segments, leafKey);
     return;
   }
@@ -1061,6 +1098,128 @@ function creditFieldGroupLayout(
   }
 }
 
+/**
+ * [#21439] The two analytics member kinds, on a dataset and on a cube alike.
+ * Each names its column in one slot: a dataset member's `field`, a cube
+ * member's `sql` — the same value at two depths, since the dataset compiler
+ * copies `field` into the `sql` of the cube member it compiles to.
+ */
+const ANALYTICS_MEMBER_KINDS = ['dimensions', 'measures'] as const;
+
+/** The row wildcard a `count` measure aggregates: it reads no field value. */
+const ROW_WILDCARD = '*';
+
+/**
+ * [#21439] Credit every field one analytics column path reads.
+ *
+ * The fields a path reads are the ones the analytics door's field-level read
+ * gate names for it (`fieldsOfColumnSql`, `service-analytics`): each hop's
+ * relationship field on the object before it, and the column on the object
+ * the last hop reaches. Each is the LEAF of one prefix of the path, so
+ * `resolve` — the door's own resolution, see {@link creditAnalyticsColumns} —
+ * is asked about every prefix: `account`, `account.region`,
+ * `account.region.code`. No hop is walked here.
+ *
+ * How the fields are recorded depends on whether the door reads the path:
+ *
+ *   - **Read** — every prefix resolves, and on a dataset the relationship
+ *     prefix is declared in `include`: each field is a consumer, bucketed as
+ *     any dimension or measure is.
+ *   - **Refused** — a prefix resolves to nothing the graph declares (a hop
+ *     that names no field or a field that is not a relationship, a column
+ *     that does not exist), or the dataset's `include` does not declare the
+ *     join (`compileDataset` refuses the dataset, `dataset-field-not-included`
+ *     reports it). The door reads nothing, so each field the path does name
+ *     is a carrier a removal must clean — the rule's word for a site that
+ *     names a field and reads it nowhere, as an `inlineColumns` entry with no
+ *     `inlineEdit` is — and none is credited as read.
+ *   - **Not judgeable** — the graph cannot answer for some prefix (an object
+ *     this stack does not define, a hop through an injected column, a
+ *     relationship with no target), and none is refused. The fields it does
+ *     resolve are credited as read: the door joins through them before it
+ *     reaches the part the graph cannot see, and "cannot answer" is never
+ *     evidence that nothing reads them.
+ *
+ * Only fields this stack declares are recorded; an injected column it does
+ * not declare is no declaration to judge.
+ */
+function creditColumnPath(
+  ledger: ConsumerLedger,
+  column: string,
+  resolve: (prefix: string) => FieldPathVerdict | undefined,
+  joinDeclared: boolean,
+  root: string,
+  path: string,
+  segments: readonly string[],
+  leafKey: string,
+): void {
+  ledger.analyticsColumns.add(path);
+  if (column === ROW_WILDCARD) return;
+  const hops = column.split('.');
+  const named: { object: string; field: string }[] = [];
+  let refused = !joinDeclared;
+  for (let i = 1; i <= hops.length; i++) {
+    const verdict = resolve(hops.slice(0, i).join('.'));
+    if (verdict?.kind === 'ok') named.push({ object: verdict.object, field: verdict.field });
+    else if (!isUnjudgeable(verdict)) refused = true;
+  }
+  const kind: SiteKind = refused ? 'carrier' : bucketFor(root, segments, leafKey);
+  for (const { object, field } of named) {
+    if (ledger.declares(object, field)) ledger.record(object, field, { root, path, kind });
+  }
+}
+
+/**
+ * [#21439] Credit every field the analytics members of this stack read
+ * through their column slots — a dataset dimension's and measure's `field`, a
+ * cube dimension's and measure's `sql` — bare names and relationship paths
+ * alike, through {@link creditColumnPath}. Each door is read the way it reads
+ * the path, with the resolver `validate-dataset-measure-aggregates.ts` already
+ * judges the same slots with:
+ *
+ *   - a **dataset** joins only what its `include` declares (ADR-0021 D-C,
+ *     prefixes included — {@link joinablePrefixes}), and its compiler reaches
+ *     each hop through the relationship's `reference`: `resolveFieldPath` on
+ *     the dataset's `object`;
+ *   - a **cube** joins every hop of a member's path, through the join it
+ *     declares for that hop, else the relationship's `reference`:
+ *     `resolveCubeColumn` on the object its `sql` names.
+ *
+ * A dataset or cube whose base object this stack does not define with a field
+ * map is skipped, as that rule skips it, and its slots stay with the general
+ * walk.
+ */
+function creditAnalyticsColumns(ledger: ConsumerLedger, stack: AnyRec): void {
+  const graph = indexObjectGraph(stack);
+  for (const { rec: ds, path: dsPath } of collectionEntries(stack.datasets, 'datasets')) {
+    const object = strName(ds.object);
+    if (!object || !graph.get(object)) continue;
+    const joinable = joinablePrefixes(ds.include);
+    for (const kind of ANALYTICS_MEMBER_KINDS) {
+      for (const { rec: member, path } of collectionEntries(ds[kind], `${dsPath}.${kind}`)) {
+        const column = strName(member.field);
+        if (column === undefined) continue;
+        const cut = column.lastIndexOf('.');
+        const joinDeclared = cut < 0 || joinable.has(column.slice(0, cut));
+        const resolve = (prefix: string) => resolveFieldPath(graph, object, prefix);
+        creditColumnPath(ledger, column, resolve, joinDeclared, 'datasets', `${path}.field`, [kind, 'field'], 'field');
+      }
+    }
+  }
+  for (const { rec: cube, path: cubePath } of collectionEntries(stack.analyticsCubes, 'analyticsCubes')) {
+    const object = typeof cube.sql === 'string' ? cube.sql.trim() : '';
+    if (!object || !graph.get(object)) continue;
+    for (const kind of ANALYTICS_MEMBER_KINDS) {
+      for (const { rec: member, path } of collectionEntries(cube[kind], `${cubePath}.${kind}`)) {
+        const column = strName(member.sql);
+        if (column === undefined) continue;
+        const resolve = (prefix: string) => resolveCubeColumn(graph, cube, object, prefix);
+        creditColumnPath(ledger, column, resolve, true, 'analyticsCubes', `${path}.sql`, [kind, 'sql'], 'sql');
+      }
+    }
+  }
+}
+
 function listPaths(paths: readonly string[]): string {
   return paths.join(', ');
 }
@@ -1107,6 +1266,9 @@ export function validateFieldConsumers(stack: AnyRec): FieldConsumerFinding[] {
     if (name && object) ledger.datasetObject.set(name, object);
   }
 
+  // [#21439] Before the general walk, which skips the slots this reads.
+  creditAnalyticsColumns(ledger, stack);
+
   for (const { rec: obj, path: objPath } of objectEntries) {
     const objectName = strName(obj.name);
     if (!objectName || !ledger.fieldsByObject.has(objectName)) continue;
@@ -1146,12 +1308,14 @@ export function validateFieldConsumers(stack: AnyRec): FieldConsumerFinding[] {
       path,
       message:
         `field "${field}" on object "${object}" is declared but nothing in this stack reads or displays ` +
-        `it: no view column, inline grid column, form section, page binding, flow node, dataset, widget, ` +
-        `formula, validation, hook or action names it, no declared field group places it on the ` +
+        `it: no view column, inline grid column, form section, page binding, flow node, dataset or cube ` +
+        `member, widget, formula, validation, hook or action names it, no declared field group places it on the ` +
         `synthesized layout, and no ` +
         `seed or import mapping matches on it. A translation label, a seed value, an import-mapping ` +
-        `target, a permission grant, a flow that only WRITES it, or an \`inlineColumns\` entry on a ` +
-        `relationship field that does not set \`inlineEdit\` (no grid is drawn) is a carrier, not a consumer. ` +
+        `target, a permission grant, a flow that only WRITES it, an \`inlineColumns\` entry on a ` +
+        `relationship field that does not set \`inlineEdit\` (no grid is drawn), or a dataset or cube ` +
+        `member path the analytics door refuses (a hop or column that does not resolve, or a join the ` +
+        `dataset's \`include\` does not declare) is a carrier, not a consumer. ` +
         `${verdictClause}${sharedClause}`,
       hint:
         `Give "${field}" a consumer — a view column, a form section, a page binding, a formula, a ` +

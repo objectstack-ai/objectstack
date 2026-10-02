@@ -308,7 +308,7 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
                 `(it falls back to the field's defaultValue) — while the create_record step still reports ` +
                 `success, with only a run-time warning naming the dropped field.`
               : `writes field '${fieldName}', which object '${objectName}' declares readonly:true. Under ` +
-                `runAs:'${runAs}' the engine silently strips readonly fields from the UPDATE payload (#2948), ` +
+                `runAs:'${runAs}' the engine silently strips readonly fields from the UPDATE payload, ` +
                 `so this write never lands — while the step still reports success.`,
             hint: isCreate
               ? `Seeding a readonly column at create time is a SYSTEM act: declare the flow runAs:'system' ` +
@@ -333,8 +333,9 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
             path: `${nodePath}.config.fields.${fieldName}`,
             message:
               `writes field '${fieldName}', which object '${objectName}' declares readonlyWhen. On records ` +
-              `where that predicate is TRUE, a runAs:'${runAs}' UPDATE strips the field (#3042), so this ` +
-              `write may silently not land depending on the record's state.`,
+              `where that predicate is TRUE, a runAs:'${runAs}' UPDATE strips the field (a bulk update strips ` +
+              `it from every matched row once any one of them is locked), so this write may silently not ` +
+              `land depending on the record's state.`,
             hint:
               `Elevation is not a workaround here: unlike the static readonly strip, the conditional lock ` +
               `is NOT waived by a system context, so runAs:'system' strips this field on a locked record ` +

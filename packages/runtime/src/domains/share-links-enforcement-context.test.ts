@@ -54,7 +54,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { SHARE_LINK_SERVICE } from '@objectstack/spec/contracts';
 import type { IHttpRequest, IHttpResponse, IHttpServer, RouteHandler } from '@objectstack/spec/contracts';
 import { PermissionDeniedError, SecurityPlugin } from '@objectstack/plugin-security';
-import { ShareLinkService, registerShareLinkRoutes } from '@objectstack/plugin-sharing';
+import { ShareLinkService, SharingServicePlugin, registerShareLinkRoutes } from '@objectstack/plugin-sharing';
 import { ApiErrorSchema, BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { apiErrorResponse } from '../error-envelope.js';
@@ -989,6 +989,7 @@ async function mintOnPluginDoor(
     engine: any,
     svc: ShareLinkService,
     envelope: ExecutionContext,
+    body: { object: string; recordId: string } = { object: OBJECT, recordId: RECORD },
 ): Promise<{ status: number; body: any }> {
     const http = new RouteRecorder();
     registerShareLinkRoutes(http, svc, engine, { contextFromRequest: () => envelope });
@@ -1004,7 +1005,7 @@ async function mintOnPluginDoor(
     const req: IHttpRequest = {
         params: {},
         query: {},
-        body: { object: OBJECT, recordId: RECORD },
+        body,
         headers: {},
         method: 'POST',
         path: '/api/v1/share-links',
@@ -1045,4 +1046,368 @@ describe('[#21405] the plugin route door answers the same refusal with the same 
             expect(tables.sys_share_link).toEqual([]);
         }, 30_000);
     }
+});
+
+/**
+ * [#21329 — ADR-0111 D8 rule 1, ruling 5950188467 (A′)] Who may mint a link on
+ * an OWNER-PRIVATE object, read at BOTH doors.
+ *
+ * ## The object
+ *
+ * An analogue of the conversation object the card measured: `access.default:
+ * 'private'` (ADR-0066 D2), so the member baseline's `'*'` wildcard grant does
+ * not cover it and no member reads it through the data door; an `owner_id` the
+ * owner holds; and the `publicSharing` opt-in. On it the visibility read
+ * `createLink` runs refuses the OWNER too — the CRUD gate throws before any
+ * row is looked at — so on the visibility rule alone the owner could never
+ * share their own record.
+ *
+ * ## The ruled matrix
+ *
+ * "the owner mints on an owner-private object; a hierarchy manager without
+ * visibility is refused; a non-owner member is refused; Modify-All mints" —
+ * plus the anonymous resolve of the owner's link, which is what the mint is
+ * for. Each refusal is read as the pair (`status`, `code`) and against the
+ * STORE: a refused mint writes no row.
+ *
+ * ## The capability hard stop
+ *
+ * A second object is gated on a capability too (`requiredPermissions`,
+ * ADR-0066 D3). An owner who lacks it is refused there: neither alternative
+ * applies past that gate. The control is an owner who holds the capability and
+ * is refused only by the CRUD grant, and mints.
+ *
+ * ## What is real here
+ *
+ * Both doors' production entries — the dispatcher domain body and the plugin's
+ * `registerShareLinkRoutes` (via `mintOnPluginDoor` above) — over ONE link
+ * service; the whole `SecurityPlugin` (its CRUD gate, its `hasWriteBypass` and
+ * `resolveWriteScope` probes, booted over the same engine double); and the
+ * whole `SharingServicePlugin`, booted with `registerShareLinkRoutes: false`,
+ * the per-environment configuration for which the dispatcher domain is the
+ * only share-link surface. The plugin composes the link service itself, so the
+ * authority each case reaches is the production wiring, not a hand-assembled
+ * copy of it. DOUBLES: storage (`makeEngine` above) and the enterprise
+ * hierarchy resolver, which this open edition does not ship.
+ */
+describe('[#21329] mint authority on an owner-private object, at both doors (ruling A′)', () => {
+    const CONV = 'ai_conversations';
+    const CONV_ID = 'conv_1';
+    const OWNER = 'u_owner';
+    const STRANGER = 'u_stranger';
+    const ADMIN = 'u_admin';
+    const MANAGER = 'u_manager';
+    /** Owns a record on the capability-gated object AND holds its capability. */
+    const CAPABLE_OWNER = 'u_capable_owner';
+    /** Owner-private AND capability-gated (ADR-0066 D3): a read needs `view_vault`. */
+    const VAULT = 'vault_notes';
+
+    const CONVERSATION_SCHEMA = {
+        name: CONV,
+        access: { default: 'private' },
+        fields: {
+            id: { name: 'id' },
+            title: { name: 'title' },
+            owner_id: { name: 'owner_id' },
+        },
+        publicSharing: { enabled: true, allowedAudiences: ['link_only'], allowedPermissions: ['view'] },
+    };
+
+    /** The member baseline: a `'*'` wildcard grant, the shape `member_default` has. */
+    const MEMBER_BASELINE: PermissionSet = PermissionSetSchema.parse({
+        name: 'conv_member_baseline',
+        label: 'Member baseline (wildcard grant)',
+        objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+    });
+
+    /** Modify All on the wildcard, which a private object honours (the super-user bits). */
+    const MODIFY_ALL: PermissionSet = PermissionSetSchema.parse({
+        name: 'conv_modify_all',
+        label: 'Modify All',
+        objects: {
+            '*': {
+                allowRead: true,
+                allowCreate: true,
+                allowEdit: true,
+                allowDelete: true,
+                viewAllRecords: true,
+                modifyAllRecords: true,
+            },
+        },
+    });
+
+    /**
+     * A hierarchy manager: WRITE depth `unit` on the object and no read grant —
+     * a principal `canManageShares` admits (ADR-0111 D1 DEPTH) on a record the
+     * data door will not let them read.
+     */
+    const UNIT_WRITER: PermissionSet = PermissionSetSchema.parse({
+        name: 'conv_unit_writer',
+        label: 'Unit-depth writer, no read',
+        objects: { [CONV]: { allowEdit: true, writeScope: 'unit' } },
+    });
+
+    /** The object a capability gates, on top of being owner-private. */
+    const VAULT_SCHEMA = {
+        name: VAULT,
+        access: { default: 'private' },
+        requiredPermissions: ['view_vault'],
+        fields: {
+            id: { name: 'id' },
+            title: { name: 'title' },
+            owner_id: { name: 'owner_id' },
+        },
+        publicSharing: { enabled: true, allowedAudiences: ['link_only'], allowedPermissions: ['view'] },
+    };
+
+    /** The capability, and nothing else: no object grant rides with it. */
+    const VAULT_CAPABLE: PermissionSet = PermissionSetSchema.parse({
+        name: 'conv_vault_capable',
+        label: 'Holds view_vault',
+        objects: {},
+        systemPermissions: ['view_vault'],
+    });
+
+    const SETS = [MEMBER_BASELINE, MODIFY_ALL, UNIT_WRITER, VAULT_CAPABLE];
+
+    /** The envelope `resolveExecutionContext` assembles for a human member of org A. */
+    const principal = (userId: string, permissions: string[]): ExecutionContext =>
+        ({
+            userId,
+            tenantId: ORG_A,
+            email: `${userId}@example.com`,
+            isSystem: false,
+            principalKind: 'human',
+            posture: 'MEMBER',
+            positions: [],
+            permissions,
+            systemPermissions: [],
+            org_user_ids: [userId],
+            accessible_org_ids: [ORG_A],
+        }) as unknown as ExecutionContext;
+
+    const owner = () => principal(OWNER, ['conv_member_baseline']);
+    const stranger = () => principal(STRANGER, ['conv_member_baseline']);
+    const admin = () => principal(ADMIN, ['conv_member_baseline', 'conv_modify_all']);
+    const manager = () => principal(MANAGER, ['conv_member_baseline', 'conv_unit_writer']);
+    const capableOwner = () => principal(CAPABLE_OWNER, ['conv_member_baseline', 'conv_vault_capable']);
+
+    interface World {
+        tables: Record<string, any[]>;
+        sharing: any;
+        mint(as: ExecutionContext): Promise<{ status: number; body: any }>;
+        /** The same mint through the plugin's route door. */
+        mintOnPlugin(as: ExecutionContext): Promise<{ status: number; body: any }>;
+        /** The same mint on the capability-gated object, at each door. */
+        mintVault(recordId: string, as: ExecutionContext): Promise<{ status: number; body: any }>;
+        mintVaultOnPlugin(recordId: string, as: ExecutionContext): Promise<{ status: number; body: any }>;
+        /** A data-door read of a vault record under `as`. */
+        readVault(recordId: string, as: ExecutionContext): Promise<unknown>;
+        resolve(token: string): Promise<{ status: number; body: any }>;
+        revoke(idOrToken: string, as: ExecutionContext): Promise<{ status: number; body: any }>;
+        /** A data-door read of the record under `as` — the visibility leg itself. */
+        read(as: ExecutionContext): Promise<unknown>;
+        resolveWriteScopeCalls(): number;
+    }
+
+    async function bootWorld(): Promise<World> {
+        const tables: Record<string, any[]> = {
+            [CONV]: [{ id: CONV_ID, title: 'My chat', owner_id: OWNER, organization_id: ORG_A }],
+            [VAULT]: [
+                { id: 'vault_owner', title: 'Owner\'s note', owner_id: OWNER, organization_id: ORG_A },
+                { id: 'vault_capable', title: 'Capable owner\'s note', owner_id: CAPABLE_OWNER, organization_id: ORG_A },
+            ],
+            sys_share_link: [],
+            sys_permission_set: [],
+        };
+        const engine = makeEngine(tables, { [CONV]: CONVERSATION_SCHEMA, [VAULT]: VAULT_SCHEMA });
+        const services: Record<string, any> = {
+            manifest: { register: vi.fn() },
+            objectql: engine,
+            metadata: { get: async () => null, list: async () => SETS },
+            // Cloud's topology: one database per environment, no organization wall.
+            tenancy: { posture: 'single' },
+            // The enterprise seam, doubled: the manager's `unit` covers the owner.
+            'hierarchy-scope-resolver': {
+                resolveOwnerIds: async (c: any, scope: string) =>
+                    c?.userId === MANAGER && scope === 'unit' ? [MANAGER, OWNER] : [String(c?.userId)],
+            },
+        };
+        const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+        const getService = (name: string) => {
+            if (name in services) return services[name];
+            throw new Error(`service not registered: ${name}`);
+        };
+        const registerService = (name: string, service: unknown) => { services[name] = service; };
+
+        const securityCtx: any = { logger, hook: vi.fn(), registerService, getService };
+        const security = new SecurityPlugin({
+            defaultPermissionSets: SETS,
+            fallbackPermissionSet: 'conv_member_baseline',
+        });
+        await security.init(securityCtx);
+        await security.start(securityCtx);
+
+        // Count the DEPTH probe, so a mint that consults it is visible.
+        let writeScopeCalls = 0;
+        const realResolveWriteScope = services.security.resolveWriteScope.bind(services.security);
+        services.security.resolveWriteScope = (...args: unknown[]) => {
+            writeScopeCalls += 1;
+            return realResolveWriteScope(...args);
+        };
+
+        const hooks: Record<string, Array<() => Promise<void> | void>> = {};
+        const sharingCtx: any = {
+            logger,
+            hook: (event: string, handler: () => Promise<void> | void) => { (hooks[event] ??= []).push(handler); },
+            registerService,
+            getService,
+        };
+        const plugin = new SharingServicePlugin({ enforce: false, registerShareLinkRoutes: false });
+        await plugin.init(sharingCtx);
+        await plugin.start(sharingCtx);
+        for (const handler of hooks['kernel:ready'] ?? []) await handler();
+
+        const svc = services[SHARE_LINK_SERVICE];
+        if (!svc) throw new Error('the sharing plugin registered no share-link service');
+        const deps = makeDeps(engine, svc);
+        const drive = async (
+            subPath: string,
+            method: string,
+            body: unknown,
+            as: ExecutionContext | undefined,
+        ): Promise<{ status: number; body: any }> => {
+            const res = await handleShareLinksRequest(deps, subPath, method, body, {}, httpContext(as));
+            if (!res.handled || !res.response) throw new Error(`${method} /share-links${subPath} was not handled`);
+            return res.response as { status: number; body: any };
+        };
+
+        return {
+            tables,
+            sharing: services.sharing,
+            mint: (as) => drive('', 'POST', { object: CONV, recordId: CONV_ID }, as),
+            mintOnPlugin: (as) => mintOnPluginDoor(engine, svc, as, { object: CONV, recordId: CONV_ID }),
+            mintVault: (recordId, as) => drive('', 'POST', { object: VAULT, recordId }, as),
+            mintVaultOnPlugin: (recordId, as) => mintOnPluginDoor(engine, svc, as, { object: VAULT, recordId }),
+            readVault: async (recordId, as) => engine.find(VAULT, { where: { id: recordId }, limit: 1, context: as }),
+            resolve: (token) => drive(`/${token}/resolve`, 'GET', undefined, undefined),
+            revoke: (idOrToken, as) => drive(`/${idOrToken}`, 'DELETE', undefined, as),
+            read: async (as) => engine.find(CONV, { where: { id: CONV_ID }, limit: 1, context: as }),
+            resolveWriteScopeCalls: () => writeScopeCalls,
+        };
+    }
+
+    it('[persona] the object is owner-private: the owner\'s own data-door read is refused at the CRUD gate', async () => {
+        const w = await bootWorld();
+        // The visibility leg is CLOSED for the owner — without this, a 201 below
+        // would prove nothing about the owner branch.
+        await expect(w.read(owner())).rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+        await expect(w.read(stranger())).rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+        await expect(w.read(manager())).rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+        // The Modify-All holder reads it: the super-user bits are honoured on a private object.
+        expect(await w.read(admin())).toHaveLength(1);
+    }, 30_000);
+
+    it('[owner] the owner mints a link on their own record at both doors, and an anonymous holder resolves it', async () => {
+        const w = await bootWorld();
+        const res = await w.mint(owner());
+        const plugin = await w.mintOnPlugin(owner());
+
+        expect(res.status, JSON.stringify(res.body)).toBe(201);
+        expect(res.body.data).toMatchObject({ object_name: CONV, record_id: CONV_ID, created_by: OWNER });
+        expect(plugin.status, JSON.stringify(plugin.body)).toBe(201);
+        expect(plugin.body.data).toMatchObject({ object_name: CONV, record_id: CONV_ID, created_by: OWNER });
+        expect(w.tables.sys_share_link.map((r) => r.created_by)).toEqual([OWNER, OWNER]);
+
+        const resolved = await w.resolve(String(res.body.data.token));
+        expect(resolved.status, JSON.stringify(resolved.body)).toBe(200);
+        expect(resolved.body.data.record).toMatchObject({ id: CONV_ID, title: 'My chat' });
+    }, 30_000);
+
+    it('[stranger] a non-owner member is refused with the visibility read\'s own refusal at both doors, and nothing lands', async () => {
+        const w = await bootWorld();
+        const res = await w.mint(stranger());
+        const plugin = await w.mintOnPlugin(stranger());
+
+        expect(res.status).toBe(403);
+        expect(expectDeclaredEnvelope(res).code).toBe('PERMISSION_DENIED');
+        expect(plugin.status, JSON.stringify(plugin.body)).toBe(403);
+        expect(plugin.body).toMatchObject({ success: false, error: { code: 'PERMISSION_DENIED' } });
+        expect(w.tables.sys_share_link).toEqual([]);
+    }, 30_000);
+
+    it('[modify-all] a Modify-All holder mints at both doors', async () => {
+        const w = await bootWorld();
+        const res = await w.mint(admin());
+        const plugin = await w.mintOnPlugin(admin());
+
+        expect(res.status, JSON.stringify(res.body)).toBe(201);
+        expect(res.body.data).toMatchObject({ object_name: CONV, record_id: CONV_ID, created_by: ADMIN });
+        expect(plugin.status, JSON.stringify(plugin.body)).toBe(201);
+        expect(w.tables.sys_share_link.map((r) => r.created_by)).toEqual([ADMIN, ADMIN]);
+    }, 30_000);
+
+    it('[manager] a hierarchy manager without visibility is refused, though they ARE a share-manager of the record', async () => {
+        const w = await bootWorld();
+
+        // The control: this principal holds ADR-0111 D1 DEPTH authority over the
+        // record. Without it the refusal below could be "not a manager at all".
+        expect(await w.sharing.canManageShares(CONV, CONV_ID, manager())).toBe(true);
+        const callsBefore = w.resolveWriteScopeCalls();
+
+        const res = await w.mint(manager());
+        const plugin = await w.mintOnPlugin(manager());
+        expect(res.status).toBe(403);
+        expect(expectDeclaredEnvelope(res).code).toBe('PERMISSION_DENIED');
+        expect(plugin.status, JSON.stringify(plugin.body)).toBe(403);
+        expect(plugin.body).toMatchObject({ success: false, error: { code: 'PERMISSION_DENIED' } });
+        expect(w.tables.sys_share_link).toEqual([]);
+        // The DEPTH branch is not part of mint authority at all: minting never
+        // asked for the caller's write scope.
+        expect(w.resolveWriteScopeCalls(), 'the mint consulted the hierarchy-depth probe').toBe(callsBefore);
+
+        // ...while their revoke authority over the record (D8 rule 2) stands.
+        const minted = await w.mint(owner());
+        expect(minted.status, JSON.stringify(minted.body)).toBe(201);
+        const revoked = await w.revoke(String(minted.body.data.id), manager());
+        expect(revoked.status, JSON.stringify(revoked.body)).toBe(200);
+        expect(w.tables.sys_share_link[0]?.revoked_at).toBeTruthy();
+    }, 30_000);
+    it('[capability persona] the vault refuses the owner at the CAPABILITY gate, and the capable owner only at the CRUD grant', async () => {
+        const w = await bootWorld();
+        const ownerRead = await w.readVault('vault_owner', owner()).then(() => null, (e) => e);
+        expect(ownerRead).toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+        expect(ownerRead?.details?.missingPermissions, 'the owner lacks view_vault').toEqual(['view_vault']);
+        const capableRead = await w.readVault('vault_capable', capableOwner()).then(() => null, (e) => e);
+        expect(capableRead).toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+        expect(capableRead?.details?.missingPermissions, 'the capable owner is refused by the CRUD grant, not the capability').toBeUndefined();
+    }, 30_000);
+
+    it('[capability] an owner lacking the object\'s required capability is refused with that refusal at both doors, and nothing lands', async () => {
+        const w = await bootWorld();
+        const res = await w.mintVault('vault_owner', owner());
+        const plugin = await w.mintVaultOnPlugin('vault_owner', owner());
+
+        expect(res.status, JSON.stringify(res.body)).toBe(403);
+        expect(expectDeclaredEnvelope(res).code).toBe('PERMISSION_DENIED');
+        // The wire carries the refusal's user-facing sentence only — which gate
+        // refused (the capability's `missingPermissions`) stays off the wire, so
+        // that half is pinned beside the service, on the rejection itself.
+        expect(res.body.error.message).toBe(BUILTIN_OPERATION_MESSAGES.en.permission_denied);
+        expect(plugin.status, JSON.stringify(plugin.body)).toBe(403);
+        expect(plugin.body).toMatchObject({ success: false, error: { code: 'PERMISSION_DENIED' } });
+        expect(w.tables.sys_share_link).toEqual([]);
+        // The owner alternative itself holds; the hard stop is what refused.
+        expect(await w.sharing.canManageShares(VAULT, 'vault_owner', owner())).toBe(true);
+    }, 30_000);
+
+    it('[capability control] the owner who HOLDS the capability mints on the same object at both doors', async () => {
+        const w = await bootWorld();
+        const res = await w.mintVault('vault_capable', capableOwner());
+        const plugin = await w.mintVaultOnPlugin('vault_capable', capableOwner());
+
+        expect(res.status, JSON.stringify(res.body)).toBe(201);
+        expect(plugin.status, JSON.stringify(plugin.body)).toBe(201);
+        expect(w.tables.sys_share_link.map((r) => r.created_by)).toEqual([CAPABLE_OWNER, CAPABLE_OWNER]);
+    }, 30_000);
 });

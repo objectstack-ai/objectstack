@@ -66,7 +66,9 @@ describe('the #4771 shape — a flow node-type verdict drawn while the vocabular
     const wording = findings.filter((f) => f.rule === STARTUP_VERDICT_ASSERTIVE_WORDING);
     expect(wording).toHaveLength(1);
     expect(wording[0].message).toContain('"will fail"');
-    expect(wording[0].message).toContain('#4771');
+    expect(wording[0].message).toContain(
+      'the engine now judges node types only once the vocabulary is sealed at `kernel:bootstrapped`',
+    );
     expect(wording[0].message).toContain('the identical eight');
   });
 
@@ -75,9 +77,11 @@ describe('the #4771 shape — a flow node-type verdict drawn while the vocabular
       expect(finding.hint).toBe(STARTUP_VERDICT_HINT);
       expect(finding.hint).toContain('createLazyCacheRateLimitStorage()');
       expect(finding.hint).toContain('sealNodeTypeVocabulary()');
-      expect(finding.hint).toContain('#4769');
-      expect(finding.hint).toContain('#4771');
-      expect(finding.hint).toContain('#4772');
+      expect(finding.hint).toContain(
+        'the ADR-0104 born-migrated attestation, written only after the first boot has seeded its data',
+      );
+      expect(finding.hint).toContain('`AutomationEngine.sealNodeTypeVocabulary()`, called at `kernel:bootstrapped`');
+      expect(finding.hint).toContain('which takes the cache service only when a rate-limit counter is used');
     }
   });
 
