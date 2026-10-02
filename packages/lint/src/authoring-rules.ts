@@ -718,6 +718,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // over the shipped dataset corpus before crossing, at the door's own
     // snapshot shape: 11 datasets (platform-objects 5, showcase 4, crm 1,
     // todo 1) — 0 findings, with a lit synthetic probe refused.
+    //
+    // [#21082] The rule also walks `analyticsCubes` (the cube leg, same two
+    // ids). That leg is CLI-only by construction, not by a narrowing here: a
+    // `dataset` write's snapshot carries no `analyticsCubes` (the context
+    // collections are `RuntimeStackContext`'s), so it reads nothing at this
+    // door, and an `analytics_cube` write has no `TYPE_TO_STACK_KEY` row.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['dataset'],
     run: (stack) => validateDatasetMeasureAggregates(stack),
