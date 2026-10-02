@@ -5,7 +5,7 @@
 
 feat(cli): `os secret rewrap` re-wraps version-1 `sys_secret` ciphertext under the current AAD derivation, each row under its holder's producer scope (ADR-0128 §4.2, #21326 stage 2)
 
-Clause-②: no
+Clause-②: yes (widening)
 
 A ciphertext sealed before ADR-0128 D1–D3 carries the older binding over
 `(namespace, key)` alone, and still opens in this release. `os secret rewrap` moves
