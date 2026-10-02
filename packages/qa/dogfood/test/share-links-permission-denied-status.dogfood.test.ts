@@ -23,7 +23,7 @@
  * sets grant nothing on. That class declared `statusCode = 403` and no
  * `status`. The plugin door's catch reads `err?.status ?? 500` and the
  * dispatcher's `errorFromThrown` reads `status` then `statusCode`. Measured on
- * this boot at the merge base, as a plain member:
+ * this boot as a plain member, before the fix (`main` at 6d67ad5ec):
  *
  *   | request                 | plugin door              | dispatcher door          |
  *   |-------------------------|--------------------------|--------------------------|
@@ -34,17 +34,18 @@
  * both spellings, as every sibling in `plugin-security/src/errors.ts` does.
  * That also fixes every other door that reads `status` alone.
  *
- * ## Why create pins 403 and list pins agreement
+ * ## Why only create is pinned
  *
  * The create refusal is the visibility read in `createLink`: the member asks
  * to share a record of `showcase_client_brief` (which opts into
  * `publicSharing`, so the request reaches that read) and holds no read grant on
- * it. The list refusal is the read of `sys_share_link` under the member's
- * context. #21328 makes a member's own list a self-scoped read, after which the
- * member's list answers 200 through both doors. So the list case asserts what
- * holds on both sides of that change: the two doors give the same status and
- * the same code, and neither gives a server fault. Before this fix the plugin
- * door's 500 breaks it, whichever side of #21328 the tree is on.
+ * it. The list refusal in the table above was the read of `sys_share_link`
+ * under the member's context. #21328 made a member's own list a self-scoped
+ * read, and both doors force the creator filter to the caller, so no list
+ * request reaches that refusal any more. Measured on this boot after #21328:
+ * `GET /share-links` answers 200 through both doors, with no filter, with the
+ * Share dialog's object and record filter, and with `includeRevoked`. A list
+ * case here would pin a refusal no request can produce.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -78,20 +79,20 @@ describe('#21405: a share-link permission refusal answers one status through bot
   let memberId = '';
   let briefId = '';
 
-  /** The plugin door: an HTTP request through the booted Hono app. */
-  const viaPluginDoor = async (method: 'GET' | 'POST', body?: unknown): Promise<DoorAnswer> => {
-    const res = await stack.apiAs(memberTok, method, '/share-links', body);
+  /** `POST /share-links` through the plugin door: an HTTP request into the booted Hono app. */
+  const mintViaPluginDoor = async (body: unknown): Promise<DoorAnswer> => {
+    const res = await stack.apiAs(memberTok, 'POST', '/share-links', body);
     const text = await res.text();
     let parsed: unknown = text;
     try { parsed = JSON.parse(text); } catch { /* the status still reports */ }
     return { status: res.status, body: parsed };
   };
 
-  /** The dispatcher door: the runtime `/share-links` domain, same kernel, same token. */
-  const viaDispatcherDoor = async (method: 'GET' | 'POST', body?: unknown): Promise<DoorAnswer> => {
-    const res = await dispatcher.dispatch(method, '/share-links', body, {}, {
+  /** `POST /share-links` through the dispatcher door: same kernel, same token. */
+  const mintViaDispatcherDoor = async (body: unknown): Promise<DoorAnswer> => {
+    const res = await dispatcher.dispatch('POST', '/share-links', body, {}, {
       request: {
-        method,
+        method: 'POST',
         url: 'http://localhost/api/v1/share-links',
         headers: {
           authorization: `Bearer ${memberTok}`,
@@ -100,7 +101,7 @@ describe('#21405: a share-link permission refusal answers one status through bot
         },
       },
     });
-    if (!res.handled || !res.response) throw new Error(`the dispatcher did not handle ${method} /share-links`);
+    if (!res.handled || !res.response) throw new Error('the dispatcher did not handle POST /share-links');
     return { status: res.response.status, body: res.response.body };
   };
 
@@ -133,8 +134,8 @@ describe('#21405: a share-link permission refusal answers one status through bot
 
   it('[create] both doors answer 403 PERMISSION_DENIED, and mint nothing', async () => {
     const request = { object: OBJECT, recordId: briefId };
-    const plugin = await viaPluginDoor('POST', request);
-    const dispatched = await viaDispatcherDoor('POST', request);
+    const plugin = await mintViaPluginDoor(request);
+    const dispatched = await mintViaDispatcherDoor(request);
 
     expect(plugin.status, `plugin door: ${JSON.stringify(plugin.body)}`).toBe(403);
     expect(plugin.body).toMatchObject({ success: false, error: { code: 'PERMISSION_DENIED' } });
@@ -143,16 +144,5 @@ describe('#21405: a share-link permission refusal answers one status through bot
 
     const minted = await ql.find('sys_share_link', { where: { created_by: memberId }, context: SYS });
     expect(minted, 'a refused mint writes no link').toEqual([]);
-  });
-
-  it('[list] both doors give the same status and code, and neither gives a server fault', async () => {
-    const plugin = await viaPluginDoor('GET');
-    const dispatched = await viaDispatcherDoor('GET');
-    const detail = `plugin door ${plugin.status} ${JSON.stringify(plugin.body)} · `
-      + `dispatcher door ${dispatched.status} ${JSON.stringify(dispatched.body)}`;
-
-    expect(plugin.status, detail).toBe(dispatched.status);
-    expect(plugin.body?.error?.code, detail).toBe(dispatched.body?.error?.code);
-    expect(plugin.status, detail).toBeLessThan(500);
   });
 });

@@ -29,13 +29,14 @@ import { unresolvedPostureRemedy } from './unresolved-posture.js';
  *
  * This class used to declare `statusCode` alone — the only class here that
  * did — so a door that reads `status` alone derived no status from it.
- * Measured on a showcase boot as a plain member: `plugin-sharing`'s share-link
- * route door (`err?.status ?? 500`) answered `POST` and `GET
- * /api/v1/share-links` with `500 PERMISSION_DENIED`, while the runtime
- * dispatcher's `/share-links` domain answered the same throw with `403`. The
- * class now carries both spellings with equal values, for the reason the note
- * below gives its siblings, so a door that reads either one answers `403`.
- * `errors.test.ts` holds every error class this module exports to that rule.
+ * Measured on a showcase boot: a plain member's `POST /api/v1/share-links` on
+ * a record they cannot read answered `500 PERMISSION_DENIED` through
+ * `plugin-sharing`'s share-link route door (`err?.status ?? 500`), and `403`
+ * through the runtime dispatcher's `/share-links` domain, for the same throw.
+ * The class now carries both spellings with equal values, for the reason the
+ * note below gives its siblings, so a door that reads either one answers
+ * `403`. `errors.test.ts` holds every error class this module exports to that
+ * rule.
  */
 export class PermissionDeniedError extends Error {
   readonly code = 'PERMISSION_DENIED';
