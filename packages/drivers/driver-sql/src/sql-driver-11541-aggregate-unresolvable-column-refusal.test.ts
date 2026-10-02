@@ -274,7 +274,12 @@ describe(`[#11541] driver-sql — aggregate() attributes an unresolvable column 
     // The withholding half: the dialect's own words reach the operator.
     const line = logged.find((l) => l.includes('INVALID_FIELD') && l.includes('nosuchcol'));
     expect(line, 'the dialect message must reach the server log').toBeDefined();
-    expect(String(line), 'the log carries the compiled statement').toMatch(/\bselect\b/i);
+    // [#21385, maintainer ruling 2026-10-02] …cut: the compiled statement and
+    // the literal bound into it no longer reach the log (a server log leaves
+    // the data's trust boundary); the cut's marker says a statement stood there.
+    expect(String(line), 'the log no longer carries the compiled statement').not.toMatch(/\bselect\b/i);
+    expect(String(line).includes(SECRET_LITERAL), 'the bound literal reached the log').toBe(false);
+    expect(String(line)).toContain('[statement and bound values redacted]');
   });
 
   // ───────────────────────────────────────────────────────────────

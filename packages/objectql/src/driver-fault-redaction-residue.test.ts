@@ -35,7 +35,7 @@ import { inspect, types as utilTypes } from 'node:util';
 import { isMissingTableError, looksLikeInternalErrorLeak, mapDataError } from '@objectstack/types';
 import { ObjectQL } from './engine.js';
 import { assertEngineDeleteDispatch } from './engine-delete-dispatch.js';
-import { redactPropagatedDriverFault } from './driver-fault-redaction.js';
+import { redactPropagatedDriverFault } from '@objectstack/types';
 import { LifecycleService, type LifecycleObjectLike } from './lifecycle/lifecycle-service.js';
 
 /** The caller's value. Synthetic; asserted ABSENT from every carrier. */
