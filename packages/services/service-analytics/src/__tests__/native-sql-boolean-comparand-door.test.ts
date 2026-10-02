@@ -3,8 +3,9 @@
 /**
  * [#21376] The native-SQL strategy answers a comparand against a declared
  * BOOLEAN column what the engine's `where` door answers: `'true'` / `'false'`,
- * `'1'` / `'0'` and `1` / `0` narrow to the boolean each names, and any other
- * string is refused `INVALID_FILTER` / 400 before a statement runs.
+ * `'1'` / `'0'` and `1` / `0` narrow to the boolean each names, and anything
+ * else the verdict refuses (`'yes'`, `2`) is refused `INVALID_FILTER` / 400
+ * before a statement runs.
  *
  * ## Measured on the base, through these doors
  *
@@ -130,6 +131,8 @@ const CELLS: ReadonlyArray<readonly [filter: unknown, engine: Answer, label: str
   [{ flag: 'yes' }, { code: 'INVALID_FILTER', status: 400 }, 'no boolean reading'],
   [{ flag: { $ne: 'TRUE' } }, { code: 'INVALID_FILTER', status: 400 }, 'another letter case'],
   [{ flag: { $in: [true, 'on'] } }, { code: 'INVALID_FILTER', status: 400 }, 'a list member with no boolean reading'],
+  // A number other than 1 / 0: the verdict's refusal, read from the spec, never a table here.
+  [{ flag: 2 }, { code: 'INVALID_FILTER', status: 400 }, 'a number other than 1 / 0'],
 ];
 
 interface Cell {

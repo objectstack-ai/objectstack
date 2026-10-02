@@ -27,9 +27,10 @@
  * judged by the spec's verdict in the same walk as the number arm: `'true'` /
  * `'false'`, `'1'` / `'0'` and `1` / `0` narrow to the boolean each names, so
  * every cell answers the `where` twin's rows and the write check admits
- * exactly what the read shows; any other string drops the policy through the
- * `refused-comparand` route for both clauses (the read gets the deny sentinel,
- * the write a 403). `record.flag == true` is the control and does not move.
+ * exactly what the read shows; anything else the verdict refuses drops the
+ * policy through the `refused-comparand` route for both clauses (the read gets
+ * the deny sentinel, the write a 403). `record.flag == true` is the control
+ * and does not move.
  *
  * The compiled policy filter is deep-frozen as `compileCelToFilter` returns it
  * (the mock below), so every cell also holds the narrowing to copy-on-write:
@@ -230,6 +231,9 @@ const REFUSED_ROWS: ReadonlyArray<readonly [predicate: string, where: Record<str
   ["record.flag != 'yes'", { flag: { $ne: 'yes' } }],
   ["record.flag == 'TRUE'", { flag: 'TRUE' }],
   ["record.flag in [true, 'on']", { flag: { $in: [true, 'on'] } }],
+  // A number other than 1 / 0 is the verdict's refusal too: the seam carries no
+  // table of its own, so it answers whatever the spec's verdict answers.
+  ['record.flag == 2', { flag: 2 }],
 ];
 
 for (const cell of DRIVER_CELLS) {

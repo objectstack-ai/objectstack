@@ -177,10 +177,10 @@ export interface RlsFieldGuard {
    * `loadObjectFieldNames` writes each one, and leaves the class to the
    * verdict), so it is also the slice the spec's boolean-comparand verdict
    * reads — the same `type` / `returnType` pair (`BooleanComparandDoorFieldMeta`).
-   * A comparand a BOOLEAN column cannot be compared with (a string that is not
-   * `"true"` / `"false"` / `"1"` / `"0"`) is refused here as the engine's
-   * `where` door refuses it, and an accepted spelling is narrowed to its
-   * boolean. Each verdict decides which columns it judges; the two classes
+   * A comparand a BOOLEAN column cannot be compared with (`'yes'`, a number
+   * other than `1` / `0` — whatever the verdict refuses) is refused here as the
+   * engine's `where` door refuses it, and an accepted spelling is narrowed to
+   * its boolean. Each verdict decides which columns it judges; the two classes
    * are disjoint.
    */
   number?: ReadonlyMap<string, NumberComparandDoorFieldMeta>;
@@ -351,8 +351,8 @@ type RlsComparandVerdict =
  *
  * [#21376] The same walk carries the boolean arm, as the engine's walk does:
  * the spec's boolean-comparand verdict, read off the same declared types. A
- * string a boolean column cannot be compared with (`'yes'`) is refused through
- * the same route, and `'true'` / `'false'`, `'1'` / `'0'` and `1` / `0`
+ * comparand a boolean column cannot be compared with (`'yes'`, `2`) is refused
+ * through the same route, and `'true'` / `'false'`, `'1'` / `'0'` and `1` / `0`
  * narrow to the boolean each names. Before it ran, `record.flag != 'true'`
  * compiled to `{ flag: { $ne: 'true' } }`, which the read compared with the
  * stored `1` / `0` on SQLite and so kept EVERY row — the exclusion the author

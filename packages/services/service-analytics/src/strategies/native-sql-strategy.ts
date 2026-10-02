@@ -280,7 +280,7 @@ interface StatementClauses {
 // `boolean-comparand-declared-type-door.ts`), by the spec's verdict
 // (`booleanComparandDoorVerdict`, `@objectstack/spec/data`): `true` / `false`
 // pass, `"true"` / `"false"`, `"1"` / `"0"` and `1` / `0` narrow to the boolean
-// each names, any other string is refused `INVALID_FILTER` / 400. This strategy
+// each names, anything else it refuses (`'yes'`, `2`) is `INVALID_FILTER` / 400. This strategy
 // compiles its filters to SQL itself, past that walk, so a string reached the
 // driver as written: on SQLite a stored boolean is `1` / `0`, and the string
 // `'true'` equals neither — `{ flag: 'true' }` counted no row, `{ flag: { $ne:
