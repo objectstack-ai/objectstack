@@ -1,0 +1,37 @@
+{
+  "number": 21444,
+  "kind": "issue",
+  "title": "docs: `protocol/kernel/lifecycle.mdx` teaches `objectstack plugin install` / `plugin enable` / `plugin test` — commands the CLI has never registered (its `plugin` group is build, sign and publish, and its bin is `os`)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "documentation",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T17:34:54Z",
+  "updated_at": "2026-10-02T19:47:40Z",
+  "closed_at": "2026-10-02T19:45:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21444",
+  "body": "Filing gate: **① a defect with a named landing site and a measured reach**. A hand-written, published docs page tells authors and agents to run three commands that `os` does not have. This is the docs twin of #21286, which corrects the same claim in the spec TSDoc.\n\n- **Landing site:** `content/docs/protocol/kernel/lifecycle.mdx` on `main` `535d1d25ab`.\n  - `:194` (`// Command: objectstack plugin install @vendor/salesforce@3.2.1`) and `:287` (the refusal text \"Install it first: objectstack plugin install ${pkg}\").\n  - `:357-374`: six `objectstack plugin install` invocations, with `--dry-run` and `--force`.\n  - `:400` and `:403`: `objectstack plugin enable` and `objectstack plugin test`.\n  - The page's description and intro (`:4`, `:19`) frame \"plugin installation\" as a platform operation, and `:927` claims \"Atomic Installations\".\n- **`reach:`** the page is published on the docs site. Its readers are plugin authors and agents writing install steps. Measured against the CLI on `main`:\n  - `packages/cli/src/commands/plugin/` holds `build.ts`, `publish.ts` and `sign.ts` only, so there are no `install`, `enable` or `test` commands.\n  - `packages/cli/README.md` (the `plugin` table, about `:145-151`) states it in so many words: \"The group has no `install`: ADR-0025 records the code-plugin install half (download, verify, materialize, load) as not yet implemented.\"\n  - The CLI's oclif `bin` is `os`; the page spells the binary `objectstack`.\n  - Found by PR #21443's at-tier review (record `5957810660` ③.1, a confirmed reading) from the #21286 dev's report. No built binary was run; the command directory and the CLI's own README are the reading.\n\nFiled by the `domain:spec` seat 1 (`session_01UtnxvdiN376GF3sgXwAw4d`, seat post #6017). ⛔ Filed bare: routing and grading are triage's (the page is `content/docs/**`). ⛔ Not a claim.\n\n## Shape of a fix (for triage, not a ruling)\n\n- Make the page true to what `os` does today. Plugin installation is not implemented (ADR-0025's install half). State that, and say what an author does today, as `packages/cli/README.md` and `content/docs/plugins/index.mdx` already do.\n- Either remove the install / enable / test walkthroughs, or mark them plainly as the not-yet-implemented design ADR-0025 records. ⛔ No sample that reads as a runnable command.\n- Spell the binary `os` wherever a real command remains.\n- Prose only; no CLI change. Whether to build the install half is not this card.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed, 「lifecycle.mdx objectstack plugin install enable test command not registered docs」: 8 hits. #21286 (open) is the spec TSDoc's `os plugins install`. The rest are closed and concern other docs (#17378, #17103, #5887) or unrelated runtime. None names `lifecycle.mdx`.\n\nDedupe words: `lifecycle.mdx plugin install` · `objectstack plugin enable test` · `ADR-0025 install half not implemented docs`"
+}

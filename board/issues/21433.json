@@ -1,0 +1,37 @@
+{
+  "number": 21433,
+  "kind": "pull_request",
+  "title": "test(spec): the gate-spawning beforeAll in check-liveness.test.ts runs under the case budget (#21421)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T16:00:21Z",
+  "updated_at": "2026-10-02T16:58:33Z",
+  "closed_at": "2026-10-02T16:58:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-02T16:58:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/21433",
+  "body": "Fixes #21421\n\nClause-②: no\n\nThe one hook in `packages/spec/scripts/liveness/check-liveness.test.ts` that spawns the whole liveness gate (the `beforeAll` of the tombstone describe, #19062) now runs under the budget its sibling cases already run the same gate under, instead of vitest's 10 s default `hookTimeout`. Test-only: no runtime, spec, config or published file changes.\n\n## Changes\n\nOne file, +105 / -1 (1673 to 1777 lines).\n\n- `const GATE_BUDGET_MS = 60_000;` beside `runGate`, with the reason it is a literal and not an import: `vitest.config.ts` exports no constant and cannot be imported from a test (its top level runs the filter preflights against `process.argv`).\n- The hook passes it: the closing `});` becomes `}, GATE_BUDGET_MS);`.\n- A new block at the end of the file reads the file's own source with the TypeScript parser and holds three facts:\n  1. the scan can see `runGate` as reaching `spawnSync` and finds lifecycle hooks (it cannot pass by scanning nothing);\n  2. every `beforeAll` / `beforeEach` / `afterAll` / `afterEach` whose callback reaches `spawnSync`, directly or through another function in the file, passes `GATE_BUDGET_MS` as its timeout argument;\n  3. `GATE_BUDGET_MS` is not below any `testTimeout` that `vitest.config.ts` declares (the three declarations all read 60000 today).\n\nNot done, per the ruling: no skip, retry or quarantine, no change to vitest's `hookTimeout`, no edit to `vitest.config.ts`.\n\n## Hook census (A1)\n\n22 lifecycle hooks in the file: 11 `beforeAll` and 11 `afterAll`, no `beforeEach` / `afterEach`. Exactly one reaches the gate, the `beforeAll` of the #19062 describe (`runGate(undefined, ['--json'])`). The other ten `beforeAll`s only `mkdtempSync` or `cpSync` the ledgers; every `afterAll` is `rmSync`. The dispatch listed ten `beforeAll`s; the file has eleven (the one in the #21127 block, which only creates a temp directory, was not in the list). It does not change the answer.\n\n## Evidence\n\n- **Red before the fix.** With the pin in place and the hook still unfixed: `Tests 1 failed | 2 passed | 68 skipped (71)`, the failing case being the hook one, with `beforeAll at line 1412: timeout argument absent (vitest hookTimeout default, 10 s)`. Line 1412 is the old line 1401 plus the 11 lines added above it.\n- **Green after.** The whole file at `1ea92df0fb`: `Test Files 1 passed (1)`, `Tests 71 passed (71)`, run with `vitest run --project local` under the shared verify lock (322.8 s on a shared box).\n- **The pin bites in both of its directions** (one-off ablations, mutation proven on disk by `scripts/ablation-replace.mjs`, restored with blob equal to HEAD and `git diff HEAD` empty):\n  - `GATE_BUDGET_MS` lowered to 9_999: the config case turns red (`expected 9999 to be greater than or equal to 60000`), the other two stay green.\n  - the hook given an explicit but wrong `10_000`: the hook case turns red (`beforeAll at line 1414: timeout argument 10_000`), the other two stay green.\n- **Typecheck.** `pnpm --filter @objectstack/spec typecheck` exit 0 (`tsc --noEmit`, `check:scripts-typecheck`, `check:test-typecheck` OK with its debt ledger unchanged). `tsc --noEmit -p tsconfig.scripts.json --listFiles` lists the test file once, so the scripts program does compile it.\n\n## Gates\n\n`dispatch-gates --commands` derived 59 commands for this diff. Reconciled with `--ran`: 59 accounted for, 55 run (exit 0), 4 NOT MEASURED, 0 unrun. The four are `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure` and `check:sourcemap-no-sources-content`: each exited 3 (prerequisite not met, no built `dist`) and measured nothing. They read the published build, which this diff cannot reach: `npm pack --dry-run` on `packages/spec` lists 322 files and none under `scripts/` (positive control: 83 files under `liveness/`). `check:query-options-erasure` and `check:type-check-debt` hit my 250 s cap on the first pass and were re-run with a larger cap: both exit 0. `check:nul-bytes` exit 0; control-character scan of the file clean.\n\n## Changeset\n\nNot published: `scripts/` is outside the package's `files[]` (pack listing above). `skip-changeset` is applied.\n\n## Acceptance notes\n\n- The third pin case (config drift) goes one step beyond the ruling's pin, to keep the one literal from drifting from `vitest.config.ts`. It is self-contained; deleting it leaves the other two intact.\n- This file runs in the `local` vitest project (`vitest.repo-tests.json` does not list it), not `repo`; both projects declare the same `testTimeout`.\n- Base is `39a912ea73`, not merged forward. The commits that reached `main` since do not touch this file, `vitest.config.ts` or the spec `package.json`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01YDt3PzwfrkuFzUBF89WPmM)_\n"
+}

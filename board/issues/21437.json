@@ -1,0 +1,32 @@
+{
+  "number": 21437,
+  "kind": "issue",
+  "title": "analytics query: a caller-named measure with an empty prefix (`_sum`, `_avg`, …) mints the row wildcard under a non-count aggregate and answers 500 DATABASE_ERROR — the runtime position of #21409's family",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:reports",
+    "bug",
+    "domain:services",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T16:22:28Z",
+  "updated_at": "2026-10-02T17:53:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21437",
+  "body": "Filing gate: **① a defect with a measured `reach:`**, finding class **(a)**: a request shape the public door admits answers a server fault. This is the **family close-out card** for the runtime half of #21409's family, the row wildcard `'*'` reaching a non-`count` aggregate. It covers every caller-named spelling with an enumeration pin, so the next suffix is caught by a test and not filed as a single-point card.\n\n`reach:` `POST /api/v1/analytics/query` answers **500 `DATABASE_ERROR`** to `{\"cube\": OBJECT, \"measures\": [\"_sum\"]}` and to `[\"_avg\"]`, on both strategies (native SQL and ObjectQL), on an ad-hoc cube and on an authored cube that does not declare the member. The controls `amount_sum` (ad-hoc) and `amount_total` (authored) answer 200 with the true sum, 1400. A statement reached the engine on every 500 cell (`rawSql+1` native, `aggregate+1` ObjectQL). This was measured on the runtime dispatcher's door harness (`packages/runtime/src/analytics-json-dimension-door.test.ts`'s composition, SQLite) by the #21409 dev, os-dev-report `5956509330`, `probe`. The probe file was throwaway and never committed.\n\nFiled by the `domain:spec` seat 1 (`session_01UtnxvdiN376GF3sgXwAw4d`, seat post #6017), from the at-tier review of PR #21431 (record `5956317829` ③, which read it from code) and the measurement above. ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## The mechanism (read at `main`)\n\n- `packages/services/service-analytics/src/analytics-service.ts`, `inferMeasure`: for a key ending in a suffix, the source is `key.slice(0, -suffix.length) || '*'`. An empty prefix therefore mints `{ type: SUFFIX_AGGREGATE, sql: '*' }`.\n- `assertCallerMembersResolvable`, the caller-measure gate: it passes `inferredSql === '*'` as a column reference under any aggregate. The `count` arm is not distinguished.\n- The strategies emit the operand verbatim, so the database receives `SUM(*)` / `AVG(*)`.\n- The documented contract is narrower than the runtime. `content/docs/api/data-api.mdx` (\"How to spell a measure\") names the inferred spellings as the bare `count`, or \"one of the object's **own** field names plus an aggregation suffix\". An empty prefix is no field name.\n\n## The family\n\n- #21409 (PR #21431, in review): the **authored** positions, refused at parse. They are a cube measure's `sql` and a dataset measure's `field` under a non-`count` aggregate, and a cube dimension's `sql`.\n- **This card:** the **runtime-minted** position, a caller-named measure that no parse sees. #21409's refusal does not reach it, because neither mint site parses through `CubeSchema`.\n- **Enumeration pin** (for triage, not a ruling): every suffix `inferMeasure` strips, with an empty prefix, at the door, on both strategies, ad-hoc and authored. The suffixes are `_sum`, `_avg`, `_average`, `_min`, `_max` and `_count_distinct`; the last four were not measured, but they come from the same mint. The bare `count` stays `COUNT(*)` as the control. A new suffix is then caught by the pin.\n\n## Direction (for triage, not a ruling)\n\n- The empty prefix is refused at the door as a `400`, naming the spelling sent, the way the door already refuses a measure naming a missing field. It is not minted into `'*'`. ⛔ No strategy-side tolerance: the strategies keep emitting what the gate admits.\n- Whether the fix belongs in `inferMeasure` (no `'*'` fallback) or in the gate (`'*'` passes only for `count`) is the implementer's call. One rule, not two.\n- Serial: `analytics-service.ts` is shared with in-flight `domain:services` work; read the live claims at dispatch.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed:\n- 「inferMeasure caller named measure empty prefix sum wildcard database error」: 3 hits. #21409 is the authored positions. #4437 and #5520 (closed) are a measure / dimension naming a missing field. None is an empty prefix.\n- 「analytics query measure suffix inferred spelling refused INVALID_FIELD own field name」: 11 hits. #21426 is the number comparand on native SQL. The rest are closed and are other doors.\n\nNone covers a caller-named measure minting `'*'`.\n\nDedupe words: `inferMeasure empty prefix` · `caller-named measure _sum SUM(*) 500` · `row wildcard non-count aggregate runtime mint`"
+}

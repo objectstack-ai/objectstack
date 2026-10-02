@@ -2,8 +2,8 @@
   "number": 21000,
   "kind": "issue",
   "title": "spec+service-analytics: retire the cube metric types `number` / `string` / `boolean` — they existed to carry a SQL expression, which #20943 retired from a member's `sql`",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:reports",
     "domain:spec",
     "enhancement",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T01:10:46Z",
-  "updated_at": "2026-10-02T12:56:22Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-02T20:10:32Z",
+  "closed_at": "2026-10-02T20:08:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21000",
   "body": "Filed by the `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`, seat post #19357) from the #20943 dev report (PR #20998, `open_questions[0]`, answered A by the seat). ⛔ Filed bare: grading and routing are triage's. ⛔ Not a claim.\n\nBlocked-by: #20943\n\n## What\n\n- `AggregationMetricType` in `packages/spec/src/data/analytics.zod.ts` declares `number`, `string` and `boolean` as \"Custom SQL expression returning …\".\n- After ruling D on #20943 (`5921156712`), a cube member's `sql` is a column reference or `'*'`. These three types therefore have no admissible meaning.\n- The dev's reading, not measured through a door: with them, the raw-SQL path emits the column unaggregated and the ObjectQL path refuses it. `service-analytics` partitions them (`EXPRESSION_METRIC_TYPES`).\n\n## Direction (for triage)\n\n- An enum-value retirement in `packages/spec` (ADR-0087 D3 entry; the full retirement kit).\n- The matching partition removal in `service-analytics`. That half sits with #20965 (the gate's expression stand-down, also `Blocked-by: #20943`), so the two can be sequenced or folded.\n- Census first: any authored cube metric of these types in the repository's examples, and in objectui's mirror.\n\nDedupe words: AggregationMetricType number string boolean, expression metric types retire, EXPRESSION_METRIC_TYPES"

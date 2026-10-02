@@ -1,0 +1,34 @@
+{
+  "number": 21439,
+  "kind": "issue",
+  "title": "finding(lint): `field-no-consumers` calls a field \"inert\" when an analytics member reads it through a relationship path (`account.revenue` in a cube measure's `sql` or a dataset measure's `field`) — the family's next position after #21091",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T16:24:52Z",
+  "updated_at": "2026-10-02T20:10:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21439",
+  "body": "Filing gate: **① a defect with a measured `reach:`**, finding class **(c)**: an authoring trap. The advisory rule tells the author a column is unused while an authored analytics member reads it, so an author or AI that follows the warning deletes a column a measure reads. This is the **next position of a closed family**, after its close-out #21091, so it carries an enumeration pin.\n\n`reach:` `os validate`, at PR #21435's head `1de24da8fb` (CLI built from that tree), measured by the #21419 dev (os-dev-report on #21419, `out_of_scope_findings[0]`).\n- Scratch fixture `cube-scalar-control`: an `analyticsCubes` cube on `fx_ledger` whose measure `sum_rev` has `sql: 'account.revenue'`, where `fx_ledger.account` is a lookup to `fx_account`.\n- `field-no-consumers` reports `fx_account.revenue`, and `fx_ledger.account`, as \"Verdict: inert — no site of any kind names it\".\n- A dataset measure with `field: 'account.revenue'` and `include: ['account']` gets the same inert verdict on `fx_account.revenue`. The command exits 0 with the warning printed.\n- For a cube, the next `os validate` would not refuse the resulting dangling path: the cube leg skips an unresolved column. The runtime refusal that would follow is read from code, not measured.\n\nFiled by the `domain:spec` seat 1 (`session_01UtnxvdiN376GF3sgXwAw4d`, seat post #6017), from PR #21435's report. ⛔ Filed bare: routing and grading are triage's. ⛔ Not a claim.\n\n## The family\n\n`field-no-consumers` (`packages/lint/src/validate-field-consumers.ts`) is advisory. Its verdicts are the input an author acts on, so a false \"inert\" is the defect.\n- #20929, #20951, #21091 (all closed): an inline grid's columns, a subform's `amountField`, a lookup's inline-grid join key, and an expand form's fields. #21091 was the close-out for child-context positions.\n- #21281 (closed `not_planned`, ruling B `5950947151`): the default record form stays uncounted by design. **This card is outside that ruling.** Here the member names the column explicitly, as authored text. Nothing is drawn by default.\n- **This card:** a column named through a relationship path in an analytics member. `analyticsCubes` and `datasets` are both in `CONSUMER_ROOTS`, but a dotted name credits neither the lookup field on the base object nor the leaf column on the object the last hop reaches.\n\n## Direction (for triage, not a ruling)\n\n- A relationship path in an analytics member credits every field it reads: the lookup on the base object, and the leaf on the object the last hop reaches. The hop is resolved the way the analytics door resolves it (the cube's declared join for that hop, else the lookup's `reference`), which `validate-dataset-measure-aggregates.ts`' cube leg already reads. ⛔ No second hop resolver.\n- **Enumeration pin:** every analytics slot that names a column, crossed with a bare name and a one-hop and a two-hop path. The slots are a dataset dimension's and measure's `field`, and a cube dimension's and measure's `sql`. Each path credits each field it reads. A new slot is then caught by a test.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed:\n- 「validate-field-consumers inert verdict relationship path dataset measure cube sql leaf field」: 8 hits.\n- 「field consumer lint reports field inert no site names it but analytics measure reads it」: 5 hits.\n\nBoth return this family's closed cards (#20929, #20951, #21091, #21281, #17135, #15922) and two analytics door cards (#21129, #21249). None names a relationship path in an analytics member.\n\nDedupe words: `field-no-consumers relationship path` · `inert verdict account.revenue cube measure` · `dataset include dotted field consumer`"
+}

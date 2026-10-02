@@ -2,8 +2,8 @@
   "number": 21385,
   "kind": "issue",
   "title": "[security] driver-sql's own server-log lines (raw and read terminals, three unresolvable-column refusals) write the compiled statement and inlined bound values, beneath the engine-boundary redaction of #21274 / #21345",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,21 +14,22 @@
     "area:access",
     "bug",
     "domain:engine",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
-  "assignees": [
-    "huangyiirene"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-02T09:52:17Z",
-  "updated_at": "2026-10-02T14:24:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-02T16:56:26Z",
+  "closed_at": "2026-10-02T16:54:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21385",
   "body": "Ruled: 5950942037 · letter A · 2026-10-02T11:03Z\n\nFiling gate: **① a defect with named positions**, filed under the reach exception for **possible data disclosure**: a server-log line can carry a statement's bound values. ⚠️ Classes and positions only: no statement, value or reproduction here. This is the **third position** of the driver-fault redaction family, after #21274 (PR #21335) and #21345 (PR #21384, open).\n\n`reach:` **measured** at the public engine door `ObjectQL.execute`, over a real `SqlDriver` on better-sqlite3, live PostgreSQL 16 and live MySQL 8.0, by #21345's dev (os-dev-report on #21345, `open_questions[0]` and `out_of_scope_findings[0]`). A synthetic sentinel bound into a raw statement reached the driver's own raw-terminal WARN line, for the four listed leading verbs and for unlisted ones alike, on all three dialects. The other four lines below are the same family by the driver's own words; they are read from source, not driven.\n\nFiled by `domain:engine#1` (seat post #6367, `session_017xfMoEjKUuSh2xYB8sCozp`). **Reader who acts:** the maintainer. The fix would amend the log half of an earlier maintainer ruling, so this card goes to the decision box, and the analysis is the next comment. ⛔ Not a claim.\n\n## Positions (`packages/drivers/driver-sql/src/sql-driver.ts` at `origin/main` `43e928dd4`)\n\nFive WARN lines say, in their own words, that the dialect message they write is \"kept server-side\" because it carries the statement and, on the dialects that inline them, the bound literals:\n1. **The raw terminal** (near `:10284`, before `rawStatementFaultError`). The line also writes the statement the door sent. This is the line the probe measured.\n2. **The read terminal** (near `:10215`, before `backendStatementFaultError`): \"it carries the compiled statement, and on the dialects that inline them the bound literals too\".\n3. **The unresolvable WHERE column** (near `:10087`, `INVALID_FILTER`): \"because it inlines the statement bound literals\".\n4. **The unresolvable groupBy / aggregation column** (near `:10960`, `INVALID_FIELD`): the same words.\n5. **The unresolvable listed distinct column** (near `:11253`, `INVALID_FIELD`): the same words.\n\nEach line runs inside the driver, before the engine's boundary helper (`redactPropagatedDriverFault`, #21274) sees the fault. So the engine-boundary cut, and #21345's by-construction cut at `ObjectQL.execute`, both stop above these lines.\n\n## Governing text: two positions that disagree\n\n- **#21274's ruling** (5943536760, triage's, overturnable by the maintainer): \"Logs leave the trust boundary of the data: they are shipped, aggregated and read by operators\", and \"The error that propagates out of the engine carries the same redaction the engine's own log line already applies: no statement, no bound values.\"\n- **The driver's design under the maintainer's ruling of 2026-08-17 on #8931** (「同意 C」): the read and raw terminals write the dialect message to the server log, \"kept server-side\", so an operator can read the diagnostic. The client envelope withholds it.\n\n#21274's premise reaches the engine's carriers; the 2026-08-17 design places the driver's own log inside the data's trust boundary. Which one governs the driver's log lines is the maintainer's call.\n\n## Dedupe\n\nThrough `mcp__github__search_issues`, repo-scoped, open and closed: 「driver-sql server log line writes compiled statement bound values rawStatementFault backendStatementFault kept server-side」 gave 4 hits:\n- #21345 (open): this family's second position;\n- #21274 (closed): the first position;\n- #20805 (closed): a caller-supplied formula value, a different subject;\n- #9160 (closed): the value-bearing-diagnostic list in `driver-fault-redaction.ts`, a different subject.\n\nNone covers the driver's own log lines.\n\nDedupe words: `driver-sql raw terminal log bound values` · `rawStatementFault server log statement` · `backendStatementFault dialect text log` · `driver log line redaction` · `statement kept server-side operator log`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n"

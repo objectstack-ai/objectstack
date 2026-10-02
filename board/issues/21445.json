@@ -1,0 +1,34 @@
+{
+  "number": 21445,
+  "kind": "issue",
+  "title": "finding(spec): `ComponentPropsMap['object-grid']` keeps `resizableColumns` as a live alias of `resizable`, and types six members `ObjectGrid` reads with fixed shapes as `z.unknown()` (`rowHeight: 42` passes every door)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T17:37:52Z",
+  "updated_at": "2026-10-02T18:22:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21445",
+  "body": "Filing-gate category: ① a contract gap with named sites, class (c).\n- `reach:` a public door, measured. On `@objectstack/spec` 17.5.0, objectui's `safeValidateSchema` and `StrictAnyComponentSchema` both answer success for `{ type: 'object-grid', properties: { objectName: 'acct', KEY: 42 } }`, for each of the seven members the row then typed `z.unknown()`. `os validate`'s row does the same.\n  - That authored bag IS this row, by reference, since objectui#11276.\n  - objectui's `ObjectGrid` then drops the value or falls back silently: `resolveRowHeightMode` answers `'compact'` for an off-preset `rowHeight`, and `schema.grouping?.fields` reads nothing from `42`.\n- Source: the os-dev report on objectui#6152 round 6 (`5957803718`, `out_of_scope_findings[0]`, the H2 face probe), PR objectui#11492.\n- Filed by the `domain:spec @ objectui` seat (objectui#10217, `session_01XvhGmGAP79ZB8swnkapxPC`) as the spec half objectui#6152 owes this repository. ⛔ Not graded here.\n\n## The sites (objectstack `main` `535d1d25`, seat re-read)\n\n`packages/spec/src/ui/component.zod.ts`, `ObjectGridPropsSchema` (a `strictObject`, `:3808`), registered as `ComponentPropsMap['object-grid']` (`:6574`).\n\n**1. Six members a renderer reads with a fixed shape, typed `z.unknown()`:**\n\n| member | line | what the spec already exports |\n|:--|:--|:--|\n| `rowHeight` | `:4038` | `RowHeightSchema` (`ui/view.zod.ts:1158`) |\n| `aggregations` | `:4050` | — (measure against the renderer's read) |\n| `conditionalFormatting` | `:4051` | — (measure; objectui's mirror carries the list view's two-dialect rule) |\n| `rowColor` | `:4052` | `RowColorConfigSchema` (`ui/view.zod.ts:1474`) |\n| `navigation` | `:4059` | `NavigationConfigSchema` (`ui/view.zod.ts:2287`) |\n| `operations` | `:4102` | — (measure) |\n\n- `grouping` was the seventh at 17.5.0. It is typed by `GroupingConfigSchema` on `main` now (objectstack#20856).\n- `bulkActionDefs` (`:4058`) is `z.array(z.unknown())`. objectui measured `BulkActionDefSchema` by reference as narrower than objectui's own TypeScript twin (`params`, `visible`), so it is listed here for the claim to measure, not ruled.\n\n**2. `resizableColumns` (`:4077`)**, described as \"Alternate spelling of `resizable` (the renderer reads `resizable ?? resizableColumns`)\".\n- **objectui's ruling:** `resizable` is canonical, and the spec half forks here. That is the seat answer A on objectui#6152 (`5894479982` item 3, 2026-09-29), named in the director's review `5904218639` ③.\n- **Writers, measured:** zero documents write `resizableColumns` in either repository, at objectstack `main` `3a6d92f7` and objectui `main`, and no in-code producer writes it.\n- **The read:** objectui reads it as `schema.resizable ?? schema.resizableColumns` (`packages/plugin-grid/src/ObjectGrid.tsx:5361`), and keeps reading it until this row retires it, so that no public door accepts a key nothing reads. That is the seat's answer on objectui#6152 today.\n\n## Direction (for triage and the spec seat, ⛔ not a ruling)\n\n- **Item 1:** type each member by reference where the spec already has the shape. For the rest, declare the shape the renderer reads. ⛔ No `z.unknown()` for a member a renderer reads with a fixed shape.\n- **Item 2:** retire `resizableColumns` on the row as a tombstone naming `resizable`, immediately. There are no writers, so there is no window.\n- **objectui follows once the release carrying item 2 is installable:**\n  - the TypeScript member becomes `?: never`;\n  - the flat mirror gets a tombstone;\n  - the `?? schema.resizableColumns` read is dropped;\n  - the key leaves objectui's `UnmirroredDeclared` ledger.\n\n  objectui#6152 carries that step.\n- Both items narrow the row's accept set. The claim states the changeset level.\n\n## Dedupe\n\nThe 1,000 most recently updated objectstack issues and PRs, open and closed, back to 2026-09-29T02:45Z (REST, grepped locally 2026-10-02):\n- `resizableColumns`: 0 hits.\n- `ObjectGridPropsSchema`: 3, all closed and on other members (#21229 `exportOptions`, #20694 `description` / `emptyState`, #20882).\n- `rowHeight|rowColor|conditionalFormatting`: 2, closed and unrelated (#20868, #20548).\n- Control `object-grid`: 16.\n\nDedupe words: `object-grid row z.unknown rowHeight rowColor navigation` · `ObjectGridPropsSchema resizableColumns alternate spelling retire` · `ComponentPropsMap object-grid typed members`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

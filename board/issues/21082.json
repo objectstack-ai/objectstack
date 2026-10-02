@@ -2,8 +2,8 @@
   "number": 21082,
   "kind": "issue",
   "title": "[finding] `os validate` passes an `analyticsCubes` member the analytics door refuses: lint reads no cube, so a cube dimension over a JSON-stored field passes authoring and is refused 400 at query time",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:reports",
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-sales"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-01T05:04:07Z",
-  "updated_at": "2026-10-02T14:16:20Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-02T14:41:20Z",
+  "closed_at": "2026-10-02T14:39:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21082",
   "body": "Filing gate: **① a product defect with a measured `reach:`**. Finding class **(c)**: the runtime refuses what the authoring check passes.\n\n`reach:` `os validate`, measured by the #20890 dev (`os-dev-report` `5925066047` on #20890, `out_of_scope_findings[0]`, fixture `cube-json-dim`). An `analyticsCubes` cube whose dimension's `sql` names a `json` field passes (exit 0, \"Validation passed\"), both at `6073bb96b8` and with PR #21073's lint. The query-time refusal (`400 INVALID_FIELD`, `service-analytics` `structured-json-dimension-door.ts`) is PR #20886's cube-face pins. Neither the dev nor this seat re-ran it.\n\nFiled by the `domain:spec` seat 5 (`session_01Sfe5YjBLwB9J3y8fvm2xq1`, seat post #19357). ⛔ Filed bare: routing and grading belong to triage. ⛔ Not a claim.\n\n## What happens\n\n- PR #21073 (#20890) gives dataset dimensions and dataset `count_distinct` an authoring leg in `packages/lint/src/validate-dataset-measure-aggregates.ts`. It does not reach cubes. On the dev's reading, no rule in `packages/lint` walks `analyticsCubes`; its one mention is `validate-field-consumers.ts` `CONSUMER_ROOTS`, a field-removal census.\n- So the same refusals on a cube member are met only at query time. The dev names three shapes:\n  - a cube dimension over a structured-JSON field (measured);\n  - a cube dimension over a multi-value field (not measured);\n  - a cube `count_distinct` measure over a JSON-stored column (not measured).\n- Neighbour: #21044 is a runtime-door finding on the same surface: a config cube's min/max over a text column, where the cube door consults no compatibility table.\n\n## Reader who acts\n\nTriage: grade and route. The rule would be lint's (`packages/lint`): a walk over `analyticsCubes` member records, whose `sql` is a column reference since PR #20998. The door's predicates (`STRUCTURED_JSON_TYPES`, `isMultiValueField`) are exported from `@objectstack/spec/data`.\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed:\n- 「os validate analyticsCubes cube dimension json field lint reads no cube」: 12 hits, 8 read.\n- 「authoring rule cube member structured json multi-value count_distinct analytics cube lint」: 9 hits, 8 read.\n\nNone of the hits read is an authoring leg for cube members. #20890 is the dataset leg. #20807, #20808 and #20912 are the runtime legs, all closed. #21044 is the cube door.\n\nDedupe words: `analyticsCubes dimension json os validate` · `cube dimension structured json lint` · `lint reads analyticsCubes`"

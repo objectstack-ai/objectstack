@@ -2,8 +2,8 @@
   "number": 21388,
   "kind": "issue",
   "title": "security(plugin-audit): an activity row whose every recorded change is withheld from the reader is still served (empty change, summary, actor, timestamp), so an org peer reads WHEN a colleague's identity row was stamped — each sign-in time",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,8 +14,7 @@
     "area:access",
     "bug",
     "domain:services",
-    "pm:dispatched",
-    "priority:p3",
+    "priority:p2",
     "security"
   ],
   "assignees": [
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-02T09:56:37Z",
-  "updated_at": "2026-10-02T13:14:02Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-02T16:08:39Z",
+  "closed_at": "2026-10-02T16:07:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/21388",
   "body": "Seam card filed by the `repo:cloud` seat (`repo:cloud#1`, session `session_01Wxo1xhh2bU66T73q23jzE4`, R44). It comes from objectstack-ai/cloud#2485's dev report (`os-dev-report` 5949654406 on that card, `open_questions[0]` and `out_of_scope_findings[0]`). Owner: the platform, because the fix lands in `plugin-audit`. ⛔ Classes, doors, roles and statuses only; no user value, address or e-mail appears here.\n\n## The reading (measured at service level)\n\n- **Where and how:** on cloud's hosted-slate tenant kernel at objectstack `16eefc6c` (which carries objectstack#21237's fix, PR #21340), as engine reads made with an org member's request context. The HTTP door was not exercised.\n- **The member's access:**\n  - **Grants:** object-level read on `sys_activity` (the AI-app member template row in objectstack-ai/cloud PR #2599); `member_default` otherwise.\n- **The setup:** a colleague (a second `org_member`) signs in twice through the auth door. Each sign-in stamps the colleague's identity row: one `update` activity row recording `last_login_at` and `last_login_ip`, both of them `Admin`-group fields that `member_default` withholds since #21340.\n- **Served to the member:** all 4 activity rows on the colleague's identity record, including **both sign-in stamp rows**.\n  - Each stamp row has an **empty recorded change** (old/new `{}`), the summary \"Updated User …\", an actor and a timestamp.\n  - 0 `Admin`-group keys and 0 address strings are served in any row. The withholding works key by key, as declared.\n- **Control:** an owner's rename of the same colleague is served with exactly the `name` key.\n- **Why it matters:** the row's existence and timestamp still tell an org peer *when* each sign-in happened. objectstack#21237's title names \"through sys_activity, their sign-in history\" as the leak. PR #21340 closed the values (\"rows served, 0 group keys in any recorded change\", its acceptance table), and left the timing.\n\n## The class (⛔ not only sign-ins)\n\nAny write whose every changed field is withheld from a reader is served to that reader as a row with no change, and its summary, actor and timestamp say that something happened, and when. Sign-in stamps are the measured instance and the most frequent. Others would include a lockout counter bump, a ban set or cleared, or an MFA-required stamp, each a timing signal about a withheld state change. Those others are NOT MEASURED.\n\n## Direction (⛔ not a ruling; triage's call)\n\n- The activity read side drops a row when, for that reader, the redaction leaves its recorded change empty and the row's verb is `update`.\n  - Creates and deletes keep their rows: their existence is the record's own existence, which the parent-record gate already decides.\n- Or the CRUD mirror writes no activity row for an update that touches only `Admin`-group or `internal` fields, if the ledger's admin readers do not need it there. The compliance ledger (`sys_audit_log`) is a separate door and keeps its rows.\n- ⛔ No reader-side special case for one object or one field name.\n- **Pins:** a member reads a colleague's record history and gets no row for a withheld-only update. An admin still gets the row, with its change. A mixed update (one served field plus one withheld field) is still served with the served key; that is the control.\n\n## Grade (triage's call)\n\nThe seat reads **p3**:\n- times only, no values and no addresses;\n- reachable only by an org peer who already reads the colleague's identity row;\n- the direct read already serves the row's current `updated_at` (whether a sign-in moves `updated_at` is NOT MEASURED).\n\n**Cloud's consumer:** objectstack-ai/cloud#2485 lands the member template's `sys_activity` read row now, with this residual accepted in-seat and the maintainer's veto open. The row does not wait on this card. When this lands in a pin cloud consumes, PR #2599's member e2e (case 5) can tighten from \"0 `Admin` keys\" to \"no row for the stamp\".\n\n## Dedupe\n\n`mcp__github__search_issues`, repo-scoped, open and closed:\n- 「activity stream row served with empty recorded change when every changed field is withheld from the reader, timestamp reveals when the write happened」 found 8 hits. #21081 and #21155 (closed) are the value-carrying cases, not row existence; the rest are unrelated.\n- 「sign-in stamp activity row org peer member inferable login time last_login_at sys_activity」 found 2 hits. #21237 (closed) is the values half this card follows. #8144 (closed) added the login writers and attributes the stamp row.\n\nDedupe words: `activity row empty recorded change served` · `withheld-only update timing` · `org peer sign-in times activity` · `activity field redaction whole row`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

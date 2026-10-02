@@ -1,0 +1,33 @@
+{
+  "number": 21454,
+  "kind": "issue",
+  "title": "[finding] [security] An action/automation body's object API and an action handler's engine handle read the stored-metadata family outside its body projection and keyed serve (reach NOT MEASURED)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:cli",
+    "pm:queue",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-02T18:54:19Z",
+  "updated_at": "2026-10-02T19:56:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/21454",
+  "body": "Filing door: class ① — a `finding` under the data-leak exception. Its reach is **NOT MEASURED**, so the first step is the reachability measurement, before any fix is shaped.\n\nSource: the contract review of PR #21436 (#21207 exit two), section ③. It was filed by the `domain:cli` seat, `session_01VvcEokUG1tvVxkceYfR5XB`. ⛔ Classes, doors and roles only. No request, field path, value or seeding recipe appears here.\n\n## The class\n\nThe stored-metadata-body family (#21120, #21207) closes every door that serves, copies or evaluates a stored body, or a content hash over it. Each door either projects the body through the shared credential redactor or serves the hash in keyed form. Two in-process reader contexts are outside every enumeration so far:\n\n1. **An action or automation body's object API.** The sandbox resolves `ctx.api.object(...)` to the engine's scoped object facade (`packages/runtime/src/sandbox/body-runner.ts`, `buildSandboxApi`).\n2. **An action handler's engine handle.** `ctx.engine.find` calls the engine's `find` directly (`packages/runtime/src/action-execution.ts`, the handler context's `find`).\n\nBy source reading, neither applies the family's body projection or the keyed serve. The system-object guard in the same file covers MCP-invoked actions only.\n\n**Who could reach it:** an administrator who authors an action or automation body. That is the same role the family already refuses cleartext to at its other doors. The class is the same as #21207's exit one, body and hash alike.\n\n## What is owed first\n\n- **Measure reach:** does either context, as composed by `os serve`, return a stored body or a stored content hash unprojected? Record the answer with a control: the same read through a family door returns the projected or keyed form.\n- **If reach is measured:** route by where the fix lands. Is the projection applied at the engine's read of the family's objects, or at each reader context? That choice belongs to triage and the owning seat; this card does not pre-judge it.\n- **If neither context reaches unprojected content:** close as not planned, with the measurement on the card.\n\n## Dedupe\n\nThree repo-scoped searches, open and closed together:\n- \"automation sandbox ctx.api.object or action handler ctx.engine.find reads stored metadata body without projection\": 2 hits;\n- \"stored metadata body credential sys_metadata read through action body or flow sandbox engine facade redaction\": 19 hits;\n- \"body-runner action-execution system object guard sys_metadata engine read\": 8 hits.\n\nNone covers these two contexts. Nearest:\n- #21207, whose exit one closed a different engine-only door;\n- #21120, the closed family close-out;\n- #3914 and #7867 (action-body `ctx.api`; unrelated defects, both closed).\n\nDedupe words: sandbox object API stored metadata body; action handler engine find sys_metadata; engine-only reader outside body projection; keyed content hash in-process reader."
+}
