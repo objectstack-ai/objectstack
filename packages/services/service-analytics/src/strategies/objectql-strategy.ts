@@ -358,8 +358,8 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     } catch {
       sql = undefined;
     }
-    const rows = this.orderAndWindow(query, mappedRows);
-    return sql ? { rows, fields, sql } : { rows, fields };
+    const answer = this.orderAndWindow(query, mappedRows);
+    return sql ? { rows: answer, fields, sql } : { rows: answer, fields };
   }
 
   /**
@@ -387,9 +387,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * query, its `ORDER BY` follows the driver's collation and NULL placement
    * (SQLite sorts NULL lowest, PostgreSQL highest), while `applyOrdering` keeps
    * NULL and `''` last in both directions, compares numeric text as numbers and
-   * other text with `localeCompare`. The two faces therefore agree on numbers,
-   * date buckets and text of single-case ASCII letters, and can differ on a
-   * NULL, an `''`, numeric text, mixed case or punctuation.
+   * other text with `localeCompare`. The two faces therefore agree on numbers
+   * and on text of single-case ASCII letters, and can differ on a NULL, an
+   * `''`, numeric text, mixed case or punctuation. (A date bucket key is minted
+   * sort-stable, `2026-03`, so it orders chronologically here.)
    */
   private orderAndWindow(query: AnalyticsQuery, rows: Record<string, unknown>[]): Record<string, unknown>[] {
     return applyWindow(applyOrdering(rows, query.order), query.limit, query.offset);
