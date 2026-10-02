@@ -8679,7 +8679,10 @@ export class ObjectQL implements IObjectQLEngine {
       }
 
       const plain = typeof value === 'string' ? value : JSON.stringify(value);
+      // ADR-0128 D1: this producer's own scope, so the AAD names the
+      // object-secret-field vocabulary and no other producer's context opens it.
       const handle: CryptoHandle = await this.cryptoProvider.encrypt(plain, {
+        scope: 'object_secret_field',
         namespace: object,
         key: field,
         tenantId: context?.tenantId,
@@ -8992,7 +8995,11 @@ export class ObjectQL implements IObjectQLEngine {
       version: secret.version,
       ciphertext: secret.ciphertext,
     };
+    // ADR-0128 D1: a `secret:` ref is the object-secret-field producer's
+    // holder, so the scope is that producer's. A row another producer sealed
+    // under a scoped derivation therefore does not open here.
     return this.cryptoProvider.decrypt(handle, {
+      scope: 'object_secret_field',
       namespace: secret.namespace,
       key: secret.key,
       tenantId: opts?.tenantId,
