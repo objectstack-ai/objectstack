@@ -81,9 +81,8 @@ and keep loading through their barrel `index.ts`.
 ### Cloud — publish & install
 
 Push a locally-built package to ObjectStack Cloud and (optionally) install it
-into one of your environments in a single command. Credentials and server URL
-come from `os cloud login` (stored in `~/.objectstack/cloud.json`) or the
-`--token` / `OS_CLOUD_API_KEY` and `--server` / `OS_CLOUD_URL` flags.
+into one of your environments in a single command. The commands below do not
+share one session or one flag spelling — see [Credentials and server URL](#credentials-and-server-url).
 
 | Command | Description |
 |---------|-------------|
@@ -97,18 +96,40 @@ Typical flow (build → publish → install into an environment, seeding sample 
 
 ```bash
 os compile                                 # → dist/objectstack.json
-os cloud login                             # one-time, stores the cloud session
-os environments create --org "$ORG" --name "Dev" --activate
+os cloud login                             # one-time; the session os package publish reads
+os environments create --org "$ORG" --name "Dev" --activate   # does NOT read that session — see below
 os package publish --env <env-id> --install --seed-sample-data
 ```
+
+`os environments create` does not use the session `os cloud login` stored: give
+it `--url` and `--token` (or `OS_CLOUD_URL` / `OS_TOKEN`), or an `os login`
+session. Without either it exits 1 with `Authentication required`.
 
 `os package publish` registers a `sys_package` (keyed by a reverse-domain
 `--manifest-id`, derived from the artifact when omitted), snapshots the
 artifact as a new `--version`, and — with `--env <id> --install` — installs
 that version into the environment. Useful flags: `--visibility private|org|
 marketplace`, `--note`, and for marketplace listings `--submit` (request
-review) or `--auto-approve` (platform admins only). Set `OS_CLOUD_URL` (or
-`--server`) to target a non-default control plane, e.g. a staging cloud.
+review) or `--auto-approve` (platform admins only). Set `OS_CLOUD_URL` to
+target a non-default control plane, e.g. a staging cloud. `os cloud login`,
+`os package publish` and `os environments` read it; the flag is `--server` on
+`os package publish` and `--url` on the other two.
+
+#### Credentials and server URL
+
+Two stored sessions exist, and each command authenticates with one of them:
+
+| Command | Server URL | Token | Stored session |
+|---------|------------|-------|-------------------------|
+| `os cloud login` | `-u, --url` (env `OS_CLOUD_URL`, default `https://cloud.objectos.ai`) | none — `-e, --email` / `-p, --password`, or the browser device flow | writes `~/.objectstack/cloud.json` |
+| `os cloud whoami` / `os cloud logout` | — | — | reads / deletes `~/.objectstack/cloud.json` |
+| `os package publish`, `os plugin publish` | `-s, --server` (env `OS_CLOUD_URL`); else the URL in `cloud.json`; else `https://cloud.objectos.ai` | `-t, --token` (env `OS_CLOUD_API_KEY`, then `OS_TOKEN`) | `~/.objectstack/cloud.json` — the `os cloud login` session |
+| `os environments list` / `show` / `create` / `bind` / `switch` | `-u, --url` (env `OS_CLOUD_URL`); else the URL in `credentials.json`; else `http://localhost:3000` | `-t, --token` (env `OS_TOKEN`) | `~/.objectstack/credentials.json` — the `os login` session, **not** `os cloud login`'s |
+
+`os package install` is not a cloud command: it installs into a running runtime
+(`-r, --runtime`, env `OS_RUNTIME_URL`, default `http://localhost:3000`) and signs
+in there with `--email` / `--password` (env `OS_RUNTIME_EMAIL` /
+`OS_RUNTIME_PASSWORD`).
 
 ### Plugin Management
 
@@ -215,7 +236,7 @@ There are no short forms: `os -h` and `os -v` exit 2 with `command -h not found`
 
 - `-p, --port <port>` — Server port. Resolution: `--port` › `$OS_PORT` › `$PORT` › `3000`. With `--dev` a busy port auto-hops to the next free one; in production mode it's a hard error (never silently drifts).
 - `--dev` — Run in development mode (load devPlugins, pretty logging)
-- `--ui` — Enable Studio UI
+- `--ui` — Enable the bundled Console portal at `/_console/` when `@object-ui/console` is installed (default: true)
 - `--no-server` — Skip starting HTTP server plugin
 
 ### `os generate`
