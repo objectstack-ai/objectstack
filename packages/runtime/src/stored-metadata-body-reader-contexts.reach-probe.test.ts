@@ -141,6 +141,7 @@ interface Reading {
   status: number;
   bodyForm: Form;
   hashForm: Form;
+  code?: string;
   note?: string;
 }
 
@@ -152,6 +153,7 @@ let app: any;
 let adminToken: string;
 let memberToken: string;
 let storedRow: Record<string, any>;
+let storedHistory: { rows: number; carriesCredential: boolean };
 let prevNodeEnv: string | undefined;
 
 const req = (path: string, init?: RequestInit) => app.request(`${ORIGIN}${API}${path}`, init);
@@ -205,7 +207,14 @@ function hashFormOf(status: number, payload: unknown): Form {
   return 'keyed';
 }
 
+/** The refusal's ADR-0112 code, when the door refused. */
+function refusalCode(status: number, payload: any): string | undefined {
+  if (status < 400) return undefined;
+  return payload?.error?.code ?? payload?.code ?? undefined;
+}
+
 function record(context: string, door: string, role: string, status: number, payload: unknown, note?: string) {
+  const code = refusalCode(status, payload);
   const reading: Reading = {
     context,
     door,
@@ -213,6 +222,7 @@ function record(context: string, door: string, role: string, status: number, pay
     status,
     bodyForm: bodyFormOf(status, payload),
     hashForm: hashFormOf(status, payload),
+    ...(code ? { code } : {}),
     ...(note ? { note } : {}),
   };
   READINGS.push(reading);
@@ -307,10 +317,21 @@ beforeAll(async () => {
     context: { isSystem: true },
   });
   storedRow = rows[0];
+  // The family's second table: does this save leave a stored body in history too?
+  const history: any[] = await engine.find('sys_metadata_history', {
+    where: { type: 'datasource', name: DS_NAME },
+    context: { isSystem: true },
+  });
+  storedHistory = {
+    rows: history.length,
+    carriesCredential: history.some((h) => String(h.metadata ?? '').includes(SENTINEL)),
+  };
 }, BOOT_TIMEOUT);
 
 afterAll(async () => {
   // Forms only — never the values.
+  // eslint-disable-next-line no-console
+  console.log(`[#21454 reach probe] stored history for the probe row: ${JSON.stringify(storedHistory)}`);
   // eslint-disable-next-line no-console
   console.log(`[#21454 reach probe] readings\n${JSON.stringify(READINGS, null, 2)}`);
   try { await httpServer?.close?.(); } catch { /* best-effort */ }
@@ -331,16 +352,21 @@ describe('[#21454] precondition — the fixture stores what the family protects'
 describe('[#21454] CONTROL — the same row through a family door (generic data door)', () => {
   it('administrator, list: the body is projected and the hash keyed', async () => {
     const res = await as(adminToken, 'GET', `/data/sys_metadata?type=datasource&name=${DS_NAME}`);
-    const reading = record('control', 'data door list', 'administrator', res.status, await readJson(res));
+    const payload = await readJson(res);
+    const reading = record('control', 'data door list', 'administrator', res.status, payload);
     expect(reading.status).toBe(200);
+    // The projection of THIS row: its non-credential config survives.
+    expect(JSON.stringify(familyRowsIn(payload).map((r) => r.metadata))).toContain('probe.example.invalid');
     expect(reading.bodyForm).toBe('projected');
     expect(reading.hashForm).toBe('keyed');
   });
 
   it('administrator, get by id: the body is projected and the hash keyed', async () => {
     const res = await as(adminToken, 'GET', `/data/sys_metadata/${storedRow.id}`);
-    const reading = record('control', 'data door get', 'administrator', res.status, await readJson(res));
+    const payload = await readJson(res);
+    const reading = record('control', 'data door get', 'administrator', res.status, payload);
     expect(reading.status).toBe(200);
+    expect(JSON.stringify(familyRowsIn(payload).map((r) => r.metadata))).toContain('probe.example.invalid');
     expect(reading.bodyForm).toBe('projected');
     expect(reading.hashForm).toBe('keyed');
   });
@@ -401,7 +427,7 @@ describe('[#21454] ① a sandboxed body\'s object API (ctx.api.object)', () => {
     const authored = await as(adminToken, 'PUT', '/meta/action/probe_authored_reads_family', {
       name: 'probe_authored_reads_family',
       label: 'Probe authored read',
-      object: 'probe_note',
+      objectName: 'probe_note',
       type: 'script',
       body: actionBody,
     });
@@ -421,13 +447,13 @@ describe('[#21454] ① a sandboxed body\'s object API (ctx.api.object)', () => {
       payload,
       `/meta PUT answered ${authored.status}; bound=${bound}`,
     );
-  });
+  }, 30_000);
 
   it('①c authoring the same body through /meta — member (who may author it?)', async () => {
     const authored = await as(memberToken, 'PUT', '/meta/action/probe_member_authored', {
       name: 'probe_member_authored',
       label: 'Probe member authored',
-      object: 'probe_note',
+      objectName: 'probe_note',
       type: 'script',
       body: actionBody,
     });
